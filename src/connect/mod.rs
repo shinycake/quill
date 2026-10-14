@@ -1,5 +1,6 @@
 //! Live TDLib connect gate: credentials + tdjson → setTdlibParameters → auth updates.
 //! Never logs api_hash, phone numbers, or codes.
+#![deny(clippy::indexing_slicing)]
 mod account_hygiene;
 mod auth;
 mod backgrounds;

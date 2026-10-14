@@ -2,6 +2,7 @@
 //! description, the resend countdown, the banned-number help mail and the
 //! account-count limit. Mirrors tdesktop's `intro_code.cpp`,
 //! `phone_banned_box.cpp` and `Main::Domain::maxAccounts`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::state::AuthRequestError;
 use crate::telegram::envelope::{CodeDelivery, CodeKind, EmailResetState, ErrorClass};

@@ -11,6 +11,7 @@ use crate::export::model::{Entity, file_of, formatted, int, thumb_of};
 use crate::export::names::{Namer, date_part, sanitize};
 use crate::export::settings::{MediaKind, Skip};
 use crate::export::worker::{ExportError, Tdlib, copy_into, fetch_file, query};
+use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -74,7 +75,8 @@ pub fn format_phone(phone: &str) -> String {
 
 /// `@name`, tdesktop's `FormatUsername`.
 fn first_username(user: &Value) -> String {
-    user["usernames"]["active_usernames"]
+    user.at("usernames")
+        .at("active_usernames")
         .as_array()
         .and_then(|list| list.first())
         .and_then(Value::as_str)
@@ -83,19 +85,24 @@ fn first_username(user: &Value) -> String {
 }
 
 pub fn personal_info<T: Tdlib>(tdlib: &mut T, me: &Value) -> Result<PersonalInfo, ExportError> {
-    let user_id = me["id"].as_i64().unwrap_or(0);
+    let user_id = me.at("id").as_i64().unwrap_or(0);
     let full = tdlib.call(
         json!({"@type": "getUserFullInfo", "user_id": user_id}),
         crate::export::worker::QUERY_TIMEOUT,
     )?;
-    let text = |key: &str| me[key].as_str().unwrap_or_default().to_string();
+    let text = |key: &str| me.at(key).as_str().unwrap_or_default().to_string();
     Ok(PersonalInfo {
         user_id,
         first_name: text("first_name"),
         last_name: text("last_name"),
-        phone: format_phone(me["phone_number"].as_str().unwrap_or_default()),
+        phone: format_phone(me.at("phone_number").as_str().unwrap_or_default()),
         username: first_username(me),
-        bio: full["bio"]["text"].as_str().unwrap_or_default().to_string(),
+        bio: full
+            .at("bio")
+            .at("text")
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
     })
 }
 
@@ -112,9 +119,9 @@ fn largest(sizes: &Value) -> (i32, i64) {
         .as_array()
         .and_then(|list| {
             list.iter()
-                .max_by_key(|s| i64::from(int(&s["width"])) * i64::from(int(&s["height"])))
+                .max_by_key(|s| i64::from(int(s.at("width"))) * i64::from(int(s.at("height"))))
         })
-        .map_or((0, 0), |s| file_of(&s["photo"]))
+        .map_or((0, 0), |s| file_of(s.at("photo")))
 }
 
 /// Every profile picture, newest first, as `profile_pictures/photo_N@….jpg`.
@@ -132,13 +139,13 @@ pub fn userpics<T: Tdlib>(
             json!({"@type": "getUserProfilePhotos", "user_id": user_id,
                 "offset": out.len(), "limit": PAGE}),
         )?;
-        let photos = page["photos"].as_array().cloned().unwrap_or_default();
+        let photos = page.at("photos").as_array().cloned().unwrap_or_default();
         if photos.is_empty() {
             break;
         }
         for photo in photos {
-            let date = int(&photo["added_date"]);
-            let (file_id, size) = largest(&photo["sizes"]);
+            let date = int(photo.at("added_date"));
+            let (file_id, size) = largest(photo.at("sizes"));
             let relative = format!(
                 "profile_pictures/photo_{}{}.jpg",
                 out.len() + 1,
@@ -188,30 +195,30 @@ pub fn stories<T: Tdlib>(
                 "from_story_id": from, "limit": PAGE}),
         )?;
         let mut oldest = from;
-        for story in page["stories"].as_array().cloned().unwrap_or_default() {
-            let Some(id) = story["id"].as_i64().filter(|id| *id > 0) else {
+        for story in page.at("stories").as_array().cloned().unwrap_or_default() {
+            let Some(id) = story.at("id").as_i64().filter(|id| *id > 0) else {
                 continue;
             };
             if from != 0 && id >= from {
                 continue;
             }
             oldest = if oldest == 0 { id } else { oldest.min(id) };
-            if story["can_be_forwarded"] == false {
+            if story.at("can_be_forwarded") == false {
                 protected += 1;
                 continue;
             }
-            let date = int(&story["date"]);
+            let date = int(story.at("date"));
             let index = out.len() + 1;
-            let content = &story["content"];
-            let (file_id, size, ext, thumb) = match content["@type"].as_str() {
+            let content = &story.at("content");
+            let (file_id, size, ext, thumb) = match content.at("@type").as_str() {
                 Some("storyContentPhoto") => {
-                    let (id, size) = largest(&content["photo"]["sizes"]);
+                    let (id, size) = largest(content.at("photo").at("sizes"));
                     (id, size, ".jpg", None)
                 }
                 Some("storyContentVideo") => {
-                    let video = &content["video"];
-                    let (id, size) = file_of(&video["video"]);
-                    (id, size, ".mp4", thumb_of(&video["thumbnail"]))
+                    let video = &content.at("video");
+                    let (id, size) = file_of(video.at("video"));
+                    (id, size, ".mp4", thumb_of(video.at("thumbnail")))
                 }
                 _ => (0, 0, "", None),
             };
@@ -223,10 +230,10 @@ pub fn stories<T: Tdlib>(
                     *thumb = Some(target);
                 }
             }
-            let (caption, entities) = formatted(&story["caption"]);
+            let (caption, entities) = formatted(story.at("caption"));
             out.push(Story {
                 date,
-                pinned: story["is_posted_to_chat_page"] == true,
+                pinned: story.at("is_posted_to_chat_page") == true,
                 size,
                 outcome,
                 caption,
@@ -268,13 +275,13 @@ pub fn profile_music<T: Tdlib>(
             json!({"@type": "getUserProfileAudios", "user_id": user_id,
                 "offset": out.len(), "limit": PAGE}),
         )?;
-        let audios = page["audios"].as_array().cloned().unwrap_or_default();
+        let audios = page.at("audios").as_array().cloned().unwrap_or_default();
         if audios.is_empty() {
             break;
         }
         for audio in audios {
-            let text = |key: &str| audio[key].as_str().unwrap_or_default().to_string();
-            let (file_id, size) = file_of(&audio["audio"]);
+            let text = |key: &str| audio.at(key).as_str().unwrap_or_default().to_string();
+            let (file_id, size) = file_of(audio.at("audio"));
             let outcome = match files.settings.skip_reason(MediaKind::File, size) {
                 Some(skip) => Outcome::Skipped(skip),
                 None => {
@@ -293,7 +300,7 @@ pub fn profile_music<T: Tdlib>(
                 title: text("title"),
                 file_name: text("file_name"),
                 mime: text("mime_type"),
-                duration: int(&audio["duration"]),
+                duration: int(audio.at("duration")),
                 size,
                 outcome,
             });
@@ -325,21 +332,22 @@ pub fn contacts<T: Tdlib>(tdlib: &mut T) -> Result<(Vec<Contact>, bool), ExportE
         crate::export::worker::QUERY_TIMEOUT,
     )?;
     let mut list = Vec::new();
-    let complete = saved["@type"] == "quillSavedContacts";
+    let complete = saved.at("@type") == "quillSavedContacts";
     if complete {
-        for contact in saved["contacts"].as_array().cloned().unwrap_or_default() {
-            let text = |key: &str| contact[key].as_str().unwrap_or_default().to_string();
+        for contact in saved.at("contacts").as_array().cloned().unwrap_or_default() {
+            let text = |key: &str| contact.at(key).as_str().unwrap_or_default().to_string();
             list.push(Contact {
                 user_id: 0,
                 first_name: text("first_name"),
                 last_name: text("last_name"),
                 phone: format_phone(&text("phone_number")),
-                date: int(&contact["date"]),
+                date: int(contact.at("date")),
             });
         }
     } else {
         let users = query(tdlib, json!({"@type": "getContacts"}))?;
-        for id in users["user_ids"]
+        for id in users
+            .at("user_ids")
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -350,7 +358,7 @@ pub fn contacts<T: Tdlib>(tdlib: &mut T) -> Result<(Vec<Contact>, bool), ExportE
                 json!({"@type": "getUser", "user_id": id}),
                 crate::export::worker::QUERY_TIMEOUT,
             )?;
-            let text = |key: &str| user[key].as_str().unwrap_or_default().to_string();
+            let text = |key: &str| user.at(key).as_str().unwrap_or_default().to_string();
             list.push(Contact {
                 user_id: id,
                 first_name: text("first_name"),
@@ -385,7 +393,8 @@ pub fn frequent<T: Tdlib>(tdlib: &mut T, me: i64) -> Result<Vec<TopPeer>, Export
             json!({"@type": "getTopChats", "category": {"@type": category}, "limit": TOP_CHATS}),
             crate::export::worker::QUERY_TIMEOUT,
         )?;
-        for chat_id in answer["chat_ids"]
+        for chat_id in answer
+            .at("chat_ids")
             .as_array()
             .cloned()
             .unwrap_or_default()
@@ -393,13 +402,13 @@ pub fn frequent<T: Tdlib>(tdlib: &mut T, me: i64) -> Result<Vec<TopPeer>, Export
             .filter_map(Value::as_i64)
         {
             let chat = query(tdlib, json!({"@type": "getChat", "chat_id": chat_id}))?;
-            let saved = chat["type"]["user_id"].as_i64() == Some(me);
+            let saved = chat.at("type").at("user_id").as_i64() == Some(me);
             out.push(TopPeer {
                 chat_id,
                 name: if saved {
                     "Saved messages".into()
                 } else {
-                    chat["title"].as_str().unwrap_or_default().to_string()
+                    chat.at("title").as_str().unwrap_or_default().to_string()
                 },
                 category: name,
             });
@@ -437,14 +446,15 @@ pub struct WebSession {
 /// Active sessions and the websites logged in with Telegram.
 pub fn sessions<T: Tdlib>(tdlib: &mut T) -> Result<(Vec<Session>, Vec<WebSession>), ExportError> {
     let answer = query(tdlib, json!({"@type": "getActiveSessions"}))?;
-    let text = |v: &Value, key: &str| v[key].as_str().unwrap_or_default().to_string();
-    let sessions = answer["sessions"]
+    let text = |v: &Value, key: &str| v.at(key).as_str().unwrap_or_default().to_string();
+    let sessions = answer
+        .at("sessions")
         .as_array()
         .cloned()
         .unwrap_or_default()
         .iter()
         .map(|s| Session {
-            api_id: s["api_id"].as_i64().unwrap_or(0),
+            api_id: s.at("api_id").as_i64().unwrap_or(0),
             application: text(s, "application_name"),
             version: text(s, "application_version"),
             device: text(s, "device_model"),
@@ -452,20 +462,27 @@ pub fn sessions<T: Tdlib>(tdlib: &mut T) -> Result<(Vec<Session>, Vec<WebSession
             system: text(s, "system_version"),
             ip: text(s, "ip_address"),
             location: text(s, "location"),
-            last_active: int(&s["last_active_date"]),
-            created: int(&s["log_in_date"]),
+            last_active: int(s.at("last_active_date")),
+            created: int(s.at("log_in_date")),
         })
         .collect();
     let answer = query(tdlib, json!({"@type": "getConnectedWebsites"}))?;
     let mut web = Vec::new();
-    for site in answer["websites"].as_array().cloned().unwrap_or_default() {
-        let bot = match site["bot_user_id"].as_i64().filter(|id| *id != 0) {
+    for site in answer
+        .at("websites")
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        let bot = match site.at("bot_user_id").as_i64().filter(|id| *id != 0) {
             Some(id) => {
                 let user = tdlib.call(
                     json!({"@type": "getUser", "user_id": id}),
                     crate::export::worker::QUERY_TIMEOUT,
                 )?;
-                user["usernames"]["active_usernames"][0]
+                user.at("usernames")
+                    .at("active_usernames")
+                    .nth(0)
                     .as_str()
                     .map(|name| format!("@{name}"))
                     .unwrap_or_else(|| user_name(&user))
@@ -479,8 +496,8 @@ pub fn sessions<T: Tdlib>(tdlib: &mut T) -> Result<(Vec<Session>, Vec<WebSession
             platform: text(&site, "platform"),
             ip: text(&site, "ip_address"),
             location: text(&site, "location"),
-            last_active: int(&site["last_active_date"]),
-            created: int(&site["log_in_date"]),
+            last_active: int(site.at("last_active_date")),
+            created: int(site.at("log_in_date")),
         });
     }
     Ok((sessions, web))

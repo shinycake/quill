@@ -3,6 +3,7 @@
 //! for, keys 1 to 9 press the inline buttons of the chat's last message while
 //! the composer is empty. The bot ids live in `fast_buttons.json` under the
 //! app data root (isolated in screenshot demos).
+#![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

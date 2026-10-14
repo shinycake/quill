@@ -1,3 +1,5 @@
+#![deny(clippy::indexing_slicing)]
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceLoginResult {
     Linked,

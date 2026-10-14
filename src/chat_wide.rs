@@ -22,6 +22,7 @@
 //!   (`Element::AdditionalSpaceForSelectionCheckbox`).
 //!
 //! The composer is not affected.
+#![deny(clippy::indexing_slicing)]
 
 use crate::bubble_layout::{MSG_MARGIN, MSG_MAX_WIDTH, MSG_PHOTO_SKIP};
 use crate::telegram::envelope::ChatKind;

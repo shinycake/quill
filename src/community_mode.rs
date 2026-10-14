@@ -7,6 +7,7 @@
 //! (line 10753) replaces the pack wholesale, so a chat leaving the
 //! community drops out of the filtered list on the next render with no
 //! extra sync.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::{HashMap, HashSet};
 

@@ -12,6 +12,7 @@
 //! Whether the entry is on is read from the shortcut itself, the way
 //! autostart reads its registry value, so the switch can never disagree with
 //! what Explorer shows.
+#![deny(clippy::indexing_slicing)]
 
 use std::io;
 use std::path::{Path, PathBuf};

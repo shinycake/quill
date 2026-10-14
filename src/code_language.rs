@@ -8,6 +8,7 @@
 //! (`` ```rust\ncode\n``` ``), so setting the language rewrites the text
 //! after the opening fence. Pure logic; `src/ui/composer_shortcuts.rs` has
 //! the dialog.
+#![deny(clippy::indexing_slicing)]
 
 use std::ops::Range;
 

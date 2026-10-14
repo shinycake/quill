@@ -67,10 +67,18 @@ pub fn send_local_animation(
 /// content as it was.
 pub fn with_video_options(mut content: Value, cover: Option<&str>, start_timestamp: i32) -> Value {
     if let Some(cover) = cover {
-        content["video"]["cover"] = json!({ "@type": "inputFileLocal", "path": cover });
+        crate::json_access::set_path(
+            &mut content,
+            &["video", "cover"],
+            json!({ "@type": "inputFileLocal", "path": cover }),
+        );
     }
     if start_timestamp > 0 {
-        content["video"]["start_timestamp"] = json!(start_timestamp);
+        crate::json_access::set_path(
+            &mut content,
+            &["video", "start_timestamp"],
+            json!(start_timestamp),
+        );
     }
     content
 }

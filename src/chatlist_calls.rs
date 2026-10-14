@@ -4,6 +4,7 @@
 //! asks "Are you sure you want to completely clear your calls log?" with a
 //! "Delete for everyone" checkbox and a Clear / Cancel pair. TDLib does
 //! the same with one request, `deleteAllCallMessages(revoke)`.
+#![deny(clippy::indexing_slicing)]
 
 pub const CLEAR_TITLE: &str = "Clear calls";
 pub const CLEAR_ABOUT: &str = "Are you sure you want to completely clear your calls log?";

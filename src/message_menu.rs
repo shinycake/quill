@@ -8,6 +8,7 @@
 //! Send Now, Delete, Report, Select, and last the "who saw it" row and
 //! the date line. The orders below are the single source for that
 //! sequence; the UI sorts its rows by them.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::FileId;
 use crate::local_time::{CivilTime, day_label, hhmm};

@@ -22,6 +22,7 @@
 //! record (there is nothing to derive on here at all). Raw `key_hash`
 //! bytes stay in `Session.users_state.secret_chat_states` — only the pixel indices
 //! cross into the UI for rendering.
+#![deny(clippy::indexing_slicing)]
 
 /// `secretChat.key_hash` is exactly 36 bytes (`schema/td_api.tl:2812`).
 pub const KEY_HASH_LEN: usize = 36;
@@ -52,7 +53,9 @@ pub fn key_hash_pixels(key_hash: &[u8]) -> Option<[u8; KEY_PIXEL_COUNT]> {
         // Little-endian 2-bit groups: group j = bits (2j+1, 2j), the
         // least-significant pair first.
         for j in 0..4 {
-            pixels[i * 4 + j] = (byte >> (2 * j)) & 0b11;
+            if let Some(pixel) = pixels.get_mut(i * 4 + j) {
+                *pixel = (byte >> (2 * j)) & 0b11;
+            }
         }
     }
     Some(pixels)
@@ -60,7 +63,10 @@ pub fn key_hash_pixels(key_hash: &[u8]) -> Option<[u8; KEY_PIXEL_COUNT]> {
 
 /// The 0xRRGGBB color for a pixel index from [`key_hash_pixels`].
 pub fn key_pixel_color(pixel: u8) -> u32 {
-    KEY_PIXEL_COLORS[(pixel & 0b11) as usize]
+    KEY_PIXEL_COLORS
+        .get((pixel & 0b11) as usize)
+        .copied()
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

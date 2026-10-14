@@ -124,3 +124,65 @@ Verified: clippy with `-W clippy::indexing_slicing` has zero hits in the four
 modules for `--features ui`, `--no-default-features` and
 `ui,demo-capture`; plain clippy with the new `deny` passes in all three;
 `gate.sh`.
+
+## Phase D, batch 2: the non-UI library modules
+
+Branch `panic-lints-d2`. 168 non-UI modules now start with
+`#![deny(clippy::indexing_slicing)]`. That is every top-level module of
+`src/lib.rs` that had no site left, including the ones that never had one
+(`rich`, `link_handler`, `link_policy`, `deep_link_types`, `emoji`, ...), so a
+new slice in them fails the build.
+
+Sites fixed (clippy lines on macOS `--features ui`, production code):
+
+- Network and file-format parsers first: `telegram` 16 (request builders,
+  vCard unfolding, name-accent table, failed-response recovery), `export` 69
+  (TDLib answers read through `JsonExt::at`, HTML entity cuts, userpic
+  colour), `stat_chart` 11 (JSON columns, xlsx cells, pie shares, day labels),
+  `spellcheck` 11 plus `spell_dict` and `spell_download`, `text_split` 3,
+  `text` 1, `translate` 3, `proxy` 5 (MTProto secret checks), `credentials`
+  2, `passcode` 3 (sealed blob parsing), `start_files` 3, `connect` 17
+  (percent decoding, request JSON, paid media zip), `update_install`,
+  `single_instance`, `video_decode` 3, `voice_opus` 3.
+- Pixel and layout code: `wallpaper_raster` 24 (gradient sampling, blur,
+  tiling, blit, soft-light table), `album` 35 (the layout functions take
+  `[f64; N]` after one slice-pattern match on the ratios; grouping uses
+  `get`), `app_theme` 16 (palette and zip parsing, comment stripping).
+- Small leftovers: `advanced`, `earn`, `key_fingerprint`, `local_time`,
+  `notify`, `service_text`, `settings`.
+- Windows only (not compiled on macOS): `spell_win` 1 and `winreg` 2, found by
+  the Windows core cross clippy.
+
+Total 243 sites, 2 `#[expect]` (`Palette::rgba` and `Palette::set`, indexed by
+the `PaletteKey` discriminant like `SharedMediaState::tab_state` in batch 1).
+
+New helper `src/json_access.rs`. Clippy flags every index into a
+`serde_json::Value`, and `value["k"] = x` really does panic when the value is
+an array, string or number. `JsonExt::at` / `nth` read like `value["k"]` /
+`value[0]` (a missing entry is `Null`, same as `Index`), and `set` /
+`set_path` write only into objects or `Null`, as `IndexMut` does, and skip
+anything else instead of panicking. On valid input (objects built by
+`json!`) the result is identical; the new unit tests cover the skip cases.
+
+Fallbacks, all on states that used to panic: a missing byte or slice reads as
+"no match" or an empty slice; the album layout returns no rectangles; the
+MTProto secret check reports `Invalid`; `Raster::pixel` returns transparent
+black. None of them loops or feeds an offset forward: loops that used to
+index still advance or `break`/`continue`.
+
+Left for the next batch (37 modules, about 105 sites): `video` 15,
+`calls` 14, `tray_mac` 14, `profile_photo_gradient` 10, `tray` 8, `suggest`
+7, `business_hours_edit` 7, `share_box` 4, `power_saving` 4, `playlist` 4,
+`folder_archive` 4, `paid_reaction` 3, `inline_grid` 3,
+`chatlist_suggestions` 3, `selection_pin` 2, `privacy` 2, `pin_reorder` 2 and
+one site each in `voice`, `schedule`, `profile_photo_sources`, `owned_bots`,
+`data_settings`, `contacts_index`, `business_info`, `business_bots`,
+`auto_delete`. Not touched on purpose: `media_viewer`, the sticker files,
+`video_edit`, `video_timeline` and `profile_photo_video` (other threads), and
+the Linux-only `tray_sni`, which does not build here (it stays open with
+`tray`). `src/ui/` is a later batch.
+
+Verified: plain clippy with the new `deny` passes for `--features ui`,
+`--no-default-features` and `ui,demo-capture` (all targets) and for the
+Windows and Linux core cross builds; `-W clippy::indexing_slicing` has zero
+hits in the denied modules; gate.sh.

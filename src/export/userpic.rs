@@ -34,7 +34,7 @@ pub fn bare_id(who: Who) -> i64 {
 /// `PeerColorIndex` does (seven peer colors in its fixed order).
 pub fn color_index(bare: i64) -> u8 {
     const MAP: [u8; 7] = [0, 7, 4, 1, 6, 3, 5];
-    MAP[bare.rem_euclid(7) as usize]
+    MAP.get(bare.rem_euclid(7) as usize).copied().unwrap_or(0)
 }
 
 /// Up to two letters: the first of the first word and of the last word.

@@ -21,6 +21,7 @@
 //! The editor here handles plain text messages. Media messages of a shortcut
 //! are listed (with their caption) and can be deleted, but not created or
 //! edited.
+#![deny(clippy::indexing_slicing)]
 
 use crate::composer::CommandMenuItem;
 use serde_json::{Value, json};

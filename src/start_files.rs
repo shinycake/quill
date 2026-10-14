@@ -14,6 +14,7 @@
 //! Files are untrusted input (any local process can launch Quill with any
 //! path), so nothing is sent from here: the user still picks the chat and
 //! confirms in the composer.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::collections::VecDeque;
@@ -123,7 +124,7 @@ fn file_url_path(rest: &str) -> Option<PathBuf> {
     let decoded = percent_decode(rest)?;
     // `/C:/Users/a` names `C:\Users\a` on Windows.
     let bytes = decoded.as_bytes();
-    let decoded = if cfg!(windows) && bytes.len() > 2 && bytes[0] == b'/' && bytes[2] == b':' {
+    let decoded = if cfg!(windows) && matches!(bytes, [b'/', _, b':', ..]) {
         decoded.get(1..).unwrap_or_default().to_string()
     } else {
         decoded
@@ -138,12 +139,12 @@ fn percent_decode(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
+    while let Some(&byte) = bytes.get(i) {
+        if byte == b'%' {
             out.push(u8::from_str_radix(input.get(i + 1..i + 3)?, 16).ok()?);
             i += 3;
         } else {
-            out.push(bytes[i]);
+            out.push(byte);
             i += 1;
         }
     }

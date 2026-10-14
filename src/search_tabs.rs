@@ -6,6 +6,7 @@
 //! tdesktop also lists a Downloads tab between Videos and Links, shown only
 //! while the download manager has entries; Quill keeps downloads in their
 //! own list and leaves that tab out.
+#![deny(clippy::indexing_slicing)]
 
 use crate::search_filters::{GlobalSearchFilters, SearchChatType, SearchMediaKind, SearchScope};
 use crate::state::SharedMediaTab;

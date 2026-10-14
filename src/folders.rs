@@ -7,6 +7,7 @@
 //! folder after being dropped from its explicit include lists — the
 //! remove-from-folder chain needs it because there is no
 //! `removeChatFromList` in TDLib 1.8.67.
+#![deny(clippy::indexing_slicing)]
 
 use crate::state::ChatSummary;
 use crate::telegram::envelope::{ChatFolderSpec, ChatKind, ParsedUser};

@@ -4,6 +4,7 @@
 //! so a long chat never sits in memory.
 use super::model::{Body, ExportMessage, Origin, Who, parse_message};
 use super::worker::{ExportError, Job, Progress, QUERY_TIMEOUT, Tdlib, query};
+use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
@@ -20,8 +21,8 @@ pub struct Names {
 
 /// "First Last" of a TDLib `user`, or tdesktop's "Deleted Account".
 pub fn user_name(user: &Value) -> String {
-    let first = user["first_name"].as_str().unwrap_or_default();
-    let last = user["last_name"].as_str().unwrap_or_default();
+    let first = user.at("first_name").as_str().unwrap_or_default();
+    let last = user.at("last_name").as_str().unwrap_or_default();
     let full = format!("{first} {last}").trim().to_string();
     if full.is_empty() {
         "Deleted Account".to_string()
@@ -40,9 +41,9 @@ impl Names {
             Who::Chat(id) => json!({"@type": "getChat", "chat_id": id}),
         };
         let name = match tdlib.call(request, QUERY_TIMEOUT)? {
-            answer if answer["@type"] == "error" => "Unknown".to_string(),
+            answer if answer.at("@type") == "error" => "Unknown".to_string(),
             answer if matches!(who, Who::Chat(_)) => {
-                answer["title"].as_str().unwrap_or("Unknown").to_string()
+                answer.at("title").as_str().unwrap_or("Unknown").to_string()
             }
             answer => user_name(&answer),
         };
@@ -94,9 +95,12 @@ fn next_page<T: Tdlib>(
                     "sender_id": {"@type": "messageSenderUser", "user_id": me},
                     "from_message_id": from, "offset": 0, "limit": PAGE_LIMIT, "filter": null}),
             )?;
-            let next = page["next_from_message_id"].as_i64().filter(|id| *id > 0);
+            let next = page
+                .at("next_from_message_id")
+                .as_i64()
+                .filter(|id| *id > 0);
             Ok((
-                page["messages"].as_array().cloned().unwrap_or_default(),
+                page.at("messages").as_array().cloned().unwrap_or_default(),
                 next,
             ))
         }
@@ -108,7 +112,7 @@ fn next_page<T: Tdlib>(
             )?;
             // The cursor is the oldest id seen; the caller works it out.
             Ok((
-                page["messages"].as_array().cloned().unwrap_or_default(),
+                page.at("messages").as_array().cloned().unwrap_or_default(),
                 None,
             ))
         }
@@ -134,13 +138,13 @@ pub fn collect<T: Tdlib>(
             json!({"@type": "getChatMessageByDate", "chat_id": settings.chat_id, "date": date}),
             QUERY_TIMEOUT,
         )? {
-            answer if answer["@type"] == "error" => {
+            answer if answer.at("@type") == "error" => {
                 // Nothing at or before that date.
                 return Ok((Vec::new(), 0));
             }
             // A search page starts after `from_message_id`; history pages
             // include it, so a search starts one id later.
-            answer => from = answer["id"].as_i64().unwrap_or(0) + i64::from(searching),
+            answer => from = answer.at("id").as_i64().unwrap_or(0) + i64::from(searching),
         }
     }
     let mut oldest = 0i64;
@@ -154,7 +158,7 @@ pub fn collect<T: Tdlib>(
         let mut progressed = false;
         let mut past_range = false;
         for value in &raw {
-            let Some(id) = value["id"].as_i64() else {
+            let Some(id) = value.at("id").as_i64() else {
                 continue;
             };
             if oldest != 0 && id >= oldest {

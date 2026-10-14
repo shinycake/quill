@@ -53,8 +53,9 @@ pub fn apply_circle_mask(rgba: &mut [u8], size: u32) {
             let distance = (dx * dx + dy * dy).sqrt();
             // Full coverage inside `center - 1`, none beyond `center`.
             let coverage = (center - distance).clamp(0.0, 1.0);
-            let alpha = &mut rgba[(y * side + x) * 4 + 3];
-            *alpha = (f32::from(*alpha) * coverage).round() as u8;
+            if let Some(alpha) = rgba.get_mut((y * side + x) * 4 + 3) {
+                *alpha = (f32::from(*alpha) * coverage).round() as u8;
+            }
         }
     }
 }

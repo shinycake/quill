@@ -226,20 +226,22 @@ impl ThemeFile {
 fn strip_comments(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut i = 0;
-    while i < text.len() {
-        if text[i..].starts_with(b"//") {
-            while i < text.len() && text[i] != b'\n' {
+    while let Some(rest) = text.get(i..)
+        && let Some(&byte) = rest.first()
+    {
+        if rest.starts_with(b"//") {
+            while text.get(i).is_some_and(|b| *b != b'\n') {
                 i += 1;
             }
-        } else if text[i..].starts_with(b"/*") {
+        } else if rest.starts_with(b"/*") {
             i += 2;
-            while i < text.len() && !text[i..].starts_with(b"*/") {
+            while i < text.len() && !text.get(i..).unwrap_or_default().starts_with(b"*/") {
                 i += 1;
             }
             i = (i + 2).min(text.len());
             out.push(b' ');
         } else {
-            out.push(text[i]);
+            out.push(byte);
             i += 1;
         }
     }
@@ -259,17 +261,17 @@ pub fn parse_palette(text: &[u8]) -> Result<Vec<(String, String)>, ThemeFileErro
     let data = strip_comments(text);
     let mut at = 0;
     let skip = |at: &mut usize| {
-        while *at < data.len() && data[*at].is_ascii_whitespace() {
+        while data.get(*at).is_some_and(u8::is_ascii_whitespace) {
             *at += 1;
         }
         *at < data.len()
     };
     let read_name = |at: &mut usize| {
         let start = *at;
-        while *at < data.len() && is_name_byte(data[*at]) {
+        while data.get(*at).copied().is_some_and(is_name_byte) {
             *at += 1;
         }
-        String::from_utf8_lossy(&data[start..*at]).into_owned()
+        String::from_utf8_lossy(data.get(start..*at).unwrap_or_default()).into_owned()
     };
     let mut out = Vec::new();
     loop {
@@ -282,7 +284,7 @@ pub fn parse_palette(text: &[u8]) -> Result<Vec<(String, String)>, ThemeFileErro
                 "expected a key name".to_string(),
             ));
         }
-        if !skip(&mut at) || data[at] != b':' {
+        if !skip(&mut at) || data.get(at) != Some(&b':') {
             return Err(ThemeFileError::BadPalette(format!(
                 "expected ':' after {name}"
             )));
@@ -291,7 +293,7 @@ pub fn parse_palette(text: &[u8]) -> Result<Vec<(String, String)>, ThemeFileErro
         if !skip(&mut at) {
             return Err(ThemeFileError::BadPalette(format!("no value for {name}")));
         }
-        let hash = data[at] == b'#';
+        let hash = data.get(at) == Some(&b'#');
         if hash {
             at += 1;
         }
@@ -301,7 +303,7 @@ pub fn parse_palette(text: &[u8]) -> Result<Vec<(String, String)>, ThemeFileErro
                 "expected a color for {name}"
             )));
         }
-        if !skip(&mut at) || data[at] != b';' {
+        if !skip(&mut at) || data.get(at) != Some(&b';') {
             return Err(ThemeFileError::BadPalette(format!(
                 "expected ';' after {name}"
             )));
@@ -313,13 +315,13 @@ pub fn parse_palette(text: &[u8]) -> Result<Vec<(String, String)>, ThemeFileErro
 }
 
 fn u16_at(data: &[u8], at: usize) -> Option<usize> {
-    let bytes = data.get(at..at + 2)?;
-    Some(usize::from(u16::from_le_bytes([bytes[0], bytes[1]])))
+    let bytes: [u8; 2] = data.get(at..at + 2)?.try_into().ok()?;
+    Some(usize::from(u16::from_le_bytes(bytes)))
 }
 
 fn u32_at(data: &[u8], at: usize) -> Option<usize> {
-    let bytes = data.get(at..at + 4)?;
-    Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize)
+    let bytes: [u8; 4] = data.get(at..at + 4)?.try_into().ok()?;
+    Some(u32::from_le_bytes(bytes) as usize)
 }
 
 /// The files of a small zip (stored or deflated), from its central
@@ -329,9 +331,10 @@ fn read_zip(zip: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
     // optional comment of up to 64 KB.
     let min = zip.len().checked_sub(22)?;
     let floor = min.saturating_sub(u16::MAX as usize);
-    let eocd = (floor..=min)
-        .rev()
-        .find(|&i| zip[i..].starts_with(&[0x50, 0x4b, 0x05, 0x06]))?;
+    let eocd = (floor..=min).rev().find(|&i| {
+        zip.get(i..)
+            .is_some_and(|rest| rest.starts_with(&[0x50, 0x4b, 0x05, 0x06]))
+    })?;
     let count = u16_at(zip, eocd + 10)?;
     let mut at = u32_at(zip, eocd + 16)?;
     let mut out = Vec::new();

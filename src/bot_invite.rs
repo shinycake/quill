@@ -6,6 +6,7 @@
 //! chat picker lists the chats where the person may add admins (the bot then
 //! asks for its default rights, which the person can trim) and, when the bot
 //! can join groups, the groups where members may be added.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatAdminRights;
 

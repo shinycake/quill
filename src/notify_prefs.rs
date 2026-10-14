@@ -8,6 +8,7 @@
 //! screen corner, count, display, respect Focus mode) drive Quill's own
 //! notification windows where those are used (`crate::notify::custom`,
 //! `docs/decisions/notification-windows-system-proxy.md`).
+#![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

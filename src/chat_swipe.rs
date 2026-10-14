@@ -8,6 +8,7 @@
 //! the row glue in `dialogs/dialogs_widget.cpp` (`setupSwipeBack`) and
 //! `dialogs/dialogs_inner_widget.cpp` (`setSwipeContextData`). Time is
 //! passed in as milliseconds so every transition is deterministic.
+#![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 

@@ -9,6 +9,7 @@
 //! `chatActionWatchingAnimations` with the message's emoji tells the other
 //! party it was seen (tdesktop `playStarted`, at most once a second per
 //! emoji).
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::telegram::envelope::StickerItem;

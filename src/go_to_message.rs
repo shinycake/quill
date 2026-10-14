@@ -5,6 +5,7 @@
 //! outside the chat's own history: in the pinned messages section and in the
 //! chat peek preview. Search results, shared media, scheduled and thread
 //! lists open the message with a plain click and have no such item.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, MessageId};
 

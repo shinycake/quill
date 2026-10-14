@@ -11,6 +11,7 @@
 //! small dependency-free guess: Unicode script first, then common-word
 //! scoring for the Latin and Cyrillic scripts. It returns `None` rather than
 //! guess when the text is short or ambiguous.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::MessageContent;
 use crate::text::TextEntity;
@@ -459,8 +460,10 @@ fn latin_language(text: &str) -> Option<&'static str> {
         tokens += 1;
         let lower = token.to_lowercase();
         for (index, (_, words)) in LATIN_WORDS.iter().enumerate() {
-            if words.contains(&lower.as_str()) {
-                scores[index] += 1;
+            if words.contains(&lower.as_str())
+                && let Some(score) = scores.get_mut(index)
+            {
+                *score += 1;
             }
         }
     }
@@ -502,12 +505,18 @@ fn latin_language(text: &str) -> Option<&'static str> {
         .unwrap_or(0);
     // Two clear hits at least, and clearly ahead of the next language.
     let enough = best >= 2 && (best * 2 > tokens.min(40) / 2 || tokens <= 6);
-    (enough && best > runner_up).then(|| LATIN_WORDS[best_index].0)
+    if enough && best > runner_up {
+        LATIN_WORDS.get(best_index).map(|(code, _)| *code)
+    } else {
+        None
+    }
 }
 
 fn bump(scores: &mut [u32], code: &str, by: u32) {
-    if let Some(index) = LATIN_WORDS.iter().position(|(c, _)| *c == code) {
-        scores[index] += by;
+    if let Some(index) = LATIN_WORDS.iter().position(|(c, _)| *c == code)
+        && let Some(score) = scores.get_mut(index)
+    {
+        *score += by;
     }
 }
 

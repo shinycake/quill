@@ -10,6 +10,7 @@
 //! slice of it is loaded. Rows carry an "owner" or "admin" pill, replaced
 //! by the member's custom title when one is set. Rows past the first page
 //! load as the list scrolls (first page 16, then 200 per request).
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{ChannelMemberStatus, UserStatusKind};
 

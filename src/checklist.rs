@@ -6,6 +6,7 @@
 //! Premium gating follows `PeerData::canCreateTodoLists`: Premium account,
 //! not a broadcast channel, and the user may send polls (or it is a
 //! private chat).
+#![deny(clippy::indexing_slicing)]
 
 use crate::state::ChatSummary;
 use crate::telegram::envelope::{ChatKind, Checklist};

@@ -5,6 +5,7 @@
 //! [`ServiceText`] — plain segments, some carrying a link (a user or chat
 //! to open, a message to jump to) — that both the history pill and the
 //! chat-list preview use.
+#![deny(clippy::indexing_slicing)]
 
 use crate::local_time::{civil_local, day_label, hhmm};
 use crate::telegram::envelope::{
@@ -313,12 +314,10 @@ impl ServiceCtx<'_> {
             Some(actor) => {
                 let mut out = self.peer(actor);
                 if self.actor_is_me()
-                    && out
-                        .0
-                        .first()
-                        .is_some_and(|seg| seg.text == WHO || seg.text == "a chat")
+                    && let Some(seg) = out.0.first_mut()
+                    && (seg.text == WHO || seg.text == "a chat")
                 {
-                    out.0[0].text = "You".into();
+                    seg.text = "You".into();
                 }
                 out
             }

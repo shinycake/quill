@@ -15,6 +15,7 @@ use crate::export::settings::ExportSettings;
 use crate::export::worker::{
     ChatOut, ExportError, Job, Progress, Tdlib, create_named_folder, export_chat, query,
 };
+use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{self, BufWriter, Write};
@@ -225,7 +226,7 @@ fn run_inner<T: Tdlib>(
     };
     step(&mut progress, AccountStage::Starting);
     let me = query(tdlib, json!({"@type": "getMe"}))?;
-    let me_id = me["id"].as_i64().unwrap_or(0);
+    let me_id = me.at("id").as_i64().unwrap_or(0);
 
     let (dialogs, protected_chats) = if settings.sections.any_chats() {
         step(&mut progress, AccountStage::ChatsList);
@@ -297,7 +298,7 @@ fn run_inner<T: Tdlib>(
             tdlib,
             json!({"@type": "createPrivateChat", "user_id": me_id, "force": false}),
         )?;
-        let self_chat = own["id"].as_i64().unwrap_or(me_id);
+        let self_chat = own.at("id").as_i64().unwrap_or(me_id);
         let (list, _protected) = sections::stories(tdlib, &files, self_chat)?;
         writer.field("stories", &out_json::stories_json(&list, offset_at))?;
         writer.list(list.len(), 5, "Stories archive", pages::STORIES, || {

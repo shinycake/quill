@@ -1,6 +1,7 @@
 //! Folder icons and the tab layout options (tdesktop `ui/filter_icons.cpp`,
 //! `ui/filter_icon_panel.cpp`, Settings > Folders "Tabs view" / "Tabs
 //! appearance"). Pure logic: the UI maps each name to a drawn glyph.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatFolderSpec;
 use serde::{Deserialize, Serialize};

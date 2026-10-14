@@ -40,7 +40,7 @@ impl CodeFeeder {
         let mut from = 0;
         let mut found = None;
         while size > from {
-            let piece: String = self.secret[from..].iter().collect();
+            let piece: String = self.secret.get(from..).unwrap_or_default().iter().collect();
             if let Some((_, code)) = CODES.iter().find(|(key, _)| *key == piece) {
                 found = Some(*code);
                 from = size;
@@ -51,11 +51,7 @@ impl CodeFeeder {
             }
             from += 1;
         }
-        self.secret = if size > from {
-            self.secret[from..].to_vec()
-        } else {
-            Vec::new()
-        };
+        self.secret = self.secret.get(from..).unwrap_or_default().to_vec();
         found
     }
 }

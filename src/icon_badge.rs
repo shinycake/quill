@@ -28,6 +28,7 @@
 //! The dock resolves the badge against the app's installed desktop file;
 //! Quill ships no `.desktop` file yet (packaging is a separate slice), so
 //! [`APP_URI`] names the `quill.desktop` id a future install will satisfy.
+#![deny(clippy::indexing_slicing)]
 
 use crate::state::Session;
 

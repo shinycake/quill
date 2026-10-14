@@ -4,6 +4,7 @@
 //!
 //! Pure logic only (no GPUI), so the state choice and the animation
 //! timeline are unit tested; `src/ui/send_button_ui.rs` draws it.
+#![deny(clippy::indexing_slicing)]
 
 /// What the button currently is. Mirrors `SendButton::Type`; `Stop` and
 /// `Cancel` have no Quill counterpart yet.

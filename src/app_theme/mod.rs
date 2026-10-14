@@ -4,6 +4,7 @@
 //!
 //! Cloud themes (tdesktop `data_cloud_themes.cpp`, `account.getThemes`)
 //! are not here: TDLib has no API for them.
+#![deny(clippy::indexing_slicing)]
 
 pub mod embedded;
 pub mod file;

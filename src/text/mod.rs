@@ -1,4 +1,5 @@
 //! UTF-16 entity offsets used by TDLib, mapped to UTF-8 byte indices.
+#![deny(clippy::indexing_slicing)]
 
 /// Convert a UTF-8 byte index into a UTF-16 code-unit offset.
 ///
@@ -352,7 +353,9 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
     points.dedup();
     let mut runs: Vec<TextRun> = Vec::new();
     for window in points.windows(2) {
-        let (start, end) = (window[0], window[1]);
+        let &[start, end] = window else {
+            continue;
+        };
         if start >= end {
             continue;
         }

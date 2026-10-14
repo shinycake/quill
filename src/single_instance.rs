@@ -17,6 +17,7 @@
 //! found", so the new process unlinks the leftover file and binds a fresh
 //! one. A file lock serializes that check-and-bind sequence so two racing
 //! launches cannot both conclude they are the owner.
+#![deny(clippy::indexing_slicing)]
 
 use interprocess::local_socket::{ListenerOptions, Stream, prelude::*};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -51,7 +52,12 @@ pub struct Endpoint {
 fn root_digest(root: &Path) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(root.to_string_lossy().as_bytes());
-    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+    digest
+        .get(..8)
+        .unwrap_or_default()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 impl Endpoint {

@@ -23,6 +23,7 @@
 //!
 //! Everything that decides something (parsing, the entry table, the
 //! ownership rule) is pure so every platform tests it.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 #[cfg(any(test, target_os = "macos"))]

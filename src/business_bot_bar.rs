@@ -9,6 +9,7 @@
 //! neither reply nor is paused. A "..." menu holds "Manage bot" (opens
 //! `manage_url`) and "Remove bot from this chat" (the label is "Revoke
 //! access to this chat" when the toggle button is hidden).
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::{Value, json};
 

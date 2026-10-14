@@ -1,4 +1,5 @@
 //! Collectible gift quotes and explicit, price-bound Marketplace purchases.
+#![deny(clippy::indexing_slicing)]
 use crate::ids::ChatId;
 use crate::telegram::envelope::MessageSender;
 use serde_json::{Value, json};

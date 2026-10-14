@@ -4,6 +4,7 @@
 //! (:123), `inputRichMessage` (:149), `inputMessageRichMessage` (:6084),
 //! `messageRichMessage` (:5143), `pageBlock*` (:4198–:4364),
 //! `inputPageBlock*` (:5978–:6071), `richText*` (:4036–:4129).
+#![deny(clippy::indexing_slicing)]
 
 use crate::composer::ComposerEntity;
 use crate::telegram::envelope::{InlineKeyboardButton, parse_inline_keyboard_button};

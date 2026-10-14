@@ -1,5 +1,6 @@
 //! B10: pure helpers for the profile and contact panels — birthday form
 //! validation and the copyable profile link.
+#![deny(clippy::indexing_slicing)]
 
 /// Why a profile photo is reported (`reportChatPhoto`). tdesktop's report
 /// box offers the same `ReportReason` constructors.

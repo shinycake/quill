@@ -423,9 +423,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Share photo/video from the viewer — closes the viewer and opens the existing forward picker with the message selected <!-- parity:media-viewer-share -->
 - [x] Save viewer media to downloads folder — largest local photo size / full video clip (honest "download the media first" when not local; video never saves its thumbnail), `(n)` de-dup <!-- parity:media-viewer-save -->
 - [x] "Show in chat" jump from the viewer to the source message — closes the viewer, jumps via the existing reply-jump flow <!-- parity:media-viewer-show-in-chat -->
-- [x] Pictures sent as files show their thumbnail in the file row (tdesktop's thumbed file layout) and open in the viewer, which pages over the chat's files and shows a card for other files <!-- parity:media-image-files -->
-- [x] HEIC, AVIF and JPEG XL pictures decode on every platform, with EXIF orientation and colour profiles (Display P3 and others) converted to sRGB <!-- parity:media-image-formats -->
-- [x] Sending a picture as a file keeps the original bytes and uploads a 320 px thumbnail where Telegram makes none (HEIC, AVIF, large files) <!-- parity:media-image-file-thumbnail-send -->
+- [ ] Pictures sent as files show their thumbnail in the file row (tdesktop's thumbed file layout) and open in the viewer, which pages over the chat's files and shows a card for other files <!-- parity:media-image-files -->
+- [ ] HEIC, AVIF and JPEG XL pictures decode on every platform, with EXIF orientation and colour profiles (Display P3 and others) converted to sRGB <!-- parity:media-image-formats -->
+- [ ] Sending a picture as a file keeps the original bytes and uploads a 320 px thumbnail where Telegram makes none (HEIC, AVIF, large files) <!-- parity:media-image-file-thumbnail-send -->
 - [x] Play/pause video in the viewer with elapsed/total overlay (PlaybackClock, src/playback.rs:18; ui/mod.rs:4951) <!-- parity:media-video-play -->
 - [x] Seek scrubber in the fullscreen video player — drag scrubs (position preview in the elapsed label), release seeks the clock and restarts ffplay at `-ss` when playing <!-- parity:media-video-seek -->
 - [x] Playback speed control for voice/audio/video — speed button cycles the TGX set 0.5x–2.0x (single-tap cycle, not TGX's long-press dial); clock rate + ffplay `-af atempo=` stay in sync <!-- parity:media-playback-speed -->

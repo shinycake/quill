@@ -4,6 +4,7 @@
 //! seen state, the sender, the bot, the reply, the forward origin, the media,
 //! the link preview, the text, the fact check and "Pinned", then the delivery
 //! status with the time, then the reactions.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::FileId;
 use crate::state::{HistoryMessage, OutboxReceipt};

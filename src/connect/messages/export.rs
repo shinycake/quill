@@ -94,7 +94,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         let extra = self.session.request(purpose, None);
-        request["@extra"] = serde_json::json!({"quill_account_export": extra.as_extra()});
+        crate::json_access::set(
+            &mut request,
+            "@extra",
+            serde_json::json!({"quill_account_export": extra.as_extra()}),
+        );
         if let Some(link) = link(&mut self.session) {
             link.pending = Some(extra);
         }

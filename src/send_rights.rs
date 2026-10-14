@@ -9,6 +9,7 @@
 //! of this group restricted you from sending photos here."), or the member
 //! is restricted until a date. Pure logic; the UI reads it to replace the
 //! composer, to refuse a recording or an attachment, and to explain why.
+#![deny(clippy::indexing_slicing)]
 
 use crate::composer::AttachmentKind;
 use crate::state::{ChatSummary, Session};

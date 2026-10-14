@@ -5,6 +5,7 @@
 //! offset the OS applies to that instant, so DST transitions are honored.
 //! No chrono/time dependency: civil-date math is Howard Hinnant's
 //! days-from-civil inverse.
+#![deny(clippy::indexing_slicing)]
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -177,11 +178,17 @@ const WEEKDAYS: [&str; 7] = [
 ];
 
 pub fn month_name(month: u8) -> &'static str {
-    MONTHS[usize::from(month.clamp(1, 12) - 1)]
+    MONTHS
+        .get(usize::from(month.clamp(1, 12) - 1))
+        .copied()
+        .unwrap_or_default()
 }
 
 pub fn weekday_name(weekday: u8) -> &'static str {
-    WEEKDAYS[usize::from(weekday.min(6))]
+    WEEKDAYS
+        .get(usize::from(weekday.min(6)))
+        .copied()
+        .unwrap_or_default()
 }
 
 /// `HH:MM`.

@@ -4,6 +4,7 @@
 //! folds the entries into Mobile / Wi-Fi / Roaming / Other groups with
 //! the category rows Telegram X shows (`TGNetworkStats`). tdesktop has no
 //! such screen, so the layout follows the TGX reference.
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::Value;
 

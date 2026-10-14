@@ -1,4 +1,5 @@
 //! Small non-message preferences. Message history lives in TDLib.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::AccountKey;
 use crate::sticker_suggest::StickerSuggestMode;

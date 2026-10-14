@@ -1,5 +1,6 @@
 //! "About Quill" text and the location of the bundled license notices
 //! (docs/decisions/codex-legal-compliance.md).
+#![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 

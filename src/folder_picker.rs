@@ -2,6 +2,7 @@
 //! tdesktop's `boxes/filters/edit_filter_box.cpp` ("Included chats" /
 //! "Excluded chats" with an "Add Chats" button) and
 //! `edit_filter_chats_list.cpp` (the picker box: search, "N / limit").
+#![deny(clippy::indexing_slicing)]
 
 /// Which list the picker edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -20,6 +20,7 @@
 //!
 //! Left out on purpose: the fireworks and the "lifting" variant that group
 //! restriction prompts use.
+#![deny(clippy::indexing_slicing)]
 
 use crate::local_time::{civil_local, day_label};
 use crate::telegram::envelope::{ParsedBoostSlot, ParsedBoostStatus};

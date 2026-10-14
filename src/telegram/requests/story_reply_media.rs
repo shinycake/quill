@@ -29,8 +29,12 @@ fn retarget(json: String, target: StoryReplyTarget) -> String {
     let Ok(mut value) = serde_json::from_str::<Value>(&json) else {
         return json;
     };
-    value["reply_to"] = input_message_reply_to_story(target.poster_chat_id, target.story_id);
-    value["topic_id"] = Value::Null;
+    crate::json_access::set(
+        &mut value,
+        "reply_to",
+        input_message_reply_to_story(target.poster_chat_id, target.story_id),
+    );
+    crate::json_access::set(&mut value, "topic_id", Value::Null);
     value.to_string()
 }
 

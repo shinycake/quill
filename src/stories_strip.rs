@@ -11,6 +11,7 @@
 //! of the list's scroll offset.
 //!
 //! Pure core, no GPUI.
+#![deny(clippy::indexing_slicing)]
 
 /// `dialogsStoriesFull.height` (dialogs.style:693).
 pub const FULL_HEIGHT: f32 = 77.0;

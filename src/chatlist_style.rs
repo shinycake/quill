@@ -17,6 +17,7 @@
 //!   rich-message blocks keep a plain preview (different entity model).
 //!   Spoilers stay hidden in the list (open the chat to reveal); links
 //!   render unstyled and don't open from the list row.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::MessageContent;
 use crate::text::TextEntity;

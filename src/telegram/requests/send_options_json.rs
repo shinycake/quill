@@ -27,7 +27,7 @@ pub fn with_message_send_options(json: String, options: &SendOptions, single: bo
         },
         ..*options
     };
-    value["options"] = super::message_send_options(&options);
+    crate::json_access::set(&mut value, "options", super::message_send_options(&options));
     value.to_string()
 }
 

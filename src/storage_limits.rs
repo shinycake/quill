@@ -3,6 +3,7 @@
 //! than"). TDLib keeps the cache itself: the limits are the options its
 //! storage optimizer reads (`td/telegram/files/FileGcParameters.cpp`),
 //! and the optimizer only runs while `use_storage_optimizer` is on.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::OptionValue;
 

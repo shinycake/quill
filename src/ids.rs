@@ -1,3 +1,5 @@
+#![deny(clippy::indexing_slicing)]
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;

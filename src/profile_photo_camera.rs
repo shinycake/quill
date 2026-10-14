@@ -3,6 +3,7 @@
 //! square and writes raw RGB frames to a pipe. A thread keeps the newest
 //! frame; the panel takes it on its redraw clock, and "Take photo" saves
 //! the frame on screen.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::io::Read;

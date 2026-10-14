@@ -7,6 +7,7 @@
 //! and the parser. The driver is `connect::earn`, the reducer
 //! `state::domains::payments::earn`, the screens `ui::earn`. Nothing here
 //! moves funds: a withdrawal only fetches a Fragment URL for the browser.
+#![deny(clippy::indexing_slicing)]
 
 mod affiliate;
 mod format;

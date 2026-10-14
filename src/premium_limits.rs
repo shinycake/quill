@@ -8,6 +8,7 @@
 //! `data/data_premium_limits.cpp` (the fallbacks used before the server
 //! answers) and `Resources/langs/lang.strings` (`lng_*_limit*`). Folder
 //! limits live in [`crate::folder_limits`]; they keep their own box.
+#![deny(clippy::indexing_slicing)]
 
 /// Which limit a box talks about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

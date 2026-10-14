@@ -5,6 +5,7 @@
 //! Still images display directly. MPEG-4 (`video/mp4`, the saved-GIF format)
 //! frames come from `ffmpeg` when it is installed. Quill does not vendor a
 //! decoder and does not call Tenor.
+#![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 

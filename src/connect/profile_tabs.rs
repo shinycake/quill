@@ -45,8 +45,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         for tab in [SharedMediaTab::Stories, SharedMediaTab::Gifts] {
-            let idle = self.session.media.shared_media.tabs[tab.index()].status
-                == SharedMediaTabStatus::Idle;
+            let idle = self
+                .session
+                .media
+                .shared_media
+                .tabs
+                .get(tab.index())
+                .is_some_and(|state| state.status == SharedMediaTabStatus::Idle);
             if tab.available_in(&kind) && idle {
                 // A failed send leaves that tab hidden; the others still load.
                 let _ = self.fetch_profile_tab(tab, false);
@@ -105,8 +110,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             self.session.media.shared_media.begin_profile_fetch(tab);
         }
-        let state = &self.session.media.shared_media.tabs[tab.index()];
-        let next_offset = state.next_offset.clone();
+        let next_offset = self
+            .session
+            .media
+            .shared_media
+            .tabs
+            .get(tab.index())
+            .map(|state| state.next_offset.clone())
+            .unwrap_or_default();
         let result = match tab {
             SharedMediaTab::Stories => {
                 let from = if append {

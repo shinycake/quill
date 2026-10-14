@@ -3,6 +3,7 @@
 //!
 //! Schema (TDLib 1.8.67): `message.media_album_id` is int64, `0` if none.
 //! `sendMessageAlbum` takes 2–10 `InputMessageContent` values.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::MessageContent;
 
@@ -61,28 +62,32 @@ pub fn group_media_albums<'a, T>(
 ) -> Vec<HistoryGroup<'a, T>> {
     let mut groups = Vec::new();
     let mut index = 0;
-    while index < messages.len() {
-        let id = album_id(&messages[index]);
-        let outgoing = is_outgoing(&messages[index]);
-        if id != 0 && is_media(&messages[index]) {
+    while let Some(first) = messages.get(index) {
+        let id = album_id(first);
+        let outgoing = is_outgoing(first);
+        if id != 0 && is_media(first) {
             let mut end = index + 1;
-            while end < messages.len()
-                && album_id(&messages[end]) == id
-                && is_outgoing(&messages[end]) == outgoing
-                && is_media(&messages[end])
+            while let Some(next) = messages.get(end)
+                && album_id(next) == id
+                && is_outgoing(next) == outgoing
+                && is_media(next)
             {
                 end += 1;
             }
             if end - index >= 2 {
                 groups.push(HistoryGroup::Album {
                     album_id: id,
-                    messages: messages[index..end].iter().collect(),
+                    messages: messages
+                        .get(index..end)
+                        .unwrap_or_default()
+                        .iter()
+                        .collect(),
                 });
                 index = end;
                 continue;
             }
         }
-        groups.push(HistoryGroup::Single(&messages[index]));
+        groups.push(HistoryGroup::Single(first));
         index += 1;
     }
     groups
@@ -122,31 +127,41 @@ pub fn layout_media_group(
 
     if count == 1 {
         let width = max_width;
-        let height = (sizes[0].1.max(1) * width) / sizes[0].0.max(1);
+        let (size_w, size_h) = sizes.first().copied().unwrap_or((1, 1));
+        let height = (size_h.max(1) * width) / size_w.max(1);
         return vec![rect(0, 0, width, height.max(1))];
     }
     if count >= 5 || ratios.iter().any(|ratio| *ratio > 2.0) {
         return layout_complex(&ratios, average, max_width, min_width, spacing);
     }
-    if count == 2 {
-        if proportions == "ww" && average > 1.4 * max_size_ratio && (ratios[1] - ratios[0]) < 0.2 {
-            return layout_two_top_bottom(&ratios, max_width, max_height, spacing);
+    // `count` is 2, 3 or 4 from here (1 and 5+ returned above).
+    match *ratios.as_slice() {
+        [r0, r1] => {
+            let pair = [r0, r1];
+            if proportions == "ww" && average > 1.4 * max_size_ratio && (r1 - r0) < 0.2 {
+                return layout_two_top_bottom(pair, max_width, max_height, spacing);
+            }
+            if proportions == "ww" || proportions == "qq" {
+                return layout_two_left_right_equal(pair, max_width, max_height, spacing);
+            }
+            layout_two_left_right(pair, max_width, max_height, min_width, spacing)
         }
-        if proportions == "ww" || proportions == "qq" {
-            return layout_two_left_right_equal(&ratios, max_width, max_height, spacing);
+        [r0, r1, r2] => {
+            let trio = [r0, r1, r2];
+            if proportions.as_bytes().first() == Some(&b'n') {
+                return layout_three_left(trio, max_width, max_height, min_width, spacing);
+            }
+            layout_three_top(trio, max_width, max_height, spacing)
         }
-        return layout_two_left_right(&ratios, max_width, max_height, min_width, spacing);
-    }
-    if count == 3 {
-        if proportions.as_bytes().first() == Some(&b'n') {
-            return layout_three_left(&ratios, max_width, max_height, min_width, spacing);
+        [r0, r1, r2, r3] => {
+            let quad = [r0, r1, r2, r3];
+            if proportions.as_bytes().first() == Some(&b'w') {
+                layout_four_top(quad, max_width, max_height, min_width, spacing)
+            } else {
+                layout_four_left(quad, max_width, max_height, min_width, spacing)
+            }
         }
-        return layout_three_top(&ratios, max_width, max_height, spacing);
-    }
-    if proportions.as_bytes().first() == Some(&b'w') {
-        layout_four_top(&ratios, max_width, max_height, min_width, spacing)
-    } else {
-        layout_four_left(&ratios, max_width, max_height, min_width, spacing)
+        _ => Vec::new(),
     }
 }
 
@@ -164,15 +179,15 @@ fn round_to_i32(value: f64) -> i32 {
 }
 
 fn layout_two_top_bottom(
-    ratios: &[f64],
+    [r0, r1]: [f64; 2],
     max_width: i32,
     max_height: i32,
     spacing: i32,
 ) -> Vec<AlbumRect> {
     let width = max_width;
     let height = round_to_i32(
-        (width as f64 / ratios[0])
-            .min(width as f64 / ratios[1])
+        (width as f64 / r0)
+            .min(width as f64 / r1)
             .min((max_height - spacing) as f64 / 2.0),
     );
     vec![
@@ -182,15 +197,15 @@ fn layout_two_top_bottom(
 }
 
 fn layout_two_left_right_equal(
-    ratios: &[f64],
+    [r0, r1]: [f64; 2],
     max_width: i32,
     max_height: i32,
     spacing: i32,
 ) -> Vec<AlbumRect> {
     let width = (max_width - spacing) / 2;
     let height = round_to_i32(
-        (width as f64 / ratios[0])
-            .min(width as f64 / ratios[1])
+        (width as f64 / r0)
+            .min(width as f64 / r1)
             .min(max_height as f64),
     );
     vec![
@@ -200,7 +215,7 @@ fn layout_two_left_right_equal(
 }
 
 fn layout_two_left_right(
-    ratios: &[f64],
+    [r0, r1]: [f64; 2],
     max_width: i32,
     max_height: i32,
     min_width: i32,
@@ -208,14 +223,10 @@ fn layout_two_left_right(
 ) -> Vec<AlbumRect> {
     let minimal_width = round_to_i32(min_width as f64 * 1.5);
     let span = max_width - spacing;
-    let second = round_to_i32(
-        (0.4 * span as f64).max(span as f64 / ratios[0] / (1.0 / ratios[0] + 1.0 / ratios[1])),
-    )
-    .min(max_width - spacing - minimal_width);
+    let second = round_to_i32((0.4 * span as f64).max(span as f64 / r0 / (1.0 / r0 + 1.0 / r1)))
+        .min(max_width - spacing - minimal_width);
     let first = max_width - second - spacing;
-    let height = max_height.min(round_to_i32(
-        (first as f64 / ratios[0]).min(second as f64 / ratios[1]),
-    ));
+    let height = max_height.min(round_to_i32((first as f64 / r0).min(second as f64 / r1)));
     vec![
         rect(0, 0, first, height),
         rect(first + spacing, 0, second, height),
@@ -223,7 +234,7 @@ fn layout_two_left_right(
 }
 
 fn layout_three_left(
-    ratios: &[f64],
+    [r0, r1, r2]: [f64; 3],
     max_width: i32,
     max_height: i32,
     min_width: i32,
@@ -231,17 +242,15 @@ fn layout_three_left(
 ) -> Vec<AlbumRect> {
     let first_height = max_height;
     let third_height = round_to_i32(
-        ((max_height - spacing) as f64 / 2.0)
-            .min(ratios[1] * (max_width - spacing) as f64 / (ratios[2] + ratios[1])),
+        ((max_height - spacing) as f64 / 2.0).min(r1 * (max_width - spacing) as f64 / (r2 + r1)),
     );
     let second_height = first_height - third_height - spacing;
     let right_width = min_width.max(round_to_i32(
         ((max_width - spacing) as f64 / 2.0)
-            .min(third_height as f64 * ratios[2])
-            .min(second_height as f64 * ratios[1]),
+            .min(third_height as f64 * r2)
+            .min(second_height as f64 * r1),
     ));
-    let left_width =
-        round_to_i32(first_height as f64 * ratios[0]).min(max_width - spacing - right_width);
+    let left_width = round_to_i32(first_height as f64 * r0).min(max_width - spacing - right_width);
     vec![
         rect(0, 0, left_width, first_height),
         rect(left_width + spacing, 0, right_width, second_height),
@@ -255,17 +264,17 @@ fn layout_three_left(
 }
 
 fn layout_three_top(
-    ratios: &[f64],
+    [r0, r1, r2]: [f64; 3],
     max_width: i32,
     max_height: i32,
     spacing: i32,
 ) -> Vec<AlbumRect> {
     let first_width = max_width;
     let first_height =
-        round_to_i32((first_width as f64 / ratios[0]).min((max_height - spacing) as f64 * 0.66));
+        round_to_i32((first_width as f64 / r0).min((max_height - spacing) as f64 * 0.66));
     let second_width = (max_width - spacing) / 2;
     let second_height = (max_height - first_height - spacing).min(round_to_i32(
-        (second_width as f64 / ratios[1]).min(second_width as f64 / ratios[2]),
+        (second_width as f64 / r1).min(second_width as f64 / r2),
     ));
     let third_width = first_width - second_width - spacing;
     vec![
@@ -281,21 +290,21 @@ fn layout_three_top(
 }
 
 fn layout_four_top(
-    ratios: &[f64],
+    [r0, r1, r2, r3]: [f64; 4],
     max_width: i32,
     max_height: i32,
     min_width: i32,
     spacing: i32,
 ) -> Vec<AlbumRect> {
-    let h0 = round_to_i32((max_width as f64 / ratios[0]).min((max_height - spacing) as f64 * 0.66));
-    let h = round_to_i32((max_width - 2 * spacing) as f64 / (ratios[1] + ratios[2] + ratios[3]));
+    let h0 = round_to_i32((max_width as f64 / r0).min((max_height - spacing) as f64 * 0.66));
+    let h = round_to_i32((max_width - 2 * spacing) as f64 / (r1 + r2 + r3));
     let w0 = min_width.max(round_to_i32(
-        ((max_width - 2 * spacing) as f64 * 0.4).min(h as f64 * ratios[1]),
+        ((max_width - 2 * spacing) as f64 * 0.4).min(h as f64 * r1),
     ));
     let w2 = round_to_i32(
         (min_width as f64)
             .max((max_width - 2 * spacing) as f64 * 0.33)
-            .max(h as f64 * ratios[3]),
+            .max(h as f64 * r3),
     );
     let w1 = max_width - w0 - w2 - 2 * spacing;
     let h1 = (max_height - h0 - spacing).min(h);
@@ -308,19 +317,17 @@ fn layout_four_top(
 }
 
 fn layout_four_left(
-    ratios: &[f64],
+    [r0, r1, r2, r3]: [f64; 4],
     max_width: i32,
     max_height: i32,
     min_width: i32,
     spacing: i32,
 ) -> Vec<AlbumRect> {
     let h = max_height;
-    let w0 = round_to_i32((h as f64 * ratios[0]).min((max_width - spacing) as f64 * 0.6));
-    let w = round_to_i32(
-        (max_height - 2 * spacing) as f64 / (1.0 / ratios[1] + 1.0 / ratios[2] + 1.0 / ratios[3]),
-    );
-    let h0 = round_to_i32(w as f64 / ratios[1]);
-    let h1 = round_to_i32(w as f64 / ratios[2]);
+    let w0 = round_to_i32((h as f64 * r0).min((max_width - spacing) as f64 * 0.6));
+    let w = round_to_i32((max_height - 2 * spacing) as f64 / (1.0 / r1 + 1.0 / r2 + 1.0 / r3));
+    let h0 = round_to_i32(w as f64 / r1);
+    let h1 = round_to_i32(w as f64 / r2);
     let h2 = h - h0 - h1 - 2 * spacing;
     let w1 = min_width.max((max_width - w0 - spacing).min(w));
     vec![
@@ -351,7 +358,10 @@ fn layout_complex(
     let count = ratios.len();
     let max_height = max_width * 4 / 3;
     let multi_height = |offset: usize, n: usize| -> f64 {
-        let sum: f64 = ratios[offset..offset + n].iter().sum();
+        // The offsets and counts partition `ratios`, so the range exists.
+        let sum: f64 = ratios
+            .get(offset..offset + n)
+            .map_or(1.0, |part| part.iter().sum());
         (max_width - (n as i32 - 1) * spacing) as f64 / sum
     };
     let mut attempts: Vec<(Vec<usize>, Vec<f64>)> = Vec::new();
@@ -401,7 +411,10 @@ fn layout_complex(
         } else {
             1.0
         };
-        let bad2 = if counts.windows(2).any(|pair| pair[0] > pair[1]) {
+        let bad2 = if counts
+            .windows(2)
+            .any(|pair| matches!(pair, [a, b] if a > b))
+        {
             1.5
         } else {
             1.0
@@ -415,16 +428,22 @@ fn layout_complex(
     let Some(best) = best else {
         return Vec::new();
     };
-    let (counts, heights) = &attempts[best];
+    let Some((counts, heights)) = attempts.get(best) else {
+        return Vec::new();
+    };
     let mut result = Vec::with_capacity(count);
     let mut index = 0;
     let mut y = 0.0;
     for (row, col_count) in counts.iter().enumerate() {
-        let line_height = heights[row];
+        let Some(&line_height) = heights.get(row) else {
+            return Vec::new();
+        };
         let height = round_to_i32(line_height);
         let mut x = 0;
         for col in 0..*col_count {
-            let ratio = ratios[index];
+            let Some(&ratio) = ratios.get(index) else {
+                return Vec::new();
+            };
             let width = if col + 1 == *col_count {
                 max_width - x
             } else {

@@ -1,4 +1,5 @@
 //! Session restore, logout, and shutdown — no live Telegram in this crate.
+#![deny(clippy::indexing_slicing)]
 
 use crate::auth::credentials_ready;
 use crate::ids::AccountKey;

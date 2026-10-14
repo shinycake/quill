@@ -7,6 +7,7 @@
 //! or "Unhide Stories" depending on which story list the peer is in. The
 //! mute entry is an addition: TDLib keeps story notifications as a
 //! per-chat setting (`mute_stories`), so the menu can flip it.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatKind;
 

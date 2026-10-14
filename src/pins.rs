@@ -1,4 +1,5 @@
 //! Exact pins for this checkout. Recheck together; never refresh one layer alone.
+#![deny(clippy::indexing_slicing)]
 
 /// crates.io `gpui-kit` version (`=0.7.1` in Cargo.toml, 2026-10-09). The
 /// whole UI family is this Kit release, with GPUI from the `gpui-pre` 0.3.8

@@ -15,7 +15,7 @@ pub const TON_MORE_SLICE: i32 = 10;
 pub const STAR_TX_LIMIT: i32 = 100;
 
 fn request(extra: RequestId, mut body: Value) -> String {
-    body["@extra"] = json!(extra.as_extra());
+    crate::json_access::set(&mut body, "@extra", json!(extra.as_extra()));
     body.to_string()
 }
 
@@ -66,7 +66,7 @@ pub fn get_star_transactions(
     let mut body = json!({"@type": "getStarTransactions", "owner_id": owner.sender_json(),
                           "subscription_id": "", "offset": offset, "limit": limit});
     if let Some(direction) = filter.direction_type() {
-        body["direction"] = json!({ "@type": direction });
+        crate::json_access::set(&mut body, "direction", json!({ "@type": direction }));
     }
     request(extra, body)
 }

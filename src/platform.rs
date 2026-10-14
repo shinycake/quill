@@ -4,6 +4,7 @@
 //! directory (`FileSecretStore`). `MemorySecretStore` remains for unit tests only
 //! and must not be the live-connect path on Linux.
 //! A missing or locked item must never be replaced silently against an existing DB.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::AccountKey;
 use crate::locks::LockExt;

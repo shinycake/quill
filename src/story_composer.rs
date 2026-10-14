@@ -16,6 +16,7 @@
 //! expiry, post-to-chat-page, protect-content, link + reaction areas,
 //! honest pending / succeeded / failed states. Out: location / venue /
 //! message / weather / gift areas, editing, posting as a channel.
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::{Value, json};
 

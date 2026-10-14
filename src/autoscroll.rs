@@ -2,6 +2,7 @@
 //! (`ui/widgets/middle_click_autoscroll.cpp`): pressing the middle button
 //! anchors a point; while the pointer stays below or above it the list
 //! scrolls in that direction, faster the farther away it is.
+#![deny(clippy::indexing_slicing)]
 
 use std::time::Duration;
 

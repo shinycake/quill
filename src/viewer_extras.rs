@@ -6,6 +6,7 @@
 //! (speed slider and presets, `kSpeedMin`/`kSpeedMax` in
 //! `media/media_common.h`), `media_view_overlay_widget.cpp`
 //! (`showSaveMsgToast`) and `media/system_media_controls_manager.cpp`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::media_session::{Command, NowPlaying};
 use std::path::{Path, PathBuf};

@@ -1,3 +1,5 @@
+#![deny(clippy::indexing_slicing)]
+
 pub mod client;
 pub mod envelope;
 pub mod envelope_emoji;

@@ -13,6 +13,7 @@
 //! `ISpellChecker` can't report which words were added, so adding to the
 //! shared Windows dictionary would leave "Remove from Dictionary"
 //! unable to know what to undo.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::sync::{Mutex, mpsc};
@@ -213,7 +214,9 @@ pub fn user_locale_tags() -> Vec<String> {
     if len <= 1 {
         return Vec::new();
     }
-    vec![String::from_utf16_lossy(&buf[..len as usize - 1])]
+    vec![String::from_utf16_lossy(
+        buf.get(..len as usize - 1).unwrap_or_default(),
+    )]
 }
 
 impl SpellBackend for WindowsSpellBackend {

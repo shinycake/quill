@@ -7,6 +7,7 @@
 //! a worker thread and paints the result as one image, and the core tests
 //! cover the maths on every platform. Decoding photos and rasterising SVG
 //! patterns stay in the UI crate, which has the image libraries.
+#![deny(clippy::indexing_slicing)]
 
 mod soft_light;
 
@@ -54,12 +55,10 @@ impl Raster {
     /// The pixel at `x`, `y` as `[b, g, r, a]`.
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
         let at = ((y as usize) * (self.width as usize) + x as usize) * 4;
-        [
-            self.bgra[at],
-            self.bgra[at + 1],
-            self.bgra[at + 2],
-            self.bgra[at + 3],
-        ]
+        match self.bgra.get(at..at + 4) {
+            Some(&[b, g, r, a]) => [b, g, r, a],
+            _ => [0; 4],
+        }
     }
 
     /// Bytes this picture holds.
@@ -134,10 +133,10 @@ impl FillSampler {
             BackgroundFill::Gradient { top, bottom, angle } => {
                 Self::linear(&[*top, *bottom], *angle)
             }
-            BackgroundFill::Freeform(colors) => match colors.len() {
-                0 => Self::Solid([0.0; 3]),
-                1 => Self::Solid(channels(colors[0])),
-                2 => Self::linear(colors, 0),
+            BackgroundFill::Freeform(colors) => match colors.as_slice() {
+                [] => Self::Solid([0.0; 3]),
+                [one] => Self::Solid(channels(*one)),
+                [_, _] => Self::linear(colors, 0),
                 _ => {
                     let (phase, progress) = freeform_phase(rotation);
                     let small = small_complex_gradient(colors, phase, progress);
@@ -200,13 +199,13 @@ impl FillSampler {
                 let (x0, y0) = (fx.floor() as u32, fy.floor() as u32);
                 let (x1, y1) = ((x0 + 1).min(*side - 1), (y0 + 1).min(*side - 1));
                 let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
-                let at = |x: u32, y: u32| rgb[(y * *side + x) as usize];
+                let at = |x: u32, y: u32| {
+                    rgb.get((y * *side + x) as usize)
+                        .copied()
+                        .unwrap_or([0.0; 3])
+                };
                 let (a, b, c, d) = (at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1));
-                std::array::from_fn(|i| {
-                    let top = a[i] + (b[i] - a[i]) * tx;
-                    let bottom = c[i] + (d[i] - c[i]) * tx;
-                    top + (bottom - top) * ty
-                })
+                lerp3(lerp3(a, b, tx), lerp3(c, d, tx), ty)
             }
         }
     }
@@ -249,6 +248,11 @@ pub fn freeform_phase(rotation: u16) -> (usize, f32) {
     ((degrees.clamp(0, 315) / 45) as usize, progress)
 }
 
+/// `a + (b - a) * t` per channel.
+fn lerp3([a0, a1, a2]: [f32; 3], [b0, b1, b2]: [f32; 3], t: f32) -> [f32; 3] {
+    [a0 + (b0 - a0) * t, a1 + (b1 - a1) * t, a2 + (b2 - a2) * t]
+}
+
 /// The colour `t` (0-1) along evenly spaced `stops`.
 fn along(stops: &[[f32; 3]], t: f32) -> [f32; 3] {
     match stops {
@@ -258,8 +262,10 @@ fn along(stops: &[[f32; 3]], t: f32) -> [f32; 3] {
             let at = t * (stops.len() - 1) as f32;
             let index = (at.floor() as usize).min(stops.len() - 2);
             let frac = at - index as f32;
-            let (a, b) = (stops[index], stops[index + 1]);
-            std::array::from_fn(|i| a[i] + (b[i] - a[i]) * frac)
+            match stops.get(index..index + 2) {
+                Some(&[a, b]) => lerp3(a, b, frac),
+                _ => stops.last().copied().unwrap_or([0.0; 3]),
+            }
         }
     }
 }
@@ -335,10 +341,12 @@ pub fn compose_pattern(
     let offset = (-shift).rem_euclid(i64::from(tw)) as u32;
     for (y, row) in out.bgra.chunks_exact_mut(stride).enumerate() {
         let ty = (y as u32 % th) as usize;
-        let tile_row = &tile.alpha[ty * tw as usize..(ty + 1) * tw as usize];
+        let Some(tile_row) = tile.alpha.get(ty * tw as usize..(ty + 1) * tw as usize) else {
+            continue;
+        };
         let mut tx = offset;
         for px in row.as_chunks_mut::<4>().0.iter_mut() {
-            let coverage = tile_row[tx as usize];
+            let coverage = tile_row.get(tx as usize).copied().unwrap_or(0);
             px[0] = table.mix(px[0], coverage);
             px[1] = table.mix(px[1], coverage);
             px[2] = table.mix(px[2], coverage);
@@ -497,32 +505,36 @@ fn box_line(
     line.clear();
     line.extend((0..count).map(|i| {
         let at = start + i * step;
-        [
-            u32::from(data[at]),
-            u32::from(data[at + 1]),
-            u32::from(data[at + 2]),
-        ]
+        match data.get(at..at + 3) {
+            Some(&[b, g, r]) => [u32::from(b), u32::from(g), u32::from(r)],
+            _ => [0; 3],
+        }
     }));
     let span = (radius * 2 + 1) as u32;
-    let get = |i: isize| line[i.clamp(0, count as isize - 1) as usize];
+    let get = |i: isize| {
+        line.get(i.clamp(0, count as isize - 1) as usize)
+            .copied()
+            .unwrap_or([0; 3])
+    };
     let mut sum = [0u32; 3];
     for i in -(radius as isize)..=(radius as isize) {
-        let p = get(i);
-        for c in 0..3 {
-            sum[c] += p[c];
+        for (s, v) in sum.iter_mut().zip(get(i)) {
+            *s += v;
         }
     }
     for i in 0..count {
         let at = start + i * step;
-        for c in 0..3 {
-            data[at + c] = ((sum[c] + span / 2) / span) as u8;
+        if let Some(px) = data.get_mut(at..at + 3) {
+            for (d, s) in px.iter_mut().zip(sum) {
+                *d = ((s + span / 2) / span) as u8;
+            }
         }
         let (out, inn) = (
             get(i as isize - radius as isize),
             get(i as isize + radius as isize + 1),
         );
-        for c in 0..3 {
-            sum[c] = sum[c] + inn[c] - out[c];
+        for ((s, i), o) in sum.iter_mut().zip(inn).zip(out) {
+            *s = *s + i - o;
         }
     }
 }
@@ -537,9 +549,13 @@ pub fn tile(source: &Raster, width: u32, height: u32) -> Raster {
     }
     let stride = width as usize * 4;
     for (y, row) in out.bgra.chunks_exact_mut(stride.max(4)).enumerate() {
-        let src_row = &source.bgra[(y % sh) * sw * 4..(y % sh + 1) * sw * 4];
+        let Some(src_row) = source.bgra.get((y % sh) * sw * 4..(y % sh + 1) * sw * 4) else {
+            continue;
+        };
         for (chunk, src) in row.chunks_mut(sw * 4).zip(std::iter::repeat(src_row)) {
-            chunk.copy_from_slice(&src[..chunk.len()]);
+            if let Some(src) = src.get(..chunk.len()) {
+                chunk.copy_from_slice(src);
+            }
         }
     }
     out
@@ -561,7 +577,12 @@ pub fn blit(target: &mut Raster, source: &Raster, x: i32, y: i32) {
         let src = ((sy as usize) * source.width as usize + sx0 as usize) * 4;
         let dst = ((ty as usize) * target.width as usize + (x + sx0) as usize) * 4;
         let len = (sx1 - sx0) as usize * 4;
-        target.bgra[dst..dst + len].copy_from_slice(&source.bgra[src..src + len]);
+        if let (Some(to), Some(from)) = (
+            target.bgra.get_mut(dst..dst + len),
+            source.bgra.get(src..src + len),
+        ) {
+            to.copy_from_slice(from);
+        }
     }
 }
 

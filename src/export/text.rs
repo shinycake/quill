@@ -99,8 +99,10 @@ pub fn render(text: &str, entities: &[Entity]) -> String {
     let cuts: Vec<usize> = cuts.into_iter().collect();
     let mut out = String::with_capacity(text.len() + 16);
     for pair in cuts.windows(2) {
-        let (from, to) = (pair[0], pair[1]);
-        let piece: String = chars[from..to].iter().collect();
+        let &[from, to] = pair else {
+            continue;
+        };
+        let piece: String = chars.get(from..to).unwrap_or_default().iter().collect();
         let mut covering: Vec<&(usize, usize, &Entity)> = spans
             .iter()
             .filter(|(start, end, _)| *start <= from && to <= *end)
@@ -110,7 +112,7 @@ pub fn render(text: &str, entities: &[Entity]) -> String {
         let mut closing = Vec::new();
         let mut in_pre = false;
         for (start, end, entity) in covering {
-            let covered: String = chars[*start..*end].iter().collect();
+            let covered: String = chars.get(*start..*end).unwrap_or_default().iter().collect();
             if let Some((open, close)) = tags(&entity.kind, &covered) {
                 out.push_str(&open);
                 closing.push(close);

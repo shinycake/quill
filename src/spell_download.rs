@@ -4,6 +4,7 @@
 //! Blocking and bounded: the UI runs it on the background executor and
 //! reads [`Progress`] to draw the row's percentage and to cancel
 //! (tdesktop: switching a downloading dictionary off destroys the loader).
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -81,7 +82,7 @@ fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, &'static str> {
         if n == 0 {
             break;
         }
-        out.extend_from_slice(&chunk[..n]);
+        out.extend_from_slice(chunk.get(..n).unwrap_or_default());
         progress.received.fetch_add(n as u64, Ordering::Relaxed);
         if out.len() as u64 > limit {
             return Err("The dictionary is larger than expected.");

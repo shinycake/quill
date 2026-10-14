@@ -3,6 +3,7 @@
 //! An app opened from Finder or the Dock inherits launchd's minimal `PATH`
 //! (`/usr/bin:/bin:/usr/sbin:/sbin`), which misses Homebrew and MacPorts,
 //! so a bare `Command::new("ffmpeg")` fails there even when it is installed.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

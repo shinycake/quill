@@ -1,3 +1,5 @@
+#![deny(clippy::indexing_slicing)]
+
 use crate::state::{RequestPurpose, Session};
 use crate::telegram::envelope::StickersPayload;
 use crate::telegram::envelope::{

@@ -9,6 +9,7 @@
 //! tdesktop's `QString::size()` and `TextEntity` offsets use), which is
 //! never smaller than the scalar-value count, so a text that fits here
 //! also fits whichever unit the server counts.
+#![deny(clippy::indexing_slicing)]
 
 use crate::composer::parse_format_markup;
 
@@ -61,13 +62,16 @@ fn largest_fitting_prefix(rest: &str, max: usize) -> usize {
     let (mut lo, mut hi) = (0usize, bounds.len() - 1);
     while lo < hi {
         let mid = (lo + hi).div_ceil(2);
-        if markup_text_units(rest.get(..bounds[mid]).unwrap_or_default()) <= max {
+        let Some(&bound) = bounds.get(mid) else {
+            break;
+        };
+        if markup_text_units(rest.get(..bound).unwrap_or_default()) <= max {
             lo = mid;
         } else {
             hi = mid - 1;
         }
     }
-    bounds[lo]
+    bounds.get(lo).copied().unwrap_or(0)
 }
 
 /// A cut at `at` keeps formatting intact when parsing the two halves
@@ -115,7 +119,7 @@ pub fn split_markup_text(markup: &str, limit: i32) -> Vec<String> {
             if at <= half || at > hard {
                 continue;
             }
-            let prev = n.checked_sub(1).map(|p| chars[p].1);
+            let prev = n.checked_sub(1).and_then(|p| chars.get(p)).map(|&(_, c)| c);
             let next = chars.get(n + 1).map(|&(_, c)| c);
             if let Some(level) = break_level(prev, ch, next) {
                 candidates.push((level, at));

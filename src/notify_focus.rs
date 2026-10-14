@@ -11,6 +11,7 @@
 //! Every query shells out or calls the OS, so none of them runs on the UI
 //! thread: [`dnd_active`] returns the last answer and, when it is stale,
 //! refreshes it on a short-lived worker. The parsers are pure and tested.
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};

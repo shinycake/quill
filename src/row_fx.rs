@@ -6,6 +6,7 @@
 //! grows from its centre while its ring widens. It does not animate the
 //! unread counter; Quill gives a newly appearing badge the same 150 ms
 //! scale and fade so the list reads consistently.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

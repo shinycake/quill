@@ -9,6 +9,7 @@
 //!
 //! The probe may block (Linux runs `gdbus`), so callers run it on a
 //! background thread and hand the answer to [`set_state`].
+#![deny(clippy::indexing_slicing)]
 
 use crate::power_saving::{BATTERY_IGNORE, BATTERY_STATE, slot_get, slot_set};
 

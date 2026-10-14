@@ -4,6 +4,7 @@
 //! background, hidden or minimised is offline. TDLib's `online` option
 //! defaults to false and re-announces itself while true, so only changes
 //! are sent.
+#![deny(clippy::indexing_slicing)]
 
 /// tdesktop `MTP::Config::offlineIdleTimeout` default (30 s): no input
 /// for this long and the account goes offline even with the window open.

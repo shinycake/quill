@@ -5,6 +5,7 @@
 //! setting to `setInstantReplacesEnabled`, so with the setting off nothing
 //! is replaced at all, dashes and guillemets included (`TextOnly` is only
 //! used by the member tag field). Pure, so it is unit tested.
+#![deny(clippy::indexing_slicing)]
 
 use std::ops::Range;
 

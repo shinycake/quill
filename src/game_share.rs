@@ -2,6 +2,7 @@
 //! window_peer_menu.cpp) and the game branch of `FastShareMessage`
 //! (boxes/share_box.cpp): a `t.me/<bot>?game=<name>` link asks where to send
 //! the game, and a game message can copy that link.
+#![deny(clippy::indexing_slicing)]
 
 /// The shareable link of a game, `None` while the bot has no username or the
 /// game no short name.

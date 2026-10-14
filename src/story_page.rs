@@ -3,6 +3,7 @@
 //! Split out of `state.rs` per the file-size directive — `state.rs` keeps
 //! the `Session` fields, the `RequestPurpose` variants, the reducer match
 //! arms, and the `Session` methods.
+#![deny(clippy::indexing_slicing)]
 
 use crate::state::RequestPurpose;
 

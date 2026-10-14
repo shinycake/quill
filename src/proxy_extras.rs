@@ -4,6 +4,7 @@
 //!
 //! tdesktop reference: `settings/sections/settings_advanced.cpp`
 //! (`connectionType`) and `boxes/connection_box.cpp` (`ShareProxy`).
+#![deny(clippy::indexing_slicing)]
 use crate::proxy::{ProxyEntry, ProxyState};
 
 /// The value shown on the "Connection type" row. tdesktop shows

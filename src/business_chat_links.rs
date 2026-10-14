@@ -7,6 +7,7 @@
 //! clicks"); a click opens a menu with Copy, Share, Get QR Code, Edit and
 //! Delete (confirmed). The edit box has the message and an optional name.
 //! The footer offers the plain `t.me/username` and `t.me/+phone` links.
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::{Value, json};
 

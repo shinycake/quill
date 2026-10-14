@@ -9,6 +9,7 @@
 //!
 //! Nothing is written to disk here: the proxies, with their logins and
 //! secrets, stay inside TDLib's encrypted databases.
+#![deny(clippy::indexing_slicing)]
 
 use crate::proxy::{ProxyDraft, ProxyEntry};
 

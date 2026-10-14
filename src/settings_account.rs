@@ -1,6 +1,7 @@
 //! The help rows and the version line at the bottom of Settings
 //! (tdesktop `settings_main.cpp`: Telegram FAQ, Telegram Features,
 //! Ask a Question).
+#![deny(clippy::indexing_slicing)]
 
 /// tdesktop `lng_settings_faq_link`.
 pub const FAQ_URL: &str = "https://telegram.org/faq#general-questions";

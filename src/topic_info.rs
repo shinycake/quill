@@ -1,6 +1,7 @@
 //! Rows of the topic and reply-thread info cards (tdesktop shows the same
 //! facts in the topic profile and the replies section header). Pure
 //! formatting; names and dates come in already resolved.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ForumTopic;
 

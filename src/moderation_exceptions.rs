@@ -2,6 +2,7 @@
 //! `ParticipantsBoxController` with `Role::Restricted`, and
 //! `EditRestrictedBox`): how a member's current end date shows in the
 //! list, and where the Duration choice starts when an exception is edited.
+#![deny(clippy::indexing_slicing)]
 
 use crate::moderation::{MAX_RESTRICT_DAYS, RestrictUntil};
 

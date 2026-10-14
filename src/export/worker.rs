@@ -16,6 +16,7 @@ use super::json::{self, JsonWriter, MessageSink};
 use super::model::{Body, ExportMessage, MediaRef};
 use super::names::Namer;
 use super::settings::{ExportSettings, Skip};
+use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{self, BufWriter};
@@ -153,9 +154,13 @@ pub struct Job<'a> {
 /// A TDLib answer, or its error as an [`ExportError`].
 pub(crate) fn query<T: Tdlib>(tdlib: &mut T, request: Value) -> Result<Value, ExportError> {
     let answer = tdlib.call(request, QUERY_TIMEOUT)?;
-    if answer["@type"] == "error" {
+    if answer.at("@type") == "error" {
         return Err(ExportError::Tdlib(
-            answer["message"].as_str().unwrap_or("unknown error").into(),
+            answer
+                .at("message")
+                .as_str()
+                .unwrap_or("unknown error")
+                .into(),
         ));
     }
     Ok(answer)
@@ -178,16 +183,17 @@ pub(crate) fn fetch_file<T: Tdlib>(
             "offset": 0, "limit": 0, "synchronous": true}),
         DOWNLOAD_TIMEOUT,
     )?;
-    let local = &answer["local"];
-    if answer["@type"] == "error" || local["is_downloading_completed"] != true {
+    let local = &answer.at("local");
+    if answer.at("@type") == "error" || local.at("is_downloading_completed") != true {
         return Ok(Err(Skip::Unavailable));
     }
     if let Some(limit) = limit
-        && answer["size"].as_i64().unwrap_or(0) > limit
+        && answer.at("size").as_i64().unwrap_or(0) > limit
     {
         return Ok(Err(Skip::TooLarge));
     }
-    let Some(source) = local["path"]
+    let Some(source) = local
+        .at("path")
         .as_str()
         .and_then(|path| Path::new(path).canonicalize().ok())
     else {

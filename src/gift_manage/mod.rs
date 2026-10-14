@@ -6,6 +6,7 @@
 //! owner action, the collection and limit types, and the parser for the
 //! answers. The requests are in `telegram::requests_gifts`, the driver in
 //! `connect::gift_manage`, the reducer in `state::domains::payments`.
+#![deny(clippy::indexing_slicing)]
 
 mod send;
 mod state;

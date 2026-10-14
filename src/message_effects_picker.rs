@@ -5,6 +5,7 @@
 //! expanded list and where the "Send with Effect" card goes.
 //!
 //! Pure logic only; `src/ui/send_effects/` draws it.
+#![deny(clippy::indexing_slicing)]
 
 use crate::message_effects::{MessageEffect, MessageEffects};
 use crate::telegram::envelope::StickerItem;

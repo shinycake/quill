@@ -156,7 +156,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 _ => content,
             };
             if att.spoiler && matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video) {
-                content["has_spoiler"] = serde_json::Value::Bool(true);
+                crate::json_access::set(&mut content, "has_spoiler", serde_json::Value::Bool(true));
             }
             contents.push(content);
         }

@@ -7,6 +7,7 @@
 //! (`ShowPremiumPreview`). With Premium it sends one request per changed
 //! section (`account.updateColor`; TDLib splits that into `setAccentColor`
 //! and `setProfileAccentColor`) and closes the box.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::ProfileAccentColor;
 use crate::telegram::name_accent::{BUILT_IN_COUNT, name_color_rgb};

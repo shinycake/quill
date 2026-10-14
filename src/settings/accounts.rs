@@ -97,7 +97,7 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
         .as_ref()
         .is_none_or(|k| !registry.accounts.iter().any(|r| &r.key == k))
     {
-        registry.active = Some(registry.accounts[0].key.clone());
+        registry.active = registry.accounts.first().map(|r| r.key.clone());
     }
     registry
 }

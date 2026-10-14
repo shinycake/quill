@@ -7,6 +7,7 @@
 //! has already written the report by the time the unwind is caught; it asks
 //! [`panic_will_be_caught`] so it can file the report as a caught panic,
 //! which does not bring up the "closed unexpectedly" notice next launch.
+#![deny(clippy::indexing_slicing)]
 
 use std::cell::Cell;
 use std::io;

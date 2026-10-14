@@ -186,8 +186,12 @@ pub fn set_forum_topic_notification_settings(
         &super::super::chats::set_chat_notification_settings(extra, chat_id, settings),
     )
     .unwrap_or_else(|_| json!({}));
-    value["@type"] = json!("setForumTopicNotificationSettings");
-    value["forum_topic_id"] = json!(forum_topic_id);
+    crate::json_access::set(
+        &mut value,
+        "@type",
+        json!("setForumTopicNotificationSettings"),
+    );
+    crate::json_access::set(&mut value, "forum_topic_id", json!(forum_topic_id));
     value.to_string()
 }
 

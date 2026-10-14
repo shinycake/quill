@@ -1,4 +1,5 @@
 //! Path sandbox: display only under allowed roots; send only via explicit user pick.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use std::collections::{HashMap, HashSet};

@@ -3,6 +3,7 @@
 //! `history/view/controls/history_view_draft_options.cpp`): what the
 //! bar's menu offers, how a message splits into quotable parts, and the
 //! wording of a reply that comes from another chat.
+#![deny(clippy::indexing_slicing)]
 
 use crate::composer::QuoteSelection;
 

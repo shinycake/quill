@@ -2,6 +2,7 @@
 //! topics and for forum supergroups with `has_forum_tabs`
 //! (`history_view_subsection_tabs.cpp`). Pure model; the UI lives in
 //! `ui/subsection_tabs.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 

@@ -2,6 +2,7 @@
 //! Desktop's `Filler` in `window/window_peer_menu.cpp`: View profile (or
 //! group / channel info), the "mark as read" entries for unread mentions,
 //! reactions and poll votes, and Export chat history.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatKind;
 

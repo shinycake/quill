@@ -4,6 +4,7 @@
 //! `boxes/moderate_messages_box.cpp` (the admin delete box) and
 //! `boxes/peers/edit_participant_box.cpp` (restrict-until). Everything here
 //! is pure so the permission gating can be tested without a session.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChannelMemberStatus;
 

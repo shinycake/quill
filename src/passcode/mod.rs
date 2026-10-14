@@ -16,6 +16,7 @@
 //!   entered: the app starts locked, as in tdesktop.
 //! * Failed attempts are rate limited with tdesktop's schedule (free for 3,
 //!   then 5/10/15/20/25/30 s) and the counter survives a restart.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::AccountKey;
 use crate::locks::LockExt;
@@ -230,19 +231,19 @@ fn seal(key: &MasterKey, aad: &[u8], plain: &[u8]) -> Result<Vec<u8>, PasscodeEr
 
 fn open(key: &MasterKey, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, PasscodeError> {
     let header = WRAP_MAGIC.len() + NONCE_LEN;
-    if sealed.len() <= header || &sealed[..WRAP_MAGIC.len()] != WRAP_MAGIC {
+    let (Some(magic), Some(nonce), Some(msg)) = (
+        sealed.get(..WRAP_MAGIC.len()),
+        sealed.get(WRAP_MAGIC.len()..header),
+        sealed.get(header..),
+    ) else {
+        return Err(PasscodeError::Corrupt);
+    };
+    if sealed.len() <= header || magic != WRAP_MAGIC {
         return Err(PasscodeError::Corrupt);
     }
-    let nonce = &sealed[WRAP_MAGIC.len()..header];
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
     cipher
-        .decrypt(
-            XNonce::from_slice(nonce),
-            Payload {
-                msg: &sealed[header..],
-                aad,
-            },
-        )
+        .decrypt(XNonce::from_slice(nonce), Payload { msg, aad })
         .map_err(|_| PasscodeError::Wrong)
 }
 

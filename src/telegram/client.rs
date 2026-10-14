@@ -235,7 +235,7 @@ pub fn recover_failed_response(json: &str) -> Option<Envelope> {
         "@extra": extra,
     });
     if let Some(client_id) = value.get("@client_id") {
-        synthetic["@client_id"] = client_id.clone();
+        crate::json_access::set(&mut synthetic, "@client_id", client_id.clone());
     }
     parse_envelope(&synthetic.to_string()).ok()
 }

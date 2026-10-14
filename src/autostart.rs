@@ -20,6 +20,7 @@
 //! mechanism (Startup-folder shortcut, systemd user unit) because a second
 //! entry could not be reliably cleaned up when the user turns the toggle
 //! off.
+#![deny(clippy::indexing_slicing)]
 // Windows uses the registry; the file-based helpers below are for XDG/macOS.
 #![cfg_attr(windows, allow(dead_code))]
 use std::io;

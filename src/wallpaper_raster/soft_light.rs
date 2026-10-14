@@ -86,7 +86,9 @@ impl MixTable {
                     // destination by the constant alpha.
                     (mixed * opacity + dst * (255 - opacity) + 127) / 255
                 };
-                table[(coverage as usize) << 8 | dst as usize] = value.clamp(0, 255) as u8;
+                if let Some(slot) = table.get_mut((coverage as usize) << 8 | dst as usize) {
+                    *slot = value.clamp(0, 255) as u8;
+                }
             }
         }
         Self { table }
@@ -95,6 +97,9 @@ impl MixTable {
     /// The channel `dst` once a pattern of `coverage` is mixed in.
     #[inline]
     pub fn mix(&self, dst: u8, coverage: u8) -> u8 {
-        self.table[(coverage as usize) << 8 | dst as usize]
+        self.table
+            .get((coverage as usize) << 8 | dst as usize)
+            .copied()
+            .unwrap_or(dst)
     }
 }
