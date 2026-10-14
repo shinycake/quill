@@ -9,6 +9,8 @@
 //! "Split profile media tab" keeps living in the chat prefs (the shared media
 //! gallery reads it from there); "Fast buttons mode" is stored here, in
 //! `experimental_options.json`, like tdesktop's `experimental_options.json`.
+//! "Disable Touch Bar (macOS only)." is stored there too; its default follows
+//! the hardware, as in tdesktop (`Platform::HasTouchBar`).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -17,6 +19,10 @@ use std::sync::RwLock;
 
 pub const SPLIT_MEDIA_ID: &str = "profile-media-tabs-expanded";
 pub const FAST_BUTTONS_ID: &str = "fast-buttons-mode";
+pub const TOUCHBAR_DISABLED_ID: &str = "touchbar-disabled";
+
+/// Every option id, in page order.
+const ALL_IDS: [&str; 3] = [SPLIT_MEDIA_ID, FAST_BUTTONS_ID, TOUCHBAR_DISABLED_ID];
 
 /// One row of the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +51,12 @@ pub const FAST_BUTTONS: OptionSpec = OptionSpec {
     description: "Trigger inline keyboard buttons by 1-9 keyboard keys.",
 };
 
+pub const TOUCHBAR_DISABLED: OptionSpec = OptionSpec {
+    id: TOUCHBAR_DISABLED_ID,
+    name: "Disable Touch Bar (macOS only).",
+    description: "",
+};
+
 /// tdesktop's "Profile" category.
 pub const PROFILE: Category = Category {
     title: "Profile",
@@ -58,16 +70,100 @@ pub const OTHER: Category = Category {
     options: &[FAST_BUTTONS],
 };
 
+/// tdesktop's "Interface" category; of its options only the Touch Bar one
+/// switches something in Quill, and only on macOS (tdesktop's `scope`).
+pub const INTERFACE: Category = Category {
+    title: "Interface",
+    options: &[TOUCHBAR_DISABLED],
+};
+
 pub const ABOUT: &str = "Warning! These are experimental settings. Some may not work. Others may break the app. Any of them may disappear in the next version without a trace. Use at your own risk.";
 pub const RESTORE_LABEL: &str = "Restore default values";
 pub const FAST_BUTTONS_ENABLED_TOAST: &str = "Fast buttons mode enabled.";
 pub const FAST_BUTTONS_DISABLED_TOAST: &str = "Fast buttons mode disabled.";
 
-/// Every value the page can change. Both options default to off.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Every value the page can change. The first two default to off; the
+/// Touch Bar is disabled by default on Macs without one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Values {
     pub split_profile_media: bool,
     pub fast_buttons_mode: bool,
+    pub touchbar_disabled: bool,
+}
+
+impl Default for Values {
+    fn default() -> Self {
+        Self {
+            split_profile_media: false,
+            fast_buttons_mode: false,
+            touchbar_disabled: !has_touch_bar(),
+        }
+    }
+}
+
+/// Whether this Mac has a Touch Bar (tdesktop `Platform::HasTouchBar`):
+/// every Intel Mac is assumed to, and of the Apple silicon ones only the
+/// 13-inch MacBook Pro models `MacBookPro17,1` and `Mac14,7`. Asked once.
+pub fn has_touch_bar() -> bool {
+    static HAS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HAS.get_or_init(detect_touch_bar)
+}
+
+fn detect_touch_bar() -> bool {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        matches!(
+            hardware_model().as_deref(),
+            Some("MacBookPro17,1" | "Mac14,7")
+        )
+    }
+    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+    {
+        true
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+/// `hw.model`, e.g. "MacBookPro18,3".
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn hardware_model() -> Option<String> {
+    let name = c"hw.model";
+    let mut length: libc::size_t = 0;
+    // SAFETY: a size query: no output buffer, `length` receives the size.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || length == 0 {
+        return None;
+    }
+    let mut bytes = vec![0u8; length];
+    // SAFETY: `bytes` holds `length` writable bytes, the size sysctl asked
+    // for; it writes at most `length` and updates it.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            bytes.as_mut_ptr().cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    bytes.truncate(length);
+    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+    bytes.truncate(end);
+    String::from_utf8(bytes).ok()
 }
 
 impl Values {
@@ -82,6 +178,7 @@ impl Values {
         match id {
             SPLIT_MEDIA_ID => Some(self.split_profile_media),
             FAST_BUTTONS_ID => Some(self.fast_buttons_mode),
+            TOUCHBAR_DISABLED_ID => Some(self.touchbar_disabled),
             _ => None,
         }
     }
@@ -90,6 +187,7 @@ impl Values {
         match id {
             SPLIT_MEDIA_ID => self.split_profile_media = value,
             FAST_BUTTONS_ID => self.fast_buttons_mode = value,
+            TOUCHBAR_DISABLED_ID => self.touchbar_disabled = value,
             _ => return false,
         }
         true
@@ -104,9 +202,13 @@ const EXPORT_PREFIX: &str = "quill-flags:";
 pub fn encode_export(values: Values) -> String {
     use base64::Engine as _;
     use std::io::Write as _;
-    let changed: BTreeMap<&str, bool> = [SPLIT_MEDIA_ID, FAST_BUTTONS_ID]
+    let defaults = Values::default();
+    let changed: BTreeMap<&str, bool> = ALL_IDS
         .into_iter()
-        .filter_map(|id| values.get(id).filter(|on| *on).map(|on| (id, on)))
+        .filter_map(|id| {
+            let value = values.get(id)?;
+            (Some(value) != defaults.get(id)).then_some((id, value))
+        })
         .collect();
     let json = serde_json::to_vec(&changed).unwrap_or_else(|_| b"{}".to_vec());
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
@@ -174,11 +276,14 @@ pub const INVALID_CODE_TOAST: &str =
 pub const UNSUPPORTED_CODE_TOAST: &str =
     "Experimental settings code is valid, but data format is not supported.";
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 struct Stored {
     #[serde(rename = "fast-buttons-mode")]
     fast_buttons_mode: bool,
+    /// Unset: follow the hardware.
+    #[serde(rename = "touchbar-disabled", skip_serializing_if = "Option::is_none")]
+    touchbar_disabled: Option<bool>,
 }
 
 static STORED: RwLock<Option<Stored>> = RwLock::new(None);
@@ -191,18 +296,14 @@ fn stored() -> Stored {
     if let Ok(guard) = STORED.read()
         && let Some(stored) = guard.as_ref()
     {
-        return Stored {
-            fast_buttons_mode: stored.fast_buttons_mode,
-        };
+        return *stored;
     }
     let loaded = path()
         .and_then(|path| std::fs::read(path).ok())
         .and_then(|bytes| serde_json::from_slice::<Stored>(&bytes).ok())
         .unwrap_or_default();
     if let Ok(mut guard) = STORED.write() {
-        guard.get_or_insert(Stored {
-            fast_buttons_mode: loaded.fast_buttons_mode,
-        });
+        guard.get_or_insert(loaded);
     }
     loaded
 }
@@ -215,9 +316,28 @@ pub fn fast_buttons_mode() -> bool {
 
 /// Switch Fast buttons mode and keep it for the next launch.
 pub fn set_fast_buttons_mode(on: bool) {
-    let next = Stored {
+    store(Stored {
         fast_buttons_mode: on,
-    };
+        ..stored()
+    });
+}
+
+/// Whether the Touch Bar is switched off (tdesktop `kOptionDisableTouchbar`).
+pub fn touchbar_disabled() -> bool {
+    stored()
+        .touchbar_disabled
+        .unwrap_or_else(|| !has_touch_bar())
+}
+
+/// Switch the Touch Bar off or back on and keep it for the next launch.
+pub fn set_touchbar_disabled(on: bool) {
+    store(Stored {
+        touchbar_disabled: (on != !has_touch_bar()).then_some(on),
+        ..stored()
+    });
+}
+
+fn store(next: Stored) {
     if crate::fast_buttons::persistence_enabled()
         && let Some(path) = path()
     {
@@ -248,6 +368,7 @@ mod tests {
         let values = Values {
             split_profile_media: true,
             fast_buttons_mode: true,
+            touchbar_disabled: has_touch_bar(),
         };
         let text = encode_export(values);
         assert!(text.starts_with("quill-flags:"));
@@ -260,12 +381,33 @@ mod tests {
     fn only_changed_options_are_exported() {
         let text = encode_export(Values {
             split_profile_media: true,
-            fast_buttons_mode: false,
+            ..Values::default()
         });
         let Imported::Values(values) = decode_import(&text) else {
             panic!("export must import");
         };
         assert!(values.split_profile_media && !values.fast_buttons_mode);
+    }
+
+    #[test]
+    fn the_touch_bar_option_defaults_to_the_hardware() {
+        let defaults = Values::default();
+        assert_eq!(defaults.touchbar_disabled, !has_touch_bar());
+        if !cfg!(target_os = "macos") {
+            assert!(!has_touch_bar());
+        }
+        // Only a change from the hardware default is exported.
+        let flipped = Values {
+            touchbar_disabled: has_touch_bar(),
+            ..defaults
+        };
+        assert!(flipped.changed());
+        let text = encode_export(flipped);
+        assert_eq!(decode_import(&text), Imported::Values(flipped));
+        assert_eq!(
+            decode_import(&encode_export(defaults)),
+            Imported::Values(defaults)
+        );
     }
 
     #[test]

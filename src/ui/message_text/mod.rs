@@ -459,7 +459,7 @@ fn initials_circle(name: &str, size: Pixels) -> AnyElement {
 
 /// Up to two initials: first letters of the first two words, or the first
 /// two characters of a single word (gpui-kit's rule), uppercased.
-fn avatar_initials(name: &str) -> String {
+pub(in crate::ui) fn avatar_initials(name: &str) -> String {
     let words: Vec<&str> = name.split_whitespace().collect();
     let initials: String = match words.as_slice() {
         [] => String::new(),

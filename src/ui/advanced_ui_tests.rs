@@ -203,7 +203,7 @@ fn the_experimental_page_changes_restores_exports_and_imports(cx: &mut TestAppCo
         values,
         Values {
             split_profile_media: true,
-            fast_buttons_mode: false
+            ..Values::default()
         }
     );
     app.update_in(vcx, |app, _, cx| {
