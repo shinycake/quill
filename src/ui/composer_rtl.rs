@@ -11,7 +11,8 @@
 //! `demo-capture` feature enables:
 //! `cargo test --features demo-capture --bin quill composer_rtl`.
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(super) mod tests {
     use gpui_kit::component::Root;
     use gpui_kit::component::input::{Textarea, TextareaState};
@@ -1137,7 +1138,7 @@ pub(super) mod tests {
                 );
                 assert!(!s.ends_with('\u{200D}'), "{s:?} ends on a joiner");
                 // No string ends half way through a flag (regional indicator pair).
-                let tail = s.graphemes(true).last().unwrap_or("");
+                let tail = s.graphemes(true).next_back().unwrap_or("");
                 let regional = |c: char| ('\u{1F1E6}'..='\u{1F1FF}').contains(&c);
                 if tail.chars().all(regional) && !tail.is_empty() {
                     assert_eq!(tail.chars().count() % 2, 0, "{s:?} splits a flag");

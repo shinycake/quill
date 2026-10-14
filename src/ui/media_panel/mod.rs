@@ -960,7 +960,8 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
 
 mod categories;
 mod custom_emoji_cell;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod panel_tests;
 
 #[cfg(test)]

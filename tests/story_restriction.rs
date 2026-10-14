@@ -5,6 +5,10 @@
 //! tests in `src/story_restriction.rs` only prove classification; this
 //! proves the reducer arm (state.rs `CheckCanPostStory`) actually
 //! surfaces the notice the composer renders.
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;

@@ -3,7 +3,8 @@
 //! send one. Rules and requests: `quill::quick_replies`.
 
 mod build;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests;
 
 use super::app::QuillApp;

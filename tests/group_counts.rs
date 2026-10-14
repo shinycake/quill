@@ -1,5 +1,9 @@
 //! Header member/online counts from `updateBasicGroup`, `updateSupergroup`
 //! and `updateChatOnlineMemberCount`.
+#![allow(
+    clippy::expect_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;
 use quill::state::Session;

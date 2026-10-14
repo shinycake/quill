@@ -363,7 +363,9 @@ pub(crate) fn seed_zoomed_day(session: &mut Session, chat_id: i64) -> i64 {
 pub(crate) fn seed_message_statistics(session: &mut Session, chat_id: i64, from_chat: i64) -> i64 {
     let message_id = 100 << 20;
     session.open_message_stats_page(chat_id, message_id);
-    let state = session.groups.stats.message.as_mut().expect("opened");
+    let Some(state) = session.groups.stats.message.as_mut() else {
+        return message_id;
+    };
     let interactions = chart_json(
         30,
         DAY_MS,

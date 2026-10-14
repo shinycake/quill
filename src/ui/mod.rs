@@ -182,11 +182,13 @@ mod chatlist_style;
 mod checklists;
 mod command_shortcuts;
 mod composer;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod composer_bundle_tests;
 mod composer_date;
 mod composer_field;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod composer_field_tests;
 mod composer_shortcuts;
 mod composer_suggest;
@@ -288,7 +290,8 @@ mod paid_messages_channel;
 mod paid_messages_privacy;
 mod paid_messages_send;
 mod paid_messages_state;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod paid_messages_tests;
 mod paid_reaction_chip;
 mod paid_reaction_state;
@@ -332,7 +335,8 @@ mod security;
 mod security_recovery;
 mod send_box_options;
 mod send_box_state;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod send_box_tests;
 mod send_button_ui;
 mod send_effects;
@@ -384,7 +388,8 @@ mod threads;
 mod ton_wallet_details;
 mod ton_wallet_money;
 mod ton_wallet_ui;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod ton_wallet_ui_tests;
 mod translate_ui;
 mod tray_settings;

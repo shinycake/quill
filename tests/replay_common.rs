@@ -8,6 +8,10 @@
 //! (Moving this to `tests/common/` would need touching every consumer for
 //! zero behavioral gain.)
 #![allow(dead_code, unused_imports)]
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 pub use quill::diagnostics::{Diagnostic, DiagnosticSink, MemorySink};
 pub use quill::ids::AccountKey;
 pub use quill::state::{MemberListFilter, RequestPurpose, Session};

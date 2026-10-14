@@ -8,5 +8,8 @@ description = "Hand-written raw FFI bindings for ntgcalls v3.0.2 (LGPLv3), loade
 repository = "https://github.com/shinycake/quill"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 libloading = "0.9"

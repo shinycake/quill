@@ -52,7 +52,8 @@ impl ChatWindowView {
         }
     }
 
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn chat_id(&self) -> ChatId {
         self.chat_id
     }

@@ -1,5 +1,9 @@
 //! Slice S4 fix-up: apply-on-ok reducer coverage for Data & Storage
 //! (the `set_account_ttl_ok_stores_confirmed_days` pattern).
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use quill::data_settings::{AutoDownloadNetSettings, NetworkKind};
 use quill::diagnostics::{DiagnosticSink, MemorySink};

@@ -8,6 +8,10 @@
 //! 3. `updateChatLastMessage` captures the media icon, the formatted
 //!    entities, and the sender name next to `last_preview`.
 //! 4. the pure sender-name rule and entity clipping.
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use quill::chatlist_style::{
     ChatListRowStyle, ChatPreviewStyle, PREVIEW_LINES_DEFAULT, chat_row_height_px,

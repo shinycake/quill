@@ -108,7 +108,8 @@ pub(super) fn premium_playing(key: Key) -> bool {
 
 /// Whether the effect of message `key`, sent with an effect, is playing
 /// or waiting for its animation.
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(super) fn message_effect_playing(key: Key) -> bool {
     ACTIVE.with(|active| {
         active

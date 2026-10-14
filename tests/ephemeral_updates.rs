@@ -8,6 +8,10 @@
 //! 2. applying it replaces the stored ephemeral content in place and the
 //!    chat-list preview shows the refreshed ephemeral text (the row
 //!    re-renders via `effective_content`, ephemeral wins).
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::AccountKey;

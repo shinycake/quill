@@ -4,6 +4,10 @@
 //! `updateCommunityFullInfo` builds the membership pack, and
 //! `retain_community_chats` (the production predicate, called from the
 //! UI at the same shape) narrows it.
+#![allow(
+    clippy::expect_used,
+    reason = "integration test code is exempt (docs/contributing/panic-safety.md)"
+)]
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;

@@ -4,6 +4,10 @@
 //! instead of panicking.
 
 /// Report `error` from opening the main window and end the process.
+#[expect(
+    clippy::exit,
+    reason = "no window could open, so there is no UI to keep running; exit with a failure code"
+)]
 pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     let detail = error.to_string();
     eprintln!("quill: could not open a window: {detail}");

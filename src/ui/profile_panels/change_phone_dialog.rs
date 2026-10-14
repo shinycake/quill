@@ -47,6 +47,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "change_phone_dialog_tests.rs"]
 mod ui_tests;

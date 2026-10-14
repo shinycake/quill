@@ -196,7 +196,8 @@ mod tests {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 mod surface_tests {
     use super::turn_surface;
     use core_video::pixel_buffer::{CVPixelBuffer, kCVPixelBufferLock_ReadOnly};

@@ -2,6 +2,19 @@
 members = [".", "crates/ntgcalls-sys", "crates/webview-protocol", "crates/webview-host"]
 resolver = "2"
 
+# Never crash (docs/contributing/panic-safety.md, phases A and B). Test code is
+# exempt through clippy.toml. The vendored third_party crates are not members
+# and do not inherit these.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+exit = "deny"
+undocumented_unsafe_blocks = "deny"
+
 [package]
 name = "quill"
 version = "0.1.0"
@@ -11,6 +24,9 @@ license = "MIT"
 description = "Quill, an independent, unofficial Telegram desktop client built on GPUI and TDLib"
 repository = "https://github.com/shinycake/quill"
 publish = false
+
+[lints]
+workspace = true
 
 [features]
 default = ["ui"]

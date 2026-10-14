@@ -38,7 +38,8 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::state::ChatSummary;
 pub(in crate::ui) use slot::scope_probe;
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 use view::ChatWindowView;
 pub(in crate::ui) use view::WindowScope;
 
@@ -73,7 +74,8 @@ pub(crate) struct ChatWindows {
 struct OpenChatWindow {
     chat_id: ChatId,
     handle: AnyWindowHandle,
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     view: WeakEntity<ChatWindowView>,
     slot: slot::SharedSlot,
 }
@@ -135,13 +137,15 @@ impl ChatWindows {
     }
 
     /// Whether `chat_id` has a window of its own.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn has(&self, chat_id: ChatId) -> bool {
         self.window_for(chat_id).is_some()
     }
 
     /// The view of the window showing `chat_id`.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn view_for(&self, chat_id: ChatId) -> Option<Entity<ChatWindowView>> {
         self.window_for(chat_id)
             .and_then(|open| open.view.upgrade())
@@ -322,7 +326,8 @@ impl QuillApp {
                 app.windows.open.push(OpenChatWindow {
                     chat_id,
                     handle,
-                    #[cfg(all(test, feature = "demo-capture"))]
+                    #[cfg(test)]
+                    #[cfg(feature = "demo-capture")]
                     view,
                     slot,
                 });

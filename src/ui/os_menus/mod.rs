@@ -17,7 +17,8 @@
 mod dock;
 mod window_menu;
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests;
 
 pub(crate) use dock::{DockAccount, DockEntry, DockModel, DockPlayer, dock_entries};

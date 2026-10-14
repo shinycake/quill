@@ -322,6 +322,7 @@ impl QuillApp {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "group_call_share_tests.rs"]
 mod tests;

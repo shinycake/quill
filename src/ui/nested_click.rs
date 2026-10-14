@@ -19,7 +19,8 @@ pub(super) trait SwallowPress: InteractiveElement + Sized {
 
 impl<T: InteractiveElement> SwallowPress for T {}
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod tests {
     use super::SwallowPress;
     use gpui_kit::component::button::Button;

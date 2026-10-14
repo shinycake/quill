@@ -92,6 +92,7 @@ impl QuillApp {
     }
 }
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "option_media_tests.rs"]
 mod tests;

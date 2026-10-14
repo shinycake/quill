@@ -909,7 +909,8 @@ mod tests {
 
 /// Effects of the privacy actions on a demo `QuillApp` (needs the
 /// `demo-capture` feature for gpui-kit's test support).
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 mod dispatch_tests {
     use super::FileOpenConfirm;
     use crate::ui::app::QuillApp;

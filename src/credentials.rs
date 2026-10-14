@@ -212,6 +212,7 @@ mod tests {
         }
 
         fn remove(&self, key: &str) {
+            // SAFETY: tests hold ENV_LOCK; we restore in Drop.
             unsafe { env::remove_var(key) };
         }
     }
@@ -220,7 +221,9 @@ mod tests {
         fn drop(&mut self) {
             for (key, prev) in self.keys.iter().zip(self.previous.iter()) {
                 match prev {
+                    // SAFETY: the guard still holds ENV_LOCK while it restores.
                     Some(v) => unsafe { env::set_var(key, v) },
+                    // SAFETY: as above.
                     None => unsafe { env::remove_var(key) },
                 }
             }

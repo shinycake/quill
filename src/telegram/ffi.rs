@@ -290,11 +290,15 @@ mod tests {
                     !leaked,
                     "canary leaked to native stderr despite secure_native_logging"
                 ),
-                _ => unreachable!(),
+                other => panic!("unknown child mode {other}"),
             }
         }
     }
 
+    #[expect(
+        clippy::exit,
+        reason = "the re-executed child test process reports its result through its exit status"
+    )]
     fn native_log_child_main(mode: &str) -> ! {
         let api = match TdJson::load_default() {
             Ok(api) => api,
