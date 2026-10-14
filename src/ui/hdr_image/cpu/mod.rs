@@ -72,11 +72,16 @@ impl LinearImage {
         let len = self.pixels.len().checked_mul(8)?;
         let mut bytes = Arc::<[u8]>::new_zeroed_slice(len);
         let slots = Arc::get_mut(&mut bytes)?;
-        for (slot, [red, green, blue, alpha]) in slots.as_chunks_mut::<8>().0.iter_mut().zip(self.pixels) {
+        for (slot, [red, green, blue, alpha]) in
+            slots.as_chunks_mut::<8>().0.iter_mut().zip(self.pixels)
+        {
             let alpha = finite(alpha).clamp(0.0, 1.0);
             let values = [red * alpha, green * alpha, blue * alpha, alpha];
             for (pair, value) in slot.as_chunks_mut::<2>().0.iter_mut().zip(values) {
-                for (byte, value) in pair.iter_mut().zip(f32_to_half(finite(value)).to_le_bytes()) {
+                for (byte, value) in pair
+                    .iter_mut()
+                    .zip(f32_to_half(finite(value)).to_le_bytes())
+                {
                     byte.write(value);
                 }
             }
