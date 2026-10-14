@@ -23,6 +23,11 @@ pub(crate) fn parse_payments_payload(
             PaymentsPayload::SuggestedPost(payload),
         )));
     }
+    if let Some(payload) = crate::gift_market::parse_payload(type_name, value) {
+        return Ok(Some(EnvelopePayload::Payments(
+            PaymentsPayload::GiftMarket(payload),
+        )));
+    }
     if let Some(payload) = crate::earn::parse_payload(type_name, value) {
         return Ok(Some(EnvelopePayload::Payments(PaymentsPayload::Earn(
             payload,

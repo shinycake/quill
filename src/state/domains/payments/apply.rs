@@ -88,6 +88,9 @@ impl Session {
                     self.apply_gift_option(limit, pending);
                 }
             }
+            PaymentsPayload::GiftPurchaseResult(result) if self.is_gift_market_buy(pending) => {
+                self.apply_gift_market_purchase(result);
+            }
             PaymentsPayload::GiftPurchaseResult(result) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
@@ -236,6 +239,7 @@ impl Session {
             PaymentsPayload::TonWallet(payload) => self.apply_ton_wallet(payload, pending),
             PaymentsPayload::Earn(payload) => self.apply_earn(payload, pending),
             PaymentsPayload::SuggestedPost(payload) => self.apply_suggested_post(payload),
+            PaymentsPayload::GiftMarket(payload) => self.apply_gift_market(payload, pending),
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 // The subscriptions list carries its own copy of the balance.
                 if let Some(subs) = self.payments.star_subscriptions.as_mut() {
