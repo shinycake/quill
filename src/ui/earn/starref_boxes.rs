@@ -1,0 +1,759 @@
+//! The affiliate boxes (tdesktop `info/bot/starref/info_bot_starref_common`):
+//! the setup's confirmations, "View existing programs", joining a
+//! program, a joined program's link and "Revoke Link".
+
+use super::join::ProgramRow;
+use super::setup::STARREF_TOS_URL;
+use super::*;
+use crate::ui::shell::{DialogKind, QuillShell};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::{Dialog, DialogContent};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
+use gpui_kit::component::spinner::Spinner;
+use quill::earn::*;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+/// The one-shot body the kit dialog content closure takes.
+fn one_shot(
+    body: AnyElement,
+) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
+    let body = Rc::new(RefCell::new(Some(body)));
+    crate::ui::shell::scrollable_dialog_content(move |content, _, _| {
+        let body = body
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| div().into_any_element());
+        content.child(body)
+    })
+}
+
+/// A centered box title (tdesktop `st::boxTitle` with `al_top`).
+fn box_title(text: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .justify_center()
+        .text_lg()
+        .font_semibold()
+        .child(text.into())
+}
+
+/// A centered paragraph (tdesktop `st::starrefCenteredText`).
+fn centered(text: impl Into<SharedString>) -> Div {
+    div().text_sm().text_center().child(text.into())
+}
+
+/// A table row of the confirmation (tdesktop `giveawayGiftCodeTable`).
+fn table_row(label: &'static str, value: String, cx: &App) -> Div {
+    div()
+        .flex()
+        .border_1()
+        .border_color(cx.theme().border)
+        .child(
+            div()
+                .w(px(120.))
+                .p_2()
+                .bg(cx.theme().secondary)
+                .text_sm()
+                .child(label),
+        )
+        .child(div().flex_1().p_2().text_sm().child(value))
+}
+
+/// The join box's recipients: the user's list without the bot and with
+/// the chosen recipient, sorted by name (tdesktop `JoinStarRefBox`).
+fn recipient_list(
+    session: &Session,
+    recipients: &[EarnPeer],
+    bot_user_id: i64,
+    chosen: EarnPeer,
+) -> Vec<EarnPeer> {
+    if recipients.is_empty() {
+        return Vec::new();
+    }
+    let mut list: Vec<EarnPeer> = recipients
+        .iter()
+        .copied()
+        .filter(|peer| *peer != EarnPeer::User(bot_user_id))
+        .collect();
+    if !list.contains(&chosen) {
+        list.insert(0, chosen);
+    }
+    list.sort_by_cached_key(|peer| peer_name(session, *peer).to_lowercase());
+    list
+}
+
+/// The link box's footer (tdesktop `lng_star_ref_link_copy_users`).
+fn opened_through(users: i64, app: &str) -> String {
+    match users {
+        0 => format!("No one have opened {app} through this link."),
+        1 => format!("1 user have opened {app} through this link."),
+        n => format!("{n} users have opened {app} through this link."),
+    }
+}
+
+impl QuillApp {
+    fn close_setup_confirm(&mut self, cx: &mut Context<Self>) {
+        if let Some(setup) = self.earn_mut().and_then(|e| e.setup.as_mut()) {
+            setup.confirm = None;
+        }
+        cx.notify();
+    }
+
+    /// `ConfirmUpdate` and `ConfirmEndBox`.
+    pub(super) fn build_earn_setup_confirm_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::EarnSetupConfirm, |this, _, cx| {
+                this.close_setup_confirm(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(setup) = this.earn_state().and_then(|e| e.setup.clone()) else {
+                return dialog.on_close(on_close);
+            };
+            let Some(confirm) = setup.confirm else {
+                return dialog.on_close(on_close);
+            };
+            let exists = setup.exists();
+            let mut body = div().flex().flex_col().gap_3().child(box_title("Warning"));
+            let action = match confirm {
+                SetupConfirm::Save => {
+                    body = body
+                        .child(div().text_sm().child(if exists {
+                            "This change is irreversible. You won't be able to reduce commission or duration. You can only increase these parameters or end the program, which will disable all previously shared referral links."
+                        } else {
+                            "Once you start the affiliate program, you won't be able to decrease its commission or duration. You can only increase these parameters or end the program, which will disable all previously distributed referral links."
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .rounded_md()
+                                .overflow_hidden()
+                                .child(table_row(
+                                    "Commission",
+                                    format_commission(setup.params.commission_per_mille),
+                                    cx,
+                                ))
+                                .child(table_row(
+                                    "Duration",
+                                    format_program_duration(setup.params.month_count),
+                                    cx,
+                                )),
+                        );
+                    Button::new("earn-setup-confirm")
+                        .label(if exists { "Update" } else { "Start" })
+                        .primary()
+                        .loading(setup.saving)
+                        .disabled(setup.saving)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.earn_call("Couldn't save the affiliate program", cx, |driver| {
+                                driver.save_starref_program()
+                            });
+                        }))
+                }
+                SetupConfirm::End => {
+                    body = body
+                        .child(div().text_sm().child("If you end your affiliate program:"))
+                        .child(Self::bullet(
+                            "Any referral links already shared will be disabled in 24 hours.",
+                        ))
+                        .child(Self::bullet("All participating affiliates will be notified."))
+                        .child(Self::bullet(
+                            "You will be able to start a new affiliate program only in 24 hours.",
+                        ));
+                    Button::new("earn-setup-end-confirm")
+                        .label("End Anyway")
+                        .danger()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            // tdesktop closes this box before the request.
+                            this.earn_call("Couldn't end the affiliate program", cx, |driver| {
+                                driver.end_starref_program()
+                            });
+                            this.close_setup_confirm(cx);
+                            this.close_kit_dialog_if_done(DialogKind::EarnSetupConfirm, window, cx);
+                        }))
+                }
+            };
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .w_full()
+                .child(Button::new("earn-setup-cancel")
+                        .debug_selector(|| "earn-setup-cancel".into()).label("Cancel").ghost().on_click(
+                    cx.listener(|this, _, window, cx| {
+                        this.close_setup_confirm(cx);
+                        this.close_kit_dialog_if_done(DialogKind::EarnSetupConfirm, window, cx);
+                    }),
+                ))
+                .child(action);
+            dialog
+                .overlay(true)
+                .content(one_shot(body.into_any_element()))
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    /// A dotted point of `ConfirmEndBox`.
+    fn bullet(text: &'static str) -> Div {
+        div()
+            .flex()
+            .gap_2()
+            .pl_1()
+            .text_sm()
+            .child(
+                div()
+                    .mt(px(7.))
+                    .size(px(5.))
+                    .flex_none()
+                    .rounded_full()
+                    .bg(text_muted()),
+            )
+            .child(div().flex_1().child(text))
+    }
+
+    fn close_programs_box(&mut self, cx: &mut Context<Self>) {
+        if let Some(earn) = self.earn_mut() {
+            earn.programs_box = None;
+        }
+        cx.notify();
+    }
+
+    /// "View existing programs" (tdesktop `ProgramsListBox`).
+    pub(super) fn build_earn_programs_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::EarnPrograms, |this, _, cx| {
+                this.close_programs_box(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(session) = this.session() else {
+                return dialog.on_close(on_close);
+            };
+            let earn = &session.payments.earn;
+            let (Some(list), Some(bot)) = (
+                earn.programs_box.as_ref(),
+                earn.setup.as_ref().map(|s| s.bot_user_id),
+            ) else {
+                return dialog.on_close(on_close);
+            };
+            let mut rows = div()
+                .id("earn-programs-list")
+                .max_h(px(420.))
+                .overflow_y_scroll()
+                .track_scroll(&this.earn.box_scroll)
+                .flex()
+                .flex_col();
+            // tdesktop `setupAddForBot`: a bot without a program of its
+            // own is offered to start one.
+            let has_program = session
+                .bots
+                .bot_info
+                .get(&bot)
+                .and_then(|info| info.as_ref()?.affiliate_program)
+                .is_some_and(|p| p.params.commission_per_mille > 0);
+            if list.loaded && !has_program {
+                rows = rows.child(
+                    div()
+                        .id("earn-programs-add")
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .py_2()
+                        .px_2()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .role(gpui_kit::Role::Button)
+                        .tab_index(0)
+                        .hover(|s| s.bg(cx.theme().secondary))
+                        .text_color(cx.theme().primary)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_programs_box(cx);
+                            this.close_kit_dialog_if_done(DialogKind::EarnPrograms, window, cx);
+                        }))
+                        .child(Icon::new(IconName::Plus).size(px(20.)))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(format!("Add {}", peer_name(session, EarnPeer::User(bot)))),
+                        ),
+                );
+            }
+            for (index, program) in list.programs.iter().enumerate() {
+                rows = rows.child(this.program_row(
+                    session,
+                    ("earn-box-program", index),
+                    ProgramRow::found(program),
+                    true,
+                    cx,
+                ));
+            }
+            if !list.loaded {
+                rows = rows.child(about("Loading...").py_2());
+            } else if list.loading {
+                rows = rows.child(div().flex().justify_center().py_2().child(Spinner::new()));
+            }
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(box_title("Affiliate Programs"))
+                .child(rows);
+            let footer = div().flex().justify_end().w_full().child(
+                Button::new("earn-programs-close")
+                    .label("Close")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_programs_box(cx);
+                        this.close_kit_dialog_if_done(DialogKind::EarnPrograms, window, cx);
+                    })),
+            );
+            dialog
+                .overlay(true)
+                .content(one_shot(body.into_any_element()))
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    fn close_join_box(&mut self, cx: &mut Context<Self>) {
+        if let Some(earn) = self.earn_mut() {
+            earn.join_box = None;
+            earn.pending_join = None;
+        }
+        cx.notify();
+    }
+
+    /// The bot's photo, an arrow and the recipient's (tdesktop
+    /// `CreateUserpicsTransfer` with `StarRefJoin`).
+    fn transfer_userpics(&self, session: &Session, bot: EarnPeer, recipient: EarnPeer) -> Div {
+        div()
+            .flex()
+            .justify_center()
+            .items_center()
+            .gap_2()
+            .child(self.earn_avatar(session, bot, 64.))
+            .child(
+                Icon::new(IconName::ChevronRight)
+                    .size(px(20.))
+                    .text_color(text_muted()),
+            )
+            .child(self.earn_avatar(session, recipient, 64.))
+    }
+
+    /// `JoinStarRefBox`.
+    pub(super) fn build_earn_join_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::EarnJoin, |this, _, cx| {
+                this.close_join_box(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(session) = this.session() else {
+                return dialog.on_close(on_close);
+            };
+            let earn = &session.payments.earn;
+            let Some(join) = earn.join_box.clone() else {
+                return dialog.on_close(on_close);
+            };
+            let bot = EarnPeer::User(join.bot_user_id);
+            let app_name = peer_name(session, bot);
+            let params = join.info.params;
+            let mut body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(this.transfer_userpics(session, bot, join.recipient))
+                .child(box_title("Affiliate Program"))
+                .child(centered(format!(
+                    "{app_name} will share {} of the revenue from each user you refer to it {}.",
+                    format_commission(params.commission_per_mille),
+                    format_for_program_duration(params.month_count),
+                )));
+            let daily = join.info.daily_revenue_per_user;
+            if daily.stars > 0 || daily.nanos > 0 {
+                body = body.child(
+                    div()
+                        .flex()
+                        .justify_center()
+                        .items_center()
+                        .gap_1()
+                        .text_sm()
+                        .child("Daily revenue per user:")
+                        .child(star_icon(14.))
+                        .child(div().font_semibold().child(daily.label())),
+                );
+            }
+            let list = if join.choose_recipient {
+                recipient_list(
+                    session,
+                    earn.recipients.as_deref().unwrap_or(&[]),
+                    join.bot_user_id,
+                    join.recipient,
+                )
+            } else {
+                Vec::new()
+            };
+            if !list.is_empty() {
+                body = body.child(centered("Commissions will be sent to:"));
+                let bubble = this.earn_peer_bubble(session, join.recipient, cx);
+                if list.len() > 1 {
+                    let names: Vec<(EarnPeer, String)> = list
+                        .iter()
+                        .map(|peer| (*peer, peer_name(session, *peer)))
+                        .collect();
+                    let current = join.recipient;
+                    let owner = cx.entity().downgrade();
+                    body = body.child(
+                        div().flex().justify_center().child(
+                            Button::new("earn-join-recipient")
+                                .ghost()
+                                .child(
+                                    bubble.child(
+                                        Icon::new(IconName::ChevronDown)
+                                            .size(px(14.))
+                                            .text_color(text_muted()),
+                                    ),
+                                )
+                                .dropdown_menu(move |mut menu, _, _| {
+                                    for (peer, name) in names.iter().cloned() {
+                                        let owner = owner.clone();
+                                        menu = menu.item(
+                                            PopupMenuItem::new(name)
+                                                .checked(peer == current)
+                                                .on_click(move |_, _, cx| {
+                                                    let _ = owner.update(cx, |this, cx| {
+                                                        if let Some(join) = this
+                                                            .earn_mut()
+                                                            .and_then(|e| e.join_box.as_mut())
+                                                        {
+                                                            join.recipient = peer;
+                                                        }
+                                                        cx.notify();
+                                                    });
+                                                }),
+                                        );
+                                    }
+                                    menu
+                                }),
+                        ),
+                    );
+                } else {
+                    body = body.child(div().flex().justify_center().child(bubble));
+                }
+            }
+            let footer = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .w_full()
+                .child(
+                    Button::new("earn-join-program")
+                        .debug_selector(|| "earn-join-program".into())
+                        .label("Join Program")
+                        .primary()
+                        .w_full()
+                        .loading(join.joining)
+                        .disabled(join.joining)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.earn_call("Couldn't join the program", cx, |driver| {
+                                driver.join_affiliate_program()
+                            });
+                        })),
+                )
+                .child(about_link(
+                    "earn-join-terms",
+                    "By joining this program, you agree to the",
+                    "terms and conditions",
+                    "of Affiliate Programs.",
+                    |_, cx| cx.open_url(STARREF_TOS_URL),
+                    cx,
+                ));
+            dialog
+                .overlay(true)
+                .content(one_shot(body.into_any_element()))
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    fn close_link_box(&mut self, cx: &mut Context<Self>) {
+        if let Some(earn) = self.earn_mut() {
+            earn.link_box = None;
+        }
+        cx.notify();
+    }
+
+    fn copy_affiliate_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(url.to_string()));
+        self.connection.status_note = "Link copied to clipboard.".into();
+        cx.notify();
+    }
+
+    /// `StarRefLinkBox`.
+    pub(super) fn build_earn_link_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::EarnLink, |this, _, cx| {
+                this.close_link_box(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(session) = this.session() else {
+                return dialog.on_close(on_close);
+            };
+            let Some(link) = session.payments.earn.link_box.clone() else {
+                return dialog.on_close(on_close);
+            };
+            let bot = EarnPeer::User(link.program.bot_user_id);
+            let app_name = peer_name(session, bot);
+            let params = link.program.params;
+            let users = link.program.user_count;
+            let audience = match link.recipient {
+                EarnPeer::Chat(_) => "subscribers",
+                EarnPeer::User(_) => "friends",
+            };
+            let mut icon = div().flex().flex_col().items_center().child(
+                div()
+                    .size(px(72.))
+                    .rounded_full()
+                    .bg(cx.theme().primary)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Icon::new(IconName::Link)
+                            .size(px(34.))
+                            .text_color(cx.theme().primary_foreground),
+                    ),
+            );
+            if users > 0 {
+                icon = icon.child(
+                    div()
+                        .mt(px(-10.))
+                        .flex()
+                        .items_center()
+                        .gap_0p5()
+                        .px_1p5()
+                        .rounded_full()
+                        .border_2()
+                        .border_color(cx.theme().background)
+                        .bg(cx.theme().primary)
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().primary_foreground)
+                        .child(Icon::new(IconName::User).size(px(10.)))
+                        .child(crate::ui::statistics::format_stat_count(users as f64)),
+                );
+            }
+            let url = link.program.url.clone();
+            let preview_url = url.clone();
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(icon)
+                .child(box_title("Referral Link"))
+                .child(centered(format!(
+                    "Share this link with your {audience} to earn a {} commission on their spending in {app_name} {}.",
+                    format_commission(params.commission_per_mille),
+                    format_for_program_duration(params.month_count),
+                )))
+                .child(centered("Commissions will be sent to:"))
+                .child(
+                    div()
+                        .flex()
+                        .justify_center()
+                        .child(this.earn_peer_bubble(session, link.recipient, cx)),
+                )
+                .child(
+                    div()
+                        .id("earn-link-preview")
+                        .p_2()
+                        .rounded_lg()
+                        .bg(cx.theme().secondary)
+                        .text_sm()
+                        .text_center()
+                        .truncate()
+                        .cursor_pointer()
+                        .role(gpui_kit::Role::Button)
+                        .aria_label("Copy Link")
+                        .tab_index(0)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.copy_affiliate_link(&preview_url, cx);
+                        }))
+                        .child(
+                            url.trim_start_matches("https://")
+                                .to_string(),
+                        ),
+                );
+            let footer = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .w_full()
+                .child(
+                    Button::new("earn-link-copy")
+                        .debug_selector(|| "earn-link-copy".into())
+                        .label("Copy Link")
+                        .icon(IconName::Copy)
+                        .primary()
+                        .w_full()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.copy_affiliate_link(&url, cx);
+                            this.close_link_box(cx);
+                            this.close_kit_dialog_if_done(DialogKind::EarnLink, window, cx);
+                        })),
+                )
+                .child(about(opened_through(users, &app_name)).text_center());
+            dialog
+                .overlay(true)
+                .content(one_shot(body.into_any_element()))
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+
+    fn close_revoke(&mut self, cx: &mut Context<Self>) {
+        if let Some(earn) = self.earn_mut() {
+            earn.revoke = None;
+        }
+        cx.notify();
+    }
+
+    /// "Revoke Link" (tdesktop's `rowContextMenu` → `MakeConfirmBox`).
+    pub(super) fn build_earn_revoke_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::EarnRevoke, |this, _, cx| {
+                this.close_revoke(cx);
+            });
+        app.update(cx, |this, cx| {
+            let Some(session) = this.session() else {
+                return dialog.on_close(on_close);
+            };
+            let Some(revoke) = session.payments.earn.revoke.clone() else {
+                return dialog.on_close(on_close);
+            };
+            let bot = peer_name(session, EarnPeer::User(revoke.program.bot_user_id));
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(div().text_lg().font_semibold().child("Revoke Link"))
+                .child(div().text_sm().child(format!(
+                    "Are you sure you want to revoke the link of {bot}?"
+                )));
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .w_full()
+                .child(
+                    Button::new("earn-revoke-cancel")
+                        .debug_selector(|| "earn-revoke-cancel".into())
+                        .label("Cancel")
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_revoke(cx);
+                            this.close_kit_dialog_if_done(DialogKind::EarnRevoke, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("earn-revoke-ok")
+                        .debug_selector(|| "earn-revoke-ok".into())
+                        .label("OK")
+                        .primary()
+                        .loading(revoke.sending)
+                        .disabled(revoke.sending)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.earn_call("Couldn't revoke the link", cx, |driver| {
+                                driver.revoke_affiliate_link()
+                            });
+                        })),
+                );
+            dialog
+                .overlay(true)
+                .content(one_shot(body.into_any_element()))
+                .footer(footer)
+                .on_close(on_close)
+        })
+    }
+}
+
+crate::ui::shell::register_dialogs! {
+    /// The setup page's "Warning" boxes.
+    EarnSetupConfirm => DialogSpec::new(
+        7615,
+        |app| app.earn_state().and_then(|e| e.setup.as_ref()).is_some_and(|s| s.confirm.is_some()),
+        QuillApp::build_earn_setup_confirm_dialog,
+    ),
+    /// "View existing programs".
+    EarnPrograms => DialogSpec::new(
+        7616,
+        |app| app.earn_state().is_some_and(|e| e.programs_box.is_some()),
+        QuillApp::build_earn_programs_dialog,
+    ),
+    /// Joining a program.
+    EarnJoin => DialogSpec::new(
+        7617,
+        |app| app.earn_state().is_some_and(|e| e.join_box.is_some()),
+        QuillApp::build_earn_join_dialog,
+    ),
+    /// A joined program's referral link.
+    EarnLink => DialogSpec::new(
+        7618,
+        |app| app.earn_state().is_some_and(|e| e.link_box.is_some()),
+        QuillApp::build_earn_link_dialog,
+    ),
+    /// "Revoke Link".
+    EarnRevoke => DialogSpec::new(
+        7619,
+        |app| app.earn_state().is_some_and(|e| e.revoke.is_some()),
+        QuillApp::build_earn_revoke_dialog,
+    ),
+}
+
+#[cfg(test)]
+mod unit {
+    use super::opened_through;
+
+    #[test]
+    fn the_link_footer_counts_users() {
+        assert_eq!(
+            opened_through(0, "Bot"),
+            "No one have opened Bot through this link."
+        );
+        assert_eq!(
+            opened_through(1, "Bot"),
+            "1 user have opened Bot through this link."
+        );
+        assert_eq!(
+            opened_through(5, "Bot"),
+            "5 users have opened Bot through this link."
+        );
+    }
+}

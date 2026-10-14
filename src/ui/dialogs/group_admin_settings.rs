@@ -27,7 +27,6 @@ pub(crate) enum GroupSettingsAction {
     HistoryVisible(bool),
     JoinToSend(bool),
     HiddenMembers(bool),
-    SponsoredMessages(bool),
     ProtectedContent(bool),
     ReactionsAll,
     ReactionsNone,

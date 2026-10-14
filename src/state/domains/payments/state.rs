@@ -72,6 +72,8 @@ pub struct PaymentsState {
     pub hub: crate::premium_hub::PremiumHub,
     /// Gift management and the send-gift dialog (`crate::gift_manage`).
     pub gifts_manage: crate::gift_manage::GiftManageState,
+    /// Revenue screens and affiliate programs (`crate::earn`).
+    pub earn: crate::earn::EarnState,
     /// Slice `parity:bots-payment-recurring`: subscription id awaiting
     /// cancel confirmation in the dialog.
     pub subscription_cancel_confirm: Option<String>,
@@ -132,6 +134,7 @@ impl PaymentsState {
             subscriptions_open: false,
             hub: crate::premium_hub::PremiumHub::default(),
             gifts_manage: Default::default(),
+            earn: Default::default(),
             subscription_cancel_confirm: None,
             premium_option: None,
             premium_available: None,

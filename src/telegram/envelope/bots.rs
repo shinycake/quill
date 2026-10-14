@@ -46,6 +46,12 @@ pub struct BotInfo {
     /// `botInfo.can_manage_emoji_status`: the person let this bot set their
     /// emoji status (tdesktop `canManageEmojiStatus`).
     pub can_manage_emoji_status: bool,
+    /// `botInfo.can_get_revenue_statistics`: the owner may open the bot's
+    /// revenue pages (tdesktop `canViewRevenue`).
+    pub can_get_revenue_statistics: bool,
+    /// `botInfo.affiliate_program`: the bot's running or ending affiliate
+    /// program, if it has one.
+    pub affiliate_program: Option<crate::earn::ProgramInfo>,
 }
 
 /// Slice B2: `botMenuButton text:string url:string = BotMenuButton;`
@@ -132,6 +138,11 @@ pub(crate) fn parse_bot_info(value: Option<&Value>) -> Option<BotInfo> {
             .get("can_manage_emoji_status")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        can_get_revenue_statistics: value
+            .get("can_get_revenue_statistics")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        affiliate_program: crate::earn::ProgramInfo::parse(value.get("affiliate_program")),
     })
 }
 

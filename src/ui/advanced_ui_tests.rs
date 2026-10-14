@@ -8,6 +8,7 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AppContext, Entity, Keystroke, Modifiers, TestAppContext, VisualTestContext, px, size,
 };
@@ -232,5 +233,60 @@ fn the_install_beta_switch_follows_the_update_switch(cx: &mut TestAppContext) {
             app.install_beta_row(cx).is_none(),
             "hidden while an update downloads"
         );
+    });
+}
+
+/// A signed-out screen with no connection: the screenshot demo of the
+/// phone step.
+fn sign_in_screen(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    cx.update(gpui_kit::init);
+    cx.update(bind_keys);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| {
+            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("wait-phone")))
+        });
+        *slot_in.borrow_mut() = Some(view.clone());
+        let shell = cx.new(|_| QuillShell::new(view));
+        Root::new(shell, window, cx)
+    });
+    let Some(app) = slot.borrow().clone() else {
+        panic!("the window opened");
+    };
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    (app, vcx)
+}
+
+fn test_mode_label_shown(vcx: &mut VisualTestContext) -> bool {
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.debug_bounds("auth-test-mode-label").is_some()
+}
+
+#[gpui_kit::test]
+fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestAppContext) {
+    use quill::advanced::test_environment::{SWITCHED_TO_PRODUCTION, SWITCHED_TO_TEST};
+    let (app, mut vcx) = sign_in_screen(cx);
+    let vcx = &mut vcx;
+    assert!(!test_mode_label_shown(vcx), "production at first");
+    // Typed keys, as the window gets them.
+    vcx.simulate_keystrokes("t e s t m o d e");
+    assert!(
+        test_mode_label_shown(vcx),
+        "the sign-in screen says Test Mode"
+    );
+    app.read_with(vcx, |app, _| {
+        assert!(app.settings.advanced.test_environment);
+        assert_eq!(app.connection.status_note, SWITCHED_TO_TEST);
+        assert!(app.live.is_none(), "nothing connected");
+    });
+    // Typed again, it switches back to production.
+    vcx.simulate_keystrokes("t e s t m o d e");
+    assert!(!test_mode_label_shown(vcx));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.connection.status_note, SWITCHED_TO_PRODUCTION);
     });
 }

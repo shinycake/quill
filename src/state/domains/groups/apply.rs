@@ -166,6 +166,8 @@ impl Session {
                 boosts_per_gift,
                 ton_explorer_url,
                 ton_usd_rate,
+                starref_join,
+                starref_setup,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
                     self.groups.boosts_per_gift = Some(boosts_per_gift);
@@ -177,6 +179,11 @@ impl Session {
                 if ton_usd_rate.is_some() {
                     self.ton_wallet.ton_usd_rate = ton_usd_rate;
                 }
+                // Every app config answer carries the affiliate switches.
+                let limits = &mut self.payments.earn.limits;
+                limits.starref_join_allowed = starref_join;
+                limits.starref_setup_allowed = starref_setup;
+                limits.app_config_loaded = true;
             }
             // `getChatBoostFeatures` answer, kept for the chat it was
             // asked for.

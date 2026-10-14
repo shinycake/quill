@@ -278,6 +278,7 @@ impl QuillApp {
                 reaction_search_input,
             ),
             payments: super::payments_state::PaymentUi::new(window, cx),
+            earn: super::earn_state::EarnUi::new(window, cx),
             auth_ui: super::auth_state::AuthUi::new(
                 window,
                 cx,

@@ -28,6 +28,8 @@ pub enum HeaderEntry {
     Folders,
     SharedMedia,
     Statistics,
+    /// `lng_channel_earn_title`: the channel's revenue page.
+    Monetization,
     AutoDelete,
     ReceivedGifts,
     Gift,
@@ -51,6 +53,9 @@ pub struct HeaderFacts<'a> {
     pub can_be_reported: bool,
     /// `supergroupFullInfo.can_get_statistics`.
     pub can_get_statistics: bool,
+    /// `can_get_revenue_statistics` or `can_get_star_revenue_statistics`
+    /// (tdesktop `CanViewRevenue` / `CanViewCreditsRevenue`).
+    pub can_view_revenue: bool,
     pub exportable: bool,
     pub has_view_toggle: bool,
     pub can_create_topic: bool,
@@ -118,6 +123,10 @@ pub fn header_entries(facts: &HeaderFacts<'_>) -> Vec<HeaderEntry> {
     if matches!(facts.kind, ChatKind::Supergroup { .. }) && facts.can_get_statistics {
         out.push(HeaderEntry::Statistics);
     }
+    // tdesktop `addViewStatistics`: "Monetization" after the statistics.
+    if matches!(facts.kind, ChatKind::Supergroup { .. }) && facts.can_view_revenue {
+        out.push(HeaderEntry::Monetization);
+    }
     if facts.auto_delete_ready {
         out.push(HeaderEntry::AutoDelete);
     }
@@ -153,6 +162,7 @@ mod tests {
             polls_allowed: true,
             can_be_reported: false,
             can_get_statistics: false,
+            can_view_revenue: false,
             exportable: false,
             has_view_toggle: false,
             can_create_topic: false,
@@ -239,6 +249,19 @@ mod tests {
         let mut f = facts(&basic);
         f.can_get_statistics = true;
         assert!(!header_entries(&f).contains(&E::Statistics));
+    }
+
+    #[test]
+    fn monetization_follows_statistics() {
+        let kind = supergroup(true);
+        let mut f = facts(&kind);
+        assert!(!header_entries(&f).contains(&E::Monetization));
+        f.can_get_statistics = true;
+        f.can_view_revenue = true;
+        let entries = header_entries(&f);
+        let stats = entries.iter().position(|e| *e == E::Statistics);
+        let earn = entries.iter().position(|e| *e == E::Monetization);
+        assert!(stats.is_some() && earn.is_some() && stats < earn);
     }
 
     #[test]

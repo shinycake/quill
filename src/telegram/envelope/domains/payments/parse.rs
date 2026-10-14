@@ -18,6 +18,11 @@ pub(crate) fn parse_payments_payload(
             payload,
         ))));
     }
+    if let Some(payload) = crate::earn::parse_payload(type_name, value) {
+        return Ok(Some(EnvelopePayload::Payments(PaymentsPayload::Earn(
+            payload,
+        ))));
+    }
     let payload = match type_name {
         // Slice P1: payment answers (TDLib 1.8.67, `schema/td_api.tl:4734` /
         // `:4737` / `:4740` / `:4765`).

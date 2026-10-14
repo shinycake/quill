@@ -52,4 +52,6 @@ pub enum PaymentsPayload {
     GiftManage(crate::gift_manage::GiftManagePayload),
     /// The read-only TON wallet's answers and updates (`crate::ton_wallet`).
     TonWallet(crate::ton_wallet::TonWalletPayload),
+    /// Revenue statistics and affiliate programs (`crate::earn`).
+    Earn(crate::earn::EarnPayload),
 }

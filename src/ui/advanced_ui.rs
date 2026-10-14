@@ -241,6 +241,21 @@ impl QuillApp {
     }
 }
 
+crate::ui::screenshot_demo::register_demos![
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-advanced")
+        .setup(|app, _, _| app.demo_settings_page(ADVANCED_PAGE)),
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-experimental")
+        .setup(|app, _, _| app.demo_settings_page(EXPERIMENTAL_PAGE)),
+];
+
+impl QuillApp {
+    /// Settings open on one page (screenshot demos; nothing is saved).
+    fn demo_settings_page(&mut self, page: &'static str) {
+        self.settings.open = true;
+        self.settings.page = Some(page);
+    }
+}
+
 #[cfg(all(test, feature = "demo-capture"))]
 #[path = "advanced_ui_tests.rs"]
 mod tests;

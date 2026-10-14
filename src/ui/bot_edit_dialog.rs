@@ -70,6 +70,11 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // The Toncoin, Stars and Affiliate Program rows.
+        let _ = live.driver.ensure_earn_app_config();
+        let _ = live
+            .driver
+            .fetch_earn_balances(quill::earn::EarnPeer::User(bot_id), true, true);
         let name = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Bot name")
@@ -135,7 +140,7 @@ impl QuillApp {
         true
     }
 
-    fn close_bot_edit(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_bot_edit(&mut self, cx: &mut Context<Self>) {
         if self.dialogs.bot_edit_dialog.take().is_some()
             && let Some(live) = self.live.as_mut()
         {
@@ -337,6 +342,7 @@ impl QuillApp {
                         .child(line),
                 );
             }
+            body = body.children(this.bot_edit_earn_rows(bot_id, cx));
             if !username.is_empty() {
                 let mut rows = div().flex().flex_col().gap_0p5();
                 for screen in ManagerScreen::ALL {

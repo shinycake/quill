@@ -144,6 +144,8 @@ pub enum PaymentsPurpose {
     GetAwardMembers {
         generation: u64,
     },
+    /// Revenue screens and affiliate programs (`crate::earn`).
+    Earn(crate::earn::EarnPurpose),
 }
 
 impl PaymentsPurpose {

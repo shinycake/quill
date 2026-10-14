@@ -36,6 +36,7 @@ impl Session {
                 self.apply_privacy_option(&name, &value);
                 self.apply_quick_replies_option(&name, &value);
                 self.apply_business_option(&name, &value);
+                self.apply_earn_option(&name, &value);
                 if name == "disable_contact_registered_notifications"
                     && let OptionValue::Boolean(off) = &value
                 {
@@ -199,7 +200,10 @@ impl Session {
             },
             // Phase C3a: `getVideoChatInviteLink` returns `httpUrl`.
             CommonPayload::HttpUrl { url } => {
-                if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
+                if self.is_earn_request(pending) {
+                    // Revenue: a Fragment withdrawal page or the ads account.
+                    self.apply_earn_url(url, pending);
+                } else if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
                     group_call_id,
                     can_self_unmute,
                 })) = pending.map(|p| p.purpose)

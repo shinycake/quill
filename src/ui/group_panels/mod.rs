@@ -192,7 +192,9 @@ impl QuillApp {
             // "N photos · N videos …" rows).
             if !matches!(
                 target,
-                InfoPanelTarget::Statistics(_) | InfoPanelTarget::Community(_)
+                InfoPanelTarget::Statistics(_)
+                    | InfoPanelTarget::Community(_)
+                    | InfoPanelTarget::Earn(_)
             ) && let Some(chat_id) = live.driver.session.open_chat
             {
                 let _ = live.driver.fetch_chat_media_counts(chat_id);
@@ -290,6 +292,8 @@ impl QuillApp {
                     .driver
                     .get_community_full_info(community_id)
                     .map(|_| ()),
+                // Loaded below, once the driver borrow ends.
+                InfoPanelTarget::Earn(_) => Ok(()),
             };
             if let Err(err) = fetch {
                 self.connection.status_note = format!("info request failed: {err:?}");
@@ -300,6 +304,9 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_open_info_panel(Some(target));
+        }
+        if let InfoPanelTarget::Earn(panel) = target {
+            self.load_earn_panel(panel, super::chat_theme::is_dark_palette());
         }
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
@@ -524,6 +531,7 @@ impl QuillApp {
                 "Community info",
                 self.community_info_panel(community_id, cx),
             ),
+            InfoPanelTarget::Earn(panel) => (panel.title(), self.earn_panel(panel, cx)),
         };
         Some((title, content))
     }

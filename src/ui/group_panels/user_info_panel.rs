@@ -546,6 +546,7 @@ impl QuillApp {
         // Phase D3b: administrator management (owner / admins with
         // `can_promote_members` only; the section no-ops otherwise).
         body = body.child(self.administrators_section(chat_id, cx));
+        body = body.children(self.channel_balance_row(chat_id, cx));
         // Slice G1: group/channel management — members, permissions,
         // invite link, join requests, username, broadcast upgrade,
         // leave/delete. Every row is capability-gated inside.

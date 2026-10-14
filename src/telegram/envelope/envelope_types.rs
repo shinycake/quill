@@ -384,6 +384,10 @@ pub struct SupergroupFullAdmin {
     /// `outgoing_paid_message_star_count`: Stars the account pays per
     /// message in this supergroup (0 for administrators and free groups).
     pub outgoing_paid_message_star_count: i64,
+    /// `can_get_revenue_statistics` / `can_get_star_revenue_statistics`:
+    /// the Monetization page and the Stars balance may be opened.
+    pub can_get_revenue_statistics: bool,
+    pub can_get_star_revenue_statistics: bool,
 }
 
 /// A chat's name color and reply emoji (`chat.accent_color_id`,

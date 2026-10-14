@@ -109,6 +109,9 @@ impl QuillApp {
     pub(super) fn open_stars(&mut self, cx: &mut Context<Self>) {
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.hub.stars_open = true;
+            // "View Statistics" and "Earn Stars from Mini Apps" gates.
+            let _ = live.driver.probe_self_star_stats();
+            let _ = live.driver.ensure_earn_app_config();
             live.driver.maybe_fetch_star_transactions()
         });
         if let Some(Err(_)) = sent {
@@ -171,15 +174,10 @@ impl QuillApp {
                         .gap_1()
                         .py_2()
                         .child(div().text_xs().text_color(muted).child("Your balance"))
-                        .child(
-                            div()
-                                .text_size(px(30.))
-                                .font_semibold()
-                                .child(format!(
-                                    "\u{2B50} {}",
-                                    hub.balance.map_or("\u{2013}".to_string(), |b| b.label())
-                                )),
-                        ),
+                        .child(div().text_size(px(30.)).font_semibold().child(format!(
+                            "\u{2B50} {}",
+                            hub.balance.map_or("\u{2013}".to_string(), |b| b.label())
+                        ))),
                 );
                 let mut tabs = div().flex().gap_1();
                 for filter in TxFilter::ALL {
@@ -190,7 +188,11 @@ impl QuillApp {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.set_tx_filter(filter, cx);
                         }));
-                    tabs = tabs.child(if active { button.primary() } else { button.ghost() });
+                    tabs = tabs.child(if active {
+                        button.primary()
+                    } else {
+                        button.ghost()
+                    });
                 }
                 body = body.child(tabs);
                 if let Some(err) = hub.tx_error.as_ref() {
@@ -217,7 +219,11 @@ impl QuillApp {
                 if !hub.tx_offset.is_empty() {
                     body = body.child(
                         Button::new("stars-load-more")
-                            .label(if hub.tx_loading { "Loading\u{2026}" } else { "Load more" })
+                            .label(if hub.tx_loading {
+                                "Loading\u{2026}"
+                            } else {
+                                "Load more"
+                            })
                             .ghost()
                             .disabled(hub.tx_loading)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -229,12 +235,15 @@ impl QuillApp {
                     );
                 }
                 body = body.child(star_packs::star_packs_section(session, cx));
+                // tdesktop `BuildCreditsButtons`: stats, gift, earn.
+                body = body.children(this.stars_stats_button(cx));
                 body = body.child(super::stars_gift_ui::gift_stars_button(cx));
+                body = body.children(this.stars_earn_button(cx));
                 body = body.child(
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Withdrawals happen in the Telegram app or @PremiumBot. You pay for Stars in the checkout."),
+                        .child("You pay for Stars in the checkout."),
                 );
             }
             dialog
@@ -437,8 +446,25 @@ impl QuillApp {
 }
 
 fn tx_row(session: &Session, ix: usize, tx: &StarTx, cx: &mut Context<QuillApp>) -> AnyElement {
-    let muted = cx.theme().muted_foreground;
     let id = tx.id.clone();
+    star_tx_row(
+        session,
+        ("stars-tx", ix as u64),
+        tx,
+        move |this, cx| this.select_tx(Some(id.clone()), cx),
+        cx,
+    )
+}
+
+/// One Stars history row; `on_click` opens its receipt.
+pub(in crate::ui) fn star_tx_row(
+    session: &Session,
+    id: impl Into<ElementId>,
+    tx: &StarTx,
+    on_click: impl Fn(&mut QuillApp, &mut Context<QuillApp>) + 'static,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
     let mut sub = Vec::new();
     if let Some(peer) = tx.peer {
         sub.push(session.sender_label(peer));
@@ -451,7 +477,7 @@ fn tx_row(session: &Session, ix: usize, tx: &StarTx, cx: &mut Context<QuillApp>)
         sub.push("Refund".to_string());
     }
     div()
-        .id(("stars-tx", ix as u64))
+        .id(id)
         .flex()
         .justify_between()
         .items_center()
@@ -461,9 +487,7 @@ fn tx_row(session: &Session, ix: usize, tx: &StarTx, cx: &mut Context<QuillApp>)
         .role(gpui_kit::Role::Button)
         .aria_label(format!("{}, {} Stars", tx.title, tx.amount.signed_label()))
         .tab_index(0)
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.select_tx(Some(id.clone()), cx);
-        }))
+        .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
         .child(
             div()
                 .flex()
@@ -493,9 +517,10 @@ fn tx_row(session: &Session, ix: usize, tx: &StarTx, cx: &mut Context<QuillApp>)
 }
 
 fn tx_details(session: &Session, tx: &StarTx, cx: &mut Context<QuillApp>) -> AnyElement {
-    let id = tx.id.clone();
-    let mut col = div().flex().flex_col().gap_2();
-    col = col
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
         .child(
             Button::new("stars-back")
                 .label("\u{2039} Back")
@@ -503,26 +528,38 @@ fn tx_details(session: &Session, tx: &StarTx, cx: &mut Context<QuillApp>) -> Any
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| this.select_tx(None, cx))),
         )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap_1()
-                .py_2()
-                .child(
-                    div()
-                        .text_size(px(28.))
-                        .font_semibold()
-                        .text_color(if tx.is_incoming() {
-                            success().into()
-                        } else {
-                            cx.theme().foreground
-                        })
-                        .child(format!("{} \u{2B50}", tx.amount.signed_label())),
-                )
-                .child(div().font_semibold().child(tx.title.clone())),
-        );
+        .child(star_tx_facts(session, tx, cx))
+        .into_any_element()
+}
+
+/// A Stars transaction's receipt: the amount, what it was and its facts.
+pub(in crate::ui) fn star_tx_facts(
+    session: &Session,
+    tx: &StarTx,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let id = tx.id.clone();
+    let mut col = div().flex().flex_col().gap_2();
+    col = col.child(
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .py_2()
+            .child(
+                div()
+                    .text_size(px(28.))
+                    .font_semibold()
+                    .text_color(if tx.is_incoming() {
+                        success().into()
+                    } else {
+                        cx.theme().foreground
+                    })
+                    .child(format!("{} \u{2B50}", tx.amount.signed_label())),
+            )
+            .child(div().font_semibold().child(tx.title.clone())),
+    );
     if !tx.detail.is_empty() {
         col = col.child(fact_row("Details", tx.detail.clone(), cx));
     }

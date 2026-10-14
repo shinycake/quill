@@ -251,6 +251,7 @@ impl QuillApp {
                 this.child(
                     div()
                         .id("auth-test-mode-label")
+                        .debug_selector(|| "auth-test-mode-label".into())
                         .role(Role::Label)
                         .aria_label("Test Mode")
                         .absolute()

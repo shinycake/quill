@@ -122,9 +122,6 @@ impl QuillApp {
             }
             GroupSettingsAction::JoinToSend(on) => driver.set_group_join_to_send(chat_id, on),
             GroupSettingsAction::HiddenMembers(on) => driver.set_group_hidden_members(chat_id, on),
-            GroupSettingsAction::SponsoredMessages(on) => {
-                driver.set_channel_sponsored_messages(chat_id, on)
-            }
             GroupSettingsAction::ProtectedContent(on) => {
                 driver.set_chat_protected_content(chat_id, on)
             }
@@ -407,26 +404,6 @@ impl QuillApp {
                 cx,
             ));
         }
-        if controls.switch_off_ads {
-            let can_have = session
-                .and_then(|s| {
-                    s.chat_supergroup(chat_id)
-                        .and_then(|id| s.supergroup_full_info(id))
-                        .map(|info| info.admin.can_have_sponsored_messages)
-                })
-                .unwrap_or(true);
-            body = body.child(self.settings_switch(
-                "ads-switch-off",
-                IconName::EyeOff,
-                "Switch Off Ads",
-                !can_have,
-                !busy,
-                "Sponsored messages won't be shown in this channel. The channel needs enough boosts."
-                    .into(),
-                GroupSettingsAction::SponsoredMessages(!can_have),
-                cx,
-            ));
-        }
         if controls.protected_content {
             let on = session.is_some_and(|s| s.chat_has_protected_content(chat_id));
             body = body.child(heading("Content protection")).child(
@@ -510,6 +487,9 @@ impl QuillApp {
             body = body.child(row);
         }
         if let Some(row) = self.direct_messages_settings_row(chat_id, cx) {
+            body = body.child(row);
+        }
+        if let Some(row) = self.channel_affiliate_row(chat_id, cx) {
             body = body.child(row);
         }
         if controls.upgrade {

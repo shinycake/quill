@@ -23,6 +23,9 @@ impl QuillApp {
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
         self.restore_chat_windows(window, cx);
+        // Revenue and affiliate pages: the amount field, the setup
+        // sliders, program photos and pages, profile balances.
+        self.earn_frame_upkeep(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in

@@ -615,6 +615,9 @@ impl Session {
         if self.apply_business_bot_search(&chat_ids, pending) {
             return;
         }
+        if self.apply_earn_recipient_chats(&chat_ids, pending) {
+            return;
+        }
         // Parity slice: `getChatFolderChatsToLeave` response for the
         // delete-confirm dialog (correlated via folder_id). Runs
         // before the search branch below consumes `chat_ids`.
