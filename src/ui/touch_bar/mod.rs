@@ -15,7 +15,9 @@ pub(crate) mod model;
 
 #[cfg(target_os = "macos")]
 mod mac;
-#[cfg(all(test, target_os = "macos", feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[cfg(feature = "demo-capture")]
 mod tests;
 
 use super::app::QuillApp;
