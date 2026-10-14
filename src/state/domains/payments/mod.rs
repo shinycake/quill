@@ -9,6 +9,7 @@ mod limit;
 mod paid;
 mod purpose;
 mod state;
+mod suggested_posts;
 mod ton_wallet;
 
 pub use gift_code::*;

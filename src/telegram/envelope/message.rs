@@ -61,6 +61,19 @@ pub struct MessageExtras {
     /// `message.effect_id` (int64): the animated effect the sender added
     /// when sending (private chats); 0 for none.
     pub effect_id: i64,
+    /// `message.suggested_post_info`: the offer of a suggested post in a
+    /// channel's direct messages; `None` for a plain message.
+    pub suggested_post: Option<crate::suggested_posts::SuggestedPostInfo>,
+    /// `message.is_paid_star_suggested_post` or
+    /// `is_paid_gram_suggested_post`: a published post someone paid for.
+    pub paid_suggested_post: Option<PaidSuggestedPost>,
+}
+
+/// The currency a published suggested post was paid in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaidSuggestedPost {
+    Stars,
+    Grams,
 }
 
 /// `factCheck text:formattedText country_code:string` (TDLib 1.8.68, schema
@@ -585,6 +598,16 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
         via_bot_user_id: int53_or_zero(value.get("via_bot_user_id")),
         effect_id: int64(value.get("effect_id")).unwrap_or(0).max(0),
         fact_check: parse_fact_check(value.get("fact_check")),
+        suggested_post: crate::suggested_posts::SuggestedPostInfo::parse(
+            value.get("suggested_post_info"),
+        ),
+        paid_suggested_post: if flag(value, "is_paid_star_suggested_post") {
+            Some(PaidSuggestedPost::Stars)
+        } else if flag(value, "is_paid_gram_suggested_post") {
+            Some(PaidSuggestedPost::Grams)
+        } else {
+            None
+        },
         import_info: value
             .get("import_info")
             .filter(|info| info.get("@type").and_then(Value::as_str) == Some("messageImportInfo"))
@@ -601,6 +624,10 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
                     .sat_i32(),
             }),
     }
+}
+
+fn flag(value: &Value, name: &str) -> bool {
+    value.get(name).and_then(Value::as_bool).unwrap_or(false)
 }
 
 pub(crate) fn parse_forward_info(value: Option<&Value>) -> Option<MessageForwardInfo> {

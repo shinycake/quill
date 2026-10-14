@@ -138,6 +138,7 @@ pub(crate) fn parse_groups_payload(
                     .and_then(|info| info.get("restriction_reason"))
                     .and_then(Value::as_str)
                     .is_some_and(|reason| !reason.is_empty()),
+                direct_messages: direct_messages_role(supergroup),
             }))
         }
         "supergroup" => Ok(EnvelopePayload::Groups(GroupsPayload::Supergroup {
@@ -195,6 +196,7 @@ pub(crate) fn parse_groups_payload(
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             paid_message_star_count: int53_or_zero(value.get("paid_message_star_count")),
+            direct_messages: direct_messages_role(value),
         })),
         "updateChatMember" => {
             let member = value
@@ -675,4 +677,18 @@ pub(crate) fn parse_groups_payload(
         _ => return Ok(None),
     };
     payload.map(Some)
+}
+
+/// The viewer's side in a channel's direct messages group.
+fn direct_messages_role(supergroup: &Value) -> Option<crate::suggested_posts::DirectMessagesRole> {
+    let flag = |name: &str| {
+        supergroup
+            .get(name)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    crate::suggested_posts::DirectMessagesRole::from_flags(
+        flag("is_direct_messages_group"),
+        flag("is_administered_direct_messages_group"),
+    )
 }

@@ -212,6 +212,7 @@ impl QuillApp {
             text,
             reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
             quote: reply_to.and_then(|reply| reply.quote),
+            suggested_post: None,
         });
         session.store_composer_draft(chat_id, topic, draft);
     }

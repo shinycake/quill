@@ -186,6 +186,7 @@ pub mod story_ring;
 pub mod story_viewer;
 pub mod subsection_tabs;
 pub mod suggest;
+pub mod suggested_posts;
 pub mod system_accent;
 pub mod system_proxy;
 pub mod telegram;

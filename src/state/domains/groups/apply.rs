@@ -679,7 +679,9 @@ impl Session {
                 join_to_send_messages,
                 paid_message_star_count,
                 restricted,
+                direct_messages,
             } => {
+                self.set_direct_messages_role(supergroup_id, direct_messages);
                 self.payments
                     .paid_messages
                     .dm_price
@@ -745,7 +747,9 @@ impl Session {
                 show_message_sender,
                 join_to_send_messages,
                 paid_message_star_count,
+                direct_messages,
             } => {
+                self.set_direct_messages_role(supergroup_id, direct_messages);
                 self.payments
                     .paid_messages
                     .dm_price

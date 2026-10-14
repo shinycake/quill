@@ -235,6 +235,7 @@ impl Session {
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),
             PaymentsPayload::TonWallet(payload) => self.apply_ton_wallet(payload, pending),
             PaymentsPayload::Earn(payload) => self.apply_earn(payload, pending),
+            PaymentsPayload::SuggestedPost(payload) => self.apply_suggested_post(payload),
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 // The subscriptions list carries its own copy of the balance.
                 if let Some(subs) = self.payments.star_subscriptions.as_mut() {

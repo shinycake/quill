@@ -96,6 +96,9 @@ pub struct PaymentsState {
     pub star_packs: crate::star_packs::StarPacksState,
     /// The Gift Stars dialog.
     pub stars_gift: crate::stars_gift::StarsGiftState,
+    /// Suggested posts: limits, the composer's suggest bars, the Grams
+    /// balance.
+    pub suggested_posts: crate::suggested_posts::SuggestedPostsState,
 }
 
 /// A tapped bank card number and the lookup's progress.
@@ -145,6 +148,7 @@ impl PaymentsState {
             paid_messages: Default::default(),
             star_packs: Default::default(),
             stars_gift: Default::default(),
+            suggested_posts: Default::default(),
         }
     }
 }

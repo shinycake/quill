@@ -43,6 +43,7 @@ mod sticker_creator;
 mod stickers;
 mod stories;
 mod story_reply_media;
+mod suggested_posts;
 #[cfg(test)]
 mod tests_auth;
 #[cfg(test)]
@@ -129,6 +130,7 @@ pub use sticker_creator::*;
 pub use stickers::*;
 pub use stories::*;
 pub use story_reply_media::*;
+pub use suggested_posts::*;
 pub use ton_wallet::*;
 pub use translate::*;
 pub use users::*;

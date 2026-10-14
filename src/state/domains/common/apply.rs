@@ -90,6 +90,10 @@ impl Session {
                 }
                 if let OptionValue::Integer(limit) = &value {
                     self.payments.giveaway.limits.apply_option(&name, *limit);
+                    self.payments
+                        .suggested_posts
+                        .limits
+                        .apply_option(&name, *limit);
                     match name.as_str() {
                         "notification_sound_size_max" => {
                             self.messages.tone_limits.max_size = *limit

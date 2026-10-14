@@ -115,6 +115,9 @@ pub struct SendOptions {
     /// send menu (tdesktop `SendOptions::effectId`); 0 for none. TDLib
     /// applies it in private chats only.
     pub effect_id: i64,
+    /// `messageSendOptions.suggested_post_info`: send as a suggested post
+    /// in a channel's direct messages, with these terms.
+    pub suggested_post: Option<crate::suggested_posts::SuggestTerms>,
 }
 
 /// MED4b: media-size half of `linkPreviewOptions` (TDLib 1.8.67,

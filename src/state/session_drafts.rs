@@ -102,6 +102,10 @@ impl Session {
         if self.draft_is_dirty(chat_id, topic) {
             return;
         }
+        if topic == DraftTopic::Chat {
+            let terms = draft.as_ref().and_then(|draft| draft.suggested_post);
+            self.payments.suggested_posts.sync_draft(chat_id, terms);
+        }
         self.write_draft_slot(chat_id, topic, draft);
     }
 
