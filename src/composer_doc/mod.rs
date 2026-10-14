@@ -474,11 +474,13 @@ pub fn markdown_replacement(
             if inner.is_empty() {
                 continue;
             }
-            let inner_text = text.get(inner.clone()).unwrap_or_default();
+            let Some(inner_text) = text.get(inner.clone()) else {
+                continue;
+            };
             if inner_text.starts_with(char::is_whitespace)
                 || inner_text.ends_with(char::is_whitespace)
-                || inner_text.as_bytes()[0] == marker_char
-                || inner_text.as_bytes()[inner_text.len() - 1] == marker_char
+                || inner_text.as_bytes().first() == Some(&marker_char)
+                || inner_text.as_bytes().last() == Some(&marker_char)
             {
                 continue;
             }
