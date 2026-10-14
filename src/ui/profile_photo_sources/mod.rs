@@ -1,9 +1,10 @@
 //! Profile photo sources in the edit-profile dialog (tdesktop
 //! `UserpicButton` menu): the camera with a live preview, the emoji and
-//! sticker avatar builder with its gradient editor, and a video avatar
-//! with trim, crop and cover frame. Each opens a panel in place of the
-//! dialog's normal body; the request bodies, the gradient drawing and the
-//! ffmpeg command lines are in `quill::profile_photo_*`.
+//! sticker avatar builder with its gradient editor, and a video avatar.
+//! The camera and the emoji open a panel in place of the dialog's normal
+//! body; the video opens the full video editor over the dialog. The
+//! request bodies, the gradient drawing and the ffmpeg command lines are
+//! in `quill::profile_photo_*`.
 
 mod camera;
 mod emoji;
@@ -20,7 +21,6 @@ use std::sync::Arc;
 
 pub(crate) use camera::CameraDraft;
 pub(crate) use emoji::EmojiBuilder;
-pub(crate) use video::VideoDraft;
 
 /// Which source panel the dialog shows.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -29,7 +29,6 @@ pub(crate) enum SourceMode {
     #[default]
     Closed,
     Emoji,
-    Video,
     Camera,
 }
 
@@ -38,7 +37,6 @@ pub(crate) enum SourceMode {
 pub(crate) struct PhotoSources {
     mode: SourceMode,
     emoji: EmojiBuilder,
-    video: Option<VideoDraft>,
     camera: CameraDraft,
     busy: bool,
     note: Option<String>,
@@ -143,7 +141,6 @@ impl QuillApp {
     fn close_photo_source(&mut self, cx: &mut Context<Self>) {
         if let Some(sources) = self.sources_mut() {
             sources.mode = SourceMode::Closed;
-            sources.video = None;
             sources.camera = CameraDraft::default();
             sources.emoji.close_editor();
             sources.note = None;
@@ -189,7 +186,6 @@ impl QuillApp {
         let body = match sources.mode {
             SourceMode::Closed => return None,
             SourceMode::Emoji => self.emoji_panel(sources, cx),
-            SourceMode::Video => self.video_panel(sources, cx),
             SourceMode::Camera => self.camera_panel(sources, cx),
         };
         let theme = cx.theme();
@@ -281,12 +277,20 @@ impl QuillApp {
                 SourceMode::Emoji,
                 cx,
             ))
-            .child(button(
-                "edit-profile-video",
-                "Video…",
-                SourceMode::Video,
-                cx,
-            ))
+            // Straight to the file picker, then the video editor (tdesktop
+            // `PrepareProfileVideo`).
+            .child(
+                Button::new("edit-profile-video")
+                    .label("Video…")
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.choose_avatar_video(window, cx);
+                    })),
+            )
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests;

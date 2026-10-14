@@ -7,7 +7,7 @@
 
 use super::app::QuillApp;
 use super::native_video::{NativeVideo, Purpose, VideoPicture, supported};
-use super::video_editor::{EditorTarget, VideoEditorDialog, palette};
+use super::video_editor::{VideoEditorDialog, palette};
 use super::video_editor_timeline::StagePress;
 use gpui_kit::*;
 use quill::sticker_video::square_crop;
@@ -130,8 +130,8 @@ impl QuillApp {
         editor.edits.turns = (editor.edits.turns + 1) % 4;
         editor.edits.crop = match (editor.target, editor.info, editor.edits.crop) {
             (_, _, Some(crop)) => Some(crop.turned_cw()),
-            // A sticker's crop is always a square.
-            (EditorTarget::Set { .. }, Some(info), None) => {
+            // A sticker's or an avatar's crop is always a square.
+            (target, Some(info), None) if target.square() => {
                 let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
                 square_crop(width, height)
             }
@@ -215,7 +215,7 @@ impl QuillApp {
             f32::from(picture.size.height),
         );
         let square = match (editor.target, editor.info) {
-            (EditorTarget::Set { .. }, Some(info)) => {
+            (target, Some(info)) if target.square() => {
                 let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
                 Some(width as f32 / height.max(1) as f32)
             }
@@ -267,6 +267,7 @@ impl QuillApp {
         let picture_cell = editor.motion.picture_bounds.clone();
         let crop_cell = editor.motion.crop_bounds.clone();
         let grid = editor.motion.grid.value(Instant::now());
+        let round = editor.target.round();
         let paused = editor.user_paused && editor.player.borrow().is_some();
         canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
@@ -301,7 +302,7 @@ impl QuillApp {
                 let cut =
                     Bounds::from_corners(at(crop.x, crop.y), at(crop.x + crop.w, crop.y + crop.h));
                 crop_cell.set(Some(cut));
-                paint_crop(fit, cut, grid, window);
+                paint_crop(fit, cut, grid, round, window);
                 if paused {
                     paint_play_badge(cut.center(), window);
                 }
@@ -362,7 +363,13 @@ impl QuillApp {
 
 /// `Crop::paintFrame` and `paintGrid`: the fade outside, a thin frame,
 /// thick corner brackets and the thirds grid at `grid` opacity.
-fn paint_crop(fit: Bounds<Pixels>, cut: Bounds<Pixels>, grid: f32, window: &mut Window) {
+fn paint_crop(
+    fit: Bounds<Pixels>,
+    cut: Bounds<Pixels>,
+    grid: f32,
+    round: bool,
+    window: &mut Window,
+) {
     for band in [
         Bounds::from_corners(fit.origin, point(fit.right(), cut.top())),
         Bounds::from_corners(point(fit.left(), cut.bottom()), fit.bottom_right()),
@@ -378,6 +385,9 @@ fn paint_crop(fit: Bounds<Pixels>, cut: Bounds<Pixels>, grid: f32, window: &mut 
         if band.size.width > px(0.) && band.size.height > px(0.) {
             window.paint_quad(fill(band, palette::crop_fade()));
         }
+    }
+    if round {
+        paint_round_fade(cut, window);
     }
     window.paint_quad(outline(
         cut.dilate(px(FRAME_LINE / 2.0)),
@@ -441,5 +451,33 @@ fn paint_play_badge(center: Point<Pixels>, window: &mut Window) {
     path.close();
     if let Ok(path) = path.build() {
         window.paint_path(path, palette::text());
+    }
+}
+
+/// An avatar's crop fades outside its circle too (`CropType::Ellipse`):
+/// each corner of the square, between its sides and the arc.
+fn paint_round_fade(cut: Bounds<Pixels>, window: &mut Window) {
+    let radius = cut.size.width.min(cut.size.height) / 2.;
+    if radius <= px(0.) {
+        return;
+    }
+    let center = cut.center();
+    let (left, right) = (point(cut.left(), center.y), point(cut.right(), center.y));
+    let (top, bottom) = (point(center.x, cut.top()), point(center.x, cut.bottom()));
+    // Corner, then the arc counter-clockwise through that quarter.
+    for (corner, from, to) in [
+        (cut.origin, top, left),
+        (cut.top_right(), right, top),
+        (cut.bottom_right(), bottom, right),
+        (cut.bottom_left(), left, bottom),
+    ] {
+        let mut path = PathBuilder::fill();
+        path.move_to(corner);
+        path.line_to(from);
+        path.arc_to(point(radius, radius), px(0.), false, false, to);
+        path.close();
+        if let Ok(path) = path.build() {
+            window.paint_path(path, palette::crop_fade());
+        }
     }
 }

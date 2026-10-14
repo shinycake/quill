@@ -1,5 +1,9 @@
 # Profile photo sources, second pass
 
+> The video avatar part is superseded by
+> [avatar-video-editor.md](avatar-video-editor.md): the clip is now edited in
+> the full video editor, and the slider panel described here is gone.
+
 Closes the differences listed in `codex-photo-sources.md`.
 
 ## What tdesktop does
