@@ -3,9 +3,14 @@
 //!
 //! macOS decodes through ImageIO into a half-float GPU buffer and switches
 //! the window's layer to an extended-range drawable while one shows
-//! (`macos.rs`). Windows and Linux show the SDR picture for now; every
-//! entry point here answers "SDR" there.
+//! (`macos.rs`). Windows decodes gain-map JPEGs and HDR JPEG XL on the CPU
+//! (`cpu`) and switches the swap chain to scRGB while one shows on an HDR
+//! display (`windows.rs`). Linux shows the SDR picture: GPUI's wgpu
+//! renderer has no HDR surface; every entry point here answers "SDR" there.
 
+#[cfg(any(windows, test))]
+mod cpu;
+mod half_float;
 #[cfg(target_os = "macos")]
 mod macos;
 mod probe_cache;
@@ -14,6 +19,8 @@ mod probe_cache;
 mod tests;
 mod tone_map;
 mod viewer;
+#[cfg(windows)]
+mod windows;
 #[cfg(test)]
 #[cfg(all(target_os = "macos", feature = "demo-capture"))]
 mod viewer_tests;
@@ -29,7 +36,7 @@ use std::path::Path;
 
 /// The largest HDR frame the viewer decodes, in pixels (8 bytes each: a
 /// 24 Mpx frame is 192 MB of GPU memory, held only while it shows).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows, test))]
 pub(crate) const HDR_MAX_PIXELS: u64 = 24_000_000;
 
 /// How far above SDR white a display can go (1.0 = no headroom).
@@ -65,8 +72,8 @@ impl Headroom {
     }
 }
 
-/// A decoded HDR still (only macOS makes one).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// A decoded HDR still (macOS and Windows make them).
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 pub(crate) struct HdrPixels {
     pub frame: Frame,
     pub size: (u32, u32),
@@ -76,12 +83,14 @@ pub(crate) struct HdrPixels {
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::Frame;
+#[cfg(windows)]
+pub(crate) use windows::Frame;
 
-/// No HDR frames exist off macOS.
-#[cfg(not(target_os = "macos"))]
+/// No HDR frames exist on Linux.
+#[cfg(not(any(target_os = "macos", windows)))]
 pub(crate) enum Frame {}
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 impl Frame {
     pub(crate) fn set_headroom(&self, _headroom: f32) {
         match *self {}
@@ -94,7 +103,9 @@ impl Frame {
 pub(crate) fn decode(path: &Path, long_edge: u32) -> Result<Option<HdrPixels>, DecodeError> {
     #[cfg(target_os = "macos")]
     return macos::decode(path, long_edge);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    return windows::decode(path, long_edge);
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = (path, long_edge);
         Ok(None)
@@ -110,7 +121,9 @@ pub(crate) fn probe(path: &Path) -> bool {
 fn probe_file(path: &Path) -> Option<bool> {
     #[cfg(target_os = "macos")]
     return macos::probe(path);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    return windows::probe(path);
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = path;
         Some(false)
@@ -137,17 +150,22 @@ pub(crate) fn headroom(window: &gpui_kit::Window) -> Headroom {
     }
     #[cfg(target_os = "macos")]
     return macos::headroom(window);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    return windows::headroom(window);
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = window;
         Headroom::SDR
     }
 }
 
-/// Switch `window` to (or back from) an extended-range drawable.
+/// Switch `window` to (or back from) an extended-range drawable (an
+/// scRGB swap chain on Windows).
 fn set_window_edr(window: &gpui_kit::Window, on: bool) {
     #[cfg(target_os = "macos")]
     macos::set_window_edr(window, on);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    windows::set_window_edr(window, on);
+    #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (window, on);
 }

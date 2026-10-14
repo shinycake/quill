@@ -1521,6 +1521,7 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
+- [gpui-pre 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-apple 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-linux 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-macos 0.3.8](https://github.com/zed-industries/zed)
@@ -1541,7 +1542,6 @@ Used by:
 - [gpui-pre-zlog 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-ztracing-macro 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-ztracing 0.3.8](https://github.com/zed-industries/zed)
-- [gpui-pre 0.3.8](https://github.com/zed-industries/zed)
 
 ````text
 Copyright 2022 - 2025 Zed Industries, Inc.
