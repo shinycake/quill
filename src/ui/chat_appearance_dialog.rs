@@ -4,6 +4,7 @@
 //! and the emoji status. Parts the chat has too few boosts for show their
 //! level ("Level N required") and Apply asks for boosts instead of sending,
 //! like tdesktop's `CheckBoostLevel`. Rules live in `quill::chat_appearance`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::danger;

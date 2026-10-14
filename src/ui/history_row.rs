@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 use super::*;
 use quill::ids::MessageId;
 use quill::state::{HistoryMessage, OutboxReceipt};

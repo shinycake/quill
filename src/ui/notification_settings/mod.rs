@@ -1,4 +1,5 @@
 //! mute menu, notification sounds, badge prefs, scope/reaction settings.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, danger_bg};

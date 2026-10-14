@@ -1,4 +1,5 @@
 //! Group and channel management boxes: invite links, admins, members, permissions.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::TextareaState;

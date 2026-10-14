@@ -1,4 +1,5 @@
 //! story viewer overlay.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;

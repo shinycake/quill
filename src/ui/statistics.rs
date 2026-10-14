@@ -2,6 +2,7 @@
 //! their change, every chart TDLib returns, recent posts (channels) or
 //! top members (groups); a post or story opens its own page
 //! (`statistics_posts.rs`). tdesktop: `info/statistics/`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

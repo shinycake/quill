@@ -1,4 +1,5 @@
 //! connection status UI.
+#![deny(clippy::indexing_slicing)]
 
 use quill::auth::view_for;
 use quill::connect::{ConnectBlocker, ConnectGate, evaluate_gate, start_prepared_live_connect};

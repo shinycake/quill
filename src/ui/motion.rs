@@ -20,6 +20,7 @@
 //! - `ui/effects/round_checkbox.cpp:294` `RoundCheckbox::setChecked` and
 //!   `:195` `paintFrame`: a 160 ms linear check; the fill closes in over the
 //!   first 75 % (`bgDuration`) and the tick wipes in across the whole run.
+#![deny(clippy::indexing_slicing)]
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

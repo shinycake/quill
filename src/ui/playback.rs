@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::*;
 use gpui_kit::component::slider::SliderState;

@@ -23,6 +23,7 @@
 //! dark values (designed for black backgrounds). The kit [`ThemeMode`]
 //! stays Light/Dark (the kit has no HC variant); HC pairs with the dark
 //! kit theme so kit components stay coherent with the black surfaces.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Rgba, Window};

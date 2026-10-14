@@ -1,4 +1,5 @@
 //! Media viewer: zoom, video, controls and the photo editor.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;

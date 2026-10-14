@@ -1,4 +1,5 @@
 //! info panels (user/supergroup/community).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
@@ -391,11 +392,13 @@ impl QuillApp {
             else {
                 continue;
             };
-            let tab = tabs[index];
+            let (Some(&tab), Some(&icon)) = (tabs.get(index), icons.get(index)) else {
+                continue;
+            };
             rows.push(
                 action_row(
                     ("info-media-count", index as u64),
-                    Some(icons[index]),
+                    Some(icon),
                     format!(
                         "{} {}",
                         compact_count(count),
@@ -618,7 +621,10 @@ pub(super) fn format_birthday(date: quill::telegram::envelope::Birthdate) -> Str
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let month = MONTHS[usize::from(date.month.clamp(1, 12)) - 1];
+    let month = MONTHS
+        .get(usize::from(date.month.clamp(1, 12)) - 1)
+        .copied()
+        .unwrap_or_default();
     match date.year {
         Some(year) => {
             let today = quill::local_time::civil_local(quill::local_time::now_unix());

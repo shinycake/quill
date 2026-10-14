@@ -29,14 +29,17 @@ pub(in crate::ui) fn rich_text_reserving(
     // Paragraph = maximal stretch of inline runs; quotes and `pre` blocks
     // break the flow and render as their own blocks.
     let mut index = 0;
-    while index < runs.len() {
+    while let Some(run) = runs.get(index) {
         let start = index;
-        if runs[index].style.quote {
-            while index < runs.len() && runs[index].style.quote {
+        if run.style.quote {
+            while runs.get(index).is_some_and(|run| run.style.quote) {
                 index += 1;
             }
+            let Some(block) = runs.get(start..index) else {
+                break;
+            };
             column = column.child(quote_block(
-                &runs[start..index],
+                block,
                 start,
                 msg_key,
                 is_caption,
@@ -48,9 +51,9 @@ pub(in crate::ui) fn rich_text_reserving(
             ));
             continue;
         }
-        if runs[index].style.pre {
+        if run.style.pre {
             column = column.child(paint_text_run(
-                &runs[index],
+                run,
                 index,
                 msg_key,
                 is_caption,
@@ -63,12 +66,18 @@ pub(in crate::ui) fn rich_text_reserving(
             index += 1;
             continue;
         }
-        while index < runs.len() && !runs[index].style.quote && !runs[index].style.pre {
+        while runs
+            .get(index)
+            .is_some_and(|run| !run.style.quote && !run.style.pre)
+        {
             index += 1;
         }
         let last = index == runs.len();
+        let Some(paragraph) = runs.get(start..index) else {
+            break;
+        };
         column = column.child(inline_paragraph(
-            &runs[start..index],
+            paragraph,
             start,
             msg_key,
             is_caption,

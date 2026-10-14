@@ -3,6 +3,7 @@
 //! Telegram's call sounds are GPL and can't ship in an MIT app, and the
 //! system sounds differ per OS, so every platform plays these. Pure maths,
 //! no audio or GPUI types: the playback lives in `call_sounds`.
+#![deny(clippy::indexing_slicing)]
 
 use std::f32::consts::{PI, TAU};
 

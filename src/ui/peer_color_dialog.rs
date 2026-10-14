@@ -5,6 +5,7 @@
 //! The Name tab also lists gifts whose colors can be worn
 //! (`getReceivedGifts` with `exclude_without_colors`), applied with
 //! `setUpgradedGiftColors`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::pressable::PressableDiv;

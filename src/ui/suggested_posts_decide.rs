@@ -2,6 +2,7 @@
 //! `history_view_suggest_decision.cpp`, `api_suggest_post.cpp`): Accept
 //! with the Accept Terms box, Decline with a reason, Suggest Changes, Add
 //! Offer, and the Grams Needed box.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

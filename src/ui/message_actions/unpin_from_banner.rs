@@ -58,8 +58,9 @@ impl QuillApp {
             .copied()
             .unwrap_or(0)
             .min(count - 1);
-        let message_id = list[index].id;
-        let preview = effective_preview(list[index]);
+        let item = *list.get(index)?;
+        let message_id = item.id;
+        let preview = effective_preview(item);
         let title = if index == 0 {
             "Pinned message".to_string()
         } else if count == 2 {

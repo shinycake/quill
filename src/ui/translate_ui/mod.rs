@@ -3,6 +3,7 @@
 //! translate bar with its menu, translated bubbles, and the translation
 //! options in Settings. Modelled on Telegram Desktop's `boxes/translate_box`,
 //! `history_view_translate_bar` and `history_view_translate_tracker`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_text::rich_text_line;

@@ -1,6 +1,7 @@
 //! The bottom of the Settings list: Telegram FAQ, Telegram Features,
 //! Ask a Question, and the version line with its changelog link
 //! (tdesktop `settings_main.cpp`, `BuildHelpSection`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

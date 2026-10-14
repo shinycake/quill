@@ -3,6 +3,7 @@
 //! international formatting, resend countdown, "Wrong number?", the
 //! banned-number box and flood countdowns. The pure logic lives in
 //! `quill::phone` and `quill::signin`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

@@ -9,6 +9,7 @@
 //! from the area's color at its top edge to the one at its bottom edge.
 //! Without a fill the theme's outgoing accent (else its accent) fills the
 //! bubbles, as before.
+#![deny(clippy::indexing_slicing)]
 
 use super::chat_theme::accent_strong;
 use gpui_kit::component::theme::ActiveTheme;
@@ -59,7 +60,9 @@ impl OutgoingFill {
     pub(crate) fn from_colors(list: &[u32], dark: bool) -> Self {
         let mut colors = [0u32; 4];
         let count = list.len().min(4);
-        colors[..count].copy_from_slice(&list[..count]);
+        for (slot, color) in colors.iter_mut().zip(list) {
+            *slot = *color;
+        }
         Self {
             colors,
             count: count.max(1) as u8,
@@ -68,7 +71,9 @@ impl OutgoingFill {
     }
 
     pub(crate) fn colors(&self) -> &[u32] {
-        &self.colors[..self.count as usize]
+        self.colors
+            .get(..self.count as usize)
+            .unwrap_or(&self.colors)
     }
 
     /// One color for the whole fill (the mean).

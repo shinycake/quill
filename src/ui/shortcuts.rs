@@ -3,6 +3,7 @@
 //! `keybindings::shortcut_rows()` — the same table `bind_keys` installs —
 //! grouped by section, so the reference can never drift from the real
 //! bindings. Opened from Help → Keyboard Shortcuts.
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use super::keybindings::shortcut_rows;

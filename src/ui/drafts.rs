@@ -1,6 +1,7 @@
 //! Cross-chat draft lifecycle: save the composer into the slot it was
 //! typed in (chat, forum topic or reply thread — tdesktop's
 //! `Data::DraftKey`), restore the slot's draft when it opens again.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

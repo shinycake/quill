@@ -6,6 +6,7 @@
 //! dialog (`ui/payments`) serves all of them: this module only builds the
 //! invoice and fetches its form. Nothing is paid until the user presses Pay
 //! in the checkout.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_base::{Disableable, StyledExt};

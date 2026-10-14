@@ -9,6 +9,7 @@
 //! account → session restore). Hosted in a kit `Dialog` via `window.open_dialog` (the kit
 //! Phase 2 redo pattern). Removing the active account is not offered in
 //! the UI — switch away from it first.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

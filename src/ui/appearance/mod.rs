@@ -686,8 +686,9 @@ impl QuillApp {
                     .map(|label| Radio::new(format!("appearance-night-{label}")).label(*label)),
             )
             .on_click(cx.listener(|this, &ix, _, cx| {
-                let mode = MODES[ix];
-                this.set_appearance(cx, |a| a.auto_night = mode);
+                if let Some(&mode) = MODES.get(ix) {
+                    this.set_appearance(cx, |a| a.auto_night = mode);
+                }
             }));
         let mut body = div()
             .flex()

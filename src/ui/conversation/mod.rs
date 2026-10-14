@@ -1,4 +1,5 @@
 //! conversation header, typing indicators.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp, pane_placeholder};
 use super::chat_row::compact_count;

@@ -5,6 +5,7 @@
 //! Mirrors tdesktop's `ScheduleBox` / `ChooseDateTimeBox` and
 //! `HistoryView::ScheduledMemento` (see
 //! `docs/decisions/codex-scheduled-messages.md`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_text::format_unix_date_time;

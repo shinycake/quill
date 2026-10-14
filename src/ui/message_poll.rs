@@ -1,4 +1,5 @@
 //! poll message rendering.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::polls::option_thumb::{PollMediaView, option_thumb};

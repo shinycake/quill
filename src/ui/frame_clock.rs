@@ -8,6 +8,7 @@
 //! (`app_slice`); a tick then redraws only the slices that asked, and the
 //! rest of the window replays its last frame. Requests made outside any
 //! slice redraw the whole app, as before.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

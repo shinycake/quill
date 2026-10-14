@@ -2,6 +2,7 @@
 //! with a Premium gift code and the countries that may take part (tdesktop
 //! `create_giveaway_box.cpp`: "Award specific users", `SelectCountriesBox`).
 //! Both open as a page inside the form's dialog and go back with Done.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::giveaway_create_ui::{about_line, boosts_text, choice, section_title};

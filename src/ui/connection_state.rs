@@ -1,4 +1,5 @@
 //! Connection status, the status line and presence sync.
+#![deny(clippy::indexing_slicing)]
 
 use super::connect_ui::ConnectUiStatus;
 

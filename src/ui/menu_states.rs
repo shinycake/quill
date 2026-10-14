@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 /// M1: right-click context menu state — the target message plus the

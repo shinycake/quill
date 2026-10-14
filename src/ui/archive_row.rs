@@ -3,6 +3,7 @@
 //! names of the newest archived chats as the preview, a muted unread badge,
 //! a slim collapsed bar, and the context menu with Collapse / Move to main
 //! menu. State and rules live in `quill::chatlist_archive`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{ChatListFilter, QuillApp};
 use super::chat_row::chat_row_height;

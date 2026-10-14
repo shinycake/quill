@@ -1,5 +1,6 @@
 //! "What can this bot do?": the bot's description shown in an empty bot
 //! chat, as tdesktop's `AboutView::makeAboutBot` does.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::{ActiveTheme, StyledExt};

@@ -12,6 +12,7 @@
 //!
 //! The bar keeps to this module and is added to the conversation column by
 //! one call, above the call bar and the chat's own bars.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::playback::PlaybackKind;

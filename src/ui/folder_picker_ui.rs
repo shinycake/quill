@@ -1,6 +1,7 @@
 //! The folder editor's "Included chats" / "Excluded chats" sections and the
 //! chat picker with search (tdesktop `boxes/filters/edit_filter_box.cpp`
 //! and `edit_filter_chats_list.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

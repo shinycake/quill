@@ -5,6 +5,7 @@
 //! The question can block (Linux runs `gdbus`), so it runs on the background
 //! executor. Only a change touches the UI: the flags and GPUI's reduced
 //! motion are updated and the windows redraw.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 use std::time::Duration;

@@ -8,6 +8,7 @@
 //!
 //! The lock screen is deliberately not a row: while locked, Escape does
 //! nothing at all (see `QuillApp::dismiss_topmost_layer`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

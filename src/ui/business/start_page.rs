@@ -141,7 +141,8 @@ impl QuillApp {
             let _ = live.driver.fetch_greeting_stickers();
         }
         let list = &self.session()?.stickers.stickers.greeting;
-        (!list.is_empty()).then(|| list[seed.unsigned_abs() as usize % list.len()].clone())
+        let at = (seed.unsigned_abs() as usize).checked_rem(list.len())?;
+        list.get(at).cloned()
     }
 
     /// The intro card's title and message, as an empty chat shows them;

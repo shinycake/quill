@@ -5,6 +5,7 @@
 //! canvas (or the image's own ratio with "Keep original aspect ratio"), and
 //! a menu picks how round the corners come out. The pixels are in
 //! `quill::sticker_image`; this is the editor state and its tools.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::photo_edit::{CropRect, Placed, Stroke, overlay_item, render};

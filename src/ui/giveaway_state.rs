@@ -1,4 +1,5 @@
 //! The giveaway form's state (`giveaway_create_ui.rs`).
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;

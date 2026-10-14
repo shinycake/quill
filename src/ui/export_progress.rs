@@ -1,6 +1,7 @@
 //! Progress of a running chat export, shown in the export box
 //! (tdesktop `export/view/export_view_progress`): a bar, what is being
 //! done, and Cancel; when it ends, a way to open the folder.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::DialogKind;

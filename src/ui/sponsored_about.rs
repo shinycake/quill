@@ -3,6 +3,7 @@
 //! `lng_sponsored_revenued_*`). It explains what sponsored messages are,
 //! lists the advertiser info TDLib sent (`sponsor.info`, `additional_info`;
 //! tdesktop's "Advertiser info" submenu) and links to the ad platform.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

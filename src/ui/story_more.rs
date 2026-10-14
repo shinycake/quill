@@ -7,6 +7,7 @@
 //! tdesktop reference: `media/stories/media_stories_controller.cpp`
 //! (pause on press, `muted`), `media_stories_view.cpp`,
 //! `media_stories_share.cpp` (share box), `boxes/peers/edit_close_friends`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_media::file_is_downloading;

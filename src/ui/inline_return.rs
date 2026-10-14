@@ -3,6 +3,7 @@
 //! chat and sends its start with the parameter; when the bot answers with a
 //! switch-inline button, Quill goes back to the chat the query came from and
 //! types `@bot query` there.
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use gpui_kit::*;

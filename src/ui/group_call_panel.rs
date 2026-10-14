@@ -10,6 +10,7 @@
 //!
 //! The window renders a body the app builds (elements are window-agnostic),
 //! so every existing action and helper works from here.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::format_helpers::format_starts_in;

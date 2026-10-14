@@ -730,8 +730,8 @@ impl QuillApp {
         };
         if let Some((before, bold, after)) =
             quill::message_menu::emoji_pack_footer(packs.len(), pack_name.as_deref())
+            && let Some(&first) = packs.first()
         {
-            let first = packs[0];
             let row_hover = cx.theme().accent;
             rows.push(menu_separator(order::EMOJI_PACKS - 1));
             rows.push((

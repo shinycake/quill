@@ -8,6 +8,7 @@
 //! Shown only where Quill owns the dictionaries (Hunspell on Linux, the
 //! fallback on Windows). macOS and the Windows system checker keep their
 //! languages in the OS, as in tdesktop.
+#![deny(clippy::indexing_slicing)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

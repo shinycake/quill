@@ -1,4 +1,5 @@
 //! chat-list behavior: tabs, folders, select mode, archive/pin/unread, community hub.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::app::{ChatListFilter, PaneMode};
@@ -833,7 +834,9 @@ impl QuillApp {
             None if step >= 0 => 0,
             None => len - 1,
         };
-        self.select_listed_chat(ids[next as usize], window, cx);
+        if let Some(&id) = ids.get(next as usize) {
+            self.select_listed_chat(id, window, cx);
+        }
     }
 }
 

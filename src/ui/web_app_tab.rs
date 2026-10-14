@@ -1,6 +1,7 @@
 //! The Apps tab of the global search (tdesktop `dialogs_suggestions.cpp`:
 //! "Apps you use", then "Grossing apps" from `getGrossingWebAppBots`).
 //! A row opens the bot's main app in the mini app window.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::search_ui::search_result_row;

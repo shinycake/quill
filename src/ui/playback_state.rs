@@ -1,4 +1,5 @@
 //! Voice, music, GIF, sticker and inline video playback.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;

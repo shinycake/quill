@@ -1,4 +1,5 @@
 //! invite links + join requests.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::*;

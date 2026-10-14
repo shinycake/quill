@@ -1,6 +1,7 @@
 //! Statistics fixtures for UI tests: a channel's overview with one graph
 //! of every kind (in Telegram's chart JSON), an async graph that has
 //! loaded, a failed one, recent posts and a loaded zoomed day.
+#![deny(clippy::indexing_slicing)]
 
 use quill::state::{
     ChatStatisticsFetch, GraphFetch, GraphKey, MessageStatsFetch, Session, StatsPostPreview,
@@ -45,7 +46,7 @@ pub(crate) fn chart_json(
     let mut root = json!({"columns": columns, "names": names, "colors": colors, "types": {}});
     if let Some(extra) = extra.as_object() {
         for (key, value) in extra {
-            root[key] = value.clone();
+            quill::json_access::set(&mut root, key, value.clone());
         }
     }
     root.to_string()

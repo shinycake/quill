@@ -4,6 +4,7 @@
 //! (`boxes/peers/edit_participants_box.cpp`) and `FillSenderUserpicMenu`
 //! (`window/window_peer_menu.cpp`). What the menu offers comes from
 //! [`quill::moderation::member_menu_actions`], which is unit tested.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::dialogs::{AdminDialog, AdminDialogKind, GroupConfirmAction};

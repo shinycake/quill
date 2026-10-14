@@ -11,6 +11,7 @@
 //!
 //! Closing the window doesn't end the call: the main window's call bar
 //! brings it back.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::call_panel_backdrop::{backdrop, connecting_arc};
@@ -663,12 +664,13 @@ impl Render for CallPanel {
                     )
                     .into_any_element(),
                 ];
-                row[0] = corner(
-                    row.remove(0),
-                    "call-video-devices",
-                    DeviceMenuTarget::Camera,
-                    cx,
-                );
+                if !row.is_empty() {
+                    let first = row.remove(0);
+                    row.insert(
+                        0,
+                        corner(first, "call-video-devices", DeviceMenuTarget::Camera, cx),
+                    );
+                }
                 if snap.can_share_screen {
                     row.push(
                         call_button(

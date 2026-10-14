@@ -1,4 +1,5 @@
 //! 1:1 call state + actions.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

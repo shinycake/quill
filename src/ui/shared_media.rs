@@ -1,4 +1,5 @@
 //! shared-media panel.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp};
 use super::pressable::PressableDiv;
@@ -42,7 +43,7 @@ impl QuillApp {
         });
         let active_tab = session.media.shared_media.active_tab;
         let visible_tabs = session.shared_media_visible_tabs();
-        let tab = &session.media.shared_media.tabs[active_tab.index()];
+        let tab = session.media.shared_media.tab_at(active_tab)?;
         let status = tab.status;
         let total_count = tab.total_count;
         // `error` stays an owned clone: the panel tree is boxed into

@@ -1,4 +1,5 @@
 //! story albums page, privacy/cover editors.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::*;
@@ -622,8 +623,10 @@ impl QuillApp {
                     Radio::new(format!("story-privacy-{}", option.label())).label(option.label())
                 }))
                 .on_click(cx.listener(move |this, &ix, _, cx| {
-                    if let Some(edit) = this.stories.privacy_edit.as_mut() {
-                        edit.privacy = StoryPrivacy::ALL[ix];
+                    if let Some(edit) = this.stories.privacy_edit.as_mut()
+                        && let Some(&privacy) = StoryPrivacy::ALL.get(ix)
+                    {
+                        edit.privacy = privacy;
                     }
                     cx.notify();
                 })),

@@ -1,4 +1,5 @@
 //! Payments and the gift marketplace.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};

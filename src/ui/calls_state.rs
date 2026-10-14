@@ -1,4 +1,5 @@
 //! One-to-one call UI: the call window, tick, sounds, images and notifications.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 use std::sync::Arc;

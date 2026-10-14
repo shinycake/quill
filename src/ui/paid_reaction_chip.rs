@@ -1,5 +1,6 @@
 //! The Star chip under a message (tdesktop `InlineList` paid button): a
 //! click sends one Star, a right-click opens the amount box.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{bg_subtle, text_primary, warning};

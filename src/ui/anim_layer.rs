@@ -33,6 +33,7 @@
 //! slice) or a [`mirror`] (redrawn by the layer above the item). Anything
 //! painted after the slice (menus, dialogs, the media viewer, tooltips,
 //! deferred popovers) covers the layer as it covered the slice.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;
@@ -265,8 +266,10 @@ impl Layer {
         }
         let index = self.register(content, bounds, mask, None);
         let items = self.0.items.borrow();
-        items[index].inline.set(inline);
-        items[index].seq.set(next_seq());
+        if let Some(item) = items.get(index) {
+            item.inline.set(inline);
+            item.seq.set(next_seq());
+        }
     }
 
     /// The frame rates its painted content wants: drawn by the layer, and
@@ -356,11 +359,17 @@ impl Layer {
     fn paint(&self, built: &mut [Option<AnyElement>], window: &mut Window, cx: &mut App) {
         let items = self.0.items.borrow();
         let mut order: Vec<usize> = (0..items.len())
-            .filter(|&ix| items[ix].seq.get() != 0 && !items[ix].inline.get())
+            .filter(|&ix| {
+                items
+                    .get(ix)
+                    .is_some_and(|item| item.seq.get() != 0 && !item.inline.get())
+            })
             .collect();
-        order.sort_by_key(|&ix| items[ix].seq.get());
+        order.sort_by_key(|&ix| items.get(ix).map_or(0, |item| item.seq.get()));
         for ix in order {
-            let item = &items[ix];
+            let Some(item) = items.get(ix) else {
+                continue;
+            };
             if item.visible().is_none() {
                 continue;
             }

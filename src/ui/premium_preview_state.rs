@@ -1,4 +1,5 @@
 //! The Premium feature preview: the promotion clip that is playing.
+#![deny(clippy::indexing_slicing)]
 
 use super::native_video::NativeVideo;
 use std::cell::{Cell, RefCell};

@@ -1,5 +1,6 @@
 //! Settings radio group and double-click dispatch for the message quick
 //! action (tdesktop `chatQuickAction`, `ListWidget::mouseDoubleClickEvent`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -34,8 +35,12 @@ impl QuillApp {
                         Radio::new(format!("quick-action-{label}")).label(*label)
                     }))
                     .on_click(cx.listener(|this, &ix: &usize, _, cx| {
-                        let action = QuickAction::ALL[ix.min(QuickAction::ALL.len() - 1)].0;
-                        this.set_media_pref(|prefs| prefs.quick_action = action, cx);
+                        if let Some(action) = QuickAction::ALL
+                            .get(ix.min(QuickAction::ALL.len() - 1))
+                            .map(|entry| entry.0)
+                        {
+                            this.set_media_pref(|prefs| prefs.quick_action = action, cx);
+                        }
                     })),
             )
             .into_any_element()

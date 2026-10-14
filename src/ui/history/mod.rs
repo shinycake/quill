@@ -1,4 +1,5 @@
 //! message history: loading, rows, albums, skeletons.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp};
 use super::bubble_header::{forward_header_line, reply_header_strip, via_bot_line};

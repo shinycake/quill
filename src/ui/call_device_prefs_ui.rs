@@ -1,6 +1,7 @@
 //! The "Other" rows of Settings > Calls: "Accept calls on this device" for
 //! the current session (`toggleSessionCanAcceptCalls`) and "Open system
 //! sound preferences". Rules in `quill::call_device_prefs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_base::Disableable;

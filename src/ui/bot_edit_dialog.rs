@@ -2,6 +2,7 @@
 //! edit box, `boxes/peers/edit_peer_info_box.cpp`, bot branch): photo, name
 //! and about text, then rows that open @BotFather for the intro, the
 //! commands and the settings. Rules and requests: `quill::owned_bots`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::pressable::action_row;

@@ -1,6 +1,7 @@
 //! Drawing of the members block in the group info panel: header with the
 //! count, search and add buttons, then the rows (online first, with owner
 //! and admin pills) in a list that pages as it scrolls.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

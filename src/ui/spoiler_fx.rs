@@ -7,6 +7,7 @@
 //!   pre-rendered frames of the tile (one multi-frame image, tiled).
 //! - Text spoilers draw the specks as quads in the text's color, inside
 //!   the hidden run's rectangles.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -247,8 +248,9 @@ fn build_image_tile() -> Arc<RenderImage> {
                                 pxi.rem_euclid(side as i32) as u32,
                                 pyi.rem_euclid(side as i32) as u32,
                             );
-                            let slot = &mut alpha[(wy * side + wx) as usize];
-                            *slot = (*slot + cover * opacity).min(1.);
+                            if let Some(slot) = alpha.get_mut((wy * side + wx) as usize) {
+                                *slot = (*slot + cover * opacity).min(1.);
+                            }
                         }
                     }
                 }

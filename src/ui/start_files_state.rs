@@ -1,5 +1,6 @@
 //! Files that arrived from outside the window (the Windows "Send to" menu,
 //! `quill <file>`) and are waiting for the user to pick a chat.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};

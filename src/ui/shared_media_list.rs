@@ -2,6 +2,7 @@
 //! button (tdesktop `Info::Media` month sections and its "Show calendar"
 //! action): the box marks the days that have media and a picked day reloads
 //! the tab from there.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
@@ -21,7 +22,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return div().into_any_element();
         };
-        let state = &session.media.shared_media.tabs[tab.index()];
+        let Some(state) = session.media.shared_media.tab_at(tab) else {
+            return div().into_any_element();
+        };
         let sections = month_sections(&state.items);
         let mut list = div()
             .id(("shared-media-items", tab.index() as u64))
@@ -127,7 +130,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let session = self.session()?;
-        let day = session.media.shared_media.tabs[tab.index()].anchor_day?;
+        let day = session.media.shared_media.tab_at(tab)?.anchor_day?;
         let title =
             quill::search_filters::YearMonth::of(quill::search_filters::local_midnight(day))
                 .title();

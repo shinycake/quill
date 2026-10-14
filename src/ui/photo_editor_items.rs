@@ -1,6 +1,7 @@
 //! The photo editor's Stickers mode: pictures placed on the photo, moved
 //! and resized with the pointer, and the strip they are picked from
 //! (split from `photo_editor.rs`).
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::photo_edit::Placed;
 use super::photo_editor::{EditorMode, HANDLE_GRAB, PhotoEditor, preview_of};

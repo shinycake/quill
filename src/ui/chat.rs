@@ -1,4 +1,5 @@
 //! slow-mode helpers.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

@@ -2,6 +2,7 @@
 //! (B15). tdesktop references: `edit_todo_list_box.cpp`,
 //! `history_view_todo_list.cpp`, `history_view_poll.cpp`
 //! (`lng_polls_add_option*`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::dialogs::OptionMediaSlot;

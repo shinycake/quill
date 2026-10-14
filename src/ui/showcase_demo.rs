@@ -5,6 +5,7 @@
 //! (`docs/screenshots/fixtures/showcase/`), all text is invented, and
 //! everything is injected through the normal reducer (no live Telegram).
 //! `QUILL_DEMO_SHOWCASE=<scene>` picks the opened chat (see [`Scene`]).
+#![deny(clippy::indexing_slicing)]
 
 use super::demo::{demo_file_json, demo_media_allowlist};
 use quill::diagnostics::{DiagnosticSink, MemorySink};

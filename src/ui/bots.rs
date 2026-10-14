@@ -1,4 +1,5 @@
 //! bot panels, callbacks, game buttons, login URLs, command menus.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

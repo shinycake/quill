@@ -4,6 +4,7 @@
 //! through TDLib `getUserPrivacySettingRules` / `setUserPrivacySettingRules`
 //! (+ read-date and blocked-sender constructors); unknown rule types
 //! round-trip untouched via `PrivacyRuleDetail::extra_rules`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;

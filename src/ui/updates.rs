@@ -1,4 +1,5 @@
 //! Release checks run off the UI thread and never install silently.
+#![deny(clippy::indexing_slicing)]
 use super::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;

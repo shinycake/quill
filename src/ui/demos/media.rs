@@ -282,7 +282,9 @@ impl QuillApp {
                     {
                         session.apply(owned);
                     }
-                    let mut item = stickers[0].clone();
+                    let Some(mut item) = stickers.first().cloned() else {
+                        break;
+                    };
                     item.id = i64::from(id);
                     item.file_id = quill::ids::FileId(id);
                     item.format = if i % 2 == 0 {

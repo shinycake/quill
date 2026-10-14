@@ -3,6 +3,7 @@
 //! `boxes/star_gift_box.cpp`). Shown in the received-gifts dialog for the
 //! signed-in user's own gifts only. Upgrade and transfer spend Stars, so
 //! each opens an inline confirmation that names the price.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

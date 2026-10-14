@@ -1,4 +1,5 @@
 //! PressableDiv helper.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;

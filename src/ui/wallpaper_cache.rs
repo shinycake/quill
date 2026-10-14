@@ -14,6 +14,7 @@
 //! - Images stay under a byte budget; evicted ones are retired from the
 //!   sprite atlas through `image_budget`. Painting a ready image does no
 //!   pixel work and allocates no pixels.
+#![deny(clippy::indexing_slicing)]
 
 use super::image_budget;
 use super::wallpaper::Wallpaper;

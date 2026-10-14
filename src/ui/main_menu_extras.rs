@@ -2,6 +2,7 @@
 //! Set Emoji Status, My Stories, and the My Groups / My Channels lists
 //! (`window_main_menu_helpers.cpp` `AddMyChannelsBox`), plus the "For ..."
 //! duration menu on an emoji status (`info_profile_emoji_status_panel.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::folder_share::finish_dialog;

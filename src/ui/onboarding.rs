@@ -1,5 +1,6 @@
 //! Sign-in flow: one centered card per authorization step, shown in place
 //! of the chat layout until the account is ready.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

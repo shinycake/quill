@@ -1,6 +1,7 @@
 //! Telegram Desktop's pin and unpin boxes (`pin_messages_box.cpp`,
 //! `ToggleMessagePinned`, `UnpinMessages`): a confirmation with "Notify
 //! all members" in groups or "Also pin for {user}" in private chats.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::*;

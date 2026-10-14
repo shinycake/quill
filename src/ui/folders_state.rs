@@ -1,4 +1,5 @@
 //! Chat folders UI: the tab strip, editor, manager, share and invite boxes.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 

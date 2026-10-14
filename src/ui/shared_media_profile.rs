@@ -1,6 +1,7 @@
 //! The gallery's profile-style tabs (tdesktop `info/profile/tabs`): the
 //! `profile-media-tabs-expanded` option, thumbnail grids for Stories and
 //! Gifts, "load more", the profile's music button and the Playlist page.
+#![deny(clippy::indexing_slicing)]
 
 use super::accent;
 use super::app::QuillApp;
@@ -94,15 +95,17 @@ impl QuillApp {
         let Some(chat_id) = session.media.shared_media.chat_id else {
             return;
         };
-        let keys: Vec<(i64, i32)> = session.media.shared_media.tabs
-            [SharedMediaTab::Stories.index()]
-        .items
-        .iter()
-        .filter_map(|item| match item.action {
-            SharedMediaAction::Story(id) => Some((chat_id.0, id)),
-            _ => None,
-        })
-        .collect();
+        let Some(stories_tab) = session.media.shared_media.tab_at(SharedMediaTab::Stories) else {
+            return;
+        };
+        let keys: Vec<(i64, i32)> = stories_tab
+            .items
+            .iter()
+            .filter_map(|item| match item.action {
+                SharedMediaAction::Story(id) => Some((chat_id.0, id)),
+                _ => None,
+            })
+            .collect();
         let items = quill::story_viewer::collect_found_story_items(&keys, &session.stories.stories);
         if let Some(index) = items.iter().position(|item| item.story_id == story_id) {
             self.begin_story_viewer(items, index, cx);
@@ -137,7 +140,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return div().into_any_element();
         };
-        let state = &session.media.shared_media.tabs[tab.index()];
+        let Some(state) = session.media.shared_media.tab_at(tab) else {
+            return div().into_any_element();
+        };
         let roots = self.media_display_roots();
         let mut grid = div().flex().flex_wrap().gap_1().px_2().py_2();
         for (index, item) in state.items.iter().enumerate() {

@@ -17,6 +17,7 @@
 //! `gpui-base` (`BidiParagraph::layout_one_line`: typing-order elision, the
 //! same per-run shaping on every platform); everything else is GPUI's
 //! `StyledText`, untouched.
+#![deny(clippy::indexing_slicing)]
 
 use super::selectable_text::{BidiSource, text_runs};
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;

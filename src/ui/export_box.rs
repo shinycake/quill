@@ -2,6 +2,7 @@
 //! for one chat): media kinds, size limit, format, folder and a date range,
 //! then Export. Once the export runs, the same dialog shows its progress
 //! (`export_progress.rs`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::folder_share::finish_dialog;
@@ -231,8 +232,10 @@ impl QuillApp {
                     .map(|(i, f)| Radio::new(("chat-export-format-item", i)).label(f.label())),
             )
             .on_click(cx.listener(|this, &ix, _, cx| {
-                if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
-                    draft.settings.format = ExportFormat::ALL[ix];
+                if let Some(draft) = this.dialogs.chat_export_dialog.as_mut()
+                    && let Some(&format) = ExportFormat::ALL.get(ix)
+                {
+                    draft.settings.format = format;
                 }
                 cx.notify();
             }));

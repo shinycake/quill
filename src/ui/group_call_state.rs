@@ -1,4 +1,5 @@
 //! Video chat UI: its window, dialogs, composer, pin and push-to-talk.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::TextareaState;

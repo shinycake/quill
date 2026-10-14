@@ -1,4 +1,5 @@
 //! group call overlay rendering.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;

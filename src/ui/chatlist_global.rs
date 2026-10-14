@@ -2,6 +2,7 @@
 //! headers and the alphabetical index bar (tdesktop `ContactsBoxController`
 //! and `PeerListSectionIndex`; the ordering and bar maths are in
 //! `quill::contacts_index`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;
@@ -198,6 +199,9 @@ impl QuillApp {
             .role(gpui_kit::Role::Group)
             .aria_label("Alphabet index");
         for (i, slot) in layout.slots.iter().enumerate() {
+            let (Some(&center), Some(&scale)) = (centers.get(i), scales.get(i)) else {
+                continue;
+            };
             let on =
                 self.chat_list.global.index_current == Some(i) || visible.contains(&slot.letter);
             bar = bar.child(
@@ -205,13 +209,13 @@ impl QuillApp {
                     .absolute()
                     .right_0()
                     .w(px(BAR_WIDTH))
-                    .top(px(centers[i] - 10.))
+                    .top(px(center - 10.))
                     .h(px(20.))
                     .flex()
                     .items_center()
                     .justify_center()
                     .font_semibold()
-                    .text_size(px(11. * scales[i]))
+                    .text_size(px(11. * scale))
                     .text_color(if on { active } else { muted })
                     .child(slot.letter.to_string()),
             );
@@ -265,9 +269,9 @@ impl QuillApp {
             let layout = index::bar_layout(stops, height);
             if let Some(slot) = index::slot_at(&layout, y)
                 && self.chat_list.global.index_current != Some(slot)
+                && let Some(stop) = layout.slots.get(slot).and_then(|s| stops.get(s.source))
             {
                 self.chat_list.global.index_current = Some(slot);
-                let stop = &stops[layout.slots[slot].source];
                 let offset = index::jump_offset(stop, total, height);
                 self.chat_list
                     .global

@@ -1,6 +1,7 @@
 //! "Get Boosts via Gifts" and the prepaid giveaways on the boosts page
 //! (tdesktop `FillGetBoostsButton` and the "Prepaid giveaways" list in
 //! `info/channel_statistics/boosts/info_boosts_inner_widget.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::giveaway_create_ui::prepaid_summary;

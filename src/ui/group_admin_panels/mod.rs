@@ -1,4 +1,5 @@
 //! admin panels: management, invites, admins, boosts, sign flags.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::pressable::action_row;

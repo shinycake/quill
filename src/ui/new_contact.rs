@@ -5,6 +5,7 @@
 //!
 //! It reuses [`AddContactDialog`] with `user_id == 0`; the known-user
 //! "Add {name} to contacts" box stays in `contacts.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::dialogs::contacts::AddContactDialog;

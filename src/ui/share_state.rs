@@ -1,4 +1,5 @@
 //! Forwarding and the share box.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::TextareaState;

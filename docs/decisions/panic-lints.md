@@ -233,3 +233,64 @@ Verified: plain clippy with the new `deny` passes for `--features ui` and
 `--no-default-features` (all targets) and for the Linux and Windows core
 cross builds; `-W clippy::indexing_slicing` has zero hits in the denied
 modules; gate.sh.
+
+## Phase D, batch 4: the UI modules
+
+Branch `panic-lints-d4`, the first UI batch. 314 modules under `src/ui/` now
+start with `#![deny(clippy::indexing_slicing)]` (a directory module carries
+it in its `mod.rs`, which covers the children). Only 114 production sites were
+left in them, so the batch covers every UI module that other threads and
+platform code let it, not just the ones with hits.
+
+Sites fixed (clippy lines on macOS `--features ui,demo-capture`), 114 and no
+`#[expect]`:
+
+- Bytes from disk and the network: `audio` 18 (the Ogg Opus head is one slice
+  pattern; a bad TOC table, packet or scratch range ends the stream or makes
+  silence; `Tempo` skips a write that would fall outside its buffers),
+  `attach_bots` 1 and `audio` header sniffing (`get(..n).unwrap_or(all)`),
+  `clipboard_files` 2 (percent decoding walks with `while let Some`),
+  `web_app_ui` 1.
+- Text and history: `message_text` 7 (`rich_text_reserving` walks the runs
+  with `get` and `break`s if a range is missing), `history` 1, `history_fx` 1,
+  `conversation` 1, `composer_suggest` 1, `share_box_ui` 1, `selection_drag`
+  1, `shortcut_pack` 1, `inline_mode` 1, `inline_grid` 3, `chat_list` 1,
+  `chatlist_global` 3 (letter bar), `message_actions` 3, `media_panel` 1,
+  `paragraph_cache` 1 and `status_emoji` 1 (cache trimming clears the cache
+  when the median lookup fails instead of panicking), `shared_media*` 5
+  through the new `SharedMediaState::tab_at`.
+- Click handlers that read `TABLE[ix]` from a radio group: `account_lifecycle`,
+  `account_export_box`, `export_box`, `appearance`, `bots_extras`, `business`,
+  `call_ui`, `group_moderation`, `notification_settings`, `payments`,
+  `premium_ui`, `proxy`, `quick_action_ui`, `settings_ui`, `story_albums`,
+  `story_composer`, `groups_forum`. A stale index now does nothing.
+- Layout and paint: `anim_layer` 5, `bubble_theme` 2, `call_panel` and
+  `call_panel_backdrop` 2, `inline_video` 2, `spoiler_fx` 1, `reply_pattern`
+  2, `photo_editor` 2, `wallpaper` 1, `profile_photo_sources` 5 (gradient
+  editor), `app_theme` 1, `profile_business` 1, `statistics_fixture` 1
+  (`json_access::set`), `demos` 1.
+
+Left out on purpose: `media_viewer`, the sticker UI, the video editor,
+`image_decode` and anything else other threads own; the `composer` directory
+(its one site, `toggle_composer_silent`, belongs to the send menu work), the
+send box and send effects files, `ton_wallet_*` and `earn*`; `ui/mod.rs`
+(hotspot) and the other hotspot files (`app`, `app_demo`, `shell`,
+`screenshot_demo`, `demos/mod.rs`); `frame_profile` (feature gated) and every
+file with `cfg(target_os ...)`/`cfg(windows)`/`cfg(unix)` code
+(`app_render`, `message_media`, `message_text` (its one site is fixed, the
+directory has no deny yet), `notifications`,
+`notify_windows`, `os_menus`, `keybindings`, `touch_bar`, `native_video*`,
+`window_*`, `system_unlock`, `spellcheck_ui`, `capture_*`, ...), because their
+Linux and Windows branches do not compile here and could hold sites clippy
+never showed. Known sites still open on macOS: `sticker_mirror` 3,
+`media_viewer/navigation` 3, `media_viewer/playback` 1, `composer` 1.
+
+Behaviour: valid input is unchanged. The fallbacks only run on states that
+used to panic: an out-of-range radio index changes nothing, a short Opus
+head is "not an Opus stream", a missing row or glyph is skipped. No loop
+depends on the missing element to advance, and none feeds an offset forward.
+
+Verified: plain clippy with the new `deny` passes for `--features ui`,
+`ui,demo-capture,frame-profiler` and `--no-default-features` (all targets);
+`-W clippy::indexing_slicing` shows only the open modules above; gate.sh. Not
+checked: Linux and Windows builds of the UI.

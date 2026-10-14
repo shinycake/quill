@@ -25,6 +25,7 @@
 //! dialogs open in the window whose input asked for them
 //! (`QuillShell::sync_kit_dialogs_in`). On the session side the chat is
 //! one of `Session::window_chats`.
+#![deny(clippy::indexing_slicing)]
 
 mod body;
 mod saved;

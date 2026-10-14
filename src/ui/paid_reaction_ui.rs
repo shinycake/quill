@@ -6,6 +6,7 @@
 //! A tap on the Star chip adds one Star and shows "Star sent" with a
 //! countdown Undo. The Stars are committed when the countdown ends. The
 //! box adds the chosen amount the same way, so it gets the same Undo.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas, bg_subtle, text_muted, warning};

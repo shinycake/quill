@@ -2,6 +2,7 @@
 //! row per task with a done mark and who completed it, and an "Add a task"
 //! row. Mirrors tdesktop's `HistoryView::TodoList`
 //! (`history_view_todo_list.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_text::format_unix_date_time;

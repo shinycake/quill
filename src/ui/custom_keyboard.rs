@@ -1,4 +1,5 @@
 //! custom reply keyboards.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::request_share::RequestShareKind;

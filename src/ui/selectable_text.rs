@@ -4,6 +4,7 @@
 //! takes plain text: this element lays out a styled `StyledText`
 //! (highlights for bold, links, spoilers…) and keeps the inline click
 //! targets (links, spoilers) a plain `InteractiveText` had.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
 use gpui_kit::base::{

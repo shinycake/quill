@@ -4,6 +4,7 @@
 //! section icons to jump between them, and a search field. Set contents load
 //! lazily as their sections scroll into view; cells show static images and
 //! only the hovered sticker animates.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
@@ -616,18 +617,17 @@ impl QuillApp {
                 ReactionChoice::Emoji(emoji) => wanted(&emoji)
                     .then(|| PanelCell::Emoji(super::reactions::emoji_presentation(&emoji).into())),
                 ReactionChoice::CustomEmoji(id) => {
-                    let ix = session
+                    let (ix, sticker) = session
                         .stickers
                         .emoji
                         .custom_emoji_stickers
                         .iter()
-                        .position(|item| item.custom_emoji_id == Some(id))?;
-                    wanted(&session.stickers.emoji.custom_emoji_stickers[ix].emoji).then_some(
-                        PanelCell::Custom {
-                            source: StickerSource::CustomEmoji,
-                            ix,
-                        },
-                    )
+                        .enumerate()
+                        .find(|(_, item)| item.custom_emoji_id == Some(id))?;
+                    wanted(&sticker.emoji).then_some(PanelCell::Custom {
+                        source: StickerSource::CustomEmoji,
+                        ix,
+                    })
                 }
             })
             .collect();

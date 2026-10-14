@@ -146,7 +146,10 @@ impl QuillApp {
                                     .label(name.clone())
                             }))
                             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                                let user_id = candidates[ix].0;
+                                let Some(user_id) = candidates.get(ix).map(|candidate| candidate.0)
+                                else {
+                                    return;
+                                };
                                 if let Some(dialog) = this.admin.admin_dialog.as_mut()
                                     && let AdminDialogKind::Promote { selected_user, .. } =
                                         &mut dialog.kind

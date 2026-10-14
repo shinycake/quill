@@ -3,6 +3,7 @@
 //!
 //! Each bot ships an SVG icon (`default_icon`); the driver downloads it
 //! and the entry draws it from the file, falling back to the bot glyph.
+#![deny(clippy::indexing_slicing)]
 
 use quill::locks::LockExt;
 use quill::telegram::envelope::{AttachChatKind, AttachmentMenuBot};
@@ -43,7 +44,7 @@ pub(super) fn bots_for_chat(
 
 /// Whether `bytes` look like an SVG document.
 pub(super) fn looks_like_svg(bytes: &[u8]) -> bool {
-    let head = &bytes[..bytes.len().min(512)];
+    let head = bytes.get(..512).unwrap_or(bytes);
     String::from_utf8_lossy(head).contains("<svg")
 }
 
