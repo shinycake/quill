@@ -1,5 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre-linux 0.3.8 (Apache-2.0):
-// the refresh timer parks while the window is idle. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
+// the refresh timer parks while the window is idle, and a bad
+// GPUI_X11_SCALE_FACTOR is ignored with a warning instead of panicking.
+// See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -2704,18 +2706,24 @@ fn get_scale_factor(
                 if valid_scale_factor(scale) {
                     DpiMode::Scale(scale)
                 } else {
-                    panic!(
-                        "`{}` must be a positive normal number or `randr`. Got `{}`",
-                        GPUI_X11_SCALE_FACTOR_ENV, var
+                    // Quill: ignore the value instead of upstream's panic.
+                    log::warn!(
+                        "ignoring `{}`: it must be a positive normal number or `randr`. Got `{}`",
+                        GPUI_X11_SCALE_FACTOR_ENV,
+                        var
                     );
+                    DpiMode::NotSet
                 }
             } else if var.is_empty() {
                 DpiMode::NotSet
             } else {
-                panic!(
-                    "`{}` must be a positive number or `randr`. Got `{}`",
-                    GPUI_X11_SCALE_FACTOR_ENV, var
+                // Quill: ignore the value instead of upstream's panic.
+                log::warn!(
+                    "ignoring `{}`: it must be a positive number or `randr`. Got `{}`",
+                    GPUI_X11_SCALE_FACTOR_ENV,
+                    var
                 );
+                DpiMode::NotSet
             }
         })
         .unwrap_or(DpiMode::NotSet);

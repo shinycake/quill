@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.8 (Apache-2.0):
+// a failed display list query returns no displays instead of panicking.
+// See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 use crate::ns_string;
 use anyhow::Result;
 use cocoa::{
@@ -56,12 +59,18 @@ impl MacDisplay {
                 &mut display_count,
             );
 
-            if result == 0 {
-                displays.set_len(display_count as usize);
-                displays.into_iter().map(MacDisplay)
+            // Quill: no displays instead of upstream's panic when the call fails (a display
+            // reconfiguration can race it, for example on sleep, wake or unplug).
+            let count = if result == 0 {
+                (display_count as usize).min(displays.capacity())
             } else {
-                panic!("Failed to get active display list. Result: {result}");
-            }
+                log::error!("Failed to get active display list. Result: {result}");
+                0
+            };
+            // SAFETY: CGGetActiveDisplayList wrote `display_count` ids into the buffer on
+            // success, and `count` never exceeds the capacity it was given.
+            displays.set_len(count);
+            displays.into_iter().map(MacDisplay)
         }
     }
 }

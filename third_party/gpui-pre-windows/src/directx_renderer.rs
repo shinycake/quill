@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// drawing returns an error instead of panicking when device-loss recovery
+// failed. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -202,15 +205,20 @@ impl DirectXRenderer {
     }
 
     fn pre_draw(&self, clear_color: &[f32; 4]) -> Result<()> {
-        let resources = self.resources.as_ref().expect("resources missing");
+        // Quill: errors instead of upstream's `expect`/`unwrap`; a renderer whose device-loss
+        // recovery failed has no resources or devices.
+        let resources = self.resources.as_ref().context("resources missing")?;
         let device_context = &self
             .devices
             .as_ref()
-            .expect("devices missing")
+            .context("devices missing")?
             .device_context;
         update_buffer(
             device_context,
-            self.globals.global_params_buffer.as_ref().unwrap(),
+            self.globals
+                .global_params_buffer
+                .as_ref()
+                .context("missing global params buffer")?,
             &[GlobalParams {
                 gamma_ratios: self.font_info.gamma_ratios,
                 viewport_size: [resources.viewport.Width, resources.viewport.Height],
@@ -243,13 +251,10 @@ impl DirectXRenderer {
 
     #[inline]
     fn present(&mut self) -> Result<()> {
-        let result = unsafe {
-            self.resources
-                .as_ref()
-                .expect("resources missing")
-                .swap_chain
-                .Present(0, DXGI_PRESENT(0))
-        };
+        // Quill: an error instead of upstream's `expect` (see `pre_draw`).
+        let resources = self.resources.as_ref().context("resources missing")?;
+        // SAFETY: the swap chain belongs to this renderer's live resources.
+        let result = unsafe { resources.swap_chain.Present(0, DXGI_PRESENT(0)) };
         result.ok().context("Presenting swap chain failed")
     }
 

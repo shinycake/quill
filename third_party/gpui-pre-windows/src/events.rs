@@ -1,5 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
-// windows stop receiving vsync frames while idle. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// windows stop receiving vsync frames while idle, and a renderer that can't
+// recover from a lost device closes its window instead of panicking.
+// See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
 
 use anyhow::Context as _;
@@ -22,6 +24,13 @@ use windows::{
 use crate::*;
 use gpui::*;
 
+/// Quill: waits before each extra round of renderer recovery after a device loss. Short, since
+/// this runs on the window's thread while the vsync thread waits for it.
+const RENDERER_RECOVERY_BACKOFF: [std::time::Duration; 2] = [
+    std::time::Duration::from_millis(200),
+    std::time::Duration::from_millis(500),
+];
+
 pub(crate) const WM_GPUI_CURSOR_STYLE_CHANGED: u32 = WM_USER + 1;
 pub(crate) const WM_GPUI_CLOSE_ONE_WINDOW: u32 = WM_USER + 2;
 pub(crate) const WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD: u32 = WM_USER + 3;
@@ -31,6 +40,8 @@ pub(crate) const WM_GPUI_KEYBOARD_LAYOUT_CHANGED: u32 = WM_USER + 6;
 pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
+/// Quill: destroy this window because its GPU device is gone and could not be recreated.
+pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: u32 = WM_USER + 10;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
@@ -163,7 +174,8 @@ impl WindowsWindowInner {
             WM_SHOWWINDOW => self.handle_window_visibility_changed(handle, wparam),
             WM_GPUI_CURSOR_STYLE_CHANGED => self.handle_cursor_changed(lparam),
             WM_GPUI_FORCE_UPDATE_WINDOW => self.draw_window(handle, true),
-            WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
+            WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(handle, lparam),
+            WM_GPUI_DESTROY_AFTER_DEVICE_LOST => self.handle_destroy_after_device_lost(handle),
             DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(wparam),
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
             _ => None,
@@ -1309,22 +1321,51 @@ impl WindowsWindowInner {
             .detach();
     }
 
-    fn handle_device_lost(&self, lparam: LPARAM) -> Option<isize> {
+    fn handle_device_lost(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
         let devices = lparam.0 as *const DirectXDevices;
+        // SAFETY: the vsync thread sends this message with `SendMessageW` and a pointer to its
+        // own `DirectXDevices`, which it keeps alive and unchanged until the call returns.
         let devices = unsafe { &*devices };
-        if let Err(err) = self
-            .state
-            .renderer
-            .borrow_mut()
-            .handle_device_lost(&devices)
-        {
-            panic!("Device lost: {err}");
+        // Quill: retry with backoff, then close the window instead of panicking (upstream
+        // panics here). Each renderer borrow ends within its statement.
+        let mut result = self.state.renderer.borrow_mut().handle_device_lost(devices);
+        for delay in RENDERER_RECOVERY_BACKOFF {
+            let Err(err) = &result else {
+                break;
+            };
+            log::warn!("DirectX renderer recovery failed, retrying in {delay:?}: {err:#}");
+            std::thread::sleep(delay);
+            result = self.state.renderer.borrow_mut().handle_device_lost(devices);
+        }
+        if let Err(err) = result {
+            log::error!(
+                "DirectX renderer could not recover from a lost device, closing the window: {err:#}"
+            );
+            // SAFETY: PostMessageW only queues the message for this window's own thread.
+            unsafe {
+                PostMessageW(
+                    Some(handle),
+                    WM_GPUI_DESTROY_AFTER_DEVICE_LOST,
+                    WPARAM::default(),
+                    LPARAM::default(),
+                )
+                .log_err();
+            }
+            return Some(0);
         }
         // Make sure the first `draw_window` after recovery (whether it comes
         // from the forced WM_GPUI_FORCE_UPDATE_WINDOW or a stray WM_PAINT in
         // between) is treated as a forced render so it both clears
         // `skip_draws` and bypasses the view cache.
         self.state.force_render_pending.set(true);
+        Some(0)
+    }
+
+    /// Quill: the window's GPU device is gone for good (see `handle_device_lost` and the vsync
+    /// thread). Destroying it runs the normal close path (`WM_DESTROY`).
+    fn handle_destroy_after_device_lost(&self, handle: HWND) -> Option<isize> {
+        // SAFETY: `handle` is this window, and this runs on the thread that created it.
+        unsafe { DestroyWindow(handle) }.log_err();
         Some(0)
     }
 

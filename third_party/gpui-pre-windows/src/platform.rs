@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
-// the vsync thread skips idle windows and sleeps while all are idle.
+// the vsync thread skips idle windows and sleeps while all are idle; a lost
+// GPU device or a failed DirectX start no longer panics.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
@@ -59,6 +60,9 @@ pub struct WindowsPlatform {
     raw_window_handles: Arc<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     /// The windowing mode to start in, applied when `run` starts. Windowed when unset.
     initial_windowing: RefCell<Option<WindowingRequest>>,
+    /// Quill: why DirectX could not start at launch, reported by `open_window`
+    /// so the app's startup failure path can show it.
+    gpu_init_error: RefCell<Option<String>>,
     /// Set to stop the current `VSyncProvider` thread, which runs while windowed.
     vsync_stop: RefCell<Option<Arc<AtomicBool>>>,
     // The below members will never change throughout the entire lifecycle of the app.
@@ -270,6 +274,7 @@ impl WindowsPlatform {
             handle,
             raw_window_handles,
             initial_windowing: RefCell::new(None),
+            gpu_init_error: RefCell::new(None),
             vsync_stop: RefCell::new(None),
             headless,
             icon,
@@ -389,10 +394,10 @@ impl WindowsPlatform {
 
     /// Connects in the initial windowing mode, before the app finishes launching.
     ///
-    /// # Panics
+    /// Starts headless if this process can't show windows, for example when started over SSH.
     ///
-    /// Panics if DirectX can't be initialized, since the app can't start. Starts headless if this
-    /// process can't show windows, for example when started over SSH.
+    /// Quill: if DirectX can't be initialized, stays headless and keeps the error, which
+    /// `open_window` returns, instead of panicking (upstream panics here).
     fn connect_initially(&self) {
         let request = self
             .initial_windowing
@@ -406,8 +411,10 @@ impl WindowsPlatform {
             log::info!("starting headless: {error:#}");
             return;
         }
-        self.attach_gpu()
-            .unwrap_or_else(|error| panic!("failed to initialize DirectX: {error:#}"));
+        if let Err(error) = self.attach_gpu() {
+            log::error!("failed to initialize DirectX: {error:#}");
+            *self.gpu_init_error.borrow_mut() = Some(format!("{error:#}"));
+        }
     }
 
     /// Creates the DirectX devices that windows draw with, and starts vsync.
@@ -478,14 +485,21 @@ impl WindowsPlatform {
                     if check_device_lost(&directx_device.device)
                         || invalidate_devices.fetch_and(false, Ordering::Acquire)
                     {
-                        if let Err(err) = handle_gpu_device_lost(
+                        // Quill: retry with backoff, then close the windows and stop
+                        // vsync instead of panicking (upstream panics here).
+                        if let Err(err) = recover_from_gpu_device_lost(
                             &mut directx_device,
                             platform_window.as_raw(),
                             validation_number,
                             &all_windows,
                             &text_system,
                         ) {
-                            panic!("Device lost: {err}");
+                            log::error!(
+                                "DirectX device lost and could not be recreated, closing all \
+                                 windows: {err:#}"
+                            );
+                            destroy_all_windows_after_device_lost(&all_windows);
+                            break;
                         }
                     }
                     let Some(all_windows) = all_windows.upgrade() else {
@@ -744,15 +758,11 @@ impl Platform for WindowsPlatform {
 
     fn hide(&self) {}
 
-    // todo(windows)
-    fn hide_other_apps(&self) {
-        unimplemented!()
-    }
+    // Quill: Windows has no "hide others"; a no-op instead of upstream's `unimplemented!()`.
+    fn hide_other_apps(&self) {}
 
-    // todo(windows)
-    fn unhide_other_apps(&self) {
-        unimplemented!()
-    }
+    // Quill: see `hide_other_apps`.
+    fn unhide_other_apps(&self) {}
 
     fn displays(&self) -> Vec<Rc<dyn PlatformDisplay>> {
         WindowsDisplay::displays()
@@ -786,6 +796,10 @@ impl Platform for WindowsPlatform {
         options: WindowParams,
     ) -> Result<Box<dyn PlatformWindow>> {
         if !self.is_windowed() {
+            // Quill: say why when DirectX failed to start at launch.
+            if let Some(error) = self.gpu_init_error.borrow().as_ref() {
+                return Err(anyhow!("failed to initialize DirectX: {error}"));
+            }
             return Err(anyhow!("cannot open windows while headless"));
         }
         let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
@@ -1704,6 +1718,72 @@ fn is_window_station_visible() -> bool {
         )
     };
     result.is_ok() && flags.dwFlags & WSF_VISIBLE as u32 != 0
+}
+
+/// Quill: waits before each extra round of device recreation after a device loss. Each round
+/// already makes several quick attempts (`try_to_recover_from_device_lost`); a driver update
+/// or reset can take longer than those, so later rounds wait longer.
+const DEVICE_LOST_RETRY_BACKOFF: [std::time::Duration; 3] = [
+    std::time::Duration::from_millis(500),
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(5),
+];
+
+/// Quill: `handle_gpu_device_lost`, retried with `DEVICE_LOST_RETRY_BACKOFF`. Returns the last
+/// error when every round failed.
+fn recover_from_gpu_device_lost(
+    directx_devices: &mut DirectXDevices,
+    platform_window: HWND,
+    validation_number: usize,
+    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    text_system: &std::sync::Weak<DirectWriteTextSystem>,
+) -> Result<()> {
+    let mut result = handle_gpu_device_lost(
+        directx_devices,
+        platform_window,
+        validation_number,
+        all_windows,
+        text_system,
+    );
+    for delay in DEVICE_LOST_RETRY_BACKOFF {
+        let Err(err) = &result else {
+            break;
+        };
+        log::warn!("DirectX device recovery failed, retrying in {delay:?}: {err:#}");
+        std::thread::sleep(delay);
+        result = handle_gpu_device_lost(
+            directx_devices,
+            platform_window,
+            validation_number,
+            all_windows,
+            text_system,
+        );
+    }
+    result
+}
+
+/// Quill: asks every window to destroy itself once the GPU device is gone for good. Posted, not
+/// sent, so each window handles it on its own thread outside any draw, and `DestroyWindow`
+/// (not `WM_CLOSE`) so an app that hides windows on close still releases them.
+fn destroy_all_windows_after_device_lost(
+    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+) {
+    let Some(all_windows) = all_windows.upgrade() else {
+        return;
+    };
+    for window in all_windows.read().iter() {
+        // SAFETY: PostMessageW only queues the message; a handle that was destroyed in the
+        // meantime makes it fail, which is logged.
+        unsafe {
+            PostMessageW(
+                Some(window.as_raw()),
+                WM_GPUI_DESTROY_AFTER_DEVICE_LOST,
+                WPARAM::default(),
+                LPARAM::default(),
+            )
+            .log_err();
+        }
+    }
 }
 
 fn handle_gpu_device_lost(

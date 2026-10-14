@@ -763,8 +763,6 @@ impl Element for SelectableRichText {
     }
 }
 
-/// The fallback text of the custom emoji whose placeholder lies within one
-/// of the selected `ranges`, with the placeholder's byte offset.
 /// A per-element cell kept across frames. `SelectableRichText::id` is always
 /// `Some`, so GPUI passes a global id; without one the cell lives one frame.
 fn retained_cell<T: Default + 'static>(
@@ -780,6 +778,8 @@ fn retained_cell<T: Default + 'static>(
     })
 }
 
+/// The fallback text of the custom emoji whose placeholder lies within one
+/// of the selected `ranges`, with the placeholder's byte offset.
 fn selected_fallbacks(
     emoji: &[InlineEmoji],
     ranges: &[Option<Range<usize>>],

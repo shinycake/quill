@@ -39,3 +39,13 @@ draws on demand).
 Each changed source file starts with a comment saying so. The changes are
 licensed under Apache-2.0, like the rest of the crate. Background and what
 still needs a live check: `docs/decisions/codex-idle-frames-x11-windows.md`.
+
+The Quill project also changed it in 2026 so a bad `GPUI_X11_SCALE_FACTOR`
+no longer crashes the app (step 7 of `docs/decisions/no-crash-audit.md`):
+
+- `src/linux/x11/client.rs`: `get_scale_factor` logs a warning and ignores a
+  value that is neither `randr` nor a positive normal number, falling back to
+  the Xft.dpi / RandR detection, instead of panicking.
+
+Type-checked with `cargo check --target x86_64-unknown-linux-gnu` on macOS;
+not built or run on Linux. See `docs/decisions/gpui-fork-panics.md`.
