@@ -97,3 +97,7 @@ pub fn delete_sticker_set(extra: RequestId, name: &str) -> String {
     })
     .to_string()
 }
+
+#[cfg(test)]
+#[path = "tests_sticker_creator.rs"]
+mod tests;
