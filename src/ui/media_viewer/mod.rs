@@ -41,6 +41,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 mod actions;
+mod caption;
 mod navigation;
 mod overlay;
 mod overlay_controls;
@@ -85,6 +86,8 @@ pub(super) struct ViewerExtra {
     pub share_at: Option<(ChatId, MessageId, i32)>,
     /// Turns of videos rotated in this run, by `(chat, message)`.
     pub rotations: HashMap<(i64, i64), u8>,
+    /// The caption's collapsed / expanded state.
+    pub(in crate::ui) caption: caption::ViewerCaption,
 }
 
 /// Screenshot-capture runs render a single frame: skip fades there so the

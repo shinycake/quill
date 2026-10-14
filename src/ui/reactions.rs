@@ -118,6 +118,9 @@ impl QuillApp {
             cx.notify();
             return true;
         }
+        if self.collapse_viewer_caption_on_escape(cx) {
+            return true;
+        }
         self.close_media_viewer(cx);
         true
     }
