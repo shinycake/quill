@@ -473,7 +473,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Caption-too-long validation on sends and caption edits (runtime `message_caption_length_max`, live counter, refusal names the limit) <!-- parity:media-caption-length-limit -->
 - [x] Video viewer: Copy Frame, Share at current time, quality picker, rotate video <!-- parity:viewer-video-extras -->
 - [x] Caption overlay in the viewer with formatted text and links <!-- parity:viewer-caption-entities -->
-- [ ] Long captions in the viewer collapse to a quarter of the window with Show more / Show less <!-- parity:viewer-caption-expand -->
+- [x] Long captions in the viewer collapse to a quarter of the window with Show more / Show less <!-- parity:viewer-caption-expand -->
 - [x] Viewer header shows the sender (opens profile) and send time <!-- parity:viewer-sender-header -->
 - [x] "Disappears in" countdown on timed photos and videos <!-- parity:viewer-ttl-countdown -->
 - [x] "View all photos / files" link to shared media <!-- parity:viewer-view-all -->
