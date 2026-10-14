@@ -10,6 +10,7 @@
 //! The app computes a [`model::Bar`] whenever it or the composer changes,
 //! and the AppKit side mirrors it. Touches come back as [`model::Command`]s
 //! through a channel and run here on the app.
+#![deny(clippy::indexing_slicing)]
 
 pub(crate) mod model;
 

@@ -7,6 +7,7 @@
 //! under it, and a note covers the composer. Frames come from the frame
 //! clock. Letting go on a ready pull preloads and opens the next unread
 //! channel (or forum topic), which slides in from the bottom.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::switch::Switch;

@@ -14,6 +14,7 @@
 //!   the word, undoably), then "Add to Dictionary" and "Ignore"; on a word
 //!   the user added, "Remove from Dictionary". Cut / Copy / Paste /
 //!   Select All follow.
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::Arc;
 use std::time::Duration;

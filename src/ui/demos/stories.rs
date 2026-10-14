@@ -1,4 +1,5 @@
 //! Screenshot demos: stories.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::groups::{apply_ready_channels, apply_ready_channels_admin};

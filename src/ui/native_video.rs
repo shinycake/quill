@@ -12,6 +12,7 @@
 //!
 //! The UI pulls a frame each animation frame while playing
 //! ([`NativeVideo::frame`]).
+#![deny(clippy::indexing_slicing)]
 
 use std::path::Path;
 use std::sync::Arc;

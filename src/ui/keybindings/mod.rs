@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 use super::actions::{
     ArchiveOpenChat, AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
     ComposerEditLink, ComposerPastePlain, DeleteSelection, FirstChat, FocusComposer, FocusSidebar,
