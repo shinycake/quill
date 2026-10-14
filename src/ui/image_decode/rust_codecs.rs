@@ -83,11 +83,17 @@ pub(super) fn to_srgb(pixels: &mut [u8], layout: moxcms::Layout, icc: &[u8]) {
     }
 }
 
+/// The most memory jxl-oxide may use for one picture.
+const JXL_MEMORY_LIMIT: usize = 1024 * 1024 * 1024;
+
 /// JPEG XL through jxl-oxide, rendered straight to sRGB (it applies the
 /// file's orientation itself).
 pub(super) fn decode_jxl(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage, DecodeError> {
     contained(|| {
+        // jxl-oxide works in f32 planes: cap its memory so a huge file fails
+        // instead of aborting on allocation.
         let mut image = jxl_oxide::JxlImage::builder()
+            .alloc_tracker(jxl_oxide::AllocTracker::with_limit(JXL_MEMORY_LIMIT))
             .read(Cursor::new(bytes))
             .map_err(failed)?;
         area_allowed(image.width(), image.height())?;

@@ -482,6 +482,7 @@ mod tests {
             MessageContent::Document(crate::telegram::envelope::DocumentContent {
                 thumbnail: None,
                 minithumbnail: None,
+                size: 0,
                 file_name: "notes.txt".to_string(),
                 mime_type: "text/plain".to_string(),
                 caption: String::new(),

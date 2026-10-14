@@ -504,6 +504,13 @@ impl Session {
                         push(AUTO_DOWNLOAD_PHOTO, size.file_id, &mut ids);
                     }
                 }
+                // A picture file that shows as a photo loads like one.
+                MessageContent::Document(doc)
+                    if crate::media_viewer::shows_as_photo(doc)
+                        && doc.size <= crate::media_viewer::PICTURE_FILE_AUTO_DOWNLOAD_MAX =>
+                {
+                    push(AUTO_DOWNLOAD_PHOTO, doc.file_id, &mut ids);
+                }
                 MessageContent::Document(doc) => {
                     push(AUTO_DOWNLOAD_FILE, doc.file_id, &mut ids);
                 }

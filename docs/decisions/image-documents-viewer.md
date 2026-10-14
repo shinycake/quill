@@ -13,7 +13,7 @@ HDR viewer (slice B) builds on the decoder added here.
   Clicking the picture cancels, opens or downloads.
 - Opening a document goes through `ResolveDocument`. A file opens in the
   media viewer when `CheckImageOpenInApp` passes: it is smaller than
-  `kReadBytesLimit` (125 MB), named or typed as an image
+  `kReadBytesLimit` (64 MB, lib_ui `ui/image/image_prepare.h`), named or typed as an image
   (`Core::FileIsImage`, `DetectNameType`'s extension list, or the `image/`
   MIME type when the file has no name), and Qt can read it. The picture
   area is capped at `kReadMaxArea` (12032 × 9024).
@@ -75,9 +75,6 @@ HDR viewer (slice B) builds on the decoder added here.
 - In the chat, tdesktop shows a picture sent as a file as a file row with
   its thumbnail, not as a photo bubble, and so does Quill. The full photo
   experience (zoom, rotate, navigation, copy, save) is in the viewer.
-- `kReadBytesLimit` and `kReadMaxArea` come from lib_ui, which is not
-  checked out next to the tdesktop clone. The values are the published
-  ones (125 MB, 12032 × 9024).
 - The upload rule checks the file extension, where tdesktop checks the
   MIME type it detected.
 - HEIC/AVIF on Windows need Microsoft's HEIF and AV1 codec extensions

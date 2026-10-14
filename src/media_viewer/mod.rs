@@ -32,7 +32,10 @@ pub use controls::{
     ViewerKeyAction, ViewerKeyMods, ViewerVideoStart, controls_hide_wait_ms, controls_should_hide,
     decide_viewer_video_start, seek_target_secs, viewer_delete_gate, viewer_key_action,
 };
-pub use files::{collect_file_items, file_viewer_item, is_image_file, opens_as_picture};
+pub use files::{
+    PICTURE_FILE_AUTO_DOWNLOAD_MAX, READ_BYTES_LIMIT, collect_file_items, file_viewer_item,
+    is_image_file, opens_as_picture, picture_format_label, shows_as_photo,
+};
 pub use items::{
     collect_media_items, poll_option_viewer_item, profile_photo_items, timed_viewer_item,
 };

@@ -317,12 +317,13 @@ pub(in crate::ui) fn session_history_row(
     // free of the sender name, a caption above/below, badges or reactions.
     let corners = {
         let media_led = header.is_none()
-            && matches!(
-                effective_content(&message.content, message.ephemeral.as_ref()),
-                MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_)
-            );
+            && leads_with_media(effective_content(
+                &message.content,
+                message.ephemeral.as_ref(),
+            ));
         let has_caption = match &message.content {
             MessageContent::Photo(photo) => !photo.caption.is_empty(),
+            MessageContent::Document(doc) => !doc.caption.is_empty(),
             MessageContent::Video(video) => !video.caption.is_empty(),
             MessageContent::Animation(animation) => !animation.caption.is_empty(),
             _ => false,
@@ -385,6 +386,9 @@ pub(in crate::ui) fn session_history_row(
                 caption_w,
                 cx,
             ))
+        }
+        MessageContent::Document(doc) if quill::media_viewer::shows_as_photo(doc) => {
+            Some(picture_file_attachment(message.id.0 as u64, doc, files, downloading, media_roots, (message.chat_id, message.id), (frame_w, frame_h), corners, cx))
         }
         MessageContent::Document(doc) => Some(document_chip(
             message.id.0 as u64,
@@ -826,10 +830,10 @@ pub(in crate::ui) fn session_history_row(
     // picture sits on a thin inset and a caption gets its own padding.
     let media_led = header.is_none()
         && extra_media.is_some()
-        && matches!(
-            effective_content(&message.content, message.ephemeral.as_ref()),
-            MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_)
-        );
+        && leads_with_media(effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        ));
     // Media with nothing under it shows its time on the picture.
     let footer_overlay = media_led && caption_below_el.is_none() && reserve_footer;
     let caption_below_el = caption_below_el.map(|caption| {

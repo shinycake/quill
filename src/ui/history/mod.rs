@@ -7,12 +7,12 @@ use super::message_checklist::checklist_body;
 use super::message_games::game_card;
 use super::message_media::{
     ContactCardState, action_card, animation_attachment, audio_row, call_card, contact_row,
-    dice_row, document_chip, location_row, photo_attachment, sticker_attachment, venue_row,
-    video_attachment, video_note_attachment, voice_note_row,
+    dice_row, document_chip, location_row, photo_attachment, picture_file_attachment,
+    sticker_attachment, venue_row, video_attachment, video_note_attachment, voice_note_row,
 };
 use super::message_media::{
-    DocOrigin, MediaCorners, file_is_downloading, media_content_width, photo_display_path,
-    single_media_frame, single_media_width, spoiler_cover,
+    DocOrigin, MediaCorners, file_is_downloading, leads_with_media, media_content_width,
+    photo_display_path, single_media_frame, single_media_width, spoiler_cover,
 };
 use super::message_payments::{
     inline_keyboard, invoice_body, payment_received_row, payment_success_row,

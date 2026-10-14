@@ -105,6 +105,8 @@ pub struct DocumentContent {
     pub thumbnail: Option<AlbumCoverThumb>,
     /// `document.minithumbnail`: blurred stand-in until the thumbnail lands.
     pub minithumbnail: Option<MiniThumbnail>,
+    /// The file's size in bytes when the message arrived (0 if unknown).
+    pub size: i64,
 }
 
 /// `minithumbnail` (TDLib 1.8.67): JPEG bytes, usually ≤ 40px.
@@ -221,9 +223,11 @@ pub(crate) fn parse_message_photo(value: &Value) -> (MessageContent, Vec<ParsedF
 pub(crate) fn parse_message_document(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
     let document = value.get("document");
     let mut files = Vec::new();
+    let mut size = 0;
     let file_id = match document.and_then(|d| parse_file(d.get("document")).ok()) {
         Some(file) => {
             let id = file.id;
+            size = file.display_size();
             files.push(file);
             id
         }
@@ -268,6 +272,7 @@ pub(crate) fn parse_message_document(value: &Value) -> (MessageContent, Vec<Pars
             caption,
             caption_entities,
             file_id,
+            size,
         }),
         files,
     )

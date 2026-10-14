@@ -17,7 +17,7 @@ use windows::Win32::Graphics::Imaging::{
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::core::{Interface, w};
 
@@ -25,11 +25,34 @@ fn failed(err: windows::core::Error) -> DecodeError {
     DecodeError::Failed(err.message())
 }
 
+/// One `CoInitializeEx` on this thread, balanced by `CoUninitialize` when it
+/// succeeded (`S_OK` or `S_FALSE`). A thread already in another apartment
+/// (`RPC_E_CHANGED_MODE`) keeps it, and WIC works there too.
+struct ComApartment(bool);
+
+impl ComApartment {
+    fn join() -> Self {
+        // SAFETY: joining this worker thread to the multithreaded apartment.
+        Self(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok())
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: balances the successful `CoInitializeEx` above, on the
+            // same thread, after every WIC interface of the call is gone.
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
 pub(super) fn decode(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage, DecodeError> {
-    // SAFETY: joining this worker thread to the multithreaded apartment; a
-    // thread already in an apartment keeps it (the call then fails
-    // harmlessly and WIC works in either).
-    let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let _apartment = ComApartment::join();
+    decode_in_apartment(bytes, size)
+}
+
+fn decode_in_apartment(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage, DecodeError> {
     // SAFETY: creating the in-process WIC factory.
     let factory: IWICImagingFactory =
         unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
@@ -101,11 +124,19 @@ unsafe fn to_srgb(
     frame: &IWICBitmapFrameDecode,
     source: &IWICBitmapSource,
 ) -> Option<IWICBitmapSource> {
-    // SAFETY: the caller's interfaces are live; the count query passes an
-    // empty slice, the second call a slice of that many created contexts.
+    // SAFETY: the caller's interfaces are live; the count query passes a
+    // null array with a count of 0 (the documented way to ask), the second
+    // call a slice of that many created contexts.
     unsafe {
         let mut count = 0_u32;
-        frame.GetColorContexts(&mut [], &mut count).ok()?;
+        (Interface::vtable(frame).GetColorContexts)(
+            Interface::as_raw(frame),
+            0,
+            std::ptr::null_mut(),
+            &mut count,
+        )
+        .ok()
+        .ok()?;
         if count == 0 {
             return None;
         }

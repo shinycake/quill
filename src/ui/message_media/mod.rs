@@ -31,6 +31,7 @@ mod fixtures;
 mod layout;
 mod location;
 mod paid_media;
+mod picture_file;
 mod sticker;
 mod story_card;
 mod surfaces;
@@ -46,10 +47,11 @@ pub(super) use document::{
     inline_link,
 };
 pub(super) use layout::{
-    MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, media_content_width, media_disc,
-    media_frame_for, single_media_frame, single_media_width,
+    MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, leads_with_media,
+    media_content_width, media_disc, media_frame_for, single_media_frame, single_media_width,
 };
 pub(super) use location::{location_row, venue_row};
+pub(super) use picture_file::picture_file_attachment;
 pub(super) use sticker::{sticker_attachment, sticker_box};
 pub(super) use story_card::{expired_mention_text, story_mention_extras};
 pub(super) use surfaces::{spoiler_cover, spoiler_surface};

@@ -42,8 +42,9 @@ mod wic;
 mod tests;
 
 /// tdesktop `Images::kReadBytesLimit` (lib_ui `ui/image/image_prepare.h`):
-/// bigger image files open in another app instead of the viewer.
-pub(crate) const READ_BYTES_LIMIT: i64 = 125 * 1024 * 1024;
+/// image files this big or bigger open in another app instead of the
+/// viewer.
+pub(crate) const READ_BYTES_LIMIT: i64 = quill::media_viewer::READ_BYTES_LIMIT;
 
 /// tdesktop `Images::kReadMaxArea`: pictures with more pixels than this are
 /// not decoded at all.
@@ -85,8 +86,8 @@ impl DecodeSize {
         (side(width), side(height))
     }
 
-    /// The longest side of the decoded picture (what ImageIO, WIC and
-    /// libheif scale to).
+    /// The longest side of the decoded picture (what ImageIO scales to).
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn long_edge(self, size: (u32, u32)) -> u32 {
         let (width, height) = self.fit(size);
         width.max(height)
@@ -218,10 +219,10 @@ pub(crate) fn decode_image(
         // variants it rejects (CMYK JPEG, 16-bit TIFF layouts…).
         Sniffed::Raster(_) | Sniffed::Svg => rust().or_else(|err| match err {
             DecodeError::TooLarge => Err(err),
-            _ => platform(bytes, size).map_err(|_| err),
+            _ => contained(|| platform(bytes, size)).map_err(|_| err),
         }),
-        Sniffed::JpegXl => platform(bytes, size).or_else(|_| rust()),
-        Sniffed::Heif | Sniffed::Avif | Sniffed::Other => platform(bytes, size),
+        Sniffed::JpegXl => contained(|| platform(bytes, size)).or_else(|_| rust()),
+        Sniffed::Heif | Sniffed::Avif | Sniffed::Other => contained(|| platform(bytes, size)),
     }
 }
 
@@ -248,10 +249,12 @@ fn platform(bytes: &[u8], size: DecodeSize) -> Result<image::RgbaImage, DecodeEr
 
 /// Read a file and decode it, refusing files over [`READ_BYTES_LIMIT`].
 pub(crate) fn decode_file(path: &Path, size: DecodeSize) -> Result<image::RgbaImage, DecodeError> {
-    let len = std::fs::metadata(path)
-        .map_err(|err| DecodeError::Failed(err.to_string()))?
-        .len();
-    if len > READ_BYTES_LIMIT as u64 {
+    let meta = std::fs::metadata(path).map_err(|err| DecodeError::Failed(err.to_string()))?;
+    // A FIFO or device would block the read forever.
+    if !meta.is_file() {
+        return Err(DecodeError::Unsupported);
+    }
+    if meta.len() >= READ_BYTES_LIMIT as u64 {
         return Err(DecodeError::TooLarge);
     }
     let bytes = std::fs::read(path).map_err(|err| DecodeError::Failed(err.to_string()))?;

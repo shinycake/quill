@@ -6,6 +6,7 @@
 //! action.
 
 use super::*;
+use crate::telegram::envelope::DocumentContent;
 
 /// tdesktop `DetectNameType` (core/mime_type.cpp): the file extensions it
 /// treats as images.
@@ -59,6 +60,46 @@ pub fn opens_as_picture(file_name: &str, mime_type: &str) -> bool {
     is_image_file(file_name, mime_type) || mime_type.to_ascii_lowercase().starts_with("image/")
 }
 
+/// tdesktop `Images::kReadBytesLimit` (lib_ui `ui/image/image_prepare.h`):
+/// image files this big or bigger open in another app, not the viewer.
+pub const READ_BYTES_LIMIT: i64 = 64 * 1024 * 1024;
+
+/// Picture files up to this size download on their own where photos do
+/// (they show as a photo in the chat).
+pub const PICTURE_FILE_AUTO_DOWNLOAD_MAX: i64 = 10 * 1024 * 1024;
+
+/// A picture sent as a file shows in the chat as a photo (with a "file"
+/// pill), not a file row: it is a picture by name or type, it has a
+/// thumbnail to show until the file loads, and it is small enough to open
+/// in the viewer. Anything else keeps the file row.
+pub fn shows_as_photo(doc: &DocumentContent) -> bool {
+    opens_as_picture(&doc.file_name, &doc.mime_type)
+        && doc
+            .thumbnail
+            .as_ref()
+            .is_some_and(|thumb| thumb.width > 0 && thumb.height > 0 && thumb.file_id.0 != 0)
+        && doc.size < READ_BYTES_LIMIT
+}
+
+/// The picture format a photo-like file shows on its pill: its extension in
+/// capitals (`HEIC`, `JPG`), or the MIME subtype without one.
+pub fn picture_format_label(doc: &DocumentContent) -> String {
+    let from_name = doc
+        .file_name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext)
+        .filter(|ext| !ext.is_empty() && ext.len() <= 5);
+    let from_mime = doc
+        .mime_type
+        .split_once('/')
+        .map(|(_, subtype)| subtype.trim_start_matches("x-"))
+        .filter(|subtype| !subtype.is_empty() && subtype.len() <= 5);
+    from_name
+        .or(from_mime)
+        .map(|label| label.to_ascii_uppercase())
+        .unwrap_or_else(|| "FILE".to_string())
+}
+
 /// The viewer item of a document message.
 pub fn file_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
     let MessageContent::Document(doc) = &message.content else {
@@ -110,7 +151,7 @@ pub fn collect_file_items(messages: &[HistoryMessage]) -> Vec<MediaViewerItem> {
 mod tests {
     use super::*;
     use crate::media_viewer::test_support::test_message;
-    use crate::telegram::envelope::{AlbumCoverThumb, DocumentContent};
+    use crate::telegram::envelope::AlbumCoverThumb;
 
     fn document(id: i64, name: &str, mime: &str, thumb: Option<i32>) -> HistoryMessage {
         test_message(
@@ -123,6 +164,7 @@ mod tests {
                     file_id: FileId(file),
                 }),
                 minithumbnail: None,
+                size: 0,
                 file_name: name.to_string(),
                 mime_type: mime.to_string(),
                 caption: String::new(),
@@ -144,6 +186,33 @@ mod tests {
         // The viewer also tries pictures by MIME type.
         assert!(opens_as_picture("photo.heif", "image/heif"));
         assert!(!opens_as_picture("report.pdf", "application/pdf"));
+    }
+
+    #[test]
+    fn picture_files_with_a_thumbnail_show_as_photos() {
+        let MessageContent::Document(mut doc) =
+            document(1, "IMG_0001.HEIC", "image/heic", Some(91)).content
+        else {
+            unreachable!()
+        };
+        assert!(shows_as_photo(&doc));
+        assert_eq!(picture_format_label(&doc), "HEIC");
+        doc.size = READ_BYTES_LIMIT;
+        assert!(!shows_as_photo(&doc));
+        doc.size = 0;
+        doc.thumbnail = None;
+        assert!(!shows_as_photo(&doc));
+        let MessageContent::Document(pdf) =
+            document(2, "report.pdf", "application/pdf", Some(92)).content
+        else {
+            unreachable!()
+        };
+        assert!(!shows_as_photo(&pdf));
+        let MessageContent::Document(unnamed) = document(3, "", "image/x-jxl", Some(93)).content
+        else {
+            unreachable!()
+        };
+        assert_eq!(picture_format_label(&unnamed), "JXL");
     }
 
     #[test]

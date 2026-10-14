@@ -14,9 +14,14 @@ use quill::composer::{
 };
 use quill::media_viewer::is_image_file;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// tdesktop `kThumbnailQuality`.
 const QUALITY: u8 = 87;
+
+/// Sending waits at most this long for a thumbnail; a decoder stuck on a
+/// file must not hold the batch.
+const GIVE_UP_AFTER: Duration = Duration::from_secs(15);
 
 impl QuillApp {
     /// Start a thumbnail for each picture in the tray that goes as a file
@@ -40,6 +45,19 @@ impl QuillApp {
             self.composer_ui.send_box.thumbnailing.insert(path.clone());
             let source = path.clone();
             let worker = cx.background_spawn(async move { write_file_thumbnail(&source) });
+            let timer = cx.background_executor().timer(GIVE_UP_AFTER);
+            let waited = path.clone();
+            cx.spawn(async move |this, cx| {
+                timer.await;
+                let _ = this.update(cx, |this, cx| {
+                    let send_box = &mut this.composer_ui.send_box;
+                    if send_box.thumbnailing.remove(&waited) {
+                        send_box.thumbnailed.insert(waited);
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
             cx.spawn(async move |this, cx| {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
