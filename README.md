@@ -555,7 +555,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Join requests: approve all, dismiss all, search <!-- parity:admin-join-requests-bulk -->
 - [x] Boosts list, boost link, boost features table and unrestrict-by-boosts setting <!-- parity:admin-boosts-list -->
 - [x] Statistics: message and story stats, zoomable graphs, public forwards <!-- parity:admin-stats-messages -->
-- [x] Monetization, revenue and earnings sections (deferred: low impact) <!-- parity:admin-monetization -->
+- [x] Monetization, revenue and earnings sections <!-- parity:admin-monetization -->
 - [x] Channel direct messages settings and paid-message price <!-- parity:admin-direct-messages -->
 - [x] Auto-translate channel and sponsored-messages toggles <!-- parity:admin-auto-translate -->
 - [x] Broadcast-group conversion explainer text <!-- parity:admin-gigagroup-copy -->
@@ -865,7 +865,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Allow-messages consent for web apps (write access) <!-- parity:bots-allow-write -->
 - [x] Keys 1 to 9 press inline buttons <!-- parity:bots-fast-buttons -->
 - [x] Owned bots management and create a bot <!-- parity:bots-owned-manage -->
-- [x] Bot earnings and affiliate programs (deferred: low impact) <!-- parity:bots-earn-affiliate -->
+- [x] Bot earnings and affiliate programs <!-- parity:bots-earn-affiliate -->
 - [x] "Apps" tab in search with popular mini apps <!-- parity:bots-apps-tab -->
 - [x] Add an option to an open poll and "Allow adding options" when creating <!-- parity:polls-add-option -->
 - [x] Poll creation extras: hide results until close, restrict to subscribers, absolute deadline <!-- parity:polls-create-extras -->
