@@ -306,13 +306,8 @@ impl QuillApp {
         // view or the previous topic): save it there, then restore the new
         // topic's draft once the switch is done.
         self.flush_leaving_draft(cx);
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .select_topic(forum_topic_id);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.select_topic(forum_topic_id);
             self.connection.status_note = match result {
                 Ok(_) => "topic selected".into(),
                 Err(_) => "could not open topic".into(),
@@ -329,8 +324,8 @@ impl QuillApp {
     /// Phase 5.1: leave the topic view, back to the forum's topic list.
     pub(in crate::ui) fn deselect_topic_ui(&mut self, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
-        if self.live.is_some() {
-            self.live.as_mut().expect("live").driver.deselect_topic();
+        if let Some(live) = self.live.as_mut() {
+            live.driver.deselect_topic();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.deselect_topic();
         }

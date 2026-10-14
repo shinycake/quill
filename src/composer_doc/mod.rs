@@ -664,7 +664,7 @@ impl<'a> Markup<'a> {
                 out.push_str(text.get(block.range.clone()).unwrap_or_default());
                 out.push_str("\n```");
                 // Continue from the end of the block.
-                while i + 1 < cuts.len() && cuts.get(i).is_some_and(|&c| c < block.range.end) {
+                while cuts.get(i).is_some_and(|&c| c < block.range.end) {
                     i += 1;
                 }
                 continue;

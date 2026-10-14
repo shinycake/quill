@@ -286,7 +286,10 @@ impl<'a> MarkupParser<'a> {
                 i = consumed;
                 continue;
             }
-            let ch = self.text[i..].chars().next().expect("char boundary");
+            // `i` always advances by whole chars, so it stays on a boundary.
+            let Some(ch) = self.text.get(i..).and_then(|rest| rest.chars().next()) else {
+                break;
+            };
             self.push_char(ch);
             i += ch.len_utf8();
         }
@@ -529,7 +532,9 @@ fn strip_markup(text: &str) -> String {
                 continue;
             }
         }
-        let ch = text[i..].chars().next().expect("char boundary");
+        let Some(ch) = text.get(i..).and_then(|rest| rest.chars().next()) else {
+            break;
+        };
         out.push(ch);
         i += ch.len_utf8();
     }

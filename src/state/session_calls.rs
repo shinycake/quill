@@ -186,11 +186,6 @@ impl Session {
                 if tracked.id != group_call.id {
                     *tracked = ActiveGroupCall::fresh(group_call.id);
                 }
-                let tracked = self
-                    .calls
-                    .active_group_call
-                    .as_mut()
-                    .expect("just inserted");
                 tracked.title = group_call.title.clone();
                 tracked.can_be_managed = group_call.can_be_managed;
                 tracked.is_owned = group_call.is_owned;
@@ -228,11 +223,6 @@ impl Session {
             // state; fresh updates repopulate it.
             *tracked = ActiveGroupCall::fresh(group_call.id);
         }
-        let tracked = self
-            .calls
-            .active_group_call
-            .as_mut()
-            .expect("just inserted");
         tracked.title = group_call.title.clone();
         tracked.is_video_chat = group_call.is_video_chat;
         tracked.is_live_story = group_call.is_live_story;

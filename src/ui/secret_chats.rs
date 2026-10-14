@@ -65,13 +65,8 @@ impl QuillApp {
         let Some(chat_id) = self.chat_list.pending_close_secret_chat.take() else {
             return;
         };
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .close_secret_chat(chat_id);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.close_secret_chat(chat_id);
             self.connection.status_note = match result {
                 Ok(_) => "closing secret chat…".into(),
                 Err(_) => "could not close secret chat".into(),
@@ -94,13 +89,8 @@ impl QuillApp {
     /// opens when its `updateNewChat` arrives; the state (Pending →
     /// Ready) arrives as `updateSecretChat`.
     pub(super) fn start_secret_chat_for_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .start_secret_chat(user_id);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.start_secret_chat(user_id);
             self.connection.status_note = match result {
                 Ok(_) => "creating secret chat…".into(),
                 Err(_) => "could not start secret chat".into(),
@@ -171,13 +161,8 @@ impl QuillApp {
     pub(super) fn apply_chat_ttl(&mut self, chat_id: ChatId, secs: i32, cx: &mut Context<Self>) {
         self.notify.ttl_picker_open = false;
         self.notify.ttl_custom_open = false;
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .set_chat_message_auto_delete_time(chat_id, secs);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.set_chat_message_auto_delete_time(chat_id, secs);
             self.connection.status_note = match result {
                 Ok(_) if secs == 0 => "turning off timer…".into(),
                 Ok(_) => "setting timer…".into(),

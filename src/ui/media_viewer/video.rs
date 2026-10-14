@@ -38,12 +38,18 @@ impl QuillApp {
                     && !self.viewer.demo_sync_frames =>
             {
                 self.viewer.pending_play = None;
-                let path = path.expect("clip checked local by decide_viewer_video_start");
+                // `decide_viewer_video_start` only plays or extracts a local clip.
+                let Some(path) = path else {
+                    return;
+                };
                 self.play_native_viewer_video(&item, &path, cx);
             }
             ViewerVideoStart::PlayNow => {
                 self.viewer.pending_play = None;
-                let path = path.expect("clip checked local by decide_viewer_video_start");
+                // `decide_viewer_video_start` only plays or extracts a local clip.
+                let Some(path) = path else {
+                    return;
+                };
                 self.play_viewer_video(&item, &path, cx);
             }
             ViewerVideoStart::ExtractFrames => {
@@ -53,7 +59,10 @@ impl QuillApp {
                 if self.viewer.demo_sync_frames {
                     return;
                 }
-                let path = path.expect("clip checked local by decide_viewer_video_start");
+                // `decide_viewer_video_start` only plays or extracts a local clip.
+                let Some(path) = path else {
+                    return;
+                };
                 self.extract_viewer_frames(&item, &path, cx);
             }
         }

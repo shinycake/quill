@@ -84,18 +84,17 @@ impl QuillApp {
                     self.submit_rich_composer(text, window, cx);
                     return;
                 }
-                if self.live.is_some() {
-                    let plan = {
-                        let session = &self.live.as_ref().expect("live").driver.session;
-                        (
-                            session.open_chat,
-                            session.view_generation,
-                            session.open_chat.and_then(|id| {
-                                session.chats.get(&id.0).map(|chat| chat.supported())
-                            }),
-                        )
-                    };
-                    let (open_chat, view_generation, supported) = plan;
+                let plan = self.live.as_ref().map(|live| {
+                    let session = &live.driver.session;
+                    (
+                        session.open_chat,
+                        session.view_generation,
+                        session
+                            .open_chat
+                            .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
+                    )
+                });
+                if let Some((open_chat, view_generation, supported)) = plan {
                     let Some(chat_id) = open_chat else {
                         self.connection.status_note = "select a chat to send".into();
                         cx.notify();
@@ -288,19 +287,21 @@ impl QuillApp {
                         return;
                     }
                     // MED1: ungrouped sends go out one message at a time.
-                    let mut result = self
-                        .live
-                        .as_mut()
-                        .expect("live")
-                        .driver
-                        .send_snapshot(&snaps[0]);
-                    for snap in &snaps[1..] {
+                    // `plan` came from the live session and `snaps` is non-empty
+                    // (checked above), so neither early return fires.
+                    let (Some(live), Some((first, rest))) =
+                        (self.live.as_mut(), snaps.split_first())
+                    else {
+                        return;
+                    };
+                    let mut result = live.driver.send_snapshot(first);
+                    for snap in rest {
                         if result.is_err() {
                             break;
                         }
-                        result = self.live.as_mut().expect("live").driver.send_snapshot(snap);
+                        result = live.driver.send_snapshot(snap);
                     }
-                    let scheduling = snaps[0].send_options.scheduling;
+                    let scheduling = first.send_options.scheduling;
                     match result {
                         Ok(_) => {
                             self.composer_ui.pending_attachments.clear();
@@ -438,26 +439,22 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (open_chat, supported) = {
-            let session = &self.live.as_ref().expect("live").driver.session;
-            (
-                session.open_chat,
-                session
-                    .open_chat
-                    .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
-            )
+        // Callers only open the rich editor with a live session.
+        let Some(live) = self.live.as_ref() else {
+            return;
         };
+        let session = &live.driver.session;
+        let (open_chat, supported) = (
+            session.open_chat,
+            session
+                .open_chat
+                .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
+        );
         // Premium gate (`premiumFeatureRichMessages`): the editor can only
         // be opened by Premium users, but double-check here too — the
         // server would reject `inputMessageRichMessage` from a non-Premium
         // user and we never want to fake a successful send.
-        let premium = self
-            .live
-            .as_ref()
-            .expect("live")
-            .driver
-            .session
-            .my_is_premium();
+        let premium = session.my_is_premium();
         if !premium {
             self.connection.status_note = "Rich messages require Telegram Premium".into();
             cx.notify();
@@ -530,10 +527,10 @@ impl QuillApp {
             .as_ref()
             .and_then(|reply| reply.send_reply(chat_id));
         let options = self.composer_send_options();
-        match self
-            .live
-            .as_mut()
-            .expect("live")
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        match live
             .driver
             .send_rich_snapshot(chat_id, &blocks, reply_to, &options)
         {

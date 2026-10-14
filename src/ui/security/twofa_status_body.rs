@@ -305,9 +305,8 @@ impl QuillApp {
             TwofaView::Change => "twofa-submit-change",
             TwofaView::Disable => "twofa-submit-disable",
             TwofaView::Email => "twofa-submit-email",
-            TwofaView::Status | TwofaView::Recover | TwofaView::LoginEmail => {
-                unreachable!("this view has its own buttons")
-            }
+            // These views draw their own buttons and never call this.
+            TwofaView::Status | TwofaView::Recover | TwofaView::LoginEmail => return div(),
         };
         div()
             .flex()

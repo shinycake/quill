@@ -38,6 +38,8 @@ impl Drop for Handle {
         self.active.store(false, Ordering::SeqCst);
         let thread = self.thread_id.load(Ordering::SeqCst);
         if thread != 0 {
+            // SAFETY: posting takes no pointers; a thread that already exited
+            // only makes the call fail, which is fine here.
             unsafe { PostThreadMessageW(thread, WM_QUIT, 0, 0) };
         }
     }
@@ -79,6 +81,9 @@ fn run_hook(
     thread_id: Arc<AtomicU32>,
     ready: mpsc::Sender<Result<(), StartError>>,
 ) {
+    // SAFETY: `MSG` is plain data, so all-zero is valid. Every pointer passed
+    // is a live local or null where the API allows it; `on_key` matches
+    // HOOKPROC and the hook is removed on this same thread before it exits.
     unsafe {
         let mut msg: MSG = std::mem::zeroed();
         // Creates this thread's message queue so WM_QUIT can be posted.

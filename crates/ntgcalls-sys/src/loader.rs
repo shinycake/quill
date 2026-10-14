@@ -220,6 +220,9 @@ pub struct Loader {
 macro_rules! resolve {
     ($lib:expr, $name:literal, $ty:ty) => {{
         let name_bytes = concat!($name, "\0");
+        // SAFETY: `$ty` is the C signature ntgcalls exports for `$name`
+        // (ntgcalls.h). The pointer copied out below stays valid because
+        // `Loader` keeps the `Library` loaded for as long as it lives.
         let symbol: libloading::Symbol<$ty> = unsafe { $lib.get(name_bytes.as_bytes()) }
             .map_err(|_| LoadError::SymbolMissing { symbol: $name })?;
         *symbol
@@ -234,6 +237,9 @@ impl Loader {
     /// did not resolve.
     pub fn load(path: impl AsRef<OsStr>) -> Result<Self, LoadError> {
         let path = path.as_ref();
+        // SAFETY: loading runs the library's initializers. The path is the
+        // ntgcalls build Quill bundles or the user pointed at, whose
+        // initializers only set up its own static state.
         let lib =
             unsafe { libloading::Library::new(path) }.map_err(|_| LoadError::LibraryMissing {
                 searched: vec![PathBuf::from(path)],

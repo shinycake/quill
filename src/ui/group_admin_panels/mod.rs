@@ -12,7 +12,10 @@ use quill::state::{AdminListFetch, InviteLinkFetch, JoinRequestFetch, RequestPur
 use quill::telegram::envelope::{ChannelMemberStatus, ChatAdministratorEntry, ChatKind};
 impl QuillApp {
     fn group_sticker_choices(&self, chat_id: ChatId, cx: &mut Context<Self>) -> AnyElement {
-        let session = self.session().expect("group info session");
+        // The caller only builds this section with a session.
+        let Some(session) = self.session() else {
+            return div().into_any_element();
+        };
         let info = session.chats.get(&chat_id.0).and_then(|c| match c.kind {
             ChatKind::Supergroup { supergroup_id, .. } => {
                 session.supergroup_full_info(supergroup_id)

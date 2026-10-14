@@ -240,10 +240,13 @@ impl SpellBackend for WindowsSpellBackend {
                 // error that is no misspelling (e.g. a repeated word):
                 // correct in this language.
                 let mut found = None;
+                // SAFETY: `found` is a valid out slot; the enumerator is a live
+                // COM object used on the thread that created it.
                 let hr = unsafe { errors.Next(&mut found) };
                 let Some(error) = found.filter(|_| hr.is_ok()) else {
                     return true;
                 };
+                // SAFETY: `error` is a live ISpellingError from `Next` above.
                 let action = unsafe { error.CorrectiveAction() };
                 if !matches!(
                     action,
@@ -273,12 +276,16 @@ impl SpellBackend for WindowsSpellBackend {
                 };
                 loop {
                     let mut item = [windows::core::PWSTR::null()];
+                    // SAFETY: `item` is a one-slot out array and `None` is the
+                    // allowed "fetched" pointer; `list` is a live IEnumString.
                     let hr = unsafe { list.Next(&mut item, None) };
                     if hr != windows::Win32::Foundation::S_OK || item[0].is_null() {
                         break;
                     }
                     // SAFETY: COM allocated a NUL-terminated string.
                     let text = unsafe { PCWSTR(item[0].0).to_string() }.unwrap_or_default();
+                    // SAFETY: the enumerator allocated `item[0]` with the COM task
+                    // allocator and hands ownership to us; freed once, after the copy.
                     unsafe { CoTaskMemFree(Some(item[0].0 as *const _)) };
                     if !text.is_empty() && !out.contains(&text) {
                         out.push(text);

@@ -229,7 +229,9 @@ impl Session {
             RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { message_id }),
         ];
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
-        let thread = self.threads.thread.as_mut().expect("checked above");
+        let Some(thread) = self.threads.thread.as_mut() else {
+            return false;
+        };
         thread.stale_pages.extend(stale.into_iter().map(|id| id.0));
         thread.reset_window();
         true

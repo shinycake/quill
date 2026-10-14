@@ -31,6 +31,7 @@ unsafe extern "C" {
         order: isize,
     ) -> CFTypeRef;
     fn CFMachPortInvalidate(port: CFTypeRef);
+    fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
     fn CFRelease(cf: CFTypeRef);
 }
 
@@ -70,10 +71,16 @@ pub struct Handle {
 impl Drop for Handle {
     fn drop(&mut self) {
         self.active.store(false, Ordering::SeqCst);
-        let rl = self.run_loop.load(Ordering::SeqCst);
+        let rl = self.run_loop.swap(0, Ordering::SeqCst);
         if rl != 0 {
             // Wakes the thread; it also re-checks the flag on a short timeout.
-            unsafe { CFRunLoopStop(rl as CFTypeRef) };
+            // SAFETY: `run_tap` stored this run loop with a +1 retain, which
+            // this handle now owns, so it is alive even if the tap thread has
+            // already exited. Stopping a run loop is allowed from any thread.
+            unsafe {
+                CFRunLoopStop(rl as CFTypeRef);
+                CFRelease(rl as CFTypeRef);
+            }
         }
     }
 }
@@ -131,6 +138,8 @@ fn run_tap(
         tap: Cell::new(std::ptr::null()),
     }));
     let mask = (1u64 << KEY_DOWN) | (1u64 << KEY_UP);
+    // SAFETY: `on_event` matches CGEventTapCallBack and cannot unwind
+    // (`ffi_boundary`); `ctx` stays alive until after the tap is invalidated.
     let tap = unsafe {
         CGEventTapCreate(
             SESSION_EVENT_TAP,
@@ -142,17 +151,24 @@ fn run_tap(
         )
     };
     if tap.is_null() {
+        // SAFETY: no tap was created, so nothing else holds `ctx`.
         drop(unsafe { Box::from_raw(ctx) });
         let _ = ready.send(Err(StartError::PermissionDenied));
         return;
     }
+    // SAFETY: `tap` is a live mach port we own (+1 from the create call);
+    // `rl` is this thread's run loop. The callback only runs inside
+    // `CFRunLoopRunInMode` on this thread, and `ctx` is freed only after the
+    // tap is disabled, removed and invalidated, so no callback can see it.
     unsafe {
         (*ctx).tap.set(tap);
         let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
         let rl = CFRunLoopGetCurrent();
         CFRunLoopAddSource(rl, source, kCFRunLoopCommonModes);
         CGEventTapEnable(tap, true);
-        run_loop.store(rl as usize, Ordering::SeqCst);
+        // The handle owns this retain and releases it in `Drop`, so stopping
+        // the loop never touches a run loop freed at thread exit.
+        run_loop.store(CFRetain(rl) as usize, Ordering::SeqCst);
         let _ = ready.send(Ok(()));
         while active.load(Ordering::SeqCst) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, 0);
@@ -201,6 +217,7 @@ pub fn static_limit() -> Option<String> {
 }
 
 pub fn permission_granted() -> bool {
+    // SAFETY: a plain query with no arguments; it never prompts.
     unsafe { CGPreflightListenEventAccess() }
 }
 

@@ -37,6 +37,8 @@ impl NtgcallsEngine {
     /// Phase C2b: load the sidecar and cache its reported call protocol.
     pub fn load() -> Result<Self, EngineError> {
         let api = Loader::load_default().map_err(|_| EngineError::Unavailable)?;
+        // SAFETY: `ntg_protocol` is a C struct of integers, bools and pointers;
+        // all-zero (null pointers, zero lengths) is a valid value.
         let mut raw: ntg_protocol = unsafe { std::mem::zeroed() };
         // SAFETY: `raw` is a valid writable C output and the loaded function
         // pointer remains live through `api`.
@@ -110,6 +112,8 @@ impl NtgcallsEngine {
                 code: rc,
             });
         }
+        // SAFETY: same `user_data` contract as the signaling callback above;
+        // the trampoline catches panics before returning to C.
         let rc = unsafe {
             (self.api.ntg_on_connection_change_callback)(
                 instance.as_ptr(),
@@ -118,6 +122,8 @@ impl NtgcallsEngine {
             )
         };
         if rc != NTG_OK {
+            // SAFETY: `instance` is live and owned here; clearing the callback
+            // that was registered and then destroying it is the documented teardown.
             unsafe {
                 let _ =
                     (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
@@ -128,10 +134,13 @@ impl NtgcallsEngine {
                 code: rc,
             });
         }
+        // SAFETY: same `user_data` contract as the signaling callback above.
         let rc = unsafe {
             (self.api.ntg_on_frames_callback)(instance.as_ptr(), Some(frames_trampoline), user_data)
         };
         if rc != NTG_OK {
+            // SAFETY: `instance` is live and owned here; clear the callbacks
+            // registered so far, then destroy it.
             unsafe {
                 let _ =
                     (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
@@ -147,6 +156,7 @@ impl NtgcallsEngine {
                 code: rc,
             });
         }
+        // SAFETY: same `user_data` contract as the signaling callback above.
         let rc = unsafe {
             (self.api.ntg_on_remote_source_change_callback)(
                 instance.as_ptr(),
@@ -155,6 +165,8 @@ impl NtgcallsEngine {
             )
         };
         if rc != NTG_OK {
+            // SAFETY: `instance` is live and owned here; clear the callbacks
+            // registered so far, then destroy it.
             unsafe {
                 let _ =
                     (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
@@ -436,6 +448,8 @@ impl NtgcallsEngine {
             camera: &mut peer_camera,
             screen: &mut peer_screen,
         };
+        // SAFETY: `instance` is live and the descriptions are stack-local for
+        // the duration of this synchronous C call.
         let rc = unsafe {
             (self.api.ntg_set_stream_sources)(
                 instance.as_ptr(),

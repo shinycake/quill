@@ -64,11 +64,10 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if self.live.is_some() {
+        if let Some(live) = self.live.as_mut() {
             // Scoped borrow: the driver result is owned, so the
             // `status_note` write below doesn't alias the live borrow.
             let result = {
-                let live = self.live.as_mut().expect("live checked above");
                 match target {
                     PrivacyEditorTarget::Rule(key) => {
                         // Not Ready (Loading/Failed): ignore the click — sending
@@ -194,11 +193,8 @@ impl QuillApp {
             .session()
             .and_then(|s| s.settings.read_date_show)
             .unwrap_or(true);
-        if self.live.is_some() {
-            let result = {
-                let live = self.live.as_mut().expect("live checked above");
-                live.driver.set_read_date_privacy(next)
-            };
+        if let Some(live) = self.live.as_mut() {
+            let result = { live.driver.set_read_date_privacy(next) };
             if let Err(err) = result {
                 self.connection.status_note = format!("read-date update failed: {err:?}");
             }
@@ -556,11 +552,8 @@ impl QuillApp {
             return;
         };
         edit(&mut detail);
-        if self.live.is_some() {
-            let result = {
-                let live = self.live.as_mut().expect("live checked above");
-                live.driver.set_privacy_rules(key, detail)
-            };
+        if let Some(live) = self.live.as_mut() {
+            let result = { live.driver.set_privacy_rules(key, detail) };
             if let Err(err) = result {
                 self.connection.status_note = format!("privacy update failed: {err:?}");
             }

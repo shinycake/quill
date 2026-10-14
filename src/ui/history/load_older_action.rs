@@ -6,27 +6,20 @@ impl QuillApp {
     pub(in crate::ui) fn load_older_action(&mut self, cx: &mut Context<Self>) {
         match self.pane_mode() {
             PaneMode::Ready => {
-                if self.live.is_some() {
-                    // Phase 5.1: a topic view pages its own history.
-                    let topic_open = self
-                        .live
-                        .as_ref()
-                        .and_then(|live| live.driver.session.open_topic)
-                        .is_some();
-                    let result = if self.thread_active() {
-                        self.live
-                            .as_mut()
-                            .expect("live")
-                            .driver
-                            .fetch_thread_history()
+                // Phase 5.1: a topic view pages its own history.
+                let topic_open = self
+                    .live
+                    .as_ref()
+                    .and_then(|live| live.driver.session.open_topic)
+                    .is_some();
+                let thread_active = self.thread_active();
+                if let Some(live) = self.live.as_mut() {
+                    let result = if thread_active {
+                        live.driver.fetch_thread_history()
                     } else if topic_open {
-                        self.live
-                            .as_mut()
-                            .expect("live")
-                            .driver
-                            .fetch_topic_history()
+                        live.driver.fetch_topic_history()
                     } else {
-                        self.live.as_mut().expect("live").driver.fetch_history()
+                        live.driver.fetch_history()
                     };
                     self.connection.status_note = match result {
                         Ok(Some(_)) => "loading older messages".into(),

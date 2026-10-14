@@ -103,10 +103,9 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
         return MuteState::Join;
     }
     let me = call.participants.iter().find(|p| p.is_current_user);
-    if call.reconnecting || me.is_none() {
+    let Some(me) = me.filter(|_| !call.reconnecting) else {
         return MuteState::Connecting;
-    }
-    let me = me.expect("checked");
+    };
     if me.is_muted_for_all_users && !me.can_unmute_self {
         return if me.is_hand_raised {
             MuteState::HandRaised

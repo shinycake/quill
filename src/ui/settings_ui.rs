@@ -170,8 +170,7 @@ impl QuillApp {
                                 );
                             })),
                     );
-            } else {
-                let settings = settings.expect("checked");
+            } else if let Some(settings) = settings {
                 for (index, (title, label, desc)) in ARCHIVE_SETTING_ROWS.iter().enumerate() {
                     let enabled = archive_setting_get(&settings, index);
                     body = body.child(

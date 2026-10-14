@@ -89,7 +89,12 @@ pub struct TdJson {
 
 impl TdJson {
     pub fn load_from(path: &Path) -> Result<Self, TdJsonError> {
+        // SAFETY: loading tdjson runs its initializers, which only set up
+        // TDLib's own static state; the path is the bundled or configured tdjson.
         let library = unsafe { Library::new(path) }.map_err(|_| TdJsonError::Load)?;
+        // SAFETY: each field's type is the signature td_json_client.h
+        // declares for that symbol, and `_library` keeps the library loaded
+        // for as long as the copied function pointers live.
         unsafe {
             Ok(Self {
                 create_client_id: *library
@@ -123,6 +128,8 @@ impl TdJson {
     /// Install a callback that never forwards the native message body.
     /// Native TDLib methods must not be called from this callback.
     pub fn install_redacted_log(&self, max_verbosity: i32) {
+        // SAFETY: `redacted_native_log` is a valid `extern "C"` callback
+        // for the process lifetime; it only bumps an atomic and cannot unwind.
         unsafe {
             (self.set_log_message_callback)(max_verbosity, Some(redacted_native_log));
         }
@@ -153,21 +160,28 @@ impl TdJson {
     }
 
     pub fn create_client_id(&self) -> i32 {
+        // SAFETY: `td_create_client_id` takes no arguments and is thread-safe.
         unsafe { (self.create_client_id)() }
     }
 
     pub fn send(&self, client_id: i32, request: &str) -> Result<(), TdJsonError> {
         let c = CString::new(request).map_err(|_| TdJsonError::InvalidRequest)?;
+        // SAFETY: `c` is a NUL-terminated string alive for the call; `td_send`
+        // copies it before returning and is thread-safe.
         unsafe { (self.send)(client_id, c.as_ptr()) };
         Ok(())
     }
 
     /// Copy the received C string before the next `td_receive`/`td_execute` call.
     pub fn receive(&self, timeout: f64) -> Option<String> {
+        // SAFETY: `td_receive` takes a plain timeout; Quill calls it from one
+        // receive thread at a time, as TDLib requires.
         let ptr = unsafe { (self.receive)(timeout) };
         if ptr.is_null() {
             return None;
         }
+        // SAFETY: non-null `td_receive` results are NUL-terminated and valid
+        // until the next `td_receive`/`td_execute`; we copy before returning.
         let copied = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned();
@@ -176,10 +190,13 @@ impl TdJson {
 
     pub fn execute(&self, request: &str) -> Result<Option<String>, TdJsonError> {
         let c = CString::new(request).map_err(|_| TdJsonError::InvalidRequest)?;
+        // SAFETY: `c` is a NUL-terminated request alive for the call.
         let ptr = unsafe { (self.execute)(c.as_ptr()) };
         if ptr.is_null() {
             return Ok(None);
         }
+        // SAFETY: non-null `td_execute` results are NUL-terminated and valid
+        // until the next `td_execute` on this thread; we copy before returning.
         let copied = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned();
@@ -192,6 +209,8 @@ impl Drop for TdJson {
         // Clear the native log callback before `dlclose`. Do not call other
         // TDLib methods from a log callback; this runs on the owner thread
         // after the receive loop has joined.
+        // SAFETY: clearing the callback with `None` is always allowed and
+        // the library is still loaded (`_library` drops after this).
         unsafe {
             (self.set_log_message_callback)(0, None);
         }

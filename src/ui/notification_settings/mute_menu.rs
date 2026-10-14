@@ -24,13 +24,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.notify.mute_menu_open = false;
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .set_chat_mute_for(chat_id, mute_for);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.set_chat_mute_for(chat_id, mute_for);
             self.connection.status_note = match result {
                 Ok(_) if mute_for == 0 => "unmuting…".into(),
                 Ok(_) => "muting…".into(),

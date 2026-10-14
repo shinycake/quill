@@ -86,9 +86,11 @@ fn os_utc_offset_at(unix: i64) -> i32 {
     #[cfg(unix)]
     {
         let t = unix as libc::time_t;
-        // SAFETY: `localtime_r` writes only into the zeroed `tm` we own and
-        // reads `t`; a null return means failure and leaves us on UTC.
+        // SAFETY: `libc::tm` is plain integers (and a pointer on some
+        // platforms), so all-zero is a valid value.
         let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        // SAFETY: `localtime_r` writes only into the `tm` we own and reads
+        // `t`; a null return means failure and leaves us on UTC.
         if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
             return 0;
         }

@@ -187,11 +187,13 @@ pub fn about_text(
     }
     paragraphs.push(intro);
 
-    if !gift_code && !finished && !refunded {
+    // An unfinished giveaway is always `Ongoing`.
+    if !gift_code
+        && !finished
+        && !refunded
+        && let GiveawayInfoData::Ongoing { status, .. } = info
+    {
         {
-            let GiveawayInfoData::Ongoing { status, .. } = info else {
-                unreachable!("an unfinished giveaway is ongoing");
-            };
             let line = match status {
                 GiveawayParticipantStatus::Administrator { chat_id } => {
                     let name = (ctx.chat_title)(*chat_id);

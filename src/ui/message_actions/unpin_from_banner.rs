@@ -9,13 +9,8 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .unpin_chat_message(chat_id, message_id);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.unpin_chat_message(chat_id, message_id);
             self.connection.status_note = match result {
                 Ok(_) => "unpinning…".into(),
                 Err(_) => "could not unpin".into(),

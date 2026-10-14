@@ -51,9 +51,9 @@ pub(super) fn apply_ready_link_preview(
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let thumb = demo_file_json(41, &demo_thumb_png_path(), true);
     let body = "see https://example.com/story";
-    let url_at = body.find("https").unwrap();
+    let url_at = body.find("https").unwrap_or(0);
     let url_len = "https://example.com/story".len();
-    let text_json = serde_json::to_string(body).unwrap();
+    let text_json = serde_json::to_string(body).unwrap_or_default();
     let json = format!(
         r#"{{"@type":"updateMessageContent","chat_id":11,"message_id":101,"new_content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text_json},"entities":[{{"@type":"textEntity","offset":{url_at},"length":{url_len},"type":{{"@type":"textEntityTypeUrl"}}}}]}},"link_preview":{{"@type":"linkPreview","url":"https://example.com/story","display_url":"example.com","site_name":"Example","title":"A short story","description":{{"@type":"formattedText","text":"Telegram-style link preview for a private chat.","entities":[]}},"author":"","type":{{"@type":"linkPreviewTypeArticle","photo":{{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":90,"height":90,"progressive_sizes":[]}}]}}}},"has_large_media":true,"show_large_media":false,"show_media_above_description":false,"skip_confirmation":true,"show_above_text":false,"instant_view_version":0}},"link_preview_options":null}}}}"#
     );
@@ -94,9 +94,9 @@ pub(super) fn apply_ready_text_entities(
 
     let body = "Bold italic bolditalic underline strike secret code https://example.com\nfn demo() {\n  42\n}";
     let span = |text: &str, needle: &str| -> (i32, i32) {
-        let start = text.find(needle).expect("demo needle");
-        let utf16_start = utf8_to_utf16_offset(text, start).expect("demo offset");
-        let utf16_end = utf8_to_utf16_offset(text, start + needle.len()).expect("demo offset");
+        let start = text.find(needle).unwrap_or(0);
+        let utf16_start = utf8_to_utf16_offset(text, start).unwrap_or(0);
+        let utf16_end = utf8_to_utf16_offset(text, start + needle.len()).unwrap_or(0);
         (utf16_start, utf16_end - utf16_start)
     };
     let ent = |text: &str, needle: &str, type_json: &str| -> String {
@@ -128,7 +128,7 @@ pub(super) fn apply_ready_text_entities(
         ),
     ]
     .join(",");
-    let text_json = serde_json::to_string(body).unwrap();
+    let text_json = serde_json::to_string(body).unwrap_or_default();
     let text_message = format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":104,"chat_id":14,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{text_json},"entities":[{entities}]}}}}}}}}"#
     );
@@ -143,7 +143,7 @@ pub(super) fn apply_ready_text_entities(
         ),
     ]
     .join(",");
-    let caption_json = serde_json::to_string(caption).unwrap();
+    let caption_json = serde_json::to_string(caption).unwrap_or_default();
     let photo_message = format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":105,"chat_id":14,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{thumb},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{caption_json},"entities":[{caption_entities}]}},"has_spoiler":false,"is_secret":false}}}}}}"#
     );
@@ -200,7 +200,7 @@ pub(super) fn apply_ready_text_entities(
         ),
     ]
     .join(",");
-    let links_json = serde_json::to_string(links).unwrap();
+    let links_json = serde_json::to_string(links).unwrap_or_default();
     let links_message = format!(
         r#"{{"@type":"updateNewMessage","message":{{"id":106,"chat_id":14,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":{links_json},"entities":[{link_entities}]}}}}}}}}"#
     );

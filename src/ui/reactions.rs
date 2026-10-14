@@ -330,11 +330,8 @@ impl QuillApp {
         emoji: String,
         cx: &mut Context<Self>,
     ) {
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
+        if let Some(live) = self.live.as_mut() {
+            let result = live
                 .driver
                 .toggle_message_reaction(chat_id, message_id, &emoji);
             self.connection.status_note = match result {

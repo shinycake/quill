@@ -92,6 +92,7 @@ mod shortcut_pack;
 mod spell_state;
 mod start_files_state;
 mod start_files_ui;
+pub(crate) mod startup_failure;
 mod stories_state;
 mod synthetic;
 mod twofa_state;

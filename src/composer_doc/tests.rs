@@ -334,5 +334,7 @@ fn markup_survives_ranges_off_a_char_boundary() {
         custom_emoji_id: 1,
     });
     let markup = doc.to_markup();
-    assert!(markup.contains('a') && markup.contains('b'), "{markup}");
+    // No draft text is lost: the plain text round-trips through the parser.
+    let (text, _) = parse_format_markup(&markup);
+    assert_eq!(text, "a\u{e9} b", "{markup}");
 }

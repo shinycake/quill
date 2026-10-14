@@ -37,8 +37,11 @@ register_demos![
 
 impl QuillApp {
     fn demo_ready_marketplace_gift(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.demo_session.as_mut() {
-            let quote=quill::marketplace::GiftQuote::parse(&serde_json::json!({"name":"PlushPepe-123","title":"Plush Pepe","resale_parameters":{"star_count":25,"gram_cent_count":0,"gram_only":false}})).unwrap();
+        if let Some(session) = self.demo_session.as_mut()
+            && let Some(quote) = quill::marketplace::GiftQuote::parse(
+                &serde_json::json!({"name":"PlushPepe-123","title":"Plush Pepe","resale_parameters":{"star_count":25,"gram_cent_count":0,"gram_only":false}}),
+            )
+        {
             session.payments.gift_text_length_max = Some(128);
             session.payments.marketplace_gift = Some(quill::marketplace::GiftPurchase {
                 chat_id: ChatId(11),

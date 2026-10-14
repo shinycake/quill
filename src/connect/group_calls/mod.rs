@@ -90,11 +90,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some((answer, video_enabled)) = join_answer
             && !answer.is_empty()
         {
-            let result = self
-                .call_engine
-                .as_deref_mut()
-                .expect("available engine")
-                .connect_group_call(group_call_id, &answer, video_enabled);
+            let Some(engine) = self.call_engine.as_deref_mut() else {
+                return Ok(());
+            };
+            let result = engine.connect_group_call(group_call_id, &answer, video_enabled);
             // Join muted if you muted before the transport was up.
             if result.is_ok() {
                 let muted = self
@@ -146,11 +145,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .unwrap_or(false);
         if self.group_camera_state.get(&group_call_id) != Some(&wanted_camera) {
             let camera = self.selected_camera.clone();
-            let result = self
-                .call_engine
-                .as_deref_mut()
-                .expect("available engine")
-                .set_group_camera(group_call_id, wanted_camera, camera.as_deref());
+            let Some(engine) = self.call_engine.as_deref_mut() else {
+                return Ok(());
+            };
+            let result = engine.set_group_camera(group_call_id, wanted_camera, camera.as_deref());
             match result {
                 Ok(()) => {
                     self.group_camera_state.insert(group_call_id, wanted_camera);
@@ -174,11 +172,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .map(|call| group_video_sources(&call.participants))
             .unwrap_or_default();
-        if let Err(err) = self
-            .call_engine
-            .as_deref_mut()
-            .expect("available engine")
-            .sync_group_video(group_call_id, &sources)
+        let Some(engine) = self.call_engine.as_deref_mut() else {
+            return Ok(());
+        };
+        if let Err(err) = engine.sync_group_video(group_call_id, &sources)
             && let Some(call) = self.session.calls.active_group_call.as_mut()
         {
             call.transport_error = Some(err.to_string());
@@ -195,11 +192,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(answer) = share_answer
             && !answer.is_empty()
         {
-            let result = self
-                .call_engine
-                .as_deref_mut()
-                .expect("available engine")
-                .connect_screen_share(group_call_id, &answer);
+            let Some(engine) = self.call_engine.as_deref_mut() else {
+                return Ok(());
+            };
+            let result = engine.connect_screen_share(group_call_id, &answer);
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 match result {
                     Ok(()) => {

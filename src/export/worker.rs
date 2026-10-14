@@ -433,7 +433,11 @@ pub fn create_named_folder(parent: &Path, base: &str) -> io::Result<PathBuf> {
             Err(err) => return Err(err),
         }
     }
-    unreachable!("the loop only exits by returning")
+    // Only reached if every numbered name up to the integer limit exists.
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "no free export folder name",
+    ))
 }
 
 /// Create the chat export folder inside `parent`, like tdesktop's

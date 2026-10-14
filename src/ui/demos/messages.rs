@@ -91,10 +91,10 @@ impl QuillApp {
             apply_ready_forward(session, &self.demo_ui.sink, &self.demo_ui.seq);
             self.share.forward_result = session.messages.last_forward.clone();
         }
-        let mut draft =
-            ForwardDraft::from_message(ChatId(11), MessageId(101), false).expect("forward 101");
-        draft.toggle(ChatId(11), MessageId(102), false);
-        self.share.pending_forward = Some(draft);
+        if let Some(mut draft) = ForwardDraft::from_message(ChatId(11), MessageId(101), false) {
+            draft.toggle(ChatId(11), MessageId(102), false);
+            self.share.pending_forward = Some(draft);
+        }
         self.share.forward_picker_open = true;
         self.share.search_input.update(cx, |input, cx| {
             input.set_value("Demo chat B", window, cx);

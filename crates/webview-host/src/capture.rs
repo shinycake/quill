@@ -13,6 +13,7 @@ pub fn capture(webview: &wry::WebView, path: std::path::PathBuf, done: impl Fn(b
     fn write_png(image: &NSImage, path: &std::path::Path) -> Option<()> {
         let tiff = image.TIFFRepresentation()?;
         let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
+        // SAFETY: an empty properties dictionary is valid for every file type.
         let png = unsafe {
             rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
         }?;
@@ -22,9 +23,13 @@ pub fn capture(webview: &wry::WebView, path: std::path::PathBuf, done: impl Fn(b
 
     let wk = webview.webview();
     let block = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
+        // SAFETY: WebKit passes a valid NSImage or null for the duration of
+        // the completion handler.
         let ok = unsafe { image.as_ref() }.is_some_and(|image| write_png(image, &path).is_some());
         done(ok);
     });
+    // SAFETY: a nil configuration snapshots the visible bounds; WebKit copies
+    // the block and calls it once on the main thread.
     unsafe { wk.takeSnapshotWithConfiguration_completionHandler(None, &block) };
 }
 

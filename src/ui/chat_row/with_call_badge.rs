@@ -162,24 +162,22 @@ pub(in crate::ui) fn title_badge_element(
             .child(label)
             .into_any_element();
     }
-    match badge {
-        TitleBadge::Verified => Icon::new(IconName::BadgeCheck)
+    match (badge, emoji) {
+        (TitleBadge::Verified, _) => Icon::new(IconName::BadgeCheck)
             .size(px(14.))
             .flex_none()
             .text_color(Hsla::from(accent_strong()))
             .into_any_element(),
-        TitleBadge::EmojiStatus(_) if emoji.is_some() => {
-            status_element(emoji.expect("checked by the guard"), 14.)
-        }
+        (TitleBadge::EmojiStatus(_), Some(emoji)) => status_element(emoji, 14.),
         // A status that has not downloaded yet shows the star.
-        TitleBadge::EmojiStatus(_) | TitleBadge::PremiumStar => div()
+        (TitleBadge::EmojiStatus(_) | TitleBadge::PremiumStar, _) => div()
             .flex_none()
             .text_size(px(13.))
             .line_height(px(14.))
             .text_color(Hsla::from(accent_strong()))
             .child("\u{2605}")
             .into_any_element(),
-        TitleBadge::Scam | TitleBadge::Fake => div().into_any_element(),
+        (TitleBadge::Scam | TitleBadge::Fake, _) => div().into_any_element(),
     }
 }
 

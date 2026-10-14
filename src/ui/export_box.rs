@@ -155,7 +155,7 @@ impl QuillApp {
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            if this.dialogs.chat_export_dialog.is_none() {
+            let Some(draft) = this.dialogs.chat_export_dialog.clone() else {
                 let (body, footer) = this.chat_export_progress(cx);
                 return finish_dialog(
                     dialog,
@@ -164,8 +164,7 @@ impl QuillApp {
                     Some(footer),
                     on_close,
                 );
-            }
-            let draft = this.dialogs.chat_export_dialog.clone().expect("checked");
+            };
             let (title, body, footer) = match draft.picking {
                 Some(field) => this.chat_export_calendar(&draft, field, cx),
                 None => this.chat_export_options(&draft, cx),

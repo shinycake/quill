@@ -57,12 +57,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.notify.notif_sound_picker_open = false;
-        if self.live.is_some() {
-            let result = self.live.as_mut().expect("live").driver.set_chat_sound(
-                chat_id,
-                use_default_sound,
-                sound_id,
-            );
+        if let Some(live) = self.live.as_mut() {
+            let result = live
+                .driver
+                .set_chat_sound(chat_id, use_default_sound, sound_id);
             self.connection.status_note = match result {
                 Ok(_) => "sound updated…".into(),
                 Err(_) => "could not change sound".into(),
@@ -92,13 +90,8 @@ impl QuillApp {
         show_preview: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .set_chat_show_preview(chat_id, show_preview);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.set_chat_show_preview(chat_id, show_preview);
             self.connection.status_note = match result {
                 Ok(_) => "preview setting updated…".into(),
                 Err(_) => "could not change preview".into(),
@@ -128,13 +121,8 @@ impl QuillApp {
         mute_stories: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .set_chat_story_mute(chat_id, mute_stories);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.set_chat_story_mute(chat_id, mute_stories);
             self.connection.status_note = match result {
                 Ok(_) => "story mute updated…".into(),
                 Err(_) => "could not change story mute".into(),
@@ -164,11 +152,8 @@ impl QuillApp {
         show_story_poster: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
+        if let Some(live) = self.live.as_mut() {
+            let result = live
                 .driver
                 .set_chat_story_poster(chat_id, show_story_poster);
             self.connection.status_note = match result {
@@ -202,13 +187,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.notify.story_sound_picker_open = false;
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .set_chat_story_sound(chat_id, use_default_story_sound, story_sound_id);
+        if let Some(live) = self.live.as_mut() {
+            let result =
+                live.driver
+                    .set_chat_story_sound(chat_id, use_default_story_sound, story_sound_id);
             self.connection.status_note = match result {
                 Ok(_) => "story sound updated…".into(),
                 Err(_) => "could not change story sound".into(),

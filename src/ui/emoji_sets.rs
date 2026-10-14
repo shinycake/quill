@@ -415,7 +415,7 @@ impl QuillApp {
             );
         }
         let mut preview = div().flex().flex_col().gap_2();
-        if panel.selected_set_id.is_some() {
+        if let Some(id) = panel.selected_set_id {
             preview = preview.child(div().font_semibold().child(panel.preview_title.clone()));
             let roots = self.media_display_roots();
             let mut grid = div().flex().flex_wrap().gap_2();
@@ -448,7 +448,6 @@ impl QuillApp {
                 grid = grid.child(cell);
             }
             preview = preview.child(grid);
-            let id = panel.selected_set_id.unwrap();
             preview = preview.child(
                 Button::new("download-emoji-pack")
                     .label("Download or retry pack")

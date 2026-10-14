@@ -106,18 +106,17 @@ fn valid_release(release: &ReleaseInfo) -> bool {
     else {
         return false;
     };
-    let (Ok(version), Ok(tag_version), Some(asset)) = (
+    let (Ok(version), Ok(tag_version), Some(asset), Ok(current)) = (
         semver::Version::parse(&release.version),
         semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag)),
         release.asset.as_ref(),
+        semver::Version::parse(crate::version::APP),
     ) else {
         return false;
     };
     version == tag_version
         && version.pre.is_empty()
-        && version
-            .cmp_precedence(&semver::Version::parse(crate::version::APP).unwrap())
-            .is_gt()
+        && version.cmp_precedence(&current).is_gt()
         && crate::updater::valid_asset(asset, tag)
 }
 
@@ -146,12 +145,12 @@ fn probe_binary(path: &Path, version: &str) -> std::io::Result<()> {
             std::thread::sleep(Duration::from_millis(50));
         };
         let mut output = String::new();
-        probe
-            .stdout
-            .take()
-            .unwrap()
-            .take(1024)
-            .read_to_string(&mut output)?;
+        let Some(stdout) = probe.stdout.take() else {
+            return Err(std::io::Error::other(
+                "Updated binary version probe has no stdout",
+            ));
+        };
+        stdout.take(1024).read_to_string(&mut output)?;
         if !status.success() || output.trim() != expected {
             return Err(std::io::Error::other(
                 "Updated binary version does not match release",

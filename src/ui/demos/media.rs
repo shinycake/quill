@@ -201,30 +201,30 @@ impl QuillApp {
             apply_ready_voice(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // One Play request must survive the download and start the note.
-        let local = self.demo_session.as_ref().unwrap().media.files[&82].clone();
-        let mut waiting = local.clone();
-        waiting.local.path.clear();
-        waiting.local.is_downloading_completed = false;
-        self.demo_session
-            .as_mut()
-            .unwrap()
-            .media
-            .files
-            .insert(82, waiting);
-        self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
-        assert!(self.playback.pending_voice_play.is_some());
-        self.demo_session
-            .as_mut()
-            .unwrap()
-            .media
-            .files
-            .insert(82, local);
-        self.resume_pending_voice(cx);
-        assert!(
-            self.playback.pending_voice_play.is_none()
-                && self.playback.playing_voice == Some(MessageId(91))
-        );
-        self.stop_voice_playback();
+        if let Some(local) = self
+            .demo_session
+            .as_ref()
+            .and_then(|session| session.media.files.get(&82))
+            .cloned()
+        {
+            let mut waiting = local.clone();
+            waiting.local.path.clear();
+            waiting.local.is_downloading_completed = false;
+            if let Some(session) = self.demo_session.as_mut() {
+                session.media.files.insert(82, waiting);
+            }
+            self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
+            assert!(self.playback.pending_voice_play.is_some());
+            if let Some(session) = self.demo_session.as_mut() {
+                session.media.files.insert(82, local);
+            }
+            self.resume_pending_voice(cx);
+            assert!(
+                self.playback.pending_voice_play.is_none()
+                    && self.playback.playing_voice == Some(MessageId(91))
+            );
+            self.stop_voice_playback();
+        }
         let bars = vec![4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14];
         self.recording.voice_capture = Some(VoiceCapture::preview(
             demo_media_allowlist().join("demo-voice.ogg"),

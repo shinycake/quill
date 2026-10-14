@@ -93,25 +93,13 @@ impl QuillApp {
     /// Slice parity:platform-offline-errors — a call can't be queued
     /// like a message, so refuse while offline with an honest note.
     pub(super) fn dial_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
-        if self.live.is_some() {
-            if self
-                .live
-                .as_ref()
-                .expect("live")
-                .driver
-                .session
-                .is_offline()
-            {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.session.is_offline() {
                 self.connection.status_note = "You're offline — can't start a call".into();
                 cx.notify();
                 return;
             }
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .start_call(user_id, is_video);
+            let result = live.driver.start_call(user_id, is_video);
             self.connection.status_note = match result {
                 Ok(_) => {
                     if is_video {
@@ -317,8 +305,8 @@ impl QuillApp {
 
     /// Phase C1: `acceptCall` for the ringing incoming call.
     pub(super) fn accept_incoming_call(&mut self, cx: &mut Context<Self>) {
-        if self.live.is_some() {
-            let result = self.live.as_mut().expect("live").driver.accept_call();
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.accept_call();
             self.connection.status_note = match result {
                 Ok(_) => "answering…".into(),
                 Err(_) => "could not answer the call".into(),
@@ -332,8 +320,8 @@ impl QuillApp {
     /// Phase C1: `discardCall` for the tracked call (decline an
     /// incoming call, or hang up an active one).
     pub(super) fn hang_up_call(&mut self, cx: &mut Context<Self>) {
-        if self.live.is_some() {
-            let result = self.live.as_mut().expect("live").driver.discard_call();
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.discard_call();
             self.connection.status_note = match result {
                 Ok(_) => "hanging up…".into(),
                 Err(_) => "could not hang up the call".into(),
@@ -396,13 +384,8 @@ impl QuillApp {
             .map(|(_, (constructor, _))| *constructor)
             .collect();
         let stars = detail.stars;
-        if self.live.is_some() {
-            let result = self
-                .live
-                .as_mut()
-                .expect("live")
-                .driver
-                .send_call_rating(stars, &comment, &problems);
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.send_call_rating(stars, &comment, &problems);
             self.connection.status_note = match result {
                 Ok(_) => "thanks for your feedback".into(),
                 Err(_) => "could not send the rating".into(),
@@ -642,8 +625,8 @@ impl QuillApp {
     /// ends the current call first (TDLib allows a single active call)
     /// and accepts the incoming one once the discard lands.
     pub(super) fn answer_swap_call(&mut self, cx: &mut Context<Self>) {
-        if self.live.is_some() {
-            let result = self.live.as_mut().expect("live").driver.accept_swap_call();
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.accept_swap_call();
             self.connection.status_note = match result {
                 Ok(_) => "ending current call, answering…".into(),
                 Err(_) => "could not answer the call".into(),
@@ -683,8 +666,8 @@ impl QuillApp {
 
     /// Swap prompt: decline the pending incoming call as busy.
     pub(super) fn decline_swap_call(&mut self, cx: &mut Context<Self>) {
-        if self.live.is_some() {
-            let result = self.live.as_mut().expect("live").driver.decline_swap_call();
+        if let Some(live) = self.live.as_mut() {
+            let result = live.driver.decline_swap_call();
             self.connection.status_note = match result {
                 Ok(_) => "incoming call declined".into(),
                 Err(_) => "could not decline the call".into(),

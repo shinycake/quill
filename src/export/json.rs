@@ -5,7 +5,7 @@ use super::html::{Outcome, service_text, skip_note};
 use super::model::{Body, EntityKind, ExportMessage, Origin, Who};
 use super::settings::MediaKind;
 use crate::local_time::civil_at;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::io::{self, Write};
 
 fn who_id(who: Who) -> String {
@@ -54,13 +54,19 @@ pub(crate) fn iso_date(date: i32, offset: i32) -> String {
 
 /// One message as a JSON object.
 pub fn message_json(msg: &ExportMessage, outcome: Option<&Outcome>, offset: i32) -> Value {
-    let mut out = json!({
-        "id": msg.id,
-        "type": if msg.is_service() { "service" } else { "message" },
-        "date": iso_date(msg.date, offset),
-        "date_unixtime": msg.date.to_string(),
-    });
-    let object = out.as_object_mut().expect("json! object");
+    let mut object = Map::new();
+    object.insert("id".into(), msg.id.into());
+    object.insert(
+        "type".into(),
+        if msg.is_service() {
+            "service"
+        } else {
+            "message"
+        }
+        .into(),
+    );
+    object.insert("date".into(), iso_date(msg.date, offset).into());
+    object.insert("date_unixtime".into(), msg.date.to_string().into());
     if msg.edited > 0 {
         object.insert("edited".into(), iso_date(msg.edited, offset).into());
         object.insert("edited_unixtime".into(), msg.edited.to_string().into());
@@ -201,7 +207,7 @@ pub fn message_json(msg: &ExportMessage, outcome: Option<&Outcome>, offset: i32)
         }
         Body::Text | Body::Service { .. } | Body::Other => {}
     }
-    out
+    Value::Object(object)
 }
 
 /// Where a chat's messages go as they are written: the chat export's own

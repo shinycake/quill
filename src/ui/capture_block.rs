@@ -29,7 +29,7 @@ fn apply_sharing(window: &Window, blocked: bool) {
     if let Ok(handle) = HasWindowHandle::window_handle(window)
         && let RawWindowHandle::AppKit(handle) = handle.as_raw()
     {
-        // GPUI owns this NSView; its raw handle is valid during the render callback.
+        // SAFETY: GPUI owns this NSView; its raw handle is valid during the render callback.
         let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
         if let Some(ns_window) = view.window() {
             ns_window.setSharingType(if blocked {
