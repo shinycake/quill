@@ -7,10 +7,10 @@
 //! `deleteStickerSet`); every success refreshes the open set
 //! (`getStickerSet`) the way tdesktop re-applies the answered set.
 use crate::ids::FileId;
-use crate::sticker_set_box::{
-    ADDED_NOTE, ADD_EXISTING_FAILED_NOTE, EMOJI_ADDED_NOTE, UPLOAD_FAILED_NOTE,
-};
 use crate::state::*;
+use crate::sticker_set_box::{
+    ADD_EXISTING_FAILED_NOTE, ADDED_NOTE, EMOJI_ADDED_NOTE, UPLOAD_FAILED_NOTE,
+};
 
 /// Edits of an owned set; wrapped as
 /// [`StickersPurpose::Creator`](super::StickersPurpose::Creator).
@@ -18,31 +18,18 @@ use crate::state::*;
 pub enum StickerCreatorPurpose {
     /// `addStickerToSet` with a freshly rendered image (`inputFileLocal`).
     /// Response is `ok`.
-    AddNewSticker {
-        set_id: i64,
-    },
+    AddNewSticker { set_id: i64 },
     /// `addStickerToSet` with a sticker that already exists
     /// (`inputFileId`). Response is `ok`.
-    AddExistingSticker {
-        set_id: i64,
-    },
+    AddExistingSticker { set_id: i64 },
     /// `removeStickerFromSet`. Response is `ok`.
-    RemoveSticker {
-        set_id: i64,
-        file_id: FileId,
-    },
+    RemoveSticker { set_id: i64, file_id: FileId },
     /// `setStickerPositionInSet`. Response is `ok`.
-    MoveSticker {
-        set_id: i64,
-    },
+    MoveSticker { set_id: i64 },
     /// `setStickerSetTitle`. Response is `ok`.
-    RenameSet {
-        set_id: i64,
-    },
+    RenameSet { set_id: i64 },
     /// `deleteStickerSet`. Response is `ok`; the box closes.
-    DeleteSet {
-        set_id: i64,
-    },
+    DeleteSet { set_id: i64 },
 }
 
 impl StickerCreatorPurpose {
@@ -177,7 +164,11 @@ impl Session {
             StickerCreatorPurpose::AddNewSticker { .. }
             | StickerCreatorPurpose::AddExistingSticker { .. } => {
                 let is_emoji = self.sticker_set_view_is_emoji(set_id);
-                let note = if is_emoji { EMOJI_ADDED_NOTE } else { ADDED_NOTE };
+                let note = if is_emoji {
+                    EMOJI_ADDED_NOTE
+                } else {
+                    ADDED_NOTE
+                };
                 self.finish_sticker_set_edit(set_id, Some(note.into()), true);
             }
             StickerCreatorPurpose::RemoveSticker { file_id, .. } => {

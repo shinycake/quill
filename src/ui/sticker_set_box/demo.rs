@@ -32,7 +32,8 @@ impl QuillApp {
                 return;
             };
             let mut stickers = Vec::new();
-            for (index, emoji) in ["😀", "👋", "🔥", "❤️", "🎉", "🤔"].iter().enumerate() {
+            for (index, emoji) in ["😀", "👋", "🔥", "❤️", "🎉", "🤔"].iter().enumerate()
+            {
                 let id = 9100 + index as i32;
                 let json = format!(
                     r#"{{"@type":"updateFile","file":{}}}"#,
@@ -52,18 +53,24 @@ impl QuillApp {
                 item.set_id = 78;
                 stickers.push(item);
             }
-            for set in &mut session.stickers.stickers.sets {
-                set.is_owned = true;
-            }
-            session.stickers.stickers.sets.push(quill::telegram::envelope::StickerSetInfo {
-                id: 78,
-                title: "My doodles".into(),
-                name: "my_doodles_by_quill".into(),
-                size: stickers.len() as i32,
-                is_installed: true,
-                is_official: false,
-                is_owned: true,
-            });
+            session
+                .media
+                .media_library
+                .set_stickers
+                .insert(78, stickers.clone());
+            session
+                .stickers
+                .stickers
+                .sets
+                .push(quill::telegram::envelope::StickerSetInfo {
+                    id: 78,
+                    title: "My doodles".into(),
+                    name: "my_doodles_by_quill".into(),
+                    size: stickers.len() as i32,
+                    is_installed: true,
+                    is_official: false,
+                    is_owned: true,
+                });
             let mut view = StickerSetView::loading(78);
             view.stage = StickerSetViewStage::Ready {
                 title: "My doodles".into(),
@@ -77,6 +84,41 @@ impl QuillApp {
             session.stickers.sticker_set_view = Some(view);
         }
         self.message_ui.menu_ui.sticker_set_open = true;
+        // `QUILL_DEMO_STICKER_BOX=<state>` opens one of the editing states
+        // for its screenshot: reorder, rename, delete, create, panel.
+        match std::env::var("QUILL_DEMO_STICKER_BOX").as_deref() {
+            Ok("reorder") => self.sticker_box.reordering = true,
+            Ok("rename") => {
+                self.sticker_box.rename_input.update(_cx, |input, cx| {
+                    input.set_value("My doodles", _window, cx);
+                });
+                self.sticker_box.rename_open = true;
+            }
+            Ok("delete") => {
+                self.sticker_box.delete_sticker = self
+                    .demo_session
+                    .as_ref()
+                    .and_then(|s| s.stickers.sticker_set_view.as_ref())
+                    .and_then(|view| match &view.stage {
+                        StickerSetViewStage::Ready { stickers, .. } => stickers.get(2).cloned(),
+                        _ => None,
+                    });
+            }
+            Ok("create") => {
+                self.sticker_box.create = Some(super::state::CreateSticker {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
+                    emojis: vec!["😀".into(), "🎨".into()],
+                });
+            }
+            Ok("panel") => {
+                self.message_ui.menu_ui.sticker_set_open = false;
+                self.pickers.media_panel.open = true;
+                self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
+            }
+            _ => {}
+        }
         self.connection.status_note = "screenshot demo — your own sticker set".into();
     }
 }

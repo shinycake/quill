@@ -768,9 +768,8 @@ impl QuillApp {
             PanelRow::Header { label, set_id } => {
                 need_sets.extend(set_id);
                 // tdesktop's "edit" badge next to a set the user created.
-                let owned = set_id.is_some_and(|id| {
-                    self.session().is_some_and(|s| s.is_owned_sticker_set(id))
-                });
+                let owned = set_id
+                    .is_some_and(|id| self.session().is_some_and(|s| s.is_owned_sticker_set(id)));
                 div()
                     .px_3()
                     .pt_3()
@@ -783,7 +782,11 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(div().truncate().child(label))
                     .when(owned, |row| {
-                        row.child(gpui_kit::component::tag::Tag::secondary().xsmall().child("edit"))
+                        row.child(
+                            gpui_kit::component::tag::Tag::secondary()
+                                .xsmall()
+                                .child("edit"),
+                        )
                     })
                     .into_any_element()
             }

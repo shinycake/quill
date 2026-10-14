@@ -45,11 +45,13 @@ impl QuillApp {
                     let rename = owner.clone();
                     let reorder = owner.clone();
                     menu = menu
-                        .item(PopupMenuItem::new("Edit name").on_click(move |_, window, cx| {
-                            let _ = rename.update(cx, |this, cx| {
-                                this.open_rename_set(window, cx);
-                            });
-                        }))
+                        .item(
+                            PopupMenuItem::new("Edit name").on_click(move |_, window, cx| {
+                                let _ = rename.update(cx, |this, cx| {
+                                    this.open_rename_set(window, cx);
+                                });
+                            }),
+                        )
                         .item(PopupMenuItem::new("Reorder").on_click(move |_, _, cx| {
                             let _ = reorder.update(cx, |this, cx| {
                                 this.begin_edit_stickers(cx);
@@ -81,14 +83,16 @@ impl QuillApp {
                                     });
                                 },
                             ))
-                            .item(PopupMenuItem::new("Delete for Myself").on_click(
-                                move |_, _, cx| {
-                                    let _ = myself.update(cx, |this, cx| {
-                                        this.sticker_box.remove_set_open = true;
-                                        cx.notify();
-                                    });
-                                },
-                            ))
+                            .item(
+                                PopupMenuItem::new("Delete for Myself").on_click(
+                                    move |_, _, cx| {
+                                        let _ = myself.update(cx, |this, cx| {
+                                            this.sticker_box.remove_set_open = true;
+                                            cx.notify();
+                                        });
+                                    },
+                                ),
+                            )
                         })
                         .separator()
                         .link(
@@ -118,35 +122,46 @@ impl QuillApp {
             .items_center()
             .justify_center()
             .child(
-                Button::new("sticker-set-add")
-                    .icon(IconName::Plus)
-                    .ghost()
-                    .rounded(ButtonRounded::Size(px(28.)))
-                    .tooltip(AddEntry::CreateNew.label(kind))
-                    .accessibility_label(AddEntry::CreateNew.label(kind))
-                    .dropdown_menu(move |menu, _, _| {
-                        let mut menu = menu;
-                        for entry in kind.add_menu() {
-                            let entry = *entry;
-                            let owner = owner.clone();
-                            menu = menu.item(PopupMenuItem::new(entry.label(kind)).on_click(
-                                move |_, _, cx| {
-                                    let _ = owner.update(cx, |this, cx| match entry {
-                                        AddEntry::CreateNew => {
-                                            this.begin_create_sticker(set_id, kind, cx)
-                                        }
-                                        AddEntry::AddExisting => {
-                                            this.open_pick_existing(set_id, kind, false, cx)
-                                        }
-                                        AddEntry::AdaptSticker => {
-                                            this.open_pick_existing(set_id, kind, true, cx)
-                                        }
-                                    });
-                                },
-                            ));
-                        }
-                        menu
-                    }),
+                // tdesktop's round add cell: a 56 px disc of subtle text color.
+                div()
+                    .size(px(56.))
+                    .rounded_full()
+                    .bg(cx.theme().muted_foreground.opacity(0.12))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Button::new("sticker-set-add")
+                            .icon(IconName::Plus)
+                            .ghost()
+                            .rounded(ButtonRounded::Size(px(28.)))
+                            .tooltip(AddEntry::CreateNew.label(kind))
+                            .accessibility_label(AddEntry::CreateNew.label(kind))
+                            .dropdown_menu(move |menu, _, _| {
+                                let mut menu = menu;
+                                for entry in kind.add_menu() {
+                                    let entry = *entry;
+                                    let owner = owner.clone();
+                                    menu =
+                                        menu.item(PopupMenuItem::new(entry.label(kind)).on_click(
+                                            move |_, _, cx| {
+                                                let _ = owner.update(cx, |this, cx| match entry {
+                                                    AddEntry::CreateNew => {
+                                                        this.begin_create_sticker(set_id, kind, cx)
+                                                    }
+                                                    AddEntry::AddExisting => this
+                                                        .open_pick_existing(
+                                                            set_id, kind, false, cx,
+                                                        ),
+                                                    AddEntry::AdaptSticker => this
+                                                        .open_pick_existing(set_id, kind, true, cx),
+                                                });
+                                            },
+                                        ));
+                                }
+                                menu
+                            }),
+                    ),
             )
             .into_any_element()
     }

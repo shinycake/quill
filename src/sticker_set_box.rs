@@ -213,10 +213,8 @@ pub fn emoji_or_default(emoji: &str) -> &str {
 /// animated (TGS) sticker fits both kinds; one at most 100 px a side is an
 /// emoji; the rest are stickers.
 pub fn joinable_kinds(is_lottie: bool, width: i32, height: i32) -> (bool, bool) {
-    let fits_emoji = width > 0
-        && height > 0
-        && width <= EMOJI_SIDE as i32
-        && height <= EMOJI_SIDE as i32;
+    let fits_emoji =
+        width > 0 && height > 0 && width <= EMOJI_SIDE as i32 && height <= EMOJI_SIDE as i32;
     (is_lottie || !fits_emoji, is_lottie || fits_emoji)
 }
 
@@ -252,9 +250,8 @@ pub fn custom_emoji_preview_label(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AddEntry, SetKind, can_archive, custom_emoji_preview_label, emoji_or_default,
-        fitted_size, has_add_cell, joinable_kinds, joined_emojis, set_link, share_label,
-        valid_set_name,
+        AddEntry, SetKind, can_archive, custom_emoji_preview_label, emoji_or_default, fitted_size,
+        has_add_cell, joinable_kinds, joined_emojis, set_link, share_label, valid_set_name,
     };
 
     #[test]

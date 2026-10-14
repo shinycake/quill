@@ -256,7 +256,9 @@ impl MediaAction {
             Self::SaveGif => "Add to GIFs",
             Self::ViewStickerSet { installed: true } => "View Sticker Set",
             Self::ViewStickerSet { installed: false } => "Add Stickers",
-            Self::AddToSet { emoji } => crate::sticker_set_box::SetKind::of(emoji).add_to_set_label(),
+            Self::AddToSet { emoji } => {
+                crate::sticker_set_box::SetKind::of(emoji).add_to_set_label()
+            }
             Self::ToggleFavorite { remove: false } => "Add to Favorites",
             Self::ToggleFavorite { remove: true } => "Remove from Favorites",
             Self::ShowInFolder if finder => "Show in Finder",

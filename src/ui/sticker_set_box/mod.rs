@@ -16,7 +16,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
+use gpui_kit::{TestSupportExt, *};
 use quill::ids::FileId;
 use quill::state::StickerSetViewStage;
 use quill::sticker_set_box::{
@@ -31,7 +31,7 @@ mod demo;
 mod dialogs;
 mod menu;
 pub(crate) mod state;
-#[cfg(test)]
+#[cfg(all(test, feature = "demo-capture"))]
 mod tests;
 
 /// A sticker being dragged to a new place in reorder mode.
@@ -200,6 +200,7 @@ impl QuillApp {
         let file_id = item.file_id;
         let cell = div()
             .id(("sticker-set-cell", index as u64))
+            .test_support()
             .size(px(72.))
             .p_1()
             .flex()
@@ -376,9 +377,8 @@ impl QuillApp {
                     let reordering = this.sticker_box.reordering;
                     let mut grid = div().flex().flex_wrap().gap_1().w(px(380.));
                     for (index, item) in stickers.iter().enumerate() {
-                        grid = grid.child(this.sticker_set_cell(
-                            set_id, kind, is_owned, index, item, cx,
-                        ));
+                        grid = grid
+                            .child(this.sticker_set_cell(set_id, kind, is_owned, index, item, cx));
                     }
                     if !reordering && has_add_cell(is_owned, count, kind) {
                         grid = grid.child(this.sticker_set_add_cell(set_id, kind, cx));

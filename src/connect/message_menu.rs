@@ -442,7 +442,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(set_id));
+        self.session.stickers.sticker_set_view =
+            Some(crate::state::StickerSetView::loading(set_id));
         let extra = self.session.request(
             RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
             None,

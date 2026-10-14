@@ -37,9 +37,7 @@ pub(super) enum MessageMenuPage {
     SaveTo,
     /// "Add to Sticker Set" / "Add to Emoji Set": the sets the user
     /// created.
-    AddToSet {
-        emoji: bool,
-    },
+    AddToSet { emoji: bool },
     /// Who saw / reacted to the message.
     Audience,
 }

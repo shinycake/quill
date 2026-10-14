@@ -116,7 +116,11 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            if live.driver.remove_sticker_from_set(set_id, item.file_id).is_err() {
+            if live
+                .driver
+                .remove_sticker_from_set(set_id, item.file_id)
+                .is_err()
+            {
                 self.connection.status_note = "Couldn't delete the sticker.".into();
             }
         } else if let Some(session) = self.demo_session.as_mut()
@@ -150,7 +154,12 @@ impl QuillApp {
 
     /// "Create a New Sticker" / "Create a New Emoji": pick an image, then
     /// the photo editor with a square crop.
-    pub(super) fn begin_create_sticker(&mut self, set_id: i64, kind: SetKind, cx: &mut Context<Self>) {
+    pub(super) fn begin_create_sticker(
+        &mut self,
+        set_id: i64,
+        kind: SetKind,
+        cx: &mut Context<Self>,
+    ) {
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -251,8 +260,7 @@ impl QuillApp {
                 .add_new_sticker_to_set(create.set_id, &path, &emojis)
                 .is_err()
             {
-                self.connection.status_note =
-                    quill::sticker_set_box::UPLOAD_FAILED_NOTE.into();
+                self.connection.status_note = quill::sticker_set_box::UPLOAD_FAILED_NOTE.into();
             }
         } else {
             self.connection.status_note = "demo — stickers upload with live TDLib".into();
@@ -321,15 +329,26 @@ impl QuillApp {
         if pick.adapt {
             match item.format {
                 // Animated stickers become emoji as they are.
-                StickerFormat::Tgs => self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx),
+                StickerFormat::Tgs => {
+                    self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx)
+                }
                 StickerFormat::Webp | StickerFormat::Unknown => {
                     let roots = self.media_display_roots();
                     let path = self
                         .session()
-                        .and_then(|s| s.media.files.get(&item.file_id.0)?.usable_path().map(str::to_string))
+                        .and_then(|s| {
+                            s.media
+                                .files
+                                .get(&item.file_id.0)?
+                                .usable_path()
+                                .map(str::to_string)
+                        })
                         .and_then(|p| quill::local_path::sandboxed_display_path(&p, &roots));
                     match path.and_then(|p| {
-                        super::super::editor_art::sticker_pixels(std::path::Path::new(&p), item.format)
+                        super::super::editor_art::sticker_pixels(
+                            std::path::Path::new(&p),
+                            item.format,
+                        )
                     }) {
                         Some(pixels) => {
                             self.viewer.photo_editor =
@@ -370,7 +389,10 @@ impl QuillApp {
                 cx.notify();
                 return;
             }
-            if stickers.iter().any(|s| s.file_id == item.file_id || s.id == item.id) {
+            if stickers
+                .iter()
+                .any(|s| s.file_id == item.file_id || s.id == item.id)
+            {
                 self.connection.status_note = already_note(kind).into();
                 cx.notify();
                 return;
@@ -383,7 +405,8 @@ impl QuillApp {
                 .add_existing_sticker_to_set(set_id, item.file_id, item.format, &emoji)
                 .is_err()
             {
-                self.connection.status_note = quill::sticker_set_box::ADD_EXISTING_FAILED_NOTE.into();
+                self.connection.status_note =
+                    quill::sticker_set_box::ADD_EXISTING_FAILED_NOTE.into();
             }
         } else {
             self.connection.status_note = "demo — stickers are added with live TDLib".into();

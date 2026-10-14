@@ -6,13 +6,13 @@
 
 use super::app::QuillApp;
 use super::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
+use super::photo_editor_items::ItemDrag;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use image::RgbaImage;
 use quill::sticker_set_box::SetKind;
-use super::photo_editor_items::ItemDrag;
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -42,7 +42,6 @@ pub(super) enum EditorMode {
     Draw,
     Stickers,
 }
-
 
 /// What the edited picture is for.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -202,11 +201,6 @@ impl PhotoEditor {
         ))
     }
 
-
-
-
-
-
     fn press(&mut self, position: Point<Pixels>) {
         let Some((x, y)) = self.normalized(position) else {
             return;
@@ -328,8 +322,10 @@ impl QuillApp {
         };
         match image::open(&attachment.path) {
             Ok(image) => {
-                self.viewer.photo_editor =
-                    Some(PhotoEditor::new(EditorPurpose::Attachment(index), image.to_rgba8()));
+                self.viewer.photo_editor = Some(PhotoEditor::new(
+                    EditorPurpose::Attachment(index),
+                    image.to_rgba8(),
+                ));
             }
             Err(_) => self.connection.status_note = "Couldn't open this image for editing.".into(),
         }
@@ -771,6 +767,4 @@ impl QuillApp {
                 .into_any_element(),
         )
     }
-
-
 }

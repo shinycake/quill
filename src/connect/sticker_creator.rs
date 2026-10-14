@@ -4,9 +4,7 @@
 //! `edits`, and once confirmed the view asks `getStickerSet` again.
 use super::*;
 use crate::ids::{FileId, RequestId};
-use crate::state::{
-    RequestPurpose, StickerCreatorPurpose, StickerSetViewStage, StickersPurpose,
-};
+use crate::state::{RequestPurpose, StickerCreatorPurpose, StickerSetViewStage, StickersPurpose};
 use crate::sticker_set_box::{emoji_or_default, valid_set_name};
 use crate::telegram::envelope::StickerFormat;
 use crate::telegram::requests::{
@@ -29,9 +27,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::Stickers(StickersPurpose::Creator(purpose)), None);
+        let extra = self.session.request(
+            RequestPurpose::Stickers(StickersPurpose::Creator(purpose)),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
             return Err(err);

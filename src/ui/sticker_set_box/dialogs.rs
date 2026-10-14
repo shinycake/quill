@@ -149,9 +149,11 @@ impl QuillApp {
                             .flex_col()
                             .items_center()
                             .gap_3()
-                            .children(still.clone().map(|path| {
-                                img(path).size(px(96.)).object_fit(ObjectFit::Contain)
-                            }))
+                            .children(
+                                still.clone().map(|path| {
+                                    img(path).size(px(96.)).object_fit(ObjectFit::Contain)
+                                }),
+                            )
                             .child(div().text_sm().child(kind.delete_question())),
                     )
                 })
@@ -277,7 +279,9 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let Some(create) = this.sticker_box.create.clone() else {
-                return dialog.title(shell::dialog_title("New Sticker")).on_close(on_close);
+                return dialog
+                    .title(shell::dialog_title("New Sticker"))
+                    .on_close(on_close);
             };
             let kind = create.kind;
             let preview = this.create_preview_path();
@@ -295,12 +299,8 @@ impl QuillApp {
                     .take(EMOJI_GRID)
                     .collect()
             };
-            let chosen_row = div()
-                .flex()
-                .flex_wrap()
-                .gap_1()
-                .min_h(px(36.))
-                .children(chosen.iter().enumerate().map(|(index, emoji)| {
+            let chosen_row = div().flex().flex_wrap().gap_1().min_h(px(36.)).children(
+                chosen.iter().enumerate().map(|(index, emoji)| {
                     let emoji = emoji.clone();
                     Button::new(("sticker-create-chosen", index as u64))
                         .label(emoji.clone())
@@ -310,32 +310,32 @@ impl QuillApp {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_create_emoji(&emoji, cx);
                         }))
-                }));
-            let grid = div().flex().flex_wrap().gap_1().children(
-                results.into_iter().enumerate().map(|(index, emoji)| {
-                    let picked = chosen.iter().any(|e| e == emoji);
-                    div()
-                        .id(("sticker-create-emoji", index as u64))
-                        .size(px(36.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_md()
-                        .text_xl()
-                        .cursor_pointer()
-                        .when(picked, |cell| cell.bg(cx.theme().accent))
-                        .hover(|style| style.bg(cx.theme().accent))
-                        .child(emoji)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_create_emoji(emoji, cx);
-                        }))
                 }),
             );
-            let about = format!(
-                "{} ({}/{MAX_EMOJIS})",
-                kind.emoji_about(),
-                chosen.len()
-            );
+            let grid =
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(results.into_iter().enumerate().map(|(index, emoji)| {
+                        let picked = chosen.iter().any(|e| e == emoji);
+                        div()
+                            .id(("sticker-create-emoji", index as u64))
+                            .size(px(36.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_md()
+                            .text_xl()
+                            .cursor_pointer()
+                            .when(picked, |cell| cell.bg(cx.theme().accent))
+                            .hover(|style| style.bg(cx.theme().accent))
+                            .child(emoji)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.toggle_create_emoji(emoji, cx);
+                            }))
+                    }));
+            let about = format!("{} ({}/{MAX_EMOJIS})", kind.emoji_about(), chosen.len());
             let body = div()
                 .flex()
                 .flex_col()
@@ -414,7 +414,9 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let Some(pick) = this.sticker_box.pick else {
-                return dialog.title(shell::dialog_title("Choose a sticker")).on_close(on_close);
+                return dialog
+                    .title(shell::dialog_title("Choose a sticker"))
+                    .on_close(on_close);
             };
             let title = if pick.adapt {
                 "Adapt from a Sticker"
@@ -529,7 +531,9 @@ fn confirm_dialog(
                     Button::new(format!("{id}-confirm"))
                         .label("Remove")
                         .danger()
-                        .on_click(cx.listener(move |this, _, window, cx| confirm(this, window, cx))),
+                        .on_click(
+                            cx.listener(move |this, _, window, cx| confirm(this, window, cx)),
+                        ),
                 ),
         )
 }
