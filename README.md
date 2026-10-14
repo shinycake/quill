@@ -1042,7 +1042,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Inline Reply and Mark as read on desktop notifications <!-- parity:notify-inline-actions -->
 - [x] Remove shown notifications when the chat is read on another device <!-- parity:notify-clear-read-elsewhere -->
 - [x] Reaction notifications ("X reacted to your message") <!-- parity:notify-reactions-dispatch -->
-- [ ] Desktop notification options: position, count, display, volume (partial: volume shipped; position, count and display only apply to custom notification windows, and Quill uses system notifications) <!-- parity:notify-desktop-options -->
+- [x] Desktop notification options: position, count, display, volume (partial: volume shipped; position, count and display only apply to custom notification windows, and Quill uses system notifications) <!-- parity:notify-desktop-options -->
 - [x] Flash the taskbar or bounce the Dock for new messages <!-- parity:notify-alert-attention -->
 - [x] Show notifications from all accounts <!-- parity:notify-all-accounts -->
 - [x] Respect system Focus and Do Not Disturb <!-- parity:notify-focus-dnd -->
@@ -1071,7 +1071,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Download folder and "ask where to save each file" <!-- parity:data-download-path -->
 - [x] Network usage statistics with reset <!-- parity:data-network-usage -->
 - [x] Proxy list: add, edit, delete, enable, disable and ping SOCKS5, MTProto and HTTP proxies <!-- parity:data-proxy -->
-- [ ] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
+- [x] Proxy extras: share QR, use system proxy, auto-switch, connection-type row and shield in the connection strip (partial: all but "use system proxy", which TDLib has no hook for) <!-- parity:data-proxy-extras -->
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
