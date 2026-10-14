@@ -124,7 +124,7 @@ thread_local! {
 }
 
 #[cfg(test)]
-#[cfg(feature = "demo-capture")]
+#[cfg(all(target_os = "macos", feature = "demo-capture"))]
 pub(crate) fn set_test_headroom(headroom: Option<Headroom>) {
     TEST_HEADROOM.with(|cell| cell.set(headroom));
 }
