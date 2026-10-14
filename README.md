@@ -901,11 +901,11 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Wallet transfer messages show as a card with amount, direction, peer and public comment (planned: phase 1, read-only) <!-- parity:wallet-transfer-card -->
 - [x] TON Connect request messages show the app name and request state, with no approve or reject (planned: phase 1, read-only) <!-- parity:wallet-tonconnect-card -->
 - [x] Chat-list, reply and notification previews for wallet transfers and TON Connect requests (planned: phase 1, read-only) <!-- parity:wallet-previews -->
-- [ ] A user's public wallet address on their profile, with copy (planned: phase 1, read-only) <!-- parity:wallet-profile-address -->
-- [ ] Own wallet address and balance, with fiat value and backup status (planned: phase 1, read-only) <!-- parity:wallet-own-overview -->
-- [ ] Own wallet transaction history and NFTs, view only (planned: phase 1, read-only) <!-- parity:wallet-own-history -->
-- [ ] TON transfer and TON Connect links show a notice instead of acting (planned: phase 1, read-only) <!-- parity:wallet-links-notice -->
-- [ ] First incoming transfer hint (planned: phase 1, read-only) <!-- parity:wallet-first-transfer-hint -->
+- [x] A user's public wallet address on their profile, with copy (planned: phase 1, read-only) <!-- parity:wallet-profile-address -->
+- [x] Own wallet address and balance, with fiat value and backup status (planned: phase 1, read-only) <!-- parity:wallet-own-overview -->
+- [x] Own wallet transaction history and NFTs, view only (planned: phase 1, read-only) <!-- parity:wallet-own-history -->
+- [x] TON transfer and TON Connect links show a notice instead of acting (planned: phase 1, read-only) <!-- parity:wallet-links-notice -->
+- [x] First incoming transfer hint (planned: phase 1, read-only) <!-- parity:wallet-first-transfer-hint -->
 - [ ] Decrypt encrypted transfer comments (deferred: needs security & legal review) <!-- parity:wallet-decrypt-comments -->
 - [ ] Create, import, replace or delete a wallet (deferred: needs security & legal review) <!-- parity:wallet-create-import -->
 - [ ] Secret phrase backup, export and restore (deferred: needs security & legal review) <!-- parity:wallet-secret-backup -->

@@ -1,6 +1,0 @@
-# TON wallet phase 1, profile and own-wallet side (read-only)
-parity:wallet-profile-address
-parity:wallet-own-overview
-parity:wallet-own-history
-parity:wallet-links-notice
-parity:wallet-first-transfer-hint
