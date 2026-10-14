@@ -81,6 +81,8 @@ HDR viewer (slice B) builds on the decoder added here.
   (`quill::media_viewer::shows_as_photo`). A file that fails to decode
   keeps showing its thumbnail. Picture files up to 10 MB download on their
   own under the photo auto-download setting.
+- Sponsored messages keep the file row for picture files; only chat
+  messages show them as photos.
 - The upload rule checks the file extension, where tdesktop checks the
   MIME type it detected.
 - HEIC/AVIF on Windows need Microsoft's HEIF and AV1 codec extensions

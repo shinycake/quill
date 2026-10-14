@@ -80,7 +80,7 @@ impl QuillApp {
     ) -> Option<FileCard> {
         let file = files.get(&item.download_file_id.0);
         let size = file.map(ParsedFile::display_size).unwrap_or(0);
-        let too_large = size >= READ_BYTES_LIMIT;
+        let too_large = size > READ_BYTES_LIMIT;
         let shown_as_picture = item.kind == MediaViewerKind::ImageFile && !too_large;
         if !matches!(
             item.kind,
@@ -101,7 +101,7 @@ fn picture_opens_in_app(path: &Path, doc: &DocumentContent) -> bool {
         return false;
     }
     let small_enough =
-        std::fs::metadata(path).is_ok_and(|meta| meta.len() < READ_BYTES_LIMIT as u64);
+        std::fs::metadata(path).is_ok_and(|meta| meta.len() <= READ_BYTES_LIMIT as u64);
     if !small_enough {
         return false;
     }

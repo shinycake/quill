@@ -38,11 +38,14 @@ impl QuillApp {
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
                 let send_box = &self.composer_ui.send_box;
-                !send_box.thumbnailing.contains(path) && !send_box.thumbnailed.contains(path)
+                !send_box.thumbnailing.contains_key(path) && !send_box.thumbnailed.contains(path)
             })
             .collect();
         for path in paths {
-            self.composer_ui.send_box.thumbnailing.insert(path.clone());
+            let send_box = &mut self.composer_ui.send_box;
+            send_box.thumbnail_jobs += 1;
+            let job = send_box.thumbnail_jobs;
+            send_box.thumbnailing.insert(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move { write_file_thumbnail(&source) });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
@@ -51,8 +54,7 @@ impl QuillApp {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_ui.send_box;
-                    if send_box.thumbnailing.remove(&waited) {
-                        send_box.thumbnailed.insert(waited);
+                    if send_box.settle_thumbnail(&waited, job) {
                         cx.notify();
                     }
                 });
@@ -62,11 +64,11 @@ impl QuillApp {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_ui.send_box;
-                    // The batch may have been sent or cleared meanwhile.
-                    if !send_box.thumbnailing.remove(&path) {
+                    // The batch may have been sent or cleared, or the job
+                    // given up on, meanwhile.
+                    if !send_box.settle_thumbnail(&path, job) {
                         return;
                     }
-                    send_box.thumbnailed.insert(path.clone());
                     if let Some(thumbnail) = thumbnail {
                         for attachment in this
                             .composer_ui
@@ -87,6 +89,19 @@ impl QuillApp {
     /// Thumbnails of tray files are still being made.
     pub(super) fn tray_thumbnails_pending(&self) -> bool {
         !self.composer_ui.send_box.thumbnailing.is_empty()
+    }
+}
+
+impl super::send_box_state::SendBoxUi {
+    /// End thumbnail job `job` for `path`: `false` when it is no longer
+    /// the current one (given up on, superseded, or the batch cleared).
+    fn settle_thumbnail(&mut self, path: &Path, job: u64) -> bool {
+        if self.thumbnailing.get(path) != Some(&job) {
+            return false;
+        }
+        self.thumbnailing.remove(path);
+        self.thumbnailed.insert(path.to_path_buf());
+        true
     }
 }
 

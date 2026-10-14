@@ -758,6 +758,7 @@ impl QuillApp {
         let removed = self.composer_ui.pending_attachments.remove(index);
         // Added again later, the picture gets its thumbnail again.
         self.composer_ui.send_box.thumbnailed.remove(&removed.path);
+        self.composer_ui.send_box.thumbnailing.remove(&removed.path);
         if self.composer_ui.pending_attachments.is_empty() {
             self.clear_attachment(cx);
         } else {

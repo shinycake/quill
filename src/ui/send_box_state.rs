@@ -22,8 +22,11 @@ pub(crate) struct SendBoxUi {
     pub(super) sound_checked: HashSet<PathBuf>,
     /// Tray pictures sent as files whose thumbnail is being made, and
     /// those done (`send_box_thumbnails.rs`).
-    pub(super) thumbnailing: HashSet<PathBuf>,
+    /// Each job has its own number, so a stale job (a removed and re-added
+    /// file) can't settle a newer one.
+    pub(super) thumbnailing: HashMap<PathBuf, u64>,
     pub(super) thumbnailed: HashSet<PathBuf>,
+    pub(super) thumbnail_jobs: u64,
     /// The "Paid Content" price box.
     pub(super) price: Option<PriceDialog>,
     /// The video editor opened from the tray or the edit box.
@@ -38,8 +41,9 @@ impl SendBoxUi {
             photo_sizes: RefCell::new(HashMap::new()),
             sound_checking: HashSet::new(),
             sound_checked: HashSet::new(),
-            thumbnailing: HashSet::new(),
+            thumbnailing: HashMap::new(),
             thumbnailed: HashSet::new(),
+            thumbnail_jobs: 0,
             price: None,
             video_editor: None,
         }

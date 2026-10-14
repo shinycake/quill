@@ -61,11 +61,13 @@ pub fn opens_as_picture(file_name: &str, mime_type: &str) -> bool {
 }
 
 /// tdesktop `Images::kReadBytesLimit` (lib_ui `ui/image/image_prepare.h`):
-/// image files this big or bigger open in another app, not the viewer.
+/// bigger image files open in another app, not the viewer (`file.size() >
+/// kReadBytesLimit` in `image_prepare.cpp`).
 pub const READ_BYTES_LIMIT: i64 = 64 * 1024 * 1024;
 
 /// Picture files up to this size download on their own where photos do
-/// (they show as a photo in the chat).
+/// (they show as a photo in the chat). A Quill choice: tdesktop has no
+/// photo-like file to apply it to.
 pub const PICTURE_FILE_AUTO_DOWNLOAD_MAX: i64 = 10 * 1024 * 1024;
 
 /// A picture sent as a file shows in the chat as a photo (with a "file"
@@ -78,7 +80,7 @@ pub fn shows_as_photo(doc: &DocumentContent) -> bool {
             .thumbnail
             .as_ref()
             .is_some_and(|thumb| thumb.width > 0 && thumb.height > 0 && thumb.file_id.0 != 0)
-        && doc.size < READ_BYTES_LIMIT
+        && doc.size <= READ_BYTES_LIMIT
 }
 
 /// The picture format a photo-like file shows on its pill: its extension in
@@ -198,6 +200,8 @@ mod tests {
         assert!(shows_as_photo(&doc));
         assert_eq!(picture_format_label(&doc), "HEIC");
         doc.size = READ_BYTES_LIMIT;
+        assert!(shows_as_photo(&doc));
+        doc.size = READ_BYTES_LIMIT + 1;
         assert!(!shows_as_photo(&doc));
         doc.size = 0;
         doc.thumbnail = None;

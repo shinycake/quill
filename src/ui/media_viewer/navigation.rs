@@ -265,7 +265,7 @@ impl QuillApp {
             let wanted = item.kind == MediaViewerKind::ImageFile
                 && file.is_none_or(|file| {
                     file.usable_path().is_none()
-                        && file.display_size() < crate::ui::image_decode::READ_BYTES_LIMIT
+                        && file.display_size() <= crate::ui::image_decode::READ_BYTES_LIMIT
                 });
             if wanted {
                 self.request_media_download(item.download_file_id, None, cx);

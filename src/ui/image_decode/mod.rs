@@ -42,8 +42,7 @@ mod wic;
 mod tests;
 
 /// tdesktop `Images::kReadBytesLimit` (lib_ui `ui/image/image_prepare.h`):
-/// image files this big or bigger open in another app instead of the
-/// viewer.
+/// bigger image files open in another app instead of the viewer.
 pub(crate) const READ_BYTES_LIMIT: i64 = quill::media_viewer::READ_BYTES_LIMIT;
 
 /// tdesktop `Images::kReadMaxArea`: pictures with more pixels than this are
@@ -254,7 +253,7 @@ pub(crate) fn decode_file(path: &Path, size: DecodeSize) -> Result<image::RgbaIm
     if !meta.is_file() {
         return Err(DecodeError::Unsupported);
     }
-    if meta.len() >= READ_BYTES_LIMIT as u64 {
+    if meta.len() > READ_BYTES_LIMIT as u64 {
         return Err(DecodeError::TooLarge);
     }
     let bytes = std::fs::read(path).map_err(|err| DecodeError::Failed(err.to_string()))?;
