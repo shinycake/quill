@@ -94,7 +94,7 @@ fn backdrop(index: usize) -> Value {
         "rarity": {"@type": "upgradedGiftAttributeRarityPerMille", "per_mille": 15 + 5 * id}})
 }
 
-fn listing(number: i32, model: usize, backdrop_ix: usize, stars: i64) -> Value {
+pub(super) fn listing(number: i32, model: usize, backdrop_ix: usize, stars: i64) -> Value {
     let (sticker_id, name) = MODELS
         .get(model % MODELS.len())
         .copied()
@@ -113,7 +113,7 @@ fn listing(number: i32, model: usize, backdrop_ix: usize, stars: i64) -> Value {
             "craft_probability_per_mille": 0, "is_crafted": false, "is_burned": false}})
 }
 
-fn resale_page() -> Value {
+pub(super) fn resale_page() -> Value {
     let listings: Vec<Value> = [
         (1204, 0, 0, 1_250),
         (88, 1, 1, 1_400),

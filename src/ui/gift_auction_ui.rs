@@ -8,7 +8,7 @@ use super::app::QuillApp;
 use super::chat_theme::success;
 use super::gift_manage_ui::hint;
 use super::gift_market_state::MarketBox;
-use super::gift_market_ui::{BoxView, two_line_button};
+use super::gift_market_ui::{BoxView, feature_row, two_line_button};
 use super::message_text::format_unix_date_time;
 use super::premium_ui::sticker_tile;
 use super::shell::DialogKind;
@@ -110,19 +110,6 @@ impl QuillApp {
         self.session()?.payments.gift_market.auctions.get(&gift_id)
     }
 
-    /// Opens `next` above the current box.
-    fn market_push(&mut self, next: MarketBox, cx: &mut Context<Self>) {
-        self.gift_market.push(next);
-        cx.notify();
-    }
-
-    /// Replaces the top box with `next`.
-    fn market_replace(&mut self, next: MarketBox, cx: &mut Context<Self>) {
-        self.gift_market.stack.pop();
-        self.gift_market.push(next);
-        cx.notify();
-    }
-
     fn open_auction_bought(&mut self, gift_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_gift_auction_acquired(gift_id);
@@ -192,27 +179,7 @@ impl QuillApp {
         );
         let icons = [IconName::Star, IconName::RefreshCw, IconName::Undo2];
         for ((title, text), icon) in about_features(per_round, rounds).into_iter().zip(icons) {
-            body = body.child(
-                div()
-                    .flex()
-                    .gap_3()
-                    .child(
-                        div()
-                            .pt_0p5()
-                            .text_color(cx.theme().primary)
-                            .child(Icon::new(icon).with_size(px(16.))),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap_0p5()
-                            .child(div().text_sm().font_semibold().child(title))
-                            .child(div().text_sm().text_color(muted).child(text)),
-                    ),
-            );
+            body = body.child(feature_row(icon, title, text, cx));
         }
         BoxView::new("Auction", body).footer(
             div().flex().justify_end().child(

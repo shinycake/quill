@@ -10,6 +10,7 @@ use super::chat_theme::fill_muted;
 use super::gift_market_state::MarketBox;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
@@ -71,6 +72,19 @@ impl QuillApp {
         }
     }
 
+    /// Opens `next` above the current box.
+    pub(super) fn market_push(&mut self, next: MarketBox, cx: &mut Context<Self>) {
+        self.gift_market.push(next);
+        cx.notify();
+    }
+
+    /// Replaces the top box with `next`.
+    pub(super) fn market_replace(&mut self, next: MarketBox, cx: &mut Context<Self>) {
+        self.gift_market.stack.pop();
+        self.gift_market.push(next);
+        cx.notify();
+    }
+
     /// Closes the top box ("Back", Escape, the close button).
     pub(super) fn market_back(&mut self, cx: &mut Context<Self>) {
         let popped = self.gift_market.stack.pop();
@@ -119,6 +133,7 @@ impl QuillApp {
             self.gift_market.recipient = None;
             self.gift_market.pending_auction = false;
         }
+        self.after_craft_pop();
     }
 
     /// Who an auction bid goes to: the chosen recipient, or the user.
@@ -211,6 +226,7 @@ impl QuillApp {
         if bought {
             self.market_back(cx);
         }
+        self.craft_frame_upkeep(cx);
         self.drain_gift_market_notes(window, cx);
         let follow = self
             .gift_market
@@ -284,6 +300,9 @@ impl QuillApp {
                     stickers.extend(buy.listing.gift.model.sticker.as_ref());
                 }
             }
+            Some(MarketBox::Craft | MarketBox::CraftSelect | MarketBox::CraftResult) => {
+                stickers.extend(super::gift_craft_ui::craft_stickers(market));
+            }
             Some(MarketBox::Variants { gift_id }) => {
                 if let Some(preview) = market.previews.get(gift_id) {
                     stickers.extend(
@@ -338,6 +357,11 @@ impl QuillApp {
                 MarketBox::ChangeRecipient { gift_id } => this.change_recipient_box(gift_id, cx),
                 MarketBox::ActiveAuctions => this.active_auctions_box(cx),
                 MarketBox::Variants { gift_id } => this.variants_box(gift_id, cx),
+                MarketBox::CraftInfo => this.craft_info_box(cx),
+                MarketBox::Craft => this.craft_box(cx),
+                MarketBox::CraftSelect => this.craft_select_box(cx),
+                MarketBox::CraftResult => this.craft_result_box(cx),
+                MarketBox::Notice { title, text } => this.notice_box(title, text, cx),
             };
             let body = Rc::new(RefCell::new(Some(view.body)));
             let mut dialog = dialog
@@ -409,6 +433,40 @@ pub(super) fn collectible_tile(
                 .font_semibold()
                 .text_color(gpui_kit::white().opacity(0.85))
                 .child(format!("#{}", group_digits(i64::from(gift.number)))),
+        )
+}
+
+/// One row of an explainer box: an accent icon, a title and its text
+/// (tdesktop `MakeFeatureListEntry`).
+pub(super) fn feature_row(
+    icon: IconName,
+    title: impl Into<SharedString>,
+    text: impl Into<SharedString>,
+    cx: &App,
+) -> Div {
+    div()
+        .flex()
+        .gap_3()
+        .child(
+            div()
+                .pt_0p5()
+                .text_color(cx.theme().primary)
+                .child(Icon::new(icon).with_size(px(16.))),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(div().text_sm().font_semibold().child(title.into()))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(text.into()),
+                ),
         )
 }
 

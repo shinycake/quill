@@ -29,7 +29,7 @@ pub(super) fn price_text(price: GiftPrice) -> String {
 }
 
 /// One attribute row: label, name and the rarity tag.
-fn attribute_row(label: &'static str, name: &str, rarity: Rarity, cx: &App) -> Div {
+pub(super) fn attribute_row(label: &'static str, name: &str, rarity: Rarity, cx: &App) -> Div {
     div()
         .flex()
         .items_center()
