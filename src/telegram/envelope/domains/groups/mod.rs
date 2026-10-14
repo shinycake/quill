@@ -116,6 +116,10 @@ pub enum GroupsPayload {
         /// (schema 1.8.68 `restrictionInfo`): the content must be
         /// restricted.
         restricted: bool,
+        /// `supergroup.is_direct_messages_group` /
+        /// `is_administered_direct_messages_group`: the viewer's side in a
+        /// channel's direct messages (suggested posts).
+        direct_messages: Option<crate::suggested_posts::DirectMessagesRole>,
     },
     /// `supergroup` — `getSupergroup` response. Phase A1: also keeps own
     /// `status` (`supergroup.status`, schema 1.8.67 line 2746) for the
@@ -179,6 +183,8 @@ pub enum GroupsPayload {
         join_to_send_messages: bool,
         /// `supergroup.paid_message_star_count`.
         paid_message_star_count: i64,
+        /// The viewer's side in a channel's direct messages.
+        direct_messages: Option<crate::suggested_posts::DirectMessagesRole>,
     },
     /// `chatMember` — `getChatMember` response for a channel.
     ChatMember { member: ParsedChatMember },

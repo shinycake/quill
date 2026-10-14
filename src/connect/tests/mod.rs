@@ -87,6 +87,7 @@ mod stories;
 mod story_insights;
 mod story_reply_media;
 mod subsection_tabs;
+mod suggested_posts;
 mod support;
 mod threads;
 mod ton_wallet;

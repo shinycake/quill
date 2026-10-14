@@ -143,7 +143,7 @@ pub enum EarnPurpose {
 
 /// TDLib errors the revenue screens tell apart (tdesktop
 /// `HandleWithdrawalButton`, `PrePasswordErrorBox`, the megagroup check of
-/// `ChannelEarn`).
+/// `ChannelEarn`), and the low balance of a paid suggested post.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EarnErrorHint {
     /// `AMOUNT_TOO_SMALL`.
@@ -156,6 +156,9 @@ pub enum EarnErrorHint {
     PasswordInvalid,
     /// `BROADCAST_REQUIRED`: a group has no TON ad revenue.
     BroadcastRequired,
+    /// `BALANCE_TOO_LOW`: not enough Stars or Grams to pay for a suggested
+    /// post (tdesktop `api_suggest_post.cpp` asks for a top-up).
+    BalanceTooLow,
 }
 
 /// Classify a TDLib error message; `None` for anything else.
@@ -165,6 +168,7 @@ pub fn error_hint(message: &str) -> Option<EarnErrorHint> {
         "PASSWORD_MISSING" => EarnErrorHint::PasswordMissing,
         "PASSWORD_HASH_INVALID" => EarnErrorHint::PasswordInvalid,
         "BROADCAST_REQUIRED" => EarnErrorHint::BroadcastRequired,
+        "BALANCE_TOO_LOW" => EarnErrorHint::BalanceTooLow,
         m if m.starts_with("PASSWORD_TOO_FRESH_") || m.starts_with("SESSION_TOO_FRESH_") => {
             EarnErrorHint::TooFresh
         }

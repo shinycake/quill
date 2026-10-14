@@ -687,15 +687,19 @@ impl QuillApp {
         let confirm = self.message_ui.pending_delete.clone();
         let can_revoke = confirm.as_ref().is_some_and(|c| c.can_revoke);
         let revoke = confirm.as_ref().is_some_and(|c| c.revoke);
+        // A paid suggested post deleted too early loses its payment.
+        let warning = self.paid_post_delete_warning();
         composer_context_bar(
             "delete-confirm",
             gpui_kit::assets::IconName::Trash,
             danger().into(),
-            "Delete message?",
-            if can_revoke && revoke {
-                "It will be deleted for everyone in this chat.".to_string()
-            } else {
-                "It will be deleted for you only.".to_string()
+            warning.map_or("Delete message?", |(title, _)| title),
+            match warning {
+                Some((_, text)) => text.to_string(),
+                None if can_revoke && revoke => {
+                    "It will be deleted for everyone in this chat.".to_string()
+                }
+                None => "It will be deleted for you only.".to_string(),
             },
             Some(
                 div()
@@ -719,7 +723,11 @@ impl QuillApp {
                     })
                     .child(
                         Button::new("confirm-delete")
-                            .label("Delete")
+                            .label(if warning.is_some() {
+                                quill::suggested_posts::DELETE_ANYWAY
+                            } else {
+                                "Delete"
+                            })
                             .danger()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {

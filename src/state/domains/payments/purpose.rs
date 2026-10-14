@@ -146,6 +146,9 @@ pub enum PaymentsPurpose {
     },
     /// Revenue screens and affiliate programs (`crate::earn`).
     Earn(crate::earn::EarnPurpose),
+    /// Suggested posts in channel direct messages
+    /// (`crate::suggested_posts`).
+    SuggestedPost(crate::suggested_posts::SuggestedPostPurpose),
 }
 
 impl PaymentsPurpose {

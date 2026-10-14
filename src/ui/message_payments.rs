@@ -4,6 +4,7 @@ use super::app::QuillApp;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::state::HistoryMessage;
@@ -17,6 +18,35 @@ use quill::telegram::envelope::{
 /// all inherit it). Buttons stretch to share each row's width, like Telegram
 /// desktop; empty rows are skipped.
 pub(super) fn inline_keyboard(
+    message: &HistoryMessage,
+    fast_buttons: bool,
+    cx: &mut Context<QuillApp>,
+) -> Option<AnyElement> {
+    let markup = markup_keyboard(message, fast_buttons, cx);
+    // A suggested post's Decline / Accept / Suggest Changes rows come after
+    // the message's own rows (tdesktop `HistoryMessageReplyMarkup`
+    // appends them).
+    let Some(suggestion) = super::history::suggested_post_block::suggestion_buttons(message, cx)
+    else {
+        return markup;
+    };
+    // The message's own grid brings its top margin.
+    let has_markup = markup.is_some();
+    Some(
+        div()
+            .id(("inline-keyboard-with-suggestion", message.id.0 as u64))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .when(!has_markup, |rows| rows.mt_2())
+            .children(markup)
+            .child(suggestion)
+            .into_any_element(),
+    )
+}
+
+/// The message's own `replyMarkupInlineKeyboard`.
+fn markup_keyboard(
     message: &HistoryMessage,
     fast_buttons: bool,
     cx: &mut Context<QuillApp>,
@@ -144,13 +174,7 @@ pub(super) fn inline_keyboard_button(
     ))
     .label(label)
     .tooltip(button_tooltip(button));
-    let element = match button.style {
-        InlineKeyboardButtonStyle::Primary => element.primary(),
-        InlineKeyboardButtonStyle::Danger => element.danger(),
-        InlineKeyboardButtonStyle::Success => element.success(),
-        InlineKeyboardButtonStyle::Link => element.link(),
-        InlineKeyboardButtonStyle::Default => element.ghost(),
-    };
+    let element = inline_keyboard_style(element, button.style);
     if !button_is_pressable(&button.kind) {
         return element.disabled(true);
     }
@@ -166,6 +190,18 @@ pub(super) fn inline_keyboard_button(
             cx,
         );
     }))
+}
+
+/// The look of an inline keyboard button for its `style`; also used by
+/// the rows Quill adds itself (a suggested post's decisions).
+pub(super) fn inline_keyboard_style(element: Button, style: InlineKeyboardButtonStyle) -> Button {
+    match style {
+        InlineKeyboardButtonStyle::Primary => element.primary(),
+        InlineKeyboardButtonStyle::Danger => element.danger(),
+        InlineKeyboardButtonStyle::Success => element.success(),
+        InlineKeyboardButtonStyle::Link => element.link(),
+        InlineKeyboardButtonStyle::Default => element.ghost(),
+    }
 }
 
 /// Whether pressing a button of this kind does anything (`Disabled` and

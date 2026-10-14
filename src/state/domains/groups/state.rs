@@ -193,6 +193,9 @@ pub struct GroupsState {
     /// `supergroup.restriction_info.restriction_reason` is set: the
     /// content must be restricted (tdesktop `computeUnavailableReason`).
     pub supergroup_restricted: HashSet<i64>,
+    /// The viewer's side in each channel direct messages group
+    /// (`supergroup.is_direct_messages_group`), keyed by supergroup id.
+    pub supergroup_direct_messages: HashMap<i64, crate::suggested_posts::DirectMessagesRole>,
     /// B7: the viewer's own `basicGroup.status`, keyed by basic group id.
     pub basic_group_status: HashMap<i64, ChannelMemberStatus>,
     /// B7: `can_change_info` of the viewer's administrator status in a
@@ -303,6 +306,7 @@ impl GroupsState {
             supergroup_join_by_request: HashMap::new(),
             supergroup_join_to_send: HashMap::new(),
             supergroup_restricted: HashSet::new(),
+            supergroup_direct_messages: HashMap::new(),
             basic_group_status: HashMap::new(),
             basic_group_change_info_right: HashMap::new(),
             basic_group_active: HashMap::new(),

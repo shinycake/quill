@@ -54,4 +54,6 @@ pub enum PaymentsPayload {
     TonWallet(crate::ton_wallet::TonWalletPayload),
     /// Revenue statistics and affiliate programs (`crate::earn`).
     Earn(crate::earn::EarnPayload),
+    /// Suggested posts in channel direct messages (`crate::suggested_posts`).
+    SuggestedPost(crate::suggested_posts::SuggestedPostPayload),
 }

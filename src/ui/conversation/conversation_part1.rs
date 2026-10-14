@@ -248,6 +248,7 @@ impl QuillApp {
                         .when_some(self.composer_ui.pending_reply.clone(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
+                        .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
                         .when_some(self.reply_elsewhere_panel(cx), |this, panel| {
                             this.child(panel)
                         })
@@ -415,6 +416,9 @@ impl QuillApp {
                                 })
                                 // Show / hide the bot's reply keyboard.
                                 .when_some(self.keyboard_toggle_button(cx), |row, button| {
+                                    row.child(button)
+                                })
+                                .when_some(self.suggest_post_toggle(cx), |row, button| {
                                     row.child(button)
                                 })
                                 // "Send as" identity of the chat

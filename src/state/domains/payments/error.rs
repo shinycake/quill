@@ -158,6 +158,9 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::Earn(purpose))) => {
                 self.apply_earn_error(err, purpose)
             }
+            Some(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(purpose))) => {
+                self.apply_suggested_post_error(err, purpose)
+            }
             _ => {}
         }
     }

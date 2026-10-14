@@ -298,6 +298,7 @@ fn update_supergroup_parses_forum_flag() {
             join_to_send_messages: _,
             usernames: _,
             paid_message_star_count: _,
+            direct_messages: _,
             restricted: _,
         }) => {
             assert_eq!(supergroup_id, 16);
@@ -351,6 +352,7 @@ fn update_supergroup_parses_username() {
             join_to_send_messages: _,
             usernames: _,
             paid_message_star_count: _,
+            direct_messages: _,
             restricted: _,
         }) => {
             assert_eq!(supergroup_id, 18);
@@ -395,6 +397,7 @@ fn supergroup_response_parses_forum_flag() {
             is_broadcast_group,
             join_to_send_messages: _,
             paid_message_star_count: _,
+            direct_messages: _,
         }) => {
             assert_eq!(supergroup_id, 17);
             assert!(!is_forum);

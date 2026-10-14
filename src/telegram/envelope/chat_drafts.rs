@@ -12,6 +12,9 @@ pub struct ChatDraft {
     /// (`inputTextQuote`, schema 1.8.67 line 3056) — `(text, position)`
     /// with `position` in UTF-16 code units.
     pub quote: Option<(String, i32)>,
+    /// `draftMessage.suggested_post_info`: the suggest bar's terms in a
+    /// channel's direct messages.
+    pub suggested_post: Option<crate::suggested_posts::SuggestTerms>,
 }
 
 /// `updateChatAction` payloads. Kinds Quill does not label (such as
@@ -92,13 +95,16 @@ pub(crate) fn parse_chat_draft(value: Option<&Value>) -> Option<ChatDraft> {
         }
         _ => (None, None),
     };
-    if text.trim().is_empty() && reply_to_message_id.is_none() {
+    let suggested_post =
+        crate::suggested_posts::SuggestTerms::parse_input(value.get("suggested_post_info"));
+    if text.trim().is_empty() && reply_to_message_id.is_none() && suggested_post.is_none() {
         return None;
     }
     Some(ChatDraft {
         text,
         reply_to_message_id,
         quote,
+        suggested_post,
     })
 }
 

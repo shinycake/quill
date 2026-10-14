@@ -188,7 +188,9 @@ pub fn message_send_options(options: &SendOptions) -> Value {
     };
     json!({
         "@type": "messageSendOptions",
-        "suggested_post_info": Value::Null,
+        "suggested_post_info": options
+            .suggested_post
+            .map_or(Value::Null, |terms| terms.to_input_json()),
         "disable_notification": options.disable_notification,
         "from_background": false,
         "protect_content": false,

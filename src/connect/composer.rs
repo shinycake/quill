@@ -5,9 +5,10 @@ use crate::composer::{
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
+use crate::suggested_posts::SuggestTerms;
 use crate::telegram::envelope::ChatDraft;
 use crate::telegram::requests::{
-    SendReply, close_chat, open_chat, set_chat_draft_message, view_messages,
+    SendReply, close_chat, open_chat, set_suggested_draft_message, view_messages,
 };
 use std::time::Duration;
 
@@ -44,9 +45,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.accepts_composer_draft(chat_id, topic) {
             return Ok(DraftSaveOutcome::Skipped);
         }
-        let stored = draft_text_to_store(text, reply_to.is_some()).map(str::to_string);
+        let terms = self.draft_suggestion(chat_id, topic);
+        let stored =
+            draft_text_to_store(text, reply_to.is_some() || terms.is_some()).map(str::to_string);
         let reply_to = stored.as_ref().and(reply_to);
-        if self.draft_matches(chat_id, topic, stored.as_deref(), reply_to.as_ref()) {
+        if self.draft_matches(chat_id, topic, stored.as_deref(), reply_to.as_ref(), terms) {
             self.pending_draft = None;
             self.draft_clock = DraftSaveClock::idle();
             let existing = self.session.draft_for(chat_id, topic).cloned();
@@ -79,7 +82,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             DraftSaveStep::Write => {
                 self.pending_draft = None;
                 self.draft_clock = DraftSaveClock::idle();
-                self.send_draft(chat_id, topic, stored.as_deref(), reply_to.as_ref())?;
+                self.send_draft(chat_id, topic, stored.as_deref(), reply_to.as_ref(), terms)?;
                 Ok(DraftSaveOutcome::Sent)
             }
         }
@@ -98,9 +101,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.draft_clock = DraftSaveClock::idle();
-        let text = draft_text_to_store(&pending.text, pending.reply_to.is_some());
+        let terms = self.draft_suggestion(pending.chat_id, pending.topic);
+        let text =
+            draft_text_to_store(&pending.text, pending.reply_to.is_some() || terms.is_some());
         let reply_to = text.and(pending.reply_to);
-        if self.draft_matches(pending.chat_id, pending.topic, text, reply_to.as_ref()) {
+        if self.draft_matches(
+            pending.chat_id,
+            pending.topic,
+            text,
+            reply_to.as_ref(),
+            terms,
+        ) {
             let existing = self
                 .session
                 .draft_for(pending.chat_id, pending.topic)
@@ -109,8 +120,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .store_composer_draft(pending.chat_id, pending.topic, existing);
             return Ok(None);
         }
-        self.send_draft(pending.chat_id, pending.topic, text, reply_to.as_ref())
-            .map(Some)
+        self.send_draft(
+            pending.chat_id,
+            pending.topic,
+            text,
+            reply_to.as_ref(),
+            terms,
+        )
+        .map(Some)
     }
 
     /// Successful send into `topic` of `chat_id`: drop that slot's draft
@@ -132,12 +149,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.pending_draft = None;
         self.draft_clock = DraftSaveClock::idle();
-        self.send_draft(chat_id, topic, None, None).map(Some)
+        self.send_draft(chat_id, topic, None, None, None).map(Some)
     }
 
     pub fn cancel_pending_draft(&mut self) {
         self.pending_draft = None;
         self.draft_clock = DraftSaveClock::idle();
+    }
+
+    /// The suggest bar's terms a chat draft carries (only the chat slot
+    /// of a channel's direct messages has a bar).
+    fn draft_suggestion(&self, chat_id: ChatId, topic: DraftTopic) -> Option<SuggestTerms> {
+        (topic == DraftTopic::Chat)
+            .then(|| self.session.payments.suggested_posts.draft_terms(chat_id))
+            .flatten()
     }
 
     fn draft_matches(
@@ -146,6 +171,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         topic: DraftTopic,
         text: Option<&str>,
         reply_to: Option<&SendReply>,
+        terms: Option<SuggestTerms>,
     ) -> bool {
         let current = self.session.draft_for(chat_id, topic);
         match (current, text) {
@@ -154,6 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 draft.text == text
                     && draft.reply_to_message_id == reply_to.map(|reply| reply.message_id)
                     && draft.quote == reply_to.and_then(|reply| reply.quote.clone())
+                    && draft.suggested_post == terms
             }
             _ => false,
         }
@@ -165,20 +192,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         topic: DraftTopic,
         text: Option<&str>,
         reply_to: Option<&SendReply>,
+        terms: Option<SuggestTerms>,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self
             .session
             .request(RequestPurpose::SetChatDraftMessage, Some(chat_id));
-        match self.sender.send_json(&set_chat_draft_message(
-            extra, chat_id, topic, text, reply_to,
+        let terms = text.and(terms);
+        match self.sender.send_json(&set_suggested_draft_message(
+            extra, chat_id, topic, text, reply_to, terms,
         )) {
             Ok(()) => {
                 let draft = text
-                    .filter(|text| !text.trim().is_empty() || reply_to.is_some())
+                    .filter(|text| !text.trim().is_empty() || reply_to.is_some() || terms.is_some())
                     .map(|text| ChatDraft {
                         text: text.to_string(),
                         reply_to_message_id: reply_to.map(|reply| reply.message_id),
                         quote: reply_to.and_then(|reply| reply.quote.clone()),
+                        suggested_post: terms,
                     });
                 self.session.store_composer_draft(chat_id, topic, draft);
                 Ok(extra)

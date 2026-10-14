@@ -418,8 +418,21 @@ pub fn set_chat_draft_message(
     text: Option<&str>,
     reply_to: Option<&SendReply>,
 ) -> String {
+    set_suggested_draft_message(extra, chat_id, topic, text, reply_to, None)
+}
+
+/// [`set_chat_draft_message`] with the suggest bar's terms
+/// (`draftMessage.suggested_post_info`).
+pub fn set_suggested_draft_message(
+    extra: RequestId,
+    chat_id: ChatId,
+    topic: DraftTopic,
+    text: Option<&str>,
+    reply_to: Option<&SendReply>,
+    suggested: Option<crate::suggested_posts::SuggestTerms>,
+) -> String {
     let draft_message = match text {
-        None if reply_to.is_none() => Value::Null,
+        None if reply_to.is_none() && suggested.is_none() => Value::Null,
         text => {
             // Composer markup becomes entities, as on send, so other
             // clients show the formatting instead of the raw markers.
@@ -442,7 +455,8 @@ pub fn set_chat_draft_message(
                     "link_preview_options": Value::Null
                 },
                 "effect_id": "0",
-                "suggested_post_info": Value::Null
+                "suggested_post_info": suggested
+                    .map_or(Value::Null, |terms| terms.to_input_json())
             })
         }
     };

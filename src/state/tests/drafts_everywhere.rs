@@ -16,6 +16,7 @@ fn text_draft(text: &str) -> ChatDraft {
         text: text.into(),
         reply_to_message_id: None,
         quote: None,
+        suggested_post: None,
     }
 }
 

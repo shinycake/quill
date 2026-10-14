@@ -135,7 +135,9 @@ gpui_kit::assets::icon_assets!(
         ArrowUpRight,
         // Video editor bar (`ui::video_editor_controls`).
         RotateCwSquare,
-        FlipHorizontal2
+        FlipHorizontal2,
+        // Suggested posts (`ui::suggested_posts_*`).
+        CircleDollarSign
     ]
 );
 
