@@ -169,7 +169,15 @@ fn run_tap(
         // The handle owns this retain and releases it in `Drop`, so stopping
         // the loop never touches a run loop freed at thread exit.
         run_loop.store(CFRetain(rl) as usize, Ordering::SeqCst);
-        let _ = ready.send(Ok(()));
+        if ready.send(Ok(())).is_err() {
+            // `start` timed out and dropped the receiver, so no handle will
+            // ever own the retain. Whichever side swaps it out first releases
+            // it (see the timeout path in `start`).
+            let rl = run_loop.swap(0, Ordering::SeqCst);
+            if rl != 0 {
+                CFRelease(rl as CFTypeRef);
+            }
+        }
         while active.load(Ordering::SeqCst) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, 0);
         }
@@ -206,7 +214,15 @@ pub fn start(key: &str, sink: Sink) -> Result<Handle, StartError> {
         Ok(Ok(())) => Ok(Handle { active, run_loop }),
         Ok(Err(err)) => Err(err),
         Err(_) => {
-            active.store(false, Ordering::SeqCst);
+            // Order matters. Dropping the receiver first makes every later
+            // `ready.send` fail, so a thread that stores its retain from now
+            // on releases it itself. Then the handle's drop stops the thread
+            // and releases a retain stored before that (whose send
+            // succeeded). Both sides `swap(0)`, so exactly one releases it.
+            // With the handle dropped first, a store after its swap could
+            // still send successfully and the retain would leak.
+            drop(ready_rx);
+            drop(Handle { active, run_loop });
             Err(StartError::Failed("The key listener did not start.".into()))
         }
     }

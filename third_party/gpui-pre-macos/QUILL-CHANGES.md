@@ -51,3 +51,19 @@ Each changed source file starts with a comment saying so. The changes are
 licensed under Apache-2.0, like the rest of the crate. Background and
 measurements: `docs/decisions/codex-idle-cpu.md`; notifications:
 `docs/decisions/codex-notify-native.md`.
+
+The Quill project also changed it in 2026 to remove panics a user can hit
+(step 7 of `docs/decisions/no-crash-audit.md`):
+
+- `src/display.rs`: `MacDisplay::all` returns no displays, with an error in
+  the log, when `CGGetActiveDisplayList` fails (a display reconfiguration can
+  race it) instead of panicking.
+- `src/text_system.rs`: `layout_line` skips a CoreText glyph run without
+  attributes or a font, and a glyph whose string index is negative, instead
+  of unwrapping; the font is read with `CFDictionary::find`, since `get`
+  panics on a missing key.
+- `src/keyboard.rs`: the input source id and name are read with
+  `to_string_lossy` (and as empty for a null pointer) instead of
+  `to_str().unwrap()`.
+
+See `docs/decisions/gpui-fork-panics.md`.

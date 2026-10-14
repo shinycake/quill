@@ -90,3 +90,43 @@ cannot carry an opt-in:
 
 Not built or run on Windows by the author (no Windows machine); see
 `docs/decisions/codex-misc-bundle.md`.
+
+The Quill project also changed it in 2026 so a lost GPU device or a failed
+DirectX start no longer crashes the app (step 7 of
+`docs/decisions/no-crash-audit.md`):
+
+- `src/platform.rs`: when the vsync thread's device recreation fails,
+  `recover_from_gpu_device_lost` retries it after 0.5 s, 2 s and 5 s (each
+  round still makes upstream's five quick attempts). If every round fails it
+  logs the error, posts `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` to every window
+  and stops the vsync thread, instead of `panic!("Device lost: ..")`. If
+  DirectX can't be initialized at launch, `connect_initially` logs the error
+  and stays headless instead of panicking, and `open_window` returns
+  `failed to initialize DirectX: <cause>` so the app can report it.
+  `hide_other_apps` and `unhide_other_apps` are no-ops instead of
+  `unimplemented!()`.
+- `src/events.rs`: a window whose renderer can't recover from a lost device
+  retries after 0.2 s and 0.5 s, then logs and posts itself
+  `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` (new, `WM_USER + 10`) instead of
+  panicking; that message calls `DestroyWindow`, so the normal `WM_DESTROY`
+  close path runs even if the app hides windows on `WM_CLOSE`.
+- `src/directx_renderer.rs`: `pre_draw` and `present` return an error
+  instead of `expect`/`unwrap` when the renderer has no resources or devices
+  (what a failed recovery leaves), so a draw queued before the window is
+  destroyed can't panic. The renderer keeps its creation-time
+  `disable_direct_composition`; upstream re-derived it from
+  `direct_composition`, which each recovery attempt clears, so every retry
+  after a failed attempt lost DirectComposition. The `dxgi_device` unwraps
+  on that path return errors.
+- `src/directx_devices.rs`: `try_to_recover_from_device_lost` is a loop
+  instead of `find_or_last(..).unwrap()`.
+- `src/platform.rs`, `src/events.rs`: after an unrecoverable device loss
+  the vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the
+  platform window, which drops the dead devices (so `is_windowed()` is false
+  and `open_window` returns the reason; `request_windowing(Windowed)` can
+  attach new ones). `close_one_window` logs an untracked window instead of
+  unwrapping, and `handle_gpui_events` returns `None` instead of
+  `unreachable!()`.
+
+Type-checked with `cargo check --target x86_64-pc-windows-msvc` on macOS;
+not built or run on Windows. See `docs/decisions/gpui-fork-panics.md`.
