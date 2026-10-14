@@ -473,7 +473,31 @@ impl BidSlider {
     pub fn initial(self) -> i64 {
         if self.mine > 0 { self.mine } else { self.min }
     }
+
+    /// The amount at slider position `step` of [`BID_SLIDER_STEPS`]: a
+    /// cubic curve, so the low end (where most bids are) gets most of the
+    /// track, like tdesktop's paid-reaction slider.
+    pub fn amount_at(self, step: f32) -> i64 {
+        let t = f64::from(step.clamp(0., BID_SLIDER_STEPS)) / f64::from(BID_SLIDER_STEPS);
+        let span = self.max.saturating_sub(self.min).max(0) as f64;
+        let amount = self.min as f64 + span * t * t * t;
+        (amount.round() as i64).clamp(self.min, self.max.max(self.min))
+    }
+
+    /// The slider position closest to `amount` (the inverse of
+    /// [`Self::amount_at`]).
+    pub fn step_of(self, amount: i64) -> f32 {
+        let span = self.max.saturating_sub(self.min);
+        if span <= 0 {
+            return 0.;
+        }
+        let t = (amount.saturating_sub(self.min).clamp(0, span) as f64 / span as f64).cbrt();
+        (t * f64::from(BID_SLIDER_STEPS)).round() as f32
+    }
 }
+
+/// Positions on the bid slider's track.
+pub const BID_SLIDER_STEPS: f32 = 1000.;
 
 /// How the user's row reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
