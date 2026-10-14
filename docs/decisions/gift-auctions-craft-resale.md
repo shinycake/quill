@@ -332,7 +332,23 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
   resale and auction UI. The crafting boxes (info, craft, select, result,
   forge) follow in `gift-crafting`, which also ticks
   `parity:premium-gift-auctions`. The whole thing passed ~6,000 lines.
-- Forge animation simplified (crafting PR).
+- Forge animation simplified: instead of tdesktop's particle forge, the
+  first gift glows (a pulsing backdrop), the other gifts fade out and a
+  kit `ProgressCircle` fills over 3 s on the frame clock. If TDLib has
+  not answered by then, the ring spins until it does.
+- "Craft" is a button among the owner's actions on the gift page (Quill
+  has no "⋯" menu there). The per-gift "{percent}" badge shows only in the
+  craft and select boxes.
+- The craft button is the kit primary two-line button, not tdesktop's
+  green/blue gradient with a glare. The slots panel uses tdesktop's
+  hardcoded gradient colors (`craft_colors`).
+- "View all craftable models" opens the existing models box for the
+  collection, unfiltered, and without the three model emoji in front.
+- Attribute chips show the chance and the name with a kit
+  `ProgressCircle`; the full sentence ("40% chance the crafted gift will
+  have Rose Gold background.") is the chip's tooltip and accessible name.
+- "Crafting failed. Gifts consumed :(" is not toasted: the result box
+  already says it.
 - The "Learn more about Telegram Gifts" link opens Quill's Premium
   features page (gifts section) like tdesktop's premium preview.
 - Resale listings load page by page with a "Show more" button under the
@@ -372,5 +388,16 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
   `confirm` step). Looking at them found two bugs, both fixed: the about
   box cut its lines off instead of wrapping, and the minimum-bid block
   used a plain star instead of the gold Star icon.
-- Not verified against a live account: no bid, buy or resale request was
-  sent to Telegram.
+- Crafting (`gift-crafting`): UI tests in `src/ui/gift_craft_tests.rs`
+  (slots add and remove, the 35% sum, the "Crafting unavailable" gate for
+  a gift not yet craftable, Back drops the craft; "Start Crafting" by a
+  real click on the info box; the forge waits its 3 s, ends in the result
+  box, and "Craft New Gift" empties the slots and drops the burnt gifts).
+  Captures of `ready-gift-craft` (craft box, `info`, `select`, `forge`,
+  `success`, `failed`, `later`) in light and dark. Looking at them found
+  two bugs, both fixed: filled slots were shorter than the empty "+" slot,
+  so the remove button fell below the tile, and in light theme the "+"
+  slot and the "View all" link took light colors on the always-dark
+  panel.
+- Not verified against a live account: no bid, buy, resale or craft
+  request was sent to Telegram.
