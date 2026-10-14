@@ -248,3 +248,4 @@ gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
 # the window has nothing to draw.
 gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
 gpui-pre-windows = { path = "third_party/gpui-pre-windows" }
+gpui-pre-apple = { path = "third_party/gpui-pre-apple" }
