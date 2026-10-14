@@ -353,7 +353,7 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
 
 ## How verified
 
-- `quill-tools/gate.sh`: `GATE OK core=4368 0 ui=650 0` (fmt, clippy with
+- `quill-tools/gate.sh`: `GATE OK core=4372 0 ui=650 0` (fmt, clippy with
   `-D warnings`, core and UI tests).
 - Unit tests in `src/gift_market/tests.rs` (filters, sort, attribute
   counts, auction phases, bid rows, bid actions, slider steps round trip),
