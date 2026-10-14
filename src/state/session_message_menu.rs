@@ -192,28 +192,12 @@ impl Session {
         });
     }
 
-    /// The set's contents arrived.
-    pub(crate) fn accept_sticker_set_view(
-        &mut self,
-        set_id: i64,
-        title: String,
-        name: String,
-        installed: bool,
-        is_emoji: bool,
-        is_owned: bool,
-        stickers: Vec<StickerItem>,
-    ) {
+    /// The set's contents arrived (`stage` is the `Ready` stage).
+    pub(crate) fn accept_sticker_set_view(&mut self, set_id: i64, stage: StickerSetViewStage) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
-            view.stage = StickerSetViewStage::Ready {
-                title,
-                name,
-                installed,
-                is_emoji,
-                is_owned,
-                stickers,
-            };
+            view.stage = stage;
             view.edits.refresh_needed = false;
         }
     }

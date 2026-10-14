@@ -301,7 +301,7 @@ impl QuillApp {
             .favorites
             .iter()
             .chain(&session.stickers.stickers.recent)
-            .chain(library.iter().flat_map(|(_, items)| items.iter()))
+            .chain(library.values().flat_map(|items| items.iter()))
             .collect();
         for item in sources {
             if item.set_id == pick.set_id || !seen.insert(item.file_id) {
