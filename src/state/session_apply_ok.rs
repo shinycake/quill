@@ -428,8 +428,8 @@ impl Session {
                 {
                     let mut reordered = Vec::with_capacity(albums.len());
                     for id in &order {
-                        if let Some(pos) = albums.iter().position(|a| a.id == *id) {
-                            reordered.push(albums[pos].clone());
+                        if let Some(album) = albums.iter().find(|a| a.id == *id) {
+                            reordered.push(album.clone());
                         }
                     }
                     for album in albums.drain(..) {

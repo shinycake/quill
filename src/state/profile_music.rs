@@ -74,11 +74,10 @@ impl Session {
         let track = playlist.tracks.remove(from);
         let file_id = track.file_id.0;
         playlist.tracks.insert(to, track);
-        let after = if to > 0 {
-            playlist.tracks[to - 1].file_id.0
-        } else {
-            0
-        };
+        let after = to
+            .checked_sub(1)
+            .and_then(|prev| playlist.tracks.get(prev))
+            .map_or(0, |t| t.file_id.0);
         Some((file_id, after))
     }
 

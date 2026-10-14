@@ -263,7 +263,7 @@ impl<'a> MarkupParser<'a> {
         let bytes = self.text.as_bytes();
         let mut i = from;
         while i < to {
-            let line_start = i == 0 || bytes[i - 1] == b'\n';
+            let line_start = i == 0 || bytes.get(i - 1) == Some(&b'\n');
             if top && line_start && self.text.get(i..to).unwrap_or_default().starts_with("> ") {
                 let content_start = i + 2;
                 let line_end = self
@@ -332,7 +332,10 @@ impl<'a> MarkupParser<'a> {
                 // A lone `*`/`_` that continues a `**`/`__` pair never opens
                 // italic: an unmatched `**bold` must not re-parse the second
                 // `*` as an italic opener (unmatched delimiters stay literal).
-                if open.len() == 1 && i > 0 && self.text.as_bytes()[i - 1] == open.as_bytes()[0] {
+                if open.len() == 1
+                    && i > 0
+                    && self.text.as_bytes().get(i - 1) == open.as_bytes().first()
+                {
                     continue;
                 }
                 // Inline spans stay on one line (Telegram entities do).
@@ -507,7 +510,7 @@ fn strip_markup(text: &str) -> String {
     let mut i = 0;
     let bytes = text.as_bytes();
     while i < bytes.len() {
-        let line_start = i == 0 || bytes[i - 1] == b'\n';
+        let line_start = i == 0 || bytes.get(i - 1) == Some(&b'\n');
         if line_start && text.get(i..).unwrap_or_default().starts_with("> ") {
             i += 2;
             continue;

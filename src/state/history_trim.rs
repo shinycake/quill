@@ -117,7 +117,10 @@ pub fn row_window_shift(old: &[(i64, i64)], new: &[(i64, i64)]) -> Option<RowWin
         .count();
     let kept_end = old.len().checked_sub(tail_removed)?;
     let kept = old.get(front_removed..kept_end).filter(|k| !k.is_empty())?;
-    let front_added = new.iter().take_while(|(_, last)| *last < kept[0].0).count();
+    let front_added = new
+        .iter()
+        .take_while(|(_, last)| *last < kept.first().map_or(i64::MAX, |k| k.0))
+        .count();
     let run = new.get(front_added..front_added + kept.len())?;
     if run != kept {
         return None;

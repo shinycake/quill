@@ -67,24 +67,24 @@ pub fn activity_line(actions: &[SenderAction], named: bool) -> Option<ActivityLi
     let typers: Vec<&SenderAction> = actions.iter().filter(|a| is_typing(a.action)).collect();
     let name_of = |a: &SenderAction| a.name.trim().to_string();
     if !typers.is_empty() {
-        let text = match typers.len() {
-            1 => {
-                let name = name_of(typers[0]);
+        let text = match typers.as_slice() {
+            [only] => {
+                let name = name_of(only);
                 if named && !name.is_empty() {
                     format!("{name} is typing")
                 } else {
                     "typing".to_string()
                 }
             }
-            2 => {
-                let (first, second) = (name_of(typers[0]), name_of(typers[1]));
+            [one, two] => {
+                let (first, second) = (name_of(one), name_of(two));
                 if first.is_empty() || second.is_empty() {
                     "2 people are typing".to_string()
                 } else {
                     format!("{first} and {second} are typing")
                 }
             }
-            count => format!("{count} people are typing"),
+            _ => format!("{} people are typing", typers.len()),
         };
         return Some(ActivityLine {
             text,
