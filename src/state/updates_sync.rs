@@ -197,6 +197,21 @@ pub fn live_left_label(expires_at: i64, now: i64) -> String {
     }
 }
 
+/// The toast after a free transcription used up part of the quota
+/// (tdesktop `ShowTrialTranscribesToast`, shown when the remaining count
+/// changes). Premium accounts and accounts without a quota never see it;
+/// the first update of a session only records the count.
+pub fn speech_trial_toast(
+    previous: Option<SpeechTrialUpdate>,
+    trial: SpeechTrialUpdate,
+    premium: bool,
+    now: i64,
+) -> Option<String> {
+    let previous = previous?;
+    (!premium && trial.supported() && previous.left_count != trial.left_count)
+        .then(|| speech_trial_hint(&trial, now))
+}
+
 /// tdesktop `lng_audio_transcribe_trials_left` / `_trials_over` text for
 /// the free voice-to-text quota.
 pub fn speech_trial_hint(trial: &SpeechTrialUpdate, now: i64) -> String {

@@ -136,6 +136,38 @@ fn speech_trial_hint_counts_and_runs_out() {
 }
 
 #[test]
+fn speech_trial_toast_only_for_a_changed_free_quota() {
+    let trial = SpeechTrialUpdate {
+        max_media_duration: 300,
+        weekly_count: 2,
+        left_count: 1,
+        next_reset_date: 1_700_600_000,
+    };
+    let before = SpeechTrialUpdate {
+        left_count: 2,
+        ..trial
+    };
+    assert_eq!(
+        speech_trial_toast(Some(before), trial, false, 1_700_000_000).as_deref(),
+        Some("You have 1 free transcription left until November 21.")
+    );
+    // The first update of a session and an unchanged count stay quiet.
+    assert!(speech_trial_toast(None, trial, false, 1_700_000_000).is_none());
+    assert!(speech_trial_toast(Some(trial), trial, false, 1_700_000_000).is_none());
+    // Regression: Premium accounts get an all-zero quota from TDLib and
+    // were told they had used all their free transcriptions.
+    let premium = SpeechTrialUpdate {
+        max_media_duration: 300,
+        weekly_count: 0,
+        left_count: 0,
+        next_reset_date: 0,
+    };
+    assert!(!premium.supported());
+    assert!(speech_trial_toast(Some(before), premium, false, 1_700_000_000).is_none());
+    assert!(speech_trial_toast(Some(before), trial, true, 1_700_000_000).is_none());
+}
+
+#[test]
 fn live_shares_replace_keep_viewed_and_expire() {
     let (mut session, _sink) = session();
     let share = |chat: i64, msg: i64, at: i64| ActiveLiveShare {

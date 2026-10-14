@@ -956,6 +956,7 @@ mod toast_tests {
             "Slow mode: wait 12s before sending",
             "copied to clipboard",
             "Couldn't send the message.",
+            "You have 1 free transcription left until November 21.",
         ] {
             assert!(status_note_is_toast(shown), "{shown}");
         }

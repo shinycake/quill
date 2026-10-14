@@ -83,7 +83,8 @@ pub(super) fn status_note_is_toast(note: &str) -> bool {
         "limit",
         "will send when",
     ];
-    const CONFIRMATION: [&str; 12] = [
+    const CONFIRMATION: [&str; 13] = [
+        "free transcription",
         "affiliate program",
         "too small",
         "wrong",
