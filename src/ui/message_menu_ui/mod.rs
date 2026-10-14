@@ -14,7 +14,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
+use gpui_kit::{TestSupportExt, *};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::message_menu::{
     MediaAction, MediaFacts, MediaKind, MediaTarget, SeenKind, media_actions, media_target, order,
@@ -93,7 +93,7 @@ pub(super) type MenuRow = (u8, AnyElement);
 pub(super) fn menu_row(
     order: u8,
     icon: IconName,
-    id: &'static str,
+    id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     danger: bool,
     cx: &mut Context<QuillApp>,
@@ -105,6 +105,7 @@ pub(super) fn menu_row(
         order,
         div()
             .id(id)
+            .test_support()
             .flex()
             .items_center()
             .gap_3()
@@ -212,10 +213,11 @@ impl QuillApp {
             &message.content,
             message.ephemeral.as_ref(),
         );
-        // A set-less sticker may join one of the user's own sets (tdesktop
-        // `AddAddToOwnedSetAction`: lottie fits both, ≤100 px is an emoji).
+        // A set-less, sent sticker may join one of the user's own sets
+        // (tdesktop `AddAddToOwnedSetAction`: lottie fits both, ≤100 px is
+        // an emoji; nothing while the message is still sending).
         let joins = match content {
-            MessageContent::Sticker(sticker) if sticker.set_id == 0 => {
+            MessageContent::Sticker(sticker) if sticker.set_id == 0 && !message.pending => {
                 let (to_stickers, to_emoji) = quill::sticker_set_box::joinable_kinds(
                     sticker.format == quill::telegram::envelope::StickerFormat::Tgs,
                     sticker.width,

@@ -4,6 +4,7 @@
 //! dialog registered below; a lower priority than the set box means it
 //! shows on top of it and the box returns when it closes.
 use super::*;
+use gpui_kit::TestSupportExt;
 use gpui_kit::component::input::Input;
 use quill::sticker_set_box::{MAX_EMOJIS, SET_NAME_MAX};
 
@@ -37,11 +38,8 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let set_id = this.viewed_set().map(|(id, ..)| id).unwrap_or(0);
             let input = this.sticker_box.rename_input.clone();
-            let length = input.read(cx).value().chars().count();
-            let busy = this
-                .session()
-                .and_then(|s| s.stickers.sticker_set_view.as_ref())
-                .is_some_and(|view| view.edits.busy());
+            // tdesktop validates the trimmed title.
+            let length = input.read(cx).value().trim().chars().count();
             dialog
                 .overlay(true)
                 .w(px(380.))
@@ -91,7 +89,6 @@ impl QuillApp {
                             Button::new("sticker-set-rename-done")
                                 .label("Done")
                                 .primary()
-                                .loading(busy)
                                 .disabled(length == 0 || length > SET_NAME_MAX)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     if this.confirm_rename_set(set_id, cx) {
@@ -130,10 +127,6 @@ impl QuillApp {
                 .delete_sticker
                 .as_ref()
                 .and_then(|item| this.panel_still(item));
-            let busy = this
-                .session()
-                .and_then(|s| s.stickers.sticker_set_view.as_ref())
-                .is_some_and(|view| view.edits.busy());
             let title = match kind {
                 SetKind::Stickers => "Delete sticker",
                 SetKind::Emoji => "Delete emoji",
@@ -181,7 +174,6 @@ impl QuillApp {
                             Button::new("sticker-delete-confirm")
                                 .label("Delete")
                                 .danger()
-                                .loading(busy)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.confirm_delete_sticker(set_id, cx);
                                     this.close_kit_dialog_if_done(
@@ -212,9 +204,9 @@ impl QuillApp {
             let set_id = this.viewed_set().map(|(id, ..)| id).unwrap_or(0);
             confirm_dialog(
                 dialog,
-                "Delete Pack",
                 "Are you sure you want to delete this sticker set for everyone? This cannot be undone.",
                 "sticker-set-delete",
+                ("Remove", true),
                 cx,
                 move |this, window, cx| {
                     this.confirm_delete_set_everyone(set_id, cx);
@@ -247,9 +239,9 @@ impl QuillApp {
             let title = this.viewed_title();
             confirm_dialog(
                 dialog,
-                "Remove stickers",
                 format!("Remove \"{title}\"?"),
                 "sticker-set-remove",
+                ("OK", false),
                 cx,
                 move |this, window, cx| {
                     this.confirm_remove_set(set_id, cx);
@@ -321,6 +313,7 @@ impl QuillApp {
                         let picked = chosen.iter().any(|e| e == emoji);
                         div()
                             .id(("sticker-create-emoji", index as u64))
+                            .test_support()
                             .size(px(36.))
                             .flex()
                             .items_center()
@@ -500,11 +493,13 @@ impl QuillApp {
 
 /// A two-button confirmation: text, "Cancel", and a red "Remove"
 /// (tdesktop's attention button).
+/// tdesktop's `ConfirmBox`: the question alone, no title, Cancel and the
+/// confirm button (`(label, attention)`).
 fn confirm_dialog(
     dialog: Dialog,
-    title: &'static str,
     text: impl Into<SharedString>,
     id: &'static str,
+    (confirm_label, attention): (&'static str, bool),
     cx: &mut Context<QuillApp>,
     confirm: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
     cancel: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
@@ -513,7 +508,6 @@ fn confirm_dialog(
     dialog
         .overlay(true)
         .w(px(360.))
-        .title(shell::dialog_title(title))
         .content(move |content, _, _| content.child(div().text_sm().child(text.clone())))
         .footer(
             div()
@@ -529,8 +523,9 @@ fn confirm_dialog(
                 )
                 .child(
                     Button::new(format!("{id}-confirm"))
-                        .label("Remove")
-                        .danger()
+                        .label(confirm_label)
+                        .when(attention, |button| button.danger())
+                        .when(!attention, |button| button.primary())
                         .on_click(
                             cx.listener(move |this, _, window, cx| confirm(this, window, cx)),
                         ),
@@ -542,37 +537,37 @@ crate::ui::shell::register_dialogs! {
     /// "Edit name" in the set box's menu.
     StickerSetRename => DialogSpec::new(
         5610,
-        |app| app.message_ui.menu_ui.sticker_set_open && app.sticker_box.rename_open,
+        |app| super::sticker_box_shown(app) && app.sticker_box.rename_open,
         QuillApp::build_rename_set_dialog,
     ),
     /// A cell's "Delete sticker" / "Delete emoji".
     StickerDelete => DialogSpec::new(
         5620,
-        |app| app.message_ui.menu_ui.sticker_set_open && app.sticker_box.delete_sticker.is_some(),
+        |app| super::sticker_box_shown(app) && app.sticker_box.delete_sticker.is_some(),
         QuillApp::build_delete_sticker_dialog,
     ),
     /// "Delete Pack" → "Delete for Everyone".
     StickerSetDelete => DialogSpec::new(
         5630,
-        |app| app.message_ui.menu_ui.sticker_set_open && app.sticker_box.delete_set_open,
+        |app| super::sticker_box_shown(app) && app.sticker_box.delete_set_open,
         QuillApp::build_delete_set_dialog,
     ),
     /// "Delete Pack" → "Delete for Myself".
     StickerSetRemove => DialogSpec::new(
         5640,
-        |app| app.message_ui.menu_ui.sticker_set_open && app.sticker_box.remove_set_open,
+        |app| super::sticker_box_shown(app) && app.sticker_box.remove_set_open,
         QuillApp::build_remove_set_dialog,
     ),
     /// The "New Sticker" / "New Emoji" emoji step.
     StickerCreate => DialogSpec::new(
         5650,
-        |app| app.message_ui.menu_ui.sticker_set_open && app.sticker_box.create.is_some(),
+        |app| super::sticker_box_shown(app) && app.sticker_box.create.is_some(),
         QuillApp::build_create_sticker_dialog,
     ),
     /// "Add an Existing Sticker" / "Adapt from a Sticker".
     StickerPick => DialogSpec::new(
         5660,
-        |app| app.message_ui.menu_ui.sticker_set_open && app.sticker_box.pick.is_some(),
+        |app| super::sticker_box_shown(app) && app.sticker_box.pick.is_some(),
         QuillApp::build_pick_sticker_dialog,
     ),
 }

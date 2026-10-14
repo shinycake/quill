@@ -87,6 +87,15 @@ sticker; TDLib uploads), `removeStickerFromSet`, `setStickerPositionInSet`,
 
 ## Not done here
 
+The README item `stickers-creator` stays unticked: this PR ships no
+parity fragment, because the points below still differ from tdesktop.
+
+- The sticker editor. tdesktop's `PrepareEditorState` puts the image as a
+  movable item on a transparent 512 px (100 px for emoji) canvas, with a
+  rounded-corners menu (Large / Medium / Small / None) and a "keep original
+  ratio" option. Quill's photo editor crops a pixel square out of the image
+  instead, so a non-square image loses content rather than getting
+  transparent padding.
 - Video stickers (WEBM) as new stickers or adapted emoji, and GIF
   adaptation: tdesktop runs its video editor and a WEBM encoder. Quill has
   no WEBM encoder yet; choosing a WEBM sticker to adapt toasts "Video
@@ -94,4 +103,24 @@ sticker; TDLib uploads), `removeStickerFromSet`, `setStickerPositionInSet`,
   sticker as it is works (`inputFileId`).
 - The existing-sticker chooser is a dialog listing what the session has
   loaded, not tdesktop's full tabbed sticker panel.
+- "This Sticker is already in the Set." is checked before the request
+  against the open box or the panel's cached contents. tdesktop also
+  reports it after the request when the set did not grow; Quill shows
+  "Sticker added." then.
+- Failed adds toast tdesktop's fallback wording. tdesktop shows the
+  server's error type first, but Quill's `TdError` keeps only the code
+  (the message can carry secrets), so the fallback is all it has.
+- "Delete for Myself" reuses the box's remove path, which closes the box
+  as the footer's "Remove Stickers" always did in Quill; tdesktop keeps
+  the box open.
 - Set creation stays with the @stickers bot, as in tdesktop.
+
+## Kit components
+
+The box, its menus and the confirm dialogs are gpui-kit `Dialog`,
+`Button`, `PopupMenu`, `Input` and `Tag`. Two parts are plain `div`s: the
+"+" cell is a round disc the kit has no component for (tdesktop draws it
+as a circle in the sticker grid), and the New Sticker box's emoji grid is
+a 48-cell search result over `emoji_catalog`, smaller than the media
+panel's emoji tab, which is bound to the composer and the panel's own
+state.

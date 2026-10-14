@@ -215,3 +215,204 @@ fn the_square_crop_stays_square_for_a_set_image(cx: &mut TestAppContext) {
         cx.notify();
     });
 }
+
+#[gpui_kit::test]
+fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    // "Create a New Sticker" after "Choose Image": the editor paints inside
+    // the app, so the kit box (and its hit barrier) must step aside.
+    app.update(vcx, |app, cx| {
+        let image = image::RgbaImage::from_pixel(300, 300, image::Rgba([10, 20, 30, 255]));
+        app.viewer.photo_editor = Some(crate::ui::photo_editor::PhotoEditor::for_set(
+            image,
+            78,
+            quill::sticker_set_box::SetKind::Stickers,
+        ));
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open));
+    // Done in the editor hands the square image to the "New Sticker" box.
+    app.update(vcx, |app, cx| {
+        let image = image::RgbaImage::from_pixel(300, 300, image::Rgba([10, 20, 30, 255]));
+        app.viewer.photo_editor = None;
+        app.finish_set_image(78, quill::sticker_set_box::SetKind::Stickers, &image, cx);
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerCreate)));
+}
+
+#[gpui_kit::test]
+fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.sticker_box.create = Some(super::state::CreateSticker {
+            set_id: 78,
+            kind: quill::sticker_set_box::SetKind::Stickers,
+            path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
+            emojis: Vec::new(),
+        });
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerCreate)));
+    // Done without an emoji: tdesktop's "Please choose an emoji." and the
+    // box stays.
+    vcx.update(|window, cx| window.click("sticker-create-done", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_some()));
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.connection.status_note.to_string()),
+        quill::sticker_set_box::EMOJI_REQUIRED_NOTE
+    );
+    // The first grid cell toggles its emoji on and off.
+    vcx.update(|window, cx| window.click(("sticker-create-emoji", 0u64), cx));
+    frames(vcx);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app
+            .sticker_box
+            .create
+            .as_ref()
+            .map(|c| c.emojis.len())),
+        Some(1)
+    );
+    vcx.update(|window, cx| window.click(("sticker-create-emoji", 0u64), cx));
+    frames(vcx);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app
+            .sticker_box
+            .create
+            .as_ref()
+            .map(|c| c.emojis.len())),
+        Some(0)
+    );
+    // At most seven emoji (`MAX_EMOJIS`).
+    app.update(vcx, |app, cx| {
+        for emoji in ["😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂"] {
+            app.toggle_create_emoji(emoji, cx);
+        }
+    });
+    assert_eq!(
+        app.read_with(vcx, |app, _| app
+            .sticker_box
+            .create
+            .as_ref()
+            .map(|c| c.emojis.len())),
+        Some(quill::sticker_set_box::MAX_EMOJIS)
+    );
+    frames(vcx);
+    vcx.update(|window, cx| window.click("sticker-create-done", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_none()));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSet)));
+}
+
+#[gpui_kit::test]
+fn add_an_existing_sticker_opens_the_chooser_and_cancel_returns(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.open_pick_existing(78, quill::sticker_set_box::SetKind::Stickers, false, cx);
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerPick)));
+    // The set's own six stickers are not offered.
+    let candidates = app.read_with(vcx, |app, _| {
+        app.pick_candidates(super::state::PickExisting {
+            set_id: 78,
+            kind: quill::sticker_set_box::SetKind::Stickers,
+            adapt: false,
+        })
+    });
+    assert!(candidates.iter().all(|item| item.set_id != 78));
+    vcx.update(|window, cx| window.click("sticker-pick-cancel", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.pick.is_none()));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSet)));
+}
+
+#[gpui_kit::test]
+fn delete_for_myself_asks_with_the_set_title(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.sticker_box.remove_set_open = true;
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSetRemove)));
+    assert!(vcx.update(|window, _| window.try_find("sticker-set-remove-confirm").is_some()));
+    vcx.update(|window, cx| window.click("sticker-set-remove-cancel", cx));
+    frames(vcx);
+    assert!(!app.read_with(vcx, |app, _| app.sticker_box.remove_set_open));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSet)));
+    app.update(vcx, |app, cx| {
+        app.sticker_box.remove_set_open = true;
+        cx.notify();
+    });
+    frames(vcx);
+    vcx.update(|window, cx| window.click("sticker-set-remove-confirm", cx));
+    frames(vcx);
+    assert!(!app.read_with(vcx, |app, _| app.sticker_box.remove_set_open));
+}
+
+#[gpui_kit::test]
+fn a_set_less_sticker_message_lists_the_owned_sets_to_join(cx: &mut TestAppContext) {
+    use quill::ids::{ChatId, FileId, MessageId};
+    use quill::telegram::envelope::{MessageContent, StickerContent, StickerFormat};
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.close_sticker_set_dialog(cx);
+        // Turn a demo message into a sticker that belongs to no set.
+        let session = app.demo_session.as_mut().expect("demo");
+        let message = session
+            .histories
+            .get_mut(&11)
+            .and_then(|history| history.messages.get_mut(&101))
+            .expect("demo message");
+        message.content = MessageContent::Sticker(StickerContent {
+            emoji: "🎨".into(),
+            width: 512,
+            height: 512,
+            format: StickerFormat::Webp,
+            file_id: FileId(9200),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+            is_premium: false,
+            requires_premium: false,
+            premium_animation: None,
+            set_id: 0,
+        });
+        app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
+            chat_id: ChatId(11),
+            message_id: MessageId(101),
+            position: gpui_kit::point(px(420.), px(200.)),
+        });
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog.is_none()));
+    assert!(vcx.update(|window, _| window.try_find("menu-add-to-sticker-set").is_some()));
+    assert!(
+        vcx.update(|window, _| window.try_find("menu-add-to-emoji-set").is_none()),
+        "no owned emoji set in the demo"
+    );
+    vcx.update(|window, cx| window.click("menu-add-to-sticker-set", cx));
+    frames(vcx);
+    assert!(vcx.update(|window, _| window.try_find(("menu-add-to-set", 78u64)).is_some()));
+    vcx.update(|window, cx| window.click(("menu-add-to-set", 78u64), cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+}

@@ -198,7 +198,10 @@ impl Session {
             && view.set_id == set_id
         {
             view.stage = stage;
-            view.edits.refresh_needed = false;
+            // An edit still in flight (a move applied locally) may have
+            // changed the set after this answer was built: ask again once
+            // it is answered.
+            view.edits.refresh_needed = view.edits.busy();
         }
     }
 

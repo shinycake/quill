@@ -39,29 +39,15 @@ impl QuillApp {
         };
         let kind = quill::sticker_set_box::SetKind::of(emoji);
         let mut rows = Vec::new();
-        // Rows need distinct static ids; tdesktop's submenu is short too.
-        const IDS: [&str; 8] = [
-            "menu-add-to-set-1",
-            "menu-add-to-set-2",
-            "menu-add-to-set-3",
-            "menu-add-to-set-4",
-            "menu-add-to-set-5",
-            "menu-add-to-set-6",
-            "menu-add-to-set-7",
-            "menu-add-to-set-8",
-        ];
-        for (index, (set_id, title)) in session
-            .owned_sticker_sets(emoji)
-            .into_iter()
-            .take(IDS.len())
-            .enumerate()
-        {
+        for (index, (set_id, title)) in session.owned_sticker_sets(emoji).into_iter().enumerate() {
             let item = item.clone();
             let order = u8::try_from(index + 1).unwrap_or(u8::MAX);
             rows.push(menu_row(
                 order,
                 IconName::Sticker,
-                IDS[index],
+                // The set id keeps the row's identity stable (one row per
+                // owned set, however many there are).
+                ("menu-add-to-set", set_id as u64),
                 title,
                 false,
                 cx,

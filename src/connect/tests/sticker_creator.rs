@@ -331,3 +331,92 @@ fn renaming_and_deleting_name_the_set_by_its_short_name() {
     );
     drop(dir);
 }
+
+#[test]
+fn an_emoji_set_toasts_emoji_added_even_without_a_box() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    // An owned emoji set known only from the installed list ("Add to Emoji
+    // Set" in a message's menu).
+    driver
+        .session
+        .stickers
+        .emoji
+        .installed_sets
+        .push(crate::telegram::envelope::StickerSetInfo {
+            id: 88,
+            title: "My emoji".into(),
+            name: "my_emoji_by_me".into(),
+            size: 3,
+            is_installed: true,
+            is_official: false,
+            is_owned: true,
+        });
+    assert_eq!(
+        driver.session.owned_sticker_set(88),
+        Some(("my_emoji_by_me".to_string(), true))
+    );
+    let extra = driver
+        .add_existing_sticker_to_set(88, FileId(41), StickerFormat::Tgs, "")
+        .unwrap();
+    let request = sent_request(&recorder, "addStickerToSet");
+    assert_eq!(request["name"], "my_emoji_by_me");
+    feed(&mut driver, &seq, &sink, ok(extra));
+    assert_eq!(
+        driver.session.take_sticker_set_edit_note().as_deref(),
+        Some(crate::sticker_set_box::EMOJI_ADDED_NOTE)
+    );
+    // Menus and the panel badge follow the server: both installed lists
+    // are fetched again on the next sync, once.
+    assert!(driver.sync_sticker_set_view().unwrap().is_none());
+    sent_request(&recorder, "getInstalledStickerSets");
+    let sent: Vec<Value> = recorder
+        .snapshot()
+        .iter()
+        .filter_map(|json| serde_json::from_str(json).ok())
+        .filter(|v: &Value| v["@type"] == "getInstalledStickerSets")
+        .collect();
+    assert_eq!(sent.len(), 2, "regular and custom emoji sets");
+    assert!(
+        sent.iter()
+            .any(|v| v["sticker_type"]["@type"] == "stickerTypeCustomEmoji")
+    );
+    assert!(driver.sync_sticker_set_view().unwrap().is_none());
+    let again: usize = recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains("getInstalledStickerSets"))
+        .count();
+    assert_eq!(again, 2, "fetched once per edit");
+    drop(dir);
+}
+
+#[test]
+fn a_refresh_answered_during_a_move_asks_again() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    open_owned_set(&mut driver, &seq, &sink, true);
+    let rename = driver.rename_sticker_set(77, "Cats").unwrap();
+    feed(&mut driver, &seq, &sink, ok(rename));
+    let refresh = driver.sync_sticker_set_view().unwrap().unwrap();
+    // The user drags a sticker while the refresh is on its way.
+    let moved = driver.move_sticker_in_set(77, 0, 2).unwrap().unwrap();
+    assert_eq!(viewed_ids(&driver), vec![2, 3, 1]);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        set_payload(&refresh.as_extra(), true, &[1, 2, 3]),
+    );
+    assert_eq!(viewed_ids(&driver), vec![1, 2, 3], "the stale answer lands");
+    assert!(edits(&driver).refresh_needed, "but a refresh is owed");
+    feed(&mut driver, &seq, &sink, ok(moved));
+    assert!(driver.sync_sticker_set_view().unwrap().is_some());
+    drop(dir);
+}

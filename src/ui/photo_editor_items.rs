@@ -90,9 +90,11 @@ impl PhotoEditor {
             (left..left + w).contains(&x) && (top..top + h).contains(&y)
         });
         self.selected = hit;
-        self.item_drag = hit.map(|index| ItemDrag::Move {
-            from: (x, y),
-            start: self.placed[index].0.center,
+        self.item_drag = hit.and_then(|index| {
+            Some(ItemDrag::Move {
+                from: (x, y),
+                start: self.placed.get(index)?.0.center,
+            })
         });
     }
 

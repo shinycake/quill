@@ -1,2 +1,0 @@
-# sticker-set-creator — editing owned sticker and emoji sets as tdesktop does; set creation stays with @stickers as in tdesktop
-parity:stickers-creator

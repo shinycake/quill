@@ -17,6 +17,10 @@ pub struct StickersState {
     /// A one-shot toast after editing an owned set ("Sticker added.",
     /// the error), whether or not the set box is open.
     pub creator_note: Option<String>,
+    /// An edit of an owned set changed a set's title, contents or
+    /// existence: the driver fetches both installed lists again so menus
+    /// and the panel show the server's sets.
+    pub creator_refetch_sets: bool,
     /// The pack of the custom emoji the user just tapped in a message.
     pub custom_emoji_preview: Option<CustomEmojiPreview>,
     /// Titles of the emoji packs a message uses, by set id, for the menu's
@@ -46,6 +50,7 @@ impl StickersState {
             reaction_options_stale: false,
             sticker_set_view: None,
             creator_note: None,
+            creator_refetch_sets: false,
             custom_emoji_preview: None,
             emoji_pack_titles: HashMap::new(),
             stickers: StickerPanel::default(),

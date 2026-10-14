@@ -12,8 +12,8 @@ use quill::telegram::envelope::StickerFormat;
 use std::path::PathBuf;
 
 /// What the chooser says when a sticker cannot join the set
-/// (`lng_stickers_add_full`, `lng_emoji_add_full`, `lng_stickers_add_already`,
-/// `lng_emoji_add_already`).
+/// (`lng_stickers_set_is_full`, `lng_emoji_set_is_full`,
+/// `lng_stickers_already_in_set`, `lng_emoji_already_in_set`).
 fn full_note(kind: SetKind) -> &'static str {
     match kind {
         SetKind::Stickers => "This Sticker Set is full.",
@@ -140,7 +140,6 @@ impl QuillApp {
                 self.connection.status_note = "Couldn't delete the set.".into();
             }
         } else {
-            self.connection.status_note = "Sticker set deleted.".into();
             self.close_sticker_set_dialog(cx);
         }
         cx.notify();
@@ -381,22 +380,32 @@ impl QuillApp {
         item: &StickerItem,
         cx: &mut Context<Self>,
     ) {
-        if let Some((viewed_id, _, _, stickers)) = self.viewed_set()
-            && viewed_id == set_id
-        {
-            if stickers.len() >= kind.owned_limit() {
-                self.connection.status_note = full_note(kind).into();
-                cx.notify();
-                return;
-            }
-            if stickers
+        // tdesktop checks the target's count for every owned set, and a
+        // repeat wherever the set's stickers are known (the open box or the
+        // panel's cache).
+        let count = self
+            .session()
+            .and_then(|s| s.owned_sticker_set_count(set_id))
+            .unwrap_or(0);
+        if count >= kind.owned_limit() {
+            self.connection.status_note = full_note(kind).into();
+            cx.notify();
+            return;
+        }
+        let known: Option<Vec<StickerItem>> = match self.viewed_set() {
+            Some((viewed_id, _, _, stickers)) if viewed_id == set_id => Some(stickers),
+            _ => self
+                .session()
+                .and_then(|s| s.media.media_library.set_stickers.get(&set_id).cloned()),
+        };
+        if known.is_some_and(|stickers| {
+            stickers
                 .iter()
-                .any(|s| s.file_id == item.file_id || s.id == item.id)
-            {
-                self.connection.status_note = already_note(kind).into();
-                cx.notify();
-                return;
-            }
+                .any(|s| s.file_id == item.file_id || (item.id != 0 && s.id == item.id))
+        }) {
+            self.connection.status_note = already_note(kind).into();
+            cx.notify();
+            return;
         }
         let emoji = emoji_or_default(&item.emoji).to_string();
         if let Some(live) = self.live.as_mut() {
@@ -434,7 +443,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|view| view.edits.deleted);
         if deleted {
-            self.connection.status_note = "Sticker set deleted.".into();
+            // tdesktop just closes the box once the set is gone.
             self.close_sticker_set_dialog(cx);
             return true;
         }

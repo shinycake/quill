@@ -17,11 +17,12 @@ use crate::sticker_set_box::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StickerCreatorPurpose {
     /// `addStickerToSet` with a freshly rendered image (`inputFileLocal`).
-    /// Response is `ok`.
-    AddNewSticker { set_id: i64 },
+    /// `emoji` says whether the set is a custom emoji set, so the toast
+    /// reads "Emoji added." even when no box is open. Response is `ok`.
+    AddNewSticker { set_id: i64, emoji: bool },
     /// `addStickerToSet` with a sticker that already exists
     /// (`inputFileId`). Response is `ok`.
-    AddExistingSticker { set_id: i64 },
+    AddExistingSticker { set_id: i64, emoji: bool },
     /// `removeStickerFromSet`. Response is `ok`.
     RemoveSticker { set_id: i64, file_id: FileId },
     /// `setStickerPositionInSet`. Response is `ok`.
@@ -36,8 +37,8 @@ impl StickerCreatorPurpose {
     /// The set the edit belongs to.
     pub fn set_id(self) -> i64 {
         match self {
-            Self::AddNewSticker { set_id }
-            | Self::AddExistingSticker { set_id }
+            Self::AddNewSticker { set_id, .. }
+            | Self::AddExistingSticker { set_id, .. }
             | Self::RemoveSticker { set_id, .. }
             | Self::MoveSticker { set_id }
             | Self::RenameSet { set_id }
@@ -106,24 +107,53 @@ impl Session {
     /// The short name of an owned set, from the open box or the installed
     /// lists; `None` when the set is not ours or unknown.
     pub fn owned_sticker_set_name(&self, set_id: i64) -> Option<String> {
+        self.owned_sticker_set(set_id).map(|(name, _)| name)
+    }
+
+    /// The short name of an owned set and whether it is a custom emoji
+    /// set, from the open box or the installed lists.
+    pub fn owned_sticker_set(&self, set_id: i64) -> Option<(String, bool)> {
         if let Some(view) = self.stickers.sticker_set_view.as_ref()
             && view.set_id == set_id
             && let StickerSetViewStage::Ready {
                 name,
                 is_owned: true,
+                is_emoji,
                 ..
             } = &view.stage
             && !name.is_empty()
         {
-            return Some(name.clone());
+            return Some((name.clone(), *is_emoji));
+        }
+        let stickers = self.stickers.stickers.sets.iter().map(|set| (set, false));
+        let emoji = self
+            .stickers
+            .emoji
+            .installed_sets
+            .iter()
+            .map(|set| (set, true));
+        stickers
+            .chain(emoji)
+            .find(|(set, _)| set.id == set_id && set.is_owned && !set.name.is_empty())
+            .map(|(set, is_emoji)| (set.name.clone(), is_emoji))
+    }
+
+    /// How many stickers an owned set holds, from the open box or the
+    /// installed lists (tdesktop checks `set->count` before adding).
+    pub fn owned_sticker_set_count(&self, set_id: i64) -> Option<usize> {
+        if let Some(view) = self.stickers.sticker_set_view.as_ref()
+            && view.set_id == set_id
+            && let StickerSetViewStage::Ready { stickers, .. } = &view.stage
+        {
+            return Some(stickers.len());
         }
         self.stickers
             .stickers
             .sets
             .iter()
             .chain(&self.stickers.emoji.installed_sets)
-            .find(|set| set.id == set_id && set.is_owned && !set.name.is_empty())
-            .map(|set| set.name.clone())
+            .find(|set| set.id == set_id)
+            .map(|set| usize::try_from(set.size).unwrap_or(0))
     }
 
     /// The installed sets the user created, of one kind, as `(id, title)`
@@ -161,14 +191,9 @@ impl Session {
         };
         let set_id = purpose.set_id();
         match purpose {
-            StickerCreatorPurpose::AddNewSticker { .. }
-            | StickerCreatorPurpose::AddExistingSticker { .. } => {
-                let is_emoji = self.sticker_set_view_is_emoji(set_id);
-                let note = if is_emoji {
-                    EMOJI_ADDED_NOTE
-                } else {
-                    ADDED_NOTE
-                };
+            StickerCreatorPurpose::AddNewSticker { emoji, .. }
+            | StickerCreatorPurpose::AddExistingSticker { emoji, .. } => {
+                let note = if emoji { EMOJI_ADDED_NOTE } else { ADDED_NOTE };
                 self.finish_sticker_set_edit(set_id, Some(note.into()), true);
             }
             StickerCreatorPurpose::RemoveSticker { file_id, .. } => {
@@ -202,14 +227,22 @@ impl Session {
         self.media.media_library.failed.remove(&set_id);
         if !matches!(purpose, StickerCreatorPurpose::MoveSticker { .. }) {
             self.invalidate_installed_sticker_sets();
-            self.stickers.emoji.installed_sets.clear();
             self.stickers.emoji.outdated_packs.insert(set_id);
+            self.stickers.creator_refetch_sets = true;
         }
     }
 
+    /// The driver asked `getInstalledStickerSets` for both kinds again
+    /// after an edit.
+    pub(crate) fn take_sticker_set_refetch(&mut self) -> bool {
+        std::mem::take(&mut self.stickers.creator_refetch_sets)
+    }
+
     /// Called by [`Session::apply_stickers_error`]: an edit failed. The
-    /// box shows tdesktop's wording for a failed upload or add, and the
-    /// error code for the rest (tdesktop toasts the raw error type).
+    /// box shows tdesktop's wording for a failed upload or add (tdesktop
+    /// shows the server's error type first, but [`TdError`] does not keep
+    /// the message, so the fallback is used), and the error code for the
+    /// rest.
     pub(crate) fn fail_sticker_creator(&mut self, err: &TdError, pending: Option<&PendingRequest>) {
         let Some(RequestPurpose::Stickers(StickersPurpose::Creator(purpose))) =
             pending.map(|p| p.purpose)
@@ -241,17 +274,6 @@ impl Session {
             StickerCreatorPurpose::MoveSticker { .. } | StickerCreatorPurpose::RemoveSticker { .. }
         );
         self.finish_sticker_set_edit(purpose.set_id(), Some(note), refresh);
-    }
-
-    fn sticker_set_view_is_emoji(&self, set_id: i64) -> bool {
-        matches!(
-            self.stickers.sticker_set_view.as_ref(),
-            Some(StickerSetView {
-                set_id: id,
-                stage: StickerSetViewStage::Ready { is_emoji: true, .. },
-                ..
-            }) if *id == set_id
-        )
     }
 
     /// Reorder mode moved a sticker: apply it to the open view at once

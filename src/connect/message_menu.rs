@@ -545,6 +545,22 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .request(RequestPurpose::GetInstalledStickerSets, None);
             self.send_audience(extra, &get_installed_sticker_sets(extra))?;
         }
+        // "Add to Emoji Set" lists the owned emoji sets, which only the
+        // media panel loaded so far.
+        if self.session.stickers.emoji.installed_sets.is_empty()
+            && !self
+                .session
+                .requests
+                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
+        {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetInstalledEmojiSets, None);
+            self.send_audience(
+                extra,
+                &crate::telegram::requests_emoji::get_installed_emoji_sets(extra),
+            )?;
+        }
         self.fetch_editor_stickers()
     }
 }

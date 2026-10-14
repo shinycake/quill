@@ -245,20 +245,13 @@ impl QuillApp {
                     .iter()
                     .any(|f| f.file_id == file_id)
             });
+        // In someone else's set, a cell offers the owned sets of the same
+        // kind (tdesktop `AddAddToStickerSetAction` / `AddAddToEmojiSetAction`
+        // with no size filter; that filter is for set-less stickers).
         let owned_targets: Vec<(i64, String)> = if is_owned {
             Vec::new()
         } else {
-            let (to_stickers, to_emoji) = quill::sticker_set_box::joinable_kinds(
-                item.format == quill::telegram::envelope::StickerFormat::Tgs,
-                item.width,
-                item.height,
-            );
-            let wanted = match kind {
-                SetKind::Stickers => to_stickers,
-                SetKind::Emoji => to_emoji,
-            };
             self.session()
-                .filter(|_| wanted)
                 .map(|s| s.owned_sticker_sets(kind == SetKind::Emoji))
                 .unwrap_or_default()
                 .into_iter()
@@ -383,7 +376,6 @@ impl QuillApp {
                     if !reordering && has_add_cell(is_owned, count, kind) {
                         grid = grid.child(this.sticker_set_add_cell(set_id, kind, cx));
                     }
-                    let busy = view.edits.busy();
                     let more: Option<AnyElement> = set_link(&name, kind).map(|link| {
                         this.sticker_set_more_button(
                             set_id,
@@ -416,17 +408,6 @@ impl QuillApp {
                             .items_center()
                             .gap_2()
                             .children(more)
-                            .when(is_owned, |footer| {
-                                footer.child(
-                                    Button::new("sticker-set-edit")
-                                        .label(kind.edit_label())
-                                        .ghost()
-                                        .disabled(busy || count < 2)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.begin_edit_stickers(cx);
-                                        })),
-                                )
-                            })
                             .child(div().flex_1())
                             .child(
                                 Button::new("sticker-set-close")
@@ -441,24 +422,43 @@ impl QuillApp {
                                         );
                                     })),
                             )
-                            .child(
-                                Button::new("sticker-set-toggle")
-                                    .label(if installed {
-                                        "Remove Stickers".to_string()
-                                    } else {
-                                        format!("Add {count} Stickers")
-                                    })
-                                    .when(installed, |button| button.danger())
-                                    .when(!installed, |button| button.primary())
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.toggle_viewed_sticker_set(set_id, !installed, cx);
-                                        this.close_kit_dialog_if_done(
-                                            DialogKind::StickerSet,
-                                            window,
-                                            cx,
-                                        );
-                                    })),
-                            )
+                            .map(|footer| {
+                                // tdesktop: a set that is not installed gets
+                                // "Add N Stickers"; an installed set the user
+                                // created gets "Edit Stickers" in its place;
+                                // any other installed set "Remove Stickers".
+                                if installed && is_owned {
+                                    footer.child(
+                                        Button::new("sticker-set-edit")
+                                            .label(kind.edit_label())
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.begin_edit_stickers(cx);
+                                            })),
+                                    )
+                                } else {
+                                    footer.child(
+                                        Button::new("sticker-set-toggle")
+                                            .label(if installed {
+                                                "Remove Stickers".to_string()
+                                            } else {
+                                                format!("Add {count} Stickers")
+                                            })
+                                            .when(installed, |button| button.danger())
+                                            .when(!installed, |button| button.primary())
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.toggle_viewed_sticker_set(
+                                                    set_id, !installed, cx,
+                                                );
+                                                this.close_kit_dialog_if_done(
+                                                    DialogKind::StickerSet,
+                                                    window,
+                                                    cx,
+                                                );
+                                            })),
+                                    )
+                                }
+                            })
                             .into_any_element()
                     };
                     (title, grid.into_any_element(), Some(footer))
@@ -486,11 +486,19 @@ impl QuillApp {
     }
 }
 
+/// The set box and its sub-dialogs show while the box is open and the
+/// photo editor is not: the editor ("Create a New Sticker", "Adapt from a
+/// Sticker") paints inside the app, under any kit dialog, so the box steps
+/// aside until the editor is done or cancelled.
+pub(super) fn sticker_box_shown(app: &QuillApp) -> bool {
+    app.message_ui.menu_ui.sticker_set_open && app.viewer.photo_editor.is_none()
+}
+
 crate::ui::shell::register_dialogs! {
     /// "View Sticker Set" / "Add Stickers" from a sticker message.
     StickerSet => DialogSpec::new(
         5700,
-        |app| app.message_ui.menu_ui.sticker_set_open,
+        sticker_box_shown,
         QuillApp::build_sticker_set_dialog,
     ),
 }

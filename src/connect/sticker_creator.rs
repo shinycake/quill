@@ -55,9 +55,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let file = NewStickerFile::Local(path.to_string());
-        self.creator_request(StickerCreatorPurpose::AddNewSticker { set_id }, |extra| {
-            add_sticker_to_set(extra, &name, &file, StickerFormat::Webp, emojis)
-        })
+        let emoji = self
+            .session
+            .owned_sticker_set(set_id)
+            .is_some_and(|(_, emoji)| emoji);
+        self.creator_request(
+            StickerCreatorPurpose::AddNewSticker { set_id, emoji },
+            |extra| add_sticker_to_set(extra, &name, &file, StickerFormat::Webp, emojis),
+        )
     }
 
     /// Add a sticker that already exists on the server, under its own
@@ -74,8 +79,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .ok_or(ConnectSendError::InvalidRequest)?;
         let emojis = emoji_or_default(emoji).to_string();
         let file = NewStickerFile::Existing(file_id);
+        let emoji = self
+            .session
+            .owned_sticker_set(set_id)
+            .is_some_and(|(_, emoji)| emoji);
         self.creator_request(
-            StickerCreatorPurpose::AddExistingSticker { set_id },
+            StickerCreatorPurpose::AddExistingSticker { set_id, emoji },
             |extra| add_sticker_to_set(extra, &name, &file, format, &emojis),
         )
     }
@@ -105,6 +114,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.owned_set_name(set_id)
             .ok_or(ConnectSendError::InvalidRequest)?;
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let Some(position) = self.session.move_viewed_sticker(set_id, from, to) else {
             return Ok(None);
         };
@@ -124,10 +136,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         let position = i32::try_from(position).unwrap_or(i32::MAX);
-        self.creator_request(StickerCreatorPurpose::MoveSticker { set_id }, |extra| {
+        let sent = self.creator_request(StickerCreatorPurpose::MoveSticker { set_id }, |extra| {
             set_sticker_position_in_set(extra, file_id, position)
-        })
-        .map(Some)
+        });
+        if sent.is_err()
+            && let Some(view) = self.session.stickers.sticker_set_view.as_mut()
+            && view.set_id == set_id
+        {
+            // The box shows an order the server never got: ask for the
+            // server's order.
+            view.edits.refresh_needed = true;
+        }
+        sent.map(Some)
     }
 
     /// Rename the open owned set (`setStickerSetTitle`); the title is
@@ -160,6 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// box shows the set as it is now (tdesktop re-applies the answered
     /// set). The view keeps its contents while the answer is on its way.
     pub fn sync_sticker_set_view(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.refetch_installed_sets_after_edit()?;
         let Some(view) = self.session.stickers.sticker_set_view.as_ref() else {
             return Ok(None);
         };
@@ -184,5 +205,52 @@ impl<S: JsonSender> ConnectDriver<S> {
             view.files_requested = false;
         }
         Ok(Some(extra))
+    }
+
+    /// An edit renamed, changed or deleted a set: fetch both installed
+    /// lists again so the "Add to … Set" menus and the panel's "edit" badge
+    /// follow the server (tdesktop `notifyUpdated` after `feedSetFull`).
+    fn refetch_installed_sets_after_edit(&mut self) -> Result<(), ConnectSendError> {
+        if !self.session.stickers.creator_refetch_sets || !self.chats_path_active() {
+            return Ok(());
+        }
+        self.session.take_sticker_set_refetch();
+        if !self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetInstalledStickerSets)
+        {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetInstalledStickerSets, None);
+            if let Err(err) =
+                self.sender
+                    .send_json(&crate::telegram::requests::get_installed_sticker_sets(
+                        extra,
+                    ))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+        }
+        if !self
+            .session
+            .requests
+            .has_purpose(RequestPurpose::GetInstalledEmojiSets)
+        {
+            let extra = self
+                .session
+                .request(RequestPurpose::GetInstalledEmojiSets, None);
+            if let Err(err) =
+                self.sender
+                    .send_json(&crate::telegram::requests_emoji::get_installed_emoji_sets(
+                        extra,
+                    ))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
+        }
+        Ok(())
     }
 }
