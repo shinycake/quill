@@ -1,3 +1,5 @@
+#![deny(clippy::indexing_slicing)]
+
 use crate::auth::{AuthView, view_for};
 use crate::calls::engine::{RemoteVideoState, TransportState};
 use crate::chatlist_style::{ChatPreviewStyle, preview_sender_name, preview_style};

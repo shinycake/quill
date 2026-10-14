@@ -120,7 +120,9 @@ impl SharedMediaState {
     /// Whether the tab shows a window from a picked date instead of the
     /// newest media.
     pub fn is_at_date(&self, tab: SharedMediaTab) -> bool {
-        self.tabs[tab.index()].anchor_day.is_some()
+        self.tabs
+            .get(tab.index())
+            .is_some_and(|t| t.anchor_day.is_some())
     }
 }
 

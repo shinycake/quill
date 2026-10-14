@@ -101,3 +101,26 @@ Verified: UI, `--no-default-features`, `demo-capture,frame-profiler` clippy
 all targets, Windows and Linux core cross clippy (no hits), gate.sh. The
 Windows/Linux UI-only files were grepped by hand for slices and `Instant`
 subtraction.
+
+## Phase D, batch 1: `indexing_slicing` in four modules
+
+Branch `panic-lints-d1`. `src/telegram/envelope`, `src/state`, `src/composer`
+and `src/composer_doc` now start with `#![deny(clippy::indexing_slicing)]`.
+Other modules are still open and get their own batches.
+
+- `telegram/envelope` (TDLib JSON parsing) had no production hits left; the
+  attribute only locks that in.
+- 19 production sites fixed with `get`, `first`, `find` and slice patterns:
+  `composer` 6 (`attachments`, `markup`), `composer_doc` 2, `state` 11
+  (`chat_activity`, `history_trim`, `session_apply_ok`, `session_chat_search`,
+  `profile_music`, `shared_media_*`). On valid input the behaviour is the
+  same. The fallbacks only run on states that used to panic and none of them
+  loops: byte lookups in the markup parser return "not a line start"/"no
+  previous byte" and the loops still advance.
+- One `#[expect]`: `SharedMediaState::tab_state`, whose array has one slot per
+  `SharedMediaTab` and is indexed by the enum discriminant.
+
+Verified: clippy with `-W clippy::indexing_slicing` has zero hits in the four
+modules for `--features ui`, `--no-default-features` and
+`ui,demo-capture`; plain clippy with the new `deny` passes in all three;
+`gate.sh`.

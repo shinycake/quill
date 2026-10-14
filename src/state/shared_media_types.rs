@@ -336,6 +336,10 @@ pub struct SharedMediaState {
 }
 
 impl SharedMediaState {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`tabs` has one slot per `SharedMediaTab` variant and `index()` is the discriminant"
+    )]
     pub(crate) fn tab_state(&mut self, tab: SharedMediaTab) -> &mut SharedMediaTabState {
         &mut self.tabs[tab.index()]
     }
@@ -381,7 +385,9 @@ impl SharedMediaState {
     /// must send `searchChatMessages`.
     pub fn select_tab(&mut self, tab: SharedMediaTab) -> bool {
         self.active_tab = tab;
-        self.tabs[tab.index()].status == SharedMediaTabStatus::Idle
+        self.tabs
+            .get(tab.index())
+            .is_some_and(|t| t.status == SharedMediaTabStatus::Idle)
     }
 
     /// Mark the tab loading and bump the generation; the caller stamps the

@@ -91,16 +91,16 @@ impl Session {
     /// Insert a found message into that chat's history so open-chat can show it
     /// without a separate history pagination scheme.
     pub fn promote_search_message(&mut self, chat_id: ChatId, message_id: MessageId) {
-        let Some(index) = self
+        let Some(hit) = self
             .search
             .search
             .messages
             .iter()
-            .position(|hit| hit.chat_id == chat_id && hit.message_id == message_id)
+            .find(|hit| hit.chat_id == chat_id && hit.message_id == message_id)
+            .cloned()
         else {
             return;
         };
-        let hit = self.search.search.messages[index].clone();
         let row = hit.into_history();
         self.index_poll(&row);
         self.histories.entry(chat_id.0).or_default().upsert(row);

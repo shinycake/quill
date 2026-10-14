@@ -143,7 +143,8 @@ impl ComposerAttachment {
         });
         // A lone `.gif` goes out as a GIF (an animation, with a caption
         // like any media); next to other files it stays a file.
-        let gif_alone = list.is_empty() && paths.len() == 1 && is_gif_path(&paths[0]);
+        let gif_alone =
+            list.is_empty() && paths.len() == 1 && paths.first().is_some_and(|p| is_gif_path(p));
         let planned: Vec<(PathBuf, AttachmentKind)> = paths
             .iter()
             .enumerate()
@@ -153,7 +154,8 @@ impl ComposerAttachment {
                 } else {
                     media
                         .as_ref()
-                        .map_or(AttachmentKind::Document, |kinds| kinds[ix])
+                        .and_then(|kinds| kinds.get(ix).copied())
+                        .unwrap_or(AttachmentKind::Document)
                 };
                 (path.clone(), kind)
             })

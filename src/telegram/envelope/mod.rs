@@ -1,3 +1,5 @@
+#![deny(clippy::indexing_slicing)]
+
 mod account_notices;
 mod auth;
 mod backgrounds;

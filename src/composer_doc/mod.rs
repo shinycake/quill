@@ -9,6 +9,7 @@
 //! typed (`InputField::processMarkdownReplaces`).
 //!
 //! Ranges are UTF-8 byte ranges into [`ComposerDoc::text`].
+#![deny(clippy::indexing_slicing)]
 
 use std::ops::Range;
 
@@ -460,10 +461,12 @@ pub fn markdown_replacement(
         if close < line_start {
             continue;
         }
-        let marker_char = marker.as_bytes()[0];
+        let Some(&marker_char) = marker.as_bytes().first() else {
+            continue;
+        };
         // The closing marker is the whole run of marker characters typed:
         // `***` closes neither `**` nor `*`.
-        if close > 0 && text.as_bytes()[close - 1] == marker_char {
+        if close > 0 && text.as_bytes().get(close - 1) == Some(&marker_char) {
             continue;
         }
         let line = text.get(line_start..close).unwrap_or_default();

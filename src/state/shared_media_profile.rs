@@ -509,8 +509,9 @@ impl Session {
     /// A profile tab's request failed: the tab shows the error and hides
     /// from the bar unless it is the active one.
     pub(crate) fn fail_profile_tab(&mut self, chat_id: ChatId, tab: SharedMediaTab, error: String) {
-        let key = tab.count_keys()[0];
-        self.set_profile_count(chat_id, key, 0);
+        if let Some(&key) = tab.count_keys().first() {
+            self.set_profile_count(chat_id, key, 0);
+        }
         self.media.shared_media.fail_profile(chat_id, tab, error);
     }
 }

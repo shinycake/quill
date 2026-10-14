@@ -94,7 +94,7 @@ blocks a `// SAFETY:` comment too.
 | A | `unwrap_used`, `panic`, `todo`, `unimplemented`, `unreachable`, `exit` (with an `expect` on `main`'s CLI paths) | **On** (`panic-lints`) |
 | B | `expect_used`, `undocumented_unsafe_blocks` | **On** (`panic-lints`) |
 | C | `string_slice`, `unchecked_time_subtraction` | **On** (`panic-lints-c`) |
-| D | `indexing_slicing`, per module, starting with `telegram/envelope`, `state`, `composer`, `composer_doc` | 621 sites left (640 at audit time) |
+| D | `indexing_slicing`, per module with `#![deny(clippy::indexing_slicing)]` | **On** for `telegram/envelope`, `state`, `composer`, `composer_doc` (`panic-lints-d1`); other modules still open |
 
 Phase D counts are production code on macOS from
 `cargo clippy --features ui --bin quill`, which lints the library with the UI
