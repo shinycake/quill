@@ -8,6 +8,8 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::gift_manage::GiftRecipient;
+use quill::gift_market::CraftGift;
+use std::time::Instant;
 
 /// One box of the gift market.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +35,17 @@ pub(crate) enum MarketBox {
     ActiveAuctions,
     /// The models a collectible of this gift can get.
     Variants { gift_id: i64 },
+    /// "Gift Crafting": how crafting works, before the craft box.
+    CraftInfo,
+    /// "Craft Gift": the slots of `session.payments.gift_market.craft`,
+    /// then the forge while the craft runs.
+    Craft,
+    /// "Select Gifts": the user's gifts and the listings for a slot.
+    CraftSelect,
+    /// The craft's outcome: the new gift or "Crafting Failed".
+    CraftResult,
+    /// An information box ("Crafting unavailable").
+    Notice { title: String, text: String },
 }
 
 impl MarketBox {
@@ -83,6 +96,10 @@ pub(crate) struct GiftMarketUi {
     /// How often the chat-list bar opened its box (one tap, one open).
     #[cfg(test)]
     pub(super) bar_opens: usize,
+    /// The gift the craft info box was opened for.
+    pub(super) craft_primary: Option<CraftGift>,
+    /// When the forge started; it runs at least `FORGE_SECONDS`.
+    pub(super) forge_started: Option<Instant>,
 }
 
 impl GiftMarketUi {
@@ -97,6 +114,8 @@ impl GiftMarketUi {
             requested_files: Vec::new(),
             #[cfg(test)]
             bar_opens: 0,
+            craft_primary: None,
+            forge_started: None,
         }
     }
 

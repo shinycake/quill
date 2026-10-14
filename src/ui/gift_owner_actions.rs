@@ -1,5 +1,5 @@
 //! The owner's actions on one received gift: pin, upgrade, transfer, resale
-//! price and collection membership (tdesktop's gift view box). Upgrade and
+//! price, crafting and collection membership (tdesktop's gift view box). Upgrade and
 //! transfer spend Stars, so each opens an inline confirmation that names the
 //! price; the handlers are in `gift_manage_ui`.
 #![deny(clippy::indexing_slicing)]
@@ -99,6 +99,18 @@ pub(super) fn gift_owner_actions(
             col = resale_section(col, gift, manage, price_input, price_text, busy, cx);
         }
         ResaleGate::Unavailable => {}
+    }
+    // tdesktop's "Craft" in the gift's menu (`CanCraftGift`).
+    if let Some(craft) = super::gift_craft_ui::craft_gift_of(gift) {
+        col = col.child(
+            Button::new("gift-craft")
+                .label("Craft")
+                .small()
+                .disabled(busy)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_craft_info(craft.clone(), cx);
+                })),
+        );
     }
     if !manage.collections.is_empty() {
         let mut chips = div().flex().flex_wrap().gap_1();

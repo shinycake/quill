@@ -126,6 +126,17 @@ impl ResaleBuy {
     }
 }
 
+/// tdesktop's fallback attribute persistence table (per mille), used
+/// until TDLib sends one: row `n - 1` is for `n` gifts in the craft.
+pub fn default_craft_probabilities() -> Vec<Vec<i32>> {
+    vec![
+        vec![90],
+        vec![80, 200],
+        vec![70, 190, 460],
+        vec![60, 180, 450, 1000],
+    ]
+}
+
 /// The craft box: the chosen gifts, the candidates and the outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CraftSession {
@@ -152,8 +163,17 @@ impl CraftSession {
         Self {
             regular_gift_id,
             slots: vec![primary],
+            probabilities: default_craft_probabilities(),
             market: ResaleSearch::new(regular_gift_id, ResaleFilter::default(), true),
             ..Self::default()
+        }
+    }
+
+    /// Takes TDLib's `attribute_persistence_probabilities` when it sent a
+    /// table; an empty one keeps tdesktop's default.
+    pub fn set_probabilities(&mut self, table: Vec<Vec<i32>>) {
+        if !table.is_empty() && table.iter().all(|row| !row.is_empty()) {
+            self.probabilities = table;
         }
     }
 

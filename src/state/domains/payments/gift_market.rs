@@ -114,9 +114,7 @@ impl Session {
                 } else {
                     candidates.next_offset
                 };
-                if !candidates.probabilities.is_empty() {
-                    craft.probabilities = candidates.probabilities;
-                }
+                craft.set_probabilities(candidates.probabilities);
                 if page > 0 {
                     craft.candidates.extend(candidates.gifts);
                 } else {
