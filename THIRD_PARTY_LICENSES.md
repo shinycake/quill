@@ -1521,10 +1521,10 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
+- [gpui-pre-apple 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-linux 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-macos 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-windows 0.3.8](https://github.com/zed-industries/zed)
-- [gpui-pre-apple 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-collections 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-derive-refineable 0.3.8](https://github.com/zed-industries/zed)
 - [gpui-pre-http-client 0.3.8](https://github.com/zed-industries/zed)

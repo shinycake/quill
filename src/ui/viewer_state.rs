@@ -85,6 +85,8 @@ pub(crate) struct ViewerUi {
     /// `(path, orientation code)`; decoded eagerly by Rotate/Flip so the
     /// overlay render stays allocation-free.
     pub(super) rotated: Option<(PathBuf, u8, Arc<RenderImage>)>,
+    /// HDR rendition of the current picture file (macOS).
+    pub(super) hdr: super::hdr_image::HdrViewer,
     /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
     pub(super) open_gen: u64,
     /// A media-timestamp link opened this message's video; the viewer
@@ -141,6 +143,7 @@ impl ViewerUi {
             pending_play: None,
             orientation: Default::default(),
             rotated: None,
+            hdr: Default::default(),
             open_gen: 0,
             pending_seek: None,
             last_activity: std::time::Instant::now(),
