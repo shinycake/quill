@@ -9,9 +9,10 @@
 use super::app::QuillApp;
 use super::sticker_set_box::state::CreateSticker;
 use super::video_editor::EditorTarget;
+use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 use quill::sticker_set_box::SetKind;
-use quill::sticker_video::{ENCODING_NOTE, encode_sticker};
+use quill::sticker_video::{ENCODING_NOTE, EncodeError, encode_sticker};
 use quill::telegram::envelope::StickerFormat;
 use std::path::{Path, PathBuf};
 
@@ -82,7 +83,7 @@ impl QuillApp {
         let worker = cx.background_spawn(async move {
             let encoded = encode_sticker(&source, &edits, &info, kind)?;
             let preview = sticker_preview(&encoded.path);
-            Ok((encoded, preview))
+            Ok::<_, EncodeError>((encoded, preview))
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = worker.await;

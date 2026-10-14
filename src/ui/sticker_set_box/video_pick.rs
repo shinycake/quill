@@ -21,6 +21,7 @@ impl QuillApp {
             .usable_path()
             .map(str::to_string)?;
         quill::local_path::sandboxed_display_path(&path, &roots)
+            .map(|path| path.to_string_lossy().into_owned())
     }
 
     /// The saved GIFs the chooser offers next to the stickers (tdesktop's
@@ -31,7 +32,7 @@ impl QuillApp {
             return Vec::new();
         }
         self.session()
-            .map(|session| session.stickers.stickers.gifs.animations.clone())
+            .map(|session| session.stickers.gifs.animations.clone())
             .unwrap_or_default()
     }
 
@@ -78,6 +79,13 @@ impl QuillApp {
             return;
         };
         self.sticker_box.pick = None;
-        self.open_set_video_editor(pick.set_id, pick.kind, PathBuf::from(path), emoji, window, cx);
+        self.open_set_video_editor(
+            pick.set_id,
+            pick.kind,
+            PathBuf::from(path),
+            emoji,
+            window,
+            cx,
+        );
     }
 }

@@ -377,7 +377,14 @@ mod tests {
             turns: 1,
             ..VideoEdits::full(10_000)
         };
-        let args = webm_args("in.webm", "out.webm", &edits, &source(640, 480, 10_000), 100, 34);
+        let args = webm_args(
+            "in.webm",
+            "out.webm",
+            &edits,
+            &source(640, 480, 10_000),
+            100,
+            34,
+        );
         let joined = args.join(" ");
         assert!(joined.starts_with("-y -ss 0.500 -t 2.000 -i in.webm -an -vf "));
         let filters = args
@@ -386,10 +393,22 @@ mod tests {
             .and_then(|at| args.get(at + 1))
             .expect("filters");
         assert!(filters.starts_with("hflip,transpose=1,crop="));
-        assert!(filters.contains(",scale=100:100:flags=lanczos,fps=min(source_fps\\,30),format=yuva420p"));
-        assert!(joined.contains("-c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 34 -auto-alt-ref 0 -f webm out.webm"));
+        assert!(
+            filters
+                .contains(",scale=100:100:flags=lanczos,fps=min(source_fps\\,30),format=yuva420p")
+        );
+        assert!(joined.contains(
+            "-c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 34 -auto-alt-ref 0 -f webm out.webm"
+        ));
         assert!(!joined.contains("-c:a"));
-        let plain = webm_args("a", "b", &VideoEdits::full(1000), &source(512, 512, 1000), 512, 99);
+        let plain = webm_args(
+            "a",
+            "b",
+            &VideoEdits::full(1000),
+            &source(512, 512, 1000),
+            512,
+            99,
+        );
         assert!(plain.join(" ").contains("-crf 63"));
         assert!(!plain.join(" ").contains("crop="));
     }

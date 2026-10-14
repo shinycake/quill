@@ -200,8 +200,9 @@ impl QuillApp {
         pixels: Option<image::RgbaImage>,
         cx: &mut Context<Self>,
     ) {
-        let editor = pixels
-            .and_then(|pixels| super::super::photo_editor::PhotoEditor::for_set(pixels, set_id, kind));
+        let editor = pixels.and_then(|pixels| {
+            super::super::photo_editor::PhotoEditor::for_set(pixels, set_id, kind)
+        });
         match editor {
             Some(editor) => self.viewer.photo_editor = Some(editor),
             None => self.connection.status_note = OPEN_FAILED_NOTE.into(),

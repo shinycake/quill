@@ -10,7 +10,7 @@ use super::app::QuillApp;
 use super::photo_edit::{CropRect, Placed, overlay_item, render};
 use super::photo_editor::{EditorPurpose, PhotoEditor, preview_of};
 use gpui_kit::component::button::*;
-use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use image::RgbaImage;
@@ -117,7 +117,9 @@ impl PhotoEditor {
     pub(super) fn render_set_image(&self) -> RgbaImage {
         let mut canvas = self.working.clone();
         let mut items = self.placed.iter().map(|(item, _)| item);
-        if self.base_item && let Some(base) = items.next() {
+        if self.base_item
+            && let Some(base) = items.next()
+        {
             overlay_item(&mut canvas, base);
         }
         let rest: Vec<Placed> = items.cloned().collect();
@@ -129,7 +131,11 @@ impl QuillApp {
     /// Crop-mode tools of the Set mode: Rotate, Flip and the corners menu
     /// (`lng_photo_editor_corners_*`, plus "Keep original aspect ratio"
     /// when the image isn't square).
-    pub(super) fn photo_editor_set_tools(&self, editor: &PhotoEditor, cx: &mut Context<Self>) -> Div {
+    pub(super) fn photo_editor_set_tools(
+        &self,
+        editor: &PhotoEditor,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let owner = cx.entity().downgrade();
         let current = editor.corners;
         let keep_ratio = editor.keep_ratio;
@@ -237,7 +243,11 @@ mod tests {
         let padded = wide.render_set_image();
         assert_eq!(padded.dimensions(), (512, 512));
         assert_eq!(padded.get_pixel(256, 10)[3], 0, "transparent band above");
-        assert_eq!(padded.get_pixel(256, 256)[3], 255, "the image in the middle");
+        assert_eq!(
+            padded.get_pixel(256, 256)[3],
+            255,
+            "the image in the middle"
+        );
 
         wide.toggle_keep_ratio();
         assert!(wide.keep_ratio);
@@ -256,7 +266,11 @@ mod tests {
     fn the_wheel_zooms_the_picked_image_within_limits() {
         let mut square = editor(300, 300, SetKind::Stickers);
         square.zoom_base(100.0);
-        let width = square.placed.first().map(|(item, _)| item.width).unwrap_or(0.0);
+        let width = square
+            .placed
+            .first()
+            .map(|(item, _)| item.width)
+            .unwrap_or(0.0);
         assert!(width > 1.0 && width <= 1.2);
         for _ in 0..200 {
             square.zoom_base(400.0);

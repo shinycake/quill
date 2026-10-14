@@ -18,11 +18,11 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{AttachmentExtras, AttachmentKind, EditMediaKind};
+use quill::sticker_set_box::SetKind;
 use quill::video_edit::{
     VideoEdits, VideoSource, format_clock, probe_source, quality_label, quality_levels,
     render_edited, render_frame,
 };
-use quill::sticker_set_box::SetKind;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -48,7 +48,7 @@ pub(super) enum Knob {
 }
 
 pub(super) struct VideoEditorDialog {
-    target: EditorTarget,
+    pub(super) target: EditorTarget,
     /// The file the edits start from.
     pub(super) source: PathBuf,
     /// Probed size, length and sound; `None` while it is read.
@@ -59,7 +59,7 @@ pub(super) struct VideoEditorDialog {
     /// Bumped by every probe, frame and encode; late answers are dropped.
     pub(super) serial: u64,
     /// The edited copy is being encoded.
-    busy: bool,
+    pub(super) busy: bool,
     pub(super) note: Option<String>,
     range: Option<Entity<SliderState>>,
     cover: Option<Entity<SliderState>>,
@@ -183,7 +183,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn video_editor_probed(
+    pub(super) fn video_editor_probed(
         &mut self,
         serial: u64,
         info: Option<VideoSource>,
@@ -444,7 +444,7 @@ impl QuillApp {
         }
     }
 
-    fn close_video_editor(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_video_editor(&mut self, cx: &mut Context<Self>) {
         if let Some(editor) = self.composer_ui.send_box.video_editor.take()
             && let Some(preview) = editor.preview
         {

@@ -445,20 +445,55 @@ impl QuillApp {
                                 .into_any_element(),
                         })
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.pick_existing_sticker(&item, cx);
+                            this.pick_existing_sticker(&item, window, cx);
                             this.close_kit_dialog_if_done(DialogKind::StickerPick, window, cx);
                         }))
                         .into_any_element()
                 })
                 .collect();
-            let empty = cells.is_empty();
-            let body = Rc::new(RefCell::new(Some(cells)));
+            // Saved GIFs go through the video editor (tdesktop's panel has
+            // a GIFs tab in this flow).
+            let gifs: Vec<AnyElement> = this
+                .pick_gif_candidates(pick)
+                .iter()
+                .enumerate()
+                .map(|(index, animation)| {
+                    let still = this.gif_still(animation);
+                    let animation = animation.clone();
+                    div()
+                        .id(("sticker-pick-gif", index as u64))
+                        .test_support()
+                        .size(px(64.))
+                        .p_1()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .hover(|style| style.bg(cx.theme().accent))
+                        .child(match still {
+                            Some(path) => img(path)
+                                .size_full()
+                                .object_fit(ObjectFit::Cover)
+                                .into_any_element(),
+                            None => div()
+                                .size_full()
+                                .rounded_md()
+                                .bg(cx.theme().muted.opacity(0.5))
+                                .into_any_element(),
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.pick_gif_for_set(&animation, window, cx);
+                            this.close_kit_dialog_if_done(DialogKind::StickerPick, window, cx);
+                        }))
+                        .into_any_element()
+                })
+                .collect();
+            let empty = cells.is_empty() && gifs.is_empty();
+            let body = Rc::new(RefCell::new(Some((cells, gifs))));
             dialog
                 .overlay(true)
                 .w(px(400.))
                 .title(shell::dialog_title(title))
                 .content(shell::scrollable_dialog_content(move |content, _, _| {
-                    let cells = body.borrow_mut().take().unwrap_or_default();
+                    let (cells, gifs) = body.borrow_mut().take().unwrap_or_default();
                     content.child(if empty {
                         div()
                             .text_sm()
@@ -468,9 +503,13 @@ impl QuillApp {
                     } else {
                         div()
                             .flex()
-                            .flex_wrap()
-                            .gap_1()
-                            .children(cells)
+                            .flex_col()
+                            .gap_2()
+                            .child(div().flex().flex_wrap().gap_1().children(cells))
+                            .when(!gifs.is_empty(), |body| {
+                                body.child(div().text_xs().text_color(text_muted()).child("GIFs"))
+                                    .child(div().flex().flex_wrap().gap_1().children(gifs))
+                            })
                             .into_any_element()
                     })
                 }))

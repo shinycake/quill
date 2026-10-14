@@ -197,22 +197,66 @@ fn delete_for_everyone_asks_then_closes_the_box(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_square_crop_stays_square_for_a_set_image(cx: &mut TestAppContext) {
+fn a_set_image_is_padded_to_a_square_and_the_corners_cut(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         let image = image::RgbaImage::from_pixel(400, 200, image::Rgba([10, 20, 30, 255]));
-        app.viewer.photo_editor = Some(crate::ui::photo_editor::PhotoEditor::for_set(
-            image,
+        app.edit_pixels_for_set(
             78,
             quill::sticker_set_box::SetKind::Stickers,
-        ));
+            Some(image),
+            cx,
+        );
         let editor = app.viewer.photo_editor.as_ref().expect("editor");
-        let crop = editor.crop;
-        // 200 px square on a 400×200 image: half the width, all the height.
-        assert!((crop.w - 0.5).abs() < 0.01 && (crop.h - 1.0).abs() < 0.01);
-        assert!((crop.x - 0.25).abs() < 0.01);
-        cx.notify();
+        // tdesktop's canvas: a transparent square with the image fitted on
+        // it; the crop is the whole canvas.
+        assert_eq!(editor.working.dimensions(), (512, 512));
+        assert_eq!(editor.crop, crate::ui::photo_edit::CropRect::FULL);
+        assert!(editor.fixed_crop());
+        let edited = editor.render_set_image();
+        assert_eq!(edited.dimensions(), (512, 512));
+        assert_eq!(edited.get_pixel(256, 20)[3], 0);
+        assert_eq!(edited.get_pixel(256, 256)[3], 255);
+    });
+    frames(vcx);
+    // Crop mode shows the set tools, with the corners menu.
+    assert!(vcx.update(|window, _| window.try_find("photo-editor-corners").is_some()));
+    assert!(vcx.update(|window, _| window.try_find("photo-editor-reset-crop").is_none()));
+    // Done: the result is fitted, the corners are cut (Large by default).
+    vcx.update(|window, cx| window.click("photo-editor-done", cx));
+    frames(vcx);
+    let create = app
+        .read_with(vcx, |app, _| app.sticker_box.create.clone())
+        .expect("create");
+    assert_eq!(
+        create.format,
+        quill::telegram::envelope::StickerFormat::Webp
+    );
+    let written = image::open(&create.path).expect("png").to_rgba8();
+    assert_eq!(written.dimensions(), (512, 512));
+    assert_eq!(written.get_pixel(0, 0)[3], 0);
+    assert_eq!(written.get_pixel(256, 256)[3], 255);
+    let _ = std::fs::remove_file(&create.path);
+}
+
+#[gpui_kit::test]
+fn an_image_the_editor_refuses_toasts_could_not_load(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        let long = image::RgbaImage::from_pixel(20, 400, image::Rgba([1, 1, 1, 255]));
+        app.edit_pixels_for_set(
+            78,
+            quill::sticker_set_box::SetKind::Stickers,
+            Some(long),
+            cx,
+        );
+        assert!(app.viewer.photo_editor.is_none());
+        assert_eq!(
+            app.connection.status_note.as_str(),
+            quill::sticker_set_box::OPEN_FAILED_NOTE
+        );
     });
 }
 
@@ -224,25 +268,123 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
     // the app, so the kit box (and its hit barrier) must step aside.
     app.update(vcx, |app, cx| {
         let image = image::RgbaImage::from_pixel(300, 300, image::Rgba([10, 20, 30, 255]));
-        app.viewer.photo_editor = Some(crate::ui::photo_editor::PhotoEditor::for_set(
-            image,
+        app.edit_pixels_for_set(
             78,
             quill::sticker_set_box::SetKind::Stickers,
-        ));
-        cx.notify();
+            Some(image),
+            cx,
+        );
     });
     frames(vcx);
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog.is_none()));
     assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open));
-    // Done in the editor hands the square image to the "New Sticker" box.
+    // Done in the editor hands the image to the "New Sticker" box.
     app.update(vcx, |app, cx| {
         let image = image::RgbaImage::from_pixel(300, 300, image::Rgba([10, 20, 30, 255]));
         app.viewer.photo_editor = None;
-        app.finish_set_image(78, quill::sticker_set_box::SetKind::Stickers, &image, cx);
+        app.finish_set_image(
+            78,
+            quill::sticker_set_box::SetKind::Stickers,
+            &image,
+            quill::sticker_image::Corners::None,
+            cx,
+        );
     });
     frames(vcx);
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerCreate)));
+    let path = app
+        .read_with(vcx, |app, _| app.sticker_box.create.clone())
+        .map(|c| c.path);
+    if let Some(path) = path {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[gpui_kit::test]
+fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::PickExisting;
+    use quill::sticker_set_box::SetKind;
+    use quill::telegram::envelope::StickerFormat;
+    let (app, shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let pick = PickExisting {
+        set_id: 78,
+        kind: SetKind::Emoji,
+        adapt: true,
+    };
+    app.update(vcx, |app, cx| {
+        app.sticker_box.pick = Some(pick);
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerPick)));
+    // A video sticker with its file on disk (the demo's stickers are
+    // backed by a local PNG stub; the probe runs in the background).
+    let mut item = app
+        .read_with(vcx, |app, _| {
+            app.demo_session
+                .as_ref()
+                .and_then(|s| s.media.media_library.set_stickers.get(&78))
+                .and_then(|stickers| stickers.first().cloned())
+        })
+        .expect("a demo sticker");
+    item.set_id = 79;
+    item.format = StickerFormat::Webm;
+    item.emoji = "🔥".into();
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.pick_existing_sticker(&item, window, cx));
+    });
+    frames(vcx);
+    // The video editor (tdesktop `RunVideoEditorAndCreate`) replaces the
+    // chooser and sits over the set box.
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.pick.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.video_editor_for_set()));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::VideoEditor)));
+    // The probe answers: three seconds at most, a square crop, no quality
+    // or GIF choice.
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let serial = app
+                .composer_ui
+                .send_box
+                .video_editor
+                .as_ref()
+                .map_or(0, |editor| editor.serial);
+            let info = quill::video_edit::VideoSource {
+                duration_ms: 10_000,
+                width: 640,
+                height: 480,
+                has_audio: true,
+            };
+            app.video_editor_probed(serial, Some(info), None, window, cx);
+        });
+    });
+    frames(vcx);
+    let (edits, emoji) = app.read_with(vcx, |app, _| {
+        let editor = app
+            .composer_ui
+            .send_box
+            .video_editor
+            .as_ref()
+            .expect("editor");
+        (editor.edits, editor.set_emoji.clone())
+    });
+    assert_eq!((edits.from_ms, edits.till_ms), (0, 3000));
+    assert_eq!(edits.crop.map(|crop| (crop.w, crop.h)), Some((750, 1000)));
+    assert_eq!(emoji.as_deref(), Some("🔥"));
+    assert!(vcx.update(|window, _| window.try_find("video-editor-gif").is_none()));
+    assert!(vcx.update(|window, _| window.try_find("video-editor-done").is_some()));
+    // Cancel returns to the set box.
+    vcx.update(|window, cx| window.click("video-editor-cancel", cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| {
+        app.composer_ui.send_box.video_editor.is_none()
+    }));
+    assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
+        == Some(DialogKind::StickerSet)));
 }
 
 #[gpui_kit::test]
@@ -254,6 +396,8 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
             set_id: 78,
             kind: quill::sticker_set_box::SetKind::Stickers,
             path: std::path::PathBuf::from(crate::ui::demo::demo_thumb_png_path()),
+            format: quill::telegram::envelope::StickerFormat::Webp,
+            preview: None,
             emojis: Vec::new(),
         });
         cx.notify();

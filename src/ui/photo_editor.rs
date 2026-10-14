@@ -7,12 +7,12 @@
 use super::app::QuillApp;
 use super::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
 use super::photo_editor_items::ItemDrag;
-use quill::sticker_image::Corners as StickerCorners;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use image::RgbaImage;
+use quill::sticker_image::Corners as StickerCorners;
 use quill::sticker_set_box::SetKind;
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -422,7 +422,12 @@ impl QuillApp {
                 if base_item && let Some(((left, top, w, h), picture)) = items.first() {
                     let item_bounds =
                         Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
-                    paint_editor_item(window, item_bounds, picture.clone(), selected_item == Some(0));
+                    paint_editor_item(
+                        window,
+                        item_bounds,
+                        picture.clone(),
+                        selected_item == Some(0),
+                    );
                 }
                 for stroke in &strokes {
                     let color = Rgba {
@@ -446,14 +451,17 @@ impl QuillApp {
                 }
                 // Stickers and emoji over the drawing; the selected one gets
                 // a frame and a resize handle.
-                for (index, ((left, top, w, h), picture)) in items
-                    .iter()
-                    .enumerate()
-                    .skip(usize::from(base_item))
+                for (index, ((left, top, w, h), picture)) in
+                    items.iter().enumerate().skip(usize::from(base_item))
                 {
                     let item_bounds =
                         Bounds::from_corners(at((*left, *top)), at((left + w, top + h)));
-                    paint_editor_item(window, item_bounds, picture.clone(), selected_item == Some(index));
+                    paint_editor_item(
+                        window,
+                        item_bounds,
+                        picture.clone(),
+                        selected_item == Some(index),
+                    );
                 }
                 // Outside the crop is shaded in all modes, so editing
                 // shows what will be sent; handles only while cropping.
@@ -487,8 +495,8 @@ impl QuillApp {
                     if base_item {
                         // The fixed sticker frame, rounded like the corners
                         // choice; no handles, as it can't be dragged.
-                        let radius = crop_bounds.size.width.min(crop_bounds.size.height)
-                            * corner_multiplier;
+                        let radius =
+                            crop_bounds.size.width.min(crop_bounds.size.height) * corner_multiplier;
                         window.paint_quad(quad(
                             crop_bounds,
                             Corners::all(radius),
@@ -573,6 +581,8 @@ impl QuillApp {
 
         let stickers_tools =
             (mode == EditorMode::Stickers).then(|| self.photo_editor_sticker_tools(cx));
+        let set_tools = (mode == EditorMode::Crop && base_item)
+            .then(|| self.photo_editor_set_tools(editor, cx));
         let mode_button = |id: &'static str,
                            label: &'static str,
                            icon: gpui_kit::assets::IconName,
@@ -602,7 +612,7 @@ impl QuillApp {
                 .items_center()
                 .gap_2()
                 .children(stickers_tools),
-            EditorMode::Crop if base_item => self.photo_editor_set_tools(editor, cx),
+            EditorMode::Crop if base_item => div().flex().items_center().children(set_tools),
             EditorMode::Crop => div()
                 .flex()
                 .items_center()
@@ -781,7 +791,14 @@ fn paint_editor_item(
     picture: Arc<RenderImage>,
     selected: bool,
 ) {
-    let _ = window.paint_image(item_bounds, item_bounds, Corners::default(), picture, 0, false);
+    let _ = window.paint_image(
+        item_bounds,
+        item_bounds,
+        Corners::default(),
+        picture,
+        0,
+        false,
+    );
     if selected {
         window.paint_quad(outline(item_bounds, gpui_kit::white(), BorderStyle::Dashed));
         window.paint_quad(fill(
