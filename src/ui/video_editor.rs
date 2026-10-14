@@ -40,6 +40,32 @@ pub(super) enum EditorTarget {
     /// A video sticker for an owned set (`video_editor_set.rs`): three
     /// seconds at most, a square crop, encoded as WEBM.
     Set { set_id: i64, kind: SetKind },
+    /// The video avatar of the edit-profile dialog
+    /// (`profile_photo_sources/video.rs`): 1 to 9.6 s, a square crop,
+    /// encoded at 800 x 800 and set as the profile photo.
+    Avatar,
+}
+
+impl EditorTarget {
+    /// The crop is always a square (`exactSize` in tdesktop).
+    pub(super) fn square(self) -> bool {
+        matches!(self, Self::Set { .. } | Self::Avatar)
+    }
+
+    /// The longest and the shortest range in ms; 0 is no limit.
+    fn range_limits(self) -> (i64, i64) {
+        match self {
+            Self::Set { .. } => (
+                quill::sticker_video::MAX_DURATION_MS,
+                quill::sticker_video::MIN_DURATION_MS,
+            ),
+            Self::Avatar => (
+                quill::profile_photo_video::AVATAR_MAX_MS,
+                quill::profile_photo_video::AVATAR_MIN_MS,
+            ),
+            Self::Tray(_) | Self::MessageEdit => (0, 0),
+        }
+    }
 }
 
 /// The layer's own colors: like tdesktop's editor it is dark in both
@@ -251,13 +277,33 @@ impl QuillApp {
         {
             return;
         }
-        let for_set = self.video_editor_for_set();
+        let Some(target) = self
+            .composer_ui
+            .send_box
+            .video_editor
+            .as_ref()
+            .map(|editor| editor.target)
+        else {
+            return;
+        };
+        let for_set = matches!(target, EditorTarget::Set { .. });
         // A set's source the editor can't take: the editor goes and the
         // set box toasts, as tdesktop's `lng_bad_video` does.
         if for_set && !info.is_some_and(|info| quill::sticker_video::accepts_source(&info)) {
             self.close_video_editor(cx);
             self.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
             self.connection.status_note = quill::sticker_video::BAD_VIDEO_NOTE.into();
+            cx.notify();
+            return;
+        }
+        // An avatar's source too short or too thin says why and goes.
+        if target == EditorTarget::Avatar
+            && let Some(Err(error)) =
+                info.map(|info| quill::profile_photo_video::check_source(&info))
+        {
+            self.close_video_editor(cx);
+            self.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
+            self.connection.status_note = error.message().into();
             cx.notify();
             return;
         }
@@ -271,6 +317,8 @@ impl QuillApp {
         // An edit that only asked for a GIF has no range yet.
         let edits = if for_set {
             quill::sticker_video::initial_edits(&info)
+        } else if target == EditorTarget::Avatar {
+            quill::profile_photo_video::initial_edits(&info)
         } else {
             initial
                 .map(|edits| {
@@ -283,15 +331,9 @@ impl QuillApp {
                 })
                 .unwrap_or_else(|| VideoEdits::full(info.duration_ms))
         };
-        // A sticker lasts three seconds at most (`VideoStickerEditorData`).
-        let (max, min) = if for_set {
-            (
-                quill::sticker_video::MAX_DURATION_MS,
-                quill::sticker_video::MIN_DURATION_MS,
-            )
-        } else {
-            (0, 0)
-        };
+        // A sticker lasts three seconds at most (`VideoStickerEditorData`),
+        // an avatar 9.6 (`kProfileVideoMaxDuration`).
+        let (max, min) = target.range_limits();
         let timeline = Timeline::new(info.duration_ms, max, min, &edits);
         let edits = VideoEdits {
             from_ms: timeline.from,
@@ -377,6 +419,7 @@ impl QuillApp {
     }
 
     /// The open editor is making a sticker for a set.
+    #[cfg(all(test, feature = "demo-capture"))]
     pub(super) fn video_editor_for_set(&self) -> bool {
         self.composer_ui
             .send_box
@@ -395,8 +438,12 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return true;
         };
-        if let EditorTarget::Set { set_id, kind } = editor.target {
-            return self.finish_set_video_editor(set_id, kind, cx);
+        match editor.target {
+            EditorTarget::Set { set_id, kind } => {
+                return self.finish_set_video_editor(set_id, kind, cx);
+            }
+            EditorTarget::Avatar => return self.finish_avatar_video_editor(window, cx),
+            EditorTarget::Tray(_) | EditorTarget::MessageEdit => {}
         }
         let (Some(info), false) = (editor.info, editor.busy) else {
             return false;
@@ -524,7 +571,7 @@ impl QuillApp {
                 edit.media_edit.video_extras = extras;
                 "Video edits saved"
             }
-            Some(EditorTarget::Set { .. }) | None => return,
+            Some(EditorTarget::Set { .. } | EditorTarget::Avatar) | None => return,
         };
         self.connection.status_note = note.into();
         cx.notify();

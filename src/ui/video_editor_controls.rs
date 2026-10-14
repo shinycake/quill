@@ -163,7 +163,8 @@ impl QuillApp {
         editor: &VideoEditorDialog,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if matches!(editor.target, EditorTarget::Set { .. }) {
+        // A sticker or an avatar has its own fixed size.
+        if editor.target.square() {
             return None;
         }
         let (width, height) = editor.edits.edited_size(&editor.info?);

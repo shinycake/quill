@@ -7,7 +7,7 @@
 //! by the layer's parts is [`EditorMotion`].
 
 use super::app::QuillApp;
-use super::video_editor::{VideoEditorDialog, palette};
+use super::video_editor::{EditorTarget, VideoEditorDialog, palette};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::video_timeline::{
@@ -160,7 +160,17 @@ fn measured(editor: &VideoEditorDialog) -> Option<Timeline> {
 /// The size label: `~4.2 MB` for an estimate, the file's size when it is
 /// sent as it is.
 fn size_label(editor: &VideoEditorDialog) -> Option<String> {
-    let (bytes, estimate) = estimated_size(&editor.edits, &editor.info?)?;
+    let (bytes, estimate) = match editor.target {
+        // A sticker's encoder fits the set's byte cap whatever the clip.
+        EditorTarget::Set { .. } => return None,
+        EditorTarget::Avatar => (
+            quill::profile_photo_video::estimated_size(&editor.edits),
+            true,
+        ),
+        EditorTarget::Tray(_) | EditorTarget::MessageEdit => {
+            estimated_size(&editor.edits, &editor.info?)?
+        }
+    };
     let text = quill::telegram::envelope::format_size_text(i64::try_from(bytes).ok()?);
     Some(if estimate { format!("~{text}") } else { text })
 }

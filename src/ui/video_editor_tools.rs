@@ -7,7 +7,7 @@
 
 use super::app::QuillApp;
 use super::native_video::{NativeVideo, Purpose, VideoPicture, supported};
-use super::video_editor::{EditorTarget, VideoEditorDialog, palette};
+use super::video_editor::{VideoEditorDialog, palette};
 use super::video_editor_timeline::StagePress;
 use gpui_kit::*;
 use quill::sticker_video::square_crop;
@@ -130,8 +130,8 @@ impl QuillApp {
         editor.edits.turns = (editor.edits.turns + 1) % 4;
         editor.edits.crop = match (editor.target, editor.info, editor.edits.crop) {
             (_, _, Some(crop)) => Some(crop.turned_cw()),
-            // A sticker's crop is always a square.
-            (EditorTarget::Set { .. }, Some(info), None) => {
+            // A sticker's or an avatar's crop is always a square.
+            (target, Some(info), None) if target.square() => {
                 let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
                 square_crop(width, height)
             }
@@ -215,7 +215,7 @@ impl QuillApp {
             f32::from(picture.size.height),
         );
         let square = match (editor.target, editor.info) {
-            (EditorTarget::Set { .. }, Some(info)) => {
+            (target, Some(info)) if target.square() => {
                 let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
                 Some(width as f32 / height.max(1) as f32)
             }
