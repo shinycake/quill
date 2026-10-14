@@ -5,6 +5,7 @@
 //! button when a timer is set. TDLib wants a multiple of 86400 seconds up
 //! to a year for non-secret chats (`setChatMessageAutoDeleteTime`,
 //! `setDefaultMessageAutoDeleteTime`).
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::ChatKind;
 
@@ -75,7 +76,7 @@ pub fn step(current: i32, delta: i32) -> i32 {
         list.iter()
             .copied()
             .find(|&c| c > current)
-            .unwrap_or(list[list.len() - 1])
+            .unwrap_or_else(|| list.last().copied().unwrap_or(current))
     } else {
         list.iter()
             .rev()

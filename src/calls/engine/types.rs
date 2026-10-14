@@ -312,20 +312,23 @@ impl NativeRtcServers {
         }
         let raw = servers
             .iter()
-            .enumerate()
-            .map(|(index, server)| ntg_rtc_server {
-                id: server.id,
-                ipv4: strings[index][0].as_ptr().cast_mut(),
-                ipv6: strings[index][1].as_ptr().cast_mut(),
-                port: server.port,
-                username: strings[index][2].as_ptr().cast_mut(),
-                password: strings[index][3].as_ptr().cast_mut(),
-                turn: server.turn,
-                stun: server.stun,
-                tcp: server.tcp,
-                peer_tag: peer_tags[index].as_ptr().cast_mut(),
-                peer_tag_len: peer_tags[index].len(),
-            })
+            .zip(&strings)
+            .zip(&peer_tags)
+            .map(
+                |((server, [ipv4, ipv6, username, password]), peer_tag)| ntg_rtc_server {
+                    id: server.id,
+                    ipv4: ipv4.as_ptr().cast_mut(),
+                    ipv6: ipv6.as_ptr().cast_mut(),
+                    port: server.port,
+                    username: username.as_ptr().cast_mut(),
+                    password: password.as_ptr().cast_mut(),
+                    turn: server.turn,
+                    stun: server.stun,
+                    tcp: server.tcp,
+                    peer_tag: peer_tag.as_ptr().cast_mut(),
+                    peer_tag_len: peer_tag.len(),
+                },
+            )
             .collect();
         Ok(Self {
             raw,

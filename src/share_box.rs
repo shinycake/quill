@@ -1,5 +1,6 @@
 //! Share box and forward bar logic (tdesktop `ShareBox`,
 //! `HistoryView::ForwardPanel`), kept pure so it is unit tested.
+#![deny(clippy::indexing_slicing)]
 
 use crate::composer::{ComposerScheduling, SendOptions};
 use crate::ids::ChatId;
@@ -90,16 +91,13 @@ pub fn forward_bar_lines(
     hide_sender: bool,
     preview: &str,
 ) -> (String, String) {
-    let from = if hide_sender || senders.is_empty() {
-        "Sender names removed".to_string()
-    } else if senders.len() == 1 {
-        senders[0].clone()
-    } else if senders.len() == 2 {
-        format!("{} and {}", senders[0], senders[1])
-    } else if senders.len() == 3 {
-        format!("{} and 2 others", senders[0])
-    } else {
-        format!("{} and {} others", senders[0], senders.len() - 1)
+    let from = match senders {
+        _ if hide_sender => "Sender names removed".to_string(),
+        [] => "Sender names removed".to_string(),
+        [only] => only.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [first, _, _] => format!("{first} and 2 others"),
+        [first, rest @ ..] => format!("{first} and {} others", rest.len()),
     };
     let text = if count < 2 {
         preview.to_string()

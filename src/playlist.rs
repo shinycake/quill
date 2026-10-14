@@ -6,6 +6,7 @@
 //! (`media/player/media_player_instance.cpp`) is the model: music honours
 //! repeat (off / one / all) and order (in order / reverse / shuffle); voice
 //! notes just continue to the next newer unread voice note.
+#![deny(clippy::indexing_slicing)]
 
 /// Repeat mode of the music playlist (tdesktop `Media::RepeatMode`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -135,7 +136,7 @@ pub fn next_track(
     } else {
         wrap.then_some(len - 1)
     };
-    target.map(|i| ids[i])
+    target.and_then(|i| ids.get(i).copied())
 }
 
 fn shuffled(
@@ -150,11 +151,11 @@ fn shuffled(
             return None;
         }
         state.cursor -= 1;
-        return Some(state.played[state.cursor]);
+        return state.played.get(state.cursor).copied();
     }
     if state.cursor + 1 < state.played.len() {
         state.cursor += 1;
-        return Some(state.played[state.cursor]);
+        return state.played.get(state.cursor).copied();
     }
     let mut fresh: Vec<i64> = ids
         .iter()
@@ -175,7 +176,7 @@ fn shuffled(
             return Some(mv.current);
         }
     }
-    let chosen = fresh[pick(fresh.len()).min(fresh.len() - 1)];
+    let chosen = *fresh.get(pick(fresh.len()).min(fresh.len() - 1))?;
     state.played.push(chosen);
     state.cursor = state.played.len() - 1;
     Some(chosen)

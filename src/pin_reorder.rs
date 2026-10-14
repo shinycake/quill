@@ -13,6 +13,7 @@
 //! tdesktop does not animate anything else in the chat list: a chat moving
 //! up because of a new message jumps (no `_rowsAnimation` exists), so Quill
 //! does not invent one.
+#![deny(clippy::indexing_slicing)]
 
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -103,7 +104,9 @@ impl PinReorder {
         if self.start_y > y && index > 0 {
             let mut delta = self.start_y - y;
             while index > 0 {
-                let neighbour = self.ids[index - 1];
+                let Some(&neighbour) = self.ids.get(index - 1) else {
+                    break;
+                };
                 let height = self.height(neighbour);
                 if delta < cross(height) {
                     break;
@@ -118,7 +121,9 @@ impl PinReorder {
         } else if self.start_y < y && index + 1 < self.ids.len() {
             let mut delta = y - self.start_y;
             while index + 1 < self.ids.len() {
-                let neighbour = self.ids[index + 1];
+                let Some(&neighbour) = self.ids.get(index + 1) else {
+                    break;
+                };
                 let height = self.height(neighbour);
                 if delta < cross(height) {
                     break;

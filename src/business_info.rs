@@ -4,6 +4,7 @@
 //! Behaviour follows tdesktop's `info_profile_actions.cpp`
 //! (`CreateWorkingHours`, `OpensIn`, `FormatDayHours`); see
 //! `docs/decisions/codex-profile-business-rows.md`.
+#![deny(clippy::indexing_slicing)]
 
 use serde_json::Value;
 
@@ -150,7 +151,10 @@ impl OpeningHours {
             }
             let next_day_end = ranges.last().filter(|r| r.1 == DAY).and_then(|_| {
                 if day == 6 {
-                    wraps(0).then(|| self.intervals[0].1).filter(|&e| e < DAY)
+                    wraps(0)
+                        .then(|| self.intervals.first().map(|i| i.1))
+                        .flatten()
+                        .filter(|&e| e < DAY)
                 } else {
                     crosses(hi).filter(|&e| e < DAY)
                 }

@@ -316,19 +316,25 @@ pub(crate) fn i420_to_rgba(
     let (u_plane, v_plane) = uv.split_at(cw * ch);
 
     let mut rgba = vec![0u8; w * h * 4];
-    for row in 0..h {
-        for col in 0..w {
-            let y = f32::from(y_plane[row * w + col]);
-            let u = f32::from(u_plane[(row / 2) * cw + col / 2]);
-            let v = f32::from(v_plane[(row / 2) * cw + col / 2]);
+    for (row, out_row) in rgba.chunks_exact_mut(w * 4).enumerate() {
+        for (col, px) in out_row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let chroma = (row / 2) * cw + col / 2;
+            let (Some(&y), Some(&u), Some(&v), [pr, pg, pb, pa]) = (
+                y_plane.get(row * w + col),
+                u_plane.get(chroma),
+                v_plane.get(chroma),
+                px,
+            ) else {
+                continue;
+            };
+            let (y, u, v) = (f32::from(y), f32::from(u), f32::from(v));
             let r = y + 1.402 * (v - 128.0);
             let g = y - 0.344_136 * (u - 128.0) - 0.714_136 * (v - 128.0);
             let b = y + 1.772 * (u - 128.0);
-            let out = (row * w + col) * 4;
-            rgba[out] = r.clamp(0.0, 255.0).round() as u8;
-            rgba[out + 1] = g.clamp(0.0, 255.0).round() as u8;
-            rgba[out + 2] = b.clamp(0.0, 255.0).round() as u8;
-            rgba[out + 3] = 255;
+            *pr = r.clamp(0.0, 255.0).round() as u8;
+            *pg = g.clamp(0.0, 255.0).round() as u8;
+            *pb = b.clamp(0.0, 255.0).round() as u8;
+            *pa = 255;
         }
     }
     Some(match rotation {
@@ -358,7 +364,12 @@ fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: ntg_video_rotation) -> 
             };
             let src_off = (y * w + x) * 4;
             let dst_off = (dy * dw + dx) * 4;
-            dst[dst_off..dst_off + 4].copy_from_slice(&src[src_off..src_off + 4]);
+            if let (Some(to), Some(from)) = (
+                dst.get_mut(dst_off..dst_off + 4),
+                src.get(src_off..src_off + 4),
+            ) {
+                to.copy_from_slice(from);
+            }
         }
     }
     debug_assert_eq!(dw * dh, w * h);

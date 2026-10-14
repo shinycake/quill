@@ -15,6 +15,7 @@
 //! extension) registration fails, `available()` stays false, and the
 //! close/minimize-to-tray switches stay hidden. Registration is retried
 //! every [`RETRY_EVERY`], so a desktop that finishes starting later wins.
+#![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
 use crate::tray::{

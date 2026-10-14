@@ -9,6 +9,7 @@
 //! scrubs to a section and magnifies the letters near the pointer. The
 //! bar shows only when there are two or more sections, and thins its
 //! letters when the column is too short for all of them.
+#![deny(clippy::indexing_slicing)]
 
 use crate::state::ContactRow;
 use crate::telegram::envelope::UserStatusKind;
@@ -225,10 +226,12 @@ pub fn bar_layout(stops: &[SectionStop], height: f32) -> BarLayout {
     let slots = kept
         .iter()
         .enumerate()
-        .map(|(d, &source)| Slot {
-            letter: stops[source].letter,
-            source,
-            y: block_top + pitch * d as f32 + pitch / 2.,
+        .filter_map(|(d, &source)| {
+            Some(Slot {
+                letter: stops.get(source)?.letter,
+                source,
+                y: block_top + pitch * d as f32 + pitch / 2.,
+            })
         })
         .collect();
     BarLayout { slots, pitch }

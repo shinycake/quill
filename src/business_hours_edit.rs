@@ -7,6 +7,7 @@
 //! Week intervals start on Monday 00:00 (minute 0). A day's intervals are
 //! relative to that day's midnight; the last one may close up to 06:00 of
 //! the next day ([`IN_NEXT_DAY_MAX`]).
+#![deny(clippy::indexing_slicing)]
 
 /// `(start, end)` in minutes; empty when `start >= end`.
 pub type Interval = (i32, i32);
@@ -60,9 +61,11 @@ fn move_tail_to_front(mut list: Vec<Interval>) -> Vec<Interval> {
         if !valid(tail) {
             break;
         }
-        let n = list.len() - 1;
-        list[n].1 = tail.0;
-        if !valid(list[n]) {
+        let Some(end) = list.last_mut() else {
+            break;
+        };
+        end.1 = tail.0;
+        if !valid(*end) {
             list.pop();
         }
         list.insert(0, shifted(tail, -WEEK));
@@ -109,8 +112,12 @@ pub fn extract_day(week: &[Interval], day: usize) -> Vec<Interval> {
         if first.0 < 0 && first.1 <= IN_NEXT_DAY_MAX && first.0 > -DAY {
             list.remove(0);
         } else {
-            list[0] = intersected(first, (0, DAY));
-            if !valid(list[0]) {
+            let clipped = intersected(first, (0, DAY));
+            if valid(clipped) {
+                if let Some(slot) = list.first_mut() {
+                    *slot = clipped;
+                }
+            } else {
                 list.remove(0);
             }
         }
@@ -126,7 +133,9 @@ fn remove_day(week: &[Interval], day: i32) -> Vec<Interval> {
     let after = (today.1, WEEK);
     let mut i = 0;
     while i < list.len() {
-        let current = list[i];
+        let Some(&current) = list.get(i) else {
+            break;
+        };
         if current.1 <= today.0 || current.0 >= today.1 {
             i += 1;
             continue;
@@ -141,13 +150,12 @@ fn remove_day(week: &[Interval], day: i32) -> Vec<Interval> {
         }
         let first = intersected(current, before);
         let second = intersected(current, after);
-        if valid(first) {
-            list[i] = first;
-        } else if valid(second) {
-            list[i] = second;
-        } else {
+        let Some(replacement) = [first, second].into_iter().find(|&v| valid(v)) else {
             list.remove(i);
             continue;
+        };
+        if let Some(slot) = list.get_mut(i) {
+            *slot = replacement;
         }
         i += 1;
     }

@@ -1,5 +1,6 @@
 //! Pure rules for message selection and the pin boxes, as in Telegram
 //! Desktop (`boxes/pin_messages_box.cpp`, `HistoryInner` selection).
+#![deny(clippy::indexing_slicing)]
 
 use crate::ids::MessageId;
 use crate::telegram::envelope::ChatKind;
@@ -83,7 +84,8 @@ pub fn range_between(ids: &[MessageId], anchor: MessageId, target: MessageId) ->
         return vec![target];
     };
     let (lo, hi) = (a.min(b), a.max(b));
-    ids[lo..=hi].to_vec()
+    ids.get(lo..=hi)
+        .map_or_else(|| vec![target], <[MessageId]>::to_vec)
 }
 
 /// "Unpin all" question (`lng_pinned_unpin_all_sure`).
@@ -181,7 +183,7 @@ pub fn step_focus(ids: &[MessageId], current: Option<MessageId>, older: bool) ->
     } else {
         (index + 1).min(ids.len() - 1)
     };
-    Some(ids[next])
+    ids.get(next).copied()
 }
 
 /// Shift+Up / Down: moving the focus from `old` to `new` with the range

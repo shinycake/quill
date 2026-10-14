@@ -1,4 +1,5 @@
 //! Phase C2b: 1:1 call-engine boundary and signaling bridge.
+#![deny(clippy::indexing_slicing)]
 
 pub mod audio_level;
 pub mod engine;

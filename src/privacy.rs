@@ -3,6 +3,7 @@
 //! always/never exception lists, and the fetch state the Privacy screen
 //! keys "loading / loaded / failed" off. Unknown rule types round-trip
 //! untouched via `PrivacyRuleDetail::extra_rules`.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::requests::PrivacyWho;
 use serde_json::Value;
@@ -146,10 +147,10 @@ impl PrivacyRuleDetail {
         for extra in &self.extra_rules {
             let mut v = json!({"@type": extra.name});
             if !extra.user_ids.is_empty() {
-                v["user_ids"] = json!(extra.user_ids);
+                crate::json_access::set(&mut v, "user_ids", json!(extra.user_ids));
             }
             if !extra.chat_ids.is_empty() {
-                v["chat_ids"] = json!(extra.chat_ids);
+                crate::json_access::set(&mut v, "chat_ids", json!(extra.chat_ids));
             }
             rules.push(v);
         }

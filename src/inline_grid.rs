@@ -6,6 +6,7 @@
 //! into justified rows and gives every other result its own full-width row.
 //! This module ports that packing as pure integer math so the panel's
 //! shape is unit-tested; `ui/inline_grid.rs` only draws it.
+#![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{
     InlineKeyboardButtonType, InlineQueryResultSummary, InlineQueryResultsButton, ReplyMarkup,
@@ -225,14 +226,13 @@ pub fn layout_mosaic(
 
 fn layout_row(row: &RawRow, full_width: i32, padding: i32, right_skip: i32) -> (Vec<Placed>, i32) {
     let count = row.items.len();
-    let mut order: Vec<usize> = (0..count).collect();
-    order.sort_by_key(|&i| row.items[i].max_width);
+    let mut order: Vec<(usize, &MosaicItem)> = row.items.iter().enumerate().collect();
+    order.sort_by_key(|&(_, item)| item.max_width);
     let mut widths = vec![0; count];
     let mut desired = row.max_width;
     let mut available = full_width - 2 * padding;
     let mut height = 0;
-    for &index in &order {
-        let item = &row.items[index];
+    for &(index, item) in &order {
         let w = if desired > 0 {
             (i64::from(item.max_width) * i64::from(available) / i64::from(desired)) as i32
         } else {
@@ -241,11 +241,13 @@ fn layout_row(row: &RawRow, full_width: i32, padding: i32, right_skip: i32) -> (
         let actual = w.max(MIN_CELL_WIDTH);
         height = height.max(item.height);
         // A list row never grows past what it asked for.
-        widths[index] = if item.kind.is_grid() {
-            actual
-        } else {
-            actual.min(item.max_width)
-        };
+        if let Some(slot) = widths.get_mut(index) {
+            *slot = if item.kind.is_grid() {
+                actual
+            } else {
+                actual.min(item.max_width)
+            };
+        }
         if desired > 0 {
             available -= actual;
             desired -= item.max_width;

@@ -42,26 +42,31 @@ pub fn render_monochrome(unread: u32, muted: bool, dark_taskbar: bool) -> (Vec<u
     let size = ICON_SIZE as usize;
     let [r, g, b, a] = glyph_color(dark_taskbar);
     let mut buf = vec![0u8; size * size * 4];
-    for (i, mask) in TEMPLATE_MASK.iter().enumerate() {
-        let px = &mut buf[i * 4..i * 4 + 4];
-        px[..3].copy_from_slice(&[r, g, b]);
-        px[3] = (u16::from(*mask) * u16::from(a) / 255) as u8;
+    for (px, mask) in buf
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(TEMPLATE_MASK.iter())
+    {
+        let [pr, pg, pb, pa] = px;
+        (*pr, *pg, *pb) = (r, g, b);
+        *pa = (u16::from(*mask) * u16::from(a) / 255) as u8;
     }
     if unread > 0 {
         let dot = if muted { MUTED_DOT } else { BADGE_RED };
         // tdesktop: cx=3.9, cy=12.7, r=2.2 on a 16 unit grid.
         let unit = size as f32 / 16.0;
         let (cx, cy, radius) = (3.9 * unit, 12.7 * unit, 2.2 * unit);
-        for y in 0..size {
-            for x in 0..size {
-                let dist = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
-                // One pixel of anti-aliasing at the edge.
-                let cover = (radius + 0.5 - dist).clamp(0.0, 1.0);
-                if cover > 0.0 {
-                    let px = &mut buf[(y * size + x) * 4..(y * size + x) * 4 + 4];
-                    px[..3].copy_from_slice(&dot[..3]);
-                    px[3] = px[3].max((cover * 255.0) as u8);
-                }
+        let [dr, dg, db, _] = dot;
+        for (i, px) in buf.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (i % size, i / size);
+            let dist = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            // One pixel of anti-aliasing at the edge.
+            let cover = (radius + 0.5 - dist).clamp(0.0, 1.0);
+            if cover > 0.0 {
+                let [pr, pg, pb, pa] = px;
+                (*pr, *pg, *pb) = (dr, dg, db);
+                *pa = (*pa).max((cover * 255.0) as u8);
             }
         }
     }

@@ -1,6 +1,7 @@
 //! The emoji avatar's background: Telegram Desktop's gradient drawing
 //! (`Images::GenerateGradient`) and the colour maths of its gradient
 //! editor (up to four colours, hex entry, hue and lightness).
+#![deny(clippy::indexing_slicing)]
 
 /// An opaque square picture: `side` x `side` RGBA bytes, row by row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,12 +25,10 @@ impl Square {
     /// The pixel at `x`, `y` as `[r, g, b, a]`.
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
         let at = ((y * self.side + x) * 4) as usize;
-        [
-            self.rgba[at],
-            self.rgba[at + 1],
-            self.rgba[at + 2],
-            self.rgba[at + 3],
-        ]
+        match self.rgba.get(at..at + 4) {
+            Some(&[r, g, b, a]) => [r, g, b, a],
+            _ => [0; 4],
+        }
     }
 
     /// Bilinear scale to `side` (what `Qt::SmoothTransformation` gives).
@@ -46,7 +45,7 @@ impl Square {
             let (x1, y1) = ((x0 + 1).min(self.side - 1), (y0 + 1).min(self.side - 1));
             let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
             let mix = |c: usize| {
-                let p = |px: u32, py: u32| self.pixel(px, py)[c] as f32;
+                let p = |px: u32, py: u32| self.pixel(px, py).get(c).copied().unwrap_or(0) as f32;
                 let top = p(x0, y0) + (p(x1, y0) - p(x0, y0)) * tx;
                 let bottom = p(x0, y1) + (p(x1, y1) - p(x0, y1)) * tx;
                 (top + (bottom - top) * ty).round() as u8
@@ -74,7 +73,10 @@ fn points(phase: usize) -> [(f32, f32); 4] {
         (0.75, 0.40),
     ];
     std::array::from_fn(|i| {
-        let (x, y) = POSITIONS[(phase + i * 2) % 8];
+        let (x, y) = POSITIONS
+            .get((phase + i * 2) % 8)
+            .copied()
+            .unwrap_or_default();
         (x, 1.0 - y)
     })
 }
@@ -101,8 +103,12 @@ fn linear(colors: &[u32], side: u32) -> Square {
     Square::from_fn(side, |x, y| {
         // Rotation 45 runs from (width, 0) to (0, height).
         let t = (((span - x as f32) + y as f32) / (2.0 * span)).clamp(0.0, 1.0);
-        let mix = |i: usize| (first[i] + (last[i] - first[i]) * t).round() as u8;
-        [mix(0), mix(1), mix(2)]
+        let mix = |from: f32, to: f32| (from + (to - from) * t).round() as u8;
+        [
+            mix(first[0], last[0]),
+            mix(first[1], last[1]),
+            mix(first[2], last[2]),
+        ]
     })
 }
 
@@ -116,12 +122,13 @@ pub fn small_complex_gradient(colors: &[u32], phase: usize, progress: f32) -> Sq
     const SMALL: u32 = 64;
     let previous = points((phase + 1) % 8);
     let target = points(phase % 8);
-    let current: [(f32, f32); 4] = std::array::from_fn(|i| {
-        (
-            previous[i].0 + (target[i].0 - previous[i].0) * progress,
-            previous[i].1 + (target[i].1 - previous[i].1) * progress,
-        )
-    });
+    let mut current = target;
+    for (point, from) in current.iter_mut().zip(previous) {
+        *point = (
+            from.0 + (point.0 - from.0) * progress,
+            from.1 + (point.1 - from.1) * progress,
+        );
+    }
     let count = colors.len().min(4);
     let rgb: Vec<[f32; 3]> = colors.iter().take(count).map(|c| channels(*c)).collect();
     Square::from_fn(SMALL, |x, y| {
@@ -136,8 +143,7 @@ pub fn small_complex_gradient(colors: &[u32], phase: usize, progress: f32) -> Sq
         let px = (0.5 + cx * cos - cy * sin).clamp(0.0, 1.0);
         let py = (0.5 + cx * sin + cy * cos).clamp(0.0, 1.0);
         let (mut sum, mut r, mut g, mut b) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        for (i, color) in rgb.iter().enumerate() {
-            let (qx, qy) = current[i];
+        for (color, &(qx, qy)) in rgb.iter().zip(&current) {
             let distance = (0.9 - ((px - qx).powi(2) + (py - qy).powi(2)).sqrt()).max(0.0);
             let weight = distance.powi(4);
             sum += weight;
