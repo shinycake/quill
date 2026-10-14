@@ -136,6 +136,9 @@ pub enum SettingsTarget {
     DataAndStorage,
     Devices,
     EditProfile,
+    /// `edit/change-number` (and `change_number`): the note that the number
+    /// is changed in the phone apps.
+    ChangePhone,
     Notifications,
     PrivacyAndSecurity,
     Contacts,
@@ -242,6 +245,11 @@ fn peer_color_target(section: &str, subsection: &str) -> Option<SettingsTarget> 
 fn settings_target(section: Option<&str>, subsection: &str) -> SettingsTarget {
     if let Some(target) = section.and_then(|section| peer_color_target(section, subsection)) {
         return target;
+    }
+    if section == Some("settingsSectionEditProfile")
+        && matches!(subsection, "change-number" | "change_number")
+    {
+        return SettingsTarget::ChangePhone;
     }
     match section.unwrap_or("settingsSectionFeatures") {
         "settingsSectionAppearance" => SettingsTarget::Appearance,

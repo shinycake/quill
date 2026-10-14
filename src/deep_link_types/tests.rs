@@ -229,6 +229,16 @@ fn ui_links_route_without_a_request() {
             "{section} {subsection}"
         );
     }
+    for subsection in ["change-number", "change_number"] {
+        assert_eq!(
+            route_of(json!({
+                "@type": "internalLinkTypeSettings",
+                "section": {"@type": "settingsSectionEditProfile", "subsection": subsection}
+            })),
+            LinkRoute::Ui(DeepLinkUi::Settings(SettingsTarget::ChangePhone)),
+            "{subsection}"
+        );
+    }
     // Other subsections keep their page; the color words only count in
     // the two sections that have the box.
     assert_eq!(

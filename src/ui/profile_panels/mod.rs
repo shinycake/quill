@@ -908,5 +908,6 @@ crate::ui::shell::register_dialogs! {
 }
 
 pub(super) mod action_row;
+mod change_phone_dialog;
 mod main_profile_tab_dialog;
 mod submit_personal_photo;

@@ -39,6 +39,7 @@ fn settings_action(target: SettingsTarget) -> Option<NavigationAction> {
         SettingsTarget::SavedMessages => Some(NavigationAction::Saved),
         SettingsTarget::Premium => Some(NavigationAction::Premium),
         SettingsTarget::PeerColor(_)
+        | SettingsTarget::ChangePhone
         | SettingsTarget::Root
         | SettingsTarget::Unsupported
         | SettingsTarget::PrivacyPolicy
@@ -70,6 +71,7 @@ impl QuillApp {
             DeepLinkUi::GiftCode { code } => self.open_gift_code_link(code, cx),
             DeepLinkUi::LanguagePack { id } => self.open_language_pack_link(id, cx),
             DeepLinkUi::Invoice { name } => self.open_invoice_link(&name, window, cx),
+            DeepLinkUi::Settings(SettingsTarget::ChangePhone) => self.open_change_phone_dialog(cx),
             DeepLinkUi::Settings(SettingsTarget::PeerColor(tab)) => {
                 self.open_peer_color_dialog(tab, cx);
             }
