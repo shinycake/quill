@@ -48,6 +48,10 @@ pub struct InlineQueryResultSummary {
     /// The clip an animation result plays in the grid: Telegram's MP4 GIF
     /// file (true `image/gif` files stay still, as in the history).
     pub clip: Option<FileId>,
+    /// An animation's `thumbnailFormatMpeg4` thumbnail: a small MP4 loop
+    /// (tens of KB) the grid plays until the full clip is downloaded. Such
+    /// a thumbnail is no still image, so `media.file_id` is 0 for it.
+    pub preview_clip: Option<FileId>,
 }
 
 /// Bots slice: `inlineQueryResultsButton` (TDLib 1.8.68,
@@ -154,6 +158,7 @@ pub(crate) fn parse_inline_query_result(
     let mut description = str_field(value, "description");
     let null = Value::Null;
     let mut clip = None;
+    let mut preview_clip = None;
     let media = match kind {
         "article" | "location" => thumbnail_media(value.get("thumbnail"), &mut files),
         "contact" => {
@@ -201,11 +206,26 @@ pub(crate) fn parse_inline_query_result(
             let (item, item_files) = parse_animation_value(value.get("animation"));
             // No thumbnail yet still gets a cell: the animation's size
             // decides the layout (file 0 draws a placeholder).
+            let video_thumb = value
+                .get("animation")
+                .and_then(|animation| animation.get("thumbnail"))
+                .and_then(|thumb| thumb.get("format"))
+                .and_then(|format| format.get("@type"))
+                .and_then(Value::as_str)
+                == Some("thumbnailFormatMpeg4");
             item.map(|item| {
                 files.extend(item_files);
                 clip = Some(item.file_id).filter(|id| id.0 != 0 && item.mime_type != "image/gif");
+                // An MP4 thumbnail cannot be drawn as an image: it plays
+                // as the preview clip instead.
+                let still = if video_thumb {
+                    preview_clip = item.thumb_file_id;
+                    None
+                } else {
+                    item.thumb_file_id
+                };
                 InlineMedia {
-                    file_id: item.thumb_file_id.unwrap_or(FileId(0)),
+                    file_id: still.unwrap_or(FileId(0)),
                     width: item.width,
                     height: item.height,
                 }
@@ -239,6 +259,7 @@ pub(crate) fn parse_inline_query_result(
             query_id: 0,
             media,
             clip,
+            preview_clip,
         },
         files,
     )

@@ -912,7 +912,12 @@ fn inline_result_images_are_queued_for_download() {
             next_offset: String::new(),
         },
     });
-    assert_eq!(session.thumb_file_ids_to_download(), vec![FileId(7)]);
+    assert_eq!(
+        session.inline_result_file_ids_to_download(),
+        vec![FileId(7)]
+    );
+    // The panel has its own, higher-priority pass.
+    assert!(session.thumb_file_ids_to_download().is_empty());
 }
 
 fn quill_media(file_id: i32) -> crate::telegram::envelope::InlineMedia {

@@ -145,6 +145,52 @@ impl Session {
         self.unstick_download(file_id.0);
     }
 
+    /// Files the inline results panel shows, most urgent first: each
+    /// result's still image and MP4 preview loop (small, so all of them),
+    /// then the full clips of the first screens (tdesktop loads the GIFs of
+    /// the panel). Downloaded ahead of the chat's own thumbnails: the panel
+    /// is what the user is looking at.
+    pub fn inline_result_file_ids_to_download(&self) -> Vec<FileId> {
+        let mut ids = Vec::new();
+        let Some(InlineQuerySlot {
+            fetch: InlineQueryFetch::Loaded { results, .. },
+            ..
+        }) = &self.bots.inline_query
+        else {
+            return ids;
+        };
+        let prefs = &self.settings.media_prefs;
+        let autoplay = prefs.autoplay_gifs && !prefs.data_saver;
+        for result in results {
+            if let Some(media) = result.media
+                && self.should_download(media.file_id)
+            {
+                ids.push(media.file_id);
+            }
+            if autoplay
+                && let Some(preview) = result.preview_clip
+                && self.should_download(preview)
+            {
+                ids.push(preview);
+            }
+        }
+        if autoplay {
+            for clip in results
+                .iter()
+                .filter_map(|result| result.clip)
+                .take(INLINE_CLIPS_PREFETCH)
+            {
+                let small = self
+                    .file(clip)
+                    .is_none_or(|file| file.size.max(file.expected_size) <= INLINE_CLIP_MAX);
+                if small && self.should_download(clip) {
+                    ids.push(clip);
+                }
+            }
+        }
+        ids
+    }
+
     /// Photo thumbs in the open chat that are not secret/spoiler and still need a download.
     pub fn thumb_file_ids_to_download(&self) -> Vec<FileId> {
         let mut ids = Vec::new();
@@ -352,35 +398,6 @@ impl Session {
                     && self.should_download(file_id)
                 {
                     ids.push(file_id);
-                }
-            }
-        }
-        // The inline results panel shows each result's image.
-        if let Some(InlineQuerySlot {
-            fetch: InlineQueryFetch::Loaded { results, .. },
-            ..
-        }) = &self.bots.inline_query
-        {
-            for media in results.iter().filter_map(|result| result.media) {
-                if self.should_download(media.file_id) {
-                    ids.push(media.file_id);
-                }
-            }
-            // Animation clips autoplay in the grid (tdesktop loads the
-            // GIFs of the panel): the first screens' worth, small ones.
-            let prefs = &self.settings.media_prefs;
-            if prefs.autoplay_gifs && !prefs.data_saver {
-                for clip in results
-                    .iter()
-                    .filter_map(|result| result.clip)
-                    .take(INLINE_CLIPS_PREFETCH)
-                {
-                    let small = self
-                        .file(clip)
-                        .is_none_or(|file| file.size.max(file.expected_size) <= INLINE_CLIP_MAX);
-                    if small && self.should_download(clip) {
-                        ids.push(clip);
-                    }
                 }
             }
         }

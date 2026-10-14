@@ -37,6 +37,7 @@ mod group_admin;
 mod group_calls;
 mod groups;
 mod history_window;
+mod inline_gif_downloads;
 mod inline_members;
 mod invite_admin;
 mod invoice_checkout;
