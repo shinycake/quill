@@ -7,6 +7,11 @@ Quill's `Cargo.toml`. Commit `088b96c3` added the unmodified registry copy
 `git diff 088b96c3 -- third_party/gpui-pre-apple` shows every change. Changed
 code is marked `QUILL`.
 
+The registry copy's `vendor/gpui` (the GPUI sources `build.rs` reads to
+generate the shader header) was left out of that commit by the repository's
+`vendor/` ignore rule and added unmodified afterwards; `.gitignore` now keeps
+`third_party/*/vendor/`.
+
 The Quill project changed it in 2026 to show HDR photos in the media viewer
 (`docs/decisions/hdr-viewer-macos.md`):
 
