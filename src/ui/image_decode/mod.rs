@@ -26,6 +26,7 @@
 //!
 //! HDR content (gain maps, PQ / HLG) decodes to its SDR rendition here,
 //! which is what every SDR screen shows.
+#![deny(clippy::indexing_slicing)]
 
 use std::path::Path;
 

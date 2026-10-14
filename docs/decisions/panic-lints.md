@@ -372,3 +372,36 @@ Skipped: `media_viewer*`, `image_decode`, `hdr_image` as asked; `ui/mod.rs`,
 `app`, `app_demo`, `gift_send_ui` and `app_render/frame_upkeep` are touched by
 open PRs #786 and #789. Still without a deny: those, plus `media_viewer`
 (5 sites: `transform` 4, `mod` 1; `ui/media_viewer` navigation 3, playback 1).
+
+## Phase D, batch 7: media viewer and image decoding
+
+Branch `panic-lints-d7`. Three roots start with
+`#![deny(clippy::indexing_slicing)]`, which covers their submodules:
+`media_viewer` (library), `ui/media_viewer` and `ui/image_decode`. No open PR
+touched any of them.
+
+Sites fixed, 9 and no `#[expect]`:
+
+- `media_viewer/transform` 2 loops (4 sites): `flip_rgba` and
+  `rotate_rgba_quarter_turns` copy one pixel with `get(..)` and `get_mut(..)`.
+  Both functions return early unless `pixels.len() == width * height * 4`, and
+  the flip and rotation maps are bijections onto `0..w*h`, so every `get` hits
+  and the skipped-pixel fallback is unreachable. Output is identical.
+- `media_viewer/mod` 1: `merge_older` read `items[0]`; it now uses
+  `items.first()` after the existing `is_open()` check (non-empty), returning 0
+  otherwise, which cannot happen there.
+- `ui/media_viewer/navigation` 3: the album `run` count slices `items.get(first..)`
+  (`first` comes from `position`, so the tail is non-empty and `run >= 1`; the
+  fallback is 1 and `saturating_sub(1)` equals `run - 1`); the two
+  `tabs[tab.index()]` lookups use `get`, returning `false` / `None` for a tab
+  without state. Navigation (`prev`, `next`, `merge_older`) is untouched, so it
+  neither skips nor loops.
+- `ui/media_viewer/playback` 1: `cycle_playback_speed` reads the next speed
+  with `get`, falling back to 1x as the existing `unwrap_or` already did.
+
+`image_decode` had no sites on macOS. The `cfg(windows)` `wic.rs` and the
+libheif loader were read by hand: they index nothing (only constant indices into
+`[u8; 4]` arrays, which the lint allows).
+
+Still without a deny: `ui/mod.rs`, `app`, `app_demo`, `gift_send_ui` and
+`app_render/frame_upkeep` (open PRs #786 and #789).

@@ -1,4 +1,5 @@
 //! media_viewer.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 

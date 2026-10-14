@@ -92,7 +92,9 @@ pub fn flip_rgba(pixels: &[u8], width: u32, height: u32, flip_h: bool, flip_v: b
             let dx = if flip_h { w - 1 - x } else { x };
             let src = (y * w + x) * 4;
             let dst = (dy * w + dx) * 4;
-            out[dst..dst + 4].copy_from_slice(&pixels[src..src + 4]);
+            if let (Some(from), Some(to)) = (pixels.get(src..src + 4), out.get_mut(dst..dst + 4)) {
+                to.copy_from_slice(from);
+            }
         }
     }
     out
@@ -225,7 +227,9 @@ pub fn rotate_rgba_quarter_turns(
             };
             let src = src_index(x, y);
             let dst = (dy * dw + dx) * 4;
-            out[dst..dst + 4].copy_from_slice(&pixels[src..src + 4]);
+            if let (Some(from), Some(to)) = (pixels.get(src..src + 4), out.get_mut(dst..dst + 4)) {
+                to.copy_from_slice(from);
+            }
         }
     }
     let (ow, oh) = if turns % 2 == 1 { (h, w) } else { (w, h) };
