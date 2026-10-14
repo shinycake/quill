@@ -7,6 +7,9 @@
 //! chroma plane, each as a plain transpose, into a new buffer of the turned
 //! size.
 
+// The buffer turns serve the macOS AVPlayer path only.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 /// Size of a `w` x `h` picture after `turns` clockwise quarter turns.
 pub(super) fn turned_size(w: usize, h: usize, turns: u8) -> (usize, usize) {
     if turns % 2 == 1 { (h, w) } else { (w, h) }
