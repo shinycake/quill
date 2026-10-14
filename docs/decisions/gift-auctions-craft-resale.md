@@ -343,6 +343,12 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
 - The auction box's "⋯" menu has "About" and "Copy Link"; "Share" (the
   forward box) is left out.
 - "Custom Amount" opens inline in the bid box instead of a separate box.
+- The info box's "{n} items bought ›" link drops the gift emoji tdesktop
+  puts in front of the count; the text is a kit ghost button label, which
+  cannot hold a custom emoji.
+- The "⋯" menu sits in the dialog's title row, left of the kit's close
+  button, and is hidden once the auction has finished, as in tdesktop. The
+  bid box has only close and its main button (no "Back").
 - "About shown" is stored once for the app (`gift_market.json`), not per
   account.
 - Gift stickers that are not downloaded yet show the gift glyph; the demos
@@ -353,17 +359,28 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
 
 ## How verified
 
-- `quill-tools/gate.sh`: `GATE OK core=4372 0 ui=650 0` (fmt, clippy with
+- `quill-tools/gate.sh`: `GATE OK core=4373 0 ui=667 0` (fmt, clippy with
   `-D warnings`, core and UI tests).
 - Unit tests in `src/gift_market/tests.rs` (filters, sort, attribute
-  counts, auction phases, bid rows, bid actions, slider steps round trip),
+  counts, auction phases, bid rows, bid actions; the bid slider follows
+  tdesktop's `StarSelectDiscreterForMax` scale, so a ★4,000 bid sits near
+  40% of a ★30,000 track, positions round-trip exactly, and dragging
+  below the minimum stops at the user's own bid like `PaidReactionSlider`),
   driver tests in `src/connect/tests/` (resale search, buy with price
   change, auction state and bids: place vs increase for the same
   recipient), deep link parse, and link preview button labels.
 - UI tests (`src/ui/gift_market_tests.rs`, `#[gpui_kit::test]`): resale
   filters, sort and Back; listing to buy steps; the bid slider sets the
   button label ("Add ★26,000 to Your Bid", the minimum-bid block → ★4,050);
-  About → Info; the chat-list bar shows while a bid runs.
+  About → Info; the chat-list bar shows while a bid runs, and one click
+  on its button opens the bid box once (the button stops the click from
+  reaching the bar; the test fails with the old double handler).
+- Review fixes: `#![deny(clippy::indexing_slicing)]` on `gift_market` and
+  every gift UI module; the value bubble rides above the slider thumb; the
+  info box no longer adds "Top N bidders…" / "Auction ended." under the
+  cover (tdesktop shows only the "Learn more" link there); sticker
+  downloads go out only when the set of needed files changes, not every
+  frame.
 - `scripts/check-hotspots.sh origin/main` and `scripts/check-file-size.sh`
   pass.
 - Captures in light and dark through the demo-capture build

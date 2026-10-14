@@ -2,6 +2,7 @@
 //! a slider with the amount bubble, a custom amount, the minimum bid, the
 //! round countdown and the gifts left, the user's place and the top three
 //! bidders. The button names the Stars it spends.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::success;
@@ -24,28 +25,13 @@ use quill::state::Session;
 use quill::telegram::envelope::MessageSender;
 use std::path::PathBuf;
 
-/// The slider's track: from the user's bid (or the minimum) up.
-fn track(state: &AuctionState) -> BidSlider {
-    let slider = state.slider();
-    BidSlider {
-        min: if slider.mine > 0 {
-            slider.mine
-        } else {
-            slider.min
-        },
-        ..slider
-    }
-}
-
-/// An amount the slider may stop at: never between the current bid and
-/// the least raise.
-fn snap(state: &AuctionState, amount: i64) -> i64 {
-    let mine = state.my_stars();
-    let least = state.min_bid_for_me();
-    if amount > mine && amount < least {
-        least
-    } else {
+/// Keeps `amount` if the slider may stop there (at least the minimum,
+/// or the user's own bid), else the slider's start.
+fn allowed(range: BidSlider, amount: i64) -> i64 {
+    if amount >= range.min || (range.mine > 0 && amount == range.mine) {
         amount
+    } else {
+        range.initial()
     }
 }
 
@@ -134,7 +120,7 @@ impl QuillApp {
         else {
             return;
         };
-        let range = track(state);
+        let range = state.slider();
         let bounds = (range.min, range.max);
         let previous = self
             .gift_market
@@ -144,10 +130,7 @@ impl QuillApp {
         if previous.is_some_and(|ui| ui.bounds == bounds) {
             return;
         }
-        let chosen = previous
-            .map_or(range.initial(), |ui| ui.chosen)
-            .max(range.min);
-        let chosen = snap(state, chosen);
+        let chosen = allowed(range, previous.map_or(range.initial(), |ui| ui.chosen));
         let slider = cx.new(|_| {
             SliderState::new()
                 .min(0.)
@@ -163,7 +146,7 @@ impl QuillApp {
             else {
                 return;
             };
-            let amount = snap(state, track(state).amount_at(value.end()));
+            let amount = state.slider().amount_at(value.end());
             if let Some(ui) = this.gift_market.slider.as_mut() {
                 ui.chosen = amount;
             }
@@ -224,7 +207,7 @@ impl QuillApp {
             return;
         }
         self.gift_market.custom = None;
-        let range = track(&state);
+        let range = state.slider();
         if let Some(ui) = self.gift_market.slider.as_mut() {
             ui.chosen = amount;
             let step = range.step_of(amount);
@@ -329,47 +312,66 @@ impl QuillApp {
                 .text_color(muted)
                 .child(bid_subtitle(state.per_round())),
         );
-        // The amount bubble; a click opens the custom amount.
+        // The amount bubble rides above the thumb (tdesktop's
+        // `PaidReactionSlider` bubble); a click opens the custom amount.
         let subtext = state.bubble_subtext(chosen);
-        body = body.child(
-            div().flex().justify_center().child(
+        let ratio = (state.slider().step_of(chosen) / BID_SLIDER_STEPS).clamp(0.12, 0.88);
+        let bubble = div()
+            .id("auction-bid-bubble")
+            .flex_none()
+            .flex()
+            .flex_col()
+            .items_center()
+            .px_4()
+            .py_1()
+            .rounded_full()
+            .bg(cx.theme().primary)
+            .text_color(cx.theme().primary_foreground)
+            .cursor_pointer()
+            .role(Role::Button)
+            .aria_label(format!("Bid {}, {subtext}", stars_text(chosen)))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.open_custom_bid(window, cx);
+            }))
+            .child(
                 div()
-                    .id("auction-bid-bubble")
                     .flex()
-                    .flex_col()
                     .items_center()
-                    .px_4()
-                    .py_1()
-                    .rounded_full()
-                    .bg(cx.theme().primary)
-                    .text_color(cx.theme().primary_foreground)
-                    .cursor_pointer()
-                    .role(Role::Button)
-                    .aria_label(format!("Bid {}, {subtext}", stars_text(chosen)))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_custom_bid(window, cx);
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .text_lg()
-                            .font_semibold()
-                            .child(super::earn::star_icon(16.))
-                            .child(group_digits(chosen)),
-                    )
-                    .children((!subtext.is_empty()).then(|| div().text_xs().child(subtext))),
-            ),
-        );
+                    .gap_1()
+                    .text_lg()
+                    .font_semibold()
+                    .whitespace_nowrap()
+                    .child(super::earn::star_icon(16.))
+                    .child(group_digits(chosen)),
+            )
+            .children(
+                (!subtext.is_empty()).then(|| div().text_xs().whitespace_nowrap().child(subtext)),
+            );
         body = body.child(
             div()
                 .flex()
-                .items_center()
+                .items_end()
                 .gap_2()
                 .child(
                     div()
                         .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div().relative().w_full().h(px(56.)).child(
+                                // A zero-width anchor at the thumb's ratio
+                                // centres the bubble over it.
+                                div()
+                                    .absolute()
+                                    .bottom_0()
+                                    .left(relative(ratio))
+                                    .w(px(0.))
+                                    .flex()
+                                    .justify_center()
+                                    .child(bubble),
+                            ),
+                        )
                         .child(Slider::new(&slider.state).bg(cx.theme().primary)),
                 )
                 .child(
@@ -531,22 +533,13 @@ impl QuillApp {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.submit_auction_bid(gift_id, window, cx);
             }));
-        let menu = self.auction_menu(state, cx);
-        BoxView::new(bid_title(started), body).wide().footer(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(menu)
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(self.market_back_button("auction-bid-back", "Back", cx))
-                        .child(button),
-                ),
-        )
+        let view = BoxView::new(bid_title(started), body)
+            .wide()
+            .footer(div().flex().justify_end().child(button));
+        match self.auction_menu(state, cx) {
+            Some(menu) => view.title_action(menu),
+            None => view,
+        }
     }
 
     /// Moves the slider to `amount` (the minimum-bid block).
@@ -560,7 +553,7 @@ impl QuillApp {
         let Some(state) = self.auction_state_cloned(gift_id) else {
             return;
         };
-        let step = track(&state).step_of(amount);
+        let step = state.slider().step_of(amount);
         if let Some(ui) = self.gift_market.slider.as_mut() {
             ui.chosen = amount;
             ui.state

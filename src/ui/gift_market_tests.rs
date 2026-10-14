@@ -10,6 +10,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::component::slider::{SliderEvent, SliderValue};
+use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::gift_market::{
     AttributeId, AttributeKind, BID_SLIDER_STEPS, BuyStep, ResaleSort, auction_about_shown,
@@ -203,6 +204,22 @@ fn the_chat_list_bar_shows_while_a_bid_runs(cx: &mut TestAppContext) {
             })
             .unwrap_or_default();
         assert_eq!(list.len(), 1);
+    });
+    // One tap on the bar's button opens the bid box once: the button
+    // keeps the click from reaching the bar under it.
+    vcx.update(|window, cx| {
+        window.render_frame(cx);
+        window.click("gift-auction-bar-button", cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        assert_eq!(app.gift_market.bar_opens, 1);
+        assert_eq!(
+            app.gift_market.top(),
+            Some(&MarketBox::AuctionBid {
+                gift_id: AUCTION_GIFT
+            })
+        );
         if let Some(market) = app.gift_market_mut() {
             market.active.clear();
         }

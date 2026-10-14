@@ -237,6 +237,27 @@ fn bid_slider_follows_tdesktop_bounds() {
 }
 
 #[test]
+fn bid_slider_follows_the_tdesktop_discreter() {
+    use crate::gift_market::{ratio_to_value, value_to_ratio};
+    // max 30,000: 1/10 → 10, 1/6 → 100, 1/3 → 1,000, the rest to 30,000.
+    assert_eq!(ratio_to_value(30_000, 0.), 1);
+    assert_eq!(ratio_to_value(30_000, 0.1), 10);
+    assert_eq!(ratio_to_value(30_000, 1. / 3.), 1_000);
+    assert_eq!(ratio_to_value(30_000, 1.), 30_000);
+    assert_eq!(ratio_to_value(30_000, 2.), 30_000);
+    // max 5,000 uses the 1/8, 1/3, 2/3 points.
+    assert_eq!(ratio_to_value(5_000, 2. / 3.), 1_000);
+    assert!((value_to_ratio(5_000, 100) - 1. / 3.).abs() < 1e-9);
+    assert!((value_to_ratio(30_000, 30_000) - 1.).abs() < 1e-9);
+    assert_eq!(value_to_ratio(30_000, 0), 0.);
+    // A tiny max still has a two-point scale.
+    assert_eq!(ratio_to_value(1, 1.), 2);
+    for value in [1, 7, 10, 55, 100, 999, 4_000, 29_999] {
+        assert_eq!(ratio_to_value(30_000, value_to_ratio(30_000, value)), value);
+    }
+}
+
+#[test]
 fn bid_slider_steps_round_trip() {
     let slider = BidSlider {
         min: 100,
@@ -246,21 +267,27 @@ fn bid_slider_steps_round_trip() {
     assert_eq!(slider.amount_at(0.), 100);
     assert_eq!(slider.amount_at(BID_SLIDER_STEPS), 30_000);
     assert_eq!(slider.amount_at(-5.), 100);
-    // The low end gets most of the track.
-    assert!(slider.amount_at(500.) < 4_000);
+    // A 4,000 bid sits about 40% along a 30,000 track.
+    let at = slider.step_of(4_000) / BID_SLIDER_STEPS;
+    assert!((0.39..0.41).contains(&at), "{at}");
     for amount in [100, 250, 1_200, 9_999, 30_000] {
-        let back = slider.amount_at(slider.step_of(amount));
-        assert!(
-            (back - amount).abs() <= amount / 50 + 2,
-            "{amount} -> {back}"
-        );
+        assert_eq!(slider.amount_at(slider.step_of(amount)), amount);
     }
+    // With a bid of 4,000 and the least raise 4,050, dragging below the
+    // minimum stops at the bid itself, and between them at the minimum.
+    let raising = BidSlider {
+        min: 4_050,
+        mine: 4_000,
+        max: 30_000,
+    };
+    assert_eq!(raising.amount_at(0.), 4_000);
+    assert_eq!(raising.amount_at(raising.step_of(4_020)), 4_050);
+    assert_eq!(raising.amount_at(raising.step_of(4_000)), 4_000);
     let flat = BidSlider {
         min: 5,
         mine: 0,
         max: 5,
     };
-    assert_eq!(flat.step_of(5), 0.);
     assert_eq!(flat.amount_at(700.), 5);
 }
 

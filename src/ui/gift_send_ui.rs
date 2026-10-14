@@ -4,6 +4,7 @@
 //! A gift is paid with Stars from the balance, only by the button that names
 //! the total. Telegram Premium gift options are paid in the payment
 //! checkout (`ui/invoice_checkout.rs`), not from the Stars balance.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;

@@ -3,6 +3,7 @@
 //! `boxes/star_gift_auction_box.cpp`,
 //! `dialogs/suggestions/suggestion_gift_auctions.cpp`). The bid box is in
 //! `gift_auction_bid.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::success;
@@ -141,18 +142,21 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The ⋯ menu of the info and bid boxes: About and Copy Link.
+    /// The ⋯ menu in the title row of the info and bid boxes: About and
+    /// Copy Link. tdesktop drops it once the auction has finished.
     pub(super) fn auction_menu(
         &self,
         state: &AuctionState,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
+    ) -> Option<AnyElement> {
+        state.active()?;
         let owner = cx.entity().downgrade();
         let gift_id = state.gift_id();
         let link = state.gift.auction.as_ref().map(|info| info.link());
-        Button::new("auction-menu")
+        let menu = Button::new("auction-menu")
             .icon(IconName::EllipsisVertical)
             .ghost()
+            .xsmall()
             .accessibility_label("Auction actions")
             .dropdown_menu(move |mut menu, _, _| {
                 let about = owner.clone();
@@ -172,7 +176,8 @@ impl QuillApp {
                     }));
                 }
                 menu
-            })
+            });
+        Some(menu.into_any_element())
     }
 
     pub(super) fn auction_about_box(&mut self, gift_id: i64, cx: &mut Context<Self>) -> BoxView {
@@ -251,16 +256,6 @@ impl QuillApp {
             &roots,
             cx,
         ));
-        if finished {
-            body = body.child(div().text_sm().text_center().child("Auction ended."));
-        } else if started {
-            let per_round = state.per_round();
-            body = body.child(div().text_sm().text_center().child(format!(
-                "Top {} {} will get {title} gifts this round.",
-                group_digits(i64::from(per_round)),
-                if per_round == 1 { "bidder" } else { "bidders" }
-            )));
-        }
         body = body.child(
             Button::new("auction-learn-gifts")
                 .label("Learn more about Telegram Gifts \u{203A}")
@@ -317,16 +312,11 @@ impl QuillApp {
                 }
             },
         ));
-        let menu = self.auction_menu(state, cx);
-        BoxView::new(title, body).footer(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(menu)
-                .child(action),
-        )
+        let view = BoxView::new(title, body).footer(div().flex().justify_end().child(action));
+        match self.auction_menu(state, cx) {
+            Some(menu) => view.title_action(menu),
+            None => view,
+        }
     }
 
     /// "Send a Gift" for an auction gift (tdesktop `SendGiftBox` with an
@@ -704,9 +694,15 @@ impl QuillApp {
         let single = (list.len() == 1)
             .then(|| list.first().map(AuctionState::gift_id))
             .flatten();
-        let open = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| match single {
-            Some(gift_id) => this.raise_active_bid(gift_id, cx),
-            None => this.market_push(MarketBox::ActiveAuctions, cx),
+        let open = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
+            #[cfg(test)]
+            {
+                this.gift_market.bar_opens = this.gift_market.bar_opens.saturating_add(1);
+            }
+            match single {
+                Some(gift_id) => this.raise_active_bid(gift_id, cx),
+                None => this.market_push(MarketBox::ActiveAuctions, cx),
+            }
         };
         Some(
             div()
@@ -739,7 +735,11 @@ impl QuillApp {
                         .label(bar.button)
                         .small()
                         .primary()
-                        .on_click(cx.listener(move |this, _, _, cx| open(this, cx))),
+                        // The bar's own click would open it a second time.
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            open(this, cx);
+                        })),
                 )
                 .into_any_element(),
         )

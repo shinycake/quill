@@ -6,6 +6,7 @@
 //! `ready-gift-auction` shows the chat-list bar of a running auction the
 //! user bid in; `QUILL_DEMO_MARKET` opens a box over it: `bid`, `info`,
 //! `about`, `send`, `active` or `bought`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, seed_ready_chats_session};

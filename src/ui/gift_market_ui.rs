@@ -4,6 +4,7 @@
 //! and `boxes/star_gift_auction_box.cpp`. One kit dialog shows the top box
 //! of `GiftMarketUi::stack`; Escape, the close button and "Back" return
 //! to the box below.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
@@ -14,6 +15,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_market::{AuctionBoxChoice, GiftMarketState, auction_about_shown};
 use quill::ids::FileId;
@@ -35,6 +37,8 @@ pub(super) struct BoxView {
     pub(super) title: SharedString,
     pub(super) body: AnyElement,
     pub(super) footer: Option<AnyElement>,
+    /// A control at the right of the title row (tdesktop's top "⋯").
+    pub(super) title_action: Option<AnyElement>,
     pub(super) wide: bool,
 }
 
@@ -44,12 +48,18 @@ impl BoxView {
             title: title.into(),
             body: body.into_any_element(),
             footer: None,
+            title_action: None,
             wide: false,
         }
     }
 
     pub(super) fn footer(mut self, footer: impl IntoElement) -> Self {
         self.footer = Some(footer.into_any_element());
+        self
+    }
+
+    pub(super) fn title_action(mut self, action: impl IntoElement) -> Self {
+        self.title_action = Some(action.into_any_element());
         self
     }
 
@@ -218,12 +228,20 @@ impl QuillApp {
             .iter()
             .rev()
             .find_map(MarketBox::auction);
-        let files = self.market_sticker_files();
+        let mut files = self.market_sticker_files();
+        files.sort_unstable_by_key(|file| file.0);
+        files.dedup();
+        let fresh = files != self.gift_market.requested_files;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.follow_gift_auction(follow);
-            for file in files {
-                let _ = live.driver.download_file(file, 8);
+            if fresh {
+                for file in &files {
+                    let _ = live.driver.download_file(*file, 8);
+                }
             }
+        }
+        if fresh {
+            self.gift_market.requested_files = files;
         }
     }
 
@@ -342,7 +360,18 @@ impl QuillApp {
             let body = Rc::new(RefCell::new(Some(view.body)));
             let mut dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(view.title))
+                .title(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .child(crate::ui::shell::dialog_title(view.title))
+                        // Clear of the kit's close button in the corner.
+                        .when_some(view.title_action, |row, action| {
+                            row.child(div().mr_6().child(action))
+                        }),
+                )
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         let body = body
