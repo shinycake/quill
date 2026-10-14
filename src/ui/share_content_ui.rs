@@ -4,6 +4,7 @@
 //! "Location" the location picker). The dice has no menu item: like
 //! tdesktop, a message that is just a dice emoji rolls a die
 //! (`quill::telegram::requests::dice_emoji`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas, danger};

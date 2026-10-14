@@ -1,5 +1,6 @@
 //! Right-click menu of a tile in the stories strip (tdesktop
 //! `FillSourceMenu`; the items are decided in `quill::stories_menu`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::*;

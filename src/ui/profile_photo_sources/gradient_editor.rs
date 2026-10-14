@@ -67,13 +67,14 @@ impl QuillApp {
         if colors.is_empty() {
             colors.push(0x4D8DFF);
         }
-        let hsl = to_hsl(colors[0]);
+        let first = colors.first().copied().unwrap_or(0x4D8DFF);
+        let hsl = to_hsl(first);
         let hex = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
                 .placeholder("#RRGGBB")
                 .auto_grow(1, 1)
                 .submit_on_enter(false);
-            state.set_value(format_hex(colors[0]), window, cx);
+            state.set_value(format_hex(first), window, cx);
             state
         });
         cx.subscribe_in(
@@ -132,7 +133,9 @@ impl QuillApp {
         let Some(editor) = self.editor_mut() else {
             return;
         };
-        let color = editor.colors[editor.selected];
+        let Some(&color) = editor.colors.get(editor.selected) else {
+            return;
+        };
         editor.hsl = to_hsl(color);
         let (h, s, l) = editor.hsl;
         let hex_text = format_hex(color);
@@ -156,7 +159,10 @@ impl QuillApp {
             return;
         };
         let at = editor.selected;
-        editor.colors[at] = color;
+        let Some(slot) = editor.colors.get_mut(at) else {
+            return;
+        };
+        *slot = color;
         editor.redraw();
         cx.notify();
     }
@@ -168,7 +174,7 @@ impl QuillApp {
         let Some(editor) = self.editor_mut() else {
             return;
         };
-        if editor.colors[editor.selected] == color {
+        if editor.colors.get(editor.selected) == Some(&color) {
             return;
         }
         self.editor_set_color(color, cx);

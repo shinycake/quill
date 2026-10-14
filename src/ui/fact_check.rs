@@ -1,6 +1,7 @@
 //! "Add Fact Check" / "Edit Fact Check" from the message menu (Telegram
 //! Desktop `EditFactcheckBox`, `Data::Factchecks::save`): a dialog with the
 //! text field; an empty text removes the fact check.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

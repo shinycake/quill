@@ -1,4 +1,5 @@
 //! Bot game cards: `messageGame` rendering, high-score panels, game sends.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_media::{MediaCorners, photo_attachment};

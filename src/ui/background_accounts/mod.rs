@@ -14,6 +14,7 @@
 //! A background client never opens a chat or loads history. One that needs
 //! a sign-in, or whose session ended, is closed and only its status stays:
 //! signing in runs on screen.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

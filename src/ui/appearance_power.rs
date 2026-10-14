@@ -1,6 +1,7 @@
 //! Appearance: interface font family, system accent refresh and the
 //! "Battery and animations" switches (tdesktop `settings_power_saving.cpp`,
 //! `chat/font` in `settings_chat.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};

@@ -12,6 +12,7 @@
 //! and the secret-chat alert hookup. `src/ui/mod.rs` only declares the
 //! module, holds the three fields, and calls in at the existing
 //! composer/keystroke/render sites.
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use gpui_kit::gpui::{AnyElement, Context, Window};
@@ -380,7 +381,9 @@ impl QuillApp {
             .composer_ui
             .inline_results_selected
             .min(order.len() - 1);
-        let result = &results[order[index]];
+        let Some(result) = order.get(index).and_then(|&at| results.get(at)) else {
+            return false;
+        };
         self.send_inline_pick(result.query_id, result.id.clone(), window, cx);
         true
     }

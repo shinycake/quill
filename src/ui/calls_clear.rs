@@ -1,6 +1,7 @@
 //! "Clear all" on the Calls list (tdesktop `ClearCallsBox`): a confirm box
 //! with a "Delete for everyone" checkbox. Copy and rules are in
 //! `quill::chatlist_calls`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::folder_share::finish_dialog;

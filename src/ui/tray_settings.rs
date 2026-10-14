@@ -3,6 +3,7 @@
 //! "Use monochrome icon". Which of them a platform offers and how they
 //! constrain each other is `quill::tray::work_mode`; this file only draws
 //! the switches and applies the result.
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use gpui_kit::component::switch::Switch;

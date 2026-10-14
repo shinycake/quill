@@ -3,6 +3,7 @@
 //! color palette, brush sizes and undo, plus stickers and emoji placed on
 //! the photo, moved and resized with the pointer. The pixels live in
 //! `photo_edit`; this is the overlay, its canvas and the mouse handling.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
@@ -201,11 +202,14 @@ impl PhotoEditor {
         match self.mode {
             EditorMode::Stickers => self.press_item((x, y)),
             EditorMode::Draw => {
-                self.current = Some(Stroke {
-                    color: COLORS[self.color],
-                    width: SIZES[self.size],
-                    points: vec![(x, y)],
-                });
+                if let (Some(&color), Some(&width)) = (COLORS.get(self.color), SIZES.get(self.size))
+                {
+                    self.current = Some(Stroke {
+                        color,
+                        width,
+                        points: vec![(x, y)],
+                    });
+                }
             }
             EditorMode::Crop if self.fixed_crop() => self.press_base((x, y)),
             EditorMode::Crop => {

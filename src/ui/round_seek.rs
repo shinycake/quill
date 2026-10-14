@@ -2,6 +2,7 @@
 //! `VideoMessageSeek`): a thin progress arc while it plays; paused, a
 //! shaded edge, a track and a draggable dot spring in, and dragging along
 //! the edge seeks.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

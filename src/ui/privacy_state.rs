@@ -1,4 +1,5 @@
 //! Privacy and security screens: rules, blocked users, sessions and websites.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::*;

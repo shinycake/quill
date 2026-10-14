@@ -11,6 +11,7 @@
 //!   clipboard whose text is a list of `file://` URIs (Dolphin, the
 //!   `x-special/gnome-copied-files` payload) or, on Linux, of absolute paths
 //!   of existing files (GNOME Files).
+#![deny(clippy::indexing_slicing)]
 
 use std::path::PathBuf;
 
@@ -84,7 +85,7 @@ fn path_from_line(line: &str) -> Option<PathBuf> {
         let decoded = {
             // `/C:/Users/a` -> `C:/Users/a`.
             let bytes = decoded.as_bytes();
-            if bytes.len() > 2 && bytes[0] == b'/' && bytes[2] == b':' {
+            if matches!(bytes, [b'/', _, b':', ..]) {
                 decoded.get(1..).unwrap_or_default().to_string()
             } else {
                 decoded
@@ -108,13 +109,13 @@ fn percent_decode(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
+    while let Some(&byte) = bytes.get(i) {
+        if byte == b'%' {
             let hex = input.get(i + 1..i + 3)?;
             out.push(u8::from_str_radix(hex, 16).ok()?);
             i += 3;
         } else {
-            out.push(bytes[i]);
+            out.push(byte);
             i += 1;
         }
     }

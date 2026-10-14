@@ -1,6 +1,7 @@
 //! The open chat's header menu (the vertical ellipsis). Which entries show,
 //! and in which order, is decided in `quill::chat_header_menu`; this maps each
 //! entry to its label and the existing flow it opens.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::navigation::NavigationAction;

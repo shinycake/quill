@@ -614,7 +614,9 @@ impl QuillApp {
                 Radio::new(format!("appearance-language-{code}")).label(format!("{name} ({code})"))
             }))
             .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                this.set_language_pref(SUPPORTED_LANGUAGES[*ix].0, cx);
+                if let Some(language) = SUPPORTED_LANGUAGES.get(*ix) {
+                    this.set_language_pref(language.0, cx);
+                }
             }));
         self.appearance_section(
             cx,

@@ -6,6 +6,7 @@
 //! "Use Link" button; only that click sends `applyPremiumGiftCode`. The
 //! language box shows the pack and says Quill ships English only; it never
 //! changes a setting.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;

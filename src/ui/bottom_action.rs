@@ -2,6 +2,7 @@
 //! Join group and Apply to join group (`quill::chat_bottom_bar`). Channels
 //! keep their own footer (`groups::channel_footer`), which shares the
 //! decision and gains the Discuss button.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

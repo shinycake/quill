@@ -3,6 +3,7 @@
 //! Geometry is kept in normalized coordinates (0..1) of the working image,
 //! so the editor can show a downscaled preview while the result renders at
 //! full resolution.
+#![deny(clippy::indexing_slicing)]
 
 use image::{Rgba, RgbaImage};
 

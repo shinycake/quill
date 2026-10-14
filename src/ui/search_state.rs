@@ -1,4 +1,5 @@
 //! Search fields: global search and search in chat.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;

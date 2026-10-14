@@ -1,4 +1,5 @@
 //! message menu overlay, copy/open URLs, pin banner, delete confirm.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::{ChatPreviewState, chat_preview_line};

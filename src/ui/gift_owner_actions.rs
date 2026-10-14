@@ -2,6 +2,7 @@
 //! price and collection membership (tdesktop's gift view box). Upgrade and
 //! transfer spend Stars, so each opens an inline confirmation that names the
 //! price; the handlers are in `gift_manage_ui`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::gift_manage_ui::{hint, panel, stars};

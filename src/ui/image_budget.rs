@@ -30,6 +30,7 @@
 //! allocated in the newest texture with room, so images loaded together
 //! share textures; evicting oldest-first empties whole textures rather
 //! than punching holes in all of them.
+#![deny(clippy::indexing_slicing)]
 
 use super::image_decode::{self, DecodeSize};
 use gpui_kit::*;

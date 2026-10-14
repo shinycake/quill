@@ -3,6 +3,7 @@
 //! settings, "find me by my number", the 18+ switch, "File open
 //! confirmations" with the open-time warning dialog, and the
 //! "Do you still remember your password?" check.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted};

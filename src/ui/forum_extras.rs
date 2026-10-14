@@ -2,6 +2,7 @@
 //! `addManageTopic`, the pinned-topics order, the mention / reaction
 //! markers and "Unpin all messages"). The actions are shared by the topic
 //! list rows and the subsection tabs.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;

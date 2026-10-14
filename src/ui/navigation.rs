@@ -1,4 +1,5 @@
 //! Navigation keeps chat rows in the sidebar and preferences in Settings.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::dialogs::CreateChatKind;
 use super::{DialogKind, QuillShell};

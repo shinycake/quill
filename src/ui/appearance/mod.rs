@@ -6,6 +6,7 @@
 //! Language section (slice parity:settings-language): its tag is the
 //! `system_language_code` sent in `setTdlibParameters`, persisted in
 //! `language_prefs.json` and applied on restart.
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use super::chat_theme::{set_high_contrast, set_theme_mode};
@@ -686,8 +687,9 @@ impl QuillApp {
                     .map(|label| Radio::new(format!("appearance-night-{label}")).label(*label)),
             )
             .on_click(cx.listener(|this, &ix, _, cx| {
-                let mode = MODES[ix];
-                this.set_appearance(cx, |a| a.auto_night = mode);
+                if let Some(&mode) = MODES.get(ix) {
+                    this.set_appearance(cx, |a| a.auto_night = mode);
+                }
             }));
         let mut body = div()
             .flex()

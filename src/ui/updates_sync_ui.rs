@@ -3,6 +3,7 @@
 //! `FrozenInfoBox`), the live-location strip, the free transcription
 //! counter and the age verification prompt (tdesktop
 //! `ShowAgeVerification`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

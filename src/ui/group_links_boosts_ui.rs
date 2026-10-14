@@ -1,6 +1,7 @@
 //! Group and channel settings pages for username order and boosts
 //! (tdesktop `edit_peer_usernames_list.cpp` "Link order" and the boosts
 //! list and boost link of `info/boosts/`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;

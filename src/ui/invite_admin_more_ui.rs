@@ -2,6 +2,7 @@
 //! join requests, and the link QR code (tdesktop `edit_peer_invite_links.cpp`
 //! "Links created by other admins", `edit_peer_invite_link.cpp` requests
 //! list and QR box).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::auth_ui::render_qr_image;

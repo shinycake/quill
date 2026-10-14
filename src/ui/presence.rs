@@ -7,6 +7,7 @@
 //! The OS idle time is not used: while this window is active it receives
 //! all of the user's input, so in-window input is the same signal on
 //! macOS, Windows and Linux, without a per-platform backend.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

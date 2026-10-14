@@ -1,4 +1,5 @@
 //! message text rendering: rich text, entities, link previews, reply strips.
+#![deny(clippy::indexing_slicing)]
 
 use super::anim_layer::LayeredClip;
 use super::app::QuillApp;

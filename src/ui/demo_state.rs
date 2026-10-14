@@ -1,4 +1,5 @@
 //! Screenshot-demo stand-ins for devices, call video and the log sink.
+#![deny(clippy::indexing_slicing)]
 
 use quill::diagnostics::MemorySink;
 use std::collections::HashMap;

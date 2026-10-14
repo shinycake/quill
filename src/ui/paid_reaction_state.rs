@@ -1,4 +1,5 @@
 //! The Star reaction box's state (`paid_reaction_ui.rs`).
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;

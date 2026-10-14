@@ -1,4 +1,5 @@
 //! Standalone boxes: profiles, contacts, chat look, export, tags and call rating.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::TextareaState;

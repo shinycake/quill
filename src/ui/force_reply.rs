@@ -16,6 +16,7 @@
 //! also dismisses the chat's custom keyboard, locally and via
 //! `deleteChatReplyMarkup`. A `replyMarkupShowKeyboard` carrying the
 //! `force_reply` flag keeps its keyboard (TGX renders it).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::*;

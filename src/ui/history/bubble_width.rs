@@ -333,7 +333,9 @@ pub(in crate::ui) fn waveform_bars(values: &[u8], available: i32) -> Vec<WaveBar
         stretched = vec![0; WAVEFORM_SAMPLES as usize];
         &stretched
     } else if values.len() < fit {
-        stretched = (0..fit).map(|i| values[i * values.len() / fit]).collect();
+        stretched = (0..fit)
+            .map(|i| values.get(i * values.len() / fit).copied().unwrap_or(0))
+            .collect();
         &stretched
     } else {
         values

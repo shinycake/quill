@@ -1,4 +1,5 @@
 //! impl Render for QuillApp (root view composition).
+#![deny(clippy::indexing_slicing)]
 
 use super::actions::{
     AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
@@ -50,6 +51,7 @@ impl Render for QuillApp {
         }
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
+        self.sync_viewer_hdr(window);
         self.sync_speech_trial_hint(cx);
         self.sync_window_title(window);
         super::window_frame::sync(window, self.appearance.native_window_frame);

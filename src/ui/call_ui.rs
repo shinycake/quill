@@ -1,4 +1,5 @@
 //! 1:1 call overlay rendering.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
@@ -526,7 +527,9 @@ impl QuillApp {
                                 Radio::new(format!("call-device-{label}-{id}")).label(name.clone())
                             }))
                             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                                this.select_call_device(kind, &choices[ix].0, cx);
+                                if let Some(choice) = choices.get(ix) {
+                                    this.select_call_device(kind, &choice.0, cx);
+                                }
                             })),
                     );
                 }
@@ -569,11 +572,13 @@ impl QuillApp {
                                         .label(name.clone())
                                 }))
                                 .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                                    this.select_call_device(
-                                        quill::calls::engine::MediaDeviceKind::Camera,
-                                        &camera_choices[ix].0,
-                                        cx,
-                                    );
+                                    if let Some(choice) = camera_choices.get(ix) {
+                                        this.select_call_device(
+                                            quill::calls::engine::MediaDeviceKind::Camera,
+                                            &choice.0,
+                                            cx,
+                                        );
+                                    }
                                 })),
                         );
                     }

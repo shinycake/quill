@@ -1,5 +1,6 @@
 //! A bundled native camera scanner. Its pipe never enters diagnostics; linking
 //! waits for a separate affirmative action in the account's Sessions dialog.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::*;
 use std::io::Read;

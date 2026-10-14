@@ -3,6 +3,7 @@
 //! in `history_view_reply.cpp`). The emoji's first frame is the mask: its
 //! alpha is kept and its color replaced, then three copies at 12, 16 and
 //! 20 px are placed along the right edge at fixed offsets and opacities.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 use image::RgbaImage;
@@ -143,15 +144,18 @@ pub(super) fn layer(copies: &Copies, quote: bool) -> AnyElement {
         .top_0()
         .left_0()
         .size_full()
-        .children(glyphs(quote).into_iter().map(|g| {
-            let side = SIZES[g.size];
-            img(copies[g.size].clone())
-                .absolute()
-                .top(px(g.y as f32))
-                .right(px((g.x - side as i32) as f32))
-                .w(px(side as f32))
-                .h(px(side as f32))
-                .opacity(g.opacity)
+        .children(glyphs(quote).into_iter().filter_map(|g| {
+            let side = *SIZES.get(g.size)?;
+            let copy = copies.get(g.size)?;
+            Some(
+                img(copy.clone())
+                    .absolute()
+                    .top(px(g.y as f32))
+                    .right(px((g.x - side as i32) as f32))
+                    .w(px(side as f32))
+                    .h(px(side as f32))
+                    .opacity(g.opacity),
+            )
         }))
         .into_any_element()
 }

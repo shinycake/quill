@@ -1,4 +1,5 @@
 //! poll dialogs, voting, voters.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::scheduled::poll_deadline_picker;

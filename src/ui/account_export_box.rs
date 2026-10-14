@@ -4,6 +4,7 @@
 //! limit, active sessions, then the folder and format. Once the export runs
 //! the same dialog shows its progress (`account_export_progress.rs`).
 //! Opened from Settings › Data & Storage.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::export_box::default_folder;
@@ -276,7 +277,9 @@ impl QuillApp {
                 Radio::new(("account-export-format-item", i)).label(format_label(*f))
             }))
             .on_click(cx.listener(|this, &ix, _, cx| {
-                this.edit_account_export(cx, |s| s.format = ExportFormat::ALL[ix]);
+                if let Some(&format) = ExportFormat::ALL.get(ix) {
+                    this.edit_account_export(cx, |s| s.format = format);
+                }
             }));
         let folder = div()
             .flex()

@@ -1,6 +1,7 @@
 //! Service-message rows: the centered pill with Telegram Desktop's wording
 //! (`quill::service_text`), linked names / pinned excerpts, and the new
 //! photo under a chat-photo change.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::accent;

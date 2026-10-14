@@ -476,7 +476,9 @@ impl QuillApp {
                         .label(option.label())
                 }))
                 .on_click(cx.listener(move |this, &ix, _, cx| {
-                    this.stories.composer.privacy = StoryPrivacy::ALL[ix];
+                    if let Some(&privacy) = StoryPrivacy::ALL.get(ix) {
+                        this.stories.composer.privacy = privacy;
+                    }
                     this.stories.composer.local_error = None;
                     cx.notify();
                 })),
@@ -537,7 +539,9 @@ impl QuillApp {
                         .label(option.label())
                 }))
                 .on_click(cx.listener(move |this, &ix, _, cx| {
-                    this.stories.composer.expiry = StoryExpiry::ALL[ix];
+                    if let Some(&expiry) = StoryExpiry::ALL.get(ix) {
+                        this.stories.composer.expiry = expiry;
+                    }
                     this.stories.composer.local_error = None;
                     cx.notify();
                 })),
@@ -626,11 +630,16 @@ impl QuillApp {
                     ),
                 )
                 .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                    this.stories.composer.as_chat_id = if ix == 0 {
-                        None
+                    let chosen = if ix == 0 {
+                        Some(None)
                     } else {
-                        Some(as_chats[ix - 1].0)
+                        ix.checked_sub(1)
+                            .and_then(|at| as_chats.get(at))
+                            .map(|chat| Some(chat.0))
                     };
+                    if let Some(chosen) = chosen {
+                        this.stories.composer.as_chat_id = chosen;
+                    }
                     this.stories.composer.local_error = None;
                     cx.notify();
                 }));

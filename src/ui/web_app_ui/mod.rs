@@ -13,6 +13,7 @@
 //! menu bot asks with an optional "allow messages" checkbox, and the
 //! bridge's write-access and clipboard requests ask in a popup over the
 //! app. Payments (`web_app_open_invoice`) are out of scope and refused.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::attach_bots::AttachMenuEntry;
@@ -273,8 +274,9 @@ fn data_dir(account: &str, bot_id: i64) -> Option<std::path::PathBuf> {
 fn data_store_id(account: &str, bot_id: i64) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(format!("quill-webview/{account}/{bot_id}").as_bytes());
-    digest[..16]
+    digest
         .iter()
+        .take(16)
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }

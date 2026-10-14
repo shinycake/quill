@@ -2,6 +2,7 @@
 //! `SetupValidatePhoneNumberSuggestion`). It shows while TDLib has
 //! `suggestedActionCheckPhoneNumber` pending. Yes hides the suggestion;
 //! No explains that the number is changed in the official app.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::group_panels::format_phone;

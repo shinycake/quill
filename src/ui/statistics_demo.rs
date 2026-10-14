@@ -2,6 +2,7 @@
 //! Telegram): the overview and one chart of every kind.
 //! `QUILL_DEMO_FIRST_CHART=<n>` starts the page at the n-th chart, so the
 //! later charts fit a capture.
+#![deny(clippy::indexing_slicing)]
 
 use super::fixture::seed_channel_statistics;
 use crate::ui::app::QuillApp;

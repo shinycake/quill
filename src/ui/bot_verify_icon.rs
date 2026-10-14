@@ -2,6 +2,7 @@
 //! (Telegram Desktop `PeerBadge::drawVerified`, scaled to 0.88 of the emoji
 //! size) and the description line on a verified profile
 //! (`DetailsFiller::addBotVerify`). Facts and rules: `quill::bot_verification`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::*;

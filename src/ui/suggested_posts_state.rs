@@ -2,6 +2,7 @@
 //! `suggested_posts_boxes.rs`, `suggested_posts_decide.rs`). The suggest
 //! bar itself lives in the session (`SuggestedPostsState::bars`) so the
 //! draft save can read it.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::date_picker::DatePickerState;
 use gpui_kit::component::input::InputState;

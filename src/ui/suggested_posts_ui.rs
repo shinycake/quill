@@ -4,6 +4,7 @@
 //! the field, sending with the bar's terms and "Edit Message" of a
 //! suggestion. The boxes are in `suggested_posts_boxes.rs` and
 //! `suggested_posts_decide.rs`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::suggested_posts_state::{BalanceFor, SuggestTarget};

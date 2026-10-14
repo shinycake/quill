@@ -4,6 +4,7 @@
 //! With "View as Chats" on, Saved Messages lists the chats its messages were
 //! saved from; a row opens that sublist's messages. A tags bar filters the
 //! messages by tag (`searchSavedMessages`); a tag can be named with Premium.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{QuillApp, pane_placeholder};
 use super::chat_row::{chat_avatar, saved_messages_avatar};

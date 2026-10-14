@@ -393,7 +393,14 @@ impl QuillApp {
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .truncate()
-                            .child(format!(":{}", active.items[selected].name)),
+                            .child(format!(
+                                ":{}",
+                                active
+                                    .items
+                                    .get(selected)
+                                    .map(|item| item.name.to_string())
+                                    .unwrap_or_default()
+                            )),
                     )
             }
         }))

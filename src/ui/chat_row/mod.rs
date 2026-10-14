@@ -1,4 +1,5 @@
 //! chat-list row rendering: ChatListItem, badges, avatars, skeletons.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::ChatListFilter;
 use super::app::{PaneMode, QuillApp};

@@ -1,4 +1,5 @@
 //! global + in-chat search UI and shared-media browser UI.
+#![deny(clippy::indexing_slicing)]
 
 /// A search-row preview is one elided line, like tdesktop's dialog rows:
 /// every line break (and other control whitespace) becomes a space. GPUI

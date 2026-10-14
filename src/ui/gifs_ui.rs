@@ -1,4 +1,5 @@
 //! GIF collection and search picker.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::pressable::PressableDiv;

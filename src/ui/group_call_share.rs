@@ -8,6 +8,7 @@
 //! which link "Copy Speaker Link" / "Copy Listener Link" copies, and a chat
 //! in "Share to" gets the link in its message box, unsent, as every other
 //! link Quill shares (`DeepLinkAction::ShareDraft`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

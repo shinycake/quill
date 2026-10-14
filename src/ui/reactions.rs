@@ -1,5 +1,6 @@
 //! Message reactions: the strip leading the message menu (expandable to
 //! every reaction the chat allows) and the chips under messages.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::menu_states::MessageMenuState;

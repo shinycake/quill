@@ -6,6 +6,7 @@
 //! sticker manager with just Masks and Archived tabs. Quill mirrors that in
 //! the photo editor's Stickers mode. A mask sticker is placed as a plain
 //! picture; neither app fits it to a face.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;

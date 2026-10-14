@@ -1,5 +1,6 @@
 //! Screenshot demos: platform (connection state, unread badges, tray,
 //! updates).
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::demo::{seed_ready_unread_read_session, seed_ready_unread_session};

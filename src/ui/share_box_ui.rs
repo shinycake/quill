@@ -4,6 +4,7 @@
 //! (history/view/controls/history_view_forward_panel.cpp) and
 //! `ChooseSendAsBox` (ui/chat/choose_send_as.cpp); see
 //! `docs/decisions/codex-share-box.md`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
@@ -220,7 +221,7 @@ impl QuillApp {
             .pending_forward
             .as_ref()
             .filter(|draft| draft.count() == 1)
-            .map(|draft| (draft.from_chat_id, draft.message_ids[0]))
+            .and_then(|draft| Some((draft.from_chat_id, *draft.message_ids.first()?)))
         else {
             return;
         };

@@ -1,6 +1,7 @@
 //! Restricted members as exceptions: look up a member's current restriction
 //! from the loaded Restricted list, and write the end date on its row
 //! (tdesktop `ParticipantsBoxController`, `Role::Restricted`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use quill::ids::ChatId;

@@ -255,8 +255,10 @@ impl QuillApp {
                                 .label(bs::days_label(*d))
                         }))
                         .on_click(cx.listener(|this, &ix: &usize, _, cx| {
-                            if let Some(g) = this.business_mut().and_then(|d| d.greeting.as_mut()) {
-                                g.days = bs::INACTIVITY_DAYS[ix.min(3)];
+                            if let Some(g) = this.business_mut().and_then(|d| d.greeting.as_mut())
+                                && let Some(&days) = bs::INACTIVITY_DAYS.get(ix.min(3))
+                            {
+                                g.days = days;
                             }
                             cx.notify();
                         })),
@@ -318,8 +320,10 @@ impl QuillApp {
                             .label(*label)
                     }))
                     .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                        if let Some(a) = this.business_mut().and_then(|d| d.away.as_mut()) {
-                            a.schedule = choices[ix.min(2)].0;
+                        if let Some(a) = this.business_mut().and_then(|d| d.away.as_mut())
+                            && let Some(choice) = choices.get(ix.min(2))
+                        {
+                            a.schedule = choice.0;
                         }
                         cx.notify();
                     })),

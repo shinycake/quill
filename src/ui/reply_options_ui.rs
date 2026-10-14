@@ -3,6 +3,7 @@
 //! `history/view/controls/history_view_draft_options.cpp`), the chat
 //! chooser behind "Reply in Another Chat" and the quote picker. See
 //! `docs/decisions/codex-reply-elsewhere.md`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

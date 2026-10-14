@@ -12,6 +12,7 @@
 //! them. The animation is drawn by the shared overlay (`emoji_effect`),
 //! centred on the badge and mirrored for messages on the left like the other
 //! effects there.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_effect_badge::{self as badge, Key};

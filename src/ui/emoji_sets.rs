@@ -1,4 +1,5 @@
 //! Custom emoji pack settings, preview and confirmed removal.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::{DialogKind, QuillShell};

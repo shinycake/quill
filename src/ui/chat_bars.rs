@@ -1,6 +1,7 @@
 //! Batch 8: the bars above a chat's history that tdesktop stacks under the
 //! header — the contact-status action bar (`ChatActionBar`), the
 //! "N join requests" bar with its requests box, and the voice-chat join bar.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;

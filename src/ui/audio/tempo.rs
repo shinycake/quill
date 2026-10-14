@@ -218,10 +218,13 @@ impl<S: Source> Tempo<S> {
             let w = if first && i < self.hs {
                 1.0
             } else {
-                self.window[i]
+                self.window.get(i).copied().unwrap_or(0.0)
             };
             for c in 0..self.ch {
-                self.acc[i * self.ch + c] += w * self.sample(start + i, c);
+                let add = w * self.sample(start + i, c);
+                if let Some(acc) = self.acc.get_mut(i * self.ch + c) {
+                    *acc += add;
+                }
             }
         }
         self.prev = Some(start);
@@ -242,10 +245,16 @@ impl<S: Source> Tempo<S> {
     fn emit_front(&mut self) {
         self.out.clear();
         self.out_pos = 0;
-        self.out.extend_from_slice(&self.acc[..self.hs * self.ch]);
-        self.acc.copy_within(self.hs * self.ch.., 0);
-        let tail = self.acc.len() - self.hs * self.ch;
-        self.acc[tail..].fill(0.0);
+        let split = self.hs * self.ch;
+        let Some(front) = self.acc.get(..split) else {
+            return;
+        };
+        self.out.extend_from_slice(front);
+        self.acc.copy_within(split.., 0);
+        let tail = self.acc.len() - split;
+        if let Some(rest) = self.acc.get_mut(tail..) {
+            rest.fill(0.0);
+        }
     }
 }
 

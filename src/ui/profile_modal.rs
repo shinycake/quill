@@ -7,6 +7,7 @@
 //! Quill's windows are always layer-wide, so the same profile content the
 //! right-hand info panel shows (`info_panel_parts`) is presented as a
 //! centered modal here: Escape or a click outside closes it.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::bg_canvas;

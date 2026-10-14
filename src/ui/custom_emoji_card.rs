@@ -2,6 +2,7 @@
 //! card with the emoji, "This emoji is from the {pack} pack." and a View
 //! button that opens the pack (tdesktop `ShowReactionPreview` with
 //! `emojiPreview`, `history_view_reaction_preview.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

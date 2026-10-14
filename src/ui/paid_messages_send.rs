@@ -6,6 +6,7 @@
 //! Nothing here sends a paid message by itself. A send carries a price only
 //! after the confirmation (or a trusted price); without one TDLib refuses
 //! the message and no Stars move.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};

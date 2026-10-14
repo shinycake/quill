@@ -1,4 +1,5 @@
 //! Voice and round video recording.
+#![deny(clippy::indexing_slicing)]
 
 use quill::playback::PlaybackClock;
 use quill::video::VideoNoteCapture;

@@ -3,6 +3,7 @@
 //! of chats; picking one confirms verifying it with the bot, with an optional
 //! description when the bot may customise it, or removing the verification
 //! the bot already gave. Rules and requests: `quill::bot_verification`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::pressable::action_row;

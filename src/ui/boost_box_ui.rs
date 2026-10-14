@@ -5,6 +5,7 @@
 //! unlocks. The one button boosts, or opens the box tdesktop shows when no
 //! slot is free. Only a click on that button reads the slots, and only a
 //! click on Reassign or Replace moves a boost from another chat.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::link_info_boxes::finish;
 use super::shell::{DialogKind, QuillShell};

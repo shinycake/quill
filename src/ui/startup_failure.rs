@@ -2,6 +2,7 @@
 //! or a remote session without one): say so in a native alert where the
 //! platform has one, write the error to stderr, and exit with a failure code
 //! instead of panicking.
+#![deny(clippy::indexing_slicing)]
 
 /// Report `error` from opening the main window and end the process.
 #[expect(

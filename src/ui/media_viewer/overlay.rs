@@ -249,6 +249,13 @@ impl QuillApp {
         let file_card = self.viewer_file_card(&item, &files, &downloading);
         let fallback_card = (item.kind == MediaViewerKind::ImageFile)
             .then(|| files::FileCard::new(&item, &files, &downloading));
+        // An upright HDR picture file draws its HDR rendition (macOS).
+        let hdr_frame = (file_card.is_none()
+            && item.kind == MediaViewerKind::ImageFile
+            && self.viewer.orientation.is_identity())
+        .then_some(thumb_path.as_deref())
+        .flatten()
+        .and_then(|path| self.viewer_hdr_element(path, (zoom_w, zoom_h), window, cx));
         let card_view = cx.entity().downgrade();
         let content: AnyElement = if let Some(card) = file_card {
             div()
@@ -258,6 +265,8 @@ impl QuillApp {
                 .justify_center()
                 .child(card.render(card_view))
                 .into_any_element()
+        } else if let Some(hdr_frame) = hdr_frame {
+            hdr_frame
         } else if let Some(frame) = native_frame {
             frame.element(
                 px(zoom_w),
@@ -606,6 +615,7 @@ impl QuillApp {
         // hitboxes under the cursor down to the first occluding one, so
         // without it the backdrop below also gets the click and closes.
         let over_controls = Self::over_controls_listener;
+        let hdr_badge = self.viewer_hdr_badge();
         let top_bar = div()
             .id("media-viewer-top-bar")
             .on_mouse_move(over_controls(cx))
@@ -667,6 +677,9 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_1()
+                    .when_some(hdr_badge, |this, badge| {
+                        this.child(crate::ui::hdr_image::badge_element(badge))
+                    })
                     .when(item.kind.is_picture(), |this| {
                         this.child(
                             icon_action(

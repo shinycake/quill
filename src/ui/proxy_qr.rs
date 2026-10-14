@@ -2,6 +2,7 @@
 //! shows the proxy's `tg://` link as a QR code in `ShowProxyQrBox`
 //! (`boxes/connection_box.cpp`); Quill reuses the QR renderer of the
 //! login and invite-link screens.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::auth_ui::render_qr_image;
 use super::shell::{DialogKind, QuillShell};

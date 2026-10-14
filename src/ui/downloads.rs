@@ -1,4 +1,5 @@
 //! media download queue panel.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::message_media::{download_display_name, format_bytes};

@@ -7,6 +7,7 @@
 //! kept here by everything that changes their layout — the text, its styled
 //! runs, font size, line height and wrap width — so a repeat measure or a
 //! scroll frame gets the same paragraph back instead of shaping again.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
 use gpui_kit::*;
@@ -157,8 +158,10 @@ fn cached(
             // Keep the most recently used half.
             let mut ages: Vec<u64> = cache.entries.values().map(|(_, used)| *used).collect();
             ages.sort_unstable();
-            let cutoff = ages[ages.len() / 2];
-            cache.entries.retain(|_, (_, used)| *used > cutoff);
+            match ages.get(ages.len() / 2) {
+                Some(&cutoff) => cache.entries.retain(|_, (_, used)| *used > cutoff),
+                None => cache.entries.clear(),
+            }
         }
         let now = cache.clock;
         cache.entries.insert(key, (paragraph.clone(), now));

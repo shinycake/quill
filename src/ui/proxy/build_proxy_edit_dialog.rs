@@ -43,8 +43,10 @@ impl QuillApp {
                                 .label(kind_label(*k))
                         }))
                         .on_click(cx.listener(move |this, &ix, _, cx| {
-                            if let Some(editor) = this.settings.proxy.editor.as_mut() {
-                                editor.kind = kinds[ix];
+                            if let Some(editor) = this.settings.proxy.editor.as_mut()
+                                && let Some(&kind) = kinds.get(ix)
+                            {
+                                editor.kind = kind;
                                 editor.error = None;
                             }
                             cx.notify();

@@ -181,7 +181,7 @@ core-foundation = { version = "0.10.1", optional = true }
 # with ImageIO (src/ui/image_decode/macos.rs).
 objc2-image-io = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
 objc2-core-graphics = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace", "CGGeometry"] }
-objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes"] }
+objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes", "CFURL"] }
 # Badge authorization (the Dock draws badges only for apps allowed to badge).
 objc2-user-notifications = { version = "0.3", optional = true }
 # OS notifications: the inline reply field and the sender picture ride beside
@@ -248,3 +248,4 @@ gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
 # the window has nothing to draw.
 gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
 gpui-pre-windows = { path = "third_party/gpui-pre-windows" }
+gpui-pre-apple = { path = "third_party/gpui-pre-apple" }

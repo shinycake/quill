@@ -1,4 +1,5 @@
 //! Screenshot demos: media.
+#![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::audio_playback::{apply_ready_audio, apply_ready_voice};
@@ -282,7 +283,9 @@ impl QuillApp {
                     {
                         session.apply(owned);
                     }
-                    let mut item = stickers[0].clone();
+                    let Some(mut item) = stickers.first().cloned() else {
+                        break;
+                    };
                     item.id = i64::from(id);
                     item.file_id = quill::ids::FileId(id);
                     item.format = if i % 2 == 0 {

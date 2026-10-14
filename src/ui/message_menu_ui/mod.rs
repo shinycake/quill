@@ -4,6 +4,7 @@
 //! Rows are collected with a sort key from `quill::message_menu::order`
 //! (Telegram Desktop's order) and merged into the panel
 //! `message_actions.rs` builds.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

@@ -1,4 +1,5 @@
 //! settings sections: archive, contacts, calls, media/auto-download.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::privacy::PrivacyEditorTarget;
@@ -383,7 +384,9 @@ impl QuillApp {
                             .map(|(who, label)| Radio::new(format!("{id}-{who:?}")).label(*label)),
                     )
                     .on_click(cx.listener(move |this, &ix, _, cx| {
-                        this.set_privacy_target_who(PrivacyEditorTarget::Rule(key), WHOS[ix], cx);
+                        if let Some(&who) = WHOS.get(ix) {
+                            this.set_privacy_target_who(PrivacyEditorTarget::Rule(key), who, cx);
+                        }
                     }))
             };
         // Phase 6: a kit Switch row with the title/caption beside it
@@ -652,8 +655,9 @@ impl QuillApp {
                                 Radio::new(format!("instant-view-{label}")).label(*label)
                             }))
                             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                                let mode = iv_modes[ix].1;
-                                this.set_media_pref(|prefs| prefs.instant_view_mode = mode, cx);
+                                if let Some(mode) = iv_modes.get(ix).map(|entry| entry.1) {
+                                    this.set_media_pref(|prefs| prefs.instant_view_mode = mode, cx);
+                                }
                             })),
                     ),
             )

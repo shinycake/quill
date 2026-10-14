@@ -3,6 +3,7 @@
 //! (Touch ID, Apple Watch or the account password). Windows Hello and a
 //! Linux polkit prompt have no backend yet: `available()` is false there,
 //! so the switch is not offered (docs/decisions/codex-local-passcode.md).
+#![deny(clippy::indexing_slicing)]
 
 use std::sync::mpsc::{Receiver, channel};
 

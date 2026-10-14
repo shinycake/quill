@@ -1,4 +1,5 @@
 //! auth screens (phone/code/password/QR).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::*;

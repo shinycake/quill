@@ -76,7 +76,11 @@ fn title_of(view: View, include: bool, link_edit_is_new: bool) -> String {
         View::Greeting => "Greeting Message".into(),
         View::Away => "Away Message".into(),
         View::Hours => "Business Hours".into(),
-        View::Day(day) => quill::business_hours_edit::WEEKDAYS[day.min(6)].into(),
+        View::Day(day) => quill::business_hours_edit::WEEKDAYS
+            .get(day.min(6))
+            .copied()
+            .unwrap_or_default()
+            .into(),
         View::TimeZone => "Choose Time Zone".into(),
         View::Location => "Location".into(),
         View::Picker if include => "Include Chats".into(),

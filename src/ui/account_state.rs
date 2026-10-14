@@ -1,4 +1,5 @@
 //! Accounts, account lifecycle, local passcode, freeze and age checks.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::*;

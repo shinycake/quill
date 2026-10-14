@@ -27,9 +27,25 @@ pub(super) fn packet_frames(packet: &[u8]) -> Option<u64> {
     let config = toc >> 3;
     // Frame length in tenths of a millisecond.
     let tenth_ms: u64 = match config {
-        0..=11 => [100, 200, 400, 600][usize::from(config % 4)],
-        12..=15 => [100, 200][usize::from(config % 2)],
-        _ => [25, 50, 100, 200][usize::from(config % 4)],
+        0..=11 => match config % 4 {
+            0 => 100,
+            1 => 200,
+            2 => 400,
+            _ => 600,
+        },
+        12..=15 => {
+            if config % 2 == 0 {
+                100
+            } else {
+                200
+            }
+        }
+        _ => match config % 4 {
+            0 => 25,
+            1 => 50,
+            2 => 100,
+            _ => 200,
+        },
     };
     let count = match toc & 3 {
         0 => 1,
@@ -71,12 +87,34 @@ impl OpusSource {
             .ok_or("empty ogg stream")?;
         let serial = head.stream_serial();
         let head = head.data;
-        if head.len() < 19 || &head[..8] != b"OpusHead" {
+        let [
+            b'O',
+            b'p',
+            b'u',
+            b's',
+            b'H',
+            b'e',
+            b'a',
+            b'd',
+            _,
+            channels,
+            pre_skip_lo,
+            pre_skip_hi,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            mapping_family,
+            ..,
+        ] = head.as_slice()
+        else {
             return Err("not an Opus stream".into());
-        }
-        let channels = u16::from(head[9]);
-        let pre_skip = u64::from(u16::from_le_bytes([head[10], head[11]]));
-        if !(1..=2).contains(&channels) || head[18] != 0 {
+        };
+        let channels = u16::from(*channels);
+        let pre_skip = u64::from(u16::from_le_bytes([*pre_skip_lo, *pre_skip_hi]));
+        if !(1..=2).contains(&channels) || *mapping_family != 0 {
             return Err("unsupported Opus channel layout".into());
         }
         let mut packets = Vec::new();
@@ -147,7 +185,8 @@ impl OpusSource {
             .saturating_sub(1);
         self.decoder.reset();
         self.next_packet = index;
-        self.skip = target - self.starts[index].min(target);
+        let start = self.starts.get(index).copied().unwrap_or(0);
+        self.skip = target - start.min(target);
         self.remaining = self.end - target;
         self.pcm.clear();
         self.cursor = 0;
@@ -165,7 +204,9 @@ impl OpusSource {
                 // A bad packet becomes silence of its length, not a stop.
                 Err(_) => {
                     let frames = packet_frames(packet).unwrap_or(0) as usize;
-                    self.scratch[..frames * ch].fill(0.0);
+                    if let Some(silence) = self.scratch.get_mut(..frames * ch) {
+                        silence.fill(0.0);
+                    }
                     frames
                 }
             };
@@ -177,8 +218,10 @@ impl OpusSource {
             }
             self.remaining -= keep as u64;
             self.pcm.clear();
-            self.pcm
-                .extend_from_slice(&self.scratch[drop * ch..(drop + keep) * ch]);
+            let Some(decoded) = self.scratch.get(drop * ch..(drop + keep) * ch) else {
+                return false;
+            };
+            self.pcm.extend_from_slice(decoded);
             self.cursor = 0;
             return true;
         }
@@ -193,7 +236,7 @@ impl Iterator for OpusSource {
         if self.cursor >= self.pcm.len() && !self.refill() {
             return None;
         }
-        let sample = self.pcm[self.cursor];
+        let sample = *self.pcm.get(self.cursor)?;
         self.cursor += 1;
         Some(sample)
     }

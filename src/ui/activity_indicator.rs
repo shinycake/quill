@@ -3,6 +3,7 @@
 //!
 //! Only built while an action is active, so an idle chat list animates
 //! nothing.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 use quill::state::ActivityIndicator;

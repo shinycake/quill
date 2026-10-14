@@ -2,6 +2,7 @@
 //! level feature table and, in supergroups, "Boosts needed to bypass
 //! restrictions" (tdesktop `info/channel_statistics/boosts/`,
 //! `ui/boxes/boost_box.cpp` and `edit_peer_permissions_box.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::*;

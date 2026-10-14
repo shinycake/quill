@@ -4,6 +4,7 @@
 //! the gradient half a phase; the new picture renders on the wallpaper
 //! thread and crossfades in over 200 ms. "Wallpaper rotation" in Battery
 //! and animations turns it off; reduced motion swaps without the fade.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::wallpaper::{ChatLook, rotate};

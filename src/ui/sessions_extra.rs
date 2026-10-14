@@ -1,6 +1,7 @@
 //! B13: the Active Sessions additions (tdesktop `Settings::Sessions`):
 //! "Terminate old sessions if inactive for ..." and the session details
 //! view (application, system, IP address, location) with Terminate.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::danger;

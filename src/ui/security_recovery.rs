@@ -3,6 +3,7 @@
 //! "Forgot password?" with the emailed code, reset with the 7-day wait
 //! and its cancel (`settings_cloud_password_input.cpp`), and the login
 //! email (`settings_cloud_password_login_email*.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::*;

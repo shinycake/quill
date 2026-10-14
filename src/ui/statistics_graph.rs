@@ -2,6 +2,7 @@
 //! async one loads when its section is first shown (tdesktop requests
 //! them as it fills the page) and stays hidden until it arrives, and a
 //! graph with a zoom token opens one day on a tooltip click.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, success, text_muted};

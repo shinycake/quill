@@ -2,6 +2,7 @@
 //! what happens once `getInternalLinkType` has been routed
 //! (`deep_link_types::route`). The share chooser, the sticker set preview
 //! hand-off, the settings pages and the proxy confirmation.
+#![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::navigation::NavigationAction;
 use super::shell::{DialogKind, QuillShell};

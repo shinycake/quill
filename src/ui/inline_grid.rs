@@ -2,6 +2,7 @@
 //! grid, list rows, the bot's button on top and scroll-to-load paging
 //! (tdesktop `inline_bots/inline_results_inner.cpp`). The packing maths is
 //! in `quill::inline_grid`; this file draws it and wires the clicks.
+#![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
 use super::inline_mode::{InlineView, inline_view};
@@ -161,12 +162,13 @@ impl QuillApp {
         let content = content_height(&mosaic, has_button);
         let viewport = content.min(MAX_PANEL_HEIGHT);
         let order = mosaic.order();
-        let selected = (!order.is_empty()).then(|| {
-            order[self
-                .composer_ui
-                .inline_results_selected
-                .min(order.len() - 1)]
-        });
+        let selected = order
+            .get(
+                self.composer_ui
+                    .inline_results_selected
+                    .min(order.len().saturating_sub(1)),
+            )
+            .copied();
         let roots = self.media_display_roots();
         let mut body = div()
             .flex()
@@ -188,7 +190,9 @@ impl QuillApp {
                 line = line.mt(px(SKIP as f32));
             }
             for cell in &row.cells {
-                let result = &results[cell.item.result];
+                let Some(result) = results.get(cell.item.result) else {
+                    continue;
+                };
                 let is_selected = selected == Some(cell.item.result);
                 line = line.child(self.inline_cell(result, cell, is_selected, &roots, cx));
             }
@@ -452,10 +456,13 @@ impl QuillApp {
         if order.is_empty() {
             return;
         }
-        let target = order[self
-            .composer_ui
-            .inline_results_selected
-            .min(order.len() - 1)];
+        let Some(&target) = order.get(
+            self.composer_ui
+                .inline_results_selected
+                .min(order.len() - 1),
+        ) else {
+            return;
+        };
         let Some(row) = mosaic
             .rows
             .iter()

@@ -8,6 +8,7 @@
 //! Every handler returns whether it used the key; the action listener
 //! propagates the keystroke when it did not, so the composer (or any other
 //! input) keeps keys the history has no claim on.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::{ChatListFilter, PaneMode, QuillApp};
 use super::chat_row::ChatListItem;
@@ -52,8 +53,8 @@ pub(super) fn reply_nav(
             Some(&next) => ReplyNav::Reply(next),
             None => ReplyNav::Clear,
         }
-    } else if pos > 0 {
-        ReplyNav::Reply(ids[pos - 1])
+    } else if let Some(&previous) = pos.checked_sub(1).and_then(|before| ids.get(before)) {
+        ReplyNav::Reply(previous)
     } else {
         ReplyNav::Ignore
     }

@@ -2,6 +2,7 @@
 //! reached from a `tg://newbot?manager=&username=&name=` link: a name, a
 //! username that always ends with "bot", a live availability check, then
 //! `createBot` managed by the bot in the link. Rules: `quill::owned_bots`.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};

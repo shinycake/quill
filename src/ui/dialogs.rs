@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 pub(crate) mod account_notices;
 pub(crate) mod admin;
 pub(crate) mod call_rating;

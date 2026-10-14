@@ -336,6 +336,11 @@ pub struct SharedMediaState {
 }
 
 impl SharedMediaState {
+    /// The state of `tab`, `None` only if `tabs` is shorter than the enum.
+    pub fn tab_at(&self, tab: SharedMediaTab) -> Option<&SharedMediaTabState> {
+        self.tabs.get(tab.index())
+    }
+
     #[expect(
         clippy::indexing_slicing,
         reason = "`tabs` has one slot per `SharedMediaTab` variant and `index()` is the discriminant"

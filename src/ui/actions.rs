@@ -1,4 +1,5 @@
 //! app action definitions (keybindings).
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 

@@ -8,6 +8,7 @@
 //! The notice waits until the main window is active: when Quill starts
 //! hidden in the tray, it shows the first time the window is opened, and
 //! the crash counts as seen only then.
+#![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::WindowExt;
 use gpui_kit::component::button::Button;

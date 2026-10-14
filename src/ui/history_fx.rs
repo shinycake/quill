@@ -5,6 +5,7 @@
 //! Both are driven by stored `Instant`s and the shared frame clock
 //! (`QuillApp::request_animation_tick`) only while they are visible — never
 //! GPUI `with_animation`, which would redraw the app at display rate.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::motion::MotionState;
@@ -261,7 +262,10 @@ impl QuillApp {
         let Some(last) = self.history.rows.len().checked_sub(1) else {
             return;
         };
-        let label = self.history.rows[..=ix.min(last)]
+        let Some(rows) = self.history.rows.get(..=ix.min(last)) else {
+            return;
+        };
+        let label = rows
             .iter()
             .rev()
             .find_map(|row| row.day_label().map(str::to_string));

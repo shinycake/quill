@@ -1,6 +1,7 @@
 //! The Archive's "How does it work?" box (tdesktop `ArchiveHintBox`,
 //! `boxes/about_box.cpp`): a title, what a new message does to archived
 //! chats, three short sections and a "Got it" button.
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::folder_share::finish_dialog;

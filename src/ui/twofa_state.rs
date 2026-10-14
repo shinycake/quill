@@ -1,4 +1,5 @@
 //! Two-step verification box: its view, inputs and pending confirmation.
+#![deny(clippy::indexing_slicing)]
 
 use super::*;
 use gpui_kit::component::input::{InputState, TextareaState};

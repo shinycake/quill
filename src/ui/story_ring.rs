@@ -1,6 +1,7 @@
 //! Story ring around a chat-list avatar (tdesktop
 //! `Dialogs::Row::PaintCornerBadgeFrame`, `dialogs/dialogs_row.cpp:520-580`).
 //! Geometry lives in `quill::story_ring`; this paints it.
+#![deny(clippy::indexing_slicing)]
 
 use super::chat_theme::accent_strong;
 use gpui_kit::*;

@@ -1,3 +1,4 @@
+#![deny(clippy::indexing_slicing)]
 /// Phase 9.5: current Unix timestamp (seconds) — stealth active /
 /// cooldown predicates and relative viewer times compare against this.
 pub(crate) fn now_unix_secs() -> i64 {

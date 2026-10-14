@@ -5,6 +5,7 @@
 //! WASAPI, ALSA/PulseAudio) on every platform. The same tones play on all
 //! of them for consistency. The "Play sounds" notification preference
 //! silences them.
+#![deny(clippy::indexing_slicing)]
 
 use std::num::NonZero;
 use std::time::{Duration, Instant};

@@ -1,6 +1,7 @@
 //! Bubble headers: the reply strip, the "Forwarded from" line and
 //! "via @bot" (tdesktop `HistoryMessageReply`, `HistoryMessageForwarded`,
 //! `history/history_item_components.cpp`).
+#![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
