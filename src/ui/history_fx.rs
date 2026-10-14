@@ -34,7 +34,7 @@ pub(crate) fn jump_fade(elapsed: Duration) -> f32 {
     if elapsed < JUMP_FADE_IN {
         elapsed.as_secs_f32() / JUMP_FADE_IN.as_secs_f32()
     } else {
-        let out = (elapsed - JUMP_FADE_IN).as_secs_f32() / JUMP_FADE_OUT.as_secs_f32();
+        let out = elapsed.saturating_sub(JUMP_FADE_IN).as_secs_f32() / JUMP_FADE_OUT.as_secs_f32();
         (1. - out).max(0.)
     }
 }

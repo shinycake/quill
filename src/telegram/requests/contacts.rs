@@ -153,7 +153,11 @@ pub fn parse_vcard(text: &str) -> (Vec<ImportedContact>, usize, usize) {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
         if (line.starts_with(' ') || line.starts_with('\t')) && !lines.is_empty() {
             let prev = lines.len() - 1;
-            lines[prev].push_str(line[1..].trim_start_matches([' ', '\t']));
+            lines[prev].push_str(
+                line.get(1..)
+                    .unwrap_or_default()
+                    .trim_start_matches([' ', '\t']),
+            );
         } else {
             lines.push(line.to_string());
         }

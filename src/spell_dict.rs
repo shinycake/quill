@@ -408,6 +408,7 @@ pub fn hunspell_engine(dirs: &[PathBuf], system: &[String], chosen: &[String]) -
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::{
         EngineKind, discover_dictionaries, hunspell_engine, locales_from_env, pick_dictionaries,
         select_backend, standard_dictionary_dirs,

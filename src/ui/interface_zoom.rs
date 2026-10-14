@@ -965,6 +965,7 @@ impl PlatformWindow for ZoomWindow {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
     use gpui_kit::{MouseButton, MouseDownEvent, ScrollWheelEvent, point};
 

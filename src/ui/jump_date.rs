@@ -153,7 +153,12 @@ impl QuillApp {
                     .justify_center()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(weekday_name(weekday)[..2].to_string()),
+                    .child(
+                        weekday_name(weekday)
+                            .get(..2)
+                            .unwrap_or_default()
+                            .to_string(),
+                    ),
             );
         }
 

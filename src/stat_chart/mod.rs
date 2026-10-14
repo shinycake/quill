@@ -204,8 +204,11 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
             .and_then(Value::as_str)
             && let Some(hash) = color.find('#')
         {
-            line.color_key = ColorKey::parse(&color[..hash]);
-            line.rgb = u32::from_str_radix(color[hash + 1..].get(..6).unwrap_or(""), 16).ok();
+            line.color_key = ColorKey::parse(color.get(..hash).unwrap_or_default());
+            line.rgb = color
+                .get(hash + 1..)
+                .and_then(|rest| rest.get(..6))
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok());
         }
         if let Some(name) = names.and_then(|n| n.get(&line.key)).and_then(Value::as_str) {
             line.name = name.replace('-', "\u{2014}");

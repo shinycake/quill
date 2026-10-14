@@ -213,9 +213,16 @@ pub fn chat_list_stamp(date: &CivilTime, now: &CivilTime) -> String {
     }
     match age {
         i64::MIN..=0 => hhmm(date),
-        1..=6 => weekday_name(date.weekday)[..3].to_string(),
+        1..=6 => weekday_name(date.weekday)
+            .get(..3)
+            .unwrap_or_default()
+            .to_string(),
         _ if date.year == now.year => {
-            format!("{} {}", date.day, &month_name(date.month)[..3])
+            format!(
+                "{} {}",
+                date.day,
+                month_name(date.month).get(..3).unwrap_or_default()
+            )
         }
         _ => format!(
             "{:02}.{:02}.{:02}",

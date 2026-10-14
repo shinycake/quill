@@ -36,7 +36,7 @@ pub fn sanitize_link(raw: &str) -> Option<String> {
     }
     let lower = link.to_ascii_lowercase();
     if lower.starts_with("tg:") {
-        let body = &link[3..];
+        let body = link.get(3..).unwrap_or_default();
         let body = body.strip_prefix("//").unwrap_or(body);
         // `tg://` alone (or `tg:///`) names nothing to open.
         if body.trim_matches('/').is_empty() {
@@ -45,15 +45,15 @@ pub fn sanitize_link(raw: &str) -> Option<String> {
         return Some(format!("tg://{body}"));
     }
     let after_scheme = if lower.starts_with("https://") {
-        &link[8..]
+        link.get(8..).unwrap_or_default()
     } else if lower.starts_with("http://") {
-        &link[7..]
+        link.get(7..).unwrap_or_default()
     } else {
         return None;
     };
     let host_end = after_scheme.find(['/', '?', '#'])?;
-    let host = &after_scheme[..host_end];
-    let path = &after_scheme[host_end..];
+    let host = after_scheme.get(..host_end).unwrap_or_default();
+    let path = after_scheme.get(host_end..).unwrap_or_default();
     if !WEB_HOSTS.iter().any(|h| host.eq_ignore_ascii_case(h)) {
         return None;
     }

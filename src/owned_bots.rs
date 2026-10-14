@@ -80,7 +80,7 @@ fn bot_overlap(value: &str) -> usize {
 /// What the dialog appends to the typed username, empty once the text
 /// already ends with "bot".
 pub fn missing_suffix(value: &str) -> &'static str {
-    &BOT_SUFFIX[bot_overlap(value)..]
+    BOT_SUFFIX.get(bot_overlap(value)..).unwrap_or_default()
 }
 
 /// The typed text without a leading `@` or spaces.

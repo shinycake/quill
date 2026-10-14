@@ -137,21 +137,21 @@ pub fn apply_format_markup(
             _ => (format!("{open}{close}"), open.len()),
         };
         let mut new_text = String::with_capacity(text.len() + insert.len());
-        new_text.push_str(&text[..start]);
+        new_text.push_str(text.get(..start).unwrap_or_default());
         new_text.push_str(&insert);
-        new_text.push_str(&text[start..]);
+        new_text.push_str(text.get(start..).unwrap_or_default());
         let cursor = start + cursor_off;
         (new_text, cursor..cursor)
     } else {
-        let selected = &text[start..end];
+        let selected = text.get(start..end).unwrap_or_default();
         let wrapped = match action {
             FormatAction::Link(url) => format!("[{selected}]({url})"),
             _ => format!("{open}{selected}{close}"),
         };
         let mut new_text = String::with_capacity(text.len() + wrapped.len());
-        new_text.push_str(&text[..start]);
+        new_text.push_str(text.get(..start).unwrap_or_default());
         new_text.push_str(&wrapped);
-        new_text.push_str(&text[end..]);
+        new_text.push_str(text.get(end..).unwrap_or_default());
         let new_start = start + open.len();
         let new_end = new_start + selected.len();
         (new_text, new_start..new_end)
@@ -168,9 +168,9 @@ pub fn clear_format_markup(text: &str, range: std::ops::Range<usize>) -> String 
         (start, end)
     };
     let mut result = String::with_capacity(text.len());
-    result.push_str(&text[..start]);
-    result.push_str(&strip_markup(&text[start..end]));
-    result.push_str(&text[end..]);
+    result.push_str(text.get(..start).unwrap_or_default());
+    result.push_str(&strip_markup(text.get(start..end).unwrap_or_default()));
+    result.push_str(text.get(end..).unwrap_or_default());
     result
 }
 
@@ -192,20 +192,31 @@ fn snap_range(text: &str, range: std::ops::Range<usize>) -> (usize, usize) {
 
 /// M1: `> ` prefix on every line intersecting the range.
 fn apply_block_quote(text: &str, start: usize, end: usize) -> (String, std::ops::Range<usize>) {
-    let line_start = text[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let line_end = text[end..]
+    let line_start = text
+        .get(..start)
+        .unwrap_or_default()
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let line_end = text
+        .get(end..)
+        .unwrap_or_default()
         .find('\n')
         .map(|i| end + i)
         .unwrap_or(text.len());
     let mut new_text = String::with_capacity(text.len() + 8);
-    new_text.push_str(&text[..line_start]);
+    new_text.push_str(text.get(..line_start).unwrap_or_default());
     let mut added_total = 0;
-    for line in text[line_start..line_end].split_inclusive('\n') {
+    for line in text
+        .get(line_start..line_end)
+        .unwrap_or_default()
+        .split_inclusive('\n')
+    {
         new_text.push_str("> ");
         added_total += 2;
         new_text.push_str(line);
     }
-    new_text.push_str(&text[line_end..]);
+    new_text.push_str(text.get(line_end..).unwrap_or_default());
     // Select the quoted lines (predictable; the user can keep typing).
     (new_text, line_start..line_end + added_total)
 }
@@ -253,9 +264,12 @@ impl<'a> MarkupParser<'a> {
         let mut i = from;
         while i < to {
             let line_start = i == 0 || bytes[i - 1] == b'\n';
-            if top && line_start && self.text[i..to].starts_with("> ") {
+            if top && line_start && self.text.get(i..to).unwrap_or_default().starts_with("> ") {
                 let content_start = i + 2;
-                let line_end = self.text[content_start..to]
+                let line_end = self
+                    .text
+                    .get(content_start..to)
+                    .unwrap_or_default()
                     .find('\n')
                     .map(|k| content_start + k)
                     .unwrap_or(to);
@@ -300,7 +314,7 @@ impl<'a> MarkupParser<'a> {
     /// delimiters first (`**` before `*`, `__` before `_`, ` ``` ` before
     /// `` ` ``).
     fn try_inline(&mut self, i: usize, to: usize) -> Option<usize> {
-        let rest = &self.text[i..to];
+        let rest = self.text.get(i..to).unwrap_or_default();
         // Fenced code block first (may span lines, optional language).
         if let Some(after) = rest.strip_prefix("```") {
             return self.try_fenced(i, after);
@@ -323,14 +337,16 @@ impl<'a> MarkupParser<'a> {
                 }
                 // Inline spans stay on one line (Telegram entities do).
                 let line_end = after_open.find('\n').unwrap_or(after_open.len());
-                let searchable = &after_open[..line_end];
+                let searchable = after_open.get(..line_end).unwrap_or_default();
                 if let Some(close_rel) = searchable.find(open) {
                     let inner_start = i + open.len();
                     let inner_end = inner_start + close_rel;
                     if inner_end > inner_start {
                         let entity_start = self.out16;
                         if kind == FormatKind::Code {
-                            self.push_str(&self.text[inner_start..inner_end]);
+                            self.push_str(
+                                self.text.get(inner_start..inner_end).unwrap_or_default(),
+                            );
                         } else {
                             self.parse_span(inner_start, inner_end, false);
                         }
@@ -353,10 +369,12 @@ impl<'a> MarkupParser<'a> {
     fn try_fenced(&mut self, i: usize, after: &str) -> Option<usize> {
         // Language = first line after the fence (may be empty).
         let first_nl = after.find('\n')?;
-        let language = after[..first_nl].trim().to_string();
+        let language = after.get(..first_nl).unwrap_or_default().trim().to_string();
         let body_start = first_nl + 1;
-        let close_rel = after[body_start..].find("```")?;
-        let inner = &after[body_start..body_start + close_rel];
+        let close_rel = after.get(body_start..).unwrap_or_default().find("```")?;
+        let inner = after
+            .get(body_start..body_start + close_rel)
+            .unwrap_or_default();
         // A fenced block with only whitespace is not formatting.
         if inner.trim().is_empty() {
             return None;
@@ -380,13 +398,13 @@ impl<'a> MarkupParser<'a> {
 
     /// `![emoji](tg://emoji?id=N)` — Telegram's markup for a custom emoji.
     fn try_custom_emoji(&mut self, i: usize, to: usize) -> Option<usize> {
-        let rest = &self.text[i..to];
+        let rest = self.text.get(i..to).unwrap_or_default();
         let after_bang = rest.strip_prefix("![")?;
         let close_bracket = after_bang.find("](")?;
-        let fallback = &after_bang[..close_bracket];
-        let after_paren = &after_bang[close_bracket + 2..];
+        let fallback = after_bang.get(..close_bracket).unwrap_or_default();
+        let after_paren = after_bang.get(close_bracket + 2..).unwrap_or_default();
         let close_paren = after_paren.find(')')?;
-        let url = &after_paren[..close_paren];
+        let url = after_paren.get(..close_paren).unwrap_or_default();
         let id = url.strip_prefix("tg://emoji?id=")?;
         if fallback.is_empty() || id.is_empty() || id.parse::<i64>().is_err() {
             return None;
@@ -406,15 +424,15 @@ impl<'a> MarkupParser<'a> {
     /// `[label](url)`; a `tg://user?id=N` target is a mention of a user
     /// without a username. The label may hold other inline formatting.
     fn try_link(&mut self, i: usize, to: usize) -> Option<usize> {
-        let rest = &self.text[i..to];
+        let rest = self.text.get(i..to).unwrap_or_default();
         let after_bracket = rest.strip_prefix('[')?;
         let close_bracket = after_bracket.find("](")?;
-        let after_paren = &after_bracket[close_bracket + 2..];
+        let after_paren = after_bracket.get(close_bracket + 2..).unwrap_or_default();
         // URL stays on one line.
         let line_end = after_paren.find('\n').unwrap_or(after_paren.len());
-        let close_paren = after_paren[..line_end].find(')')?;
-        let label = &after_bracket[..close_bracket];
-        let url = &after_paren[..close_paren];
+        let close_paren = after_paren.get(..line_end).unwrap_or_default().find(')')?;
+        let label = after_bracket.get(..close_bracket).unwrap_or_default();
+        let url = after_paren.get(..close_paren).unwrap_or_default();
         if label.is_empty() || url.is_empty() {
             return None;
         }
@@ -490,17 +508,21 @@ fn strip_markup(text: &str) -> String {
     let bytes = text.as_bytes();
     while i < bytes.len() {
         let line_start = i == 0 || bytes[i - 1] == b'\n';
-        if line_start && text[i..].starts_with("> ") {
+        if line_start && text.get(i..).unwrap_or_default().starts_with("> ") {
             i += 2;
             continue;
         }
-        let rest = &text[i..];
+        let rest = text.get(i..).unwrap_or_default();
         if let Some(after) = rest.strip_prefix("```")
             && let Some(first_nl) = after.find('\n')
         {
             let body_start = first_nl + 1;
-            if let Some(close_rel) = after[body_start..].find("```") {
-                out.push_str(&strip_markup(&after[body_start..body_start + close_rel]));
+            if let Some(close_rel) = after.get(body_start..).unwrap_or_default().find("```") {
+                out.push_str(&strip_markup(
+                    after
+                        .get(body_start..body_start + close_rel)
+                        .unwrap_or_default(),
+                ));
                 i += 3 + body_start + close_rel + 3;
                 continue;
             }
@@ -509,8 +531,10 @@ fn strip_markup(text: &str) -> String {
         for open in ["**", "__", "~~", "||", "`", "*", "_"] {
             if let Some(after_open) = rest.strip_prefix(open) {
                 let line_end = after_open.find('\n').unwrap_or(after_open.len());
-                if let Some(close_rel) = after_open[..line_end].find(open) {
-                    out.push_str(&strip_markup(&after_open[..close_rel]));
+                if let Some(close_rel) = after_open.get(..line_end).unwrap_or_default().find(open) {
+                    out.push_str(&strip_markup(
+                        after_open.get(..close_rel).unwrap_or_default(),
+                    ));
                     i += open.len() + close_rel + open.len();
                     stripped = true;
                     break;
@@ -524,10 +548,12 @@ fn strip_markup(text: &str) -> String {
         if let Some(after_bracket) = rest.strip_prefix('[')
             && let Some(close_bracket) = after_bracket.find("](")
         {
-            let after_paren = &after_bracket[close_bracket + 2..];
+            let after_paren = after_bracket.get(close_bracket + 2..).unwrap_or_default();
             let line_end = after_paren.find('\n').unwrap_or(after_paren.len());
-            if let Some(close_paren) = after_paren[..line_end].find(')') {
-                out.push_str(&strip_markup(&after_bracket[..close_bracket]));
+            if let Some(close_paren) = after_paren.get(..line_end).unwrap_or_default().find(')') {
+                out.push_str(&strip_markup(
+                    after_bracket.get(..close_bracket).unwrap_or_default(),
+                ));
                 i += 1 + close_bracket + 2 + close_paren + 1;
                 continue;
             }
@@ -569,6 +595,7 @@ pub fn custom_emoji_markup(fallback: &str, custom_emoji_id: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
     use crate::text::{TextEntity, TextEntityKind as K};
 

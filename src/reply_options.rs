@@ -99,13 +99,18 @@ fn push_sentences(line: &str, base16: usize, parts: &mut Vec<QuoteSelection>) {
 }
 
 fn push_part(line: &str, start: usize, end: usize, base16: usize, parts: &mut Vec<QuoteSelection>) {
-    let raw = &line[start..end];
+    let raw = line.get(start..end).unwrap_or_default();
     let lead = raw.len() - raw.trim_start().len();
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.chars().count() > QUOTE_MAX_CHARS {
         return;
     }
-    let position = base16 + line[..start + lead].encode_utf16().count();
+    let position = base16
+        + line
+            .get(..start + lead)
+            .unwrap_or_default()
+            .encode_utf16()
+            .count();
     parts.push(QuoteSelection {
         text: trimmed.to_string(),
         position: position as i32,

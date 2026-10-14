@@ -106,7 +106,11 @@ impl<'a> Paragraph<'a> {
         let levels = self.info.reordered_levels(range.clone());
         let text = self.info.text;
         let mut logical: Vec<(Range<usize>, Level)> = Vec::new();
-        for (i, cluster) in text[range.clone()].grapheme_indices(true) {
+        for (i, cluster) in text
+            .get(range.clone())
+            .unwrap_or_default()
+            .grapheme_indices(true)
+        {
             let start = range.start + i;
             let level = levels[start];
             match logical.last_mut() {
@@ -142,11 +146,12 @@ fn is_rtl_letter(c: char) -> bool {
 /// the first letter (one piece each, last first). A run with no letter at all is cut into
 /// single characters.
 fn split_rtl_run(text: &str, run: Range<usize>) -> Vec<VisualRun> {
-    let slice = &text[run.clone()];
+    let slice = text.get(run.clone()).unwrap_or_default();
     let first = slice.char_indices().find(|&(_, c)| is_rtl_letter(c));
     let single = |start: usize, end: usize| -> Vec<VisualRun> {
         // One piece per grapheme cluster, visually reversed.
-        text[start..end]
+        text.get(start..end)
+            .unwrap_or_default()
             .grapheme_indices(true)
             .map(|(i, g)| VisualRun {
                 range: start + i..start + i + g.len(),
@@ -165,7 +170,7 @@ fn split_rtl_run(text: &str, run: Range<usize>) -> Vec<VisualRun> {
         .unwrap_or((first, ' '));
     let mut core_end = last + last_char.len_utf8();
     // Combining marks belong to the letter before them.
-    for c in slice[core_end..].chars() {
+    for c in slice.get(core_end..).unwrap_or_default().chars() {
         if matches!(bidi_class(c), BidiClass::NSM | BidiClass::BN) {
             core_end += c.len_utf8();
         } else {
@@ -270,7 +275,9 @@ pub(crate) fn clusters_from_glyphs(
 
     let mut clusters: Vec<Cluster> = Vec::with_capacity(by_index.len());
     for (index, left, right) in by_index {
-        let carries_no_advance = text[index..]
+        let carries_no_advance = text
+            .get(index..)
+            .unwrap_or_default()
             .chars()
             .next()
             .is_some_and(|c| matches!(bidi_class(c), BidiClass::NSM | BidiClass::BN));
@@ -383,8 +390,19 @@ impl Fragment {
         let Some(cluster) = self.cluster_at(local) else {
             return if self.rtl { self.width } else { 0. };
         };
-        let chars = self.text[cluster.range.clone()].chars().count().max(1);
-        let before = self.text[cluster.range.start..local].chars().count();
+        let chars = self
+            .text
+            .get(cluster.range.clone())
+            .unwrap_or_default()
+            .chars()
+            .count()
+            .max(1);
+        let before = self
+            .text
+            .get(cluster.range.start..local)
+            .unwrap_or_default()
+            .chars()
+            .count();
         let frac = before as f32 / chars as f32;
         let span = cluster.right - cluster.left;
         if self.rtl {
@@ -642,12 +660,17 @@ impl BidiLine {
             .clusters
             .iter()
             .find(|c| local >= c.left && local <= c.right)?;
-        f.text[cluster.range.clone()].chars().next()
+        f.text
+            .get(cluster.range.clone())
+            .unwrap_or_default()
+            .chars()
+            .next()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
 
     /// Cluster per char, `adv` wide each, laid out for `rtl` (first char at

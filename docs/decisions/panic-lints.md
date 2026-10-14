@@ -70,3 +70,34 @@ phases C (140) and D (621).
 - The Windows core build has five older, unrelated clippy warnings
   (`battery_saving.rs`, `local_path.rs`, `spell_win.rs`, `winreg.rs`); no CI
   job runs clippy on Windows, so they are left for a separate change.
+
+## Phase C: `string_slice` and `unchecked_time_subtraction`
+
+Branch `panic-lints-c`. Both lints are now `deny` in `[workspace.lints.clippy]`.
+
+- String slices: about 120 production sites (the `composer` markup parser,
+  `spellcheck`, `suggest`, `text_split`, `composer_doc`, link and deep-link
+  parsing, `emoji_replace`, UI helpers) went from `text[a..b]` to
+  `text.get(a..b).unwrap_or_default()`. For offsets that come from `find` or
+  `char_indices` on the same string the result is identical. For an offset
+  that is not a char boundary the code now sees an empty slice instead of
+  panicking. `stat_chart` colour parsing and the webview-host hex id decode
+  use `get` with `and_then` / `?` instead. No `#[expect]` was needed.
+- Time subtraction: `Instant::now() - d` became `checked_sub(..)` with
+  `unwrap_or_else(Instant::now)`, and the history jump fade uses
+  `Duration::saturating_sub`.
+- Test code has no clippy allowance for these lints, so test modules and
+  test-only files that slice known literals carry
+  `#![allow(clippy::string_slice, reason = ..)]`.
+- Vendored: `third_party/gpui-base/src/input/editor/display_map/bidi.rs`
+  compiles into the quill crate via `#[path]`; its production slices got the
+  same `get` treatment and its test module the allow.
+- Two leftovers from phase B surfaced under `demo-capture`:
+  `src/ui/sticker_set_box/mod.rs` still used `cfg(all(test, ..))` (split now).
+- A Windows-only slice in `src/ui/clipboard_files.rs` was fixed by hand; it
+  does not compile on macOS.
+
+Verified: UI, `--no-default-features`, `demo-capture,frame-profiler` clippy
+all targets, Windows and Linux core cross clippy (no hits), gate.sh. The
+Windows/Linux UI-only files were grepped by hand for slices and `Instant`
+subtraction.

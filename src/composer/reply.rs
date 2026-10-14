@@ -122,7 +122,13 @@ pub fn quote_position(full_text: &str, quote: &str) -> Option<i32> {
         return None;
     }
     let byte_offset = full_text.find(quote)?;
-    Some(full_text[..byte_offset].encode_utf16().count() as i32)
+    Some(
+        full_text
+            .get(..byte_offset)
+            .unwrap_or_default()
+            .encode_utf16()
+            .count() as i32,
+    )
 }
 
 /// tdesktop `FieldHeader` Escape / `replyCancelled`: drop the reply header
