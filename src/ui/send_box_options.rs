@@ -104,7 +104,8 @@ impl QuillApp {
 
     /// Read the sound track of the new tray videos in the background; a
     /// video without one becomes a GIF when it lands (tdesktop
-    /// `modifications.gif = !hasAudio`). Sending waits for the reads.
+    /// `modifications.gif = !hasAudio`). Sending waits for the reads. Also
+    /// starts the thumbnails of pictures sent as files.
     pub(super) fn check_tray_videos(&mut self, cx: &mut Context<Self>) {
         let paths: Vec<std::path::PathBuf> = self
             .composer_ui
@@ -150,6 +151,7 @@ impl QuillApp {
             })
             .detach();
         }
+        self.prepare_tray_file_thumbnails(cx);
     }
 
     /// Videos in the tray are still being read.

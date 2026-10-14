@@ -6,8 +6,9 @@
 //! machinery (`usable_path` + `sandboxed_display_path`), and triggers
 //! `downloadFile` when nothing viewable is local yet.
 //!
-//! Scope: photos, videos and animations (GIFs). Documents, stickers,
-//! voice notes, and audio never open the viewer. Spoiler media opens once
+//! Scope: photos, videos and animations (GIFs), and files (`files`): a
+//! picture sent as a file shows like a photo, other files as a card.
+//! Stickers, voice notes, and audio never open the viewer. Spoiler media opens once
 //! revealed. Secret media is left out of the chat's list, so paging never
 //! uncovers it; a photo or video with a self-destruct timer opens alone
 //! when it is clicked (`timed_viewer_item`), as in Telegram Desktop.
@@ -19,6 +20,7 @@ use crate::text::TextEntity;
 use crate::voice::format_voice_duration;
 
 mod controls;
+mod files;
 mod items;
 mod quality;
 mod save;
@@ -29,6 +31,10 @@ pub use controls::{
     VIEWER_FADE_MS, VIEWER_SEEK_LONG_SECS, VIEWER_SEEK_SECS, VIEWER_SHOW_MS, VIEWER_WAIT_HIDE_MS,
     ViewerKeyAction, ViewerKeyMods, ViewerVideoStart, controls_hide_wait_ms, controls_should_hide,
     decide_viewer_video_start, seek_target_secs, viewer_delete_gate, viewer_key_action,
+};
+pub use files::{
+    PICTURE_FILE_AUTO_DOWNLOAD_MAX, READ_BYTES_LIMIT, collect_file_items, file_viewer_item,
+    is_image_file, opens_as_picture, picture_format_label, shows_as_photo,
 };
 pub use items::{
     collect_media_items, poll_option_viewer_item, profile_photo_items, timed_viewer_item,
@@ -54,6 +60,12 @@ pub enum MediaViewerKind {
     /// (tdesktop streams it with `options.loop` and no playback controls,
     /// media_view_overlay_widget.cpp:5614 and :1491).
     Animation,
+    /// A picture sent as a file: shown, zoomed, turned and saved like a
+    /// photo, but listed with the chat's files (tdesktop "File 3 of 7").
+    ImageFile,
+    /// Any other file in that list: a card with its name, size and a
+    /// download / open action (tdesktop's document bubble).
+    File,
 }
 
 impl MediaViewerKind {
@@ -62,7 +74,13 @@ impl MediaViewerKind {
             MediaViewerKind::Photo => "Photo",
             MediaViewerKind::Video => "Video",
             MediaViewerKind::Animation => "GIF",
+            MediaViewerKind::ImageFile | MediaViewerKind::File => "File",
         }
+    }
+
+    /// A still picture: zoom, rotate, copy and save act on it.
+    pub fn is_picture(self) -> bool {
+        matches!(self, MediaViewerKind::Photo | MediaViewerKind::ImageFile)
     }
 
     /// Has a clip to play (video or animation).
@@ -139,6 +157,8 @@ pub struct MediaViewerItem {
     /// Video only: the renditions the quality picker offers, tallest
     /// first. Empty when the video has a single quality.
     pub quality_options: Vec<VideoQualityOption>,
+    /// Files only: the document's name (the card and the save name).
+    pub file_name: Option<String>,
 }
 
 /// Viewer state: the open chat's media list plus the current position.

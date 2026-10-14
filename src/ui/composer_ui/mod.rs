@@ -646,11 +646,17 @@ impl QuillApp {
                 attachment.kind,
                 AttachmentKind::Photo | AttachmentKind::Video
             );
-            // An image sent as a file still previews as the picture.
+            // An image sent as a file still previews as the picture; a
+            // HEIC, AVIF or other picture the tile can't read shows the
+            // thumbnail made for sending (`send_box_thumbnails.rs`).
             let image_file = attachment.kind == AttachmentKind::Document
                 && quill::composer::media_kind_for(&attachment.path) == Some(AttachmentKind::Photo);
-            let media = match attachment.kind {
-                AttachmentKind::Photo => AttachmentMedia::new().src(attachment.path.clone()),
+            let file_thumbnail = (attachment.kind == AttachmentKind::Document)
+                .then_some(attachment.extras.file_thumbnail.as_ref())
+                .flatten();
+            let media = match (attachment.kind, file_thumbnail) {
+                (AttachmentKind::Photo, _) => AttachmentMedia::new().src(attachment.path.clone()),
+                (_, Some(thumb)) => AttachmentMedia::new().src(thumb.path.clone()),
                 _ if image_file => AttachmentMedia::new().src(attachment.path.clone()),
                 _ => AttachmentMedia::new().child(Icon::new(icon)),
             };

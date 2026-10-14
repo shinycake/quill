@@ -31,6 +31,7 @@
 //! share textures; evicting oldest-first empties whole textures rather
 //! than punching holes in all of them.
 
+use super::image_decode::{self, DecodeSize};
 use gpui_kit::*;
 use quill::telegram::envelope::MiniThumbnail;
 use smallvec::SmallVec;
@@ -403,6 +404,15 @@ pub(super) fn sized_media(
     })
 }
 
+/// A picture file at its own size (within `MAX_TEXTURE_EDGE`), for the
+/// media viewer: zooming in needs every pixel. Decoded through
+/// `image_decode`, so HEIC, AVIF, JPEG XL and colour profiles work.
+pub(super) fn full_picture(path: &Path) -> ImageSource {
+    sized_image_with(SizedSource::Path(Arc::from(path)), |_| {
+        DecodeSize::FULL.short_edge
+    })
+}
+
 /// Logical size the picture's shorter side is drawn at in the frame.
 /// Without `dims` the bound over every possible aspect.
 fn shorter_side_in_frame((fw, fh): (f32, f32), dims: Option<(i32, i32)>, fit: Fit) -> f32 {
@@ -450,7 +460,12 @@ fn pick_variant(wanted: u32, loaded: &[u32]) -> VariantPick {
     let reuse = loaded
         .iter()
         .copied()
-        .filter(|&edge| edge >= wanted && edge * REUSE_UP_TO.1 <= wanted * REUSE_UP_TO.0)
+        // u64: the full-size key (`u32::MAX`) must not overflow.
+        .filter(|&edge| {
+            edge >= wanted
+                && u64::from(edge) * u64::from(REUSE_UP_TO.1)
+                    <= u64::from(wanted) * u64::from(REUSE_UP_TO.0)
+        })
         .min();
     if let Some(edge) = reuse {
         return VariantPick::Reuse(edge);
@@ -463,51 +478,15 @@ fn pick_variant(wanted: u32, loaded: &[u32]) -> VariantPick {
     )
 }
 
-/// The decoded size for an image of `size` whose shorter side should be at
-/// most `edge` (aspect kept; never enlarged).
-fn scaled_size((width, height): (u32, u32), edge: u32) -> (u32, u32) {
-    let short = width.min(height);
-    if short <= edge || short == 0 {
-        return (width, height);
-    }
-    let scale = f64::from(edge) / f64::from(short);
-    let fit = |side: u32| ((f64::from(side) * scale).round() as u32).max(1);
-    (fit(width), fit(height))
-}
-
 fn decode_sized(key: &SizedKey) -> Result<Arc<RenderImage>, ImageCacheError> {
-    let read;
-    let bytes: &[u8] = match &key.source {
-        SizedSource::Path(path) => {
-            read = std::fs::read(path).map_err(|err| ImageCacheError::Io(Arc::new(err)))?;
-            &read
-        }
-        SizedSource::Mini(mini) => &mini.data,
+    let size = DecodeSize {
+        short_edge: key.edge,
     };
-    let decoded =
-        image::load_from_memory(bytes).map_err(|err| ImageCacheError::Image(Arc::new(err)))?;
-    let filter = image::imageops::FilterType::Triangle;
-    let mut image = if decoded.color().has_alpha() {
-        let image = decoded.into_rgba8();
-        let (width, height) = scaled_size(image.dimensions(), key.edge);
-        if (width, height) == image.dimensions() {
-            image
-        } else {
-            image::imageops::resize(&image, width, height, filter)
-        }
-    } else {
-        // Photos: shrink the three-channel picture and widen only the
-        // small result (an RGBA copy of a 2560 px photo is 20 MB, held
-        // by every decode in flight).
-        let image = decoded.into_rgb8();
-        let (width, height) = scaled_size(image.dimensions(), key.edge);
-        let image = if (width, height) == image.dimensions() {
-            image
-        } else {
-            image::imageops::resize(&image, width, height, filter)
-        };
-        image::DynamicImage::ImageRgb8(image).into_rgba8()
-    };
+    let mut image = match &key.source {
+        SizedSource::Path(path) => image_decode::decode_file(path, size),
+        SizedSource::Mini(mini) => image_decode::decode_image(&mini.data, None, size),
+    }
+    .map_err(|err| ImageCacheError::Asset(err.to_string().into()))?;
     // GPUI's sprites are BGRA.
     for pixel in image.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
@@ -954,7 +933,7 @@ impl Element for CacheScope {
 mod tests {
     use super::{
         Budget, IDLE_AFTER, begin_frame, idle_trim_due, may_be_visible, newly_shown, note_activity,
-        plan_eviction, scaled_size, slice_rendered, slice_shown,
+        plan_eviction, slice_rendered, slice_shown,
     };
     use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
     use gpui_kit::EntityId;
@@ -1058,15 +1037,6 @@ mod tests {
     }
 
     #[test]
-    fn sized_decode_keeps_aspect_and_never_enlarges() {
-        assert_eq!(scaled_size((160, 160), 92), (92, 92));
-        assert_eq!(scaled_size((160, 160), 200), (160, 160));
-        assert_eq!(scaled_size((1280, 960), 36), (48, 36));
-        assert_eq!(scaled_size((40, 30), 36), (40, 30));
-        assert_eq!(scaled_size((0, 10), 5), (0, 10));
-    }
-
-    #[test]
     fn edges_round_up_to_steps() {
         assert_eq!(bucket_edge(1), 32);
         assert_eq!(bucket_edge(32), 32);
@@ -1109,6 +1079,11 @@ mod tests {
         );
         assert_eq!(pick_variant(256, &[768]), VariantPick::Decode(Some(768)));
         assert_eq!(pick_variant(768, &[320]), VariantPick::Decode(Some(320)));
+        // The full-size key does not overflow.
+        assert_eq!(
+            pick_variant(u32::MAX, &[u32::MAX]),
+            VariantPick::Reuse(u32::MAX)
+        );
     }
 
     #[test]

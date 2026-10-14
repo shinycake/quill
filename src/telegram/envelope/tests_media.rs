@@ -67,6 +67,36 @@ fn message_document_parses_name_mime_and_file() {
 }
 
 #[test]
+fn message_document_keeps_a_picture_thumbnail_only() {
+    let file = local_file_json(8, "", false, true);
+    let thumb = local_file_json(9, "", false, true);
+    let document = |format: &str| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":3,"chat_id":4,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"IMG_1.HEIC","mime_type":"image/heic","minithumbnail":{{"@type":"minithumbnail","width":40,"height":30,"data":"AAEC"}},"thumbnail":{{"@type":"thumbnail","format":{{"@type":"{format}"}},"width":320,"height":240,"file":{thumb}}},"document":{file}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+        )
+    };
+    let parse = |json: &str| match parse_envelope(json).unwrap().payload {
+        EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => message,
+        other => panic!("{other:?}"),
+    };
+    let message = parse(&document("thumbnailFormatJpeg"));
+    let MessageContent::Document(doc) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    let thumbnail = doc.thumbnail.as_ref().expect("a thumbnail");
+    assert_eq!((thumbnail.width, thumbnail.height), (320, 240));
+    assert_eq!(thumbnail.file_id.0, 9);
+    assert!(doc.minithumbnail.is_some());
+    assert!(message.files.iter().any(|f| f.id.0 == 9));
+    // A thumbnail Quill can't draw (a TGS sticker preview) is not kept.
+    let message = parse(&document("thumbnailFormatTgs"));
+    let MessageContent::Document(doc) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert!(doc.thumbnail.is_none());
+}
+
+#[test]
 fn update_file_and_file_response_are_typed() {
     let file = local_file_json(4, "/tmp/done.bin", true, true);
     let update = parse_envelope(&format!(r#"{{"@type":"updateFile","file":{file}}}"#)).unwrap();

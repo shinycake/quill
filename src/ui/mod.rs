@@ -59,6 +59,7 @@ mod group_call_state;
 mod history_a11y;
 mod history_state;
 mod image_budget;
+mod image_decode;
 mod inline_video;
 pub(crate) mod interface_zoom;
 mod links_state;
@@ -341,6 +342,7 @@ mod send_box_state;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod send_box_tests;
+mod send_box_thumbnails;
 mod send_button_ui;
 mod send_effects;
 mod send_fly;

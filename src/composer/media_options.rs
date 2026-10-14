@@ -80,6 +80,37 @@ pub struct AttachmentExtras {
     /// (tdesktop `sendsVideoAsGif`): such a video leaves an album and goes
     /// out alone. A video that never had sound stays in the album.
     pub sound_removed: bool,
+    /// The thumbnail Quill made for a picture sent as a file
+    /// (`inputDocument.thumbnail`; tdesktop `FinalizeFileThumbnail`).
+    pub file_thumbnail: Option<FileThumbnail>,
+}
+
+/// A JPEG thumbnail written next to the media cache for upload with a file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileThumbnail {
+    pub path: PathBuf,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// tdesktop `kThumbnailSize`: the long side of a file's thumbnail.
+pub const FILE_THUMBNAIL_SIDE: u32 = 320;
+
+/// tdesktop `FileThumbnailUploadRequired`: Telegram makes the thumbnail
+/// itself only for small JPEG, GIF, PNG and WebP files (and MP4 videos), so
+/// any other picture sent as a file uploads one Quill made.
+pub fn file_thumbnail_upload_required(path: &Path, size: u64) -> bool {
+    const SERVER_THUMBNAIL_MAX: u64 = 5 * 1024 * 1024;
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    size > SERVER_THUMBNAIL_MAX
+        || !matches!(
+            extension.as_str(),
+            "jpg" | "jpeg" | "jfif" | "gif" | "png" | "webp" | "mp4"
+        )
 }
 
 /// A `.gif` file: it is sent as an animation, not a video or a file.
@@ -235,6 +266,19 @@ mod tests {
             spoiler: false,
             extras: AttachmentExtras::default(),
         }
+    }
+
+    #[test]
+    fn file_thumbnails_upload_where_telegram_makes_none() {
+        let small = 1024;
+        assert!(!file_thumbnail_upload_required(Path::new("a.JPG"), small));
+        assert!(!file_thumbnail_upload_required(Path::new("a.webp"), small));
+        assert!(file_thumbnail_upload_required(Path::new("a.heic"), small));
+        assert!(file_thumbnail_upload_required(Path::new("a.avif"), small));
+        assert!(file_thumbnail_upload_required(
+            Path::new("a.png"),
+            6 * 1024 * 1024
+        ));
     }
 
     #[test]

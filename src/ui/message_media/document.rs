@@ -78,6 +78,40 @@ pub(in crate::ui) fn action_disc(
         .child(Icon::new(icon).size(px(20.)).text_color(fg))
 }
 
+/// Where a document row sits: a chat message (Open resolves like
+/// tdesktop's `ResolveDocument`, so a picture opens in the viewer) or a
+/// sponsored message (downloads report to the sponsor's chat).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::ui) enum DocOrigin {
+    Message(ChatId, MessageId),
+    Sponsored(ChatId, i64),
+}
+
+impl DocOrigin {
+    pub(in crate::ui) fn sponsored(self) -> Option<(ChatId, i64)> {
+        match self {
+            Self::Sponsored(chat, id) => Some((chat, id)),
+            Self::Message(..) => None,
+        }
+    }
+
+    /// Open a downloaded document: in the viewer when it is a picture
+    /// Quill can show, else in another app.
+    pub(in crate::ui) fn open(
+        self,
+        file_id: FileId,
+        this: &mut QuillApp,
+        cx: &mut Context<QuillApp>,
+    ) {
+        match self {
+            Self::Message(chat_id, message_id) => {
+                this.open_document(chat_id, message_id, file_id, cx)
+            }
+            Self::Sponsored(..) => this.open_downloaded_file(file_id, cx),
+        }
+    }
+}
+
 /// A document row (tdesktop `HistoryDocument`): a round action disc —
 /// download, progress ring with cancel, open, or retry — then the name and
 /// a compact meta line ("450 KB · PDF", "1.2 MB of 3.4 MB") carrying the
@@ -91,15 +125,31 @@ pub(in crate::ui) fn document_chip(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     failed: &std::collections::HashSet<i32>,
+    media_roots: &[PathBuf],
     // Slice media-downloads-pause: `None` when the file isn't a pausable
     // (user-initiated, listed) download; `Some(paused)` otherwise.
     paused: Option<bool>,
-    sponsored: Option<(ChatId, i64)>,
+    origin: DocOrigin,
     // The plain (bubble-less) look: the row takes Telegram Desktop's
     // bubble widths whole, with no padding to leave out.
     plain: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    if doc.thumbnail.is_some() {
+        return super::document_thumbed::thumbed_document_chip(
+            row_id,
+            doc,
+            outgoing,
+            files,
+            downloading,
+            failed,
+            media_roots,
+            origin,
+            plain,
+            cx,
+        );
+    }
+    let sponsored = origin.sponsored();
     let file_id = doc.file_id;
     let file = files.get(&file_id.0);
     let ready = file.and_then(|f| f.usable_path()).is_some();
@@ -150,7 +200,7 @@ pub(in crate::ui) fn document_chip(
     };
     let primary_action = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
         if ready {
-            this.open_downloaded_file(file_id, cx);
+            origin.open(file_id, this, cx);
         } else if downloading_now {
             this.cancel_media_download(file_id, cx);
         } else {

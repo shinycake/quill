@@ -1,0 +1,4 @@
+# Pictures sent as files: thumbed rows, viewer, HEIC/AVIF/JXL, send thumbnails
+parity:media-image-files
+parity:media-image-formats
+parity:media-image-file-thumbnail-send

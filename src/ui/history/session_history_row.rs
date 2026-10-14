@@ -89,14 +89,9 @@ pub(in crate::ui) fn session_history_row(
             ),
         );
     }
-    // Slice G9: community service rows (`messageChatAddedToCommunity`,
-    // `messageChatRemovedFromCommunity`, `messageChatJoinFromCommunity`,
-    // schema 1.8.67 lines 5353–5363) — centered neutral notices, no
-    // bubble, no reply/react/edit/delete controls. Wording is TGX
-    // verbatim (strings.xml: ActionChatAddedToCommunity{,Unknown} /
-    // ActionChatRemovedFromCommunity / group_user_join_from_community*).
-    // The community name resolves from the session's `updateCommunity`
-    // cache; unknown communities fall back to the nameless TGX forms.
+    // Community service rows (`messageChatAddedToCommunity` and kin):
+    // centered notices in TGX's wording; the name comes from the
+    // `updateCommunity` cache, or TGX's nameless forms.
     let community_name = |community_id: i64| {
         session.and_then(|s| {
             s.groups
@@ -317,12 +312,13 @@ pub(in crate::ui) fn session_history_row(
     // free of the sender name, a caption above/below, badges or reactions.
     let corners = {
         let media_led = header.is_none()
-            && matches!(
-                effective_content(&message.content, message.ephemeral.as_ref()),
-                MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_)
-            );
+            && leads_with_media(effective_content(
+                &message.content,
+                message.ephemeral.as_ref(),
+            ));
         let has_caption = match &message.content {
             MessageContent::Photo(photo) => !photo.caption.is_empty(),
+            MessageContent::Document(doc) => !doc.caption.is_empty(),
             MessageContent::Video(video) => !video.caption.is_empty(),
             MessageContent::Animation(animation) => !animation.caption.is_empty(),
             _ => false,
@@ -386,6 +382,9 @@ pub(in crate::ui) fn session_history_row(
                 cx,
             ))
         }
+        MessageContent::Document(doc) if quill::media_viewer::shows_as_photo(doc) => {
+            Some(picture_file_attachment(message.id.0 as u64, doc, files, downloading, media_roots, (message.chat_id, message.id), (frame_w, frame_h), corners, cx))
+        }
         MessageContent::Document(doc) => Some(document_chip(
             message.id.0 as u64,
             doc,
@@ -393,12 +392,12 @@ pub(in crate::ui) fn session_history_row(
             files,
             downloading,
             failed,
-            // Slice media-downloads-pause: the pause toggle only appears
-            // for user-initiated (listed) downloads.
+            media_roots,
+            // The pause toggle is for user-initiated (listed) downloads.
             session
                 .filter(|s| s.media.user_downloads.contains(&doc.file_id.0))
                 .map(|s| s.media.paused_downloads.contains(&doc.file_id.0)),
-            None,
+            DocOrigin::Message(message.chat_id, message.id),
             look.plain,
             cx,
         )),
@@ -586,12 +585,9 @@ pub(in crate::ui) fn session_history_row(
             })
     });
     let keyboard = inline_keyboard(message, fast_buttons, cx);
-    // Phase B3: self-destruct timer badge (`message.self_destruct_type` /
-    // `message.self_destruct_in`, schema 1.8.67 lines 3146–3147). The
-    // countdown decays locally against `unix_ms_now()` (same pattern as
-    // the Phase A1 slow-mode countdown); TDLib removes the row via
-    // `updateDeleteMessages` when the timer fires. The 1-second render
-    // tick (see `ensure_self_destruct_tick`) keeps this fresh.
+    // Self-destruct badge: counts down locally against `unix_ms_now()` on
+    // the 1-second tick (`ensure_self_destruct_tick`); TDLib deletes the
+    // row when the timer fires.
     let outgoing = message.is_outgoing;
     let self_destruct_badge = message.self_destruct_badge(unix_ms_now()).map(|label| {
         div()
@@ -826,10 +822,10 @@ pub(in crate::ui) fn session_history_row(
     // picture sits on a thin inset and a caption gets its own padding.
     let media_led = header.is_none()
         && extra_media.is_some()
-        && matches!(
-            effective_content(&message.content, message.ephemeral.as_ref()),
-            MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_)
-        );
+        && leads_with_media(effective_content(
+            &message.content,
+            message.ephemeral.as_ref(),
+        ));
     // Media with nothing under it shows its time on the picture.
     let footer_overlay = media_led && caption_below_el.is_none() && reserve_footer;
     let caption_below_el = caption_below_el.map(|caption| {

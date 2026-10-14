@@ -313,6 +313,15 @@ impl Session {
                         ids.push(file_id);
                     }
                 }
+                // The picture of a thumbed file row (image files and the
+                // other documents that carry a thumbnail).
+                MessageContent::Document(doc) => {
+                    if let Some(thumb) = &doc.thumbnail
+                        && self.should_download(thumb.file_id)
+                    {
+                        ids.push(thumb.file_id);
+                    }
+                }
                 // The pictures beside poll options, and the custom emoji in
                 // their text.
                 MessageContent::Poll(poll) => {
@@ -494,6 +503,14 @@ impl Session {
                     if let Some(size) = photo.largest_size() {
                         push(AUTO_DOWNLOAD_PHOTO, size.file_id, &mut ids);
                     }
+                }
+                // A picture file that shows as a photo loads like one.
+                MessageContent::Document(doc)
+                    if crate::media_viewer::shows_as_photo(doc)
+                        && (1..=crate::media_viewer::PICTURE_FILE_AUTO_DOWNLOAD_MAX)
+                            .contains(&doc.size) =>
+                {
+                    push(AUTO_DOWNLOAD_PHOTO, doc.file_id, &mut ids);
                 }
                 MessageContent::Document(doc) => {
                     push(AUTO_DOWNLOAD_FILE, doc.file_id, &mut ids);

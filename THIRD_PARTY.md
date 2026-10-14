@@ -50,6 +50,11 @@ that offer a GPL license only as one option (for example `self_cell`,
 | quill-qr-scanner (macOS helper) | MIT | macOS | Quill's own code, `native/qr-scanner.m`. |
 | quillvideo shim | MIT | Linux, Windows | Quill's own code, `native/quillvideo`. |
 
+Not shipped: on Linux (and on macOS when ImageIO can't read a file), Quill
+opens HEIC and AVIF pictures with the system's libheif (LGPL-3.0) if it is
+installed, loading it at run time (`src/ui/image_decode/libheif.rs`). Quill
+neither links nor distributes it. Windows uses the system's WIC codecs.
+
 Every GitHub release also carries the corresponding source of the LGPL
 components above as `quill-source-*` archives (FFmpeg as Quill builds it,
 ntgcalls at its tag, and the FFmpeg and GLib releases ntgcalls links), with

@@ -110,9 +110,28 @@ pub(in crate::ui) fn single_media_frame(
             animation.height,
             caption_width,
         ),
+        // A picture sent as a file is framed like the photo it shows.
+        MessageContent::Document(doc) if quill::media_viewer::shows_as_photo(doc) => {
+            let (width, height) = doc
+                .thumbnail
+                .as_ref()
+                .map_or((0, 0), |thumb| (thumb.width, thumb.height));
+            media_frame_for(MediaFrameKind::Photo, width, height, caption_width)
+        }
         _ => return None,
     };
     Some(frame)
+}
+
+/// Content whose picture leads the bubble: a photo, video or GIF, or a
+/// picture file shown as a photo.
+pub(in crate::ui) fn leads_with_media(content: &quill::telegram::envelope::MessageContent) -> bool {
+    use quill::telegram::envelope::MessageContent;
+    match content {
+        MessageContent::Photo(_) | MessageContent::Video(_) | MessageContent::Animation(_) => true,
+        MessageContent::Document(doc) => quill::media_viewer::shows_as_photo(doc),
+        _ => false,
+    }
 }
 
 /// Hover group for a media frame: the pause disc shows only on hover

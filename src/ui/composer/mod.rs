@@ -119,6 +119,13 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    // A picture sent as a file is still getting its thumbnail.
+                    if self.tray_thumbnails_pending() {
+                        self.connection.status_note =
+                            "preparing the file… send again in a moment".into();
+                        cx.notify();
+                        return;
+                    }
                     let attachments = self.composer_ui.pending_attachments.clone();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.
@@ -748,7 +755,10 @@ impl QuillApp {
         if index >= self.composer_ui.pending_attachments.len() {
             return;
         }
-        self.composer_ui.pending_attachments.remove(index);
+        let removed = self.composer_ui.pending_attachments.remove(index);
+        // Added again later, the picture gets its thumbnail again.
+        self.composer_ui.send_box.thumbnailed.remove(&removed.path);
+        self.composer_ui.send_box.thumbnailing.remove(&removed.path);
         if self.composer_ui.pending_attachments.is_empty() {
             self.clear_attachment(cx);
         } else {
