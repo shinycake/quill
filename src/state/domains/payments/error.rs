@@ -155,6 +155,9 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::TonWallet(purpose))) => {
                 self.apply_ton_wallet_error(err, purpose, pending.and_then(|p| p.user_id))
             }
+            Some(RequestPurpose::Payments(PaymentsPurpose::Earn(purpose))) => {
+                self.apply_earn_error(err, purpose)
+            }
             _ => {}
         }
     }

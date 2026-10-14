@@ -52,6 +52,7 @@ pub mod deep_link_inbox;
 pub mod deep_link_types;
 pub mod diagnostics;
 pub mod drop_modes;
+pub mod earn;
 pub mod emoji;
 pub mod emoji_catalog;
 pub mod emoji_interaction;

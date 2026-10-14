@@ -82,7 +82,11 @@ pub(super) fn status_note_is_toast(note: &str) -> bool {
         "limit",
         "will send when",
     ];
-    const CONFIRMATION: [&str; 7] = [
+    const CONFIRMATION: [&str; 12] = [
+        "affiliate program",
+        "too small",
+        "wrong",
+        "diamond",
         "copied",
         "saved to",
         "exported",
@@ -90,6 +94,7 @@ pub(super) fn status_note_is_toast(note: &str) -> bool {
         "link",
         "hold ",
         "archived",
+        "you are rich",
     ];
     FAILURE
         .iter()

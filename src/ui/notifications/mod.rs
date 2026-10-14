@@ -640,6 +640,7 @@ impl QuillApp {
             | self.drain_folder_limit(cx)
             | self.drain_chat_look(cx)
             | self.drain_wallpaper_preview(cx)
+            | self.drain_earn(cx)
         {
             progressed = true;
         }

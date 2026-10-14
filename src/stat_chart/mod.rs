@@ -5,6 +5,7 @@
 //! `chart_rulers_data.cpp`, `view/*`); the drawing itself lives in the UI.
 
 mod axis;
+mod currency;
 mod format;
 mod pie;
 mod range;
@@ -12,6 +13,7 @@ mod slots;
 pub(crate) mod xlsx;
 
 pub use axis::*;
+pub use currency::*;
 pub use format::*;
 pub use pie::*;
 pub use range::*;
@@ -142,6 +144,8 @@ pub struct StatChart {
     pub week_format: bool,
     pub min: i64,
     pub max: i64,
+    /// The currency the `yTickFormatter` names (revenue graphs).
+    pub currency: ChartCurrency,
 }
 
 /// Why a graph's JSON could not be used.
@@ -252,6 +256,7 @@ pub fn parse_chart(json: &str) -> Result<StatChart, ChartError> {
             .is_some_and(|f| f.contains("'week'")),
         min,
         max,
+        currency: currency_of(root),
     })
 }
 

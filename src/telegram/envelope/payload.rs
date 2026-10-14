@@ -26,6 +26,8 @@ pub(crate) fn parse_supergroup_full_admin(info: Option<&Value>) -> SupergroupFul
         has_paid_media_allowed: flag("has_paid_media_allowed"),
         can_have_sponsored_messages: flag("can_have_sponsored_messages"),
         can_enable_paid_messages: flag("can_enable_paid_messages"),
+        can_get_revenue_statistics: flag("can_get_revenue_statistics"),
+        can_get_star_revenue_statistics: flag("can_get_star_revenue_statistics"),
         outgoing_paid_message_star_count: info
             .and_then(|info| info.get("outgoing_paid_message_star_count"))
             .and_then(Value::as_i64)

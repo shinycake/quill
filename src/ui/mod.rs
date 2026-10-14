@@ -44,6 +44,8 @@ mod connection_state;
 pub(crate) mod crash_notice;
 mod demo_state;
 mod dialogs_state;
+mod earn;
+mod earn_state;
 mod editor_art;
 mod esc_stack;
 mod ffmpeg_video;

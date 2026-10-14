@@ -66,6 +66,15 @@ impl QuillApp {
                 .is_some_and(|info| info.can_get_statistics),
             _ => false,
         });
+        let can_view_revenue = chat.is_some_and(|c| match c.kind {
+            ChatKind::Supergroup { supergroup_id, .. } => session
+                .and_then(|s| s.supergroup_full_info(supergroup_id))
+                .is_some_and(|info| {
+                    info.admin.can_get_revenue_statistics
+                        || info.admin.can_get_star_revenue_statistics
+                }),
+            _ => false,
+        });
         let private_user = chat_id.and_then(|id| session?.private_chat_user_id(id));
         let entries = chat
             .map(|c| {
@@ -81,6 +90,7 @@ impl QuillApp {
                     polls_allowed: quill::poll::chat_allows_polls(c.permissions.as_ref()),
                     can_be_reported: c.can_be_reported && live,
                     can_get_statistics: supergroup_stats,
+                    can_view_revenue,
                     exportable,
                     has_view_toggle: view_toggle.is_some(),
                     can_create_topic: live
@@ -155,6 +165,14 @@ impl QuillApp {
             HeaderEntry::Statistics => {
                 self.open_info_panel_target(InfoPanelTarget::Statistics(chat_id.0), window, cx);
             }
+            HeaderEntry::Monetization => self.open_earn(
+                quill::earn::EarnPanel::Revenue {
+                    peer: quill::earn::EarnPeer::Chat(chat_id.0),
+                    screen: quill::earn::EarnScreen::Monetization,
+                },
+                window,
+                cx,
+            ),
             HeaderEntry::CreatePoll => self.open_poll_dialog(window, cx),
             HeaderEntry::Wallpaper => self.open_chat_look_dialog(chat_id.0, cx),
             HeaderEntry::Report => self.open_message_report(chat_id, Vec::new(), cx),
@@ -222,6 +240,7 @@ fn entry_label(
         HeaderEntry::Folders => ("Add to folder", Some(N::ChatFolders)),
         HeaderEntry::SharedMedia => ("Shared media", Some(N::SharedMedia)),
         HeaderEntry::Statistics => ("Statistics", None),
+        HeaderEntry::Monetization => ("Monetization", None),
         HeaderEntry::AutoDelete => ("Auto-Delete", None),
         HeaderEntry::ReceivedGifts => ("Received gifts", Some(N::ChatGifts)),
         HeaderEntry::Gift => ("Send a gift", Some(N::SendGift)),

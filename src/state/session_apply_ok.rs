@@ -21,6 +21,7 @@ impl Session {
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
         self.apply_gift_manage_ok(pending);
+        self.apply_earn_ok(pending);
         self.apply_boost_settings_ok(pending);
         self.apply_web_app_ok(pending);
         self.apply_owned_bots_ok(pending);

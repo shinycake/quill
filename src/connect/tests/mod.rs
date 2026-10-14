@@ -22,6 +22,7 @@ mod deep_link_routing;
 mod deep_links;
 mod drafts_everywhere;
 mod drafts_polls;
+mod earn;
 mod email_login;
 mod emoji_interaction;
 mod emoji_sets;

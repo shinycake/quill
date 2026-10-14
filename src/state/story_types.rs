@@ -122,4 +122,6 @@ pub enum InfoPanelTarget {
     /// `getCommunityFullInfo` fetch fires on open; name edits go
     /// through `TextPromptKind::CommunityName`.
     Community(i64),
+    /// Revenue and affiliate pages (`crate::earn`).
+    Earn(crate::earn::EarnPanel),
 }

@@ -69,6 +69,32 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The JSON of `graph` of `chat_id`: at once for a ready graph,
+    /// once loaded for an async one (asked for here), `None` for an error.
+    pub(super) fn stat_graph_json<'a>(
+        &'a self,
+        chat_id: i64,
+        graph: &'a StatisticalGraph,
+        cx: &mut Context<Self>,
+    ) -> Option<&'a str> {
+        match graph {
+            StatisticalGraph::Data { json_data, .. } => Some(json_data),
+            StatisticalGraph::Async { token } => {
+                match self.session()?.groups.stats.graph(chat_id, token, 0) {
+                    Some(GraphFetch::Loaded(StatisticalGraph::Data { json_data, .. })) => {
+                        Some(json_data)
+                    }
+                    None => {
+                        request_graph(chat_id, token.clone(), cx);
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            StatisticalGraph::Error { .. } => None,
+        }
+    }
+
     /// A chart section for `graph` of `chat_id`; `None` while an async
     /// graph loads, for a graph the server could not build, or for JSON
     /// that does not parse (tdesktop leaves those out too).

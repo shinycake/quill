@@ -47,7 +47,9 @@ impl QuillApp {
 
     fn code_screen(&self) -> Option<CodeScreen> {
         let signed_in = matches!(self.current_auth(), AuthorizationState::Ready);
-        if self.live.is_some() && !signed_in {
+        // A screenshot demo's sign-in screen (`demo_inputs`) takes them too,
+        // with no connection behind it.
+        if !signed_in && (self.live.is_some() || self.auth_ui.demo_inputs) {
             return Some(CodeScreen::SignIn);
         }
         (signed_in && self.settings.open && self.settings.page.is_none())
@@ -108,6 +110,10 @@ impl QuillApp {
     /// `testmode`: with one signed-out account, add one in the other
     /// environment and switch to it (tdesktop `Domain::addActivated`).
     fn switch_test_environment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.live.is_none() {
+            self.demo_switch_test_environment(cx);
+            return;
+        }
         let Some(root) = safe_app_root() else {
             return;
         };
@@ -138,6 +144,29 @@ impl QuillApp {
                 self.connection.status_note = format!("Could not switch the environment: {error}");
             }
         }
+        cx.notify();
+    }
+
+    /// `testmode` on a screenshot demo's sign-in screen: the demo stands for
+    /// one signed-out account, so the code always applies. Nothing is
+    /// written and nothing connects; only what the screen shows changes.
+    fn demo_switch_test_environment(&mut self, cx: &mut Context<Self>) {
+        let signed_out = !matches!(self.current_auth(), AuthorizationState::Ready);
+        let Some(action) = test_environment::plan_test_mode(
+            1,
+            signed_out,
+            self.settings.advanced.test_environment,
+        ) else {
+            return;
+        };
+        let to_test = action == test_environment::TestModeAction::AddTest;
+        self.settings.advanced.test_environment = to_test;
+        self.connection.status_note = if to_test {
+            test_environment::SWITCHED_TO_TEST
+        } else {
+            test_environment::SWITCHED_TO_PRODUCTION
+        }
+        .into();
         cx.notify();
     }
 

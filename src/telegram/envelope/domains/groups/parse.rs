@@ -448,11 +448,16 @@ pub(crate) fn parse_groups_payload(
         "chatBoostFeatures" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostFeatures(
             parse_boost_features(value),
         ))),
-        "jsonValueObject" => Ok(EnvelopePayload::Groups(GroupsPayload::ApplicationConfig {
-            boosts_per_gift: boosts_per_gift(value),
-            ton_explorer_url: crate::ton_wallet::address::explorer_url_from_config(value),
-            ton_usd_rate: crate::ton_wallet::fiat::ton_usd_rate_from_config(value),
-        })),
+        "jsonValueObject" => {
+            let (starref_join, starref_setup) = crate::earn::starref_flags(value);
+            Ok(EnvelopePayload::Groups(GroupsPayload::ApplicationConfig {
+                boosts_per_gift: boosts_per_gift(value),
+                ton_explorer_url: crate::ton_wallet::address::explorer_url_from_config(value),
+                ton_usd_rate: crate::ton_wallet::fiat::ton_usd_rate_from_config(value),
+                starref_join,
+                starref_setup,
+            }))
+        }
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {
             slots: parse_boost_slots(value),
         })),

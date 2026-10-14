@@ -20,6 +20,10 @@ pub struct TdError {
     /// caption length, joined communities, public links): which one the
     /// message named. Only this classification survives, never the text.
     pub premium_limit: Option<crate::premium_limits::PremiumLimitKind>,
+    /// A revenue withdrawal or statistics request failed for a reason the
+    /// screen reacts to (`PASSWORD_MISSING`, `AMOUNT_TOO_SMALL`, ...).
+    /// Only this classification survives, never the text.
+    pub earn_hint: Option<crate::earn::EarnErrorHint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +85,7 @@ impl TdError {
             flood_wait_secs: None,
             limit_hint: None,
             premium_limit: None,
+            earn_hint: None,
         }
     }
 
@@ -450,6 +455,10 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
         .and_then(parse_flood_wait_secs);
+    let earn_hint = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(crate::earn::error_hint);
     if let Some(class) = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
@@ -464,6 +473,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             flood_wait_secs,
             limit_hint: None,
             premium_limit: None,
+            earn_hint,
         };
     }
     // Slice msg-richtext-ai-tools: the documented AI flood error
@@ -480,6 +490,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             flood_wait_secs,
             limit_hint: None,
             premium_limit: None,
+            earn_hint,
         };
     }
     let permission = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
@@ -496,6 +507,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         err.class = class;
     }
     err.flood_wait_secs = flood_wait_secs;
+    err.earn_hint = earn_hint;
     err.limit_hint = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)

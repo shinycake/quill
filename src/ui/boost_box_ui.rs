@@ -118,7 +118,7 @@ impl QuillApp {
         self.navigate(super::navigation::NavigationAction::Premium, window, cx);
     }
 
-    fn boost_progress(counters: &BoostCounters, cx: &App) -> AnyElement {
+    pub(super) fn boost_progress(counters: &BoostCounters, cx: &App) -> AnyElement {
         let theme = cx.theme();
         let next = if counters.next_level_boosts > 0 {
             format!("Level {}", counters.level + 1)
@@ -165,9 +165,19 @@ impl QuillApp {
 
     /// What the next level unlocks, from the level table.
     fn boost_features(session: &Session, state: &BoostBoxState, target: i32) -> Option<AnyElement> {
-        let features = session.groups.chat_boost_features.get(&state.chat_id)?;
+        Self::boost_features_for(session, state.chat_id, state.group, target)
+    }
+
+    /// What each level from `target` up unlocks for `chat_id`.
+    pub(super) fn boost_features_for(
+        session: &Session,
+        chat_id: i64,
+        group: bool,
+        target: i32,
+    ) -> Option<AnyElement> {
+        let features = session.groups.chat_boost_features.get(&chat_id)?;
         let rows: Vec<_> = features
-            .table(state.group)
+            .table(group)
             .into_iter()
             .filter(|(level, _)| *level >= target)
             .collect();

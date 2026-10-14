@@ -13,3 +13,5 @@ src/state/tests/sessions.rs|Telegram Desktop
 src/signin.rs|Telegram will call
 # Giveaway wording: the Telegram service picks the winners.
 src/giveaway/tests.rs|Telegram will
+# Affiliate setup (tdesktop copy): the Telegram service lists the program.
+src/ui/earn/setup.rs|Telegram will feature your program for millions of potential affiliates.
