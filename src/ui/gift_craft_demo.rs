@@ -3,6 +3,8 @@
 //! in the slots; `QUILL_DEMO_MARKET` opens another box instead: `info`,
 //! `select`, `forge`, `success`, `failed` or `later`.
 
+#![deny(clippy::indexing_slicing)]
+
 use super::app::QuillApp;
 use super::gift_craft_ui::gate_notice;
 use super::gift_market_demo::{ME, RESALE_GIFT, listing, resale_page, seed_gift_market_session};

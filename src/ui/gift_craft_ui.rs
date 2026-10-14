@@ -5,6 +5,8 @@
 //! "Select Gifts" is in `gift_craft_select.rs`. Only the craft button
 //! spends anything: the used gifts are gone either way.
 
+#![deny(clippy::indexing_slicing)]
+
 use super::app::QuillApp;
 use super::gift_market_state::MarketBox;
 use super::gift_market_ui::{BoxView, collectible_tile, feature_row, two_line_button};
@@ -31,6 +33,20 @@ use std::time::Instant;
 pub(super) const FORGE_SECONDS: f32 = 3.;
 /// A craft slot's side.
 const SLOT: f32 = 112.;
+/// The craft panel keeps tdesktop's fixed dark gradient in both themes,
+/// so what sits on it is white on purpose, not a theme color.
+fn panel_ink() -> Hsla {
+    gpui_kit::white()
+}
+/// The chance chips' fill on the panel.
+const CHIP_FILL_ALPHA: f32 = 0.12;
+/// An empty slot's border and fill on the panel.
+const EMPTY_SLOT_BORDER_ALPHA: f32 = 0.3;
+const EMPTY_SLOT_FILL_ALPHA: f32 = 0.06;
+/// Secondary text on the panel ("If crafting fails…"): at least 5.9:1
+/// against the lightest panel color (#1C4843 with four slots, #2C4359
+/// below), above the 4.5:1 floor.
+const PANEL_MUTED_ALPHA: f32 = 0.7;
 
 /// The owned collectible behind a gift page, when it can be crafted.
 pub(super) fn craft_gift_of(gift: &ReceivedGift) -> Option<CraftGift> {
@@ -109,7 +125,7 @@ fn craft_panel(count: usize) -> Div {
         .gap_3()
         .p_4()
         .rounded_lg()
-        .text_color(gpui_kit::white())
+        .text_color(panel_ink())
         .bg(linear_gradient(
             180.,
             linear_color_stop(rgb(center), 0.),
@@ -424,7 +440,7 @@ impl QuillApp {
                                     .icon(IconName::Close)
                                     .xsmall()
                                     .ghost()
-                                    .text_color(gpui_kit::white())
+                                    .text_color(panel_ink())
                                     .accessibility_label(format!(
                                         "Remove {}",
                                         gift.gift.full_name()
@@ -443,9 +459,9 @@ impl QuillApp {
                         .h(px(SLOT))
                         .rounded_lg()
                         .border_1()
-                        .border_color(gpui_kit::white().opacity(0.3))
-                        .bg(gpui_kit::white().opacity(0.06))
-                        .text_color(gpui_kit::white())
+                        .border_color(panel_ink().opacity(EMPTY_SLOT_BORDER_ALPHA))
+                        .bg(panel_ink().opacity(EMPTY_SLOT_FILL_ALPHA))
+                        .text_color(panel_ink())
                         .accessibility_label("Add a gift")
                         .on_click(cx.listener(|this, _, _, cx| this.open_craft_select(cx))),
                 ),
@@ -465,7 +481,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_center()
-                    .opacity(0.7)
+                    .opacity(PANEL_MUTED_ALPHA)
                     .child("If crafting fails, all used gifts will be lost."),
             );
         let chances = attribute_chances(&craft.slots, &craft.probabilities);
@@ -481,14 +497,14 @@ impl QuillApp {
                     .px_2()
                     .py_1()
                     .rounded_full()
-                    .bg(gpui_kit::white().opacity(0.12))
+                    .bg(panel_ink().opacity(CHIP_FILL_ALPHA))
                     .text_xs()
                     .aria_label(tip.clone())
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     .child(
                         ProgressCircle::new(("craft-chance-ring", ix))
                             .value(chance.per_mille as f32 / 10.)
-                            .color(gpui_kit::white())
+                            .color(panel_ink())
                             .xsmall(),
                     )
                     .child(format!(
@@ -507,7 +523,7 @@ impl QuillApp {
                 Button::new("craft-view-all")
                     .label("View all craftable models \u{203A}")
                     .ghost()
-                    .text_color(gpui_kit::white())
+                    .text_color(panel_ink())
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_craftable_models(gift_id, cx);
@@ -608,7 +624,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_center()
-                    .opacity(0.7)
+                    .opacity(PANEL_MUTED_ALPHA)
                     .child("If crafting fails, all used gifts will be lost."),
             );
         BoxView::new("Crafting", div().child(panel))

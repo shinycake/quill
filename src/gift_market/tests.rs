@@ -559,6 +559,32 @@ fn craft_session_slots_and_gates() {
 }
 
 #[test]
+fn craft_probabilities_default_to_tdesktop_table() {
+    let mut session = CraftSession::new(craft_gift(1, 3, 70, 100));
+    // tdesktop `craftAttributePermilles` fallback.
+    assert_eq!(
+        session.probabilities,
+        vec![
+            vec![90],
+            vec![80, 200],
+            vec![70, 190, 460],
+            vec![60, 180, 450, 1000]
+        ]
+    );
+    // One gift keeps its backdrop with 9% before any TDLib table.
+    let chances = attribute_chances(&session.slots, &session.probabilities);
+    assert!(chances.iter().all(|chance| chance.per_mille == 90));
+    // An empty table (or an empty row) keeps the default.
+    session.set_probabilities(Vec::new());
+    assert_eq!(session.probabilities, default_craft_probabilities());
+    session.set_probabilities(vec![vec![]]);
+    assert_eq!(session.probabilities, default_craft_probabilities());
+    // A table from TDLib replaces it.
+    session.set_probabilities(vec![vec![1000], vec![400, 1000]]);
+    assert_eq!(session.probabilities, vec![vec![1000], vec![400, 1000]]);
+}
+
+#[test]
 fn craft_answers_parse() {
     let value = json!({"@type": "giftsForCrafting", "total_count": 1,
         "gifts": [{"@type": "receivedGift", "received_gift_id": "r1",

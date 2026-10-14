@@ -157,3 +157,55 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
         assert_eq!(left, ["own-640", "own-5120"]);
     });
 }
+
+/// Ends the running forge with `result` as if `craftGift` had answered.
+fn answer_forge(app: &mut QuillApp, result: CraftResult) {
+    if let Some(craft) = app.craft_mut() {
+        craft.crafting = false;
+        craft.result = Some(result);
+    }
+    app.gift_market.forge_started =
+        Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
+}
+
+#[gpui_kit::test]
+fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        // craftGiftResultTooEarly: the "Crafting unavailable" notice over
+        // the craft box, with the gifts still in their slots.
+        app.craft_now(cx);
+        answer_forge(app, CraftResult::TooEarly(3_600));
+        app.craft_frame_upkeep(cx);
+        assert!(app.gift_market.forge_started.is_none());
+        match app.gift_market.top() {
+            Some(MarketBox::Notice { title, text }) => {
+                assert_eq!(title, "Crafting unavailable");
+                assert!(
+                    text.starts_with("This gift will become available for crafting on"),
+                    "{text}"
+                );
+            }
+            other => panic!("expected the notice, got {other:?}"),
+        }
+        assert_eq!(app.craft_session().and_then(|c| c.result.clone()), None);
+        assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
+        app.market_back(cx);
+        assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
+
+        // craftGiftResultInvalidGift: a status note, the craft box stays.
+        app.craft_now(cx);
+        answer_forge(app, CraftResult::InvalidGift);
+        app.craft_frame_upkeep(cx);
+        assert!(app.gift_market.forge_started.is_none());
+        assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
+        assert_eq!(
+            app.connection.status_note,
+            "This gift can't be used for crafting."
+        );
+        assert_eq!(app.craft_session().and_then(|c| c.result.clone()), None);
+        assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
+    });
+}

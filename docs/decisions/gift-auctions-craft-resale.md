@@ -341,7 +341,24 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
   craft and select boxes.
 - The craft button is the kit primary two-line button, not tdesktop's
   green/blue gradient with a glare. The slots panel uses tdesktop's
-  hardcoded gradient colors (`craft_colors`).
+  hardcoded gradient colors (`craft_colors`), dark in both themes, so the
+  text, icons and chips on it are white on purpose rather than theme
+  colors (`panel_ink()`, with the named alphas `CHIP_FILL_ALPHA` 0.12,
+  `EMPTY_SLOT_BORDER_ALPHA` 0.3, `EMPTY_SLOT_FILL_ALPHA` 0.06 and
+  `PANEL_MUTED_ALPHA` 0.7 in `ui/gift_craft_ui.rs`). The 0.7 white of "If
+  crafting fails, all used gifts will be lost." measures 5.93:1 on the
+  lightest panel color (#1C4843, the green four-slot panel) and 5.96:1 on
+  the blue one (#2C4359), so it stays at 0.7.
+- Until `getGiftsForCrafting` answers with
+  `attribute_persistence_probabilities`, the chances use tdesktop's
+  fallback table (`AppConfig::craftAttributePermilles`:
+  {90}, {80, 200}, {70, 190, 460}, {60, 180, 450, 1000}); only a non-empty
+  TDLib table replaces it.
+- A listing bought from "Select Gifts" for crafting enters its slot with
+  `craft_date` 0 (TDLib does not send the new owner's cooldown with the
+  purchase). If the server still holds it back, `craftGift` answers
+  `craftGiftResultTooEarly` and Quill shows the same "Crafting
+  unavailable" notice with the date, keeping the slots.
 - "View all craftable models" opens the existing models box for the
   collection, unfiltered, and without the three model emoji in front.
 - Attribute chips show the chance and the name with a kit
@@ -375,8 +392,9 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
 
 ## How verified
 
-- `quill-tools/gate.sh`: `GATE OK core=4373 0 ui=667 0` (fmt, clippy with
-  `-D warnings`, core and UI tests).
+- `quill-tools/gate.sh`: `GATE OK core=4374 0 ui=671 0` with crafting
+  (`core=4373 0 ui=667 0` on `gift-auctions-craft-resale` alone; fmt,
+  clippy with `-D warnings`, core and UI tests).
 - Unit tests in `src/gift_market/tests.rs` (filters, sort, attribute
   counts, auction phases, bid rows, bid actions; the bid slider follows
   tdesktop's `StarSelectDiscreterForMax` scale, so a ★4,000 bid sits near
@@ -409,7 +427,11 @@ If the PR grows past ~6,000 lines, split step 4 into its own PR
   (slots add and remove, the 35% sum, the "Crafting unavailable" gate for
   a gift not yet craftable, Back drops the craft; "Start Crafting" by a
   real click on the info box; the forge waits its 3 s, ends in the result
-  box, and "Craft New Gift" empties the slots and drops the burnt gifts).
+  box, and "Craft New Gift" empties the slots and drops the burnt gifts;
+  `craftGiftResultTooEarly` through `craft_frame_upkeep` shows the
+  "Crafting unavailable" notice and `craftGiftResultInvalidGift` a status
+  note, both keeping the craft box and its slots). A unit test covers the
+  default chance table and its replacement by a TDLib table.
   Captures of `ready-gift-craft` (craft box, `info`, `select`, `forge`,
   `success`, `failed`, `later`) in light and dark. Looking at them found
   two bugs, both fixed: filled slots were shorter than the empty "+" slot,

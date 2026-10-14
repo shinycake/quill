@@ -2,6 +2,8 @@
 //! user's other collectibles of the collection, then the suitable listings
 //! on sale, which are bought into the slot.
 
+#![deny(clippy::indexing_slicing)]
+
 use super::app::QuillApp;
 use super::gift_craft_ui::gate_notice;
 use super::gift_market_state::MarketBox;
