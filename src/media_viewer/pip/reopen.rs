@@ -22,8 +22,10 @@ impl ClipRef {
 
 /// The index among `items` to reopen the viewer on: the item at the
 /// clip's offset in its message when it is still the same file, else the
-/// item of that message holding the file, else the file anywhere. `None`
-/// when the list no longer has it.
+/// item of that message holding the file. `None` when the list no longer
+/// has it (the caller then reopens the saved item alone). The same file
+/// in another message (a forwarded copy) is not the clip: the viewer
+/// would not take the playing player for it.
 pub fn reopen_index(items: &[MediaViewerItem], clip: &ClipRef) -> Option<usize> {
     let first = items
         .iter()
@@ -31,15 +33,7 @@ pub fn reopen_index(items: &[MediaViewerItem], clip: &ClipRef) -> Option<usize> 
     let at_offset = first
         .and_then(|first| first.checked_add(clip.offset))
         .filter(|index| items.get(*index).is_some_and(|item| clip.is(item)));
-    at_offset
-        .or_else(|| items.iter().position(|item| clip.is(item)))
-        .or_else(|| {
-            clip.file_id.and_then(|file| {
-                items
-                    .iter()
-                    .position(|item| item.play_file_id == Some(file))
-            })
-        })
+    at_offset.or_else(|| items.iter().position(|item| clip.is(item)))
 }
 
 #[cfg(test)]
@@ -89,9 +83,9 @@ mod tests {
         // The album lost its first item: offset 1 is now another file.
         let items = [item(7, 71), item(7, 72)];
         assert_eq!(reopen_index(&items, &clip(7, 1, 71)), Some(0));
-        // The file moved to another message (a resent copy).
-        let moved = [item(8, 71)];
-        assert_eq!(reopen_index(&moved, &clip(7, 0, 71)), Some(0));
+        // A copy of the file in another message (a forward) is not it.
+        let copy = [item(8, 71)];
+        assert_eq!(reopen_index(&copy, &clip(7, 0, 71)), None);
         // Gone from the list.
         assert_eq!(reopen_index(&[item(8, 80)], &clip(7, 0, 71)), None);
         assert_eq!(reopen_index(&[], &clip(7, 0, 71)), None);
