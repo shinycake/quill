@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::key_fingerprint;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::{ParsedSecretChat, ParsedSession, ParsedWebsite, PasswordState};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -66,7 +67,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(danger())
-                        .child(format!("Error: {line}")),
+                        .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
             body = match (this.twofa.view, state) {
@@ -75,9 +76,9 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if loading {
-                            "Loading…"
+                            tr(keys::Q_PREFS_LOADING)
                         } else {
-                            "No two-step verification data yet."
+                            tr(keys::Q_PREFS_NO_TWO_STEP_VERIFICATION_DATA)
                         }),
                 ),
                 (TwofaView::Status, Some(state)) => {
@@ -92,7 +93,7 @@ impl QuillApp {
             };
             let footer = div().flex().justify_end().child(
                 Button::new("close-twofa")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_twofa(window, cx);
@@ -101,7 +102,9 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Two-Step Verification"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SETTINGS_CLOUD_PASSWORD_START_TITLE,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -140,7 +143,9 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.settings.sessions_loading);
             let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
             let stale = session.is_some_and(|s| s.settings.sessions_stale);
-            let error = session.as_ref().and_then(|s| s.settings.sessions_error.clone());
+            let error = session
+                .as_ref()
+                .and_then(|s| s.settings.sessions_error.clone());
             let current = sessions.iter().find(|s| s.is_current);
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
@@ -155,31 +160,84 @@ impl QuillApp {
 
             let mut body = div().flex().flex_col().gap_2();
             if let Some(notice) = this.privacy.device_link_notice {
-                body = body.child(div().id("device-link-notice").role(Role::Status).aria_label(notice).text_sm().child(notice));
+                body = body.child(
+                    div()
+                        .id("device-link-notice")
+                        .role(Role::Status)
+                        .aria_label(notice)
+                        .text_sm()
+                        .child(notice),
+                );
             }
             if this.privacy.device_login_qr.is_some() {
-                body = body.child(div().flex().flex_col().gap_2()
-                    .child(div().id("device-login-consent").role(Role::Label)
-                        .aria_label("Allow the device displaying this QR code to sign in to your Telegram account? It will have access to your cloud chats.")
-                        .child("Allow the device displaying this QR code to sign in to your Telegram account? It will have access to your cloud chats."))
-                    .child(div().flex().gap_2()
-                        .child(Button::new("confirm-device-login").label("Link device").disabled(mutating)
-                            .on_click(cx.listener(|this, _, _, cx| this.confirm_scanned_device(cx))))
-                        .child(Button::new("cancel-device-login").label("Cancel").ghost()
-                            .on_click(cx.listener(|this, _, _, cx| { this.clear_device_qr(); cx.notify(); })))));
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .id("device-login-consent")
+                                .role(Role::Label)
+                                .aria_label(tr(keys::Q_PREFS_ALLOW_THE_DEVICE_DISPLAYING_THIS))
+                                .child(tr(keys::Q_PREFS_ALLOW_THE_DEVICE_DISPLAYING_THIS)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("confirm-device-login")
+                                        .label(tr(keys::Q_PREFS_LINK_DEVICE))
+                                        .disabled(mutating)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.confirm_scanned_device(cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new("cancel-device-login")
+                                        .label(tr(keys::CANCEL))
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.clear_device_qr();
+                                            cx.notify();
+                                        })),
+                                ),
+                        ),
+                );
             } else if this.privacy.device_qr_scanner.is_some() {
-                body = body.child(Button::new("cancel-device-scan").label("Cancel camera scan").ghost()
-                    .on_click(cx.listener(|this, _, _, cx| { this.clear_device_qr(); cx.notify(); })));
+                body = body.child(
+                    Button::new("cancel-device-scan")
+                        .label(tr(keys::Q_PREFS_CANCEL_CAMERA_SCAN))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.clear_device_qr();
+                            cx.notify();
+                        })),
+                );
             } else {
                 // Cross-platform: paste the `tg://login?token=...` link that
                 // a QR reader shows for the other device's code.
                 let mut row = div().flex().flex_wrap().gap_2();
                 if cfg!(target_os = "macos") {
-                    row = row.child(Button::new("scan-device-login").label("Link device with camera").disabled(mutating)
-                        .on_click(cx.listener(|this, _, _, cx| this.scan_device_qr(cx))));
+                    row = row.child(
+                        Button::new("scan-device-login")
+                            .label(tr(keys::Q_PREFS_LINK_DEVICE_WITH_CAMERA))
+                            .disabled(mutating)
+                            .on_click(cx.listener(|this, _, _, cx| this.scan_device_qr(cx))),
+                    );
                 }
-                body = body.child(row.child(Button::new("paste-device-login").label("Link device from pasted link").ghost().disabled(mutating)
-                    .on_click(cx.listener(|this, _, _, cx| this.paste_device_login_link(cx)))));
+                body = body.child(
+                    row.child(
+                        Button::new("paste-device-login")
+                            .label(tr(keys::Q_PREFS_LINK_DEVICE_FROM_PASTED_LINK))
+                            .ghost()
+                            .disabled(mutating)
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.paste_device_login_link(cx)),
+                            ),
+                    ),
+                );
             }
 
             if let Some(line) = error {
@@ -187,7 +245,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(danger())
-                        .child(format!("Error: {line}")),
+                        .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
             if let Some(confirm) = this.privacy.sessions_confirm {
@@ -199,9 +257,9 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if loading {
-                            "Loading…"
+                            tr(keys::Q_PREFS_LOADING)
                         } else {
-                            "No session data yet."
+                            tr(keys::Q_PREFS_NO_SESSION_DATA_YET)
                         }),
                 );
             } else {
@@ -213,7 +271,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Refreshing…"),
+                            .child(tr(keys::Q_PREFS_REFRESHING)),
                     );
                 }
                 // Phase 6: each session group is a one-column kit Table
@@ -225,13 +283,17 @@ impl QuillApp {
                                 .text_xs()
                                 .font_medium()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Current session"),
+                                .child(tr(keys::Q_PREFS_CURRENT_SESSION)),
                         )
-                        .child(Table::new().with_ix(0).accessibility_label("Current session").w_full().child(TableBody::new().child(
-                            TableRow::new().child(Self::table_cell(
-                                this.session_row(current, mutating, true, cx),
-                            )),
-                        )));
+                        .child(
+                            Table::new()
+                                .with_ix(0)
+                                .accessibility_label(tr(keys::Q_PREFS_CURRENT_SESSION))
+                                .w_full()
+                                .child(TableBody::new().child(TableRow::new().child(
+                                    Self::table_cell(this.session_row(current, mutating, true, cx)),
+                                ))),
+                        );
                 }
                 if !incomplete.is_empty() {
                     body = body
@@ -240,22 +302,28 @@ impl QuillApp {
                                 .text_xs()
                                 .font_medium()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Incomplete Login Attempts"),
+                                .child(tr(keys::Q_PREFS_INCOMPLETE_LOGIN_ATTEMPTS)),
                         )
                         .child(
-                            div().text_xs().text_color(cx.theme().muted_foreground).child(
-                                "These devices have no access to your messages: the code was entered correctly, but not the password.",
-                            ),
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(keys::Q_PREFS_THESE_DEVICES_HAVE_NO_ACCESS)),
                         );
                     let mut incomplete_body = TableBody::new();
                     for s in incomplete {
                         incomplete_body = incomplete_body.child(
-                            TableRow::new().child(Self::table_cell(
-                                this.session_row(s, mutating, false, cx),
-                            )),
+                            TableRow::new()
+                                .child(Self::table_cell(this.session_row(s, mutating, false, cx))),
                         );
                     }
-                    body = body.child(Table::new().with_ix(1).accessibility_label("Incomplete login attempts").w_full().child(incomplete_body));
+                    body = body.child(
+                        Table::new()
+                            .with_ix(1)
+                            .accessibility_label(tr(keys::Q_PREFS_INCOMPLETE_LOGIN_ATTEMPTS_2))
+                            .w_full()
+                            .child(incomplete_body),
+                    );
                 }
                 if !others.is_empty() {
                     body = body.child(
@@ -263,23 +331,28 @@ impl QuillApp {
                             .text_xs()
                             .font_medium()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Other sessions"),
+                            .child(tr(keys::Q_PREFS_OTHER_SESSIONS)),
                     );
                     let mut others_body = TableBody::new();
                     for s in others {
                         others_body = others_body.child(
-                            TableRow::new().child(Self::table_cell(
-                                this.session_row(s, mutating, true, cx),
-                            )),
+                            TableRow::new()
+                                .child(Self::table_cell(this.session_row(s, mutating, true, cx))),
                         );
                     }
-                    body = body.child(Table::new().with_ix(2).accessibility_label("Other sessions").w_full().child(others_body));
+                    body = body.child(
+                        Table::new()
+                            .with_ix(2)
+                            .accessibility_label(tr(keys::Q_PREFS_OTHER_SESSIONS))
+                            .w_full()
+                            .child(others_body),
+                    );
                 }
                 let any_other = sessions.iter().any(|s| !s.is_current);
                 body = body.child(
                     div().flex().justify_end().child(
                         Button::new("terminate-all-sessions")
-                            .label("Terminate All Other Sessions")
+                            .label(tr(keys::SESSIONS_TERMINATE_ALL))
                             .danger()
                             .disabled(!any_other || mutating)
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -291,7 +364,8 @@ impl QuillApp {
             }
             // B13: a tapped session opens its details instead of the list.
             let details = this
-                .privacy.extra
+                .privacy
+                .extra
                 .session_details
                 .and_then(|id| sessions.iter().find(|s| s.id == id))
                 .map(|s| this.session_details_body(s, mutating, cx));
@@ -303,32 +377,42 @@ impl QuillApp {
                 Some(details) => div().flex().flex_col().gap_2().child(details),
                 None => body,
             };
-            let footer = div().flex().justify_end().gap_2().child(
-                Button::new("sessions-refresh")
-                    .label("Refresh")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.refresh_sessions(cx);
-                        this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
-                    })),
-            ).child(
-                Button::new("close-sessions")
-                    .label("Close")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_sessions(cx);
-                        this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
-                    })),
-            );
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("sessions-refresh")
+                        .label(tr(keys::Q_PREFS_REFRESH))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.refresh_sessions(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("close-sessions")
+                        .label(tr(keys::CLOSE))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_sessions(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Sessions, window, cx);
+                        })),
+                );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Active Sessions"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SETTINGS_SHOW_SESSIONS,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -362,7 +446,9 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.settings.connected_websites_loading);
             let mutating = session.is_some_and(|s| s.settings.websites_mutating);
             let stale = session.is_some_and(|s| s.settings.websites_stale);
-            let error = session.as_ref().and_then(|s| s.settings.websites_error.clone());
+            let error = session
+                .as_ref()
+                .and_then(|s| s.settings.websites_error.clone());
 
             let mut body = div().flex().flex_col().gap_2();
             if let Some(line) = error {
@@ -370,7 +456,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(danger())
-                        .child(format!("Error: {line}")),
+                        .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
             if let Some(confirm) = this.privacy.websites_confirm {
@@ -382,11 +468,11 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if loading {
-                            "Loading…"
+                            tr(keys::Q_PREFS_LOADING)
                         } else if has_websites {
-                            "No active logins — you can log in on websites that support signing in with Telegram."
+                            tr(keys::Q_PREFS_NO_ACTIVE_LOGINS_YOU_CAN)
                         } else {
-                            "No website data yet."
+                            tr(keys::Q_PREFS_NO_WEBSITE_DATA_YET)
                         }),
                 );
             } else {
@@ -395,14 +481,14 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Refreshing…"),
+                            .child(tr(keys::Q_PREFS_REFRESHING)),
                     );
                 }
                 body = body
                     .child(
                         div().flex().justify_end().child(
                             Button::new("disconnect-all-websites")
-                                .label("Disconnect All Websites")
+                                .label(tr(keys::SETTINGS_DISCONNECT_ALL))
                                 .danger()
                                 .disabled(mutating)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -415,59 +501,74 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("You can log in on websites that support signing in with Telegram."),
+                            .child(tr(keys::SETTINGS_LOGGED_IN_DESCRIPTION)),
                     )
                     .child(
                         div()
                             .text_xs()
                             .font_medium()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Connected Websites"),
+                            .child(tr(keys::SETTINGS_LOGGED_IN)),
                     );
                 // Phase 6: a one-column kit Table hosting the rich
                 // website rows (was: bare rows).
                 let mut websites_body = TableBody::new();
                 for w in &websites {
                     websites_body = websites_body.child(
-                        TableRow::new()
-                            .child(Self::table_cell(this.website_row(w, mutating, cx))),
+                        TableRow::new().child(Self::table_cell(this.website_row(w, mutating, cx))),
                     );
                 }
-                body = body.child(Table::new().with_ix(3).accessibility_label("Connected websites").w_full().child(websites_body));
+                body = body.child(
+                    Table::new()
+                        .with_ix(3)
+                        .accessibility_label(tr(keys::SETTINGS_LOGGED_IN))
+                        .w_full()
+                        .child(websites_body),
+                );
                 body = body.child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Tap to disconnect from your Telegram account."),
+                        .child(tr(keys::Q_PREFS_TAP_TO_DISCONNECT_FROM_YOUR)),
                 );
             }
-            let footer = div().flex().justify_end().gap_2().child(
-                Button::new("websites-refresh")
-                    .label("Refresh")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.refresh_websites(cx);
-                        this.close_kit_dialog_if_done(DialogKind::Websites, window, cx);
-                    })),
-            ).child(
-                Button::new("close-websites")
-                    .label("Close")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_websites(cx);
-                        this.close_kit_dialog_if_done(DialogKind::Websites, window, cx);
-                    })),
-            );
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("websites-refresh")
+                        .label(tr(keys::Q_PREFS_REFRESH))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.refresh_websites(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Websites, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("close-websites")
+                        .label(tr(keys::CLOSE))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_websites(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Websites, window, cx);
+                        })),
+                );
             dialog
                 .overlay(true)
                 // TGX `WebSessionsTitle`, verbatim.
-                .title(crate::ui::shell::dialog_title("Logged In with Telegram"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SETTINGS_LOGGED_IN_TITLE,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -506,7 +607,7 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Encryption key"),
+                    .child(tr(keys::Q_PREFS_ENCRYPTION_KEY)),
             );
         match pixels {
             Some(pixels) => {
@@ -534,8 +635,11 @@ impl QuillApp {
                     .child({
                         // Phase S1: TGX `EncryptionKeyDescription`, verbatim,
                         // with the peer's display name.
-                        let name =
-                            Self::secret_peer_name(self.session(), record.user_id, "your contact");
+                        let name = Self::secret_peer_name(
+                            self.session(),
+                            record.user_id,
+                            tr(keys::Q_PREFS_YOUR_CONTACT),
+                        );
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
@@ -551,7 +655,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Encryption key · still loading…"),
+                        .child(tr(keys::Q_PREFS_ENCRYPTION_KEY_STILL_LOADING)),
                 );
             }
         }
@@ -685,9 +789,9 @@ impl QuillApp {
         // rejects it silently and the old code cleared the form first, so
         // the submit vanished with no feedback.
         let missing: Option<&str> = if include_email && new.is_empty() {
-            Some("enter a new password")
+            Some(tr(keys::Q_PREFS_ENTER_A_NEW_PASSWORD))
         } else if !include_email && current.is_empty() {
-            Some("enter your current password")
+            Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSWORD))
         } else {
             None
         };
@@ -736,9 +840,9 @@ impl QuillApp {
         // Slice A2 fixup: the driver rejects an empty password or email
         // silently — say so locally instead of clearing the form.
         let missing: Option<&str> = if current.is_empty() {
-            Some("enter your current password")
+            Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSWORD))
         } else if email.is_empty() {
-            Some("enter the new recovery email")
+            Some(tr(keys::Q_PREFS_ENTER_THE_NEW_RECOVERY_EMAIL))
         } else {
             None
         };
@@ -817,8 +921,8 @@ impl QuillApp {
                 }
             };
             self.connection.status_note = match result {
-                Ok(()) => "Terminating session…".into(),
-                Err(_) => "Could not terminate the session.".into(),
+                Ok(()) => tr(keys::Q_PREFS_TERMINATING_SESSION).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_TERMINATE_THE_SESSION).into(),
             };
         }
         cx.notify();

@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::chatlist_suggestions::{ACTION_PHONE, Suggestion};
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The prompt, or `None` when TDLib has no phone suggestion pending.
@@ -53,14 +54,14 @@ impl QuillApp {
                 .child(
                     div().flex().gap_2().pt_1().children([
                         Button::new("settings-phone-yes")
-                            .label("Yes")
+                            .label(tr(keys::BOX_YES))
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.dismiss_suggestion(&Suggestion::CheckPhone, cx);
                             }))
                             .into_any_element(),
                         Button::new("settings-phone-no")
-                            .label("No")
+                            .label(tr(keys::BOX_NO))
                             .small()
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -69,7 +70,7 @@ impl QuillApp {
                             }))
                             .into_any_element(),
                         Button::new("settings-phone-learn-more")
-                            .label("Learn more")
+                            .label(tr(keys::Q_PREFS_LEARN_MORE))
                             .small()
                             .ghost()
                             .on_click(cx.listener(|_, _, _, cx| {

@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::data_settings::NetworkKind;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::privacy::PrivacyKeyState;
 use quill::settings::{
     AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_GIF, AUTO_DOWNLOAD_MUSIC, AUTO_DOWNLOAD_PHOTO,
@@ -96,7 +97,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let Some(mut settings) = live.driver.session.chat_list.archive_chat_list_settings
             else {
-                self.connection.status_note = "archive settings still loading…".into();
+                self.connection.status_note =
+                    tr(keys::Q_PREFS_ARCHIVE_SETTINGS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -148,7 +150,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading archive settings…"),
+                        .child(tr(keys::Q_PREFS_LOADING_ARCHIVE_SETTINGS)),
                 );
             } else if settings.is_none() {
                 body = body
@@ -156,11 +158,11 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Could not load archive settings."),
+                            .child(tr(keys::Q_PREFS_COULD_NOT_LOAD_ARCHIVE_SETTINGS)),
                     )
                     .child(
                         Button::new("archive-settings-retry")
-                            .label("Retry")
+                            .label(tr(keys::Q_PREFS_RETRY))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_archive_settings(cx);
@@ -205,7 +207,7 @@ impl QuillApp {
             }
             let footer = div().flex().justify_end().child(
                 Button::new("close-archive-settings")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.set_archive_settings_open(false);
@@ -215,7 +217,9 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Archive settings"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SETTINGS_ARCHIVE_TITLE,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -280,7 +284,7 @@ impl QuillApp {
                     .child(
                         Switch::new("contacts-sync-toggle")
                             .checked(sync_on)
-                            .label("Sync contacts")
+                            .label(tr(keys::Q_PREFS_SYNC_CONTACTS))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_contact_sync(on, cx);
                             })),
@@ -292,7 +296,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Keeps the Contacts tab up to date with the Telegram servers."),
+                            .child(tr(keys::Q_PREFS_KEEPS_THE_CONTACTS_TAB_UP)),
                     ),
             )
             .child(
@@ -302,7 +306,7 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         Button::new("contacts-import-open")
-                            .label("Import contacts…")
+                            .label(tr(keys::Q_PREFS_IMPORT_CONTACTS))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_import_contacts_dialog(window, cx);
@@ -310,7 +314,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("contacts-delete-synced")
-                            .label("Delete synced contacts…")
+                            .label(tr(keys::Q_PREFS_DELETE_SYNCED_CONTACTS))
                             .ghost()
                             .danger()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -435,13 +439,13 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .px_1()
-                    .child("Call settings"),
+                    .child(tr(keys::SETTINGS_SECTION_CALL_SETTINGS)),
             )
             .child(pref_row(
                 "call-pref-confirm",
                 prefs.confirm_before_calling,
-                "Confirm before calling",
-                "Ask before placing a call",
+                tr(keys::Q_PREFS_CONFIRM_BEFORE_CALLING),
+                tr(keys::Q_PREFS_ASK_BEFORE_PLACING_A_CALL),
                 |prefs, on| prefs.confirm_before_calling = on,
             ))
             // Slice calls-proxy: "Use proxy for calls" (official:
@@ -452,8 +456,8 @@ impl QuillApp {
             .child(pref_row(
                 "call-pref-proxy",
                 prefs.use_proxy_for_calls,
-                "Use proxy for calls",
-                "Route calls through the enabled proxy",
+                tr(keys::PROXY_USE_FOR_CALLS),
+                tr(keys::Q_PREFS_ROUTE_CALLS_THROUGH_THE_ENABLED),
                 |prefs, on| prefs.use_proxy_for_calls = on,
             ))
             .child({
@@ -481,12 +485,12 @@ impl QuillApp {
                     .child(
                         Switch::new("call-pref-less-data-switch")
                             .checked(on)
-                            .accessibility_label("Use less data for calls")
+                            .accessibility_label(tr(keys::Q_PREFS_USE_LESS_DATA_FOR_CALLS))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     if live.driver.set_less_data_for_calls(on).is_err() {
                                         this.connection.status_note =
-                                            "Couldn't update call settings.".into();
+                                            tr(keys::Q_PREFS_COULDNT_UPDATE_CALL_SETTINGS).into();
                                     }
                                 } else if let Some(demo) = this.demo_session.as_mut() {
                                     // Demo: show the chosen value immediately
@@ -506,12 +510,16 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("Use less data for calls"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .child(tr(keys::Q_PREFS_USE_LESS_DATA_FOR_CALLS)),
+                            )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Lower data usage during Telegram calls"),
+                                    .child(tr(keys::Q_PREFS_LOWER_DATA_USAGE_DURING_TELEGRAM)),
                             ),
                     )
             })
@@ -524,21 +532,21 @@ impl QuillApp {
                     .font_medium()
                     .px_2()
                     .pt_1()
-                    .child("Who can call me"),
+                    .child(tr(keys::EDIT_PRIVACY_CALLS_HEADER)),
             )
             .child(if privacy_failed {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("Couldn’t load privacy settings.")
+                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS))
                     .into_any_element()
             } else if privacy_loading && allow_calls.is_none() {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("Loading privacy settings…")
+                    .child(tr(keys::Q_PREFS_LOADING_PRIVACY_SETTINGS))
                     .into_any_element()
             } else {
                 privacy_group(
@@ -554,21 +562,21 @@ impl QuillApp {
                     .font_medium()
                     .px_2()
                     .pt_1()
-                    .child("Peer-to-peer calls"),
+                    .child(tr(keys::Q_PREFS_PEER_TO_PEER_CALLS)),
             )
             .child(if privacy_failed {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("Couldn’t load privacy settings.")
+                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS))
                     .into_any_element()
             } else if privacy_loading && p2p.is_none() {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("Loading privacy settings…")
+                    .child(tr(keys::Q_PREFS_LOADING_PRIVACY_SETTINGS))
                     .into_any_element()
             } else {
                 privacy_group("call-privacy-p2p", p2p, PrivacySettingKey::PeerToPeer)
@@ -590,9 +598,18 @@ impl QuillApp {
             .unwrap_or(quill::settings::InstantViewMode::Telegram);
         // Phase 6: single-choice group (was: "tap to cycle" row).
         let iv_modes = [
-            ("Off", quill::settings::InstantViewMode::Off),
-            ("Telegram links", quill::settings::InstantViewMode::Telegram),
-            ("All links", quill::settings::InstantViewMode::All),
+            (
+                tr(keys::SETTINGS_TTL_AFTER_OFF),
+                quill::settings::InstantViewMode::Off,
+            ),
+            (
+                tr(keys::Q_PREFS_TELEGRAM_LINKS),
+                quill::settings::InstantViewMode::Telegram,
+            ),
+            (
+                tr(keys::Q_PREFS_ALL_LINKS),
+                quill::settings::InstantViewMode::All,
+            ),
         ];
         let iv_selected = iv_modes.iter().position(|(_, mode)| *mode == iv_mode);
         div()
@@ -605,7 +622,7 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .px_1()
-                    .child("Media settings"),
+                    .child(tr(keys::Q_PREFS_MEDIA_SETTINGS)),
             )
             .child(
                 // Phase 6: kit Switch (was: clickable row with a ●/○ bullet).
@@ -620,7 +637,7 @@ impl QuillApp {
                     .child(
                         Switch::new("media-pref-hq-round-switch")
                             .checked(hq)
-                            .accessibility_label("Record HQ round videos")
+                            .accessibility_label(tr(keys::Q_PREFS_RECORD_HQ_ROUND_VIDEOS))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_hq_round_videos(on, cx);
                             })),
@@ -629,12 +646,16 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("Record HQ round videos"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .child(tr(keys::Q_PREFS_RECORD_HQ_ROUND_VIDEOS)),
+                            )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Capture round video notes at 480px instead of 280px"),
+                                    .child(tr(keys::Q_PREFS_CAPTURE_ROUND_VIDEO_NOTES_AT)),
                             ),
                     ),
             )
@@ -647,7 +668,12 @@ impl QuillApp {
                     .px_2()
                     .py_1()
                     .rounded_md()
-                    .child(div().text_sm().font_medium().child("Instant View"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_medium()
+                            .child(tr(keys::Q_PREFS_INSTANT_VIEW)),
+                    )
                     .child(
                         RadioGroup::vertical("media-pref-instant-view-group")
                             .selected_index(iv_selected)
@@ -663,7 +689,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("open-emoji-sets")
-                    .label("Emoji Sets")
+                    .label(tr(keys::Q_PREFS_EMOJI_SETS))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
             )
@@ -684,7 +710,7 @@ impl QuillApp {
                                 self.session()
                                     .is_none_or(|s| s.settings.media_prefs.autoplay_gifs),
                             )
-                            .accessibility_label("Autoplay GIFs")
+                            .accessibility_label(tr(keys::Q_PREFS_AUTOPLAY_GIFS))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
                                 if !on {
@@ -694,7 +720,7 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     )
-                    .child(div().text_sm().child("Autoplay GIFs")),
+                    .child(div().text_sm().child(tr(keys::Q_PREFS_AUTOPLAY_GIFS))),
             )
             .child(
                 div()
@@ -709,7 +735,7 @@ impl QuillApp {
                                 self.session()
                                     .is_none_or(|s| s.settings.media_prefs.autoplay_videos),
                             )
-                            .accessibility_label("Autoplay videos")
+                            .accessibility_label(tr(keys::Q_PREFS_AUTOPLAY_VIDEOS))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
                                 if !on {
@@ -718,7 +744,7 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     )
-                    .child(div().text_sm().child("Autoplay videos")),
+                    .child(div().text_sm().child(tr(keys::Q_PREFS_AUTOPLAY_VIDEOS))),
             )
             .child(
                 div()
@@ -733,13 +759,13 @@ impl QuillApp {
                                 self.session()
                                     .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers),
                             )
-                            .accessibility_label("Loop Animated Stickers")
+                            .accessibility_label(tr(keys::SETTINGS_LOOP_STICKERS))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.stop_sticker_playback();
                                 this.set_media_pref(|prefs| prefs.loop_animated_stickers = on, cx);
                             })),
                     )
-                    .child(div().text_sm().child("Loop Animated Stickers")),
+                    .child(div().text_sm().child(tr(keys::SETTINGS_LOOP_STICKERS))),
             )
             // MED3: auto-download settings below the media prefs.
             .child(self.auto_download_settings_section(cx))
@@ -769,7 +795,7 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .px_1()
-                    .child("Auto-download"),
+                    .child(tr(keys::Q_PREFS_AUTO_DOWNLOAD)),
             )
             .child(
                 // Phase 6: kit Switch (was: clickable row with a ●/○ bullet).
@@ -784,7 +810,7 @@ impl QuillApp {
                     .child(
                         Switch::new("media-pref-data-saver-switch")
                             .checked(prefs.data_saver)
-                            .accessibility_label("Data saver")
+                            .accessibility_label(tr(keys::Q_PREFS_DATA_SAVER))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.data_saver = on, cx);
                             })),
@@ -793,12 +819,12 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("Data saver"))
+                            .child(div().text_sm().child(tr(keys::Q_PREFS_DATA_SAVER)))
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Pause all automatic media downloads"),
+                                    .child(tr(keys::Q_PREFS_PAUSE_ALL_AUTOMATIC_MEDIA_DOWNLOADS)),
                             ),
                     ),
             );
@@ -812,9 +838,9 @@ impl QuillApp {
             ("GIFs", AUTO_DOWNLOAD_GIF),
         ];
         let kinds = [
-            ("Private", prefs.auto_download_private),
-            ("Groups", prefs.auto_download_groups),
-            ("Channels", prefs.auto_download_channels),
+            (tr(keys::Q_PREFS_PRIVATE), prefs.auto_download_private),
+            (tr(keys::MEDIA_TYPE_GROUPS), prefs.auto_download_groups),
+            (tr(keys::RECENT_CHANNELS), prefs.auto_download_channels),
         ];
         let mut grid = div().flex().flex_col().gap_1().px_2().mt_1();
         let mut header = div().flex().items_center().gap_2();
@@ -847,7 +873,10 @@ impl QuillApp {
                         .child(
                             Checkbox::new(format!("auto-dl-check-{row_idx}-{kind_idx}"))
                                 .checked(on)
-                                .accessibility_label(format!("{label} in {kind} chats"))
+                                .accessibility_label(tr_with(
+                                    keys::Q_PREFS_IN_CHATS,
+                                    &[("label", label), ("kind", kind)],
+                                ))
                                 .on_click(cx.listener(move |this, &on, _, cx| {
                                     this.set_media_pref(
                                         move |prefs| {
@@ -887,13 +916,13 @@ impl QuillApp {
                 .text_sm()
                 .font_semibold()
                 .px_1()
-                .child("Archive and Mute"),
+                .child(tr(keys::SETTINGS_AUTO_ARCHIVE)),
         );
         let Some(settings) = settings else {
             let note = if loading {
-                "Loading…"
+                tr(keys::Q_PREFS_LOADING)
             } else {
-                "Couldn't load these settings."
+                tr(keys::Q_PREFS_COULDNT_LOAD_THESE_SETTINGS)
             };
             return section
                 .child(

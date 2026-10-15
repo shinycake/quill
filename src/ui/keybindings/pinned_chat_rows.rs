@@ -4,6 +4,7 @@ use super::*;
 use crate::ui::actions::ComposerEditDate;
 #[cfg(not(target_os = "macos"))]
 use crate::ui::actions::ZoomWindow;
+use quill::lang::{keys, tr};
 
 /// Cmd/Ctrl+1..8: the Nth pinned chat of the list on screen
 /// (`Command::ChatPinned1..8`).
@@ -19,20 +20,27 @@ pub(super) fn pinned_chat_rows() -> Vec<ShortcutRow> {
         primary!("8"),
     ];
     let labels = [
-        "Open pinned chat 1",
-        "Open pinned chat 2",
-        "Open pinned chat 3",
-        "Open pinned chat 4",
-        "Open pinned chat 5",
-        "Open pinned chat 6",
-        "Open pinned chat 7",
-        "Open pinned chat 8",
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_1),
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_2),
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_3),
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_4),
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_5),
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_6),
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_7),
+        tr(keys::Q_PREFS_OPEN_PINNED_CHAT_8),
     ];
     chords
         .into_iter()
         .zip(labels)
         .enumerate()
-        .map(|(index, (chord, label))| row(chord, label, "Navigation", OpenPinnedChat { index }))
+        .map(|(index, (chord, label))| {
+            row(
+                chord,
+                label,
+                tr(keys::Q_PREFS_NAVIGATION),
+                OpenPinnedChat { index },
+            )
+        })
         .collect()
 }
 
@@ -43,84 +51,94 @@ pub(super) fn message_rows() -> Vec<ShortcutRow> {
     vec![
         row(
             primary!("up"),
-            "Reply to previous message",
-            "Messages",
+            tr(keys::Q_PREFS_REPLY_TO_PREVIOUS_MESSAGE),
+            tr(keys::Q_PREFS_MESSAGES),
             ReplyToPrevious,
         ),
         row(
             primary!("down"),
-            "Reply to next message",
-            "Messages",
+            tr(keys::Q_PREFS_REPLY_TO_NEXT_MESSAGE),
+            tr(keys::Q_PREFS_MESSAGES),
             ReplyToNext,
         ),
-        row(primary!("o"), "Attach file", "Messages", AttachFile),
-        row("pageup", "Scroll up a page", "Messages", HistoryPageUp),
+        row(
+            primary!("o"),
+            tr(keys::Q_PREFS_ATTACH_FILE),
+            tr(keys::Q_PREFS_MESSAGES),
+            AttachFile,
+        ),
+        row(
+            "pageup",
+            tr(keys::Q_PREFS_SCROLL_UP_A_PAGE),
+            tr(keys::Q_PREFS_MESSAGES),
+            HistoryPageUp,
+        ),
         row(
             "pagedown",
-            "Scroll down a page",
-            "Messages",
+            tr(keys::Q_PREFS_SCROLL_DOWN_A_PAGE),
+            tr(keys::Q_PREFS_MESSAGES),
             HistoryPageDown,
         ),
         row(
             "home",
-            "Scroll to the first message",
-            "Messages",
+            tr(keys::Q_PREFS_SCROLL_TO_THE_FIRST_MESSAGE),
+            tr(keys::Q_PREFS_MESSAGES),
             HistoryToTop,
         ),
         row(
             "end",
-            "Scroll to the latest message",
-            "Messages",
+            tr(keys::Q_PREFS_SCROLL_TO_THE_LATEST_MESSAGE),
+            tr(keys::Q_PREFS_MESSAGES),
             HistoryToBottom,
         ),
         row(
             "delete",
-            "Delete selected messages",
-            "Messages",
+            tr(keys::Q_PREFS_DELETE_SELECTED_MESSAGES),
+            tr(keys::Q_PREFS_MESSAGES),
             DeleteSelection,
         ),
         row(
             "backspace",
-            "Delete selected messages",
-            "Messages",
+            tr(keys::Q_PREFS_DELETE_SELECTED_MESSAGES),
+            tr(keys::Q_PREFS_MESSAGES),
             DeleteSelection,
         ),
         row(
             primary!("shift-a"),
-            "Select the focused message",
-            "Messages",
+            tr(keys::Q_PREFS_SELECT_THE_FOCUSED_MESSAGE),
+            tr(keys::Q_PREFS_MESSAGES),
             ToggleMessageSelection,
         ),
         // tdesktop's chord. Some systems take Ctrl+Space themselves (an
         // input-source switch); the Shift+A chord above always works.
         row(
             "ctrl-space",
-            "Select the focused message",
-            "Messages",
+            tr(keys::Q_PREFS_SELECT_THE_FOCUSED_MESSAGE),
+            tr(keys::Q_PREFS_MESSAGES),
             ToggleMessageSelection,
         ),
         row(
             "up",
-            "Focus the older message while selecting",
-            "Messages",
+            tr(keys::Q_PREFS_FOCUS_THE_OLDER_MESSAGE_WHILE),
+            tr(keys::Q_PREFS_MESSAGES),
             SelectionFocusOlder,
         ),
         row(
             "down",
-            "Focus the newer message while selecting",
-            "Messages",
+            tr(keys::Q_PREFS_FOCUS_THE_NEWER_MESSAGE_WHILE),
+            tr(keys::Q_PREFS_MESSAGES),
             SelectionFocusNewer,
         ),
         row(
             "shift-up",
-            "Extend the selection to the older message",
-            "Messages",
+            tr(keys::Q_PREFS_EXTEND_THE_SELECTION_TO_THE),
+            tr(keys::Q_PREFS_MESSAGES),
             SelectionExtendOlder,
         ),
         row(
             "shift-down",
-            "Extend the selection to the newer message",
-            "Messages",
+            tr(keys::Q_PREFS_EXTEND_THE_SELECTION_TO_THE_2),
+            tr(keys::Q_PREFS_MESSAGES),
             SelectionExtendNewer,
         ),
     ]
@@ -146,8 +164,8 @@ pub(super) fn composer_scoped_bindings() -> Vec<KeyBinding> {
 /// bindings are installed with `composer_bindings`.
 pub(super) fn composer_extra_rows() -> Vec<ShortcutRow> {
     vec![ShortcutRow {
-        label: "Date (selected text)",
-        section: "Composer",
+        label: tr(keys::Q_PREFS_DATE_SELECTED_TEXT),
+        section: tr(keys::Q_PREFS_COMPOSER),
         binding: KeyBinding::new(
             primary!("shift-d"),
             ComposerEditDate,
@@ -179,12 +197,15 @@ pub(in crate::ui) fn app_menus_with(
     };
     // HIG: on macOS Quit lives in the app menu, not File.
     #[cfg(target_os = "macos")]
-    let file_items = vec![MenuItem::action("Close Window", CloseWindow)];
+    let file_items = vec![MenuItem::action(
+        tr(keys::Q_PREFS_CLOSE_WINDOW_2),
+        CloseWindow,
+    )];
     #[cfg(not(target_os = "macos"))]
     let file_items = vec![
-        MenuItem::action("Close Window", CloseWindow),
+        MenuItem::action(tr(keys::Q_PREFS_CLOSE_WINDOW_2), CloseWindow),
         MenuItem::separator(),
-        MenuItem::action("Quit Quill", QuitApp),
+        MenuItem::action(tr(keys::Q_PREFS_QUIT_QUILL), QuitApp),
     ];
     // macOS: Telegram Desktop's Window menu (`os_menus::window_menu`), which
     // carries Toggle Full Screen. Linux/Windows keep the in-window menu bar's
@@ -192,55 +213,59 @@ pub(in crate::ui) fn app_menus_with(
     #[cfg(target_os = "macos")]
     let (view_items, window_items) = (
         vec![
-            MenuItem::action("Quick Switch", OpenSearch),
-            MenuItem::action("Find in Chat", OpenChatSearch),
+            MenuItem::action(tr(keys::Q_PREFS_QUICK_SWITCH), OpenSearch),
+            MenuItem::action(tr(keys::Q_PREFS_FIND_IN_CHAT_2), OpenChatSearch),
             MenuItem::separator(),
             // kit Phase 8: light/dark switch for the whole app.
-            MenuItem::action("Toggle Theme", ToggleTheme),
+            MenuItem::action(tr(keys::Q_PREFS_TOGGLE_THEME), ToggleTheme),
         ],
         crate::ui::os_menus::window_menu_items(state),
     );
     #[cfg(not(target_os = "macos"))]
     let (view_items, window_items) = (
         vec![
-            MenuItem::action("Quick Switch", OpenSearch),
-            MenuItem::action("Find in Chat", OpenChatSearch),
+            MenuItem::action(tr(keys::Q_PREFS_QUICK_SWITCH), OpenSearch),
+            MenuItem::action(tr(keys::Q_PREFS_FIND_IN_CHAT_2), OpenChatSearch),
             MenuItem::separator(),
-            MenuItem::action("Enter Full Screen", ToggleFullscreen),
+            MenuItem::action(tr(keys::Q_PREFS_ENTER_FULL_SCREEN), ToggleFullscreen),
             // kit Phase 8: light/dark switch for the whole app.
-            MenuItem::action("Toggle Theme", ToggleTheme),
+            MenuItem::action(tr(keys::Q_PREFS_TOGGLE_THEME), ToggleTheme),
         ],
         vec![
-            MenuItem::action("Minimize", MinimizeWindow),
-            MenuItem::action("Zoom", ZoomWindow),
+            MenuItem::action(tr(keys::Q_PREFS_MINIMIZE), MinimizeWindow),
+            MenuItem::action(tr(keys::Q_PREFS_ZOOM), ZoomWindow),
         ],
     );
     let mut menus = Vec::new();
     // HIG: on macOS Quit lives in the app menu, not File.
     #[cfg(target_os = "macos")]
     menus.push(Menu::new("Quill").items([
-        MenuItem::action("Settings…", OpenSettings),
-        MenuItem::action("Lock Quill", LockApp),
+        MenuItem::action(tr(keys::Q_PREFS_SETTINGS), OpenSettings),
+        MenuItem::action(tr(keys::Q_PREFS_LOCK_QUILL), LockApp),
         MenuItem::separator(),
-        MenuItem::action("Quit Quill", QuitApp),
+        MenuItem::action(tr(keys::Q_PREFS_QUIT_QUILL), QuitApp),
     ]));
     menus.extend([
         Menu::new("File").items(file_items),
         Menu::new("Edit").items([
-            MenuItem::action("Undo", UndoAction),
-            MenuItem::action("Redo", RedoAction),
+            MenuItem::action(tr(keys::Q_PREFS_UNDO), UndoAction),
+            MenuItem::action(tr(keys::Q_PREFS_REDO), RedoAction),
             MenuItem::separator(),
-            MenuItem::os_action("Cut", CutAction, OsAction::Cut),
-            MenuItem::os_action("Copy", CopyAction, OsAction::Copy),
-            MenuItem::os_action("Paste", PasteAction, OsAction::Paste),
+            MenuItem::os_action(tr(keys::Q_PREFS_CUT), CutAction, OsAction::Cut),
+            MenuItem::os_action(tr(keys::MAC_MENU_COPY), CopyAction, OsAction::Copy),
+            MenuItem::os_action(tr(keys::Q_PREFS_PASTE), PasteAction, OsAction::Paste),
             MenuItem::separator(),
-            MenuItem::os_action("Select All", SelectAllAction, OsAction::SelectAll),
+            MenuItem::os_action(
+                tr(keys::MAC_MENU_SELECT_ALL),
+                SelectAllAction,
+                OsAction::SelectAll,
+            ),
         ]),
         Menu::new("View").items(view_items),
         Menu::new("Window").items(window_items),
         Menu::new("Help").items([
-            MenuItem::action("Keyboard Shortcuts", OpenShortcuts),
-            MenuItem::action("Quill on GitHub", OpenHelp),
+            MenuItem::action(tr(keys::Q_PREFS_KEYBOARD_SHORTCUTS_2), OpenShortcuts),
+            MenuItem::action(tr(keys::Q_PREFS_QUILL_ON_GITHUB), OpenHelp),
         ]),
     ]);
     menus

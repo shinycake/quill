@@ -7,6 +7,7 @@ use super::connect_ui::live_status_for;
 use super::notification_settings::MAX_OS_NOTIFICATION_THREADS;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::locks::LockExt;
 use quill::notify::{NotificationAction, NotificationSoundKind, QueuedNotification};
 use quill::state::RedrawNeed;
@@ -309,7 +310,8 @@ impl QuillApp {
             self.connection.lost,
         ) {
             self.connection.lost = true;
-            self.connection.status_note = "Connection to Telegram was closed".into();
+            self.connection.status_note =
+                tr(keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into();
             progressed = true;
             need = RedrawNeed::Now;
         }
@@ -385,7 +387,7 @@ impl QuillApp {
             self.auth_ui.recovery_mode = false;
         }
         if send_failed {
-            self.connection.status_note = "failed to send TDLib request".into();
+            self.connection.status_note = tr(keys::Q_PREFS_FAILED_TO_SEND_TDLIB_REQUEST).into();
         } else if progressed {
             if let Some(err) = err {
                 self.connection.status_note = err.user_message();

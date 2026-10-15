@@ -22,6 +22,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
+use quill::lang::{keys, tr, tr_with};
 use quill::settings::{
     AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
     load_appearance_prefs, load_chat_prefs, safe_app_root, save_appearance_prefs, save_chat_prefs,
@@ -224,7 +225,10 @@ impl QuillApp {
         quill::tray::monochrome::set_monochrome(self.appearance.tray_icon_monochrome);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         if let Err(err) = save_appearance_prefs(&Self::appearance_paths(), &self.appearance) {
-            self.connection.status_note = format!("Couldn't save appearance settings: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_PREFS_COULDNT_SAVE_APPEARANCE_SETTINGS,
+                &[("err", &err.to_string())],
+            );
         }
         self.apply_appearance(cx);
         cx.notify();
@@ -244,7 +248,10 @@ impl QuillApp {
     ) {
         f(&mut self.chat_prefs);
         if let Err(err) = save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs) {
-            self.connection.status_note = format!("Couldn't save chat settings: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_PREFS_COULDNT_SAVE_CHAT_SETTINGS,
+                &[("err", &err.to_string())],
+            );
         }
         // Keep kit's newline-vs-submit behavior in sync with the mode on
         // the two chat composers (other inputs always submit on Enter).
@@ -347,9 +354,9 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Keyboard shortcuts. Changes apply immediately and are saved on this device.",
-                        ),
+                        .child(tr(
+                            keys::Q_PREFS_KEYBOARD_SHORTCUTS_CHANGES_APPLY_IMMEDIATELY,
+                        )),
                 );
                 body = body.child(this.appearance_keybindings_section(cx));
             } else {
@@ -357,9 +364,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Customize how Quill looks and feels. Changes are saved on this device.",
-                        ),
+                        .child(tr(keys::Q_PREFS_CUSTOMIZE_HOW_QUILL_LOOKS_AND)),
                 );
                 body = body.child(this.app_themes_section(cx));
                 body = body.child(this.appearance_peer_color_section(cx));
@@ -390,7 +395,7 @@ impl QuillApp {
             }
             let footer = div().flex().justify_end().child(
                 Button::new("close-appearance")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_appearance();
@@ -400,7 +405,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Appearance"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_PREFS_APPEARANCE)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -493,7 +498,11 @@ impl QuillApp {
             .role(gpui_kit::Role::Button)
             .aria_label(format!(
                 "{name}{}",
-                if selected { ", selected" } else { "" }
+                if selected {
+                    tr(keys::Q_PREFS_SELECTED)
+                } else {
+                    ""
+                }
             ))
             .tab_index(0)
             .cursor_pointer()
@@ -568,11 +577,11 @@ impl QuillApp {
             body.push(
                 this.appearance_section(
                     cx,
-                    "Start in tray",
-                    "Open Quill from its tray menu when needed.",
+                    tr(keys::Q_PREFS_START_IN_TRAY),
+                    tr(keys::Q_PREFS_OPEN_QUILL_FROM_ITS_TRAY),
                     Switch::new("general-start-in-tray")
                         .checked(this.appearance.start_in_tray)
-                        .accessibility_label("Start Quill in the system tray")
+                        .accessibility_label(tr(keys::Q_PREFS_START_QUILL_IN_THE_SYSTEM))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             this.set_appearance(cx, |a| a.start_in_tray = on)
                         }))
@@ -589,11 +598,11 @@ impl QuillApp {
             body.push(
                 this.appearance_section(
                     cx,
-                    "Warn before quitting",
-                    "Hold \u{2318}Q to quit instead of quitting on the first press.",
+                    tr(keys::Q_PREFS_WARN_BEFORE_QUITTING),
+                    tr(keys::Q_PREFS_HOLD_Q_TO_QUIT_INSTEAD),
                     Switch::new("general-mac-warn-before-quit")
                         .checked(this.appearance.mac_warn_before_quit)
-                        .accessibility_label("Warn before quitting with Command Q")
+                        .accessibility_label(tr(keys::Q_PREFS_WARN_BEFORE_QUITTING_WITH_COMMAND))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             this.set_appearance(cx, |a| a.mac_warn_before_quit = on)
                         }))
@@ -614,11 +623,11 @@ impl QuillApp {
         supported.then(|| {
             self.appearance_section(
                 cx,
-                "Use system window frame",
-                "The system draws the title bar and window buttons.",
+                tr(keys::SETTINGS_NATIVE_FRAME),
+                tr(keys::Q_PREFS_THE_SYSTEM_DRAWS_THE_TITLE),
                 Switch::new("general-native-window-frame")
                     .checked(self.appearance.native_window_frame)
-                    .accessibility_label("Use the system window frame")
+                    .accessibility_label(tr(keys::Q_PREFS_USE_THE_SYSTEM_WINDOW_FRAME))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_appearance(cx, |a| a.native_window_frame = on)
                     }))
@@ -632,16 +641,17 @@ impl QuillApp {
         let control = RadioGroup::vertical("appearance-close-behavior")
             .selected_index(Some(usize::from(!self.appearance.minimize_to_tray)))
             .children([
-                Radio::new("appearance-close-background").label("Run in the background"),
-                Radio::new("appearance-close-quit").label("Quit Quill"),
+                Radio::new("appearance-close-background")
+                    .label(tr(keys::SETTINGS_RUN_IN_BACKGROUND)),
+                Radio::new("appearance-close-quit").label(tr(keys::Q_PREFS_QUIT_QUILL)),
             ])
             .on_click(cx.listener(|this, &ix, _, cx| {
                 this.set_appearance(cx, |a| a.minimize_to_tray = ix == 0);
             }));
-        let hint = "Quill keeps running and reopens from the tray icon.";
+        let hint = tr(keys::Q_PREFS_QUILL_KEEPS_RUNNING_AND_REOPENS);
         self.appearance_section(
             cx,
-            "When the window is closed",
+            tr(keys::Q_PREFS_WHEN_THE_WINDOW_IS_CLOSED),
             hint,
             control.into_any_element(),
         )
@@ -670,8 +680,8 @@ impl QuillApp {
             .gap_2()
             .child(self.appearance_section(
                 cx,
-                "Auto-night",
-                "Automatically switch to the dark theme at night.",
+                tr(keys::Q_PREFS_AUTO_NIGHT),
+                tr(keys::Q_PREFS_AUTOMATICALLY_SWITCH_TO_THE_DARK),
                 control.into_any_element(),
             ));
         if current == AutoNight::Scheduled {
@@ -680,14 +690,14 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(div().text_sm().child("From"))
+                    .child(div().text_sm().child(tr(keys::Q_PREFS_FROM)))
                     .child(self.appearance_time_stepper(
                         "night-start",
                         self.appearance.night_start_minutes,
                         true,
                         cx,
                     ))
-                    .child(div().text_sm().child("To"))
+                    .child(div().text_sm().child(tr(keys::Q_PREFS_TO)))
                     .child(self.appearance_time_stepper(
                         "night-end",
                         self.appearance.night_end_minutes,
@@ -701,7 +711,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Follows the OS light/dark setting."),
+                    .child(tr(keys::Q_PREFS_FOLLOWS_THE_OS_LIGHT_DARK)),
             );
         }
         body.into_any_element()

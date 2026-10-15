@@ -1,6 +1,7 @@
 //! Per-chat sound, preview and story settings, and the sound picker.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Parity slice: current sound choice for a chat, for the notifications
@@ -10,10 +11,10 @@ impl QuillApp {
         settings: &ChatNotificationSettings,
     ) -> String {
         if settings.use_default_sound {
-            return "Default".to_string();
+            return tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY_DEFAULT).to_string();
         }
         if settings.sound_id == 0 {
-            return "None".to_string();
+            return tr(keys::SETTINGS_NO_BLOCKED_USERS).to_string();
         }
         self.session()
             .and_then(|s| {
@@ -23,7 +24,7 @@ impl QuillApp {
                     .find(|sound| sound.id == settings.sound_id)
                     .map(|sound| sound.title.clone())
             })
-            .unwrap_or_else(|| "Custom".to_string())
+            .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string())
     }
 
     /// Parity slice (`parity:stories-notify-settings`): current story-sound
@@ -31,10 +32,10 @@ impl QuillApp {
     /// checkmarks.
     pub(in crate::ui) fn story_sound_label(&self, settings: &ChatNotificationSettings) -> String {
         if settings.use_default_story_sound {
-            return "Default".to_string();
+            return tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY_DEFAULT).to_string();
         }
         if settings.story_sound_id == 0 {
-            return "None".to_string();
+            return tr(keys::SETTINGS_NO_BLOCKED_USERS).to_string();
         }
         self.session()
             .and_then(|s| {
@@ -44,7 +45,7 @@ impl QuillApp {
                     .find(|sound| sound.id == settings.story_sound_id)
                     .map(|sound| sound.title.clone())
             })
-            .unwrap_or_else(|| "Custom".to_string())
+            .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string())
     }
 
     /// Parity slice: apply a sound choice to the open chat
@@ -62,8 +63,8 @@ impl QuillApp {
                 .driver
                 .set_chat_sound(chat_id, use_default_sound, sound_id);
             self.connection.status_note = match result {
-                Ok(_) => "sound updated…".into(),
-                Err(_) => "could not change sound".into(),
+                Ok(_) => tr(keys::Q_PREFS_SOUND_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_SOUND).into(),
             };
             cx.notify();
             return;
@@ -77,7 +78,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.status_note = "sound updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_SOUND_UPDATED_2).into();
             cx.notify();
         }
     }
@@ -93,8 +94,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_show_preview(chat_id, show_preview);
             self.connection.status_note = match result {
-                Ok(_) => "preview setting updated…".into(),
-                Err(_) => "could not change preview".into(),
+                Ok(_) => tr(keys::Q_PREFS_PREVIEW_SETTING_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_PREVIEW).into(),
             };
             cx.notify();
             return;
@@ -108,7 +109,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.status_note = "preview setting updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_PREVIEW_SETTING_UPDATED_2).into();
             cx.notify();
         }
     }
@@ -124,8 +125,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_story_mute(chat_id, mute_stories);
             self.connection.status_note = match result {
-                Ok(_) => "story mute updated…".into(),
-                Err(_) => "could not change story mute".into(),
+                Ok(_) => tr(keys::Q_PREFS_STORY_MUTE_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_MUTE).into(),
             };
             cx.notify();
             return;
@@ -139,7 +140,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.status_note = "story mute updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_STORY_MUTE_UPDATED_2).into();
             cx.notify();
         }
     }
@@ -157,8 +158,8 @@ impl QuillApp {
                 .driver
                 .set_chat_story_poster(chat_id, show_story_poster);
             self.connection.status_note = match result {
-                Ok(_) => "story poster setting updated…".into(),
-                Err(_) => "could not change story poster".into(),
+                Ok(_) => tr(keys::Q_PREFS_STORY_POSTER_SETTING_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_POSTER_2).into(),
             };
             cx.notify();
             return;
@@ -172,7 +173,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.status_note = "story poster setting updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_STORY_POSTER_SETTING_UPDATED_2).into();
             cx.notify();
         }
     }
@@ -192,8 +193,8 @@ impl QuillApp {
                 live.driver
                     .set_chat_story_sound(chat_id, use_default_story_sound, story_sound_id);
             self.connection.status_note = match result {
-                Ok(_) => "story sound updated…".into(),
-                Err(_) => "could not change story sound".into(),
+                Ok(_) => tr(keys::Q_PREFS_STORY_SOUND_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_SOUND).into(),
             };
             cx.notify();
             return;
@@ -207,7 +208,7 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.status_note = "story sound updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_STORY_SOUND_UPDATED_2).into();
             cx.notify();
         }
     }
@@ -252,8 +253,8 @@ impl QuillApp {
             target,
             SoundChoice::Default,
             current,
-            "Default",
-            "Quill default tone",
+            tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY_DEFAULT),
+            tr(keys::Q_PREFS_QUILL_DEFAULT_TONE),
             None,
         ));
         list = list.child(self.sound_picker_row(
@@ -261,8 +262,8 @@ impl QuillApp {
             target,
             SoundChoice::Disabled,
             current,
-            "None",
-            "No sound",
+            tr(keys::SETTINGS_NO_BLOCKED_USERS),
+            tr(keys::Q_PREFS_NO_SOUND),
             None,
         ));
         for sound in saved_sounds {
@@ -325,7 +326,11 @@ impl QuillApp {
             .role(gpui_kit::Role::Button)
             .aria_label(format!(
                 "{title}{}",
-                if selected { ", selected" } else { "" }
+                if selected {
+                    tr(keys::Q_PREFS_SELECTED)
+                } else {
+                    ""
+                }
             ))
             .tab_index(0)
             .cursor_pointer()

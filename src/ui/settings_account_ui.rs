@@ -7,6 +7,7 @@ use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 /// The Settings subpage that asks before writing to Telegram Support.
 pub(super) const ASK_QUESTION_PAGE: &str = "Ask a Question";
@@ -21,7 +22,7 @@ impl QuillApp {
             .mt_2()
             .child(
                 Button::new("settings-faq")
-                    .label("Telegram FAQ")
+                    .label(tr(keys::SETTINGS_FAQ))
                     .ghost()
                     .on_click(
                         cx.listener(|_, _, _, cx| cx.open_url(quill::settings_account::FAQ_URL)),
@@ -29,7 +30,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("settings-features")
-                    .label("Telegram Features")
+                    .label(tr(keys::SETTINGS_FEATURES))
                     .ghost()
                     .on_click(cx.listener(|_, _, _, cx| {
                         cx.open_url(quill::settings_account::FEATURES_URL)
@@ -37,7 +38,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("settings-privacy-policy")
-                    .label("Privacy Policy")
+                    .label(tr(keys::Q_PREFS_PRIVACY_POLICY))
                     .ghost()
                     .on_click(cx.listener(|_, _, _, cx| {
                         cx.open_url(quill::settings_account::PRIVACY_POLICY_URL)
@@ -68,7 +69,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("settings-changelog")
-                            .label("What's new")
+                            .label(tr(keys::Q_PREFS_WHATS_NEW))
                             .small()
                             .ghost()
                             .on_click(cx.listener(|_, _, _, cx| {
@@ -98,7 +99,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("ask-question-faq")
-                            .label("Go to FAQ")
+                            .label(tr(keys::SETTINGS_FAQ_BUTTON))
                             .outline()
                             .on_click(cx.listener(|_, _, _, cx| {
                                 cx.open_url(quill::settings_account::FAQ_URL)
@@ -106,7 +107,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("ask-question-volunteer")
-                            .label("Ask a Volunteer")
+                            .label(tr(keys::SETTINGS_ASK_OK))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.ask_support(window, cx);
@@ -127,8 +128,10 @@ impl QuillApp {
                 self.settings.page = None;
                 window.close_dialog(cx);
             }
-            Some(Err(_)) => self.set_status_note("Couldn't reach Telegram Support; try again.", cx),
-            None => self.set_status_note("Sign in to write to Telegram Support.", cx),
+            Some(Err(_)) => {
+                self.set_status_note(tr(keys::Q_PREFS_COULDNT_REACH_TELEGRAM_SUPPORT_TRY), cx)
+            }
+            None => self.set_status_note(tr(keys::Q_PREFS_SIGN_IN_TO_WRITE_TO), cx),
         }
         cx.notify();
     }

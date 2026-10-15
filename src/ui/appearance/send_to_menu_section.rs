@@ -2,6 +2,7 @@
 //! (`quill::send_to_menu`, tdesktop's "Place Telegram in \"Send to\" menu").
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// The switch that puts Quill in Explorer's "Send to" menu; none where
@@ -12,7 +13,7 @@ impl QuillApp {
         }
         let control = Switch::new("general-send-to-switch")
             .checked(quill::send_to_menu::is_enabled())
-            .accessibility_label("Place Quill in the Send to menu")
+            .accessibility_label(tr(keys::Q_PREFS_PLACE_QUILL_IN_THE_SEND))
             .on_click(cx.listener(|_, &on, _, cx| {
                 // The shell writes or deletes a shortcut file: not on the UI thread.
                 cx.spawn(async move |this, cx| {
@@ -21,8 +22,10 @@ impl QuillApp {
                         .await;
                     let _ = this.update(cx, |this, cx| {
                         if let Err(error) = result {
-                            this.connection.status_note =
-                                format!("could not update the Send to menu: {error}");
+                            this.connection.status_note = tr_with(
+                                keys::Q_PREFS_COULD_NOT_UPDATE_THE_SEND,
+                                &[("error", &error.to_string())],
+                            );
                         }
                         cx.notify();
                     });
@@ -31,8 +34,8 @@ impl QuillApp {
             }));
         Some(self.appearance_section(
             cx,
-            "Place Quill in \"Send to\" menu",
-            "Right-click files in Explorer, choose Send to, then Quill to pick a chat for them.",
+            tr(keys::Q_PREFS_PLACE_QUILL_IN_SEND_TO),
+            tr(keys::Q_PREFS_RIGHT_CLICK_FILES_IN_EXPLORER),
             control.into_any_element(),
         ))
     }

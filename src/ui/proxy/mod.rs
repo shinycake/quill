@@ -18,6 +18,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::proxy::ProxyKind;
+use quill::lang::{keys, tr, tr_with};
 use quill::proxy::{
     AUTO_SWITCH_TIMEOUTS, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode, kind_label,
     parse_proxy_link, proxy_link_from_text,
@@ -70,7 +71,7 @@ pub(crate) fn row_subtitle(entry: &ProxyEntry, ping: Option<PingStatus>) -> Stri
     let kind = kind_label(entry.proxy.kind);
     match ping {
         Some(status) => format!("{kind} · {}", status.label()),
-        None => format!("{kind} · not tested"),
+        None => tr_with(keys::Q_PREFS_NOT_TESTED, &[("kind", kind)]),
     }
 }
 
@@ -82,10 +83,8 @@ pub(crate) fn row_title(entry: &ProxyEntry) -> String {
 /// says what is wrong in one line).
 pub(crate) fn editor_issue_message(kind: ProxyKind, issue: ProxyIssue) -> String {
     match (issue, kind) {
-        (ProxyIssue::Invalid, ProxyKind::Mtproto) => {
-            "Enter a server, a port (1–65535) and a valid secret.".into()
-        }
-        (ProxyIssue::Invalid, _) => "Enter a server and a port (1–65535).".into(),
+        (ProxyIssue::Invalid, ProxyKind::Mtproto) => tr(keys::Q_PREFS_ENTER_A_SERVER_A_PORT).into(),
+        (ProxyIssue::Invalid, _) => tr(keys::Q_PREFS_ENTER_A_SERVER_AND_A).into(),
         (other, _) => other.message().into(),
     }
 }
@@ -131,7 +130,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => Some(f(&mut live.driver)),
             None => {
-                self.connection.status_note = "demo: proxy settings are not applied".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEMO_PROXY_SETTINGS_ARE_NOT).into();
                 None
             }
         }
@@ -167,11 +166,23 @@ impl QuillApp {
             enable_on_save,
             http_only: draft.http_only,
             comment,
-            server: input(window, cx, "Hostname", &draft.server, false),
-            port: input(window, cx, "Port", &port, false),
-            username: input(window, cx, "Username", &draft.username, false),
-            password: input(window, cx, "Password", &draft.password, true),
-            secret: input(window, cx, "Secret", &draft.secret, false),
+            server: input(window, cx, tr(keys::Q_PREFS_HOSTNAME), &draft.server, false),
+            port: input(window, cx, tr(keys::PROXY_BOX_PORT), &port, false),
+            username: input(
+                window,
+                cx,
+                tr(keys::PROXY_BOX_USERNAME),
+                &draft.username,
+                false,
+            ),
+            password: input(
+                window,
+                cx,
+                tr(keys::PROXY_BOX_PASSWORD),
+                &draft.password,
+                true,
+            ),
+            secret: input(window, cx, tr(keys::PROXY_BOX_SECRET), &draft.secret, false),
             error: None,
         });
         if let Some(editor) = &self.settings.proxy.editor {
@@ -229,7 +240,10 @@ impl QuillApp {
                 .any(|p| Some(p.id) != id && p.proxy.same_endpoint(&draft))
         });
         if duplicate {
-            fail(self, "This proxy is already in the list.".into());
+            fail(
+                self,
+                tr(keys::PROXY_ADD_FROM_CLIPBOARD_EXISTING_TOAST).into(),
+            );
             cx.notify();
             return;
         }
@@ -244,7 +258,7 @@ impl QuillApp {
         });
         match sent {
             Some(Ok(_)) | None => self.settings.proxy.editor = None,
-            Some(Err(_)) => fail(self, "Couldn't save the proxy. Try again.".into()),
+            Some(Err(_)) => fail(self, tr(keys::Q_PREFS_COULDNT_SAVE_THE_PROXY_TRY).into()),
         }
         cx.notify();
     }
@@ -287,10 +301,11 @@ impl QuillApp {
         match link {
             Some(link) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(link));
-                self.settings.proxy.notice = Some("Link copied to clipboard.".into());
+                self.settings.proxy.notice = Some(tr(keys::USERNAME_COPIED).into());
             }
             None => {
-                self.settings.proxy.notice = Some("HTTP proxies can't be shared as a link.".into());
+                self.settings.proxy.notice =
+                    Some(tr(keys::Q_PREFS_HTTP_PROXIES_CANT_BE_SHARED).into());
             }
         }
         cx.notify();
@@ -313,7 +328,7 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(links.join("\n")));
-        self.settings.proxy.notice = Some("Proxy List copied to clipboard.".into());
+        self.settings.proxy.notice = Some(tr(keys::PROXY_EDIT_SHARE_LIST_TOAST).into());
         cx.notify();
     }
 
@@ -324,7 +339,7 @@ impl QuillApp {
             .and_then(|item| item.text())
             .unwrap_or_default();
         let notice = match proxy_link_from_text(&text) {
-            None => "This is not a proxy link.".to_string(),
+            None => tr(keys::PROXY_ADD_FROM_CLIPBOARD_FAILED_TOAST).to_string(),
             Some(Err(issue)) => issue.message().to_string(),
             Some(Ok(draft)) => {
                 let exists = self.session().is_some_and(|s| {
@@ -335,11 +350,11 @@ impl QuillApp {
                         .any(|p| p.proxy.same_endpoint(&draft))
                 });
                 if exists {
-                    "This proxy is already in the list.".to_string()
+                    tr(keys::PROXY_ADD_FROM_CLIPBOARD_EXISTING_TOAST).to_string()
                 } else {
                     match self.proxy_driver(|driver| driver.add_proxy(&draft, false, "")) {
-                        Some(Ok(_)) => "Proxy was added from clipboard.".to_string(),
-                        _ => "Couldn't add the proxy. Try again.".to_string(),
+                        Some(Ok(_)) => tr(keys::PROXY_ADD_FROM_CLIPBOARD_GOOD_TOAST).to_string(),
+                        _ => tr(keys::Q_PREFS_COULDNT_ADD_THE_PROXY_TRY).to_string(),
                     }
                 }
             }
@@ -476,11 +491,11 @@ impl QuillApp {
                 })
                 .ghost()
                 .tooltip(if connected {
-                    "Proxy enabled"
+                    tr(keys::Q_PREFS_PROXY_ENABLED)
                 } else {
-                    "Connecting through proxy…"
+                    tr(keys::CONNECTION_PROXY_CONNECTING)
                 })
-                .accessibility_label("Proxy settings")
+                .accessibility_label(tr(keys::PROXY_SETTINGS))
                 .on_click(cx.listener(|this, _, _, cx| this.open_proxy_list(cx)))
                 .into_any_element(),
         )
@@ -497,8 +512,11 @@ impl QuillApp {
             quill::proxy_extras::connection_type_label(&s.settings.proxy, connected)
         });
         match value {
-            Some(value) => format!("Connection type: {value}"),
-            None => "Connection type".into(),
+            Some(value) => tr_with(
+                keys::Q_PREFS_CONNECTION_TYPE,
+                &[("value", &value.to_string())],
+            ),
+            None => tr(keys::Q_PREFS_CONNECTION_TYPE_2).into(),
         }
     }
 
@@ -521,7 +539,7 @@ impl QuillApp {
             .children(shield)
             .child(
                 Button::new("proxy-strip-settings")
-                    .label("Proxy settings")
+                    .label(tr(keys::PROXY_SETTINGS))
                     .ghost()
                     .xsmall()
                     .on_click(cx.listener(|this, _, _, cx| this.open_proxy_list(cx))),
@@ -639,34 +657,53 @@ impl QuillApp {
                     ),
             )
             .child(
-                icon_button("ping", gpui_kit::assets::IconName::RotateCw, "Check status")
-                    .on_click(cx.listener(move |this, _, _, cx| this.ping_proxy_entry(id, cx))),
+                icon_button(
+                    "ping",
+                    gpui_kit::assets::IconName::RotateCw,
+                    tr(keys::PROXY_BOX_CHECK_STATUS),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.ping_proxy_entry(id, cx))),
             )
             // Unshareable (HTTP) rows keep an invisible slot so the icons align.
             .child(
                 div().when(!shareable, |this| this.invisible()).child(
-                    icon_button("copy", gpui_kit::assets::IconName::Copy, "Copy link")
-                        .disabled(!shareable)
-                        .on_click(cx.listener(move |this, _, _, cx| this.copy_proxy_link(id, cx))),
+                    icon_button(
+                        "copy",
+                        gpui_kit::assets::IconName::Copy,
+                        tr(keys::CONTEXT_COPY_LINK),
+                    )
+                    .disabled(!shareable)
+                    .on_click(cx.listener(move |this, _, _, cx| this.copy_proxy_link(id, cx))),
                 ),
             )
             .child(
                 div().when(!shareable, |this| this.invisible()).child(
-                    icon_button("qr", gpui_kit::assets::IconName::QrCode, "Show QR code")
-                        .disabled(!shareable)
-                        .on_click(cx.listener(move |this, _, _, cx| this.open_proxy_qr(id, cx))),
+                    icon_button(
+                        "qr",
+                        gpui_kit::assets::IconName::QrCode,
+                        tr(keys::Q_PREFS_SHOW_QR_CODE),
+                    )
+                    .disabled(!shareable)
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_proxy_qr(id, cx))),
                 ),
             )
             .child(
-                icon_button("edit", gpui_kit::assets::IconName::Pencil, "Edit").on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.open_proxy_editor(Some(id), false, window, cx)
-                    }),
-                ),
+                icon_button(
+                    "edit",
+                    gpui_kit::assets::IconName::Pencil,
+                    tr(keys::PROXY_MENU_EDIT),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_proxy_editor(Some(id), false, window, cx)
+                })),
             )
             .child(
-                icon_button("delete", gpui_kit::assets::IconName::Trash, "Delete")
-                    .on_click(cx.listener(move |this, _, _, cx| this.delete_proxy_entry(id, cx))),
+                icon_button(
+                    "delete",
+                    gpui_kit::assets::IconName::Trash,
+                    tr(keys::PROXY_MENU_DELETE),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.delete_proxy_entry(id, cx))),
             )
     }
 
@@ -696,21 +733,20 @@ impl QuillApp {
             };
             let mut body = div().flex().flex_col().gap_2();
             if let Some(error) = state.error.clone() {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(danger())
-                        .child(format!("Error: {error}")),
-                );
+                body = body.child(div().text_xs().text_color(danger()).child(tr_with(
+                    keys::Q_PREFS_ERROR_2,
+                    &[("error", &error.to_string())],
+                )));
             }
             body = body
                 .child(
                     RadioGroup::vertical("proxy-mode")
                         .selected_index(Some(mode))
                         .children([
-                            Radio::new("proxy-mode-off").label("Disable proxy"),
-                            Radio::new("proxy-mode-system").label("Use system proxy settings"),
-                            Radio::new("proxy-mode-custom").label("Use custom proxy"),
+                            Radio::new("proxy-mode-off").label(tr(keys::PROXY_DISABLE)),
+                            Radio::new("proxy-mode-system")
+                                .label(tr(keys::PROXY_USE_SYSTEM_SETTINGS)),
+                            Radio::new("proxy-mode-custom").label(tr(keys::PROXY_USE_CUSTOM)),
                         ])
                         .on_click(cx.listener(|this, &ix, window, cx| match ix {
                             0 => this.set_proxy_mode(false, cx),
@@ -721,7 +757,7 @@ impl QuillApp {
                 .child(Self::switch_row(
                     "proxy-ipv6",
                     state.prefer_ipv6,
-                    "Try connecting through IPv6",
+                    tr(keys::CONNECTION_TRY_IPV6),
                     None,
                     cx,
                     |this, on, cx| {
@@ -733,8 +769,8 @@ impl QuillApp {
                 body = body.child(Self::switch_row(
                     "proxy-calls",
                     use_for_calls,
-                    "Use proxy for calls",
-                    Some("Only SOCKS5 proxies can carry call media"),
+                    tr(keys::PROXY_USE_FOR_CALLS),
+                    Some(tr(keys::Q_PREFS_ONLY_SOCKS5_PROXIES_CAN_CARRY)),
                     cx,
                     |this, on, cx| this.set_call_pref(|prefs| prefs.use_proxy_for_calls = on, cx),
                 ));
@@ -743,7 +779,7 @@ impl QuillApp {
                 body = body.child(Self::switch_row(
                     "proxy-auto-switch",
                     state.prefs.auto_switch,
-                    "Auto-switch proxies",
+                    tr(keys::PROXY_AUTO_SWITCH),
                     None,
                     cx,
                     |this, on, cx| this.set_proxy_auto_switch(Some(on), None, cx),
@@ -766,26 +802,28 @@ impl QuillApp {
                                     }
                                 })),
                         )
-                        .child(div().text_xs().text_color(text_muted()).child(
-                            "You can choose how quickly the app should auto-connect to the nearest active proxy if the current one stops working.",
-                        ));
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(text_muted())
+                                .child(tr(keys::PROXY_AUTO_SWITCH_ABOUT)),
+                        );
                 }
             }
-            body = body.child(div().text_xs().text_color(text_muted()).child(
-                "Proxy servers may be helpful in accessing Telegram if there is no connection in a specific region.",
-            ));
+            body = body.child(
+                div()
+                    .text_xs()
+                    .text_color(text_muted())
+                    .child(tr(keys::PROXY_ABOUT)),
+            );
             if state.entries().is_empty() {
-                body = body.child(
-                    div()
-                        .py_3()
-                        .text_sm()
-                        .text_color(text_muted())
-                        .child(if state.loading {
-                            "Loading…"
-                        } else {
-                            "Your saved proxy list will be here."
-                        }),
-                );
+                body = body.child(div().py_3().text_sm().text_color(text_muted()).child(
+                    if state.loading {
+                        tr(keys::Q_PREFS_LOADING)
+                    } else {
+                        tr(keys::PROXY_DESCRIPTION)
+                    },
+                ));
             } else {
                 let mut rows = div().flex().flex_col().gap_1();
                 for entry in state.entries() {
@@ -802,14 +840,14 @@ impl QuillApp {
                     .child(
                         Button::new("proxy-add")
                             .icon(gpui_kit::assets::IconName::Plus)
-                            .label("Add proxy")
+                            .label(tr(keys::PROXY_ADD))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_proxy_editor(None, false, window, cx);
                             })),
                     )
                     .child(
                         Button::new("proxy-add-clipboard")
-                            .label("Add proxy from clipboard")
+                            .label(tr(keys::PROXY_ADD_FROM_CLIPBOARD))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.add_proxy_from_clipboard(cx);
@@ -824,7 +862,7 @@ impl QuillApp {
                             this.child(
                                 Button::new("proxy-share-list")
                                     .icon(gpui_kit::assets::IconName::Copy)
-                                    .label("Share Proxy List")
+                                    .label(tr(keys::PROXY_EDIT_SHARE_LIST_BUTTON))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.share_proxy_list(cx);
@@ -838,7 +876,7 @@ impl QuillApp {
             }
             let footer = div().flex().justify_end().child(
                 Button::new("proxy-close")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_proxy_list(cx);
@@ -848,7 +886,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .width(px(520.))
-                .title(crate::ui::shell::dialog_title("Proxy settings"))
+                .title(crate::ui::shell::dialog_title(tr(keys::PROXY_SETTINGS)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {

@@ -1,6 +1,7 @@
 //! Methods moved out of `appearance.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The custom accent field's state, showing the old single
@@ -62,8 +63,8 @@ impl QuillApp {
         }
         self.appearance_section(
             cx,
-            "Interface scale",
-            "Scales the whole interface, applied right away.",
+            tr(keys::Q_PREFS_INTERFACE_SCALE),
+            tr(keys::Q_PREFS_SCALES_THE_WHOLE_INTERFACE_APPLIED),
             row.into_any_element(),
         )
     }
@@ -79,7 +80,7 @@ impl QuillApp {
             .items_center()
             .child(self.appearance_chip(
                 "appearance-wallpaper-default",
-                "Default",
+                tr(keys::Q_PREFS_DEFAULT),
                 current.is_none(),
                 cx,
                 |this, cx| {
@@ -106,8 +107,8 @@ impl QuillApp {
         }
         self.appearance_section(
             cx,
-            "Chat wallpaper",
-            "Solid color behind the message list — dark colors pair best with the dark theme.",
+            tr(keys::Q_PREFS_CHAT_WALLPAPER),
+            tr(keys::Q_PREFS_SOLID_COLOR_BEHIND_THE_MESSAGE),
             row.into_any_element(),
         )
     }
@@ -120,7 +121,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("appearance-font-down")
-                    .label("A−")
+                    .label(tr(keys::Q_PREFS_A))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.bump_font_size(cx, -1))),
             )
@@ -133,14 +134,14 @@ impl QuillApp {
             )
             .child(
                 Button::new("appearance-font-up")
-                    .label("A+")
+                    .label(tr(keys::Q_PREFS_A_2))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.bump_font_size(cx, 1))),
             );
         self.appearance_section(
             cx,
-            "Message text size",
-            "Chat message text, 12–20 px.",
+            tr(keys::Q_PREFS_MESSAGE_TEXT_SIZE),
+            tr(keys::Q_PREFS_CHAT_MESSAGE_TEXT_12_20),
             control.into_any_element(),
         )
     }
@@ -151,16 +152,16 @@ impl QuillApp {
         let control = RadioGroup::horizontal("appearance-style")
             .selected_index(Some(if bubbles { 0 } else { 1 }))
             .children([
-                Radio::new("appearance-style-bubbles").label("💬 Bubbles"),
-                Radio::new("appearance-style-plain").label("📄 Plain"),
+                Radio::new("appearance-style-bubbles").label(tr(keys::Q_PREFS_BUBBLES)),
+                Radio::new("appearance-style-plain").label(tr(keys::Q_PREFS_PLAIN)),
             ])
             .on_click(cx.listener(|this, &ix, _, cx| {
                 this.set_appearance(cx, |a| a.bubbles = ix == 0);
             }));
         self.appearance_section(
             cx,
-            "Chat style",
-            "Bubbles or plain rows without bubble backgrounds.",
+            tr(keys::Q_PREFS_CHAT_STYLE),
+            tr(keys::Q_PREFS_BUBBLES_OR_PLAIN_ROWS_WITHOUT),
             control.into_any_element(),
         )
     }
@@ -215,8 +216,8 @@ impl QuillApp {
         let control = RadioGroup::horizontal("appearance-chat-list-lines")
             .selected_index(Some(if lines >= 3 { 1 } else { 0 }))
             .children([
-                Radio::new("appearance-chat-list-lines-2").label("2 lines"),
-                Radio::new("appearance-chat-list-lines-3").label("3 lines"),
+                Radio::new("appearance-chat-list-lines-2").label(tr(keys::Q_PREFS_2_LINES)),
+                Radio::new("appearance-chat-list-lines-3").label(tr(keys::Q_PREFS_3_LINES)),
             ])
             .on_click(cx.listener(|this, &ix, _, cx| {
                 this.set_appearance(cx, |a| {
@@ -228,24 +229,24 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .child(self.appearance_section(
-            cx,
-            "Chat list rows",
-            "Two lines shows the title plus the message preview; three lines adds the sender line.",
-            control.into_any_element(),
-        ));
+                cx,
+                tr(keys::Q_PREFS_CHAT_LIST_ROWS),
+                tr(keys::Q_PREFS_TWO_LINES_SHOWS_THE_TITLE),
+                control.into_any_element(),
+            ));
         body = body.child(self.appearance_switch_row(
             cx,
             "appearance-chat-list-media-icons",
-            "Media icons",
-            "Show a photo, video or file icon before the preview text.",
+            tr(keys::Q_PREFS_MEDIA_ICONS),
+            tr(keys::Q_PREFS_SHOW_A_PHOTO_VIDEO_OR),
             self.appearance.chat_list_media_icons,
             |a, on| a.chat_list_media_icons = on,
         ));
         body = body.child(self.appearance_switch_row(
             cx,
             "appearance-chat-list-rich-preview",
-            "Formatted preview text",
-            "Show bold, italic and other formatting in the chat-list preview.",
+            tr(keys::Q_PREFS_FORMATTED_PREVIEW_TEXT),
+            tr(keys::Q_PREFS_SHOW_BOLD_ITALIC_AND_OTHER),
             self.appearance.chat_list_rich_preview,
             |a, on| a.chat_list_rich_preview = on,
         ));
@@ -272,10 +273,8 @@ impl QuillApp {
             }));
         self.appearance_section(
             cx,
-            "Chat list quick action",
-            "Middle-click a chat, or swipe it left with two fingers on a trackpad, \
-             to run this action. A swipe runs it once you pass the threshold and \
-             lift your fingers.",
+            tr(keys::SETTINGS_QUICK_DIALOG_ACTION_TITLE),
+            tr(keys::Q_PREFS_MIDDLE_CLICK_A_CHAT_OR),
             control.into_any_element(),
         )
     }
@@ -291,15 +290,15 @@ impl QuillApp {
         if !quill::autostart::supported() {
             return self.appearance_section(
                 cx,
-                "Launch at login",
-                "Autostart is not available on this platform.",
+                tr(keys::Q_PREFS_LAUNCH_AT_LOGIN),
+                tr(keys::Q_PREFS_AUTOSTART_IS_NOT_AVAILABLE_ON),
                 div().into_any_element(),
             );
         }
         let on = quill::autostart::is_enabled();
         let control = Switch::new("general-autostart-switch")
             .checked(on)
-            .accessibility_label("Launch Quill at login")
+            .accessibility_label(tr(keys::Q_PREFS_LAUNCH_QUILL_AT_LOGIN))
             .on_click(cx.listener(|this, &on, _, cx| {
                 if let Err(err) = quill::autostart::set_enabled(on) {
                     this.connection.status_note = err.to_string();
@@ -308,8 +307,8 @@ impl QuillApp {
             }));
         self.appearance_section(
             cx,
-            "Launch at login",
-            "Start Quill automatically when you sign in to this device.",
+            tr(keys::Q_PREFS_LAUNCH_AT_LOGIN),
+            tr(keys::Q_PREFS_START_QUILL_AUTOMATICALLY_WHEN_YOU),
             control.into_any_element(),
         )
     }
@@ -335,10 +334,10 @@ impl QuillApp {
         let control: AnyElement = match link_handler::control_kind() {
             ControlKind::Button if ours => div()
                 .text_sm()
-                .child("Quill is the default")
+                .child(tr(keys::Q_PREFS_QUILL_IS_THE_DEFAULT))
                 .into_any_element(),
             ControlKind::Button => Button::new("general-link-handler-button")
-                .label("Make Quill the default")
+                .label(tr(keys::Q_PREFS_MAKE_QUILL_THE_DEFAULT))
                 .disabled(unavailable)
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Err(err) = link_handler::make_default() {
@@ -362,7 +361,7 @@ impl QuillApp {
             ControlKind::Switch => Switch::new("general-link-handler-switch")
                 .checked(ours)
                 .disabled(unavailable)
-                .accessibility_label("Open Telegram links with Quill")
+                .accessibility_label(tr(keys::Q_PREFS_OPEN_TELEGRAM_LINKS_WITH_QUILL))
                 .on_click(cx.listener(|this, &on, _, cx| {
                     let result = if on {
                         link_handler::make_default()
@@ -376,7 +375,12 @@ impl QuillApp {
                 }))
                 .into_any_element(),
         };
-        self.appearance_section(cx, "Open Telegram links with Quill", &hint, control)
+        self.appearance_section(
+            cx,
+            tr(keys::Q_PREFS_OPEN_TELEGRAM_LINKS_WITH_QUILL),
+            &hint,
+            control,
+        )
     }
 
     pub(super) fn appearance_send_key_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -385,11 +389,11 @@ impl QuillApp {
         let control = RadioGroup::horizontal("appearance-send-key")
             .selected_index(Some(if current == SendKeyMode::Enter { 0 } else { 1 }))
             .children([
-                Radio::new("appearance-send-key-enter").label("⏎ Enter"),
+                Radio::new("appearance-send-key-enter").label(tr(keys::Q_PREFS_ENTER)),
                 Radio::new("appearance-send-key-ctrlenter").label(if cfg!(target_os = "macos") {
-                    "⌘⏎ Cmd+Enter"
+                    tr(keys::Q_PREFS_CMD_ENTER)
                 } else {
-                    "⌃⏎ Ctrl+Enter"
+                    tr(keys::Q_PREFS_CTRL_ENTER)
                 }),
             ])
             .on_click(cx.listener(|this, &ix, _, cx| {
@@ -403,8 +407,8 @@ impl QuillApp {
             }));
         self.appearance_section(
             cx,
-            "Send messages with",
-            "Enter sends, or Enter inserts a newline and Ctrl/Cmd+Enter sends.",
+            tr(keys::Q_PREFS_SEND_MESSAGES_WITH),
+            tr(keys::Q_PREFS_ENTER_SENDS_OR_ENTER_INSERTS),
             control.into_any_element(),
         )
     }
@@ -428,7 +432,7 @@ impl QuillApp {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_sm().child("Check spelling"))
+                    .child(div().text_sm().child(tr(keys::Q_PREFS_CHECK_SPELLING)))
                     .child(
                         div()
                             .text_xs()
@@ -439,7 +443,7 @@ impl QuillApp {
             .child(
                 Switch::new("appearance-spellcheck")
                     .checked(checked)
-                    .accessibility_label("Check spelling")
+                    .accessibility_label(tr(keys::Q_PREFS_CHECK_SPELLING))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_chat_prefs(cx, |c| c.spellcheck_enabled = on);
                         let text = this.composer.read(cx).value().to_string();
@@ -451,7 +455,7 @@ impl QuillApp {
             let active = self.spell.info.active.clone();
             let mut chips = div().flex().flex_wrap().gap_2().child(self.appearance_chip(
                 "spell-lang-auto",
-                "Automatic",
+                tr(keys::Q_PREFS_AUTOMATIC),
                 self.spell.info.chosen.is_empty(),
                 cx,
                 |this, cx| this.set_spell_languages(Vec::new(), cx),
@@ -485,7 +489,12 @@ impl QuillApp {
         if checked && self.dictionary_manager_available() {
             control = control.child(self.dictionary_manager_section(cx));
         }
-        self.appearance_section(cx, "Spelling", "", control.into_any_element())
+        self.appearance_section(
+            cx,
+            tr(keys::Q_PREFS_SPELLING),
+            "",
+            control.into_any_element(),
+        )
     }
 
     /// tdesktop "Suggest emoji replacements" (`suggestEmoji`, default on):
@@ -502,18 +511,22 @@ impl QuillApp {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_sm().child("Suggest emoji replacements"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_SUGGEST_EMOJI_REPLACEMENTS)),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Type : and a name in the composer to pick a matching emoji."),
+                            .child(tr(keys::Q_PREFS_TYPE_AND_A_NAME_IN)),
                     ),
             )
             .child(
                 Switch::new("appearance-suggest-emoji")
                     .checked(self.chat_prefs.suggest_emoji)
-                    .accessibility_label("Suggest emoji replacements")
+                    .accessibility_label(tr(keys::Q_PREFS_SUGGEST_EMOJI_REPLACEMENTS))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_chat_prefs(cx, |c| c.suggest_emoji = on);
                         this.sync_suggest_menu(cx);
@@ -531,18 +544,22 @@ impl QuillApp {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_sm().child("Replace emoji automatically"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_REPLACE_EMOJI_AUTOMATICALLY)),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Turn :-) and <3 into emoji as you type."),
+                            .child(tr(keys::Q_PREFS_TURN_AND_3_INTO_EMOJI)),
                     ),
             )
             .child(
                 Switch::new("appearance-replace-emoji")
                     .checked(self.chat_prefs.replace_emoji)
-                    .accessibility_label("Replace emoji automatically")
+                    .accessibility_label(tr(keys::Q_PREFS_REPLACE_EMOJI_AUTOMATICALLY))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_chat_prefs(cx, |c| c.replace_emoji = on);
                     })),
@@ -569,12 +586,12 @@ impl QuillApp {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_sm().child("Large emoji"))
+                    .child(div().text_sm().child(tr(keys::Q_PREFS_LARGE_EMOJI)))
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Show a message of one to three emoji as big glyphs."),
+                            .child(tr(keys::Q_PREFS_SHOW_A_MESSAGE_OF_ONE)),
                     ),
             )
             .child(
@@ -583,12 +600,12 @@ impl QuillApp {
                         self.session()
                             .is_none_or(|s| s.settings.media_prefs.big_emoji),
                     )
-                    .accessibility_label("Large emoji")
+                    .accessibility_label(tr(keys::Q_PREFS_LARGE_EMOJI))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_media_pref(|prefs| prefs.big_emoji = on, cx)
                     })),
             );
         let control = div().flex().flex_col().gap_2().child(large).child(control);
-        self.appearance_section(cx, "Emoji", "", control.into_any_element())
+        self.appearance_section(cx, tr(keys::Q_PREFS_EMOJI), "", control.into_any_element())
     }
 }

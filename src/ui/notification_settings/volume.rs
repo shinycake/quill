@@ -4,6 +4,7 @@
 
 use super::*;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Create the slider on first use, seeded from the saved volume.
@@ -61,7 +62,12 @@ impl QuillApp {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .child(div().font_semibold().text_sm().child("Sound volume"))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_SOUND_VOLUME)),
+                    )
                     .child(
                         div()
                             .text_xs()
@@ -74,7 +80,7 @@ impl QuillApp {
                     div()
                         .id("notification-volume-slider")
                         .role(Role::Group)
-                        .aria_label("Notification sound volume")
+                        .aria_label(tr(keys::Q_PREFS_NOTIFICATION_SOUND_VOLUME))
                         .child(Slider::new(&slider)),
                 )
             })
@@ -82,7 +88,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("How loud Quill plays message and call alert sounds"),
+                    .child(tr(keys::Q_PREFS_HOW_LOUD_QUILL_PLAYS_MESSAGE)),
             )
             .into_any_element()
     }

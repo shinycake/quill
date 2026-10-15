@@ -6,6 +6,7 @@
 
 use super::*;
 use quill::composer::{ComposerReplyTo, ComposerSnapshot};
+use quill::lang::{keys, tr};
 use quill::locks::LockExt;
 use quill::telegram::envelope::ChatKind;
 
@@ -177,7 +178,8 @@ impl QuillApp {
             Err(_) => {
                 // Not sendable here (no rights, a closed topic, a channel):
                 // open the chat instead so the user sees why.
-                self.connection.status_note = "Reply from the notification was not sent".into();
+                self.connection.status_note =
+                    tr(keys::Q_PREFS_REPLY_FROM_THE_NOTIFICATION_WAS).into();
                 false
             }
         }

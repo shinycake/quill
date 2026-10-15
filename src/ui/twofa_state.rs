@@ -4,6 +4,7 @@
 use super::*;
 use gpui_kit::component::input::{InputState, TextareaState};
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 pub(crate) struct TwoStepUi {
     /// Slice A2: two-step verification overlay. `view` picks the
@@ -34,29 +35,29 @@ impl TwoStepUi {
         let twofa_current_password = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
-                .placeholder("Current password")
+                .placeholder(tr(keys::Q_PREFS_CURRENT_PASSWORD))
                 .submit_on_enter(false)
         });
         let twofa_new_password = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
-                .placeholder("New password")
+                .placeholder(tr(keys::Q_PREFS_NEW_PASSWORD))
                 .submit_on_enter(false)
         });
         let twofa_hint = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Hint (optional)")
+                .placeholder(tr(keys::Q_PREFS_HINT_OPTIONAL))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let twofa_code = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Code")
+                .placeholder(tr(keys::Q_PREFS_CODE))
                 .submit_on_enter(false)
         });
         let twofa_email = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Recovery email")
+                .placeholder(tr(keys::Q_PREFS_RECOVERY_EMAIL))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

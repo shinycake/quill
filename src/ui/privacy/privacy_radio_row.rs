@@ -1,6 +1,7 @@
 //! Methods moved out of `privacy.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Slice S3: one Everybody / My contacts / Nobody radio row.
@@ -59,8 +60,7 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.payments.premium_option == Some(true))
         {
-            self.connection.status_note =
-                "Restricting who can send you voice messages needs Telegram Premium.".into();
+            self.connection.status_note = tr(keys::Q_PREFS_RESTRICTING_WHO_CAN_SEND_YOU).into();
             cx.notify();
             return;
         }
@@ -129,7 +129,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(if count == 0 {
-                        "None".to_string()
+                        tr(keys::SETTINGS_NO_BLOCKED_USERS).to_string()
                     } else {
                         format!("{count}")
                     }),
@@ -154,7 +154,7 @@ impl QuillApp {
         div()
             .id("privacy-hide-read-time")
             .role(gpui_kit::Role::Button)
-            .aria_label("Hide read time")
+            .aria_label(tr(keys::EDIT_LASTSEEN_HIDE_READ_TIME))
             .tab_index(0)
             .cursor_pointer()
             .flex()
@@ -168,15 +168,19 @@ impl QuillApp {
                 div()
                     .flex()
                     .flex_col()
-                    .child(div().text_sm().child("Hide read time"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::EDIT_LASTSEEN_HIDE_READ_TIME)),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(if loading {
-                                "Updating…"
+                                tr(keys::Q_PREFS_UPDATING)
                             } else {
-                                "Don't share when you've read messages"
+                                tr(keys::Q_PREFS_DONT_SHARE_WHEN_YOUVE_READ)
                             }),
                     ),
             )
@@ -234,8 +238,8 @@ impl QuillApp {
                 target,
                 kind,
                 ExceptionFlag::Premium,
-                "Premium users",
-                "all Telegram Premium subscribers",
+                tr(keys::EDIT_PRIVACY_PREMIUM),
+                tr(keys::EDIT_PRIVACY_PREMIUM_STATUS),
                 detail.allow_premium,
             ));
         }
@@ -249,8 +253,8 @@ impl QuillApp {
                 target,
                 kind,
                 ExceptionFlag::Bots,
-                "Mini Apps",
-                "web mini apps that you use",
+                tr(keys::EDIT_PRIVACY_MINIAPPS),
+                tr(keys::EDIT_PRIVACY_MINIAPPS_STATUS),
                 on,
             ));
         }
@@ -260,7 +264,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("No users or groups added yet."),
+                    .child(tr(keys::Q_PREFS_NO_USERS_OR_GROUPS_ADDED)),
             );
         }
         for user_id in ids {
@@ -269,7 +273,9 @@ impl QuillApp {
                 .users
                 .get(&user_id)
                 .map(|u| u.display_name())
-                .unwrap_or_else(|| format!("User {user_id}"));
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_PREFS_USER, &[("user_id", &user_id.to_string())])
+                });
             body = body.child(
                 div()
                     .id(format!("privacy-exception-user-{user_id}"))
@@ -282,7 +288,7 @@ impl QuillApp {
                     .child(
                         Button::new(format!("privacy-exception-remove-{user_id}"))
                             .small()
-                            .label("Remove")
+                            .label(tr(keys::BOX_REMOVE))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.edit_exception(target, kind, user_id, false, cx);
@@ -296,7 +302,9 @@ impl QuillApp {
                 .chats
                 .get(&chat_id)
                 .map(|c| c.title.clone())
-                .unwrap_or_else(|| format!("Group {chat_id}"));
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_PREFS_GROUP, &[("chat_id", &chat_id.to_string())])
+                });
             body = body.child(
                 div()
                     .id(format!("privacy-exception-chat-{chat_id}"))
@@ -309,7 +317,7 @@ impl QuillApp {
                     .child(
                         Button::new(format!("privacy-exception-remove-chat-{chat_id}"))
                             .small()
-                            .label("Remove")
+                            .label(tr(keys::BOX_REMOVE))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.edit_exception_chat(target, kind, chat_id, false, cx);
@@ -324,7 +332,7 @@ impl QuillApp {
                 .child(
                     Button::new("privacy-exception-add")
                         .small()
-                        .label("Add user…")
+                        .label(tr(keys::Q_PREFS_ADD_USER))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.privacy.exception_picker_open = true;
@@ -338,7 +346,7 @@ impl QuillApp {
                 .child(
                     Button::new("privacy-exception-add-group")
                         .small()
-                        .label("Add group…")
+                        .label(tr(keys::Q_PREFS_ADD_GROUP))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.privacy.exception_picker_open = true;
@@ -425,7 +433,7 @@ impl QuillApp {
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .px_1()
-                .child("Choose a contact:"),
+                .child(tr(keys::Q_PREFS_CHOOSE_A_CONTACT)),
         );
         if rows.is_empty() {
             body = body.child(
@@ -433,7 +441,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("No more contacts."),
+                    .child(tr(keys::Q_PREFS_NO_MORE_CONTACTS)),
             );
         }
         for row in rows {
@@ -499,7 +507,7 @@ impl QuillApp {
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .px_1()
-                .child("Choose a group:"),
+                .child(tr(keys::Q_PREFS_CHOOSE_A_GROUP)),
         );
         if groups.is_empty() {
             body = body.child(
@@ -507,7 +515,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("No more groups."),
+                    .child(tr(keys::Q_PREFS_NO_MORE_GROUPS)),
             );
         }
         for (chat_id, title) in groups {
@@ -515,7 +523,10 @@ impl QuillApp {
                 div()
                     .id(format!("privacy-picker-chat-{chat_id}"))
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Add {title} to privacy exceptions"))
+                    .aria_label(tr_with(
+                        keys::Q_PREFS_ADD_TO_PRIVACY_EXCEPTIONS,
+                        &[("title", &title.to_string())],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .flex()

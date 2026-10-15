@@ -18,6 +18,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::file_prefs::{self, OpenWarning};
+use quill::lang::{keys, tr, tr_with};
 use quill::privacy::GiftSettings;
 use quill::state::PasswordCheck;
 use quill::telegram::requests::PrivacyWho;
@@ -59,7 +60,7 @@ impl PrivacyUi {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let file_ext_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("pdf txt log")
+                .placeholder(tr(keys::Q_PREFS_PDF_TXT_LOG))
                 .auto_grow(2, 6)
                 .submit_on_enter(false)
         });
@@ -133,7 +134,10 @@ impl QuillApp {
         div()
             .id("privacy-rule-new-chat")
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("Messages · {value}"))
+            .aria_label(tr_with(
+                keys::Q_PREFS_MESSAGES_2,
+                &[("value", &value.to_string())],
+            ))
             .tab_index(0)
             .cursor_pointer()
             .flex()
@@ -142,7 +146,7 @@ impl QuillApp {
             .px_2()
             .py_1()
             .rounded_md()
-            .child(div().text_sm().child("Messages"))
+            .child(div().text_sm().child(tr(keys::SETTINGS_MESSAGES_PRIVACY)))
             .child(
                 div()
                     .text_xs()
@@ -192,8 +196,8 @@ impl QuillApp {
         block = block.child(self.gift_switch(
             cx,
             "gift-show-button",
-            "Show Gift Icon in Chats",
-            Some("Display the gift icon in the message field for both participants in all chats."),
+            tr(keys::EDIT_PRIVACY_GIFTS_SHOW_ICON),
+            Some(tr(keys::Q_PREFS_DISPLAY_THE_GIFT_ICON_IN)),
             settings.show_gift_button,
             |g, on| g.show_gift_button = on,
         ));
@@ -204,7 +208,7 @@ impl QuillApp {
                 .px_1()
                 .mt_1()
                 .text_color(cx.theme().muted_foreground)
-                .child("Accepted Gift Types"),
+                .child(tr(keys::EDIT_PRIVACY_GIFTS_TYPES)),
         );
         let types: [(
             &'static str,
@@ -214,31 +218,31 @@ impl QuillApp {
         ); 5] = [
             (
                 "gift-type-unlimited",
-                "Unlimited",
+                tr(keys::EDIT_PRIVACY_GIFTS_UNLIMITED),
                 settings.unlimited_gifts,
                 |g, on| g.unlimited_gifts = on,
             ),
             (
                 "gift-type-limited",
-                "Limited-Edition",
+                tr(keys::EDIT_PRIVACY_GIFTS_LIMITED),
                 settings.limited_gifts,
                 |g, on| g.limited_gifts = on,
             ),
             (
                 "gift-type-unique",
-                "Unique",
+                tr(keys::EDIT_PRIVACY_GIFTS_UNIQUE),
                 settings.upgraded_gifts,
                 |g, on| g.upgraded_gifts = on,
             ),
             (
                 "gift-type-channels",
-                "From Channels",
+                tr(keys::EDIT_PRIVACY_GIFTS_CHANNELS),
                 settings.gifts_from_channels,
                 |g, on| g.gifts_from_channels = on,
             ),
             (
                 "gift-type-premium",
-                "Premium Subscriptions",
+                tr(keys::EDIT_PRIVACY_GIFTS_PREMIUM),
                 settings.premium_subscription,
                 |g, on| g.premium_subscription = on,
             ),
@@ -252,9 +256,9 @@ impl QuillApp {
                 .px_2()
                 .text_color(cx.theme().muted_foreground)
                 .child(if premium {
-                    "Choose the types of gifts that you accept."
+                    tr(keys::EDIT_PRIVACY_GIFTS_TYPES_ABOUT)
                 } else {
-                    "Choose the types of gifts that you accept. Changing them needs Telegram Premium."
+                    tr(keys::Q_PREFS_CHOOSE_THE_TYPES_OF_GIFTS)
                 }),
         );
         block.into_any_element()
@@ -306,7 +310,8 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.payments.premium_option == Some(true));
         if !premium {
-            self.connection.status_note = "Changing gift settings needs Telegram Premium.".into();
+            self.connection.status_note =
+                tr(keys::Q_PREFS_CHANGING_GIFT_SETTINGS_NEEDS_TELEGRAM).into();
             cx.notify();
             return;
         }
@@ -340,7 +345,7 @@ impl QuillApp {
                 .text_sm()
                 .font_semibold()
                 .px_1()
-                .child("Security and content"),
+                .child(tr(keys::Q_PREFS_SECURITY_AND_CONTENT)),
         );
         if can_ignore {
             section = section.child(
@@ -355,20 +360,18 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("Show 18+ Content"))
+                            .child(div().text_sm().child(tr(keys::Q_PREFS_SHOW_18_CONTENT)))
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(
-                                        "Do not hide media that contains content suitable only for adults.",
-                                    ),
+                                    .child(tr(keys::SETTINGS_SENSITIVE_ABOUT)),
                             ),
                     )
                     .child(
                         Switch::new("privacy-sensitive-content")
                             .checked(ignore)
-                            .accessibility_label("Show 18+ Content")
+                            .accessibility_label(tr(keys::Q_PREFS_SHOW_18_CONTENT))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 this.toggle_sensitive_content(on, cx);
                             })),
@@ -377,7 +380,7 @@ impl QuillApp {
         }
         let prefs = file_prefs::current();
         let summary = if prefs.no_warning_extensions.is_empty() && prefs.ip_reveal_warning {
-            "Default".to_string()
+            tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY_DEFAULT).to_string()
         } else {
             format!("{} trusted", prefs.no_warning_extensions.len())
         };
@@ -385,7 +388,7 @@ impl QuillApp {
             div()
                 .id("privacy-file-open")
                 .role(gpui_kit::Role::Button)
-                .aria_label("File open confirmations")
+                .aria_label(tr(keys::Q_PREFS_FILE_OPEN_CONFIRMATIONS))
                 .tab_index(0)
                 .cursor_pointer()
                 .flex()
@@ -394,7 +397,11 @@ impl QuillApp {
                 .px_2()
                 .py_1()
                 .rounded_md()
-                .child(div().text_sm().child("File open confirmations"))
+                .child(
+                    div()
+                        .text_sm()
+                        .child(tr(keys::Q_PREFS_FILE_OPEN_CONFIRMATIONS)),
+                )
                 .child(
                     div()
                         .text_xs()
@@ -451,11 +458,11 @@ impl QuillApp {
                     .font_semibold()
                     .px_1()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Extensions whitelist"),
+                    .child(tr(keys::SETTINGS_EDIT_EXTENSIONS)),
             )
             .child(
                 Textarea::new(&self.privacy.extra.file_ext_input)
-                    .aria_label("Extensions whitelist")
+                    .aria_label(tr(keys::SETTINGS_EDIT_EXTENSIONS))
                     .h(px(72.)),
             )
             .child(
@@ -463,7 +470,7 @@ impl QuillApp {
                     .text_xs()
                     .px_1()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Open files with the following extensions without additional confirmation."),
+                    .child(tr(keys::SETTINGS_EDIT_EXTENSIONS_ABOUT)),
             )
             .child(
                 div()
@@ -476,20 +483,18 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("IP reveal warning"))
+                            .child(div().text_sm().child(tr(keys::SETTINGS_EDIT_IP_CONFIRM)))
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(
-                                        "Show confirmation when opening files that may reveal your IP address.",
-                                    ),
+                                    .child(tr(keys::SETTINGS_EDIT_IP_CONFIRM_ABOUT)),
                             ),
                     )
                     .child(
                         Switch::new("privacy-ip-reveal")
                             .checked(ip)
-                            .accessibility_label("IP reveal warning")
+                            .accessibility_label(tr(keys::SETTINGS_EDIT_IP_CONFIRM))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 this.privacy.extra.file_open_ip_draft = on;
                                 cx.notify();
@@ -503,7 +508,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("privacy-file-open-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.privacy.editor = None;
@@ -512,7 +517,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("privacy-file-open-save")
-                            .label("Save")
+                            .label(tr(keys::SETTINGS_SAVE))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.save_file_open_settings(cx);
@@ -520,7 +525,12 @@ impl QuillApp {
                     ),
             )
             .into_any_element();
-        self.privacy_shell(cx, "editor", "File open confirmations", body)
+        self.privacy_shell(
+            cx,
+            "editor",
+            tr(keys::Q_PREFS_FILE_OPEN_CONFIRMATIONS),
+            body,
+        )
     }
 
     fn save_file_open_settings(&mut self, cx: &mut Context<Self>) {
@@ -538,7 +548,7 @@ impl QuillApp {
             prefs.ip_reveal_warning = ip;
         });
         self.privacy.editor = None;
-        self.connection.status_note = "file open settings saved".into();
+        self.connection.status_note = tr(keys::Q_PREFS_FILE_OPEN_SETTINGS_SAVED).into();
         cx.notify();
     }
 
@@ -559,9 +569,9 @@ impl QuillApp {
 
     fn open_file_now(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
         self.connection.status_note = if quill::platform::open_local_file(path) {
-            "opened file".into()
+            tr(keys::Q_PREFS_OPENED_FILE).into()
         } else {
-            "could not open the file".into()
+            tr(keys::Q_PREFS_COULD_NOT_OPEN_THE_FILE).into()
         };
         cx.notify();
     }
@@ -603,7 +613,7 @@ impl QuillApp {
                 Some(c) => {
                     let extension = file_prefs::file_extension(&c.path);
                     let dotted = if extension.is_empty() {
-                        "no extension".to_string()
+                        tr(keys::Q_PREFS_NO_EXTENSION).to_string()
                     } else {
                         format!(".{extension}")
                     };
@@ -612,25 +622,25 @@ impl QuillApp {
                             format!(
                                 "This file has the extension {dotted}\nIt may harm your computer.\nAre you sure you want to run it?"
                             ),
-                            "Run",
-                            "Remember for this file type",
+                            tr(keys::Q_PREFS_RUN),
+                            tr(keys::LAUNCH_DONT_ASK),
                         ),
                         OpenWarning::Unknown => (
                             format!(
                                 "This file has {dotted} extension.\nAre you sure you want to open it?"
                             ),
-                            "Open",
-                            "Remember for this file type",
+                            tr(keys::Q_PREFS_OPEN),
+                            tr(keys::LAUNCH_DONT_ASK),
                         ),
                         OpenWarning::IpReveal => (
-                            "Opening this file can potentially expose your IP address to its creator. Continue?"
+                            tr(keys::LAUNCH_SVG_WARNING)
                                 .to_string(),
-                            "Open",
-                            "Don't ask me again",
+                            tr(keys::Q_PREFS_OPEN),
+                            tr(keys::LAUNCH_EXE_DONT_ASK),
                         ),
                     }
                 }
-                None => (String::new(), "Open", "Remember for this file type"),
+                None => (String::new(), tr(keys::Q_PREFS_OPEN), tr(keys::LAUNCH_DONT_ASK)),
             };
             let name = confirm
                 .as_ref()
@@ -662,7 +672,7 @@ impl QuillApp {
                         )
                         .when(remember, |this_| {
                             this_.child(div().text_xs().text_color(text_muted()).child(
-                                "You can later edit trusted file types in Settings > Privacy > File open confirmations.",
+                                tr(keys::Q_PREFS_YOU_CAN_LATER_EDIT_TRUSTED),
                             ))
                         })
                 })
@@ -673,7 +683,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("file-open-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.privacy.extra.file_open = None;
@@ -692,7 +702,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Open this file?"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_PREFS_OPEN_THIS_FILE)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
@@ -733,7 +743,7 @@ impl QuillApp {
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
                     ),
-                    Err(err) => format!("couldn't save: {err}"),
+                    Err(err) => tr_with(keys::Q_PREFS_COULDNT_SAVE, &[("err", &err.to_string())]),
                 };
                 cx.notify();
             });
@@ -763,12 +773,21 @@ impl QuillApp {
             .border_color(cx.theme().border);
         if check == PasswordCheck::Remembered {
             return card
-                .child(div().text_sm().font_semibold().child("Perfect!"))
-                .child(div().text_xs().child("You still remember your password."))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(keys::Q_PREFS_PERFECT)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .child(tr(keys::SETTINGS_SUGGESTION_PASSWORD_STEP_FINISH_ABOUT)),
+                )
                 .child(
                     div().flex().justify_end().child(
                         Button::new("password-check-done")
-                            .label("Done")
+                            .label(tr(keys::BOX_DONE))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.dismiss_password_check(cx);
@@ -778,28 +797,39 @@ impl QuillApp {
                 .into_any_element();
         }
         card = card
-            .child(div().text_sm().font_semibold().child("Your password"))
-            .child(div().text_xs().text_color(cx.theme().muted_foreground).child(
-                "Your account is protected by 2-Step Verification. Do you still remember your password?",
-            ))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(tr(keys::Q_PREFS_YOUR_PASSWORD)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_PREFS_YOUR_ACCOUNT_IS_PROTECTED_BY)),
+            )
             .child(
                 Input::new(&self.twofa.current_password)
-                    .aria_label("Your two-step verification password")
+                    .aria_label(tr(keys::Q_PREFS_YOUR_TWO_STEP_VERIFICATION_PASSWORD))
                     .content_type(InputContentType::Password)
                     .h(px(40.)),
             );
         match check {
             PasswordCheck::Wrong => {
-                card = card.child(div().text_xs().text_color(danger()).child(
-                    "That password is wrong. Try again, or change it in Two-Step Verification.",
-                ));
+                card = card.child(
+                    div()
+                        .text_xs()
+                        .text_color(danger())
+                        .child(tr(keys::Q_PREFS_THAT_PASSWORD_IS_WRONG_TRY)),
+                );
             }
             PasswordCheck::Failed => {
                 card = card.child(
                     div()
                         .text_xs()
                         .text_color(danger())
-                        .child("Couldn't check the password. Try again later."),
+                        .child(tr(keys::Q_PREFS_COULDNT_CHECK_THE_PASSWORD_TRY)),
                 );
             }
             _ => {}
@@ -811,7 +841,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("password-check-dismiss")
-                        .label("Dismiss")
+                        .label(tr(keys::Q_PREFS_DISMISS))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.dismiss_password_check(cx);
@@ -819,7 +849,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("password-check-submit")
-                        .label("Check")
+                        .label(tr(keys::Q_PREFS_CHECK))
                         .primary()
                         .disabled(check == PasswordCheck::Checking)
                         .on_click(cx.listener(|this, _, window, cx| {

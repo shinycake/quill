@@ -1,6 +1,7 @@
 //! The auto-delete timer picker.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase B4: self-destruct / auto-delete timer picker below the
@@ -18,16 +19,16 @@ impl QuillApp {
             open_chat_summary.is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         let current = open_chat_summary
             .and_then(|chat| chat.ttl_status_line())
-            .unwrap_or_else(|| "Off".to_string());
+            .unwrap_or_else(|| tr(keys::SETTINGS_TTL_AFTER_OFF).to_string());
         let title = if is_secret {
-            "Self-destruct timer"
+            tr(keys::SETTINGS_TTL_AFTER_SUBTITLE)
         } else {
-            "Auto-delete timer"
+            tr(keys::Q_PREFS_AUTO_DELETE_TIMER)
         };
         // Schema value rule (1.8.67 line 13454): secret chats accept
         // arbitrary seconds; other chats need day multiples.
-        let presets: &[(&str, i32)] = if is_secret {
-            &[
+        let presets: Vec<(&str, i32)> = if is_secret {
+            vec![
                 ("Off", 0),
                 ("5s", 5),
                 ("30s", 30),
@@ -39,11 +40,11 @@ impl QuillApp {
         } else {
             // tdesktop `lng_manage_messages_ttl_after1..3`; a longer or
             // odd period goes through the Custom stepper below.
-            &[
+            vec![
                 ("Off", 0),
-                ("1 day", 86_400),
-                ("1 week", 604_800),
-                ("1 month", 2_678_400),
+                (tr(keys::MANAGE_MESSAGES_TTL_AFTER1), 86_400),
+                (tr(keys::MANAGE_MESSAGES_TTL_AFTER2), 604_800),
+                (tr(keys::MANAGE_MESSAGES_TTL_AFTER3), 2_678_400),
             ]
         };
         // Phase 6: kit RadioGroup (was: buttons with a ● prefix on the
@@ -56,7 +57,7 @@ impl QuillApp {
             .children(
                 presets
                     .iter()
-                    .map(|(label, _)| Radio::new(format!("ttl-set-{label}")).label(*label)),
+                    .map(|(label, secs)| Radio::new(format!("ttl-set-{secs}")).label(*label)),
             )
             .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
                 let Some(secs) = presets.get(ix).map(|preset| preset.1) else {
@@ -77,7 +78,7 @@ impl QuillApp {
                 .child(
                     Button::new("ttl-custom-toggle")
                         .small()
-                        .label("Custom\u{2026}")
+                        .label(tr(keys::Q_PREFS_CUSTOM))
                         .outline()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.notify.ttl_custom_open = !this.notify.ttl_custom_open;
@@ -91,7 +92,7 @@ impl QuillApp {
                             .small()
                             .ghost()
                             .label("\u{2212}")
-                            .accessibility_label("Shorter")
+                            .accessibility_label(tr(keys::Q_PREFS_SHORTER))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.notify.ttl_custom_secs =
                                     quill::auto_delete::step(this.notify.ttl_custom_secs, -1);
@@ -104,7 +105,7 @@ impl QuillApp {
                             .small()
                             .ghost()
                             .label("+")
-                            .accessibility_label("Longer")
+                            .accessibility_label(tr(keys::Q_PREFS_LONGER))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.notify.ttl_custom_secs =
                                     quill::auto_delete::step(this.notify.ttl_custom_secs, 1);
@@ -114,7 +115,7 @@ impl QuillApp {
                     .child(
                         Button::new("ttl-custom-apply")
                             .small()
-                            .label("Enable auto-delete")
+                            .label(tr(keys::Q_PREFS_ENABLE_AUTO_DELETE))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if let Some(chat_id) = open_chat {
                                     let secs = this.notify.ttl_custom_secs;
@@ -126,7 +127,7 @@ impl QuillApp {
             row
         });
         let about = if is_secret {
-            "Messages auto-delete after the timer; in secret chats the countdown starts once the message is viewed.".to_string()
+            tr(keys::Q_PREFS_MESSAGES_AUTO_DELETE_AFTER_THE).to_string()
         } else {
             open_chat_summary
                 .map(|chat| quill::auto_delete::about_line(&chat.kind).to_string())
@@ -151,8 +152,8 @@ impl QuillApp {
                     .child(
                         Button::new("close-ttl-picker")
                             .icon(gpui_kit::assets::IconName::X)
-                            .tooltip("Close")
-                            .accessibility_label("Close")
+                            .tooltip(tr(keys::CLOSE))
+                            .accessibility_label(tr(keys::CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.notify.ttl_picker_open = false;
@@ -164,7 +165,13 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("Current: {current} \u{2014} {about}")),
+                    .child(tr_with(
+                        keys::Q_PREFS_CURRENT,
+                        &[
+                            ("current", &current.to_string()),
+                            ("about", &about.to_string()),
+                        ],
+                    )),
             )
             .child(preset_row)
             .children(custom_row)

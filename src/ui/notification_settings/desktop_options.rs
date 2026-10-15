@@ -8,6 +8,7 @@
 
 use super::*;
 use gpui_kit::component::tab::{Tab, TabBar};
+use quill::lang::{keys, tr};
 use quill::notify::custom::{self, NotifyPlatform, ScreenCorner};
 
 /// The screen drawing's size (tdesktop `st::notificationsBoxMonitor`).
@@ -16,10 +17,10 @@ const MONITOR_HEIGHT: f32 = 140.0;
 
 fn corner_name(corner: ScreenCorner) -> &'static str {
     match corner {
-        ScreenCorner::TopLeft => "Top left",
-        ScreenCorner::TopRight => "Top right",
-        ScreenCorner::BottomRight => "Bottom right",
-        ScreenCorner::BottomLeft => "Bottom left",
+        ScreenCorner::TopLeft => tr(keys::Q_PREFS_TOP_LEFT),
+        ScreenCorner::TopRight => tr(keys::Q_PREFS_TOP_RIGHT),
+        ScreenCorner::BottomRight => tr(keys::Q_PREFS_BOTTOM_RIGHT),
+        ScreenCorner::BottomLeft => tr(keys::Q_PREFS_BOTTOM_LEFT),
     }
 }
 
@@ -46,12 +47,17 @@ impl QuillApp {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .child(div().font_semibold().text_sm().child("System integration"));
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::SETTINGS_NATIVE_TITLE)),
+            );
         if custom::native_switch_shown(support) {
             let label = if platform == NotifyPlatform::Windows {
-                "Use Windows notifications"
+                tr(keys::SETTINGS_USE_WINDOWS)
             } else {
-                "Use native notifications"
+                tr(keys::SETTINGS_USE_NATIVE_NOTIFICATIONS)
             };
             let native = prefs.native.unwrap_or(support.by_default);
             section = section.child(switch_row(
@@ -75,7 +81,7 @@ impl QuillApp {
         if platform == NotifyPlatform::Windows {
             section = section.child(switch_row(
                 "notify-focus-toggle",
-                "Respect system Focus mode",
+                tr(keys::SETTINGS_SKIP_IN_FOCUS),
                 prefs.skip_in_focus,
                 cx.listener(|_, &on: &bool, _, cx| {
                     quill::notify_prefs::update(|prefs| prefs.skip_in_focus = on);
@@ -85,9 +91,9 @@ impl QuillApp {
         }
         section = section.children(self.notify_display_choice(prefs.display, cx));
         section
-            .child(sub_heading("Location on the screen", cx))
+            .child(sub_heading(tr(keys::SETTINGS_NOTIFICATIONS_POSITION), cx))
             .child(self.notify_corner_picker(prefs.corner, cx))
-            .child(sub_heading("Notifications count", cx))
+            .child(sub_heading(tr(keys::SETTINGS_NOTIFICATIONS_COUNT), cx))
             .child(
                 (1..=custom::MAX_COUNT)
                     .fold(TabBar::new("notify-count").segmented(), |bar, count| {
@@ -112,7 +118,7 @@ impl QuillApp {
             return None;
         }
         let mut ids = vec![0u64];
-        let mut labels = vec!["Default".to_string()];
+        let mut labels = vec![tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY_DEFAULT).to_string()];
         for display in &displays {
             let bounds = display.bounds();
             ids.push(crate::ui::notify_windows::display_checksum(
@@ -143,7 +149,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(sub_heading("Display for notifications", cx))
+                .child(sub_heading(tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY), cx))
                 .child(group)
                 .into_any_element(),
         )

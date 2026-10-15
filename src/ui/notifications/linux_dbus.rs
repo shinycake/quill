@@ -14,6 +14,7 @@
 
 use crate::ui::background_accounts::AccountClicks;
 use quill::ids::{AccountKey, ChatId};
+use quill::lang::{keys, tr};
 use quill::notify::NotificationAction;
 use quill::notify::dbus::{
     APP_NAME, BUS_NAME, Capabilities, INTERFACE, OBJECT_PATH, Signal, app_icon, interpret_signal,
@@ -189,7 +190,7 @@ impl Notifier {
             .map(|(key, value)| (key, Value::from(value)))
             .collect();
         let id: u32 = Self::proxy(&self.connection)?.call(
-            "Notify",
+            tr(keys::Q_PREFS_NOTIFY),
             &(
                 APP_NAME,
                 replaces.unwrap_or(0),

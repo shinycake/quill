@@ -12,6 +12,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::privacy::{SESSION_TTL_DAYS, session_ttl_label};
 use quill::telegram::envelope::ParsedSession;
 
@@ -43,14 +44,14 @@ impl QuillApp {
                     .text_xs()
                     .font_medium()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Terminate old sessions"),
+                    .child(tr(keys::Q_PREFS_TERMINATE_OLD_SESSIONS)),
             )
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().child("If inactive for..."))
+                    .child(div().text_sm().child(tr(keys::Q_PREFS_IF_INACTIVE_FOR)))
                     .child(
                         div()
                             .id("sessions-ttl-value")
@@ -58,7 +59,7 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(match current {
                                 Some(days) => session_ttl_label(days),
-                                None => "Loading…".to_string(),
+                                None => tr(keys::Q_PREFS_LOADING).to_string(),
                             }),
                     ),
             )
@@ -67,9 +68,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "If you don't come online from a specific session at least once within this period, it will be terminated.",
-                    ),
+                    .child(tr(keys::SELF_DESTRUCT_SESSIONS_DESCRIPTION)),
             );
         if let Some(line) = error {
             section = section.child(div().text_xs().text_color(danger()).child(line));
@@ -99,7 +98,7 @@ impl QuillApp {
         let session_id = s.id;
         let incomplete = s.is_password_pending;
         let title = if s.device_model.trim().is_empty() {
-            "Unknown device".to_string()
+            tr(keys::Q_PREFS_UNKNOWN_DEVICE).to_string()
         } else {
             s.device_model.clone()
         };
@@ -116,23 +115,29 @@ impl QuillApp {
         let mut rows: Vec<(&'static str, String)> = Vec::new();
         if !app_line.is_empty() {
             let official = if s.is_official_application {
-                " (official)"
+                tr(keys::Q_PREFS_OFFICIAL)
             } else {
                 ""
             };
-            rows.push(("Application", format!("{app_line}{official}")));
+            rows.push((
+                tr(keys::SESSIONS_APPLICATION),
+                format!("{app_line}{official}"),
+            ));
         }
         if !system_line.is_empty() {
-            rows.push(("System version", system_line));
+            rows.push((tr(keys::SESSIONS_SYSTEM), system_line));
         }
         if !s.ip_address.is_empty() {
-            rows.push(("IP address", s.ip_address.clone()));
+            rows.push((tr(keys::SESSIONS_IP), s.ip_address.clone()));
         }
         if !s.location.is_empty() {
-            rows.push(("Location", s.location.clone()));
+            rows.push((tr(keys::SESSIONS_LOCATION), s.location.clone()));
         }
         if s.log_in_date > 0 {
-            rows.push(("Logged in", format_session_last_active(s.log_in_date)));
+            rows.push((
+                tr(keys::Q_PREFS_LOGGED_IN),
+                format_session_last_active(s.log_in_date),
+            ));
         }
         let mut body = div()
             .flex()
@@ -148,7 +153,7 @@ impl QuillApp {
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(if s.is_current {
-                                "Online".to_string()
+                                tr(keys::Q_PREFS_ONLINE).to_string()
                             } else {
                                 format!(
                                     "Last active: {}",
@@ -162,7 +167,7 @@ impl QuillApp {
                     .text_xs()
                     .font_medium()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Info"),
+                    .child(tr(keys::SESSIONS_INFO)),
             );
         for (label, value) in rows {
             body = body.child(
@@ -186,16 +191,14 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(
-                    "This location estimate is based on the IP address and may not always be accurate.",
-                ),
+                .child(tr(keys::SESSIONS_LOCATION_ABOUT)),
         );
         if s.is_current && self.privacy.extra.renaming_device {
             return body.child(self.rename_device_form(cx)).into_any_element();
         }
         let mut actions = div().flex().justify_between().gap_2().child(
             Button::new("session-details-back")
-                .label("Back")
+                .label(tr(keys::Q_PREFS_BACK))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.privacy.extra.session_details = None;
@@ -206,7 +209,7 @@ impl QuillApp {
         if s.is_current {
             actions = actions.child(
                 Button::new("session-details-rename")
-                    .label("Rename")
+                    .label(tr(keys::Q_PREFS_RENAME))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.begin_rename_device(window, cx);
@@ -216,7 +219,7 @@ impl QuillApp {
         if !s.is_current {
             actions = actions.child(
                 Button::new(format!("session-details-terminate-{session_id}"))
-                    .label("Terminate Session")
+                    .label(tr(keys::SESSIONS_TERMINATE))
                     .custom(quiet_danger(cx))
                     .disabled(mutating)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -251,20 +254,23 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .font_semibold()
-                    .child("Rename current device"),
+                    .child(tr(keys::Q_PREFS_RENAME_CURRENT_DEVICE)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Device name"),
+                    .child(tr(keys::Q_PREFS_DEVICE_NAME)),
             )
-            .child(Input::new(&self.privacy.extra.rename_input).aria_label("Device name"))
+            .child(
+                Input::new(&self.privacy.extra.rename_input)
+                    .aria_label(tr(keys::Q_PREFS_DEVICE_NAME)),
+            )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("The new name applies after Quill restarts."),
+                    .child(tr(keys::Q_PREFS_THE_NEW_NAME_APPLIES_AFTER)),
             )
             .child(
                 div()
@@ -273,7 +279,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("session-rename-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.privacy.extra.renaming_device = false;
@@ -282,7 +288,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("session-rename-save")
-                            .label("Save")
+                            .label(tr(keys::SETTINGS_SAVE))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.save_device_name(cx);
@@ -300,11 +306,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.device_prefs = prefs;
             if let Err(err) = live.driver.save_device_prefs() {
-                self.connection.status_note = format!("couldn't save device name: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PREFS_COULDNT_SAVE_DEVICE_NAME,
+                    &[("err", &err.to_string())],
+                );
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.device_prefs = prefs;
-            self.connection.status_note = "demo: device name is not saved".into();
+            self.connection.status_note = tr(keys::Q_PREFS_DEMO_DEVICE_NAME_IS_NOT).into();
         }
         self.privacy.extra.renaming_device = false;
         cx.notify();

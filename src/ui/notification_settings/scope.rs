@@ -2,6 +2,7 @@
 //! exceptions.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     /// Parity slice: apply a scope's sound default
@@ -25,7 +26,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection.status_note = "defaults still loading…".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -34,8 +35,8 @@ impl QuillApp {
                 .driver
                 .send_scope_notification_settings(scope, &settings);
             self.connection.status_note = match result {
-                Ok(_) => "default sound updated…".into(),
-                Err(_) => "could not change default sound".into(),
+                Ok(_) => tr(keys::Q_PREFS_DEFAULT_SOUND_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_SOUND).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
@@ -50,7 +51,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.status_note = "default sound updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_DEFAULT_SOUND_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -74,7 +75,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection.status_note = "defaults still loading…".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -83,9 +84,9 @@ impl QuillApp {
                 .driver
                 .send_scope_notification_settings(scope, &settings);
             self.connection.status_note = match result {
-                Ok(_) if mute_for == 0 => "default unmuted…".into(),
-                Ok(_) => "default mute updated…".into(),
-                Err(_) => "could not change default mute".into(),
+                Ok(_) if mute_for == 0 => tr(keys::Q_PREFS_DEFAULT_UNMUTED).into(),
+                Ok(_) => tr(keys::Q_PREFS_DEFAULT_MUTE_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_MUTE).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
@@ -99,7 +100,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.status_note = "default mute updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_DEFAULT_MUTE_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -123,7 +124,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection.status_note = "defaults still loading…".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -132,8 +133,8 @@ impl QuillApp {
                 .driver
                 .send_scope_notification_settings(scope, &settings);
             self.connection.status_note = match result {
-                Ok(_) => "default preview updated…".into(),
-                Err(_) => "could not change default preview".into(),
+                Ok(_) => tr(keys::Q_PREFS_DEFAULT_PREVIEW_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_PREVIEW).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
@@ -147,7 +148,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.status_note = "default preview updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_DEFAULT_PREVIEW_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -172,7 +173,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection.status_note = "defaults still loading…".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -181,8 +182,8 @@ impl QuillApp {
                 .driver
                 .send_scope_notification_settings(scope, &settings);
             self.connection.status_note = match result {
-                Ok(_) => "story notification default updated…".into(),
-                Err(_) => "could not change story notification default".into(),
+                Ok(_) => tr(keys::Q_PREFS_STORY_NOTIFICATION_DEFAULT_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_NOTIFICATION).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
@@ -196,7 +197,8 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.status_note = "story notification default updated".into();
+            self.connection.status_note =
+                tr(keys::Q_PREFS_STORY_NOTIFICATION_DEFAULT_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -221,7 +223,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection.status_note = "defaults still loading…".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -230,8 +232,8 @@ impl QuillApp {
                 .driver
                 .send_scope_notification_settings(scope, &settings);
             self.connection.status_note = match result {
-                Ok(_) => "default mention notifications updated…".into(),
-                Err(_) => "could not change default mention notifications".into(),
+                Ok(_) => tr(keys::Q_PREFS_DEFAULT_MENTION_NOTIFICATIONS_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_MENTION).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
@@ -245,7 +247,8 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.status_note = "default mention notifications updated".into();
+            self.connection.status_note =
+                tr(keys::Q_PREFS_DEFAULT_MENTION_NOTIFICATIONS_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -270,7 +273,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection.status_note = "defaults still loading…".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -279,8 +282,8 @@ impl QuillApp {
                 .driver
                 .send_scope_notification_settings(scope, &settings);
             self.connection.status_note = match result {
-                Ok(_) => "story poster default updated…".into(),
-                Err(_) => "could not change story poster default".into(),
+                Ok(_) => tr(keys::Q_PREFS_STORY_POSTER_DEFAULT_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_POSTER).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
@@ -294,7 +297,7 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.status_note = "story poster default updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_STORY_POSTER_DEFAULT_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -319,7 +322,7 @@ impl QuillApp {
                 .get(&scope)
                 .cloned()
             else {
-                self.connection.status_note = "defaults still loading…".into();
+                self.connection.status_note = tr(keys::Q_PREFS_DEFAULTS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -328,8 +331,8 @@ impl QuillApp {
                 .driver
                 .send_scope_notification_settings(scope, &settings);
             self.connection.status_note = match result {
-                Ok(_) => "default pinned-message notifications updated…".into(),
-                Err(_) => "could not change default pinned-message notifications".into(),
+                Ok(_) => tr(keys::Q_PREFS_DEFAULT_PINNED_MESSAGE_NOTIFICATIONS_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_DEFAULT_PINNED).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let mut settings = session
@@ -343,7 +346,8 @@ impl QuillApp {
                 .settings
                 .scope_notification_settings
                 .insert(scope, settings);
-            self.connection.status_note = "default pinned-message notifications updated".into();
+            self.connection.status_note =
+                tr(keys::Q_PREFS_DEFAULT_PINNED_MESSAGE_NOTIFICATIONS_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -364,13 +368,13 @@ impl QuillApp {
             .is_some_and(|s| s.settings.scope_notification_settings.contains_key(&scope));
         let muted = settings.mute_for > 0;
         let sound_label = match settings.sound_id {
-            -1 => "Default".to_string(),
-            0 => "None".to_string(),
+            -1 => tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY_DEFAULT).to_string(),
+            0 => tr(keys::SETTINGS_NO_BLOCKED_USERS).to_string(),
             id => saved_sounds
                 .iter()
                 .find(|s| s.id == id)
                 .map(|s| s.title.clone())
-                .unwrap_or_else(|| "Custom".to_string()),
+                .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string()),
         };
         let current_choice = match settings.sound_id {
             -1 => SoundChoice::Default,
@@ -379,11 +383,11 @@ impl QuillApp {
         };
 
         let presets = [
-            ("Unmute", 0),
-            ("1 hour", MUTE_FOR_1_HOUR),
-            ("8 hours", MUTE_FOR_8_HOURS),
-            ("2 days", MUTE_FOR_2_DAYS),
-            ("Forever", MUTE_FOREVER),
+            (tr(keys::SETTINGS_QUICK_DIALOG_ACTION_UNMUTE).to_string(), 0),
+            (trn(keys::HOURS, 1), MUTE_FOR_1_HOUR),
+            (trn(keys::HOURS, 8), MUTE_FOR_8_HOURS),
+            (trn(keys::DAYS, 2), MUTE_FOR_2_DAYS),
+            (tr(keys::Q_PREFS_FOREVER).to_string(), MUTE_FOREVER),
         ];
         let mut preset_row = div().flex().flex_wrap().gap_1();
         for (label, seconds) in presets {
@@ -419,9 +423,14 @@ impl QuillApp {
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(if loaded {
-                                if muted { "Muted" } else { "Not muted" }.to_string()
+                                if muted {
+                                    tr(keys::NOTIFICATION_EXCEPTIONS_MUTED)
+                                } else {
+                                    tr(keys::Q_PREFS_NOT_MUTED)
+                                }
+                                .to_string()
                             } else {
-                                "Loading…".to_string()
+                                tr(keys::Q_PREFS_LOADING).to_string()
                             }),
                     ),
             )
@@ -436,13 +445,13 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Show message preview"),
+                            .child(tr(keys::Q_PREFS_SHOW_MESSAGE_PREVIEW)),
                     )
                     .child(
                         // Phase 6: kit Switch (was: On/Off ghost button).
                         Switch::new(format!("scope-preview-{scope:?}"))
                             .checked(settings.show_preview)
-                            .accessibility_label("Show message preview")
+                            .accessibility_label(tr(keys::Q_PREFS_SHOW_MESSAGE_PREVIEW))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.apply_scope_preview(scope, on, cx);
                             })),
@@ -458,14 +467,14 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Notify about mentions"),
+                            .child(tr(keys::Q_PREFS_NOTIFY_ABOUT_MENTIONS)),
                     )
                     .child(
                         // Parity slice: mention-notification override per scope
                         // (schema: disable_mention_notifications).
                         Switch::new(format!("scope-mentions-{scope:?}"))
                             .checked(!settings.disable_mention_notifications)
-                            .accessibility_label("Notify about mentions")
+                            .accessibility_label(tr(keys::Q_PREFS_NOTIFY_ABOUT_MENTIONS))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.apply_scope_mention_notif(scope, on, cx);
                             })),
@@ -481,14 +490,14 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Notify about pinned messages"),
+                            .child(tr(keys::Q_PREFS_NOTIFY_ABOUT_PINNED_MESSAGES)),
                     )
                     .child(
                         // Parity slice: pinned-message-notification override
                         // per scope (schema: disable_pinned_message_notifications).
                         Switch::new(format!("scope-pinned-{scope:?}"))
                             .checked(!settings.disable_pinned_message_notifications)
-                            .accessibility_label("Notify about pinned messages")
+                            .accessibility_label(tr(keys::Q_PREFS_NOTIFY_ABOUT_PINNED_MESSAGES))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.apply_scope_pinned_notif(scope, on, cx);
                             })),
@@ -504,7 +513,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("Sound: {sound_label}")),
+                            .child(tr_with(
+                                keys::Q_PREFS_SOUND,
+                                &[("sound_label", &sound_label.to_string())],
+                            )),
                     )
                     .child(
                         Button::new(format!("scope-sound-{:?}", scope))
@@ -513,9 +525,9 @@ impl QuillApp {
                                 if self.notify.defaults_sound_picker
                                     == Some(SoundPickerTarget::Scope(scope))
                                 {
-                                    "Hide"
+                                    tr(keys::Q_PREFS_HIDE)
                                 } else {
-                                    "Change"
+                                    tr(keys::Q_PREFS_CHANGE)
                                 },
                             )
                             .ghost()
@@ -554,12 +566,12 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Mute story notifications"),
+                            .child(tr(keys::Q_PREFS_MUTE_STORY_NOTIFICATIONS)),
                     )
                     .child(
                         Switch::new(format!("scope-story-mute-{scope:?}"))
                             .checked(settings.mute_stories)
-                            .accessibility_label("Mute story notifications")
+                            .accessibility_label(tr(keys::Q_PREFS_MUTE_STORY_NOTIFICATIONS))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.apply_scope_story_mute(scope, on, cx);
                             })),
@@ -575,12 +587,12 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Show story poster"),
+                            .child(tr(keys::Q_PREFS_SHOW_STORY_POSTER)),
                     )
                     .child(
                         Switch::new(format!("scope-story-poster-{scope:?}"))
                             .checked(settings.show_story_poster)
-                            .accessibility_label("Show story poster")
+                            .accessibility_label(tr(keys::Q_PREFS_SHOW_STORY_POSTER))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.apply_scope_story_poster(scope, on, cx);
                             })),
@@ -596,14 +608,8 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.settings.notification_exceptions_loading.contains(&scope));
         let exceptions_label = match (exceptions, exceptions_loading) {
-            (Some(ids), _) => {
-                if ids.len() == 1 {
-                    "1 chat".to_string()
-                } else {
-                    format!("{} chats", ids.len())
-                }
-            }
-            (None, true) => "Loading…".to_string(),
+            (Some(ids), _) => trn(keys::FILTERS_CHATS_COUNT, ids.len()),
+            (None, true) => tr(keys::Q_PREFS_LOADING).to_string(),
             (None, false) => "—".to_string(),
         };
         section = section.child(
@@ -616,15 +622,18 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!("Exceptions: {exceptions_label}")),
+                        .child(tr_with(
+                            keys::Q_PREFS_EXCEPTIONS,
+                            &[("exceptions_label", &exceptions_label.to_string())],
+                        )),
                 )
                 .child(
                     Button::new(format!("scope-exceptions-{scope:?}"))
                         .small()
                         .label(if self.notify.defaults_exceptions_scope == Some(scope) {
-                            "Hide"
+                            tr(keys::Q_PREFS_HIDE)
                         } else {
-                            "View"
+                            tr(keys::Q_PREFS_VIEW)
                         })
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -668,9 +677,9 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if loading {
-                            "Loading…"
+                            tr(keys::Q_PREFS_LOADING)
                         } else {
-                            "Exceptions unavailable — reopen the dialog to retry."
+                            tr(keys::Q_PREFS_EXCEPTIONS_UNAVAILABLE_REOPEN_THE_DIALOG)
                         }),
                 )
                 .into_any_element();
@@ -680,7 +689,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No exceptions — every chat uses the scope default."),
+                    .child(tr(keys::Q_PREFS_NO_EXCEPTIONS_EVERY_CHAT_USES)),
             );
         }
         for &id in ids {
@@ -688,7 +697,7 @@ impl QuillApp {
                 .as_ref()
                 .and_then(|s| s.chats.get(&id))
                 .map(|c| c.title.clone())
-                .unwrap_or_else(|| format!("Chat {id}"));
+                .unwrap_or_else(|| tr_with(keys::Q_PREFS_CHAT, &[("id", &id.to_string())]));
             list = list.child(
                 div()
                     .flex()
@@ -705,7 +714,7 @@ impl QuillApp {
                     .child(
                         Button::new(format!("exception-reset-{id}"))
                             .small()
-                            .label("Reset to default")
+                            .label(tr(keys::Q_PREFS_RESET_TO_DEFAULT))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.reset_notification_exception(ChatId(id), cx);
@@ -726,8 +735,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.reset_chat_notification_settings(chat_id);
             self.connection.status_note = match result {
-                Ok(_) => "exception reset…".into(),
-                Err(_) => "could not reset exception".into(),
+                Ok(_) => tr(keys::Q_PREFS_EXCEPTION_RESET).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_RESET_EXCEPTION).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the list reflects it.
@@ -737,7 +746,7 @@ impl QuillApp {
             for list in session.settings.notification_exceptions.values_mut() {
                 list.retain(|id| *id != chat_id.0);
             }
-            self.connection.status_note = "exception reset".into();
+            self.connection.status_note = tr(keys::Q_PREFS_EXCEPTION_RESET_2).into();
         }
         cx.notify();
     }

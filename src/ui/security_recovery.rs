@@ -12,6 +12,7 @@ use gpui_kit::component::input::{Input, InputContentType, Textarea};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{TwofaNotice, format_reset_duration};
 use quill::telegram::envelope::PasswordState;
 use zeroize::Zeroize;
@@ -46,8 +47,8 @@ impl QuillApp {
     pub(super) fn twofa_notice_line(&self) -> Option<String> {
         let notice = self.session()?.auth_state.twofa_flow.notice?;
         Some(match notice {
-            TwofaNotice::PasswordRemoved => "Two-step verification was disabled.".to_string(),
-            TwofaNotice::PasswordRecovered => "Your cloud password was updated.".to_string(),
+            TwofaNotice::PasswordRemoved => tr(keys::CLOUD_PASSWORD_REMOVED).to_string(),
+            TwofaNotice::PasswordRecovered => tr(keys::CLOUD_PASSWORD_UPDATED).to_string(),
             TwofaNotice::ResetPending { reset_date } => format!(
                 "You can reset your password in {}.",
                 format_reset_duration(i64::from(reset_date) - now_secs())
@@ -56,9 +57,13 @@ impl QuillApp {
                 "You recently requested a password reset that was canceled. Please wait {} before making a new request.",
                 format_reset_duration(i64::from(retry_date) - now_secs())
             ),
-            TwofaNotice::ResetCancelled => "Password reset canceled.".to_string(),
-            TwofaNotice::LoginEmailChanged => "Your email has been changed.".to_string(),
-            TwofaNotice::RecoveryEmailConfirmed => "Your recovery email is confirmed.".to_string(),
+            TwofaNotice::ResetCancelled => tr(keys::Q_PREFS_PASSWORD_RESET_CANCELED).to_string(),
+            TwofaNotice::LoginEmailChanged => {
+                tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_SUCCESS).to_string()
+            }
+            TwofaNotice::RecoveryEmailConfirmed => {
+                tr(keys::Q_PREFS_YOUR_RECOVERY_EMAIL_IS_CONFIRMED).to_string()
+            }
         })
     }
 
@@ -90,14 +95,14 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(heading("Confirm recovery email"))
+            .child(heading(tr(keys::CLOUD_PASSWORD_CONFIRM)))
             .child(muted_line(
                 cx,
-                format!("Confirmation code sent to {pattern}\u{2026}"),
+                tr_with(keys::CLOUD_PASSWORD_WAITING_CODE, &[("email", pattern)]),
             ))
             .child(
                 Input::new(&self.twofa.code)
-                    .aria_label("Recovery email confirmation code")
+                    .aria_label(tr(keys::Q_PREFS_RECOVERY_EMAIL_CONFIRMATION_CODE))
                     .h(px(40.)),
             )
             .when_some(self.twofa.notice.clone(), |this, note| {
@@ -110,7 +115,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("twofa-confirm-code")
-                            .label("Confirm and Finish")
+                            .label(tr(keys::SETTINGS_CLOUD_PASSWORD_EMAIL_CONFIRM))
                             .primary()
                             .disabled(loading)
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -119,7 +124,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("twofa-resend-code")
-                            .label("Resend code")
+                            .label(tr(keys::CLOUD_PASSWORD_RESEND))
                             .ghost()
                             .disabled(loading)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -132,7 +137,7 @@ impl QuillApp {
                         // dialog. No chat is involved, so its chat id is
                         // a dummy.
                         Button::new("twofa-abort-email")
-                            .label("Abort recovery email setup")
+                            .label(tr(keys::Q_PREFS_ABORT_RECOVERY_EMAIL_SETUP))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_group_confirm(
@@ -148,7 +153,7 @@ impl QuillApp {
     pub(super) fn submit_twofa_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some("enter the code from the email".into());
+            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
             cx.notify();
             return;
         }
@@ -175,7 +180,7 @@ impl QuillApp {
         }
         // Telegram sends a blank-ish pattern for "off".
         let shown = if pattern.contains(' ') {
-            "Off".to_string()
+            tr(keys::SETTINGS_CLOUD_PASSWORD_OFF).to_string()
         } else {
             pattern
         };
@@ -184,7 +189,12 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().font_semibold().text_sm().child("Login Email"))
+                .child(
+                    div()
+                        .font_semibold()
+                        .text_sm()
+                        .child(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_SECTION_TITLE)),
+                )
                 .child(
                     div()
                         .flex()
@@ -193,7 +203,7 @@ impl QuillApp {
                         .child(div().text_sm().child(shown))
                         .child(
                             Button::new("twofa-goto-login-email")
-                                .label("Change email")
+                                .label(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_BOX_OK))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -210,7 +220,7 @@ impl QuillApp {
     pub(super) fn twofa_forgot_link(&self, cx: &mut Context<Self>) -> Div {
         div().child(
             Button::new("twofa-forgot")
-                .label("Forgot password?")
+                .label(tr(keys::Q_PREFS_FORGOT_PASSWORD))
                 .ghost()
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -233,9 +243,9 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|s| s.auth_state.password_state_loading);
         let Some(state) = state else {
-            return body.child(muted_line(cx, "Loading\u{2026}"));
+            return body.child(muted_line(cx, tr(keys::Q_PREFS_LOADING)));
         };
-        let mut body = body.child(heading("Forgot password?"));
+        let mut body = body.child(heading(tr(keys::Q_PREFS_FORGOT_PASSWORD)));
         // A reset is already counting down.
         if state.pending_reset_date > 0 {
             let left = i64::from(state.pending_reset_date) - now_secs();
@@ -247,21 +257,23 @@ impl QuillApp {
                     )))
                     .child(self.twofa_confirm_or(
                         cx,
-                        "Cancel reset",
-                        "Cancel the password reset process? If you request a new reset later, it will take another 7 days.",
+                        tr(keys::CLOUD_PASSWORD_RESET_CANCEL_TITLE),
+                        tr(keys::CLOUD_PASSWORD_RESET_CANCEL_SURE),
                         TwofaConfirm::CancelReset,
-                        "Yes",
-                        "No",
+                        tr(keys::BOX_YES),
+                        tr(keys::BOX_NO),
                         loading,
                     ));
             } else {
                 body = body
-                    .child(div().text_sm().child(
-                        "The waiting period is over. Resetting removes your password and keeps your account.",
-                    ))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_THE_WAITING_PERIOD_IS_OVER)),
+                    )
                     .child(
                         Button::new("twofa-reset-now")
-                            .label("Reset password")
+                            .label(tr(keys::CLOUD_PASSWORD_RESET_READY))
                             .primary()
                             .disabled(loading)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -276,29 +288,36 @@ impl QuillApp {
         }
         if let Some(pattern) = code_sent_to {
             body = body
-                .child(div().text_sm().child(format!(
-                    "Please enter the code from the email {pattern}"
+                .child(div().text_sm().child(tr_with(
+                    keys::SIGNIN_RECOVER_DESC,
+                    &[("email", &pattern.to_string())],
                 )))
                 .child(
                     Input::new(&self.twofa.code)
-                        .aria_label("Password recovery code")
+                        .aria_label(tr(keys::Q_PREFS_PASSWORD_RECOVERY_CODE))
                         .h(px(40.)),
                 )
-                .child(div().mt_1().font_semibold().text_sm().child("New password"))
+                .child(
+                    div()
+                        .mt_1()
+                        .font_semibold()
+                        .text_sm()
+                        .child(tr(keys::Q_PREFS_NEW_PASSWORD)),
+                )
                 .child(
                     Input::new(&self.twofa.new_password)
-                        .aria_label("New two-step verification password")
+                        .aria_label(tr(keys::Q_PREFS_NEW_TWO_STEP_VERIFICATION_PASSWORD))
                         .content_type(InputContentType::Password)
                         .h(px(40.)),
                 )
                 .child(
                     Textarea::new(&self.twofa.hint)
-                        .aria_label("Password hint")
+                        .aria_label(tr(keys::SETTINGS_CLOUD_PASSWORD_HINT_TITLE))
                         .h(px(40.)),
                 )
                 .child(muted_line(
                     cx,
-                    "Leave the password empty to turn off two-step verification.",
+                    tr(keys::Q_PREFS_LEAVE_THE_PASSWORD_EMPTY_TO),
                 ))
                 .when_some(self.twofa.notice.clone(), |this, note| {
                     this.child(div().text_xs().text_color(danger()).child(note))
@@ -310,7 +329,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("twofa-recover-submit")
-                                .label("Save")
+                                .label(tr(keys::SETTINGS_SAVE))
                                 .primary()
                                 .disabled(loading)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -319,7 +338,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("twofa-recover-resend")
-                                .label("Resend code")
+                                .label(tr(keys::CLOUD_PASSWORD_RESEND))
                                 .ghost()
                                 .disabled(loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -332,23 +351,21 @@ impl QuillApp {
                 )
                 .child(self.twofa_confirm_or(
                     cx,
-                    "Unable to access your email?",
-                    "If you don't have access to your recovery email, your remaining options are either to remember your password or wait 7 days until your password resets.",
+                    tr(keys::SIGNIN_TRY_PASSWORD),
+                    tr(keys::CLOUD_PASSWORD_RESET_WITH_EMAIL),
                     TwofaConfirm::Reset { with_email: true },
-                    "Reset",
-                    "Cancel",
+                    tr(keys::CLOUD_PASSWORD_RESET_OK),
+                    tr(keys::CANCEL),
                     loading,
                 ));
             return self.twofa_back_row(cx, body);
         }
         if state.has_recovery_email_address {
             body = body
-                .child(div().text_sm().child(
-                    "We'll send a code to your recovery email. It is the only way to recover a forgotten password.",
-                ))
+                .child(div().text_sm().child(tr(keys::Q_PREFS_WELL_SEND_A_CODE_TO)))
                 .child(
                     Button::new("twofa-send-recovery-code")
-                        .label("Send code")
+                        .label(tr(keys::Q_PREFS_SEND_CODE))
                         .primary()
                         .disabled(loading)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -360,21 +377,21 @@ impl QuillApp {
                 )
                 .child(self.twofa_confirm_or(
                     cx,
-                    "Unable to access your email?",
-                    "If you don't have access to your recovery email, your remaining options are either to remember your password or wait 7 days until your password resets.",
+                    tr(keys::SIGNIN_TRY_PASSWORD),
+                    tr(keys::CLOUD_PASSWORD_RESET_WITH_EMAIL),
                     TwofaConfirm::Reset { with_email: true },
-                    "Reset",
-                    "Cancel",
+                    tr(keys::CLOUD_PASSWORD_RESET_OK),
+                    tr(keys::CANCEL),
                     loading,
                 ));
         } else {
             body = body.child(self.twofa_confirm_or(
                 cx,
-                "Reset password",
-                "Since you didn't provide a recovery email when setting up your password, your remaining options are either to remember your password or wait 7 days until your password is reset.",
+                tr(keys::CLOUD_PASSWORD_RESET_READY),
+                tr(keys::CLOUD_PASSWORD_RESET_NO_EMAIL),
                 TwofaConfirm::Reset { with_email: false },
-                "Reset",
-                "Cancel",
+                tr(keys::CLOUD_PASSWORD_RESET_OK),
+                tr(keys::CANCEL),
                 loading,
             ));
         }
@@ -384,7 +401,7 @@ impl QuillApp {
     fn twofa_back_row(&self, cx: &mut Context<Self>, body: Div) -> Div {
         body.child(
             Button::new("twofa-recover-back")
-                .label("Back")
+                .label(tr(keys::Q_PREFS_BACK))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.goto_twofa_view(TwofaView::Status);
@@ -463,7 +480,7 @@ impl QuillApp {
         let mut new = self.twofa.new_password.read(cx).value().to_string();
         let hint = self.twofa.hint.read(cx).value().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some("enter the code from the email".into());
+            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
             code.zeroize();
             new.zeroize();
             cx.notify();
@@ -494,13 +511,14 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|s| s.auth_state.password_state_loading);
         let body = if let Some(pattern) = code_sent_to {
-            body.child(heading("Check Your New Email"))
-                .child(div().text_sm().child(format!(
-                    "Please enter the code we have sent to your new email {pattern}"
+            body.child(heading(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CODE_TITLE)))
+                .child(div().text_sm().child(tr_with(
+                    keys::SETTINGS_CLOUD_LOGIN_EMAIL_CODE_ABOUT,
+                    &[("email", &pattern.to_string())],
                 )))
                 .child(
                     Input::new(&self.twofa.code)
-                        .aria_label("Login email confirmation code")
+                        .aria_label(tr(keys::Q_PREFS_LOGIN_EMAIL_CONFIRMATION_CODE))
                         .h(px(40.)),
                 )
                 .when_some(self.twofa.notice.clone(), |this, note| {
@@ -513,7 +531,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("twofa-login-email-confirm")
-                                .label("Confirm")
+                                .label(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CONFIRM))
                                 .primary()
                                 .disabled(loading)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -522,7 +540,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("twofa-login-email-resend")
-                                .label("Resend code")
+                                .label(tr(keys::CLOUD_PASSWORD_RESEND))
                                 .ghost()
                                 .disabled(loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -534,14 +552,11 @@ impl QuillApp {
                         ),
                 )
         } else {
-            body.child(heading("Enter New Email"))
-                .child(muted_line(
-                    cx,
-                    "You will receive Telegram login codes via email and not SMS. Please enter an email address to which you have access.",
-                ))
+            body.child(heading(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_TITLE)))
+                .child(muted_line(cx, tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_ABOUT)))
                 .child(
                     Textarea::new(&self.twofa.email)
-                        .aria_label("Login email address")
+                        .aria_label(tr(keys::Q_PREFS_LOGIN_EMAIL_ADDRESS))
                         .h(px(40.)),
                 )
                 .when_some(self.twofa.notice.clone(), |this, note| {
@@ -549,7 +564,7 @@ impl QuillApp {
                 })
                 .child(
                     Button::new("twofa-login-email-submit")
-                        .label("Confirm")
+                        .label(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CONFIRM))
                         .primary()
                         .disabled(loading)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -559,7 +574,7 @@ impl QuillApp {
         };
         body.child(
             Button::new("twofa-login-email-back")
-                .label("Back")
+                .label(tr(keys::Q_PREFS_BACK))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.goto_twofa_view(TwofaView::Status);
@@ -571,7 +586,7 @@ impl QuillApp {
     fn submit_login_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let email = self.twofa.email.read(cx).value().trim().to_string();
         if email.is_empty() {
-            self.twofa.notice = Some("enter the new login email".into());
+            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_NEW_LOGIN_EMAIL).into());
             cx.notify();
             return;
         }
@@ -588,7 +603,7 @@ impl QuillApp {
     fn submit_login_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some("enter the code from the email".into());
+            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
             cx.notify();
             return;
         }

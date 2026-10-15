@@ -328,6 +328,18 @@ on that screen (spoiler → `lng_menu_formatting_spoiler`, poll →
 `lng_polls_menu_item`); otherwise they get a `qll_chat_*` key. Gate OK
 (core 4444, UI 697).
 
+## PR 4: settings, privacy, security and notifications
+
+Privacy, security (two-step verification, passcode, sessions, connected
+websites), notification settings, appearance, proxy, keyboard shortcuts,
+account lifecycle, data and storage and the other Settings pages are
+converted (`lang/en/prefs.strings`). Durations and counts use tdesktop's
+generic plural keys (`lng_hours`, `lng_days`, `lng_months`, `lng_years`,
+`lng_filters_chats_count`). The keyboard shortcut rows moved to
+`keybindings/shortcut_rows.rs` to keep `keybindings/mod.rs` under 1,000
+lines. `REBINDABLE_ACTIONS` is a `const` table, so its labels stay English
+for now (a later PR turns them into keys looked up at render time).
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),
