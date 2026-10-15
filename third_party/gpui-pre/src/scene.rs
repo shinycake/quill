@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.8 (Apache-2.0):
-// `SurfaceFrame` and the non-Apple `PaintSurface::frame`. See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
 
@@ -772,114 +770,8 @@ pub struct PaintSurface {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    pub image_buffer: core_video::pixel_buffer::CVPixelBuffer,
-    /// QUILL: CPU pixels where CoreVideo doesn't exist.
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    pub frame: std::sync::Arc<SurfaceFrame>,
+    pub image_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
 }
-
-/// QUILL: the pixel layout of a `SurfaceFrame`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SurfaceFormat {
-    /// Four little-endian IEEE half floats per pixel (R, G, B, A), linear
-    /// extended sRGB, premultiplied alpha: an HDR still.
-    Rgba16Float,
-}
-
-impl SurfaceFormat {
-    /// Bytes per pixel.
-    pub fn bytes_per_pixel(self) -> usize {
-        match self {
-            SurfaceFormat::Rgba16Float => 8,
-        }
-    }
-}
-
-/// QUILL: pixels a renderer uploads to a texture and draws like a
-/// CoreVideo surface. The renderer may cache the upload by `id`, so a
-/// frame's pixels never change; its HDR headroom may.
-#[derive(Debug)]
-pub struct SurfaceFrame {
-    id: u64,
-    width: u32,
-    height: u32,
-    format: SurfaceFormat,
-    bytes: std::sync::Arc<[u8]>,
-    /// f32 bits of the display headroom to tone-map to (1.0 = SDR).
-    headroom: std::sync::atomic::AtomicU32,
-}
-
-impl SurfaceFrame {
-    /// A frame of `width` x `height` tightly packed pixels; `None` when
-    /// `bytes` is not exactly that long or the frame is empty.
-    pub fn new(
-        width: u32,
-        height: u32,
-        format: SurfaceFormat,
-        bytes: std::sync::Arc<[u8]>,
-    ) -> Option<Self> {
-        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let len = (width as usize)
-            .checked_mul(height as usize)?
-            .checked_mul(format.bytes_per_pixel())?;
-        if len == 0 || bytes.len() != len {
-            return None;
-        }
-        Some(Self {
-            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            width,
-            height,
-            format,
-            bytes,
-            headroom: std::sync::atomic::AtomicU32::new(1.0_f32.to_bits()),
-        })
-    }
-
-    /// Unique per frame; a renderer's texture cache key.
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-
-    /// Width in pixels.
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-
-    /// Height in pixels.
-    pub fn height(&self) -> u32 {
-        self.height
-    }
-
-    /// Pixel layout.
-    pub fn format(&self) -> SurfaceFormat {
-        self.format
-    }
-
-    /// Tightly packed rows of pixels.
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// The display headroom to tone-map to (at least 1.0).
-    pub fn headroom(&self) -> f32 {
-        let headroom = f32::from_bits(self.headroom.load(std::sync::atomic::Ordering::Relaxed));
-        if headroom.is_finite() { headroom.max(1.0) } else { 1.0 }
-    }
-
-    /// Set the display headroom to tone-map to.
-    pub fn set_headroom(&self, headroom: f32) {
-        self.headroom
-            .store(headroom.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-impl PartialEq for SurfaceFrame {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for SurfaceFrame {}
 
 impl From<PaintSurface> for Primitive {
     fn from(surface: PaintSurface) -> Self {

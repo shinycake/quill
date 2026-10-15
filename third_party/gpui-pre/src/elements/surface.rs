@@ -1,11 +1,11 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.8 (Apache-2.0):
-// `SurfaceSource::Frame` and `surface()` on every platform. See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{
     App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
     ObjectFit, Pixels, Style, StyleRefinement, Styled, Window,
 };
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use core_video::pixel_buffer::CVPixelBuffer;
+use objc2_core_foundation::CFRetained;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use objc2_core_video::{CVPixelBuffer, CVPixelBufferGetHeight, CVPixelBufferGetWidth};
 use refineable::Refineable;
 
 /// A source of a surface's content.
@@ -13,22 +13,12 @@ use refineable::Refineable;
 pub enum SurfaceSource {
     /// A CoreVideo image buffer
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    Surface(CVPixelBuffer),
-    /// QUILL: CPU pixels, where CoreVideo doesn't exist.
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    Frame(std::sync::Arc<crate::SurfaceFrame>),
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-impl From<std::sync::Arc<crate::SurfaceFrame>> for SurfaceSource {
-    fn from(value: std::sync::Arc<crate::SurfaceFrame>) -> Self {
-        SurfaceSource::Frame(value)
-    }
+    Surface(CFRetained<CVPixelBuffer>),
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-impl From<CVPixelBuffer> for SurfaceSource {
-    fn from(value: CVPixelBuffer) -> Self {
+impl From<CFRetained<CVPixelBuffer>> for SurfaceSource {
+    fn from(value: CFRetained<CVPixelBuffer>) -> Self {
         SurfaceSource::Surface(value)
     }
 }
@@ -41,6 +31,7 @@ pub struct Surface {
 }
 
 /// Create a new surface element.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub fn surface(source: impl Into<SurfaceSource>) -> Surface {
     Surface {
         source: source.into(),
@@ -97,29 +88,33 @@ impl Element for Surface {
         &mut self,
         _global_id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
+        #[cfg_attr(
+            not(any(target_os = "macos", target_os = "ios")),
+            allow(unused_variables)
+        )]
         bounds: Bounds<Pixels>,
         _: &mut Self::RequestLayoutState,
         _: &mut Self::PrepaintState,
+        #[cfg_attr(
+            not(any(target_os = "macos", target_os = "ios")),
+            allow(unused_variables)
+        )]
         window: &mut Window,
         _: &mut App,
     ) {
         match &self.source {
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             SurfaceSource::Surface(surface) => {
-                let size = crate::size(surface.get_width().into(), surface.get_height().into());
+                let size = crate::size(
+                    CVPixelBufferGetWidth(surface).into(),
+                    CVPixelBufferGetHeight(surface).into(),
+                );
                 let new_bounds = self.object_fit.get_bounds(bounds, size);
                 // TODO: Add support for corner_radii
                 window.paint_surface(new_bounds, surface.clone());
             }
-            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-            SurfaceSource::Frame(frame) => {
-                let size = crate::size(
-                    crate::DevicePixels::from(frame.width() as i32),
-                    crate::DevicePixels::from(frame.height() as i32),
-                );
-                let new_bounds = self.object_fit.get_bounds(bounds, size);
-                window.paint_surface_frame(new_bounds, frame.clone());
-            }
+            #[allow(unreachable_patterns)]
+            _ => {}
         }
     }
 }
