@@ -1,30 +1,39 @@
 //! A chat with an inline video tile (message 204) and a round video
 //! (message 611) on scripted players: both play muted and looped, their
 //! frames are asked for by the conversation's animation layer (not the
-//! slice), they wait while the window is in the background, and leaving
-//! the chat stops them.
+//! slice), they wait while the window is in the background, leaving the
+//! chat stops them, and a tile scrolled out of view pauses, is released
+//! and comes back. Also: a story paused while its clip opens stays paused.
 
-use super::{Script, calls, queue_backend};
+use super::{Script, Scripted, calls, queue_backend};
 use crate::ui::app::QuillApp;
 use crate::ui::frame_clock::take_video_targets;
+use crate::ui::inline_players::RELEASE_AFTER;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::video_player::{PlayState, VideoPlayer};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, point};
 use quill::ids::ChatId;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 
 const TILE: (i64, i64) = (11, 204);
 const ROUND: (i64, i64) = (11, 611);
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    new_app_sized(cx, 900.)
+}
+
+fn new_app_sized(cx: &mut TestAppContext, height: f32) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = Rc::new(RefCell::new(None));
     let slot_in = slot.clone();
-    let handle = cx.open_window(size(px(1100.), px(900.)), move |window, cx| {
+    let handle = cx.open_window(size(px(1100.), px(height)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(
                 window,
@@ -133,4 +142,119 @@ fn inline_tiles_play_muted_on_the_layer_and_stop_with_the_chat(cx: &mut TestAppC
     for script in &scripts {
         assert!(script.borrow().dropped, "the backend is released");
     }
+}
+
+/// Re-render the conversation (a history pass) `times` times.
+fn history_passes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, times: usize) {
+    for _ in 0..times {
+        app.update_in(vcx, |app, _, cx| app.notify_conversation(cx));
+        vcx.run_until_parked();
+    }
+}
+
+fn scroll(vcx: &mut VisualTestContext, dy: f32) {
+    vcx.simulate_event(ScrollWheelEvent {
+        position: point(px(800.), px(300.)),
+        delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+        modifiers: Modifiers::default(),
+        ..Default::default()
+    });
+    settle(vcx);
+}
+
+/// The round video's player: whether there is one, whether it is held
+/// off screen, and whether play is asked of it.
+fn round_state(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(bool, bool)> {
+    app.read_with(vcx, |app, _| {
+        let videos = &app.playback.inline_videos;
+        videos
+            .player(ROUND)
+            .map(|player| (videos.is_hidden(ROUND), player.wants_play()))
+    })
+}
+
+#[gpui_kit::test]
+fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAppContext) {
+    let scripts: Vec<_> = (0..6).map(|_| ready_script()).collect();
+    for script in &scripts {
+        queue_backend(script);
+    }
+    let (app, mut vcx) = new_app_sized(cx, 460.);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    scroll(vcx, 3000.);
+    assert_eq!(
+        round_state(&app, vcx),
+        Some((false, true)),
+        "in view: playing"
+    );
+    // Scroll in small steps until the round video's row still renders (the
+    // list's first row) but its picture is above the visible area.
+    let mut steps = 0;
+    while round_state(&app, vcx) != Some((true, false)) {
+        steps += 1;
+        assert!(
+            steps < 60,
+            "never held off screen: {:?}",
+            round_state(&app, vcx)
+        );
+        scroll(vcx, -10.);
+    }
+    let held = app
+        .read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        .expect("the held player");
+    let script = scripts
+        .iter()
+        .find(|script| {
+            let calls = &script.borrow().calls;
+            !script.borrow().dropped && calls.last().is_some_and(|c| c == "pause")
+        })
+        .expect("the round video's backend, paused last")
+        .clone();
+    script.borrow_mut().calls.clear();
+    // More history passes while it sits there: no play / pause churn.
+    history_passes(&app, vcx, 4);
+    assert_eq!(round_state(&app, vcx), Some((true, false)));
+    let calls = calls(&script);
+    assert!(calls.is_empty(), "{calls:?}");
+    // Off screen for RELEASE_AFTER: released, its backend freed.
+    drop(held);
+    vcx.executor().advance_clock(RELEASE_AFTER);
+    vcx.run_until_parked();
+    assert!(script.borrow().dropped, "the backend is released");
+    // A later pass that still renders the row opens a new player held,
+    // not playing, until its picture is painted in view.
+    history_passes(&app, vcx, 2);
+    assert!(
+        matches!(round_state(&app, vcx), None | Some((true, false))),
+        "{:?}",
+        round_state(&app, vcx)
+    );
+    // Back in view: a new player opens and plays.
+    scroll(vcx, 3000.);
+    assert_eq!(round_state(&app, vcx), Some((false, true)), "back in view");
+}
+
+#[gpui_kit::test]
+fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let script = Rc::new(RefCell::new(Script::default()));
+    let player = VideoPlayer::from_backend(Box::new(Scripted(script.clone())), Some(10.0));
+    player.play();
+    assert_eq!(player.state(), PlayState::Opening);
+    let story_player = player.clone();
+    app.update_in(vcx, |app, _, _| {
+        app.stories.player = Some(story_player);
+        // Press-and-hold (or Space) right after the story opened.
+        app.apply_story_native_pause(true);
+    });
+    assert!(!player.wants_play());
+    script.borrow_mut().ready = true;
+    player.pull(Instant::now(), None);
+    assert_eq!(player.state(), PlayState::Ready);
+    let calls = calls(&script);
+    assert!(!calls.iter().any(|c| c.starts_with("play")), "{calls:?}");
+    app.update_in(vcx, |app, _, _| app.stories.player = None);
 }

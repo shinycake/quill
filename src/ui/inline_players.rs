@@ -143,8 +143,11 @@ impl Toggle {
 enum Command {
     Play,
     Pause,
-    /// Leave the play-once-with-sound mode: muted, looping, playing.
-    BackToLoop,
+    /// Leave the play-once-with-sound mode: muted and looping, playing
+    /// only when the slot wants it (on screen, window active).
+    BackToLoop {
+        play: bool,
+    },
     /// Start playing once with sound from the start.
     PlayWithSound,
     Seek(f64),
@@ -155,10 +158,14 @@ fn run(commands: Vec<(VideoPlayer, Command)>) {
         match command {
             Command::Play => player.play(),
             Command::Pause => player.pause(),
-            Command::BackToLoop => {
+            Command::BackToLoop { play } => {
                 player.set_volume(0.0);
                 player.set_looping(true);
-                player.play();
+                if play {
+                    player.play();
+                } else {
+                    player.pause();
+                }
             }
             Command::PlayWithSound => {
                 player.set_looping(false);
@@ -176,7 +183,8 @@ struct Slot {
     /// Decoded picture memory it may hold (0 for AVPlayer, whose buffers
     /// aren't ours).
     bytes: usize,
-    /// The history pass its row last rendered in.
+    /// The pass its row last rendered in: the history's, or the GIF
+    /// panel's for [`PANEL_CHAT`] keys.
     seen: u64,
     /// The player's paint count when the current pass began
     /// (`VideoPlayer::shown_count`): more since means it was in view.
@@ -204,20 +212,23 @@ impl Slot {
     }
 
     /// What it takes to bring the player in line with the slot, given its
-    /// transport state.
-    fn settle(&mut self, state: PlayState, inactive: bool) -> Option<Command> {
+    /// transport state and whether play is asked of it (`running`, which
+    /// an opening player records too: it starts by itself once open).
+    fn settle(&mut self, state: PlayState, running: bool, inactive: bool) -> Option<Command> {
         // Played once with sound and done: back to the muted loop.
         if self.sound && state == PlayState::Ended {
             self.sound = false;
             self.paused = false;
-            return Some(Command::BackToLoop);
+            return Some(Command::BackToLoop {
+                play: self.wants_play(inactive),
+            });
         }
-        let wants = self.wants_play(inactive);
-        match state {
-            // An opening player starts by itself once open, if asked.
-            PlayState::Opening | PlayState::Failed => None,
-            state if wants && !state.animates() => Some(Command::Play),
-            state if !wants && state.animates() => Some(Command::Pause),
+        if state == PlayState::Failed {
+            return None;
+        }
+        match (self.wants_play(inactive), running) {
+            (true, false) => Some(Command::Play),
+            (false, true) => Some(Command::Pause),
             _ => None,
         }
     }
@@ -248,10 +259,30 @@ impl Slot {
     }
 }
 
+/// Which pass a slot's row renders in: the history's or the GIF panel's
+/// (which renders in its own slice, at its own times).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pass {
+    History(u64),
+    Panel(u64),
+}
+
+/// Whether the slot for `key`, whose row last rendered in pass `seen`,
+/// stays as `pass` begins: it rendered in the previous pass of its kind,
+/// or it belongs to the other kind.
+fn survives(key: Key, seen: u64, pass: Pass) -> bool {
+    match pass {
+        Pass::History(render) => key.0 == PANEL_CHAT || seen.saturating_add(1) >= render,
+        Pass::Panel(render) => key.0 != PANEL_CHAT || seen.saturating_add(1) >= render,
+    }
+}
+
 #[derive(Default)]
 struct State {
     players: HashMap<Key, Slot>,
     render: u64,
+    /// The GIF panel's pass count ([`InlineVideos::begin_panel_render`]).
+    panel_render: u64,
     /// The history rendered (and swept the players) this frame.
     swept: bool,
     /// The window is in the background: muted loops hold still.
@@ -272,12 +303,62 @@ pub(super) struct InlineVideos {
 
 impl InlineVideos {
     /// A short borrow of the state; `None` when it is already borrowed
-    /// further up the stack (never expected: the call is skipped).
+    /// further up the stack (never expected: the call is skipped, and
+    /// `QUILL_TRACE_VIDEO=1` logs it).
+    #[track_caller]
     fn with<R>(&self, f: impl FnOnce(&mut State) -> R) -> Option<R> {
-        self.state
-            .try_borrow_mut()
-            .ok()
-            .map(|mut state| f(&mut state))
+        let Ok(mut state) = self.state.try_borrow_mut() else {
+            if super::video_player::trace_video() {
+                eprintln!(
+                    "inline players: re-entrant borrow skipped at {}",
+                    std::panic::Location::caller()
+                );
+            }
+            return None;
+        };
+        Some(f(&mut state))
+    }
+
+    /// The pass number `key`'s row renders in now.
+    fn pass_of(state: &State, key: Key) -> u64 {
+        if key.0 == PANEL_CHAT {
+            state.panel_render
+        } else {
+            state.render
+        }
+    }
+
+    /// Start a GIF panel render pass: panel players whose cells did not
+    /// render in the last one (results that left the panel) stop. Called
+    /// at the top of the panel's render.
+    pub(super) fn begin_panel_render(&self) {
+        let dropped = self.with(|state| {
+            state.panel_render += 1;
+            let pass = Pass::Panel(state.panel_render);
+            let (keep, drop): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
+                std::mem::take(&mut state.players)
+                    .into_iter()
+                    .partition(|(key, slot)| survives(*key, slot.seen, pass));
+            state.players = keep;
+            drop
+        });
+        drop(dropped);
+    }
+
+    /// The GIF panel closed: its players stop.
+    pub(super) fn clear_panel(&self) {
+        let dropped = self.with(|state| {
+            if !state.players.keys().any(|(chat, _)| *chat == PANEL_CHAT) {
+                return HashMap::new();
+            }
+            let (drop, keep): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
+                std::mem::take(&mut state.players)
+                    .into_iter()
+                    .partition(|((chat, _), _)| *chat == PANEL_CHAT);
+            state.players = keep;
+            drop
+        });
+        drop(dropped);
     }
 
     /// Start a history render pass: players whose rows didn't render in
@@ -288,11 +369,11 @@ impl InlineVideos {
         let dropped = self.with(|state| {
             state.swept = true;
             state.render += 1;
-            let render = state.render;
+            let pass = Pass::History(state.render);
             let (keep, drop): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
                 std::mem::take(&mut state.players)
                     .into_iter()
-                    .partition(|(_, slot)| slot.seen + 1 >= render);
+                    .partition(|(key, slot)| survives(*key, slot.seen, pass));
             state.players = keep;
             drop
         });
@@ -337,15 +418,22 @@ impl InlineVideos {
                     .collect()
             })
             .unwrap_or_default();
-        let visible: Vec<(Key, bool)> = players
+        let visible: Vec<(Key, bool, PlayState, bool)> = players
             .into_iter()
-            .map(|(key, player, mark)| (key, player.shown_count() > mark))
+            .map(|(key, player, mark)| {
+                (
+                    key,
+                    player.shown_count() > mark,
+                    player.state(),
+                    player.wants_play(),
+                )
+            })
             .collect();
         let Some((commands, released, hidden)) = self.with(|state| {
             let inactive = state.inactive;
             let mut commands = Vec::new();
             let mut released = Vec::new();
-            for (key, visible) in visible {
+            for (key, visible, play_state, running) in visible {
                 let Some(slot) = state.players.get_mut(&key) else {
                     continue;
                 };
@@ -360,7 +448,7 @@ impl InlineVideos {
                         continue;
                     }
                 }
-                if let Some(command) = slot.settle(slot.player.state(), inactive) {
+                if let Some(command) = slot.settle(play_state, running, inactive) {
                     commands.push((slot.player.clone(), command));
                 }
             }
@@ -407,7 +495,13 @@ impl InlineVideos {
         let dropped = self.with(|state| {
             let mut dropped = HashMap::new();
             if history_drawn && !state.swept {
-                dropped = std::mem::take(&mut state.players);
+                // The GIF panel's players have their own passes.
+                let (panel, history): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
+                    std::mem::take(&mut state.players)
+                        .into_iter()
+                        .partition(|((chat, _), _)| *chat == PANEL_CHAT);
+                state.players = panel;
+                dropped = history;
             }
             // The display or interface scale changed: running players
             // decode at the old size, so restart them at the new one.
@@ -436,10 +530,14 @@ impl InlineVideos {
             })
             .unwrap_or_default();
         for (player, wants) in commands {
-            let state = player.state();
-            if wants && !state.animates() && state != PlayState::Opening {
+            // Play and pause on an opening player only record the intent.
+            if player.state() == PlayState::Failed {
+                continue;
+            }
+            let running = player.wants_play();
+            if wants && !running {
                 player.play();
-            } else if !wants && state.animates() {
+            } else if !wants && running {
                 player.pause();
             }
         }
@@ -469,11 +567,13 @@ impl InlineVideos {
                 return Some(vec![(slot.player.clone(), command)]);
             }
             let mut commands = Vec::new();
+            let inactive = state.inactive;
             for (other, slot) in &mut state.players {
                 if *other != key && slot.sound {
                     slot.sound = false;
                     slot.paused = false;
-                    commands.push((slot.player.clone(), Command::BackToLoop));
+                    let play = slot.wants_play(inactive);
+                    commands.push((slot.player.clone(), Command::BackToLoop { play }));
                 }
             }
             if let Some(slot) = state.players.get_mut(&key) {
@@ -556,7 +656,9 @@ impl InlineVideos {
 
     /// This message's clip, starting its muted, looping player on first
     /// use (`path` is only resolved then), sized for `tile`; its row is
-    /// rendering, so a player paused off screen resumes. A clip that would
+    /// rendering. A player paused off screen stays paused until a sweep
+    /// sees it painted in view (a paused player still paints its last
+    /// picture, so scrolling back resumes it). A clip that would
     /// take the decoded memory past [`INLINE_DECODE_BUDGET`] doesn't start
     /// (its still shows). `duration` (the message's) shows until the
     /// file's own is known.
@@ -573,13 +675,12 @@ impl InlineVideos {
             self.open(key, tile, duration, path, cx)?;
         }
         let player = self.with(|state| {
-            let render = state.render;
+            let pass = Self::pass_of(state, key);
             let slot = state.players.get_mut(&key)?;
-            slot.seen = render;
-            slot.hidden_since = None;
+            slot.seen = pass;
             Some(slot.player.clone())
         })??;
-        self.settled_frame(key, player.state())
+        self.settled_frame(key, &player)
     }
 
     /// The current frame of a running clip, for the history's animation
@@ -588,20 +689,22 @@ impl InlineVideos {
     pub(super) fn current(&self, key: Key) -> Option<InlineFrame> {
         let player =
             self.with(|state| state.players.get(&key).map(|slot| slot.player.clone()))??;
-        self.settled_frame(key, player.state())
+        self.settled_frame(key, &player)
     }
 
     /// Bring the slot's player in line (loop back, resume, pause) and
     /// return its frame; `None` once its player failed (the still shows).
-    fn settled_frame(&self, key: Key, state: PlayState) -> Option<InlineFrame> {
+    fn settled_frame(&self, key: Key, player: &VideoPlayer) -> Option<InlineFrame> {
+        let state = player.state();
         if state == PlayState::Failed {
             return None;
         }
+        let running = player.wants_play();
         let (command, frame) = self.with(|videos| {
             let inactive = videos.inactive;
             let slot = videos.players.get_mut(&key)?;
             let command = slot
-                .settle(state, inactive)
+                .settle(state, running, inactive)
                 .map(|command| (slot.player.clone(), command));
             let held = slot.paused || slot.seeking.is_some();
             Some((command, slot.frame(held)))
@@ -624,7 +727,7 @@ impl InlineVideos {
                 state.players.values().map(|slot| slot.bytes).sum::<usize>(),
                 state.scale,
                 state.inactive,
-                state.render,
+                Self::pass_of(state, key),
             )
         })?;
         let max_edge = tile.decode_edge(scale);
@@ -641,10 +744,16 @@ impl InlineVideos {
             VideoPlayer::open(&path()?, Purpose::Inline { max_edge }, duration, cx).ok()?;
         player.set_volume(0.0);
         player.set_looping(true);
-        // Behind another app a new muted loop waits for activation.
-        if !inactive {
+        // A history clip starts held, as if off screen: the sweep after
+        // this pass plays it once its first picture was painted in view,
+        // so a row rendered only in the list's overdraw never plays (and
+        // one released off screen comes back paused). The GIF panel has no
+        // sweep; behind another app a new muted loop waits for activation.
+        let in_history = key.0 != PANEL_CHAT;
+        if !inactive && !in_history {
             player.play();
         }
+        let hidden_since = in_history.then(|| cx.background_executor().now());
         let mark = player.shown_count();
         let replaced = self.with(|state| {
             state.players.insert(
@@ -654,7 +763,7 @@ impl InlineVideos {
                     bytes,
                     seen: render,
                     shown_mark: mark,
-                    hidden_since: None,
+                    hidden_since,
                     sound: false,
                     paused: false,
                     seeking: None,
@@ -691,7 +800,10 @@ impl InlineVideos {
 
 #[cfg(test)]
 mod tests {
-    use super::{INLINE_DECODE_BUDGET, OffScreenStep, RELEASE_AFTER, admits, off_screen_step};
+    use super::{
+        INLINE_DECODE_BUDGET, OffScreenStep, PANEL_CHAT, Pass, RELEASE_AFTER, admits,
+        off_screen_step, survives,
+    };
     use crate::ui::inline_video::InlineTile;
     use std::time::{Duration, Instant};
 
@@ -732,6 +844,21 @@ mod tests {
             off_screen_step(false, Some(just_before), now),
             OffScreenStep::Stay
         );
+    }
+
+    #[test]
+    fn history_and_panel_passes_each_reap_only_their_own_players() {
+        let row = (11, 204);
+        let cell = (PANEL_CHAT, 7);
+        // A history pass keeps rows seen in the previous one, and every
+        // panel cell however old.
+        assert!(survives(row, 4, Pass::History(5)));
+        assert!(!survives(row, 3, Pass::History(5)));
+        assert!(survives(cell, 0, Pass::History(500)));
+        // A panel pass reaps cells that left the panel, never history rows.
+        assert!(survives(cell, 2, Pass::Panel(3)));
+        assert!(!survives(cell, 1, Pass::Panel(3)));
+        assert!(survives(row, 0, Pass::Panel(500)));
     }
 
     #[test]

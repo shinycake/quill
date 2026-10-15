@@ -172,7 +172,10 @@ impl QuillApp {
             return;
         };
         if paused {
-            if player.state().animates() {
+            // `wants_play`, not the state: a story paused while still
+            // opening must not start once open. Runs every tick, so a
+            // player already paused is left alone.
+            if player.wants_play() {
                 player.pause();
             }
             self.stories.native_paused_by_us = true;

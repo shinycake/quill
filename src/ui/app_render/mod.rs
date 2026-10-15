@@ -73,6 +73,14 @@ impl Render for QuillApp {
         self.playback
             .inline_videos
             .frame_start(history_drawn, window.scale_factor());
+        // A viewer covers the chat: its clips stop even if a cached
+        // conversation replays its animation layer; a closed GIF panel
+        // stops the panel's.
+        if self.viewer.state.is_open() || self.stories.viewer.is_open() {
+            self.playback.inline_videos.clear();
+        } else if !self.composer_ui.inline_results_open {
+            self.playback.inline_videos.clear_panel();
+        }
         // Animations run while any Quill window is in front, a chat
         // window's included.
         let active = window.is_window_active()

@@ -460,6 +460,13 @@ impl VideoPlayer {
             .unwrap_or(PlayState::Failed)
     }
 
+    /// Whether play was asked for and not paused since: true while
+    /// playing or buffering, and while opening after a `play()`.
+    pub(crate) fn wants_play(&self) -> bool {
+        self.read_inner(|inner| inner.machine.wants_play())
+            .unwrap_or(false)
+    }
+
     /// The transport now (position extrapolated to this instant).
     pub(crate) fn transport(&self) -> Transport {
         let now = Instant::now();

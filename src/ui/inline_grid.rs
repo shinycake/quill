@@ -120,6 +120,8 @@ impl QuillApp {
         view: &InlineView,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        // Clips whose cells do not render in this pass stop.
+        self.playback.inline_videos.begin_panel_render();
         let mut panel = div()
             .id("inline-results")
             .flex()

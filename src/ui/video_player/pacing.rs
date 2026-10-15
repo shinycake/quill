@@ -18,8 +18,11 @@ const HISTORY: usize = 8;
 /// The fastest and slowest display the estimate accepts (240 Hz, 20 Hz).
 const MIN_INTERVAL: Duration = Duration::from_micros(4_167);
 const MAX_INTERVAL: Duration = Duration::from_millis(50);
-/// Two draw starts closer than this are the same frame.
-const SAME_FRAME: Duration = Duration::from_micros(3_125);
+/// Two draw starts closer than this are the same frame (a tile drawn by
+/// its layer and by its slice). Well under half a 240 Hz frame, so a late
+/// frame followed by an early one still counts as two; GPUI exposes no
+/// frame counter to tell draws apart by identity.
+const SAME_FRAME: Duration = Duration::from_millis(2);
 /// Until two draws were seen: a 60 Hz display.
 const DEFAULT_INTERVAL: Duration = Duration::from_micros(16_667);
 /// A wake this close to now is not worth a timer: ask for the next frame.
@@ -403,6 +406,18 @@ mod tests {
         }
         assert!(
             close(estimator.interval(), period),
+            "{:?}",
+            estimator.interval()
+        );
+    }
+
+    #[test]
+    fn jittered_240_hz_frames_are_not_merged() {
+        // Gaps down to 2.97 ms (a late frame, then an early one) are still
+        // separate frames at 240 Hz.
+        let (estimator, _) = steady(240.0, 16, &[0, 600, -600, 400, -400]);
+        assert!(
+            close(estimator.interval(), hz(240.0)),
             "{:?}",
             estimator.interval()
         );
