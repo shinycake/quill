@@ -15,7 +15,11 @@ same module.
   (`GroupCall::setNoiseSuppression` → tgcalls
   `setIsNoiseSuppressionEnabled`, `calls_group_call.cpp:2283`), which runs
   RNNoise on the microphone.
-- 1:1 calls keep WebRTC's own processing on and have no switch.
+- 1:1 calls always have noise suppression on and no switch for it
+  (`calls_call.cpp:1140`, `.enableNS = true` in the tgcalls config).
+- The switch exists only in that box. Settings > Calls has the devices and
+  the microphone test (`settings_calls.cpp`, `AudioInputTester`, the raw
+  input level) but no noise suppression row.
 
 ## What Quill did before
 
@@ -62,24 +66,25 @@ the level tap opened the microphone a second time to measure your level.
   before the level pump. It opens the chosen microphone while a 1:1 call has
   a transport (connecting, connected or reconnecting) or while you are
   joined to a group call whose transport is up, follows mute (silence
-  frames, same stream) and the switch, reopens on a different microphone or
-  call, and after a failed open or a lost device shows the error in the
-  call window and retries after 2 s. `apply_call_noise_suppression` applies
-  the switch at once.
+  frames, same stream), reopens on a different microphone or call, and
+  after a failed open or a lost device shows the error in the call window
+  and retries after 2 s. A 1:1 call always denoises, whatever the switch
+  says, as in tdesktop; a group call follows the switch, and
+  `apply_call_noise_suppression` applies it to the running stream at once.
 - **Level** (`connect/call_audio.rs`, `calls/level_tap.rs`): your level in
   a group call now comes from the call's own stream (`LevelCell`), so the
   second device open is gone. `LevelTap` is rebuilt on the capture path for
-  the Settings > Calls microphone test (and native mode), and its meter
-  follows the switch live, so the meter shows the denoised level.
+  the Settings > Calls microphone test (and native mode) and measures the
+  raw input, like tdesktop's `AudioInputTester`.
 - **Setting**: `CallPrefs::call_noise_suppression` in `call_prefs.json`,
   on by default (tdesktop shows it on), and files written before it existed
   read as on.
-- **UI**: the switch row (kit `Switch`, `lng_group_call_noise_suppression`)
-  sits under the microphone test in Settings > Calls, the place Quill keeps
-  the rest of tdesktop's call settings box (microphone test, push-to-talk).
-  The voice chat window's menu gains "Settings" (`lng_group_call_settings`),
-  which opens a Settings box (`lng_group_call_settings_title`, "Done"
-  closes, Escape closes) with the same switch.
+- **UI**: the voice chat window's menu gains "Settings"
+  (`lng_group_call_settings`), which opens a Settings box
+  (`lng_group_call_settings_title`, "Done" closes, Escape closes) with the
+  switch row (kit `Switch`, `lng_group_call_noise_suppression`). As in
+  tdesktop, that box is the only place the switch lives; Settings > Calls
+  has no noise row.
 - `nnnoiseless` 0.5.2 (BSD-3-Clause, allowed by `deny.toml`), without its
   default features (no command-line tool). `THIRD_PARTY.md` lists it;
   `THIRD_PARTY_LICENSES.md` is regenerated with
@@ -87,9 +92,9 @@ the level tap opened the microphone a second time to measure your level.
 
 ## Deviations
 
-- 1:1 calls get noise suppression from the same switch. tdesktop keeps
-  WebRTC's processing on there, but ntgcalls has it off, so without RNNoise
-  1:1 calls would have none (as the design says).
+- 1:1 calls get their always-on noise suppression from RNNoise in Quill
+  rather than from WebRTC's processing, which ntgcalls keeps off. The
+  behavior matches tdesktop (on, no switch); the algorithm differs.
 - The voice chat window's Settings box holds only the noise suppression
   switch. tdesktop's box also has devices, the microphone test and
   push-to-talk; Quill has those in the call window's device menus and in
@@ -135,8 +140,8 @@ the level tap opened the microphone a second time to measure your level.
   the running stream without a reopen; a lost device is reported and not
   reopened within 2 s; a refused microphone shows its error and leaving
   clears it; your level comes from the call stream; a 1:1 call opens the
-  chosen microphone by name, reopens on a new pick and stops on a failed
-  transport.
+  chosen microphone by name, denoises with the switch off, reopens on a new
+  pick and stops on a failed transport.
 - GPUI UI tests: the switch is on by default and saves both ways; the call
   window's Settings box opens from its action, carries the switch, and
   Escape closes it.

@@ -249,6 +249,8 @@ fn private_call_uses_the_chosen_microphone() {
         kind: MediaDeviceKind::Microphone,
     }];
     driver.selected_devices.0 = Some(r#"{"uid":"usb-1"}"#.into());
+    // The switch belongs to group calls; 1:1 calls always denoise.
+    driver.session.calls.prefs.call_noise_suppression = false;
     // No transport yet: nothing opens.
     driver.pump_call_capture();
     assert!(mics.opened.lock().unwrap().is_empty());
@@ -277,6 +279,9 @@ fn private_call_uses_the_chosen_microphone() {
         *mics.opened.lock().unwrap(),
         vec![Some("USB Mic".to_string())]
     );
+    assert_eq!(driver.call_capture().noise_suppression(), Some(true));
+    driver.apply_call_noise_suppression();
+    assert_eq!(driver.call_capture().noise_suppression(), Some(true));
     push_frames(&mics, 2);
     wait_for(|| handle.external_frames().len() == 2);
     assert!(

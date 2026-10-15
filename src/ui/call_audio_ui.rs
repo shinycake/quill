@@ -3,15 +3,10 @@
 //! level for the voice chat window (read from the driver's level tap,
 //! `connect::call_audio`). The rules and numbers are in
 //! `quill::calls::audio_level`.
-//!
-//! Under the meter, as in tdesktop's call settings box
-//! (`calls_group_settings.cpp`), the "Enable Noise Suppression" switch:
-//! it applies to the running call's microphone and to the meter at once.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
 use quill::calls::audio_level::{
@@ -109,16 +104,14 @@ impl QuillApp {
                             .child(tr(keys::Q_OPS_SPEAK_TO_SEE_YOUR_MICROPHONES)),
                     ),
             );
-        let noise_row = self.noise_suppression_row("call-noise-suppression", cx);
         let Some(test) = test else {
-            return row.child(noise_row).into_any_element();
+            return row.into_any_element();
         };
         test.last_render.set(Instant::now());
         self.request_animation_tick(30, cx);
         if let Some(error) = error {
             return row
                 .child(div().text_xs().text_color(cx.theme().danger).child(error))
-                .child(noise_row)
                 .into_any_element();
         }
         let value = test.meter_value();
@@ -141,54 +134,7 @@ impl QuillApp {
                         .bg(if i < lit { active } else { inactive })
                 })),
         )
-        .child(noise_row)
         .into_any_element()
-    }
-
-    /// Whether noise suppression is on (the saved switch; on by default).
-    pub(super) fn call_noise_suppression(&self) -> bool {
-        self.session()
-            .map(|session| session.calls.prefs.call_noise_suppression)
-            .unwrap_or(true)
-    }
-
-    /// The "Enable Noise Suppression" row (tdesktop
-    /// `lng_group_call_noise_suppression`), a kit `Switch` with its label.
-    pub(super) fn noise_suppression_row(
-        &self,
-        id: &'static str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let on = self.call_noise_suppression();
-        let label = tr(keys::GROUP_CALL_NOISE_SUPPRESSION);
-        div()
-            .id(id)
-            .flex()
-            .items_center()
-            .gap_2()
-            .py_1()
-            .child(
-                Switch::new(SharedString::from(format!("{id}-switch")))
-                    .checked(on)
-                    .accessibility_label(label)
-                    .on_click(cx.listener(|this, &on, _, cx| {
-                        this.set_call_noise_suppression(on, cx);
-                    })),
-            )
-            .child(div().text_sm().child(label))
-            .into_any_element()
-    }
-
-    /// Save the switch and apply it now: to the call's microphone and to
-    /// a running microphone test.
-    pub(super) fn set_call_noise_suppression(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.set_call_pref(|prefs| prefs.call_noise_suppression = on, cx);
-        if let Some(live) = self.live.as_mut() {
-            live.driver.apply_call_noise_suppression();
-        }
-        if let Some(test) = self.calls.mic_test.as_ref() {
-            test.source.set_noise_suppression(on);
-        }
     }
 
     /// Start or stop the microphone test.
@@ -196,7 +142,7 @@ impl QuillApp {
         if self.calls.mic_test.is_some() {
             self.calls.mic_test = None;
         } else {
-            match LevelTap::open_default(self.call_noise_suppression()) {
+            match LevelTap::open_default() {
                 Ok(tap) => self.start_mic_test(Box::new(tap), cx),
                 Err(err) => self.connection.status_note = err,
             }

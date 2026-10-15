@@ -26,11 +26,6 @@ pub trait LevelSource {
     fn take_level(&self) -> Option<f32>;
     /// The error that stopped the source, if any.
     fn error(&self) -> Option<String>;
-    /// Switch noise suppression on the measured stream, live. Sources
-    /// that do not process audio ignore it.
-    fn set_noise_suppression(&self, on: bool) {
-        let _ = on;
-    }
 }
 
 /// An open microphone measured for levels. Dropping it closes the device.
@@ -42,13 +37,10 @@ pub struct LevelTap {
 }
 
 impl LevelTap {
-    /// Open the default input device and start measuring, with noise
-    /// suppression on or off as given.
-    pub fn open_default(noise_suppression: bool) -> Result<Self, String> {
-        let controls = Arc::new(MicControls::new(
-            noise_suppression,
-            Arc::new(LevelCell::default()),
-        ));
+    /// Open the default input device and start measuring the raw input,
+    /// without noise suppression, as tdesktop's `AudioInputTester` does.
+    pub fn open_default() -> Result<Self, String> {
+        let controls = Arc::new(MicControls::new(false, Arc::new(LevelCell::default())));
         let mut mic = CpalMic::new(controls.clone());
         let sink = FrameSink::new(1);
         mic.start(None, sink.clone())
@@ -68,10 +60,6 @@ impl LevelSource for LevelTap {
 
     fn error(&self) -> Option<String> {
         self.mic.error()
-    }
-
-    fn set_noise_suppression(&self, on: bool) {
-        self.controls.set_noise_suppression(on);
     }
 }
 

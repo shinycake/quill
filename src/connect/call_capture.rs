@@ -3,8 +3,9 @@
 //! transport is up, the chosen microphone runs through cpal, noise
 //! suppression and the feeder into the call's external source
 //! (`CallEngine::external_frame_sender`). Muting keeps the stream open
-//! and sends silence; the "Enable Noise Suppression" switch applies to
-//! the running stream at once. The same stream feeds your level
+//! and sends silence. 1:1 calls always denoise; group calls follow the
+//! "Enable Noise Suppression" switch, which applies to the running
+//! stream at once. The same stream feeds your level
 //! (`call_audio`), so the microphone is opened once.
 //!
 //! `QUILL_CALL_CAPTURE=native` turns this off: ntgcalls opens the device
@@ -224,7 +225,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn pump_call_capture(&mut self) {
         let wanted = self.capture_wanted();
         let device = self.capture_device_name();
-        let noise_suppression = self.session.calls.prefs.call_noise_suppression;
+        let group_pref = self.session.calls.prefs.call_noise_suppression;
         let capture = &mut self.call_capture;
         // A different call or microphone: close the old stream first.
         if capture.active.as_ref().is_some_and(|active| {
@@ -254,6 +255,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             capture.error = None;
             return;
         };
+        let noise_suppression = denoises(target, group_pref);
         if let Some(active) = capture.active.as_ref() {
             active.controls.set_muted(muted);
             active.controls.set_noise_suppression(noise_suppression);
@@ -278,12 +280,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         capture.open(target, device, noise_suppression, muted, sender);
     }
 
-    /// Apply the noise suppression switch to the running call microphone
-    /// now (Settings > Calls, the call window's settings).
+    /// Apply the noise suppression switch (the voice chat window's
+    /// Settings box) to the running group call microphone now.
     pub fn apply_call_noise_suppression(&mut self) {
-        let on = self.session.calls.prefs.call_noise_suppression;
+        let pref = self.session.calls.prefs.call_noise_suppression;
         if let Some(active) = self.call_capture.active.as_ref() {
-            active.controls.set_noise_suppression(on);
+            active
+                .controls
+                .set_noise_suppression(denoises(active.target, pref));
         }
     }
 
@@ -295,5 +299,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Use a fake microphone (tests, demos).
     pub fn inject_call_microphone(&mut self, opener: MicOpener) {
         self.call_capture.inject_opener(opener);
+    }
+}
+
+/// Whether a call's microphone runs through noise suppression. As in
+/// tdesktop, 1:1 calls always do (`calls_call.cpp` sets `enableNS = true`
+/// on its config), and group calls follow the switch in the voice chat
+/// window's Settings box (`calls_group_settings.cpp`).
+fn denoises(target: CaptureTarget, group_pref: bool) -> bool {
+    match target {
+        CaptureTarget::Private(_) => true,
+        CaptureTarget::Group(_) => group_pref,
     }
 }

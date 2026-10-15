@@ -1,6 +1,6 @@
 //! The noise suppression switch: on by default, saved when flipped, in
-//! Settings > Calls and in the voice chat window's Settings box, which
-//! Escape closes (needs the `demo-capture` feature for gpui-kit's test
+//! the voice chat window's Settings box (its only place), which Escape
+//! closes (needs the `demo-capture` feature for gpui-kit's test
 //! support). The demo session has no microphone or connection.
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -51,8 +51,6 @@ fn the_switch_is_on_by_default_and_saves(cx: &mut TestAppContext) {
     assert!(saved_switch(&app, vcx));
     app.update_in(vcx, |app, _, cx| {
         assert!(app.call_noise_suppression());
-        // Settings > Calls renders the row under the microphone test.
-        let _ = app.mic_test_section(cx);
         app.set_call_noise_suppression(false, cx);
     });
     assert!(!saved_switch(&app, vcx));

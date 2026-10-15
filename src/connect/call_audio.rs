@@ -150,7 +150,7 @@ impl LevelSource for CaptureLevel {
 fn open_microphone() -> Result<Box<dyn LevelSource>, String> {
     // Native capture only: ntgcalls processes nothing here, so the tap
     // measures the raw microphone.
-    crate::calls::level_tap::LevelTap::open_default(false)
+    crate::calls::level_tap::LevelTap::open_default()
         .map(|tap| Box::new(tap) as Box<dyn LevelSource>)
 }
 
