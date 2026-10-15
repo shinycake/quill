@@ -9,6 +9,8 @@
 //! ([`tempo`]). See `docs/decisions/codex-audio-in-process.md`.
 #![deny(clippy::indexing_slicing)]
 
+#[cfg(test)]
+mod cpal_stream_tests;
 mod opus;
 mod tempo;
 
@@ -19,12 +21,19 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use quill::advanced::debug_mode::debug_log;
 use quill::connect::SoundResolution;
+use quill::cpal_stream::StreamErrors;
 use rodio::buffer::SamplesBuffer;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::mixer::Mixer;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
+use rodio::{
+    CpalError, Decoder, DeviceSinkBuilder, DeviceSinkError, MixerDeviceSink, Player, Source,
+};
 
 use super::call_tones;
 use tempo::{SharedSpeed, Tempo};
@@ -144,33 +153,98 @@ fn read_prefix(file: &mut File, buf: &mut [u8]) -> usize {
 /// The app's one audio output, opened on first use and shared by the
 /// playback engines, the notification sounds and the call tones. `None`
 /// when the machine has no usable device (retried every few seconds).
+///
+/// It is the system *default* output device, so on macOS (cpal 0.18) the
+/// stream follows a new default device by itself. Where the stream cannot
+/// follow (Windows reports the change as `StreamInvalidated`), or the
+/// device went away, the error callback marks the output stale and the
+/// next sound opens the new default.
 #[derive(Clone, Default)]
 pub(super) struct SharedOutput(Rc<RefCell<OutputState>>);
 
 #[derive(Default)]
 struct OutputState {
     sink: Option<MixerDeviceSink>,
+    /// Set from cpal's audio thread when `sink`'s stream ended.
+    stale: Arc<AtomicBool>,
+    /// The sink replaced last. Kept so a track still playing on it (when
+    /// its device is still there) is not cut off; dropped at the next
+    /// replacement.
+    retired: Option<MixerDeviceSink>,
     failed_at: Option<Instant>,
 }
 
 impl SharedOutput {
     pub(super) fn mixer(&self) -> Option<Mixer> {
         let mut state = self.0.borrow_mut();
+        if state.sink.is_some() && state.stale.load(Ordering::Relaxed) {
+            debug_log("audio: output: reopening the default output device");
+            state.retired = state.sink.take();
+            state.failed_at = None;
+        }
         if state.sink.is_none()
             && state
                 .failed_at
                 .is_none_or(|at| at.elapsed() > Duration::from_secs(5))
         {
-            match DeviceSinkBuilder::open_default_sink() {
+            let stale = Arc::new(AtomicBool::new(false));
+            match open_default_output(output_error_callback(stale.clone())) {
                 Ok(mut sink) => {
                     sink.log_on_drop(false);
                     state.sink = Some(sink);
+                    state.stale = stale;
                 }
                 Err(_) => state.failed_at = Some(Instant::now()),
             }
         }
         state.sink.as_ref().map(|sink| sink.mixer().clone())
     }
+}
+
+/// rodio's own callback prints every error to stderr, xruns and reroutes
+/// included. This one logs through Quill's debug log, rate-limited, and
+/// marks the output stale when the stream ended.
+fn output_error_callback(stale: Arc<AtomicBool>) -> impl FnMut(CpalError) + Send + Clone + 'static {
+    let mut errors = StreamErrors::new("output");
+    move |err| {
+        if errors.check(err).is_some() {
+            stale.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// `DeviceSinkBuilder::open_default_sink` with `on_error` in place of
+/// rodio's printing callback: the default device first, then any other
+/// output that is not the null device.
+fn open_default_output<E>(on_error: E) -> Result<MixerDeviceSink, DeviceSinkError>
+where
+    E: FnMut(CpalError) + Send + Clone + 'static,
+{
+    DeviceSinkBuilder::from_default_device()
+        .and_then(|builder| builder.with_error_callback(on_error.clone()).open_stream())
+        .or_else(|first| {
+            let devices = match rodio::cpal::default_host().output_devices() {
+                Ok(devices) => devices,
+                Err(err) => {
+                    debug_log(&format!("audio: output: can't list output devices: {err}"));
+                    return Err(first);
+                }
+            };
+            devices
+                .filter(|device| {
+                    device
+                        .description()
+                        .is_ok_and(|desc| desc.driver().is_some_and(|driver| driver != "null"))
+                })
+                .find_map(|device| {
+                    DeviceSinkBuilder::from_device(device)
+                        .ok()?
+                        .with_error_callback(on_error.clone())
+                        .open_sink_or_fallback()
+                        .ok()
+                })
+                .ok_or(first)
+        })
 }
 
 /// One track's player: play, pause, seek, volume and speed. The app clock

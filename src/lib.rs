@@ -46,6 +46,7 @@ pub mod connect;
 pub mod connect_smoke;
 pub mod contacts_index;
 pub mod corner_buttons;
+pub mod cpal_stream;
 pub mod crash_log;
 pub mod credentials;
 pub mod data_settings;
