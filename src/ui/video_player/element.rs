@@ -2,7 +2,8 @@
 //!
 //! Rendering it is the pull: the element records the draw start, predicts
 //! when this frame reaches the screen (on macOS from the display link's
-//! next output time), and takes the picture due then. After painting it
+//! next output time; the display's refresh period where GPUI reports one),
+//! and takes the picture due then. After painting it
 //! asks for the frame that shows the next picture
 //! ([`request_video_frame`]), redrawing only the view it is in, and wakes
 //! the player's watchers (the controls) at most every 100 ms.
@@ -197,16 +198,22 @@ fn paint_corner_mask(
 fn paint_corner_mask(_: Bounds<Pixels>, _: Corners<Pixels>, _: Hsla, _: &mut Window) {}
 
 /// The display link's next present time (with its host ticks) and refresh
-/// period for this window's display.
+/// period for this window's display; without the link's period, the one
+/// GPUI reports for the window's display.
 #[cfg(target_os = "macos")]
 fn present_hint(window: &Window, cx: &App) -> (Option<(Instant, u64)>, Option<Duration>) {
     let Some(display) = window.display(cx) else {
-        return (None, None);
+        return (None, window.refresh_interval(cx));
     };
-    gpui_macos::present_timing(u64::from(display.id()))
+    let (hint, period) = gpui_macos::present_timing(u64::from(display.id()));
+    (hint, period.or_else(|| window.refresh_interval(cx)))
 }
 
+/// No present time; the refresh period GPUI reports for the window's
+/// display (Windows and Wayland; `None` on X11, where the interval is
+/// learned from draw spacing). GPUI caches it per display, so this costs
+/// nothing per draw.
 #[cfg(not(target_os = "macos"))]
-fn present_hint(_: &Window, _: &App) -> (Option<(Instant, u64)>, Option<Duration>) {
-    (None, None)
+fn present_hint(window: &Window, cx: &App) -> (Option<(Instant, u64)>, Option<Duration>) {
+    (None, window.refresh_interval(cx))
 }
