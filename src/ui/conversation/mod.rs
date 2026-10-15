@@ -469,25 +469,7 @@ impl QuillApp {
                             }
                         })
                         .when(voice_ok, |this| {
-                            this.child(
-                                Button::new("chat-voice-chat")
-                                    .icon(gpui_kit::assets::IconName::AudioLines)
-                                    .ghost()
-                                    .when(voice_live, |button| button.selected(true))
-                                    .tooltip(if voice_live {
-                                        tr(keys::Q_CHAT_JOIN_VOICE_CHAT)
-                                    } else {
-                                        tr(keys::Q_CHAT_START_VOICE_CHAT)
-                                    })
-                                    .accessibility_label(if voice_live {
-                                        tr(keys::Q_CHAT_JOIN_VOICE_CHAT)
-                                    } else {
-                                        tr(keys::Q_CHAT_START_VOICE_CHAT)
-                                    })
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.start_or_join_video_chat(chat_id, window, cx);
-                                    })),
-                            )
+                            this.child(self.chat_voice_chat_button(chat_id, voice_live, cx))
                         })
                         // Telegram Desktop's third-column toggle: shows or
                         // hides the chat's info panel.

@@ -22,14 +22,14 @@
 
 use super::app::QuillApp;
 use super::call_panel_devices::DeviceMenuTarget;
+use super::dialogs::rtmp_stream::{RtmpRows, rtmp_info_rows};
 use super::group_call_stream_layout::{StreamFacts, leave_stream_full};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::radio::Radio;
-use gpui_kit::component::{ActiveTheme, Icon, Sizable, WindowExt};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::engine::MediaDeviceKind;
@@ -324,92 +324,17 @@ impl QuillApp {
         let url = call.rtmp_url.clone().filter(|url| !url.is_empty())?;
         let key = call.rtmp_stream_key.clone().unwrap_or_default();
         let shown = self.group_call.stream.key_shown;
-        let copy = |id: &'static str, label: &'static str, value: String, toast: &'static str| {
-            Button::new(id)
-                .label(label)
-                .outline()
-                .w_full()
-                .on_click(cx.listener(move |_, _, window, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
-                    window.push_notification(Notification::new().message(toast), cx);
-                }))
-        };
-        let subtitle = |text: &'static str| {
-            div()
-                .pt(px(8.))
-                .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(cx.theme().primary)
-                .child(text)
-        };
-        let masked = "\u{2022}".repeat(key.chars().count().clamp(8, 32));
-        Some(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .border_t_1()
-                .border_b_1()
-                .border_color(cx.theme().border)
-                .py(px(6.))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(subtitle(tr(keys::GROUP_CALL_RTMP_URL_SUBTITLE)))
-                        .child(
-                            Button::new("group-call-stream-rtmp-menu")
-                                .icon(IconName::EllipsisVertical)
-                                .ghost()
-                                .small()
-                                .dropdown_menu({
-                                    let owner = cx.entity().downgrade();
-                                    move |menu, _, _| {
-                                        let owner = owner.clone();
-                                        menu.item(
-                                            PopupMenuItem::new(tr(keys::GROUP_CALL_RTMP_REVOKE))
-                                                .on_click(move |_, _, cx| {
-                                                    let _ = owner.update(cx, |this, cx| {
-                                                        this.open_stream_overlay(
-                                                            StreamOverlay::RevokeKey,
-                                                            cx,
-                                                        )
-                                                    });
-                                                }),
-                                        )
-                                    }
-                                }),
-                        ),
-                )
-                .child(div().text_sm().child(url.clone()))
-                .child(copy(
-                    "group-call-stream-copy-url",
-                    tr(keys::GROUP_CALL_RTMP_URL_COPY),
-                    url,
-                    tr(keys::GROUP_CALL_RTMP_URL_COPIED),
-                ))
-                .child(subtitle(tr(keys::GROUP_CALL_RTMP_KEY_SUBTITLE)))
-                .child(
-                    div()
-                        .id("group-call-stream-key")
-                        .text_sm()
-                        .cursor_pointer()
-                        .child(if shown { key.clone() } else { masked })
-                        .when(!shown, |this| {
-                            this.on_click(cx.listener(|this, _, _, cx| {
-                                this.open_stream_overlay(StreamOverlay::KeyWarning, cx)
-                            }))
-                        }),
-                )
-                .child(copy(
-                    "group-call-stream-copy-key",
-                    tr(keys::GROUP_CALL_RTMP_KEY_COPY),
-                    key,
-                    tr(keys::GROUP_CALL_RTMP_KEY_COPIED),
-                ))
-                .into_any_element(),
-        )
+        Some(rtmp_info_rows(
+            RtmpRows {
+                prefix: "group-call-stream",
+                url,
+                key,
+                key_shown: shown,
+            },
+            cx,
+            |this, cx| this.open_stream_overlay(StreamOverlay::KeyWarning, cx),
+            |this, cx| this.open_stream_overlay(StreamOverlay::RevokeKey, cx),
+        ))
     }
 
     fn stream_speakers_box(&mut self, cx: &mut Context<Self>) -> AnyElement {

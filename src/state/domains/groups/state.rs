@@ -201,6 +201,9 @@ pub struct GroupsState {
     /// B7: `can_change_info` of the viewer's administrator status in a
     /// basic group.
     pub basic_group_change_info_right: HashMap<i64, bool>,
+    /// `can_manage_video_chats` of the viewer's administrator status in a
+    /// basic group.
+    pub basic_group_manage_video_chats_right: HashMap<i64, bool>,
     /// B7: `basicGroup.is_active` (false after the upgrade).
     pub basic_group_active: HashMap<i64, bool>,
     /// B7: steps waiting for a group-admin request to succeed.
@@ -309,6 +312,7 @@ impl GroupsState {
             supergroup_direct_messages: HashMap::new(),
             basic_group_status: HashMap::new(),
             basic_group_change_info_right: HashMap::new(),
+            basic_group_manage_video_chats_right: HashMap::new(),
             basic_group_active: HashMap::new(),
             admin_followups: Vec::new(),
             supergroup_is_broadcast: HashMap::new(),

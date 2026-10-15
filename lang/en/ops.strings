@@ -112,6 +112,7 @@
 "lng_group_call_context_mute_for_me" = "Mute for me";
 "lng_group_call_context_unmute_for_me" = "Unmute for me";
 "lng_group_call_edit_title_channel" = "Edit live stream title";
+"lng_from_request_understand" = "I understand";
 "lng_group_call_end_channel" = "End Live Stream";
 "lng_group_call_join" = "Join";
 "lng_group_call_leave" = "Leave";
@@ -124,12 +125,15 @@
 "lng_group_call_pinned_on_top" = "Live stream is pinned on top.";
 "lng_group_call_recording_start" = "Start Recording";
 "lng_group_call_recording_stop" = "Stop Recording";
+"lng_group_call_rtmp_info" = "To stream video with another app, enter these Server URL and Stream Key in your streaming app. Software encoding recommended (x264 in OBS).\n\nOnce you start broadcasting in your streaming app, click Start Streaming below.";
 "lng_group_call_rtmp_key_copied" = "Stream Key copied to clipboard.";
 "lng_group_call_rtmp_key_copy" = "Copy Stream Key";
 "lng_group_call_rtmp_key_subtitle" = "Stream Key";
 "lng_group_call_rtmp_key_warning" = "**Never share your Stream Key with anyone or show it on stream!**";
 "lng_group_call_rtmp_revoke" = "Revoke Stream Key";
 "lng_group_call_rtmp_revoke_sure" = "Are you sure you want to revoke your Stream Key?";
+"lng_group_call_rtmp_start" = "Start Streaming";
+"lng_group_call_rtmp_title" = "Stream with other apps";
 "lng_group_call_rtmp_url_copied" = "Server URL copied to clipboard.";
 "lng_group_call_rtmp_url_copy" = "Copy Server URL";
 "lng_group_call_rtmp_url_subtitle" = "Server URL";
@@ -179,6 +183,12 @@
 "lng_media_saved_music_title" = "Playlist";
 "lng_media_saved_music_your" = "Your playlist";
 "lng_media_song_empty" = "No music files here yet";
+"lng_menu_start_group_call" = "Start video chat";
+"lng_menu_start_group_call_channel" = "Start live stream";
+"lng_menu_start_group_call_scheduled" = "Schedule video chat";
+"lng_menu_start_group_call_scheduled_channel" = "Schedule live stream";
+"lng_menu_start_group_call_with" = "Stream with...";
+"lng_menu_start_group_call_with_channel" = "Stream with...";
 "lng_menu_settings" = "Settings";
 "lng_new_contact_phone_number" = "Phone number";
 "lng_open_link_suspicious_chars" = "Highlighted characters are from a different alphabet than the rest of the address.";
@@ -1039,3 +1049,9 @@
 "qll_ops_your_phone_number" = "Your phone number";
 "qll_ops_youre_already_in_a_call" = "You're already in a call. Telegram doesn't support putting a call on hold — answering ends the current one.";
 "qll_ops_youre_offline_cant_start_a" = "You're offline — can't start a call";
+"qll_ops_could_not_fetch_stream_key" = "Couldn't fetch the stream key.";
+"qll_ops_could_not_regenerate_stream_key" = "Couldn't regenerate the stream key.";
+"qll_ops_could_not_start_voice_chat" = "Couldn't start a voice chat here.";
+"qll_ops_server_error" = "Internal server error.";
+"qll_ops_starting_voice_chat" = "Starting voice chat…";
+"qll_ops_voice_chats_need_live" = "Voice chats need a live connection.";

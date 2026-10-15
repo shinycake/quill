@@ -27,6 +27,7 @@ pub(crate) mod poll;
 pub(crate) mod poll_voters;
 pub(crate) mod profile_panels;
 pub(crate) mod restrict;
+pub(crate) mod rtmp_stream;
 pub(crate) mod share_content;
 pub(crate) mod username;
 pub(crate) mod welcome;

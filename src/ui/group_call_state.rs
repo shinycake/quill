@@ -55,6 +55,8 @@ pub(crate) struct GroupCallUi {
     pub(super) video_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
     /// The live stream layout (RTMP): picture, placeholder and controls.
     pub(super) stream: super::group_call_stream_layout::StreamWindow,
+    /// The "Stream with other apps" box (`dialogs/rtmp_stream.rs`).
+    pub(super) rtmp_start: super::dialogs::rtmp_stream::RtmpStartUi,
 }
 
 impl GroupCallUi {
@@ -86,6 +88,7 @@ impl GroupCallUi {
             level_seen: 0.0,
             video_images: HashMap::new(),
             stream: Default::default(),
+            rtmp_start: Default::default(),
         }
     }
 }

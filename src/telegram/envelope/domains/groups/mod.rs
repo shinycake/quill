@@ -26,6 +26,9 @@ pub enum GroupsPayload {
         can_manage_tags: bool,
         /// B7: `rights.can_change_info` of an administrator status.
         can_change_info: Option<bool>,
+        /// `rights.can_manage_video_chats` of an administrator status
+        /// (tdesktop `canManageGroupCall` for a basic group).
+        can_manage_video_chats: Option<bool>,
         /// B7: `basicGroup.is_active` - false once upgraded to a
         /// supergroup.
         is_active: bool,

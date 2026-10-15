@@ -40,6 +40,7 @@ pub(crate) fn parse_groups_payload(
                     .unwrap_or(false),
                 can_manage_tags: parse_manage_tags_right(group.get("status")).unwrap_or(false),
                 can_change_info: parse_change_info_right(group.get("status")),
+                can_manage_video_chats: parse_manage_video_chats_right(group.get("status")),
                 is_active: group
                     .get("is_active")
                     .and_then(Value::as_bool)

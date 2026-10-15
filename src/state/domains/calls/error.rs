@@ -11,6 +11,17 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        // "Stream with...": a failed URL request is shown as a toast by
+        // the UI (tdesktop shows the server error), not on a call overlay.
+        if let Some(
+            RequestPurpose::Calls(CallsPurpose::GetVideoChatRtmpUrl { chat_id })
+            | RequestPurpose::Calls(CallsPurpose::ReplaceVideoChatRtmpUrl { chat_id }),
+        ) = pending.map(|p| p.purpose)
+            && let Some(start) = self.calls.rtmp_start.as_mut()
+            && start.fail(crate::ids::ChatId(chat_id))
+        {
+            return;
+        }
         // Phase C1: a failed call request surfaces on the call
         // overlay (shown and cleared by the UI). A failed
         // `createCall` also drops the half-tracked outgoing call.

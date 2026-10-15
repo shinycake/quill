@@ -16,6 +16,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         title: String,
         start_date: i64,
     ) -> Result<RequestId, ConnectSendError> {
+        self.create_video_chat_request(chat_id, title, start_date, false)
+    }
+
+    /// `createVideoChat`, shared by an ordinary start and "Stream with..."
+    /// (`is_rtmp_stream`).
+    pub(super) fn create_video_chat_request(
+        &mut self,
+        chat_id: i64,
+        title: String,
+        start_date: i64,
+        is_rtmp_stream: bool,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -55,7 +67,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         if let Err(err) = self.sender.send_json(&create_video_chat(
-            extra, chat_id, &title, start_date, false,
+            extra,
+            chat_id,
+            &title,
+            start_date,
+            is_rtmp_stream,
         )) {
             self.session.requests.take(extra);
             return Err(err);

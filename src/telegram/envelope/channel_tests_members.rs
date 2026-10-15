@@ -240,3 +240,23 @@ fn own_restricted_status_keeps_rights_and_end_date() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn update_basic_group_keeps_the_video_chat_right() {
+    let json = r#"{"@type":"updateBasicGroup","basic_group":{"@type":"basicGroup","id":5,"member_count":9,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_manage_video_chats":true}}}}"#;
+    match parse_envelope(json).unwrap().payload {
+        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
+            can_manage_video_chats,
+            ..
+        }) => assert_eq!(can_manage_video_chats, Some(true)),
+        other => panic!("{other:?}"),
+    }
+    let member = r#"{"@type":"updateBasicGroup","basic_group":{"@type":"basicGroup","id":5,"member_count":9,"status":{"@type":"chatMemberStatusMember"}}}"#;
+    match parse_envelope(member).unwrap().payload {
+        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
+            can_manage_video_chats,
+            ..
+        }) => assert_eq!(can_manage_video_chats, None),
+        other => panic!("{other:?}"),
+    }
+}

@@ -639,6 +639,7 @@ impl Session {
                 can_promote_members,
                 can_manage_tags,
                 can_change_info,
+                can_manage_video_chats,
                 is_active,
             } => {
                 self.groups
@@ -659,6 +660,9 @@ impl Session {
                 self.groups
                     .basic_group_change_info_right
                     .insert(basic_group_id, can_change_info.unwrap_or(false));
+                self.groups
+                    .basic_group_manage_video_chats_right
+                    .insert(basic_group_id, can_manage_video_chats.unwrap_or(false));
                 self.groups
                     .basic_group_active
                     .insert(basic_group_id, is_active);

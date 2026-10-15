@@ -76,6 +76,8 @@ pub struct CallsState {
     /// `joinVideoChat` response payload is stored (`join_payload`) and
     /// never consumed (real media transport is the C2 program).
     pub active_group_call: Option<ActiveGroupCall>,
+    /// "Stream with...": the process for one chat (`calls::rtmp_start`).
+    pub rtmp_start: Option<crate::calls::rtmp_start::RtmpStart>,
     /// Phase C3a: group-call ids whose full `groupCall` still needs a
     /// `getGroupCall` fetch (queued from the `createVideoChat`
     /// `groupCallId` answer). Drained by the driver.
@@ -117,6 +119,7 @@ impl CallsState {
             recent_calls_error: false,
             recent_calls_clearing: false,
             active_group_call: None,
+            rtmp_start: None,
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
             call_link: None,

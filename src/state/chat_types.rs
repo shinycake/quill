@@ -183,6 +183,11 @@ pub struct ChatSummary {
     /// every other status or an absent rights block. Gates admin
     /// management (promote / demote / edit rights).
     pub my_admin_can_promote_members: Option<bool>,
+    /// `rights.can_manage_video_chats` from `chatMemberStatusAdministrator`
+    /// (schema 1.8.68, `chatAdministratorRights`). `Some` only for an
+    /// administrator with a parsed rights block. tdesktop's
+    /// `canManageGroupCall` for channels and supergroups.
+    pub my_admin_can_manage_video_chats: Option<bool>,
     /// Slice G1: `rights.can_restrict_members` from
     /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
     /// `chatAdministratorRights`, schema line 1092). `Some` only when the
@@ -447,6 +452,25 @@ impl ChatSummary {
             self.my_member_status,
             Some(ChannelMemberStatus::Creator | ChannelMemberStatus::Administrator)
         )
+    }
+
+    /// Whether the current user may start and manage video chats and
+    /// live streams here (tdesktop `PeerData::canManageGroupCall`): the
+    /// creator, or an administrator with `can_manage_video_chats`.
+    pub fn can_manage_video_chats(&self) -> bool {
+        match self.my_member_status {
+            Some(ChannelMemberStatus::Creator) => true,
+            Some(ChannelMemberStatus::Administrator) => {
+                self.my_admin_can_manage_video_chats.unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Record `rights.can_manage_video_chats` (`None` for non-admin
+    /// statuses or an absent rights block).
+    pub fn set_admin_can_manage_video_chats(&mut self, can_manage: Option<bool>) {
+        self.my_admin_can_manage_video_chats = can_manage;
     }
 
     /// Phase D3b: record `rights.can_promote_members` (`None` for

@@ -440,6 +440,19 @@ pub(crate) fn parse_change_info_right(value: Option<&Value>) -> Option<bool> {
         .and_then(Value::as_bool)
 }
 
+/// `rights.can_manage_video_chats` from own `chatMemberStatusAdministrator`;
+/// `None` for any other status or a missing rights block.
+pub(crate) fn parse_manage_video_chats_right(value: Option<&Value>) -> Option<bool> {
+    let value = value?;
+    if value.get("@type").and_then(Value::as_str) != Some("chatMemberStatusAdministrator") {
+        return None;
+    }
+    value
+        .get("rights")
+        .and_then(|rights| rights.get("can_manage_video_chats"))
+        .and_then(Value::as_bool)
+}
+
 /// Slice G2: `rights.can_send_welcome_messages` from own
 /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090); `None`
 /// for any other status or a missing rights block. Welcome-message
