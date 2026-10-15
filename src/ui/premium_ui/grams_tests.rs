@@ -103,3 +103,44 @@ fn settings_lists_my_grams_only_with_a_balance(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert!(!row(&app, vcx));
 }
+
+#[gpui_kit::test]
+fn an_unknown_peer_shows_a_placeholder_then_a_name(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let title = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            let session = app.session()?;
+            let tx = session
+                .payments
+                .hub
+                .grams
+                .entries
+                .iter()
+                .find(|tx| tx.id == "tx-sale")?;
+            super::peer_name(session, tx.peer()?)
+        })
+    };
+    // The demo seeds the buyer's name.
+    assert_eq!(title(&app, vcx), Some("Leo Park".to_string()));
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.users.remove(&12);
+        }
+        app.open_grams(cx);
+        app.select_grams_tx(Some("tx-sale".into()), cx);
+    });
+    vcx.run_until_parked();
+    // Unknown: a placeholder, never "user 12"; the receipt still draws.
+    assert_eq!(title(&app, vcx), None);
+    assert!(vcx.debug_bounds("grams-receipt").is_some());
+    // TDLib could not return it: a deleted account.
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.grams.missing_users.insert(12);
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    assert_eq!(title(&app, vcx), Some("Deleted Account".to_string()));
+}

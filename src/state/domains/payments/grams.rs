@@ -41,15 +41,27 @@ impl Session {
         }
     }
 
-    /// A Grams request failed.
-    pub(crate) fn apply_grams_error(&mut self, err: &TdError, purpose: GramsPurpose) {
+    /// A Grams request failed. A page error counts only for the live
+    /// request, so a stale one (the tab changed in flight) cannot stop the
+    /// newer page's loading state.
+    pub(crate) fn apply_grams_error(
+        &mut self,
+        err: &TdError,
+        purpose: GramsPurpose,
+        pending: Option<&PendingRequest>,
+    ) {
         let grams = &mut self.payments.hub.grams;
+        let peer = pending.and_then(|p| p.chat_id).map(|id| id.0);
         match purpose {
             // The Settings row just stays hidden.
             GramsPurpose::Probe | GramsPurpose::Revenue => {}
+            GramsPurpose::PeerUser => grams.missing_users.extend(peer),
+            GramsPurpose::PeerChat => grams.missing_chats.extend(peer),
             GramsPurpose::Page { .. } => {
-                grams.loading = false;
-                grams.error = Some(error_reason(err));
+                if pending.is_some_and(|p| p.id.0 == grams.request) {
+                    grams.loading = false;
+                    grams.error = Some(error_reason(err));
+                }
             }
         }
     }

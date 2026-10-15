@@ -14,6 +14,7 @@ use crate::ui::message_text::format_unix_date_time;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::skeleton::Skeleton;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -53,11 +54,51 @@ fn tab_label(filter: TxFilter) -> &'static str {
     })
 }
 
-/// The row headline: the type's title, or the peer's name.
-fn row_title(session: &Session, tx: &TonTx) -> String {
-    tx.title()
-        .or_else(|| tx.peer().map(|peer| session.sender_label(peer)))
-        .unwrap_or_else(|| tr(keys::Q_GRAMS_ENTRY_UNKNOWN).to_string())
+/// The peer's name; `None` while it is still being fetched (the row
+/// shows a placeholder, never the raw id). A peer TDLib could not return
+/// reads as a deleted account.
+fn peer_name(session: &Session, peer: MessageSender) -> Option<String> {
+    let grams = &session.payments.hub.grams;
+    match peer {
+        MessageSender::User { user_id } => match session.user(user_id) {
+            Some(user) => Some(user.display_name()),
+            None => grams
+                .missing_users
+                .contains(&user_id)
+                .then(|| tr(keys::DELETED).to_string()),
+        },
+        MessageSender::Chat { chat_id } => match session.chats.get(&chat_id) {
+            Some(chat) => Some(chat.title.clone()),
+            None => grams
+                .missing_chats
+                .contains(&chat_id)
+                .then(|| tr(keys::DELETED).to_string()),
+        },
+    }
+}
+
+/// The row headline: the type's title, or the peer's name (`None` while
+/// that is loading).
+fn row_title(session: &Session, tx: &TonTx) -> Option<String> {
+    match tx.title() {
+        Some(title) => Some(title),
+        None => match tx.peer() {
+            Some(peer) => peer_name(session, peer),
+            None => Some(tr(keys::Q_GRAMS_ENTRY_UNKNOWN).to_string()),
+        },
+    }
+}
+
+/// A name, or a placeholder bar of `width` while it loads.
+fn name_or_placeholder(name: Option<String>, width: f32) -> AnyElement {
+    match name {
+        Some(name) => div().truncate().child(name).into_any_element(),
+        None => Skeleton::new()
+            .w(px(width))
+            .h(px(12.))
+            .rounded_sm()
+            .into_any_element(),
+    }
 }
 
 fn muted_note(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -97,7 +138,11 @@ impl QuillApp {
     pub(in crate::ui) fn open_grams(&mut self, cx: &mut Context<Self>) {
         let is_dark = cx.theme().is_dark();
         if let Some(live) = self.live.as_mut() {
-            if live.driver.open_grams(is_dark).is_err() {
+            // A failed first page shows its error inside the open dialog;
+            // the status line covers the case where it could not open.
+            if live.driver.open_grams(is_dark).is_err()
+                && !live.driver.session.payments.hub.grams.open
+            {
                 self.connection.status_note = tr(keys::Q_GRAMS_COULD_NOT_LOAD).into();
             }
         } else if let Some(grams) = self.grams_mut() {
@@ -123,9 +168,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(in crate::ui) fn select_grams_tx(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+    /// Show the receipt of the row with `key` (`TonTx::key`), or the list.
+    pub(in crate::ui) fn select_grams_tx(&mut self, key: Option<String>, cx: &mut Context<Self>) {
         if let Some(grams) = self.grams_mut() {
-            grams.selected = id;
+            grams.selected = key;
         }
         cx.notify();
     }
@@ -142,17 +188,15 @@ impl QuillApp {
         }
     }
 
-    /// The "My Grams" row under Stars in Settings: asks for the balance the
-    /// first time Settings shows (tdesktop `tonLoad`) and appears while the
-    /// balance is not zero, with the balance on the right.
+    /// The "My Grams" row under Stars in Settings: appears while the
+    /// balance is not zero, with the balance on the right. The poll loop
+    /// asks for the balance once Settings is open (tdesktop `tonLoad`);
+    /// render sends nothing.
     pub(in crate::ui) fn grams_settings_row(
         &mut self,
         on_open: impl Fn(&mut Window, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.probe_grams_balance();
-        }
         let grams = &self.session()?.payments.hub.grams;
         if !grams.shows_settings_row() {
             return None;
@@ -390,12 +434,16 @@ fn row_icon(session: &Session, tx: &TonTx, roots: &[PathBuf], side: f32) -> AnyE
             MessageSender::Chat { chat_id } => session.chat_photo_path(quill::ids::ChatId(chat_id)),
         }
         .and_then(|path| quill::local_path::sandboxed_display_path(path, roots));
-        return crate::ui::chat_row::chat_avatar(
-            &session.sender_label(peer),
-            photo.as_deref(),
-            side,
-        )
-        .into_any_element();
+        return match peer_name(session, peer) {
+            Some(name) => {
+                crate::ui::chat_row::chat_avatar(&name, photo.as_deref(), side).into_any_element()
+            }
+            None => Skeleton::new()
+                .w(px(side))
+                .h(px(side))
+                .rounded_full()
+                .into_any_element(),
+        };
     }
     let fallback = match tx.kind {
         TonTxKind::GiftPurchaseOffer { .. }
@@ -414,11 +462,11 @@ fn row_icon(session: &Session, tx: &TonTx, roots: &[PathBuf], side: f32) -> AnyE
     )
 }
 
-/// A stable element key from the transaction id.
+/// A stable element key from the row key.
 fn tx_key(tx: &TonTx) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    tx.id.hash(&mut hasher);
+    tx.key.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -444,12 +492,13 @@ fn tx_row(
     }
     sub.push(format_unix_date_time(i64::from(tx.date)));
     let amount = signed_gram_amount(tx.gram_nano);
-    let id = tx.id.clone();
+    let key = tx.key.clone();
+    let label = title.clone().unwrap_or_default();
     div()
-        .id(SharedString::from(format!("grams-tx-{}", tx.id)))
+        .id(SharedString::from(format!("grams-tx-{}", tx.key)))
         .debug_selector({
-            let id = tx.id.clone();
-            move || format!("grams-tx-{id}")
+            let key = tx.key.clone();
+            move || format!("grams-tx-{key}")
         })
         .flex()
         .items_center()
@@ -457,9 +506,9 @@ fn tx_row(
         .py_1p5()
         .cursor_pointer()
         .role(gpui_kit::Role::Button)
-        .aria_label(format!("{title}, {amount}"))
+        .aria_label(format!("{label}, {amount}"))
         .tab_index(0)
-        .on_click(cx.listener(move |this, _, _, cx| this.select_grams_tx(Some(id.clone()), cx)))
+        .on_click(cx.listener(move |this, _, _, cx| this.select_grams_tx(Some(key.clone()), cx)))
         .child(row_icon(session, tx, roots, ROW_ICON))
         .child(
             div()
@@ -468,7 +517,13 @@ fn tx_row(
                 .gap_0p5()
                 .flex_1()
                 .min_w_0()
-                .child(div().text_sm().font_semibold().truncate().child(title))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .min_w_0()
+                        .child(name_or_placeholder(title, 120.)),
+                )
                 .child(
                     div()
                         .text_xs()
@@ -533,7 +588,11 @@ fn receipt(
                     .text_color(amount_color(tx, cx))
                     .child(format!("{} {GRAM}", signed_gram_amount(tx.gram_nano))),
             )
-            .child(div().font_semibold().child(row_title(session, tx))),
+            .child(
+                div()
+                    .font_semibold()
+                    .child(name_or_placeholder(row_title(session, tx), 140.)),
+            ),
     );
     if let Some(peer) = tx.peer() {
         // The buyer of a sold gift, the seller of a bought one, the
@@ -546,7 +605,24 @@ fn receipt(
             _ if tx.is_incoming() => keys::CREDITS_BOX_HISTORY_ENTRY_PEER_IN,
             _ => keys::CREDITS_BOX_HISTORY_ENTRY_PEER,
         };
-        col = col.child(fact_row(tr(label), session.sender_label(peer), cx));
+        col = col.child(
+            div()
+                .flex()
+                .justify_between()
+                .gap_3()
+                .text_sm()
+                .child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(label).to_string()),
+                )
+                .child(
+                    div()
+                        .font_medium()
+                        .min_w_0()
+                        .child(name_or_placeholder(peer_name(session, peer), 100.)),
+                ),
+        );
     }
     if matches!(
         tx.kind,
@@ -555,22 +631,6 @@ fn receipt(
         col = col.child(fact_row(
             tr(keys::CREDITS_BOX_HISTORY_ENTRY_VIA),
             tr(keys::CREDITS_BOX_HISTORY_ENTRY_FRAGMENT).to_string(),
-            cx,
-        ));
-    }
-    if let TonTxKind::UpgradedGiftSale {
-        commission_nano, ..
-    } = tx.kind
-        && commission_nano > 0
-    {
-        col = col.child(muted_note(
-            tr_with(
-                keys::CREDITS_COMMISSION,
-                &[(
-                    "amount",
-                    &format!("{GRAM} {}", gram_amount_2dp(commission_nano)),
-                )],
-            ),
             cx,
         ));
     }
@@ -584,6 +644,10 @@ fn receipt(
         format_unix_date_time(i64::from(tx.date)),
         cx,
     ));
+    // A row TDLib sent without an id has nothing to copy.
+    if tx.id.is_empty() {
+        return col.into_any_element();
+    }
     let id = tx.id.clone();
     col.child(fact_row(
         tr(keys::CREDITS_BOX_HISTORY_ENTRY_ID),

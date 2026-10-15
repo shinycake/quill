@@ -98,7 +98,6 @@
 "lng_credits_box_history_entry_peer" = "Recipient";
 "lng_credits_box_history_entry_peer_in" = "From";
 "lng_credits_box_history_entry_via" = "Via";
-"lng_credits_commission" = "{amount} commission";
 "lng_credits_currency_summary_about" = "Offer Grams to submit post suggestions to channels on Telegram.";
 "lng_credits_currency_summary_in_button" = "Top-up via Fragment";
 "lng_credits_currency_summary_in_subtitle" = "You can top-up your Grams balance via Fragment.";
@@ -110,6 +109,7 @@
 "lng_credits_summary_history_tab_full" = "All Transactions";
 "lng_credits_summary_history_tab_in" = "Incoming";
 "lng_credits_summary_history_tab_out" = "Outgoing";
+"lng_deleted" = "Deleted Account";
 "lng_gift_buy_price_change_title" = "Price change!";
 "lng_gift_buy_resale_button" = "Buy for {cost}";
 "lng_gift_buy_resale_confirm_self" = "Do you want to buy {name} for {price}?";

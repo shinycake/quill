@@ -1,6 +1,6 @@
 use super::{
     GramRevenue, GramsHub, GramsPayload, TonTxKind, TonTxPage, WithdrawalState,
-    get_gram_revenue_statistics, get_ton_transactions, gram_amount_2dp, gram_balance,
+    get_gram_revenue_statistics, get_ton_transactions, get_user, gram_amount_2dp, gram_balance,
     gram_balance_short, parse_kind, parse_payload, parse_ton_transactions, signed_gram_amount,
     usd_line,
 };
@@ -56,25 +56,14 @@ fn every_transaction_type_parses() {
         by_id(&page, "tx-purchase").kind,
         TonTxKind::UpgradedGiftPurchase { user_id: 11, .. }
     ));
-    let TonTxKind::UpgradedGiftSale {
-        user_id,
-        commission_per_mille,
-        commission_nano,
-        via_offer,
-        ..
-    } = &by_id(&page, "tx-sale").kind
-    else {
-        panic!("sale");
-    };
-    assert_eq!(
-        (
-            *user_id,
-            *commission_per_mille,
-            *commission_nano,
-            *via_offer
-        ),
-        (12, 50, 200_000_000, true)
-    );
+    assert!(matches!(
+        by_id(&page, "tx-sale").kind,
+        TonTxKind::UpgradedGiftSale {
+            user_id: 12,
+            via_offer: true,
+            ..
+        }
+    ));
     assert_eq!(by_id(&page, "tx-stake").kind, TonTxKind::StakeDiceStake);
     assert_eq!(by_id(&page, "tx-payout").kind, TonTxKind::StakeDicePayout);
     assert_eq!(by_id(&page, "tx-unsupported").kind, TonTxKind::Unsupported);
@@ -99,7 +88,7 @@ fn every_transaction_type_parses() {
 }
 
 #[test]
-fn rows_without_an_id_or_type_are_skipped() {
+fn rows_without_a_type_are_skipped_and_rows_without_an_id_kept() {
     let page = parse_ton_transactions(&json!({
         "gram_amount": 1,
         "transactions": [
@@ -108,8 +97,38 @@ fn rows_without_an_id_or_type_are_skipped() {
             {"id": "b", "gram_amount": 1, "date": 1, "type": {"@type": "tonTransactionTypeStakeDiceStake"}}
         ]
     }));
-    assert_eq!(page.transactions.len(), 1);
+    assert_eq!(page.transactions.len(), 2);
     assert!(page.next_offset.is_empty());
+}
+
+#[test]
+fn keys_stay_unique_when_ids_are_empty_or_repeat() {
+    let stake = json!({"@type": "tonTransactionTypeStakeDiceStake"});
+    let mut hub = GramsHub::default();
+    hub.apply_page(
+        parse_ton_transactions(&json!({
+            "gram_amount": 1,
+            "next_offset": "n",
+            "transactions": [
+                {"id": "", "gram_amount": 1, "date": 10, "type": stake},
+                {"id": "a", "gram_amount": 2, "date": 11, "type": stake},
+                {"id": "a", "gram_amount": 3, "date": 12, "type": stake}
+            ]
+        })),
+        false,
+    );
+    hub.apply_page(
+        parse_ton_transactions(&json!({
+            "gram_amount": 1,
+            "transactions": [{"id": "", "gram_amount": 4, "date": 10, "type": stake}]
+        })),
+        true,
+    );
+    let keys: Vec<&str> = hub.entries.iter().map(|tx| tx.key.as_str()).collect();
+    assert_eq!(keys, ["0-10", "a", "2-12", "3-10"]);
+    hub.selected = Some("2-12".into());
+    assert_eq!(hub.selected_tx().map(|tx| tx.gram_nano), Some(3));
+    assert!(hub.peers_dirty);
 }
 
 #[test]
@@ -174,6 +193,7 @@ fn row_titles_details_and_peers_per_type() {
     );
     let failed = super::TonTx {
         id: "f".into(),
+        key: "f".into(),
         gram_nano: -1,
         is_refund: false,
         date: 0,
@@ -272,6 +292,11 @@ fn requests_have_the_schema_shape() {
         serde_json::from_str(&get_gram_revenue_statistics(RequestId(9), true)).unwrap();
     assert_eq!(stats["@type"], "getGramRevenueStatistics");
     assert_eq!(stats["is_dark"], true);
+    let user: Value = serde_json::from_str(&get_user(RequestId(10), 42)).unwrap();
+    assert_eq!(
+        (user["@type"].as_str(), user["user_id"].as_i64()),
+        (Some("getUser"), Some(42))
+    );
     let schema = include_str!("../../schema/td_api.tl");
     assert!(schema.contains("getTonTransactions direction:TransactionDirection offset:string limit:int32 = TonTransactions;"));
     assert!(schema.contains("getGramRevenueStatistics is_dark:Bool = GramRevenueStatistics;"));

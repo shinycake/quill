@@ -17,6 +17,15 @@ fn answer(extra: &Value, mut body: Value) -> String {
     body.to_string()
 }
 
+fn sent_of(recorder: &RecordingSender, type_name: &str) -> Vec<Value> {
+    recorder
+        .snapshot()
+        .into_iter()
+        .map(|json| serde_json::from_str::<Value>(&json).unwrap())
+        .filter(|value| value["@type"] == type_name)
+        .collect()
+}
+
 #[test]
 fn the_probe_fills_the_balance_once_and_the_screen_pages() {
     let store = MemorySecretStore::new();
@@ -31,8 +40,13 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
             .unwrap();
     };
 
-    assert!(driver.probe_grams_balance().unwrap().is_some());
+    // The poll tick probes only while Settings is open, and once.
+    assert!(!driver.grams_tick(false));
+    assert!(sent_of(&recorder, "getTonTransactions").is_empty());
+    assert!(driver.grams_tick(true));
+    assert!(!driver.grams_tick(true));
     assert!(driver.probe_grams_balance().unwrap().is_none());
+    assert_eq!(sent_of(&recorder, "getTonTransactions").len(), 1);
     let probe = sent_request(&recorder, "getTonTransactions");
     assert_eq!(probe["limit"], 1);
     ingest(
@@ -80,6 +94,51 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         Some(5_000_000_000)
     );
 
+    // Names the page uses but the session lacks are asked for once each.
+    assert!(driver.grams_tick(false));
+    assert!(!driver.grams_tick(false));
+    let mut users: Vec<i64> = sent_of(&recorder, "getUser")
+        .iter()
+        .filter_map(|v| v["user_id"].as_i64())
+        .collect();
+    users.sort_unstable();
+    assert_eq!(users, [11, 12]);
+    let chats = sent_of(&recorder, "getChat");
+    assert_eq!(chats.len(), 1);
+    assert_eq!(chats[0]["chat_id"], 13);
+    let get_user = sent_of(&recorder, "getUser")
+        .into_iter()
+        .find(|v| v["user_id"] == 12)
+        .unwrap();
+    ingest(
+        &mut driver,
+        answer(
+            &get_user["@extra"],
+            json!({"@type": "user", "id": 12, "first_name": "Leo", "last_name": "Park",
+                   "type": {"@type": "userTypeRegular"}}),
+        ),
+    );
+    assert_eq!(
+        driver.session.user(12).map(|u| u.display_name()),
+        Some("Leo Park".to_string())
+    );
+    ingest(
+        &mut driver,
+        answer(
+            &chats[0]["@extra"],
+            json!({"@type": "error", "code": 400, "message": "CHAT_NOT_FOUND"}),
+        ),
+    );
+    assert!(
+        driver
+            .session
+            .payments
+            .hub
+            .grams
+            .missing_chats
+            .contains(&13)
+    );
+
     // The next page carries the offset and appends.
     driver.fetch_more_grams().unwrap();
     let more = sent_request(&recorder, "getTonTransactions");
@@ -100,10 +159,23 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
     );
     assert!(driver.session.payments.hub.grams.entries.is_empty());
     assert!(driver.session.payments.hub.grams.loading);
+    // Another switch: an error for the older tab leaves the live one
+    // loading.
+    driver.set_grams_filter(TxFilter::Outgoing).unwrap();
+    let outgoing = sent_request(&recorder, "getTonTransactions");
     ingest(
         &mut driver,
         answer(
             &incoming["@extra"],
+            json!({"@type": "error", "code": 400, "message": "BAD_REQUEST"}),
+        ),
+    );
+    let grams = &driver.session.payments.hub.grams;
+    assert!(grams.loading && grams.error.is_none());
+    ingest(
+        &mut driver,
+        answer(
+            &outgoing["@extra"],
             json!({"@type": "error", "code": 400, "message": "BAD_REQUEST"}),
         ),
     );

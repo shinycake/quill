@@ -213,7 +213,7 @@ fn update_basic_group_keeps_own_status_and_rights() {
 fn me_response_keeps_id_only() {
     let env = parse_envelope(r#"{"@type":"user","id":777,"is_bot":false}"#).unwrap();
     match env.payload {
-        EnvelopePayload::Users(UsersPayload::Me { user_id }) => assert_eq!(user_id, 777),
+        EnvelopePayload::Users(UsersPayload::Me { user_id, .. }) => assert_eq!(user_id, 777),
         other => panic!("{other:?}"),
     }
 }

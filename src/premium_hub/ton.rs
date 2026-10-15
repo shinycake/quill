@@ -11,6 +11,7 @@ use crate::ids::RequestId;
 use crate::lang::{keys, tr};
 use crate::telegram::envelope::{MessageSender, ParsedFile, StickerContent};
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 
 /// Rows per `getTonTransactions` page (the design's limit).
 pub const PAGE: i32 = 50;
@@ -93,8 +94,6 @@ pub enum TonTxKind {
     UpgradedGiftSale {
         user_id: i64,
         gift: Box<GiftInfo>,
-        commission_per_mille: i32,
-        commission_nano: i64,
         via_offer: bool,
     },
     StakeDiceStake,
@@ -106,6 +105,9 @@ pub enum TonTxKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TonTx {
     pub id: String,
+    /// Unique within the loaded list: the id, or `index-date` when the id
+    /// is empty or repeats. Set by [`GramsHub::apply_page`].
+    pub key: String,
     /// Negative when Grams left the account.
     pub gram_nano: i64,
     pub is_refund: bool,
@@ -138,8 +140,6 @@ pub fn parse_kind(ty: &Value) -> TonTxKind {
         "tonTransactionTypeUpgradedGiftSale" => TonTxKind::UpgradedGiftSale {
             user_id: int(ty.get("user_id")),
             gift: gift_of(ty),
-            commission_per_mille: i32::try_from(int(ty.get("commission_per_mille"))).unwrap_or(0),
-            commission_nano: int(ty.get("commission_gram_amount")),
             via_offer: flag(ty, "via_offer"),
         },
         "tonTransactionTypeStakeDiceStake" => TonTxKind::StakeDiceStake,
@@ -157,14 +157,12 @@ fn kind_files(ty: &Value) -> Vec<ParsedFile> {
     files
 }
 
-/// Parse a `tonTransaction`; `None` without an id or a type.
+/// Parse a `tonTransaction`; `None` without a type. A row without an id
+/// is kept (its key comes from its place in the list).
 pub fn parse_ton_tx(value: &Value) -> Option<TonTx> {
-    let id = text(value, "id");
-    if id.is_empty() {
-        return None;
-    }
     Some(TonTx {
-        id,
+        id: text(value, "id"),
+        key: String::new(),
         gram_nano: int(value.get("gram_amount")),
         is_refund: flag(value, "is_refund"),
         date: i32::try_from(int(value.get("date"))).unwrap_or(0),
@@ -404,6 +402,11 @@ pub enum GramsPurpose {
     Page { append: bool },
     /// `getGramRevenueStatistics`.
     Revenue,
+    /// `getUser` for a user the history names but the session does not
+    /// know yet; the pending request's `chat_id` carries the user id.
+    PeerUser,
+    /// `getChat` for such a chat.
+    PeerChat,
 }
 
 /// `getTonTransactions`; the direction is omitted (null) for All.
@@ -423,6 +426,16 @@ pub fn get_ton_transactions(
         crate::json_access::set(&mut request, "direction", json!({ "@type": direction }));
     }
     request.to_string()
+}
+
+/// `getUser`.
+pub fn get_user(extra: RequestId, user_id: i64) -> String {
+    json!({
+        "@type": "getUser",
+        "@extra": extra.as_extra(),
+        "user_id": user_id,
+    })
+    .to_string()
 }
 
 /// `getGramRevenueStatistics`.
@@ -455,9 +468,18 @@ pub struct GramsHub {
     /// tabs only when both directions exist).
     pub has_in: bool,
     pub has_out: bool,
-    /// Transaction whose receipt is showing.
+    /// Key of the transaction whose receipt is showing.
     pub selected: Option<String>,
     pub revenue: Option<GramRevenue>,
+    /// Users and chats already asked for (each once per session).
+    pub asked_users: BTreeSet<i64>,
+    pub asked_chats: BTreeSet<i64>,
+    /// Asked for and refused: shown as a deleted account, not a
+    /// placeholder that never fills.
+    pub missing_users: BTreeSet<i64>,
+    pub missing_chats: BTreeSet<i64>,
+    /// A page landed; its peers still need checking.
+    pub peers_dirty: bool,
 }
 
 impl GramsHub {
@@ -487,11 +509,26 @@ impl GramsHub {
             self.has_in = page.transactions.iter().any(TonTx::is_incoming);
             self.has_out = page.transactions.iter().any(|tx| !tx.is_incoming());
         }
-        if append {
-            self.entries.extend(page.transactions);
-        } else {
-            self.entries = page.transactions;
+        if !append {
+            self.entries.clear();
         }
+        let mut keys: BTreeSet<String> = self.entries.iter().map(|tx| tx.key.clone()).collect();
+        for mut tx in page.transactions {
+            let index = self.entries.len();
+            tx.key = if tx.id.is_empty() || keys.contains(&tx.id) {
+                format!("{index}-{}", tx.date)
+            } else {
+                tx.id.clone()
+            };
+            keys.insert(tx.key.clone());
+            self.entries.push(tx);
+        }
+        self.peers_dirty = true;
+    }
+
+    /// Peers the loaded rows name, for the resolver.
+    pub fn peers(&self) -> impl Iterator<Item = MessageSender> + '_ {
+        self.entries.iter().filter_map(TonTx::peer)
     }
 
     /// Whether the All / Incoming / Outgoing tabs show.
@@ -504,8 +541,8 @@ impl GramsHub {
     }
 
     pub fn selected_tx(&self) -> Option<&TonTx> {
-        let id = self.selected.as_deref()?;
-        self.entries.iter().find(|tx| tx.id == id)
+        let key = self.selected.as_deref()?;
+        self.entries.iter().find(|tx| tx.key == key)
     }
 
     /// The withdrawal section shows while revenue is available

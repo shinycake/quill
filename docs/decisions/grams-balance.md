@@ -42,7 +42,13 @@ and the gift export flow are still to come, so the item is not ticked.
 - `src/ui/premium_ui/grams.rs`: the dialog in the Stars screen's layout
   with the currency switched (balance header, kit `TabBar`, rows with the
   peer photo / sticker / glyph, receipt with From/To/Recipient, Via
-  Fragment, commission, status, date, Transaction ID). The Settings row is
+  Fragment, status, date, Transaction ID). A user or channel the session
+  does not know yet shows a skeleton bar (never the raw id) while the poll
+  loop's `grams_tick` asks `getUser` / `getChat` once per id; one TDLib
+  refuses reads "Deleted Account" (`lng_deleted`).
+- Rows are keyed by `TonTx::key`: the id, or `index-date` when the id is
+  empty or repeats, so a row without an id is kept and opens its own
+  receipt (it has no Transaction ID line). The Settings row is
   added after Stars in `navigation.rs`. Top-up goes through
   `link_policy::open_decision` and `open_message_url`.
 - Strings in `lang/en/money.strings`: tdesktop keys where tdesktop has the
@@ -68,21 +74,42 @@ and the gift export flow are still to come, so the item is not ticked.
   row shows "My Grams 💎 12.75" instead of an icon and a right-aligned
   label. The Gram sign is the 💎 glyph the Money page uses.
 - The copied Transaction ID says so in the status line, not a toast.
+- The balance's `≈$` line keeps 3 decimals on purpose: that is tdesktop's
+  `ToUsd(.., 3)` for this screen (the withdrawal amount uses 2).
+- The gift-sale commission (`commission_per_mille`,
+  `commission_gram_amount`) is not shown and not parsed: tdesktop's
+  receipt has no commission line for Gram entries (`lng_credits_commission`
+  is only the bot affiliate title in `settings_credits_graphics.cpp`).
+- The Settings balance probe runs from the poll loop while Settings is
+  open, not from render. Settings is opened from five places
+  (`navigation.rs`, `suggestions_block.rs`, `passkeys.rs`, `advanced_ui.rs`,
+  `deep_link_routes.rs`) with no shared open hook, so the tick that already
+  resolves names checks `settings.open` instead.
+- History pages through a "Load more" button, as Quill's Stars history
+  does. tdesktop's `CreditsController` loads 20 more rows on scroll up to
+  100 and then shows "Show more"; scroll loading inside a kit `Dialog`
+  would be new to Quill and should land for Stars and Grams together.
 
 ## How verified
 
-- `gate.sh`: GATE OK (core 4455, UI 727).
+- `gate.sh`: GATE OK.
 - Unit tests (`premium_hub/ton_tests.rs`): every type from the fixture,
-  an unknown type, rows without id/type, row titles/details/peers per
-  type, amount formats, paging and tabs, request shapes against
-  `schema/td_api.tl`, revenue parsing.
-- Driver test (`connect/tests/grams.rs`): probe once, open sends the page
-  and the revenue request, offset paging, a stale page after a tab switch
-  is dropped, an error stops loading; only reads are sent.
+  an unknown type, rows without a type dropped and without an id kept,
+  unique keys for empty and repeated ids, row titles/details/peers per
+  type, amount formats, paging and tabs, request shapes (including
+  `getUser`) against `schema/td_api.tl`, revenue parsing.
+- Driver test (`connect/tests/grams.rs`): the tick probes only while
+  Settings is open and once; open sends the page and the revenue request;
+  unknown users and the channel are asked for once each, a `user` answer
+  is stored, a refused `getChat` marks the chat missing; offset paging; a
+  stale page and a stale error after tab switches are ignored, the live
+  error stops loading; only reads are sent.
 - UI tests (`premium_ui/grams_tests.rs`): the screen with balance,
   withdrawal and rows, tab switch, receipt and back, close; the Settings
-  row only with a balance.
-- Screenshots of the screen, a receipt and Settings via `ready-grams`.
+  row only with a balance; an unknown buyer is a placeholder, then
+  "Deleted Account" once TDLib refuses it.
+- Screenshots of the screen, a receipt and Settings via `ready-grams`
+  (the demo seeds the fixture's buyer, seller and channel names).
 
 Not verified: a live account's history (no Grams on the test account was
 used), Fragment opening in the browser (not clicked in tests).

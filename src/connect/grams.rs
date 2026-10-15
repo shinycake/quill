@@ -1,13 +1,14 @@
 //! Connect driver: Settings → My Grams (`crate::premium_hub::ton`). Sends
-//! only `getTonTransactions` and `getGramRevenueStatistics`; nothing here
-//! moves Grams.
+//! only reads (`getTonTransactions`, `getGramRevenueStatistics`,
+//! `getUser`, `getChat`); nothing here moves Grams.
 use super::*;
-use crate::ids::RequestId;
+use crate::ids::{ChatId, RequestId};
 use crate::premium_hub::TxFilter;
 use crate::premium_hub::ton::{
-    GramsPurpose, PAGE, get_gram_revenue_statistics, get_ton_transactions,
+    GramsPurpose, PAGE, get_gram_revenue_statistics, get_ton_transactions, get_user,
 };
 use crate::state::{PaymentsPurpose, RequestPurpose};
+use crate::telegram::envelope::MessageSender;
 
 impl<S: JsonSender> ConnectDriver<S> {
     fn send_grams(
@@ -15,12 +16,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         purpose: GramsPurpose,
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
+        self.send_grams_for(purpose, None, build)
+    }
+
+    fn send_grams_for(
+        &mut self,
+        purpose: GramsPurpose,
+        peer: Option<ChatId>,
+        build: impl FnOnce(RequestId) -> String,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::Grams(purpose)),
-            None,
+            peer,
         );
         let json = build(extra);
         self.send_json_request(extra, &json)?;
@@ -40,6 +50,52 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(sent))
     }
 
+    /// Called from the poll loop: probes the balance while Settings is
+    /// open (so the "My Grams" row can appear) and asks once for each user
+    /// or chat a landed page names that the session does not know.
+    /// Returns whether anything was sent.
+    pub fn grams_tick(&mut self, settings_open: bool) -> bool {
+        let mut sent = false;
+        if settings_open && !self.session.payments.hub.grams.probed {
+            sent |= matches!(self.probe_grams_balance(), Ok(Some(_)));
+        }
+        if !self.session.payments.hub.grams.peers_dirty || !self.chats_path_active() {
+            return sent;
+        }
+        let grams = &mut self.session.payments.hub.grams;
+        grams.peers_dirty = false;
+        let peers: Vec<MessageSender> = grams.peers().collect();
+        for peer in peers {
+            let grams = &self.session.payments.hub.grams;
+            let ask = match peer {
+                MessageSender::User { user_id } => (self.session.user(user_id).is_none()
+                    && !grams.asked_users.contains(&user_id))
+                .then_some((GramsPurpose::PeerUser, user_id)),
+                MessageSender::Chat { chat_id } => (!self.session.chats.contains_key(&chat_id)
+                    && !grams.asked_chats.contains(&chat_id))
+                .then_some((GramsPurpose::PeerChat, chat_id)),
+            };
+            let Some((purpose, id)) = ask else {
+                continue;
+            };
+            let result = self.send_grams_for(purpose, Some(ChatId(id)), |extra| {
+                if purpose == GramsPurpose::PeerUser {
+                    get_user(extra, id)
+                } else {
+                    crate::telegram::requests::get_chat(extra, ChatId(id))
+                }
+            });
+            let grams = &mut self.session.payments.hub.grams;
+            if purpose == GramsPurpose::PeerUser {
+                grams.asked_users.insert(id);
+            } else {
+                grams.asked_chats.insert(id);
+            }
+            sent |= result.is_ok();
+        }
+        sent
+    }
+
     /// Open the Grams screen: the first All page, the revenue for the
     /// withdrawal section and the app config for the USD rate.
     pub fn open_grams(&mut self, is_dark: bool) -> Result<RequestId, ConnectSendError> {
@@ -49,7 +105,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let grams = &mut self.session.payments.hub.grams;
         grams.open = true;
         grams.restart(TxFilter::All);
-        let page = self.fetch_grams_page(false)?;
+        let page = match self.fetch_grams_page(false) {
+            Ok(page) => page,
+            Err(err) => {
+                // The dialog is open: say why it is empty.
+                self.session.payments.hub.grams.error =
+                    Some(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
+                return Err(err);
+            }
+        };
         let _ = self.send_grams(GramsPurpose::Revenue, |extra| {
             get_gram_revenue_statistics(extra, is_dark)
         });
