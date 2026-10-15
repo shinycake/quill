@@ -137,19 +137,16 @@ impl QuillApp {
         });
         self.settings.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
             let loaded = load.await;
-            let _ = this.update(cx, |this, cx| this.apply_emoji_state(loaded, false, cx));
+            let _ = this.update(cx, |this, cx| this.apply_emoji_state(loaded, cx));
         }));
     }
 
-    fn apply_emoji_state(&mut self, loaded: Loaded, save: bool, cx: &mut Context<Self>) {
+    fn apply_emoji_state(&mut self, loaded: Loaded, cx: &mut Context<Self>) {
         let state = &mut self.settings.emoji_style;
         state.ready = loaded.ready;
         let changed =
             state.current != loaded.current || super::emoji_sprites::active_set() != loaded.current;
         state.current = loaded.current;
-        if save && let Some(root) = app_root() {
-            let _ = save_current(&root, loaded.current);
-        }
         if changed {
             super::emoji_sprites::install(
                 loaded.pack.map(|(dir, pack)| (loaded.current, dir, pack)),
@@ -196,12 +193,19 @@ impl QuillApp {
         let Some(root) = app_root() else {
             return;
         };
-        let load = cx.background_spawn(async move { load_state(&root, Some(id)) });
+        // The choice is saved off the UI thread too, once the pack loads.
+        let load = cx.background_spawn(async move {
+            let loaded = load_state(&root, Some(id));
+            if loaded.current == id {
+                let _ = save_current(&root, id);
+            }
+            loaded
+        });
         self.settings.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
             let loaded = load.await;
             let _ = this.update(cx, |this, cx| {
                 if loaded.current == id {
-                    this.apply_emoji_state(loaded, true, cx);
+                    this.apply_emoji_state(loaded, cx);
                 } else {
                     this.settings.emoji_style.ready.remove(&id);
                     this.download_emoji_set(id, cx);

@@ -150,15 +150,25 @@ pub fn unpack(zip: &[u8], dir: &Path) -> Result<(), UnpackError> {
         .and_then(|n| n.to_str())
         .ok_or(UnpackError::Invalid)?;
     std::fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(".{name}.part"));
+    let tmp = parent.join(format!(".{name}.{}.part", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp)?;
     let result = extract(zip, &tmp).and_then(|()| {
         if !is_ready(&tmp) {
             return Err(UnpackError::Invalid);
         }
-        let _ = std::fs::remove_dir_all(dir);
-        std::fs::rename(&tmp, dir)?;
+        // Move the old pack aside rather than deleting it first, so a
+        // failed rename puts it back.
+        let old = parent.join(format!(".{name}.old"));
+        let _ = std::fs::remove_dir_all(&old);
+        let had_old = std::fs::rename(dir, &old).is_ok();
+        if let Err(err) = std::fs::rename(&tmp, dir) {
+            if had_old {
+                let _ = std::fs::rename(&old, dir);
+            }
+            return Err(err.into());
+        }
+        let _ = std::fs::remove_dir_all(&old);
         Ok(())
     });
     if result.is_err() {
@@ -283,9 +293,15 @@ mod tests {
             ("../escape.txt", b"z"),
         ]);
         unpack(&zip, &dir).unwrap();
+        // Installing again replaces the pack in place.
+        unpack(&zip, &dir).unwrap();
         assert!(is_ready(&dir));
         assert!(!dir.parent().unwrap().join("escape.txt").exists());
-        assert!(!dir.parent().unwrap().join(".noto.part").exists());
+        let left: Vec<_> = std::fs::read_dir(dir.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["noto"]);
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 

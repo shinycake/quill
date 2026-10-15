@@ -88,14 +88,17 @@ fn request(atlas: &Rc<Atlas>, sheet: u16) {
     }
     let path = sheet_path(&atlas.dir, sheet);
     let pack = atlas.pack.clone();
-    let id = atlas.id;
+    let owner = Rc::downgrade(atlas);
     atlas
         .app
         .spawn(async move |cx| {
             let decoded = cx
                 .background_spawn(async move { decode_sheet(&path, &pack) })
                 .await;
-            let Some(atlas) = active().filter(|a| a.id == id) else {
+            let Some(atlas) = owner
+                .upgrade()
+                .filter(|a| active().is_some_and(|now| Rc::ptr_eq(a, &now)))
+            else {
                 // The set changed meanwhile.
                 if let Some(cells) = decoded {
                     super::image_budget::retire_all(cells.into_iter().flatten());

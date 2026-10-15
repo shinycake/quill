@@ -177,6 +177,12 @@ upload is Idan's step).
   one small image per emoji of a decoded sheet, so the GPU only gets what
   is painted. A sheet is decoded on first use, on the background executor;
   until then its emoji keep the system glyph.
+- Memory: a decoded sheet costs about 5 MB of CPU memory (256 cells of
+  72 px), and sheets stay decoded until the set changes. Everyday text
+  touches two or three sheets; scrolling the whole emoji panel decodes all
+  16 (about 80 MB). tdesktop also keeps its sprite sheets in memory. If
+  this shows up in profiles, the next step is evicting sheets nothing drew
+  for a while.
 - Characters that are text by default (Unicode `Emoji_Presentation=No`:
   ©, ®, ™, ↔, ❤…) stay text unless U+FE0F follows them.
 - Covered: message text and captions (with big emoji), reply strips, the

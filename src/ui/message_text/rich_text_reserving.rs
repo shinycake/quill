@@ -185,6 +185,7 @@ pub(super) fn inline_paragraph(
             if let Some(image) = sprite {
                 text.push(super::super::selectable_text::EMOJI_PLACEHOLDER);
                 let range = at..text.len();
+                let range_for_specks = range.clone();
                 if let Some(link) = &run.link {
                     click_ranges.push(range.clone());
                     actions.push(InlineAction::Link(link.clone()));
@@ -197,6 +198,12 @@ pub(super) fn inline_paragraph(
                     ),
                     fallback: piece.to_string(),
                 });
+                // A revealed spoiler's specks fade out over the picture too.
+                if style.spoiler
+                    && let Some(fade) = super::super::spoiler_fx::reveal_fade(key)
+                {
+                    spoilers.push((range_for_specks, fade));
+                }
                 continue;
             }
             text.push_str(piece);
