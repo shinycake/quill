@@ -11,7 +11,7 @@
 //! background thread and hand the answer to [`set_state`].
 #![deny(clippy::indexing_slicing)]
 
-use crate::power_saving::{BATTERY_IGNORE, BATTERY_STATE, slot_get, slot_set};
+use crate::power_saving::{BATTERY_IGNORE, BATTERY_STATE, THERMAL_HOT, slot_get, slot_set};
 
 const UNKNOWN: u32 = 0;
 const OFF: u32 = 1;
@@ -46,14 +46,51 @@ pub fn ignored() -> bool {
     slot_get(BATTERY_IGNORE) != 0
 }
 
-/// Whether every flag is forced on: the saver is on and not ignored.
-pub const fn forcing_for(saving: Option<bool>, ignore: bool) -> bool {
-    matches!(saving, Some(true)) && !ignore
+/// The system thermal pressure, mirroring GPUI's `ThermalState` without
+/// tying this module to the UI feature. tdesktop has no such input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Thermal {
+    Nominal,
+    Fair,
+    Serious,
+    Critical,
+}
+
+/// Whether thermal pressure counts as "hot" next, given whether it did
+/// before. Enters at Serious or Critical and leaves only at Nominal, so
+/// Fair holds the previous answer and a state hovering around the
+/// Serious/Fair boundary does not flap the whole UI between modes.
+pub const fn thermal_hot_next(was_hot: bool, thermal: Thermal) -> bool {
+    match thermal {
+        Thermal::Serious | Thermal::Critical => true,
+        Thermal::Fair => was_hot,
+        Thermal::Nominal => false,
+    }
+}
+
+/// Record a thermal reading; returns whether the hot latch is now set.
+pub fn set_thermal(thermal: Thermal) -> bool {
+    let hot = thermal_hot_next(thermal_hot(), thermal);
+    slot_set(THERMAL_HOT, hot.into());
+    hot
+}
+
+/// The latched thermal answer.
+pub fn thermal_hot() -> bool {
+    slot_get(THERMAL_HOT) != 0
+}
+
+/// Whether every flag is forced on: the battery saver is on, or the system
+/// is thermally constrained, and the "Save Power on Low Battery" switch
+/// (`ignore`) is not off. Thermal pressure reuses that switch, so there is
+/// one control for "let the system force power saving".
+pub const fn forcing_for(saving: Option<bool>, thermal_hot: bool, ignore: bool) -> bool {
+    (matches!(saving, Some(true)) || thermal_hot) && !ignore
 }
 
 /// [`forcing_for`] with the current state.
 pub fn forcing() -> bool {
-    forcing_for(state(), ignored())
+    forcing_for(state(), thermal_hot(), ignored())
 }
 
 /// Push the current answer into the power-saving flags.
@@ -165,10 +202,45 @@ mod tests {
 
     #[test]
     fn forced_only_while_the_saver_is_on_and_not_ignored() {
-        assert!(forcing_for(Some(true), false));
-        assert!(!forcing_for(Some(true), true));
-        assert!(!forcing_for(Some(false), false));
-        assert!(!forcing_for(None, false), "no signal forces nothing");
+        assert!(forcing_for(Some(true), false, false));
+        assert!(!forcing_for(Some(true), false, true));
+        assert!(!forcing_for(Some(false), false, false));
+        assert!(!forcing_for(None, false, false), "no signal forces nothing");
+    }
+
+    #[test]
+    fn thermal_pressure_forces_like_the_saver_and_obeys_the_switch() {
+        for saving in [None, Some(false), Some(true)] {
+            for hot in [false, true] {
+                for ignore in [false, true] {
+                    let want = (saving == Some(true) || hot) && !ignore;
+                    assert_eq!(forcing_for(saving, hot, ignore), want);
+                }
+            }
+        }
+        assert!(
+            forcing_for(None, true, false),
+            "no battery signal still heats"
+        );
+        assert!(!forcing_for(Some(false), true, true), "ignore wins");
+    }
+
+    #[test]
+    fn thermal_latch_enters_on_serious_and_leaves_only_at_nominal() {
+        use Thermal::*;
+        assert!(!thermal_hot_next(false, Nominal));
+        assert!(!thermal_hot_next(false, Fair), "Fair alone does not enter");
+        assert!(thermal_hot_next(false, Serious));
+        assert!(thermal_hot_next(false, Critical));
+        assert!(thermal_hot_next(true, Serious));
+        assert!(thermal_hot_next(true, Fair), "Fair holds while hot");
+        assert!(!thermal_hot_next(true, Nominal));
+        let mut hot = false;
+        for state in [Serious, Fair, Serious, Fair, Fair] {
+            hot = thermal_hot_next(hot, state);
+            assert!(hot);
+        }
+        assert!(!thermal_hot_next(hot, Nominal));
     }
 
     #[test]
