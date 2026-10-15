@@ -291,7 +291,33 @@ Deviations in this PR:
 - The long paragraphs of tdesktop's link box (`lng_language_switch_about_*`)
   are not reused; Quill words its own (`qll_language_link_about`).
 
-## How verified
+## PR 2: review fixes, a simpler string API, the chat list
+
+- Review fixes from PR 1: deleted recent packs stay deleted after the box
+  closes; picking the pack in use during a switch cancels that switch; a
+  reload of the old pack no longer cancels a switch in flight; changes
+  queued for the old pack are dropped when a new pack lands; a deleted
+  string reloads the pack so it falls back to the base pack; a failed
+  switch points TDLib back at the pack in use; the choice, recent list and
+  cache are written in order (a newer write of a file always wins).
+- `tr` returns `&'static str` and `tr_with`/`trn` return `String`, the
+  types the literals and `format!` calls they replace had. Pack strings
+  are interned once per distinct text for the life of the process
+  (`src/lang/intern.rs`), bounded by the packs used in one run.
+- `trn` takes any integer count.
+- Chat list, archive row, chat rows, folders, folder tabs and folder
+  sharing are converted (`lang/en/chatlist.strings`). Counts use
+  tdesktop's plural keys (`lng_filters_by_link_join`,
+  `lng_filters_link_chats`, `lng_filters_chats_count`, …). Demo fixture
+  text stays English.
+- TDLib reads `language_pack_database_path` when it starts, so on the very
+  first launch the option set after `setTdlibParameters` takes effect from
+  the second launch; strings come from the server meanwhile.
+
+How verified: gate OK (core 4429, UI 692); driver tests for the switch
+races, queued patches, deletes and the failed-switch restore.
+
+## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),
   formatting, search, prefs round trip, envelope parsing, request

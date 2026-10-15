@@ -99,6 +99,9 @@ impl Session {
                     && let Some(switch) = state.switching.take()
                 {
                     state.current = Some(switch.info.clone());
+                    // Changes queued for the old pack do not apply to this one.
+                    state.patch.clear();
+                    state.reload = false;
                     state.ready = Some(LanguageReady {
                         info: switch.info,
                         pack: switch.pack.unwrap_or_default(),
@@ -117,7 +120,10 @@ impl Session {
                 let Some(current) = state.current.as_ref() else {
                     return;
                 };
-                if language_pack_id == current.id && !strings.is_empty() {
+                // A deleted string falls back to the base pack, which the
+                // snapshot no longer keeps apart: fetch both again.
+                let deletes = strings.iter().any(|(_, v)| matches!(v, PackValue::Deleted));
+                if language_pack_id == current.id && !strings.is_empty() && !deletes {
                     state.patch.extend(strings);
                 } else if language_pack_id == current.id
                     || language_pack_id == current.base_language_pack_id

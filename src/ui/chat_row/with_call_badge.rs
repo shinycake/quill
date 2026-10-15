@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::status_emoji::{StatusGlyph, status_element};
+use quill::lang::{keys, tr};
 
 /// The active-video-chat badge on a group or channel avatar, bottom-right
 /// and ringed in the sidebar color like the online dot (tdesktop paints a
@@ -92,7 +93,7 @@ pub(super) fn row_status_mark(status: RowStatus, cx: &App) -> AnyElement {
             .text_size(px(10.))
             .line_height(px(14.))
             .font_bold()
-            .aria_label("Failed to send")
+            .aria_label(tr(keys::Q_CHATLIST_FAILED_TO_SEND))
             .child("!")
             .into_any_element(),
         RowStatus::Sent => row_glyph(IconName::Check, accent().into()).into_any_element(),
@@ -136,7 +137,11 @@ pub(in crate::ui) fn draft_prefix(reply: bool, bare: bool) -> impl IntoElement {
                     .text_color(tone),
             )
         })
-        .child(if bare { "Draft:" } else { "Draft: " })
+        .child(if bare {
+            tr(keys::Q_CHATLIST_DRAFT_2)
+        } else {
+            tr(keys::Q_CHATLIST_DRAFT_3)
+        })
 }
 
 /// The mark after a row title: verified check, Premium star or status
@@ -230,7 +235,7 @@ pub(super) fn unread_pill(
         .text_xs()
         .font_semibold()
         .aria_label(if dot {
-            "Marked as unread".to_string()
+            tr(keys::Q_CHATLIST_MARKED_AS_UNREAD_2).to_string()
         } else {
             format!("{count} unread")
         })
@@ -249,7 +254,7 @@ pub(super) fn forum_badge(chat_id: ChatId, cx: &App) -> impl IntoElement {
         .border_color(cx.theme().border)
         .text_color(cx.theme().muted_foreground)
         .text_xs()
-        .child("Topics")
+        .child(tr(keys::Q_CHATLIST_TOPICS))
 }
 
 /// kit Phase 4: the unread indicator is a kit `Badge` overlaying the given

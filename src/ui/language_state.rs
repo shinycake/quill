@@ -14,13 +14,58 @@ pub(crate) struct LanguageBox {
     pub(super) removed: Vec<String>,
 }
 
+/// The files the Language box writes, each kept in the order of the
+/// writes that produced it.
+#[derive(Clone, Copy)]
+pub(super) enum LanguageFile {
+    Choice = 0,
+    Recent = 1,
+    Cache = 2,
+}
+
+/// Background writes of the language files: a write only lands when no
+/// newer write of the same file has (a fast A → B switch never leaves A on
+/// disk).
+#[derive(Default)]
+pub(super) struct LanguageWrites {
+    issued: [u64; 3],
+    written: std::sync::Arc<std::sync::Mutex<[u64; 3]>>,
+}
+
+impl LanguageWrites {
+    pub(super) fn spawn(
+        &mut self,
+        file: LanguageFile,
+        cx: &mut Context<QuillApp>,
+        write: impl FnOnce() + Send + 'static,
+    ) {
+        let slot = file as usize;
+        let Some(issued) = self.issued.get_mut(slot) else {
+            return;
+        };
+        *issued = issued.wrapping_add(1);
+        let seq = *issued;
+        let written = self.written.clone();
+        cx.background_spawn(async move {
+            let mut written = written
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(last) = written.get_mut(slot)
+                && seq > *last
+            {
+                write();
+                *last = seq;
+            }
+        })
+        .detach();
+    }
+}
+
 pub(crate) struct LanguageUi {
     pub(super) open: Option<LanguageBox>,
+    pub(super) writes: LanguageWrites,
     /// Packs used before, newest first (`language_recent.json`).
     pub(super) recent: Vec<LanguageChoice>,
-    /// The pack a `t.me/setlanguage` link asked to apply, waiting for its
-    /// strings.
-    pub(super) applying_link: Option<String>,
 }
 
 impl LanguageUi {
@@ -38,7 +83,7 @@ impl LanguageUi {
         Self {
             open: None,
             recent,
-            applying_link: None,
+            writes: LanguageWrites::default(),
         }
     }
 }

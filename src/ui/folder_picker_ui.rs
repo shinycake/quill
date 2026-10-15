@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::folder_limits::FolderLimitKind;
 use quill::folder_picker::{PickerMode, chats_count_text, filter_chats, may_tick, picker_counter};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 
 const AVATAR: f32 = 30.;
@@ -74,10 +75,10 @@ impl QuillApp {
         };
         let titles = self.folder_picker_chats();
         let title_of = |id: i64| {
-            titles
-                .iter()
-                .find(|(chat, _)| *chat == id)
-                .map_or_else(|| format!("Chat {id}"), |(_, title)| title.clone())
+            titles.iter().find(|(chat, _)| *chat == id).map_or_else(
+                || tr_with(keys::Q_CHATLIST_CHAT, &[("id", &id.to_string())]),
+                |(_, title)| title.clone(),
+            )
         };
         let key = match mode {
             PickerMode::Include => "include",
@@ -138,8 +139,11 @@ impl QuillApp {
                         ))
                         .icon(IconName::X)
                         .ghost()
-                        .tooltip("Remove")
-                        .accessibility_label(format!("Remove {title}"))
+                        .tooltip(tr(keys::FILTERS_REMOVE_YES))
+                        .accessibility_label(tr_with(
+                            keys::Q_CHATLIST_REMOVE,
+                            &[("title", &title.to_string())],
+                        ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(dialog) = this.folders.editor.as_mut() {
                                 match mode {
@@ -207,7 +211,7 @@ impl QuillApp {
                     .py_3()
                     .text_sm()
                     .text_color(muted)
-                    .child("No chats found."),
+                    .child(tr(keys::Q_CHATLIST_NO_CHATS_FOUND)),
             );
         }
         for (chat_id, title) in rows {
@@ -276,12 +280,14 @@ impl QuillApp {
                             .child(picker_counter(selected_count, limit)),
                     ),
             )
-            .child(Textarea::new(&dialog.picker_search).aria_label("Search chats"))
+            .child(
+                Textarea::new(&dialog.picker_search).aria_label(tr(keys::Q_CHATLIST_SEARCH_CHATS)),
+            )
             .child(list)
             .child(
                 div().flex().justify_end().child(
                     Button::new("folder-picker-done")
-                        .label("Done")
+                        .label(tr(keys::BOX_DONE))
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(dialog) = this.folders.editor.as_mut() {
                                 dialog.picker = None;

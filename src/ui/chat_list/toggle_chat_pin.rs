@@ -1,6 +1,7 @@
 //! Methods moved out of `chat_list.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Slice CL1: Pin / Unpin from the chat-row context menu
@@ -62,10 +63,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.toggle_chat_pin(chat_id, !pinned);
             self.connection.status_note = match result {
-                Ok(Some(_)) if pinned => "unpinning…".into(),
-                Ok(Some(_)) => "pinning…".into(),
-                Ok(None) => "pin request already in flight".into(),
-                Err(_) => "could not change pin".into(),
+                Ok(Some(_)) if pinned => tr(keys::Q_CHATLIST_UNPINNING).into(),
+                Ok(Some(_)) => tr(keys::Q_CHATLIST_PINNING).into(),
+                Ok(None) => tr(keys::Q_CHATLIST_PIN_REQUEST_ALREADY_IN_FLIGHT).into(),
+                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_PIN).into(),
             };
             cx.notify();
             return;
@@ -111,7 +112,7 @@ impl QuillApp {
                     .is_some_and(|h| !h.messages.is_empty())
         });
         if marked && nothing_to_view && self.live.is_some() {
-            self.connection.status_note = "open the chat to mark it as read".into();
+            self.connection.status_note = tr(keys::Q_CHATLIST_OPEN_THE_CHAT_TO_MARK).into();
             cx.notify();
             return;
         }
@@ -122,10 +123,10 @@ impl QuillApp {
                 live.driver.toggle_chat_marked_as_unread(chat_id, true)
             };
             self.connection.status_note = match result {
-                Ok(Some(_)) if marked => "marking as read…".into(),
-                Ok(Some(_)) => "marking as unread…".into(),
-                Ok(None) => "request already in flight".into(),
-                Err(_) => "could not change read state".into(),
+                Ok(Some(_)) if marked => tr(keys::Q_CHATLIST_MARKING_AS_READ).into(),
+                Ok(Some(_)) => tr(keys::Q_CHATLIST_MARKING_AS_UNREAD).into(),
+                Ok(None) => tr(keys::Q_CHATLIST_REQUEST_ALREADY_IN_FLIGHT).into(),
+                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_READ_STATE).into(),
             };
             cx.notify();
             return;
@@ -133,9 +134,9 @@ impl QuillApp {
         if self.demo_session.is_some() {
             self.apply_demo_marked_as_unread(chat_id, !marked);
             self.connection.status_note = if marked {
-                "marked as read".into()
+                tr(keys::Q_CHATLIST_MARKED_AS_READ).into()
             } else {
-                "marked as unread".into()
+                tr(keys::Q_CHATLIST_MARKED_AS_UNREAD).into()
             };
             cx.notify();
         }
@@ -211,7 +212,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No chat list until Ready."),
+                        .child(tr(keys::Q_CHATLIST_NO_CHAT_LIST_UNTIL_READY)),
                 );
             }
             PaneMode::Ready => {
@@ -325,7 +326,7 @@ impl QuillApp {
                                             .gap_1()
                                             .child(
                                                 Button::new("select-pin")
-                                                    .label("Pin")
+                                                    .label(tr(keys::CONTEXT_PIN_MSG))
                                                     .ghost()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.toggle_selected_pins(cx);
@@ -333,7 +334,7 @@ impl QuillApp {
                                             )
                                             .child(
                                                 Button::new("select-read")
-                                                    .label("Read")
+                                                    .label(tr(keys::Q_CHATLIST_READ))
                                                     .ghost()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.mark_selected_read(cx);
@@ -341,7 +342,7 @@ impl QuillApp {
                                             )
                                             .child(
                                                 Button::new("select-mute")
-                                                    .label("Mute")
+                                                    .label(tr(keys::Q_CHATLIST_MUTE))
                                                     .ghost()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.toggle_selected_mute(cx);
@@ -349,7 +350,7 @@ impl QuillApp {
                                             )
                                             .child(
                                                 Button::new("select-archive")
-                                                    .label("Archive")
+                                                    .label(tr(keys::Q_CHATLIST_ARCHIVE))
                                                     .ghost()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.toggle_selected_archive(cx);
@@ -357,7 +358,7 @@ impl QuillApp {
                                             )
                                             .child(
                                                 Button::new("select-unread")
-                                                    .label("Select unread")
+                                                    .label(tr(keys::Q_CHATLIST_SELECT_UNREAD))
                                                     .ghost()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.select_unread_chats(cx);
@@ -365,7 +366,7 @@ impl QuillApp {
                                             )
                                             .child(
                                                 Button::new("select-delete")
-                                                    .label("Delete")
+                                                    .label(tr(keys::CHAT_LINK_DELETE))
                                                     .ghost()
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.delete_selected_chats(cx);
@@ -375,7 +376,7 @@ impl QuillApp {
                                                 Button::new("select-cancel")
                                                     .label("✕")
                                                     .ghost()
-                                                    .tooltip("Exit selection")
+                                                    .tooltip(tr(keys::Q_CHATLIST_EXIT_SELECTION))
                                                     .on_click(cx.listener(|this, _, _, cx| {
                                                         this.exit_select_mode(cx);
                                                     })),
@@ -413,29 +414,33 @@ impl QuillApp {
                                         }) {
                                             (
                                                 "⏳",
-                                                "Loading community…",
-                                                "Fetching the community's chats.",
+                                                tr(keys::Q_CHATLIST_LOADING_COMMUNITY),
+                                                tr(keys::Q_CHATLIST_FETCHING_THE_COMMUNITYS_CHATS),
                                             )
                                         } else {
                                             (
                                                 "👥",
-                                                "No chats in this community yet",
-                                                "Chats added to the community show up here.",
+                                                tr(keys::Q_CHATLIST_NO_CHATS_IN_THIS_COMMUNITY),
+                                                tr(keys::Q_CHATLIST_CHATS_ADDED_TO_THE_COMMUNITY),
                                             )
                                         }
                                     } else if filter == ChatListFilter::Unread {
-                                        ("🔕", "No unread chats", "You are all caught up.")
+                                        (
+                                            "🔕",
+                                            tr(keys::Q_CHATLIST_NO_UNREAD_CHATS),
+                                            tr(keys::Q_CHATLIST_YOU_ARE_ALL_CAUGHT_UP),
+                                        )
                                     } else if folder.is_some() {
                                         (
                                             "📁",
-                                            "No chats in this folder yet",
-                                            "Add chats to the folder from its settings.",
+                                            tr(keys::Q_CHATLIST_NO_CHATS_IN_THIS_FOLDER),
+                                            tr(keys::Q_CHATLIST_ADD_CHATS_TO_THE_FOLDER),
                                         )
                                     } else {
                                         (
                                             "💬",
-                                            "No chats yet",
-                                            "Start a conversation to see it here.",
+                                            tr(keys::Q_CHATLIST_NO_CHATS_YET),
+                                            tr(keys::Q_CHATLIST_START_A_CONVERSATION_TO_SEE),
                                         )
                                     };
                                 list.child(chat_list_empty_state(glyph, title, hint, cx))
@@ -532,8 +537,8 @@ impl QuillApp {
                             if archived.is_empty() && filter == ChatListFilter::Archived {
                                 list = list.child(chat_list_empty_state(
                                     "📦",
-                                    "No archived chats",
-                                    "Chats you archive stay here until they get a new message.",
+                                    tr(keys::Q_CHATLIST_NO_ARCHIVED_CHATS),
+                                    tr(keys::Q_CHATLIST_CHATS_YOU_ARCHIVE_STAY_HERE),
                                     cx,
                                 ));
                             }
@@ -646,7 +651,12 @@ impl QuillApp {
             return list.into_any_element();
         }
         list = list
-            .child(div().mt_4().font_semibold().child("Authorization"))
+            .child(
+                div()
+                    .mt_4()
+                    .font_semibold()
+                    .child(tr(keys::Q_CHATLIST_AUTHORIZATION)),
+            )
             .child(
                 div()
                     .id("auth-title")
@@ -673,31 +683,37 @@ impl QuillApp {
             |this| {
                 this.child(
                     Textarea::new(&self.auth_ui.email_input)
-                        .aria_label("Email address")
+                        .aria_label(tr(keys::Q_CHATLIST_EMAIL_ADDRESS))
                         .h(px(40.)),
                 )
                 .child(
                     Button::new("submit-login-email")
-                        .label("Submit email")
+                        .label(tr(keys::Q_CHATLIST_SUBMIT_EMAIL))
                         .on_click(cx.listener(|this, _, window, cx| this.submit_email(window, cx))),
                 )
             },
         )
         .when(show_phone, |this| {
-            this.child(div().mt_2().font_semibold().text_sm().child("Phone"))
-                .child(
-                    Textarea::new(&self.auth_ui.phone_input)
-                        .aria_label("Phone number")
-                        .h(px(40.)),
-                )
-                .child(
-                    Button::new("submit-phone")
-                        .label("Submit phone")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_phone(window, cx);
-                        })),
-                )
+            this.child(
+                div()
+                    .mt_2()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::Q_CHATLIST_PHONE)),
+            )
+            .child(
+                Textarea::new(&self.auth_ui.phone_input)
+                    .aria_label(tr(keys::Q_CHATLIST_PHONE_NUMBER))
+                    .h(px(40.)),
+            )
+            .child(
+                Button::new("submit-phone")
+                    .label(tr(keys::Q_CHATLIST_SUBMIT_PHONE))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_phone(window, cx);
+                    })),
+            )
         })
         .when(
             quill::auth::can_request_qr_login(&self.current_auth())
@@ -705,7 +721,7 @@ impl QuillApp {
             |this| {
                 this.child(
                     Button::new("qr-login")
-                        .label("Sign in with QR code")
+                        .label(tr(keys::Q_CHATLIST_SIGN_IN_WITH_QR_CODE))
                         .ghost()
                         .disabled(self.session().is_some_and(|s| s.requests.has_auth_submit()))
                         .on_click(cx.listener(|this, _, _, cx| this.request_qr_login(cx))),
@@ -713,34 +729,40 @@ impl QuillApp {
             },
         )
         .when(show_code, |this| {
-            this.child(div().mt_2().font_semibold().text_sm().child("Code"))
-                .child(
-                    Textarea::new(&self.auth_ui.code_input)
-                        .aria_label("Sign-in code")
-                        .h(px(40.)),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            Button::new("submit-code")
-                                .label("Submit code")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.submit_code(window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("resend-code")
-                                .label("Resend code")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.resend_code(cx);
-                                })),
-                        ),
-                )
+            this.child(
+                div()
+                    .mt_2()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::Q_CHATLIST_CODE)),
+            )
+            .child(
+                Textarea::new(&self.auth_ui.code_input)
+                    .aria_label(tr(keys::Q_CHATLIST_SIGN_IN_CODE))
+                    .h(px(40.)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("submit-code")
+                            .label(tr(keys::Q_CHATLIST_SUBMIT_CODE))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_code(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("resend-code")
+                            .label(tr(keys::Q_CHATLIST_RESEND_CODE))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.resend_code(cx);
+                            })),
+                    ),
+            )
         })
         .when(show_password, |this| {
             // Slice A10: password / recovery-code entry lives in
@@ -764,20 +786,24 @@ impl QuillApp {
                 None => div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Waiting for the QR payload from Telegram…")
+                    .child(tr(keys::Q_CHATLIST_WAITING_FOR_THE_QR_PAYLOAD))
                     .into_any_element(),
             };
-            this.child(div().mt_2().font_semibold().text_sm().child("QR code"))
-                .child(div().mt_1().child(qr))
-                .child(
-                    div()
-                        .mt_1()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Scan with a logged-in Telegram app. The QR payload is never logged.",
-                        ),
-                )
+            this.child(
+                div()
+                    .mt_2()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::Q_CHATLIST_QR_CODE)),
+            )
+            .child(div().mt_1().child(qr))
+            .child(
+                div()
+                    .mt_1()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_CHATLIST_SCAN_WITH_A_LOGGED_IN)),
+            )
         })
         .into_any_element()
     }

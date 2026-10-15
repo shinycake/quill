@@ -15,6 +15,7 @@ use gpui_kit::*;
 use quill::chatlist_style::ChatListRowStyle;
 use quill::folder_limits::FolderTag;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_badge::TitleBadge;
 use quill::row_fx::RowFx;
@@ -47,7 +48,7 @@ pub(super) fn chat_preview_line(
     id: u64,
 ) -> (String, String, u64) {
     let name = if is_outgoing {
-        "You".to_string()
+        tr(keys::FROM_YOU).to_string()
     } else {
         author_signature.unwrap_or(peer_title).to_string()
     };
@@ -144,7 +145,7 @@ pub(super) fn chat_list_empty_state(
 pub(super) fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> Option<SharedString> {
     match mode {
         PaneMode::Synthetic => None,
-        PaneMode::Connecting => Some("Connecting…".into()),
+        PaneMode::Connecting => Some(tr(keys::Q_CHATLIST_CONNECTING).into()),
         // Search shows its own section headings.
         PaneMode::Ready => {
             let _ = session;
@@ -344,7 +345,7 @@ pub(super) fn session_chat_row(
     let id = chat.id;
     let topic_line = topic_names.clone().filter(|_| row_style.preview_lines < 3);
     let title: String = if saved {
-        "Saved Messages".to_string()
+        tr(keys::SAVED_MESSAGES).to_string()
     } else {
         chat.title.clone()
     };
@@ -403,7 +404,13 @@ pub(super) fn session_chat_row(
     let has_reactions = chat.unread_reaction_count > 0;
     // kit Phase 7: screen-reader label for the row.
     let row_label = if draft.is_some() {
-        format!("{title} — Draft: {preview}")
+        tr_with(
+            keys::Q_CHATLIST_DRAFT,
+            &[
+                ("title", &title.to_string()),
+                ("preview", &preview.to_string()),
+            ],
+        )
     } else {
         format!("{title} — {preview}")
     };

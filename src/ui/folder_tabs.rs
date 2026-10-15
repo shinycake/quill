@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::folder_icons::{FolderTabsMode, FolderTabsView};
+use quill::lang::{keys, tr};
 use quill::state::FolderBadge;
 
 /// Column width (tdesktop `windowFiltersWidth` is 72px; the topic column
@@ -45,8 +46,8 @@ pub(super) struct FolderSlot {
 pub(super) fn build_slots(folders: &[(i32, String, String)]) -> Vec<FolderSlot> {
     let mut slots = vec![FolderSlot {
         kind: FolderSlotKind::All,
-        name: "All".into(),
-        glyph: folder_glyph("All"),
+        name: tr(keys::FILTERS_ALL_SHORT).into(),
+        glyph: folder_glyph(tr(keys::FILTERS_ALL_SHORT)),
         badge: None,
     }];
     for (id, name, icon) in folders {
@@ -59,13 +60,13 @@ pub(super) fn build_slots(folders: &[(i32, String, String)]) -> Vec<FolderSlot> 
     }
     slots.push(FolderSlot {
         kind: FolderSlotKind::Unread,
-        name: "Unread".into(),
-        glyph: folder_glyph("Unread"),
+        name: tr(keys::FILTERS_NAME_UNREAD).into(),
+        glyph: folder_glyph(tr(keys::FILTERS_NAME_UNREAD)),
         badge: None,
     });
     slots.push(FolderSlot {
         kind: FolderSlotKind::Archived,
-        name: "Archived".into(),
+        name: tr(keys::FILTERS_TYPE_NO_ARCHIVED).into(),
         glyph: IconName::Archive,
         badge: None,
     });
@@ -254,8 +255,8 @@ impl QuillApp {
                 Button::new("folder-manage")
                     .icon(IconName::Settings)
                     .small()
-                    .tooltip("Chat folders")
-                    .accessibility_label("Manage chat folders")
+                    .tooltip(tr(keys::Q_CHATLIST_CHAT_FOLDERS))
+                    .accessibility_label(tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS))
                     .ghost()
                     .on_click(move |_, _, cx| {
                         let _ = manage_weak.update(cx, |this, cx| this.open_folder_manage(cx));
@@ -380,15 +381,15 @@ impl QuillApp {
             .border_r_1()
             .border_color(cx.theme().border)
             .role(Role::TabList)
-            .aria_label("Folders")
+            .aria_label(tr(keys::SETTINGS_SECTION_FILTERS))
             .child(list)
             .child(
                 div().flex().flex_none().justify_center().py_2().child(
                     Button::new("folder-manage")
                         .icon(IconName::Settings)
                         .small()
-                        .tooltip("Chat folders")
-                        .accessibility_label("Manage chat folders")
+                        .tooltip(tr(keys::Q_CHATLIST_CHAT_FOLDERS))
+                        .accessibility_label(tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| this.open_folder_manage(cx))),
                 ),
@@ -410,14 +411,14 @@ impl QuillApp {
                 .child(text)
         };
         let views = [
-            (FolderTabsView::Left, "Tabs on the left"),
-            (FolderTabsView::Top, "Tabs at the top"),
+            (FolderTabsView::Left, tr(keys::FILTERS_VERTICAL)),
+            (FolderTabsView::Top, tr(keys::FILTERS_HORIZONTAL)),
         ];
         div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(heading("Tabs view"))
+            .child(heading(tr(keys::FILTERS_VIEW_SUBTITLE)))
             .child(
                 RadioGroup::vertical("folder-tabs-view")
                     .selected_index(views.iter().position(|(v, _)| *v == view))
@@ -431,7 +432,7 @@ impl QuillApp {
                         }
                     })),
             )
-            .child(heading("Tabs appearance"))
+            .child(heading(tr(keys::FILTERS_TABS_SUBTITLE)))
             .child(
                 RadioGroup::vertical("folder-tabs-mode")
                     .selected_index(FolderTabsMode::ALL.iter().position(|m| *m == mode))

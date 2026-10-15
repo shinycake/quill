@@ -321,7 +321,7 @@ impl QuillApp {
                             .error
                             .clone()
                             .map(SharedString::from)
-                            .unwrap_or_else(|| tr(keys::LANGUAGE_NOT_FOUND)),
+                            .unwrap_or_else(|| tr(keys::LANGUAGE_NOT_FOUND).into()),
                     ),
                 )
                 .into_any_element();
@@ -347,7 +347,7 @@ impl QuillApp {
             ));
         }
         let note = if info.id.eq_ignore_ascii_case(current) {
-            tr(keys::Q_LANGUAGE_LINK_ALREADY)
+            tr(keys::Q_LANGUAGE_LINK_ALREADY).to_string()
         } else {
             tr_with(keys::Q_LANGUAGE_LINK_ABOUT, &[("lang_name", &title)])
         };

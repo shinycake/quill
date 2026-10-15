@@ -1,6 +1,7 @@
 //! Methods moved out of `folders.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(in crate::ui) fn save_folder_editor(&mut self, cx: &mut Context<Self>) {
@@ -50,9 +51,9 @@ impl QuillApp {
             Ok(()) => {
                 self.folders.editor = None;
                 self.connection.status_note = if folder_id.is_some() {
-                    "folder updated".into()
+                    tr(keys::Q_CHATLIST_FOLDER_UPDATED).into()
                 } else {
-                    "folder created".into()
+                    tr(keys::Q_CHATLIST_FOLDER_CREATED).into()
                 };
             }
             Err(err) => {
@@ -69,8 +70,16 @@ impl QuillApp {
             .session()
             .and_then(|s| s.chat_list.chat_folders.iter().find(|f| f.id == folder_id))
             .map(|f| (f.name.clone(), f.is_shareable, f.has_my_invite_links));
-        let (name, shared, has_links) =
-            info.unwrap_or_else(|| (format!("Folder {folder_id}"), false, false));
+        let (name, shared, has_links) = info.unwrap_or_else(|| {
+            (
+                tr_with(
+                    keys::Q_CHATLIST_FOLDER,
+                    &[("folder_id", &folder_id.to_string())],
+                ),
+                false,
+                false,
+            )
+        });
         self.folders.delete_confirm = Some(FolderDeleteConfirm {
             folder_id,
             name,
@@ -118,7 +127,7 @@ impl QuillApp {
             }
         };
         self.connection.status_note = match result {
-            Ok(()) => "folder deleted".into(),
+            Ok(()) => tr(keys::Q_CHATLIST_FOLDER_DELETED).into(),
             Err(err) => format!("could not delete folder: {err:?}"),
         };
         if self.folders.tab == Some(confirm.folder_id) {
@@ -153,7 +162,7 @@ impl QuillApp {
             }
         };
         self.connection.status_note = match result {
-            Ok(()) => "folders reordered".into(),
+            Ok(()) => tr(keys::Q_CHATLIST_FOLDERS_REORDERED).into(),
             Err(err) => format!("could not reorder folders: {err:?}"),
         };
         cx.notify();
@@ -174,8 +183,8 @@ impl QuillApp {
             }
         };
         self.connection.status_note = match result {
-            Ok(()) if enabled => "folder tags on".into(),
-            Ok(()) => "folder tags off".into(),
+            Ok(()) if enabled => tr(keys::Q_CHATLIST_FOLDER_TAGS_ON).into(),
+            Ok(()) => tr(keys::Q_CHATLIST_FOLDER_TAGS_OFF).into(),
             Err(err) => format!("could not toggle folder tags: {err:?}"),
         };
         cx.notify();
@@ -199,12 +208,21 @@ impl QuillApp {
     /// "{chat} added to {folder} folder" for the folder picker.
     pub(super) fn membership_toast(&self, chat_id: ChatId, folder_id: i32, added: bool) -> String {
         let session = self.session();
-        let chat = session
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .map_or_else(|| "Chat".to_string(), |c| c.title.clone());
+        let chat = session.and_then(|s| s.chats.get(&chat_id.0)).map_or_else(
+            || tr(keys::Q_CHATLIST_CHAT_2).to_string(),
+            |c| c.title.clone(),
+        );
         let folder = session
             .and_then(|s| s.chat_list.chat_folders.iter().find(|f| f.id == folder_id))
-            .map_or_else(|| format!("Folder {folder_id}"), |f| f.name.clone());
+            .map_or_else(
+                || {
+                    tr_with(
+                        keys::Q_CHATLIST_FOLDER,
+                        &[("folder_id", &folder_id.to_string())],
+                    )
+                },
+                |f| f.name.clone(),
+            );
         quill::folders::folder_membership_toast(&chat, &folder, added)
     }
 
@@ -271,12 +289,16 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().child("Chat folders"))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .child(tr(keys::Q_CHATLIST_CHAT_FOLDERS)),
+                    )
                     .child(
                         Button::new("close-folder-menu")
                             .icon(gpui_kit::assets::IconName::X)
-                            .tooltip("Close")
-                            .accessibility_label("Close")
+                            .tooltip(tr(keys::CLOSE))
+                            .accessibility_label(tr(keys::CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_folder_menu(cx);
@@ -289,7 +311,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No chat open."),
+                        .child(tr(keys::Q_CHATLIST_NO_CHAT_OPEN)),
                 )
                 .into_any_element();
         };
@@ -300,7 +322,7 @@ impl QuillApp {
                 .iter()
                 .find(|f| f.id == id)
                 .map(|f| f.name.clone())
-                .unwrap_or_else(|| format!("Folder {id}"))
+                .unwrap_or_else(|| tr_with(keys::Q_CHATLIST_FOLDER_2, &[("id", &id.to_string())]))
         };
         let Some(lists) = session.chat_list.chat_lists_for_add.get(&chat_id.0) else {
             return panel
@@ -308,7 +330,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading folder options…"),
+                        .child(tr(keys::Q_CHATLIST_LOADING_FOLDER_OPTIONS)),
                 )
                 .into_any_element();
         };
@@ -317,7 +339,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No folder destinations available for this chat."),
+                    .child(tr(keys::Q_CHATLIST_NO_FOLDER_DESTINATIONS_AVAILABLE_FOR)),
             );
         }
         for list in lists {
@@ -325,8 +347,14 @@ impl QuillApp {
                 continue;
             }
             let (label, id_suffix) = match list {
-                ChatList::Main => ("Move to main list".to_string(), "main".to_string()),
-                ChatList::Archive => ("Archive chat".to_string(), "archive".to_string()),
+                ChatList::Main => (
+                    tr(keys::Q_CHATLIST_MOVE_TO_MAIN_LIST).to_string(),
+                    "main".to_string(),
+                ),
+                ChatList::Archive => (
+                    tr(keys::Q_CHATLIST_ARCHIVE_CHAT).to_string(),
+                    "archive".to_string(),
+                ),
                 ChatList::Folder(folder_id) => (
                     format!("Add to {}", folder_name(*folder_id)),
                     format!("add-{folder_id}"),

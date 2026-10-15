@@ -194,17 +194,46 @@ fn string_updates_patch_the_current_pack_or_ask_for_a_reload() {
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
-        "value":{"@type":"languagePackStringValueDeleted"}}]}),
+        "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
     );
     assert_eq!(
         f.driver.session.settings.language.patch,
-        vec![("lng_box_ok".into(), PackValue::Deleted)]
+        vec![("lng_box_ok".into(), PackValue::Ordinary("Certo".into()))]
     );
+    assert!(!f.driver.session.settings.language.reload);
+    // A deleted string falls back to the base pack: fetch again.
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
+        "value":{"@type":"languagePackStringValueDeleted"}}]}),
+    );
+    assert!(f.driver.session.settings.language.reload);
+    f.driver.session.settings.language.reload = false;
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[]}),
     );
     assert!(f.driver.session.settings.language.reload);
+}
+
+#[test]
+fn a_finished_switch_drops_changes_queued_for_the_old_pack() {
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    let extra = f.strings_extra("pt-br");
+    f.feed(strings(&extra, "lng_languages", "Idioma"));
+    f.driver.session.settings.language.ready = None;
+    f.driver.switch_language(pack("de", "")).unwrap();
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
+        "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
+    );
+    assert_eq!(f.driver.session.settings.language.patch.len(), 1);
+    let extra = f.strings_extra("de");
+    f.feed(strings(&extra, "lng_languages", "Sprache"));
+    let state = &f.driver.session.settings.language;
+    assert!(state.ready.is_some() && state.patch.is_empty());
 }
 
 #[test]
@@ -216,6 +245,12 @@ fn failed_strings_end_the_switch_with_an_error() {
     let state = &f.driver.session.settings.language;
     assert!(state.switching.is_none() && state.ready.is_none());
     assert!(state.error.is_some());
+    // TDLib goes back to the pack the interface still shows.
+    let before = f.sent().len();
+    f.driver.restore_language_option().unwrap();
+    let sent = f.sent();
+    assert_eq!(sent.len(), before + 1);
+    assert_eq!(sent.last().unwrap()["value"]["value"], "en");
 }
 
 #[test]
