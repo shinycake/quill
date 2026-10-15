@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 pub mod audio_level;
+pub mod capture;
 pub mod engine;
 #[cfg(feature = "ui")]
 pub mod level_tap;

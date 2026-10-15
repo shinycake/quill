@@ -1,22 +1,22 @@
-//! A microphone level tap: the default input device opened through cpal
-//! (the voice-note path, `crate::voice_input`), measured in tgcalls'
-//! windows (`calls::audio_level`) on its own thread, with the latest
-//! level readable from anywhere.
+//! A microphone level tap: a microphone opened through Quill's capture
+//! path (`calls::capture`, cpal), measured in tgcalls' windows
+//! (`calls::audio_level`), with the latest level readable from anywhere.
 //!
-//! ntgcalls opens the microphone itself during a call and hands Quill no
-//! samples, so the tap opens the device a second time alongside it.
-//! CoreAudio, WASAPI (shared mode) and PulseAudio / PipeWire share a
-//! capture device between clients; a raw ALSA `hw:` device may refuse,
-//! in which case the tap reports an error and the call carries on
-//! without a level.
+//! During a call the call's own capture stream feeds the level
+//! (`connect::call_audio`), so no second device open happens. The tap
+//! opens the device by itself for the Settings > Calls microphone test,
+//! and for calls under `QUILL_CALL_CAPTURE=native`, where ntgcalls holds
+//! the microphone and hands Quill no samples. CoreAudio, WASAPI (shared
+//! mode) and PulseAudio / PipeWire share a capture device between
+//! clients; a raw ALSA `hw:` device may refuse, in which case the tap
+//! reports an error.
 
+use crate::calls::capture::mic_cpal::CpalMic;
+use crate::calls::capture::{
+    AudioFrame, CaptureError, FrameSink, LevelCell, MicCapture, MicControls,
+};
 use crate::locks::LockExt;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
-use std::time::Duration;
-
-use super::audio_level::PeakWindow;
 
 /// Where level readers get their values from. The driver's call audio
 /// takes a boxed source so tests can feed levels without a microphone.
@@ -26,98 +26,58 @@ pub trait LevelSource {
     fn take_level(&self) -> Option<f32>;
     /// The error that stopped the source, if any.
     fn error(&self) -> Option<String>;
+    /// Switch noise suppression on the measured stream, live. Sources
+    /// that do not process audio ignore it.
+    fn set_noise_suppression(&self, on: bool) {
+        let _ = on;
+    }
 }
-
-struct Shared {
-    /// The highest level since the last `take_level`, as `f32` bits;
-    /// `u32::MAX` means "no window completed".
-    peak_since_read: AtomicU32,
-    stop: AtomicBool,
-}
-
-const NO_LEVEL: u32 = u32::MAX;
 
 /// An open microphone measured for levels. Dropping it closes the device.
 pub struct LevelTap {
-    mic: Option<crate::voice_input::MicStream>,
-    shared: Arc<Shared>,
-    worker: Option<JoinHandle<Option<()>>>,
+    mic: CpalMic,
+    controls: Arc<MicControls>,
+    /// Frames nobody sends anywhere: the sink keeps at most one.
+    _sink: FrameSink<AudioFrame>,
 }
 
 impl LevelTap {
-    /// Open the default input device and start measuring.
-    pub fn open_default() -> Result<Self, String> {
-        let (sender, receiver) = std::sync::mpsc::channel::<Vec<f32>>();
-        let mic = crate::voice_input::open_default(sender)?;
-        let shared = Arc::new(Shared {
-            peak_since_read: AtomicU32::new(NO_LEVEL),
-            stop: AtomicBool::new(false),
-        });
-        let worker = {
-            let shared = shared.clone();
-            crate::thread_guard::spawn_guarded("quill-level-tap", move || {
-                let mut window = PeakWindow::default();
-                while !shared.stop.load(Ordering::Acquire) {
-                    let chunk = match receiver.recv_timeout(Duration::from_millis(50)) {
-                        Ok(chunk) => chunk,
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    };
-                    window.push(&chunk, |level| {
-                        // Keep the highest level since the last read.
-                        let mut seen = shared.peak_since_read.load(Ordering::Acquire);
-                        loop {
-                            let current = if seen == NO_LEVEL {
-                                0.0
-                            } else {
-                                f32::from_bits(seen)
-                            };
-                            let next = level.max(current).to_bits();
-                            match shared.peak_since_read.compare_exchange(
-                                seen,
-                                next,
-                                Ordering::AcqRel,
-                                Ordering::Acquire,
-                            ) {
-                                Ok(_) => break,
-                                Err(actual) => seen = actual,
-                            }
-                        }
-                    });
-                }
-            })
-            .map_err(|err| format!("Couldn't start the level thread: {err}"))?
-        };
+    /// Open the default input device and start measuring, with noise
+    /// suppression on or off as given.
+    pub fn open_default(noise_suppression: bool) -> Result<Self, String> {
+        let controls = Arc::new(MicControls::new(
+            noise_suppression,
+            Arc::new(LevelCell::default()),
+        ));
+        let mut mic = CpalMic::new(controls.clone());
+        let sink = FrameSink::new(1);
+        mic.start(None, sink.clone())
+            .map_err(|err: CaptureError| err.to_string())?;
         Ok(Self {
-            mic: Some(mic),
-            shared,
-            worker: Some(worker),
+            mic,
+            controls,
+            _sink: sink,
         })
     }
 }
 
 impl LevelSource for LevelTap {
     fn take_level(&self) -> Option<f32> {
-        let bits = self.shared.peak_since_read.swap(NO_LEVEL, Ordering::AcqRel);
-        (bits != NO_LEVEL).then(|| f32::from_bits(bits))
+        self.controls.level().take()
     }
 
     fn error(&self) -> Option<String> {
-        self.mic
-            .as_ref()
-            .and_then(|mic| mic.error.lock_or_recover().clone())
+        self.mic.error()
+    }
+
+    fn set_noise_suppression(&self, on: bool) {
+        self.controls.set_noise_suppression(on);
     }
 }
 
 impl Drop for LevelTap {
     fn drop(&mut self) {
-        self.shared.stop.store(true, Ordering::Release);
-        // Closing the stream drops the only sender; the worker then sees
-        // the channel close (or the stop flag within 50 ms).
-        drop(self.mic.take());
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        self.mic.stop();
     }
 }
 

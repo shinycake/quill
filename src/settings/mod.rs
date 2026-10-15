@@ -100,13 +100,34 @@ pub fn save_preferences(paths: &AccountPaths, prefs: &Preferences) -> std::io::R
 /// (`autoDownloadSettings.use_less_data_for_calls`, schema 1.8.67
 /// :9856), surfaced in Data & Storage and the call settings; the stale
 /// local-only flag would have been a second, divergent toggle.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallPrefs {
     pub confirm_before_calling: bool,
     pub use_proxy_for_calls: bool,
     /// Group-call push-to-talk (key + release delay). Client-side only.
     #[serde(default)]
     pub push_to_talk: crate::calls::ptt::PttConfig,
+    /// "Enable Noise Suppression" (tdesktop
+    /// `groupCallNoiseSuppression`): RNNoise on the microphone Quill
+    /// captures for calls (`calls::capture`). On by default, as tdesktop
+    /// shows it; files written before the switch existed read as on.
+    #[serde(default = "noise_suppression_default")]
+    pub call_noise_suppression: bool,
+}
+
+fn noise_suppression_default() -> bool {
+    true
+}
+
+impl Default for CallPrefs {
+    fn default() -> Self {
+        Self {
+            confirm_before_calling: false,
+            use_proxy_for_calls: false,
+            push_to_talk: crate::calls::ptt::PttConfig::default(),
+            call_noise_suppression: noise_suppression_default(),
+        }
+    }
 }
 
 /// Shared load: a missing or corrupt prefs file falls back to defaults —
@@ -344,9 +365,17 @@ mod tests {
                 key: "f13".into(),
                 release_delay_ms: 500,
             },
+            call_noise_suppression: false,
         };
         save_call_prefs(&paths, &prefs).expect("save works");
         assert_eq!(load_call_prefs(&paths), prefs);
+        // Noise suppression is on by default, also for a file written
+        // before the switch existed.
+        assert!(CallPrefs::default().call_noise_suppression);
+        let old: CallPrefs =
+            serde_json::from_str(r#"{"confirm_before_calling":true,"use_proxy_for_calls":false}"#)
+                .unwrap();
+        assert!(old.call_noise_suppression);
         // Corrupt file → defaults, never a panic.
         std::fs::write(dir.join("accounts/primary/call_prefs.json"), b"not json").unwrap();
         assert_eq!(load_call_prefs(&paths), CallPrefs::default());

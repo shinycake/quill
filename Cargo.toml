@@ -111,6 +111,10 @@ opus-decoder = { version = "0.1", optional = true }
 # Voice-note recording: microphone via cpal (same backend rodio plays
 # through) and a pure-Rust Opus encoder, muxed with `ogg`. No external binary.
 cpal = { version = "0.17", optional = true, default-features = false }
+# Call noise suppression (docs/decisions/call-capture.md): RNNoise ported to
+# Rust, run on Quill's own 10 ms microphone frames before ntgcalls encodes
+# them. Pure Rust; the library only, not its command-line tool.
+nnnoiseless = { version = "0.5.2", default-features = false }
 rusty-opus = { version = "1", optional = true }
 # Wallpaper patterns: Telegram ships them as (gzipped) SVG. Already in the
 # lockfile through GPUI; no text or raster-image features are needed.

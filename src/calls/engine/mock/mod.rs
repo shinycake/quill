@@ -4,6 +4,9 @@ use crate::locks::LockExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+mod external;
+pub use external::MockExternalFrame;
+
 #[derive(Default)]
 struct MockInner {
     available: bool,
@@ -57,6 +60,8 @@ struct MockInner {
     stream_qualities: Vec<(i64, StreamQuality)>,
     broadcast_timestamps: Vec<(i64, i64)>,
     broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
+    /// External frames pushed through `external_frame_sender`.
+    external_frames: Vec<MockExternalFrame>,
 }
 
 /// Phase C2b: deterministic in-memory engine used by driver tests.
@@ -663,6 +668,13 @@ impl CallEngine for MockEngine {
         }
         inner.presentations.retain(|id| *id != group_call_id);
         Ok(())
+    }
+
+    fn external_frame_sender(
+        &mut self,
+        target: CaptureTarget,
+    ) -> Option<Arc<dyn ExternalFrameSender>> {
+        self.mock_external_sender(target)
     }
 
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError> {

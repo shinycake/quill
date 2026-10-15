@@ -12,6 +12,7 @@ mod business_bot_bar;
 mod business_extra;
 mod business_settings;
 mod call_audio;
+mod call_capture;
 mod calls;
 mod chat_appearance;
 mod chat_list;

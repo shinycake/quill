@@ -107,7 +107,10 @@
 "lng_greeting_select" = "Select chats or entire chat categories for sending greeting messages.";
 "lng_group_call_close" = "Close";
 "lng_group_call_connecting" = "Connecting...";
+"lng_group_call_noise_suppression" = "Enable Noise Suppression";
 "lng_group_call_screen_share_stop" = "Stop Sharing";
+"lng_group_call_settings" = "Settings";
+"lng_group_call_settings_title" = "Settings";
 "lng_group_call_tooltip_screen" = "Share screen";
 "lng_group_invite_context_copy" = "Copy";
 "lng_group_invite_context_delete" = "Delete";

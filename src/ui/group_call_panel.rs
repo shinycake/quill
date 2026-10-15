@@ -453,6 +453,7 @@ impl QuillApp {
             .children(invite)
             .children(self.group_call_share_overlay(&call, cx))
             .children(rename)
+            .children(self.group_call_settings_overlay(cx))
             .into_any_element()
     }
 

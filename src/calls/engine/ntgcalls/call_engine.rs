@@ -760,6 +760,13 @@ impl CallEngine for NtgcallsEngine {
         Ok(())
     }
 
+    fn external_frame_sender(
+        &mut self,
+        target: CaptureTarget,
+    ) -> Option<Arc<dyn ExternalFrameSender>> {
+        self.external_sender_for(target)
+    }
+
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError> {
         // SAFETY: `ntg_media_devices` is a pointer + length pair; all-zero is
         // the valid empty value.

@@ -4,13 +4,17 @@
 //! `setGroupCallParticipantIsSpeaking` tells TDLib (which marks your
 //! participant and sends the speaking action to the server).
 //!
-//! ntgcalls hands Quill no capture samples, so the tap opens the default
-//! input device beside the call's own capture. tdesktop's remote levels
+//! The level comes from the call's own microphone stream
+//! (`call_capture`), so nothing opens the device twice. Under
+//! `QUILL_CALL_CAPTURE=native` ntgcalls holds the microphone and hands
+//! Quill no samples, so the tap opens the default input device beside
+//! it, as before. tdesktop's remote levels
 //! come from tgcalls per ssrc; Quill has no such signal, so other
 //! participants' speaking state stays TDLib's `is_speaking`.
 
 use super::*;
 use crate::calls::audio_level::SpeakingTracker;
+use crate::calls::capture::LevelCell;
 use crate::calls::engine::CallEngine;
 use crate::locks::LockExt;
 use crate::state::{ActiveGroupCall, CallsPurpose, RequestPurpose};
@@ -83,13 +87,23 @@ impl CallAudio {
         self.source.is_some()
     }
 
-    fn open(&mut self) {
+    /// Open the level source: an injected one, the call capture's level
+    /// (`capture`), or the default microphone (native capture).
+    fn open(&mut self, capture: Option<Arc<LevelCell>>) {
         if self.source.is_some() {
             return;
         }
         if let Some(injected) = self.injected.take() {
             self.source = Some(injected);
             self.injected_open = true;
+            return;
+        }
+        if let Some(level) = capture {
+            // Drop what the stream measured before you could speak.
+            let _ = level.take();
+            self.source = Some(Box::new(CaptureLevel(level)));
+            self.failed_at = None;
+            self.error = None;
             return;
         }
         if self.failed_at.is_some_and(|at| at.elapsed() < REOPEN_AFTER) {
@@ -118,9 +132,25 @@ impl CallAudio {
     }
 }
 
+/// Your level as the call's own microphone stream measures it.
+struct CaptureLevel(Arc<LevelCell>);
+
+impl LevelSource for CaptureLevel {
+    fn take_level(&self) -> Option<f32> {
+        self.0.take()
+    }
+
+    fn error(&self) -> Option<String> {
+        // The capture reports its own failures (`CallCapture::error`).
+        None
+    }
+}
+
 #[cfg(feature = "ui")]
 fn open_microphone() -> Result<Box<dyn LevelSource>, String> {
-    crate::calls::level_tap::LevelTap::open_default()
+    // Native capture only: ntgcalls processes nothing here, so the tap
+    // measures the raw microphone.
+    crate::calls::level_tap::LevelTap::open_default(false)
         .map(|tap| Box::new(tap) as Box<dyn LevelSource>)
 }
 
@@ -210,7 +240,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Ok(());
         };
-        self.call_audio.open();
+        let capture_level = self
+            .call_capture
+            .enabled()
+            .then(|| self.call_capture.level());
+        self.call_audio.open(capture_level);
         let Some(level) = self
             .call_audio
             .source
@@ -249,7 +283,10 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The level tap's error, if it could not open the microphone.
     pub fn group_call_level_error(&self) -> Option<&str> {
-        self.call_audio.error.as_deref()
+        self.call_capture
+            .error
+            .as_deref()
+            .or(self.call_audio.error.as_deref())
     }
 
     fn send_speaking(
