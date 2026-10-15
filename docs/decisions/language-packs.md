@@ -416,6 +416,17 @@ Twenty strings that built English plurals by hand ("{n} files",
 its own plural rules. One line counting admins, banned users and pending
 requests together keeps a single template, since it holds three counts.
 
+## PR 12: the interface strings check
+
+`scripts/check-lang.py` runs in CI after the file size check. It fails
+when a UI file has more hard-coded English than its entry in
+`scripts/lang-baseline.txt` (files not listed must have none), and when a
+key in `lang/en/*.strings` is not used anywhere in `src/`. The baseline
+only shrinks (`--update` lowers entries). It starts at 293 strings, most
+of them in `const` tables the conversion tool skips (admin rights, the
+Business page list, keyboard shortcut actions). The media viewer, players
+and group calls are skipped until the video player overhaul lands.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),
