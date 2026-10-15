@@ -1,7 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
-// windows stop receiving vsync frames while idle, and a renderer that can't
-// recover from a lost device closes its window instead of panicking.
-// See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
 
 use anyhow::Context as _;
@@ -24,13 +20,6 @@ use windows::{
 use crate::*;
 use gpui::*;
 
-/// Quill: waits before each extra round of renderer recovery after a device loss. Short, since
-/// this runs on the window's thread while the vsync thread waits for it.
-const RENDERER_RECOVERY_BACKOFF: [std::time::Duration; 2] = [
-    std::time::Duration::from_millis(200),
-    std::time::Duration::from_millis(500),
-];
-
 pub(crate) const WM_GPUI_CURSOR_STYLE_CHANGED: u32 = WM_USER + 1;
 pub(crate) const WM_GPUI_CLOSE_ONE_WINDOW: u32 = WM_USER + 2;
 pub(crate) const WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD: u32 = WM_USER + 3;
@@ -39,12 +28,7 @@ pub(crate) const WM_GPUI_FORCE_UPDATE_WINDOW: u32 = WM_USER + 5;
 pub(crate) const WM_GPUI_KEYBOARD_LAYOUT_CHANGED: u32 = WM_USER + 6;
 pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
-pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
-/// Quill: destroy this window because its GPU device is gone and could not be recreated.
-pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: u32 = WM_USER + 10;
-/// Quill: tells the platform window that the GPU device is gone for good (see
-/// `WindowsPlatformInner::handle_device_gone`).
-pub(crate) const WM_GPUI_GPU_DEVICE_GONE: u32 = WM_USER + 11;
+pub(crate) const WM_GPUI_DISPLAYS_CHANGED: u32 = WM_USER + 10;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
@@ -125,8 +109,6 @@ impl WindowsWindowInner {
             WM_PAINT => self.handle_paint_msg(handle),
             WM_CLOSE => self.handle_close_msg(),
             WM_DESTROY => self.handle_destroy_msg(handle),
-            WM_QUERYENDSESSION => Some(1),
-            WM_ENDSESSION => self.handle_end_session_msg(wparam),
             WM_MOUSEMOVE => self.handle_mouse_move_msg(handle, lparam, wparam),
             WM_MOUSELEAVE | WM_NCMOUSELEAVE => self.handle_mouse_leave_msg(),
             WM_NCMOUSEMOVE => self.handle_nc_mouse_move_msg(handle, lparam),
@@ -177,8 +159,7 @@ impl WindowsWindowInner {
             WM_SHOWWINDOW => self.handle_window_visibility_changed(handle, wparam),
             WM_GPUI_CURSOR_STYLE_CHANGED => self.handle_cursor_changed(lparam),
             WM_GPUI_FORCE_UPDATE_WINDOW => self.draw_window(handle, true),
-            WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(handle, lparam),
-            WM_GPUI_DESTROY_AFTER_DEVICE_LOST => self.handle_destroy_after_device_lost(handle),
+            WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
             DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(wparam),
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
             _ => None,
@@ -188,20 +169,6 @@ impl WindowsWindowInner {
         } else {
             unsafe { DefWindowProcW(handle, msg, wparam, lparam) }
         }
-    }
-
-    fn handle_end_session_msg(&self, wparam: WPARAM) -> Option<isize> {
-        if wparam.0 != 0 {
-            unsafe {
-                SendMessageW(
-                    self.platform_window_handle,
-                    WM_GPUI_END_SESSION,
-                    Some(WPARAM(self.validation_number)),
-                    None,
-                );
-            }
-        }
-        Some(0)
     }
 
     fn handle_move_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
@@ -226,7 +193,7 @@ impl WindowsWindowInner {
             // monitor is invalid, we do nothing.
             if !monitor.is_invalid() && self.state.display.get().handle != monitor {
                 // we will get the same monitor if we only have one
-                self.state.display.set(WindowsDisplay::new(
+                self.set_display(WindowsDisplay::new(
                     WindowsDisplay::display_id_for_monitor(monitor),
                 )?);
             }
@@ -800,7 +767,7 @@ impl WindowsWindowInner {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Option<isize> {
-        if !self.hide_title_bar.get() || self.state.is_fullscreen() || wparam.0 == 0 {
+        if !self.hide_title_bar || self.state.is_fullscreen() || wparam.0 == 0 {
             return None;
         }
 
@@ -884,7 +851,7 @@ impl WindowsWindowInner {
     }
 
     fn handle_create_msg(&self, handle: HWND) -> Option<isize> {
-        if self.hide_title_bar.get() {
+        if self.hide_title_bar {
             notify_frame_changed(handle);
             Some(0)
         } else {
@@ -973,8 +940,16 @@ impl WindowsWindowInner {
             return None;
         }
         let new_display = WindowsDisplay::new(WindowsDisplay::display_id_for_monitor(new_monitor))?;
-        self.state.display.set(new_display);
+        self.set_display(new_display);
         Some(0)
+    }
+
+    fn set_display(&self, display: WindowsDisplay) {
+        self.state.display.set(display);
+        if let Some(mut callback) = self.state.callbacks.display_changed.take() {
+            callback();
+            self.state.callbacks.display_changed.set(Some(callback));
+        }
     }
 
     fn handle_hit_test_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
@@ -1004,7 +979,7 @@ impl WindowsWindowInner {
             None
         };
 
-        if !self.hide_title_bar.get() {
+        if !self.hide_title_bar {
             // If the OS draws the title bar, we don't need to handle hit test messages.
             return drag_area;
         }
@@ -1289,13 +1264,7 @@ impl WindowsWindowInner {
     ) -> Option<isize> {
         self.report_visibility();
         if wparam.0 == 1 {
-            // Quill: shown again (e.g. from the tray), so frames are wanted.
-            self.demand_frames();
             self.draw_window(handle, false);
-        } else {
-            // Quill: a hidden window gets no WM_PAINT, so the idle decision
-            // would never run; park it until it is shown.
-            FRAME_GATE.park(handle);
         }
         None
     }
@@ -1324,37 +1293,16 @@ impl WindowsWindowInner {
             .detach();
     }
 
-    fn handle_device_lost(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
+    fn handle_device_lost(&self, lparam: LPARAM) -> Option<isize> {
         let devices = lparam.0 as *const DirectXDevices;
-        // SAFETY: the vsync thread sends this message with `SendMessageW` and a pointer to its
-        // own `DirectXDevices`, which it keeps alive and unchanged until the call returns.
         let devices = unsafe { &*devices };
-        // Quill: retry with backoff, then close the window instead of panicking (upstream
-        // panics here). Each renderer borrow ends within its statement.
-        let mut result = self.state.renderer.borrow_mut().handle_device_lost(devices);
-        for delay in RENDERER_RECOVERY_BACKOFF {
-            let Err(err) = &result else {
-                break;
-            };
-            log::warn!("DirectX renderer recovery failed, retrying in {delay:?}: {err:#}");
-            std::thread::sleep(delay);
-            result = self.state.renderer.borrow_mut().handle_device_lost(devices);
-        }
-        if let Err(err) = result {
-            log::error!(
-                "DirectX renderer could not recover from a lost device, closing the window: {err:#}"
-            );
-            // SAFETY: PostMessageW only queues the message for this window's own thread.
-            unsafe {
-                PostMessageW(
-                    Some(handle),
-                    WM_GPUI_DESTROY_AFTER_DEVICE_LOST,
-                    WPARAM::default(),
-                    LPARAM::default(),
-                )
-                .log_err();
-            }
-            return Some(0);
+        if let Err(err) = self
+            .state
+            .renderer
+            .borrow_mut()
+            .handle_device_lost(&devices)
+        {
+            panic!("Device lost: {err}");
         }
         // Make sure the first `draw_window` after recovery (whether it comes
         // from the forced WM_GPUI_FORCE_UPDATE_WINDOW or a stray WM_PAINT in
@@ -1364,19 +1312,8 @@ impl WindowsWindowInner {
         Some(0)
     }
 
-    /// Quill: the window's GPU device is gone for good (see `handle_device_lost` and the vsync
-    /// thread). Destroying it runs the normal close path (`WM_DESTROY`).
-    fn handle_destroy_after_device_lost(&self, handle: HWND) -> Option<isize> {
-        // SAFETY: `handle` is this window, and this runs on the thread that created it.
-        unsafe { DestroyWindow(handle) }.log_err();
-        Some(0)
-    }
-
     fn handle_dm_pointer_hit_test(&self, wparam: WPARAM) -> Option<isize> {
         self.state.direct_manipulation.on_pointer_hit_test(wparam);
-        // Quill: the gesture advances only in `draw_window`; resume vsync
-        // frames if they were parked.
-        self.demand_frames();
         None
     }
 
@@ -1393,9 +1330,6 @@ impl WindowsWindowInner {
             // re-invalidates every window on each vsync (see
             // `begin_vsync_thread`), so the deferred frame still gets drawn,
             // at most one vsync late.
-            // Quill: unpark the window if its vsync frames were parked, so
-            // that re-invalidation happens.
-            self.demand_frames();
             unsafe { ValidateRect(Some(handle), None).ok().log_err() };
             return Some(0);
         };
@@ -1431,14 +1365,6 @@ impl WindowsWindowInner {
         });
 
         self.state.callbacks.request_frame.set(Some(request_frame));
-        // Quill: idle frames park this window's vsync invalidations. A forced
-        // render still pending (device-loss recovery) and a touchpad gesture
-        // (Direct Manipulation advances only in `update` above) keep them
-        // coming.
-        self.frames_after_draw(
-            self.state.force_render_pending.get()
-                || self.state.direct_manipulation.keeps_frames_running(),
-        );
         self.update_ime_enabled(handle);
         unsafe { ValidateRect(Some(handle), None).ok().log_err() };
 
@@ -1854,7 +1780,7 @@ fn get_frame_thicknessy(dpi: u32) -> i32 {
     resize_frame_thickness + padding_thickness
 }
 
-pub(crate) fn notify_frame_changed(handle: HWND) {
+fn notify_frame_changed(handle: HWND) {
     unsafe {
         SetWindowPos(
             handle,

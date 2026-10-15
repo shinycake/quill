@@ -1,8 +1,8 @@
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
-// compiles the `hdr_surface` shaders. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 
 fn main() {
+    #[cfg(not(all(target_os = "windows", not(debug_assertions))))]
+    println!("cargo:rerun-if-changed=build.rs");
     #[cfg(target_os = "windows")]
     {
         // Compile HLSL shaders
@@ -40,8 +40,6 @@ mod shader_compilation {
             "monochrome_sprite",
             "subpixel_sprite",
             "polychrome_sprite",
-            // QUILL: HDR stills.
-            "hdr_surface",
         ];
 
         let rust_binding_path = format!("{}/shaders_bytes.rs", out_dir);
