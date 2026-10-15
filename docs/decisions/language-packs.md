@@ -1,0 +1,305 @@
+# Interface language packs
+
+Parity item `appearance-localization` (parity-plan bundle 7, "LAST,
+alone"). Architecture pass 2026-10-14. The design below is the plan for
+the whole migration; the sections at the end say what each PR built and
+how it was checked. The owner chose to build this while the video player
+overhaul runs, so `src/ui/video_player` and the media viewer are
+converted last, after that work merges.
+
+Checked against Quill `a21fa816`, tdesktop `lang/*` and
+`boxes/language_box.cpp`, TDLib 1.8.68 (`td_api.tl` lines 7962–8000,
+10970, 12904, 15566–15598).
+
+## Where Quill stands
+
+- No localization at all: about 7,500 English literals across 395 files
+  in `src/ui` (`rg` count), plus `format!` strings (1,383) and English in
+  the lib crate (`src/*.rs` helper texts, service messages, errors).
+- `settings::LanguagePrefs` (src/settings/chat_prefs.rs:157) stores a
+  `system_language_code` sent once in `setTdlibParameters`; the
+  appearance page lists `SUPPORTED_LANGUAGES` tags, but nothing changes
+  visibly. Its doc comment says the full translation is "a separate
+  project": this is that project.
+- `language_link.rs` + `link_info_boxes.rs` already look up a pack from
+  `t.me/setlanguage/<id>` (`getLanguagePackInfo`) and show it, but never
+  switch.
+- Plural helpers are ad hoc (`plural` functions in eight modules),
+  English-only.
+
+## What tdesktop does
+
+- Strings are keyed `lng_*` in `Resources/langs/lang.strings`
+  (8,780 lines; 1,160 plural forms as `key#zero/#one/#two/#few/#many/
+  #other`), with `{tag}` placeholders (`{count}`, `{user}`, `{name}` …)
+  and `tr::lng_key(tr::now, lt_count, n)` call sites. Markdown-ish
+  `**bold**` in some values, resolved at render time.
+- `Lang::Instance` resolves a key: current pack → its
+  `base_language_pack_id` pack → the hardcoded English. Plural category
+  per language from CLDR rules (`lang_tag.cpp` `GeneratePluralRulesMap`),
+  chosen by the pack's `plural_code`.
+- `CloudManager` keeps the pack in sync (TDLib does the equivalent:
+  `synchronizeLanguagePack`, `updateLanguagePackStrings`).
+- Language box (`boxes/language_box.cpp`): title "Language"
+  (`lng_languages`), a search field, the list of official packs with
+  name and native name in two columns (`lng_sr_languages_column_name` /
+  `_native`), the current one checked, a count line "{count} languages",
+  empty "No languages found."; beta/unofficial packs from links appear
+  with a "Share" / "Delete" menu (`lng_proxy_edit_share`,
+  `lng_proxy_menu_delete`), deletion offers "Restore"; a "Translate"
+  section: "Show Translate Button" (`lng_translate_settings_show`),
+  "Translate entire chats" (`lng_translate_settings_chat`, Premium), "Do
+  Not Translate" (`lng_translate_settings_choose`), and on macOS/Linux a
+  "Use system translator" toggle (`lng_translate_settings_use_platform_
+  mac/_linux` with its about text). Switching a language applies
+  immediately, no restart; the app relays out.
+- RTL packs (`is_rtl`) mirror the whole layout (`style::RightToLeft`).
+
+## Design
+
+### 1. Keys and English source of truth
+
+`lang/en.strings` in the repo (same Apple-strings format as tdesktop so
+the same tooling and the translation platform's exports work):
+
+```
+"lng_saved_messages" = "Saved Messages";
+"lng_languages_count#one" = "{count} language";
+"lng_languages_count#other" = "{count} languages";
+"qll_hdr_badge_tooltip" = "Shown in standard range on this display";
+```
+
+- A key named `lng_*` is tdesktop's key with the same meaning; Quill's
+  English must equal tdesktop's English for that key (the migration tool
+  enforces it, see §5). Those keys get every language for free from
+  Telegram's translation platform through TDLib, because Quill sets the
+  TDLib option `localization_target = "tdesktop"` (writable string
+  option) before `setTdlibParameters`, together with
+  `language_pack_database_path = <account root>/langpack.sqlite`.
+- A key named `qll_*` is Quill-only (text tdesktop does not have). It is
+  English unless a `lang/<code>.strings` file in the repo provides it
+  (community translations, loaded at startup into the same store as a
+  local overlay; the Language box shows "{percent}% translated" for
+  Quill-only strings as a secondary line when below 100 %).
+- Legal note for Idan: keys are identifiers; the English text in
+  `en.strings` is Quill's own (already in Quill's sources). Translated
+  strings arrive at runtime from Telegram's servers, the same way every
+  third-party TDLib client with `localization_target` set gets them.
+  Nothing from tdesktop's GPL repository is copied into Quill.
+
+`build.rs` (lib crate) parses `lang/en.strings` into `OUT_DIR/lang_keys.
+rs`: one `pub const` per key in `quill::lang::keys`, named from the key
+(`lng_saved_messages` → `SAVED_MESSAGES`, `qll_*` → `Q_*`), typed
+`Key` (ordinary) or `PluralKey`, each carrying the key string and the
+English value(s). Build fails on duplicate keys, unbalanced braces, or a
+plural key missing `#other`. Keys unused in code are reported by a CI
+script, not the build.
+
+### 2. Runtime store (`src/lang/`, lib crate; files < 1,000 lines)
+
+- `store.rs`: `Lang` behind a global `ArcSwap<LangSnapshot>` (crate
+  `arc-swap`, MIT/Apache; lock-free reads from render code). Snapshot =
+  `{ pack_id, base_pack_id, is_rtl, plural: PluralRules, strings:
+  HashMap<Arc<str>, Value>, base: HashMap<..>, overlay: HashMap<..> }`
+  with `Value::Ordinary(SharedString) | Plural { zero, one, two, few,
+  many, other }`.
+- `lookup.rs`: resolution order pack → base pack → Quill overlay
+  (`lang/<code>.strings`) → English constant. Deleted strings
+  (`languagePackStringValueDeleted`) are treated as missing.
+- `format.rs`: `{tag}` substitution (`lt_count` formatted with the
+  language's digit grouping through the existing number formatter;
+  `{tag}` left literally when the caller passed no value, with a
+  `debug_assert!` in tests), `**bold**` kept for callers that render
+  rich text (`rich::parse` already understands it).
+- `plural.rs`: CLDR category selection with `icu_plurals` (ICU4X,
+  Unicode-3.0, already allowed by `deny.toml`; `icu_locale_core` is in
+  the lock) keyed by `plural_code`; fallback to English rules when the
+  code is unknown. Unit tests cover ru (one/few/many), ar (six forms),
+  ja (other only), fr (0 and 1 → one), en.
+- `api.rs`: `tr(keys::X) -> SharedString`, `trn(keys::X_COUNT, n)`,
+  `tr_with(keys::X, &[("user", name)])`, `trn_with(..)`, `is_rtl()`,
+  `current_pack()`. No macro: plain functions keep call sites
+  greppable and the key constants typed.
+- `sync.rs` (state side, settings domain): `SettingsPurpose::Language(
+  LanguagePurpose::{TargetInfo, PackInfo, Strings, Synchronize, Switch,
+  Delete, AddCustom})`, payloads `LocalizationTargetInfo`,
+  `LanguagePackStrings`, `UpdateLanguagePackStrings` (envelope
+  `domains/settings/{mod,parse}.rs`; the existing `LanguagePackInfoData`
+  stays). Switch flow: `setOption("language_pack_id", id)` →
+  `getLanguagePackStrings(id, [])` (all strings) → if the pack has a
+  `base_language_pack_id`, the same for the base → build a new snapshot
+  → `Lang::swap` → `cx.refresh()` on the app entity through a
+  `LangChanged` event that every window observes; then
+  `synchronizeLanguagePack(id)`. `updateLanguagePackStrings` patches the
+  live snapshot (copy-on-write, one swap). The choice persists in
+  `LanguagePrefs` (`language_pack_id` replaces `system_language_code`
+  for the UI language; `system_language_code` keeps being sent to TDLib
+  from the OS locale, which is what tdesktop does).
+- Startup: load prefs; if a pack is chosen, TDLib answers
+  `getLanguagePackStrings` from its local database immediately (it is
+  cached in `langpack.sqlite`), so the first frame already renders
+  translated except for a short English flash; to avoid even that, the
+  snapshot built on the previous run is written to `<account root>/
+  lang_cache.json` and loaded before the first window.
+
+### 3. Language settings UI (`src/ui/language_ui.rs` +
+`language_state.rs`, `register_dialogs!`)
+
+Mirrors tdesktop's box with kit components: `Dialog` titled "Language";
+`Input` search (filters by name and native name, case/diacritic-
+insensitive); `List` of packs (name left, native name right in
+muted text, `IconName::Check` on the current one; `Badge` "beta" for
+`is_beta`; unofficial packs added from links get a `PopupMenu` with
+"Share" (copies `t.me/setlanguage/<id>`) and "Delete" with the
+"Restore" toast); footer "{count} languages" / "No languages found.";
+below, the "Translate" section rows reuse Quill's existing translate
+settings (`settings_ui.rs` translate toggles) so there is one place for
+them. Opens from Settings → Language (replacing the `SUPPORTED_LANGUAGES`
+picker in `new_accent_picker.rs`, which is deleted). The language link
+box (`link_info_boxes.rs`) gains the real "Change" button
+(`addCustomServerLanguagePack` for unofficial packs, then Switch).
+
+### 4. RTL
+
+`is_rtl()` flips text alignment defaults in the few places that align
+explicitly (chat list rows, composer placeholder, settings rows) through
+one helper `lang::start()`/`end()` returning `TextAlign`; full layout
+mirroring (tdesktop's `rtl()`) is out of scope for this item and is
+recorded as a new gap `appearance-rtl-layout` through the parity
+dashboard mechanism. Hebrew/Arabic packs therefore render right-aligned
+translated text in an LTR layout, which is what most non-Qt desktop apps
+without mirroring do; the decision doc states it.
+
+### 5. Migration tooling (`quill-tools/lang/`, Python, run by the build)
+
+1. `extract.py`: walks `src/ui` and the lib crate for string literals in
+   user-facing positions (`.label(`, `.child(`, `.title(`, `.placeholder(`,
+   `.tooltip(`, `SharedString::from(`, `format!(` with a literal first
+   argument, `.into()` on a literal in a known text field; a stop-list
+   for ids, element ids, keys, URLs, JSON, `log::`/`debug_assert!`,
+   `#[cfg(test)]` and `*_tests.rs`). Output: `lang/extract.json`
+   (file, line, literal, context).
+2. `match.py`: normalizes `{}` / `{0}` / `{name}` placeholders and
+   whitespace, matches each literal against tdesktop's `lang.strings`
+   values (read from Idan's local reference checkout, never copied) to
+   propose `lng_*` keys; unmatched literals get generated `qll_<module>_
+   <slug>` keys. Writes `lang/en.strings` (sorted, grouped by module
+   comment) and `lang/migration.csv` (literal → key → confidence).
+3. `apply.py`: rewrites call sites per the CSV: `"Saved Messages"` →
+   `tr(keys::SAVED_MESSAGES)`, `format!("{n} languages")` →
+   `trn(keys::LANGUAGES_COUNT, n)`, `format!("Delete \"{name}\"?")` →
+   `tr_with(..)`; it only rewrites exact literal matches and leaves a
+   `// LANG: review` comment where a placeholder mapping is ambiguous.
+   `cargo check` after each module; the builder reviews diffs module by
+   module.
+4. `scripts/check-lang.sh` (CI): fails when a file listed as migrated
+   gains a new user-facing literal (same detector as `extract.py`),
+   when `en.strings` has keys unused in code, or when a `lng_*` key's
+   English differs from tdesktop's (the comparison runs only where the
+   reference checkout exists, i.e. locally and in the owner's CI job).
+
+Migration order (one PR each, merged in sequence, no other UI threads):
+(a) infrastructure + settings box + the chat list, composer and settings
+screens; (b) chats and history (service messages are in the lib crate:
+`service_text/`); (c) everything else; (d) remove the `SUPPORTED_
+LANGUAGES` picker, enforce `check-lang.sh` repo-wide, tick
+`parity:appearance-localization` in (d) only.
+
+### 6. Numbers, dates, service messages
+
+- Counts use `trn`; the existing eight `plural` helpers are deleted.
+- Dates keep Quill's formatter but take month and weekday names from keys
+  (`lng_month1`…, `lng_weekday1`…, `lng_month_day`, `lng_month_day_year`),
+  as tdesktop does.
+- Service messages (`service_text/actions.rs`) switch to keys with
+  `{from}`, `{user}`, `{chat}` tags, which is where most of the
+  `format!` strings live.
+
+### 7. Tests
+
+- Unit: key generation (build-script parser) on a fixture; lookup
+  fallback chain; plural categories; tag substitution; snapshot patching
+  by `updateLanguagePackStrings` (ordinary, pluralized, deleted).
+- Driver: Switch flow sends option + strings + synchronize in order;
+  startup with a saved pack; delete pack restores English; unofficial
+  pack via link.
+- UI (`#[gpui::test]`): the Language box lists packs from a demo
+  `localizationTargetInfo`, search filters, selecting a pack re-renders
+  the settings title in the demo pack ("Configurações"); RTL pack flips
+  the alignment helper.
+- Demo fixture: a `pt-br` pack with ~20 strings and a `he` RTL pack.
+- CI: `check-lang.sh` wired into `gate.sh`.
+
+## Build plan and model
+
+Opus 5.5 medium for PR (a) (infrastructure, tooling, settings box,
+first screens). Sonnet 5.5 medium for PRs (b) and (c), which are
+mechanical runs of `apply.py` plus review, with Opus reviewing each.
+PR (d) Sonnet. Each PR: gate, screenshots of the Language box and one
+translated screen (pt-br demo pack) in both themes, independent
+reviewer, queue.sh.
+
+## Deviations
+
+- No layout mirroring for RTL packs (new gap recorded).
+- Quill-only (`qll_*`) strings are English unless the repo carries a
+  community `.strings` file; tdesktop has no such class because all its
+  strings are on the platform.
+- No "Use system translator" row: Quill's translate feature decides that
+  separately.
+
+## PR 1: core, Settings → Language, main menu and Settings list
+
+What changed:
+
+- `src/lang/`: keys generated by `build.rs` from `lang/en/*.strings`
+  (`lng_*` names and English exactly as tdesktop has them, `qll_*` keys in
+  Quill's own words for strings tdesktop has no key for); one immutable
+  snapshot behind an `ArcSwapOption`; `tr`, `tr_with`, `trn`, `trn_with`;
+  ICU4X plural rules by the pack's `plural_code`; diacritic-folding
+  search; the choice, recent packs and last strings saved in the app data
+  folder so the first frame is already translated.
+- TDLib: `localization_target` = `tdesktop` and a shared
+  `language_pack_database_path` before init; switching sends
+  `setOption language_pack_id`, `getLanguagePackStrings` for the pack and
+  its base, and `synchronizeLanguagePack`; `updateLanguagePackStrings`
+  patches the snapshot in place, or reloads when TDLib says everything
+  changed.
+- Settings → Language (new last row of the Settings list): translate
+  options, search, recent unofficial packs with Share / Delete / Restore,
+  then the official list. A pick applies at once, no restart.
+- The old Appearance "Language" picker (a tag sent to Telegram, applied
+  after restart) is gone. That tag (`system_language_code`) now follows
+  the chosen pack when Quill knows it.
+- The translate options moved from Appearance into the Language box, as
+  in tdesktop.
+- `t.me/setlanguage/<id>`: tdesktop's "Change language?" box with Apply
+  Language; it switches like the Language box does.
+- Converted strings: the main menu, the Settings list, the Settings page
+  titles, the privacy page links, the translate options and the link box.
+
+Deviations in this PR:
+
+- Labels adopt tdesktop's casing where Quill had its own ("New Group",
+  "Chat Settings", "Privacy and Security", "Mark all chats as read").
+- Settings pages keep their English id (`settings.page`) and map it to a
+  translated heading, so deep links and demos keep working.
+- `quill::lang::isolate_thread` gives a test thread its own strings, so a
+  UI test that switches language does not change what parallel tests see.
+- `check-lang.sh` (no new English literals in converted files) comes with
+  the later area PRs, once there is enough converted code to guard.
+- The long paragraphs of tdesktop's link box (`lng_language_switch_about_*`)
+  are not reused; Quill words its own (`qll_language_link_about`).
+
+## How verified
+
+- `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),
+  formatting, search, prefs round trip, envelope parsing, request
+  building, and seven driver tests for the switch flow.
+- UI test `language_box_tests.rs`: the Settings row opens the box,
+  picking the demo Portuguese pack turns "Settings" into "Configurações",
+  missing keys fall back to English, and English comes back.
+- Screenshots (`ready-language`, `ready-language-pt` demos, light theme):
+  the box in English and after the switch. Dark theme not captured.
+- Not verified: a live switch against Telegram's servers (needs a
+  signed-in account; the TDLib calls match `td_api.tl` 1.8.68).

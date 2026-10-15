@@ -24,9 +24,13 @@ fn driver_sends_parameters_then_reaches_wait_phone_via_injection() {
     assert!(driver.parameters_sent());
 
     let sent = recorder.snapshot();
-    assert_eq!(sent.len(), 2); // getAuthorizationState + setTdlibParameters
+    // getAuthorizationState + setTdlibParameters + the language options
+    // (`localization_target`, `language_pack_database_path`).
+    assert_eq!(sent.len(), 4);
     assert!(sent[0].contains("getAuthorizationState"));
     assert!(sent[1].contains("setTdlibParameters"));
+    assert!(sent[2].contains("localization_target") && sent[2].contains("tdesktop"));
+    assert!(sent[3].contains("language_pack_database_path") && sent[3].contains("langpack.sqlite"));
     assert!(sent[1].contains("\"api_id\":99"));
     assert!(sent[1].contains("unit-test-hash-not-for-network"));
     assert!(!sink.rendered().contains("unit-test-hash"));

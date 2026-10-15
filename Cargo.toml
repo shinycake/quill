@@ -142,6 +142,17 @@ spellbook = "0.4"
 encoding_rs = "0.8"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 interprocess = { version = "2", default-features = false }
+# Interface language packs (docs/decisions/language-packs.md): lock-free reads
+# of the current strings from render code, CLDR plural rules (ICU4X,
+# Unicode-3.0) and GPUI's string type without GPUI itself.
+arc-swap = "1"
+icu_plurals = { version = "2", default-features = false, features = ["compiled_data"] }
+icu_locale_core = { version = "2", default-features = false }
+# Language box search folds diacritics (NFD), like tdesktop's search words.
+icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
+# `sync`: plural rules live in the shared string snapshot (Send + Sync).
+icu_provider = { version = "2", default-features = false, features = ["sync"] }
+gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.8" }
 
 [dependencies.gpui-kit]
 version = "=0.7.1"

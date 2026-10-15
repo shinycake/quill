@@ -3,6 +3,7 @@ mod apply;
 mod business;
 mod business_extra;
 mod error;
+mod language;
 mod language_link;
 mod passkeys;
 mod purpose;
@@ -11,6 +12,7 @@ mod state;
 
 pub use business::*;
 pub use business_extra::*;
+pub use language::*;
 pub use language_link::*;
 pub use purpose::*;
 pub use quick_replies::*;

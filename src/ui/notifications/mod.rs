@@ -655,6 +655,7 @@ impl QuillApp {
             | self.drain_chat_look(cx)
             | self.drain_wallpaper_preview(cx)
             | self.drain_earn(cx)
+            | self.drain_language(cx)
         {
             progressed = true;
         }

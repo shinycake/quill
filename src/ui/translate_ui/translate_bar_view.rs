@@ -1,6 +1,7 @@
 //! Methods moved out of `translate_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, trn};
 
 impl QuillApp {
     pub(super) fn translate_bar_view(
@@ -366,14 +367,18 @@ impl QuillApp {
         let premium = self.session().is_some_and(Session::is_premium);
         let ui = self.translate_ui_language();
         let skip = prefs.skip(&ui);
-        let skip_label = if skip.len() > 1 {
-            format!("{} languages", skip.len())
+        let skip_label: SharedString = if skip.len() > 1 {
+            trn(
+                keys::LANGUAGES_COUNT,
+                i64::try_from(skip.len()).unwrap_or(i64::MAX),
+            )
         } else {
             skip.first()
                 .map(|code| language_name(code))
                 .unwrap_or_default()
+                .into()
         };
-        let switch_row = |title: &'static str, hint: SharedString, control: AnyElement| {
+        let switch_row = |title: SharedString, hint: SharedString, control: AnyElement| {
             div()
                 .flex()
                 .items_center()
@@ -391,32 +396,30 @@ impl QuillApp {
                 .child(control)
         };
         let show = switch_row(
-            "Show Translate Button",
-            "The \"Translate\" button will appear in the context menu of messages containing text."
-                .into(),
+            tr(keys::TRANSLATE_SETTINGS_SHOW),
+            tr(keys::TRANSLATE_SETTINGS_ABOUT),
             Switch::new("translate-show-button")
                 .checked(prefs.show_button)
-                .accessibility_label("Show Translate Button")
+                .accessibility_label(tr(keys::TRANSLATE_SETTINGS_SHOW))
                 .on_click(cx.listener(|this, &on, _, cx| {
                     this.set_translate_prefs(cx, |p| p.show_button = on);
                 }))
                 .into_any_element(),
         );
         let chats = switch_row(
-            "Translate Entire Chats",
+            tr(keys::TRANSLATE_SETTINGS_CHAT),
             if premium {
-                "Offer to translate whole conversations with a bar above the chat.".into()
+                tr(keys::Q_TRANSLATE_CHATS_HINT)
             } else {
-                "Translating entire chats requires Telegram Premium.".into()
+                tr(keys::Q_TRANSLATE_CHATS_PREMIUM)
             },
             Switch::new("translate-chats")
                 .checked(prefs.translate_chats && premium)
                 .disabled(!premium)
-                .accessibility_label("Translate Entire Chats")
+                .accessibility_label(tr(keys::TRANSLATE_SETTINGS_CHAT))
                 .on_click(cx.listener(|this, &on, _, cx| {
                     if !this.session().is_some_and(Session::is_premium) {
-                        this.connection.status_note =
-                            "Translating entire chats requires Telegram Premium".into();
+                        this.connection.status_note = tr(keys::Q_TRANSLATE_CHATS_PREMIUM).into();
                         cx.notify();
                         return;
                     }
@@ -429,13 +432,13 @@ impl QuillApp {
             .items_center()
             .justify_between()
             .gap_2()
-            .child(div().text_sm().child("Do Not Translate"))
+            .child(div().text_sm().child(tr(keys::TRANSLATE_SETTINGS_CHOOSE)))
             .child(
                 Button::new("translate-skip-languages")
                     .label(skip_label)
                     .ghost()
                     .small()
-                    .accessibility_label("Choose languages not to translate")
+                    .accessibility_label(tr(keys::Q_TRANSLATE_SKIP_LABEL))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_translate_skip_list(window, cx);
                     })),
@@ -444,7 +447,12 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().font_semibold().text_sm().child("Translate Messages"))
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::TRANSLATE_SETTINGS_SUBTITLE)),
+            )
             .child(show)
             .child(chats)
             .when(prefs.show_button || prefs.translate_chats, |column| {

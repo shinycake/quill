@@ -914,6 +914,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = params.to_json(extra);
         self.sender.send_json(&json)?;
         self.parameters_sent = true;
-        Ok(())
+        self.send_language_options()
     }
 }

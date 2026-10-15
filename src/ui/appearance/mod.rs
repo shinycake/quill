@@ -23,9 +23,8 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
 use quill::settings::{
-    AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, DEFAULT_LANGUAGE_CODE, LanguagePrefs,
-    SUPPORTED_LANGUAGES, ThemeChoice, clamp_font_size, load_appearance_prefs, load_chat_prefs,
-    safe_app_root, save_appearance_prefs, save_chat_prefs,
+    AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
+    load_appearance_prefs, load_chat_prefs, safe_app_root, save_appearance_prefs, save_chat_prefs,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -259,26 +258,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice parity:settings-language: update the app language pref in the
-    /// session and persist it to the account dir (via
-    /// `ConnectDriver::save_language_prefs`). TDLib reads the tag once at
-    /// startup, so the UI notes that the change applies after restart.
-    pub(crate) fn set_language_pref(&mut self, code: &str, cx: &mut Context<Self>) {
-        let prefs = LanguagePrefs {
-            system_language_code: code.to_string(),
-        };
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.language_prefs = prefs;
-            if let Err(err) = live.driver.save_language_prefs() {
-                self.connection.status_note = format!("couldn't save language setting: {err}");
-            }
-        } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.language_prefs = prefs;
-            self.connection.status_note = "demo: language setting is not saved".into();
-        }
-        cx.notify();
-    }
-
     /// Step the scheduled auto-night start/end time (30-minute steps,
     /// wraps past midnight).
     fn bump_night_time(&mut self, cx: &mut Context<Self>, is_start: bool, delta: i16) {
@@ -397,12 +376,6 @@ impl QuillApp {
                 body = body.child(this.appearance_chat_list_section(cx));
                 body = body.child(this.appearance_power_section(cx));
                 body = body.child(this.appearance_send_key_section(cx));
-                // Batch 7: Show Translate Button / Translate Entire Chats /
-                // Do Not Translate.
-                body = body.child(this.translate_settings_section(cx));
-                // Slice parity:settings-language: the app language picker
-                // (the tag TDLib gets in `setTdlibParameters`).
-                body = body.child(this.appearance_language_section(cx));
                 body = body.child(this.general_autostart_section(cx));
                 body = body.child(this.general_link_handler_section(cx));
                 if let Some(section) = this.general_send_to_section(cx) {
