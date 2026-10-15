@@ -31,6 +31,7 @@ Notes on specific crates:
 | webpki-roots | CDLA-Permissive-2.0 | Mozilla CA certificate data. |
 | ICU4X crates (icu_*, zerovec, yoke, ...) | Unicode-3.0 | |
 | rusty-opus, ogg, cpal | BSD-3-Clause, BSD-3-Clause, Apache-2.0 | In-process voice-note recording. No libopus. |
+| ciborium, p256, aes, cbc, hmac, hkdf, sha2 (RustCrypto); core-foundation-sys (macOS) | Apache-2.0 (ciborium); MIT OR Apache-2.0 (the rest) | Passkeys on a USB security key (CTAP2 over HID, `src/webauthn/`). No OpenSSL, no libfido2. |
 
 No crate in the shipped graph is licensed only under GPL, AGPL or LGPL. Crates
 that offer a GPL license only as one option (for example `self_cell`,

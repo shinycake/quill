@@ -7,9 +7,9 @@
 //! reducer `state::domains::settings::passkeys`, the screens
 //! `ui::security::passkeys`.
 //!
-//! Creating a passkey and signing in with one need the platform WebAuthn
-//! API, which Quill does not have yet: [`webauthn_supported`] is the one
-//! switch that work turns on.
+//! Creating a passkey (`getPasskeyParameters`, the ceremony in
+//! `crate::webauthn`, `addLoginPasskey`) needs a WebAuthn client:
+//! [`webauthn_supported`] says whether this build has one.
 #![deny(clippy::indexing_slicing)]
 
 #[cfg(test)]
@@ -17,6 +17,7 @@ mod tests;
 
 use crate::ids::RequestId;
 use crate::local_time::{CivilTime, day_label, hhmm};
+use crate::webauthn::{CreationOptions, Registration};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
@@ -27,15 +28,17 @@ pub const LIST_FRESH_FOR: Duration = Duration::from_secs(5);
 /// The name a passkey without one shows (`lng_settings_passkey_unknown`).
 pub const UNNAMED: &str = "Passkey";
 
-/// Whether this build can create passkeys and sign in with them through
-/// the platform WebAuthn API (tdesktop `Platform::WebAuthn::IsSupported`).
-///
-/// Always `false` for now: the WebAuthn backends (macOS, Windows, Linux
-/// security keys and phones) are separate work. Turning this on is what
-/// shows the Passkeys row on accounts without passkeys and enables the
-/// "Create Passkey" button.
+/// The most passkeys an account may have when the app config does not say
+/// (tdesktop `passkeysAccountPasskeysMax`, default 10).
+pub const DEFAULT_MAX_PASSKEYS: usize = 10;
+
+/// Whether this build can create passkeys and sign in with them (tdesktop
+/// `Platform::WebAuthn::IsSupported`): a USB security key over CTAP2 on
+/// macOS and Linux (`crate::webauthn`); Windows waits for its
+/// `webauthn.dll` backend. It shows the Passkeys row on accounts without
+/// passkeys and enables the "Create Passkey" button.
 pub const fn webauthn_supported() -> bool {
-    false
+    crate::webauthn::supported()
 }
 
 /// One passkey (`passkey`, TDLib 1.8.68 `td_api.tl:189`).
@@ -112,6 +115,11 @@ pub enum PasskeysPurpose {
     List,
     /// `removeLoginPasskey`; the answer is `ok`.
     Remove,
+    /// `getPasskeyParameters`; the answer is `text` with the WebAuthn
+    /// creation options.
+    Parameters,
+    /// `addLoginPasskey`; the answer is the new `passkey`.
+    Add,
 }
 
 /// The answers this module parses.
@@ -119,6 +127,8 @@ pub enum PasskeysPurpose {
 pub enum PasskeysPayload {
     /// `passkeys`.
     List(Vec<Passkey>),
+    /// `passkey` (the answer to `addLoginPasskey`).
+    Added(Passkey),
 }
 
 /// Parse `type_name`, or `None` for a type this module does not own.
@@ -131,6 +141,7 @@ pub fn parse_payload(type_name: &str, value: &Value) -> Option<PasskeysPayload> 
                 .map(|list| list.iter().filter_map(Passkey::parse).collect())
                 .unwrap_or_default(),
         )),
+        "passkey" => Passkey::parse(value).map(PasskeysPayload::Added),
         _ => None,
     }
 }
@@ -153,6 +164,42 @@ pub fn remove_login_passkey(extra: RequestId, passkey_id: &str) -> String {
     )
 }
 
+/// `getPasskeyParameters = Text` (`td_api.tl:13153`).
+pub fn get_passkey_parameters(extra: RequestId) -> String {
+    request(extra, json!({"@type": "getPasskeyParameters"}))
+}
+
+/// `addLoginPasskey client_data:string attestation_object:bytes = Passkey`
+/// (`td_api.tl:13158`); `bytes` travel as base64 in TDLib's JSON.
+pub fn add_login_passkey(extra: RequestId, registration: &Registration) -> String {
+    use base64::Engine;
+    let attestation =
+        base64::engine::general_purpose::STANDARD.encode(&registration.attestation_object);
+    request(
+        extra,
+        json!({
+            "@type": "addLoginPasskey",
+            "client_data": registration.client_data_json,
+            "attestation_object": attestation,
+        }),
+    )
+}
+
+/// Creation options fetched for a registration, reused while they are
+/// within their own timeout (tdesktop `_pendingRegistration`).
+#[derive(Debug, Clone)]
+pub struct PendingRegistration {
+    pub options: CreationOptions,
+    pub fetched_at: Instant,
+}
+
+impl PendingRegistration {
+    pub fn fresh(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.fetched_at)
+            < Duration::from_millis(u64::from(self.options.timeout_ms))
+    }
+}
+
 /// The account's passkeys as last fetched (tdesktop `Data::Passkeys`).
 #[derive(Debug, Clone, Default)]
 pub struct PasskeysState {
@@ -171,6 +218,18 @@ pub struct PasskeysState {
     /// The server lets the app show passkeys (`settings_display_passkeys`
     /// in the application config; off until it says so).
     pub display_allowed: bool,
+    /// `passkeys_account_passkeys_max`; `None` until the app config said.
+    pub max_passkeys: Option<usize>,
+    /// The options of the registration in progress (tdesktop keeps them
+    /// for their timeout and reuses them on the next try).
+    pub registration: Option<PendingRegistration>,
+    /// Options ready for a ceremony the UI has not started yet; the UI
+    /// takes them.
+    pub ceremony: Option<CreationOptions>,
+    /// `addLoginPasskey` is on its way.
+    pub adding: bool,
+    /// A passkey was just added; the UI takes it and closes the box.
+    pub added: bool,
 }
 
 impl PasskeysState {
@@ -244,9 +303,35 @@ impl PasskeysState {
         }
     }
 
-    /// Whether "Create Passkey" works (tdesktop `canRegister`).
+    /// Whether "Create Passkey" works (tdesktop `canRegister`: WebAuthn,
+    /// and fewer passkeys than `passkeys_account_passkeys_max`).
     pub fn can_register(&self) -> bool {
-        webauthn_supported()
+        webauthn_supported() && self.list.len() < self.max_passkeys.unwrap_or(DEFAULT_MAX_PASSKEYS)
+    }
+
+    /// The new passkey from `addLoginPasskey` joins the list (tdesktop
+    /// appends it) and the registration is over.
+    pub fn accept_added(&mut self, passkey: Passkey) {
+        self.list.retain(|p| p.id != passkey.id);
+        self.list.push(passkey);
+        self.registration = None;
+        self.adding = false;
+        self.added = true;
+        self.error = None;
+    }
+
+    /// The creation options arrived: keep them and start the ceremony.
+    /// `false` when they cannot be read (tdesktop then does nothing).
+    pub fn accept_parameters(&mut self, json: &str, now: Instant) -> bool {
+        let Some(options) = CreationOptions::parse(json) else {
+            return false;
+        };
+        self.registration = Some(PendingRegistration {
+            options: options.clone(),
+            fetched_at: now,
+        });
+        self.ceremony = Some(options);
+        true
     }
 }
 
@@ -303,19 +388,43 @@ pub fn delete_question(name: &str) -> (&'static str, Option<String>, String) {
     }
 }
 
-/// `settings_display_passkeys` from `getApplicationConfig`'s
-/// `jsonValueObject` (tdesktop `AppConfig::settingsDisplayPasskeys`, off
-/// unless the server says otherwise).
-pub fn display_allowed_from_config(config: &Value) -> bool {
+/// The passkey switches of the application config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PasskeysConfig {
+    /// `settings_display_passkeys` (tdesktop `settingsDisplayPasskeys`, off
+    /// unless the server says otherwise).
+    pub display: bool,
+    /// `passkeys_account_passkeys_max` (tdesktop default 10), when sent.
+    pub max: Option<usize>,
+}
+
+fn config_member<'a>(config: &'a Value, key: &str) -> Option<&'a Value> {
     config
         .get("members")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .find(|m| m.get("key").and_then(Value::as_str) == Some("settings_display_passkeys"))
+        .find(|m| m.get("key").and_then(Value::as_str) == Some(key))
         .and_then(|m| m.get("value"))
+}
+
+/// The passkey switches from `getApplicationConfig`'s `jsonValueObject`.
+pub fn config_from_app_config(config: &Value) -> PasskeysConfig {
+    let display = config_member(config, "settings_display_passkeys")
         .filter(|v| v.get("@type").and_then(Value::as_str) == Some("jsonValueBoolean"))
         .and_then(|v| v.get("value"))
         .and_then(Value::as_bool)
-        .unwrap_or(false)
+        .unwrap_or(false);
+    let max = config_member(config, "passkeys_account_passkeys_max")
+        .filter(|v| v.get("@type").and_then(Value::as_str) == Some("jsonValueNumber"))
+        .and_then(|v| v.get("value"))
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .map(|v| v as usize);
+    PasskeysConfig { display, max }
+}
+
+/// `settings_display_passkeys` alone.
+pub fn display_allowed_from_config(config: &Value) -> bool {
+    config_from_app_config(config).display
 }

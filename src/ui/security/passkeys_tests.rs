@@ -1,5 +1,5 @@
 //! Passkeys in the UI over the demo account: the list, deleting one through
-//! the confirmation, and the "Protect your account" box without WebAuthn
+//! the confirmation, and the "Protect your account" box
 //! (needs the `demo-capture` feature for gpui-kit's test support). Nothing
 //! reaches Telegram: the app has no connection.
 use crate::ui::app::QuillApp;
@@ -121,7 +121,7 @@ fn cancel_keeps_the_passkey(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn learn_more_shows_the_unsupported_box(cx: &mut TestAppContext) {
+fn learn_more_shows_the_box(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Passkeys));
@@ -129,8 +129,13 @@ fn learn_more_shows_the_unsupported_box(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
     vcx.update(|window, cx| {
         let create = window.find("passkeys-create");
-        assert_eq!(create.label(), Some("Unsupported"));
-        // Without WebAuthn the button does nothing.
+        let label = if quill::passkeys::webauthn_supported() {
+            "Create Passkey"
+        } else {
+            "Unsupported"
+        };
+        assert_eq!(create.label(), Some(label));
+        // Without a connection (or without WebAuthn) it starts nothing.
         window.click("passkeys-create", cx);
     });
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
@@ -165,7 +170,7 @@ fn the_privacy_row_shows_the_count_and_opens_the_list(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_privacy_row_hides_without_passkeys(cx: &mut TestAppContext) {
+fn the_privacy_row_without_passkeys_follows_webauthn(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Passkeys));
@@ -180,5 +185,7 @@ fn the_privacy_row_hides_without_passkeys(cx: &mut TestAppContext) {
         cx.notify();
     });
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Settings));
-    vcx.update(|window, _| assert!(window.try_find("setting-Passkeys").is_none()));
+    // Shown while a passkey can be created (tdesktop `canRegister`).
+    let shown = quill::passkeys::webauthn_supported();
+    vcx.update(|window, _| assert_eq!(window.try_find("setting-Passkeys").is_some(), shown));
 }

@@ -458,7 +458,7 @@ pub(crate) fn parse_groups_payload(
                 ton_usd_rate: crate::ton_wallet::fiat::ton_usd_rate_from_config(value),
                 starref_join,
                 starref_setup,
-                display_passkeys: crate::passkeys::display_allowed_from_config(value),
+                passkeys: crate::passkeys::config_from_app_config(value),
                 premium_purchase: crate::premium_hub::purchase::purchase_from_config(value),
                 fragment: crate::premium_hub::fragment::fragment_from_config(value),
             }))
