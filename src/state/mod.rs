@@ -74,6 +74,7 @@ mod member_list;
 mod ownership_types;
 mod paging;
 mod redraw;
+mod request_errors;
 mod request_purpose;
 mod request_rollback;
 mod requests;
@@ -165,6 +166,7 @@ pub use media_library::{MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions,
 pub use member_list::*;
 pub use ownership_types::*;
 pub use redraw::{RedrawNeed, redraw_need};
+pub(crate) use request_errors::*;
 pub use request_purpose::*;
 pub use request_rollback::*;
 pub use requests::*;

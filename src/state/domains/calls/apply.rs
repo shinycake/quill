@@ -143,6 +143,10 @@ impl Session {
                     }
                 }
             }
+            // Stream answers go to the driver's stream feeder before the
+            // reducer (`connect::group_calls::stream`); one that still
+            // lands here belongs to a feeder that is gone.
+            CallsPayload::GroupCallStreams { .. } | CallsPayload::Data { .. } => {}
             // Phase C2f: `inviteGroupCallParticipant` answer. A success
             // clears any earlier invite error; the three failure
             // variants surface honestly via `group_call_error` (shown

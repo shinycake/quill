@@ -58,6 +58,14 @@ pub enum ErrorClass {
     /// `COLLECTIBLE_NOT_FOUND`: the tapped username is not a collectible
     /// one (tdesktop then copies its link instead).
     CollectibleNotFound,
+    /// `GROUPCALL_JOIN_MISSING` / `GROUPCALL_FORBIDDEN`: a group call
+    /// request needs the call rejoined (tdesktop's `startRejoin`).
+    GroupCallRejoin,
+    /// `GROUPCALL_INVALID`: the call is gone; TDLib treats it as having
+    /// left the call (`GroupCallManager::on_group_call_left`).
+    GroupCallLeft,
+    /// `TIME_TOO_BIG`: a stream segment is not on the server yet.
+    StreamTimeTooBig,
     Other,
 }
 
@@ -517,6 +525,10 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         Some("Not enough rights to send animations to the chat" | "CHAT_SEND_GIFS_FORBIDDEN") => {
             Some(ErrorClass::GifsForbidden)
         }
+        // Stream segments: known server constants, safe to match.
+        Some("GROUPCALL_JOIN_MISSING" | "GROUPCALL_FORBIDDEN") => Some(ErrorClass::GroupCallRejoin),
+        Some("GROUPCALL_INVALID") => Some(ErrorClass::GroupCallLeft),
+        Some("TIME_TOO_BIG") => Some(ErrorClass::StreamTimeTooBig),
         _ => None,
     };
     let mut err = TdError::from_code(code);
@@ -556,6 +568,19 @@ mod tests {
             err.flood_line("too many requests — wait and try again"),
             "try again in 30 seconds"
         );
+    }
+
+    #[test]
+    fn parse_error_classifies_stream_segment_errors() {
+        for (message, class) in [
+            ("GROUPCALL_JOIN_MISSING", ErrorClass::GroupCallRejoin),
+            ("GROUPCALL_FORBIDDEN", ErrorClass::GroupCallRejoin),
+            ("GROUPCALL_INVALID", ErrorClass::GroupCallLeft),
+            ("TIME_TOO_BIG", ErrorClass::StreamTimeTooBig),
+        ] {
+            let value = serde_json::json!({"@type": "error", "code": 400, "message": message});
+            assert_eq!(parse_error(Some(&value)).class, class, "{message}");
+        }
     }
 
     #[test]

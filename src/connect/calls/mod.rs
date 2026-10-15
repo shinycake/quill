@@ -61,6 +61,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .push_back((call_id, state));
         }));
         self.install_remote_state_hooks(engine.as_mut());
+        self.install_stream_hooks(engine.as_mut());
         let video_frame_slots = self.video_frame_slots.clone();
         let group_video_frame_slots = self.group_video_frame_slots.clone();
         engine.set_video_frame_callback(Arc::new(move |call_id, frame| {

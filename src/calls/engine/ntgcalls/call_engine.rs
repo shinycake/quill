@@ -317,6 +317,13 @@ impl CallEngine for NtgcallsEngine {
                 ..GroupCallMedia::default()
             },
         );
+        // A fresh context has no mode until it connects: an RTC call after
+        // a stream session in the same chat must not route its video to
+        // the stream slot.
+        self.callback
+            .stream_chats
+            .lock_or_recover()
+            .remove(&chat_id);
         self.callback
             .group_chat_to_call
             .lock_or_recover()
@@ -363,13 +370,110 @@ impl CallEngine for NtgcallsEngine {
                 code: rc,
             });
         }
+        // ntgcalls picks the mode from the answer (`{"stream": true}` or
+        // `{"rtmp": true}`); stream-mode frames skip the ssrc lookup.
+        let mode = self.read_connection_mode(instance, chat_id);
+        {
+            let mut stream_chats = self.callback.stream_chats.lock_or_recover();
+            if mode.is_stream() {
+                stream_chats.insert(chat_id);
+            } else {
+                stream_chats.remove(&chat_id);
+            }
+        }
         let media = self
             .group_calls
             .get_mut(&group_call_id)
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         media.connected = true;
         media.camera_enabled = video_enabled;
+        media.mode = mode;
         self.issue_group_sources(group_call_id)
+    }
+
+    fn set_engine_event_callback(&mut self, callback: EngineEventCallback) {
+        set_hook(&self.callback.engine_event_hook, callback);
+    }
+
+    fn set_stream_frame_callback(&mut self, callback: StreamFrameCallback) {
+        set_hook(&self.callback.stream_frame_hook, callback);
+    }
+
+    fn group_call_mode(&self, chat_id: i64) -> Option<GroupCallMode> {
+        self.group_calls
+            .values()
+            .find(|media| media.chat_id == chat_id && media.connected)
+            .map(|media| media.mode)
+    }
+
+    fn set_stream_quality(&mut self, chat_id: i64, quality: StreamQuality) {
+        if let Some(media) = self
+            .group_calls
+            .values_mut()
+            .find(|media| media.chat_id == chat_id)
+        {
+            media.stream_quality = Some(quality);
+        }
+    }
+
+    fn stream_quality(&self, chat_id: i64) -> Option<StreamQuality> {
+        self.group_calls
+            .values()
+            .find(|media| media.chat_id == chat_id)
+            .and_then(|media| media.stream_quality)
+    }
+
+    fn send_broadcast_timestamp(
+        &mut self,
+        chat_id: i64,
+        timestamp_ms: i64,
+    ) -> Result<(), EngineError> {
+        let instance = self.instance.ok_or(EngineError::NullInstance)?;
+        // SAFETY: the instance is live; the call takes plain integers.
+        let rc = unsafe {
+            (self.api.ntg_send_broadcast_timestamp)(instance.as_ptr(), chat_id, timestamp_ms)
+        };
+        if rc == NTG_OK {
+            Ok(())
+        } else {
+            Err(EngineError::Engine {
+                op: "ntg_send_broadcast_timestamp",
+                code: rc,
+            })
+        }
+    }
+
+    fn send_broadcast_part(
+        &mut self,
+        chat_id: i64,
+        answer: &BroadcastPartAnswer,
+    ) -> Result<(), EngineError> {
+        let instance = self.instance.ok_or(EngineError::NullInstance)?;
+        let data = answer.native_data_ptr();
+        // SAFETY: the instance is live and `data` is null with length 0 or
+        // points to `answer.data` (dangling but non-null when empty, read
+        // for 0 bytes), which outlives this synchronous call (ntgcalls
+        // copies the bytes before returning).
+        let rc = unsafe {
+            (self.api.ntg_send_broadcast_part)(
+                instance.as_ptr(),
+                chat_id,
+                answer.segment_id,
+                answer.part_id,
+                answer.status.to_native(),
+                answer.quality_update,
+                data,
+                answer.native_data_len(),
+            )
+        };
+        if rc == NTG_OK {
+            Ok(())
+        } else {
+            Err(EngineError::Engine {
+                op: "ntg_send_broadcast_part",
+                code: rc,
+            })
+        }
     }
 
     fn sync_group_video(
@@ -629,16 +733,19 @@ impl CallEngine for NtgcallsEngine {
         self.callback.forget_group(media.chat_id);
         if let Some(instance) = self.instance {
             // Privacy: tear a live presentation down FIRST so screen
-            // capture stops before the call itself.
+            // capture stops before the call itself. A failure here must
+            // not skip `ntg_stop`: the chat's connection would stay, and
+            // the next offer for it (a rejoin) would fail as "already
+            // made". ntgcalls' `GroupCall::stop` stops the presentation
+            // as well.
             if media.screen_sharing || media.presentation_initialized {
                 // SAFETY: instance is live; `media.chat_id` is this group's chat.
                 let rc =
                     unsafe { (self.api.ntg_stop_presentation)(instance.as_ptr(), media.chat_id) };
                 if rc != NTG_OK {
-                    return Err(EngineError::Engine {
-                        op: "ntg_stop_presentation",
-                        code: rc,
-                    });
+                    eprintln!(
+                        "quill: ntg_stop_presentation for group call {group_call_id} failed ({rc}); stopping the call anyway"
+                    );
                 }
             }
             // SAFETY: instance is live; `media.chat_id` is this group's chat.

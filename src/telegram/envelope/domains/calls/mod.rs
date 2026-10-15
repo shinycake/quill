@@ -88,4 +88,14 @@ pub enum CallsPayload {
     /// Phase C2f: `inviteGroupCallParticipantResult*` (schema 1.8.67,
     /// lines 7216-7227) — the `inviteGroupCallParticipant` answer.
     InviteGroupCallParticipantResult(InviteGroupCallParticipantResult),
+    /// `groupCallStreams` (schema 1.8.68, line 7446) — the
+    /// `getGroupCallStreams` answer; consumed by the driver's stream
+    /// feeder, never by the reducer.
+    GroupCallStreams {
+        streams: Vec<crate::calls::engine::StreamChannel>,
+    },
+    /// `data` (line 10437) — a `getGroupCallStreamSegment` answer, still
+    /// base64; consumed by the driver's stream feeder. `None` when the
+    /// answer has no `data` string, which the feeder answers RESYNC_NEEDED.
+    Data { base64: Option<String> },
 }

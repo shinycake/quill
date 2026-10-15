@@ -2,18 +2,17 @@
 use super::*;
 use crate::locks::LockExt;
 use ntgcalls_sys::{
-    Loader, NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DESKTOP, NTG_MEDIA_SOURCE_DEVICE,
-    NTG_MEDIA_SOURCE_EXTERNAL, NTG_OK, NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK,
-    ntg_instance, ntg_media_description, ntg_media_devices, ntg_protocol, ntg_ssrc_group,
-    ntg_video_description,
+    Loader, NTG_CONNECTION_MODE_NONE, NTG_ERR_INVALID_PARAMS, NTG_MEDIA_SOURCE_DESKTOP,
+    NTG_MEDIA_SOURCE_DEVICE, NTG_MEDIA_SOURCE_EXTERNAL, NTG_OK, NTG_STREAM_MODE_CAPTURE,
+    NTG_STREAM_MODE_PLAYBACK, ntg_connection_mode, ntg_instance, ntg_media_description,
+    ntg_media_devices, ntg_protocol, ntg_ssrc_group, ntg_video_description,
 };
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::marker::PhantomData;
 use std::ptr::{NonNull, null_mut};
 use std::rc::Rc;
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 mod call_engine;
 
@@ -69,18 +68,7 @@ impl NtgcallsEngine {
             call_to_user: HashMap::new(),
             call_media: HashMap::new(),
             group_calls: HashMap::new(),
-            callback: Arc::new(CallbackShared {
-                user_to_call: Mutex::new(HashMap::new()),
-                hook: Mutex::new(None),
-                transport_hook: Mutex::new(None),
-                frame_hook: Mutex::new(None),
-                remote_video_hook: Mutex::new(None),
-                remote_screen_hook: Mutex::new(None),
-                remote_audio_hook: Mutex::new(None),
-                frame_seq: AtomicU64::new(0),
-                group_chat_to_call: Mutex::new(HashMap::new()),
-                group_video_ssrc_to_user: Mutex::new(HashMap::new()),
-            }),
+            callback: Arc::new(CallbackShared::new()),
             _driver_thread_only: PhantomData,
         })
     }
@@ -94,97 +82,101 @@ impl NtgcallsEngine {
         let instance = unsafe { (self.api.ntg_instance_create)() };
         let instance = NonNull::new(instance).ok_or(EngineError::NullInstance)?;
         let user_data = Arc::as_ptr(&self.callback).cast_mut().cast::<c_void>();
-        // SAFETY: `user_data` points to `self.callback`, which outlives the
-        // registered callback. Drop unregisters before releasing the Arc.
-        let rc = unsafe {
-            (self.api.ntg_on_signaling_data_callback)(
-                instance.as_ptr(),
-                Some(signaling_trampoline),
-                user_data,
-            )
-        };
-        if rc != NTG_OK {
-            // SAFETY: registration failed, so no callback can reference the
-            // engine; destroy the freshly-created instance immediately.
-            unsafe { (self.api.ntg_instance_destroy)(instance.as_ptr()) };
-            return Err(EngineError::Engine {
-                op: "ntg_on_signaling_data_callback",
-                code: rc,
-            });
-        }
-        // SAFETY: same `user_data` contract as the signaling callback above;
-        // the trampoline catches panics before returning to C.
-        let rc = unsafe {
-            (self.api.ntg_on_connection_change_callback)(
-                instance.as_ptr(),
-                Some(connection_trampoline),
-                user_data,
-            )
-        };
-        if rc != NTG_OK {
-            // SAFETY: `instance` is live and owned here; clearing the callback
-            // that was registered and then destroying it is the documented teardown.
+        if let Err(err) = self.register_callbacks(instance, user_data) {
+            // SAFETY: `instance` is live and owned here; clearing every
+            // callback (registered or not) and then destroying it is the
+            // documented teardown, so no callback can outlive this call.
             unsafe {
-                let _ =
-                    (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
+                self.clear_callbacks(instance);
                 (self.api.ntg_instance_destroy)(instance.as_ptr());
             }
-            return Err(EngineError::Engine {
-                op: "ntg_on_connection_change_callback",
-                code: rc,
-            });
-        }
-        // SAFETY: same `user_data` contract as the signaling callback above.
-        let rc = unsafe {
-            (self.api.ntg_on_frames_callback)(instance.as_ptr(), Some(frames_trampoline), user_data)
-        };
-        if rc != NTG_OK {
-            // SAFETY: `instance` is live and owned here; clear the callbacks
-            // registered so far, then destroy it.
-            unsafe {
-                let _ =
-                    (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
-                let _ = (self.api.ntg_on_connection_change_callback)(
-                    instance.as_ptr(),
-                    None,
-                    null_mut(),
-                );
-                (self.api.ntg_instance_destroy)(instance.as_ptr());
-            }
-            return Err(EngineError::Engine {
-                op: "ntg_on_frames_callback",
-                code: rc,
-            });
-        }
-        // SAFETY: same `user_data` contract as the signaling callback above.
-        let rc = unsafe {
-            (self.api.ntg_on_remote_source_change_callback)(
-                instance.as_ptr(),
-                Some(remote_source_trampoline),
-                user_data,
-            )
-        };
-        if rc != NTG_OK {
-            // SAFETY: `instance` is live and owned here; clear the callbacks
-            // registered so far, then destroy it.
-            unsafe {
-                let _ =
-                    (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
-                let _ = (self.api.ntg_on_connection_change_callback)(
-                    instance.as_ptr(),
-                    None,
-                    null_mut(),
-                );
-                let _ = (self.api.ntg_on_frames_callback)(instance.as_ptr(), None, null_mut());
-                (self.api.ntg_instance_destroy)(instance.as_ptr());
-            }
-            return Err(EngineError::Engine {
-                op: "ntg_on_remote_source_change_callback",
-                code: rc,
-            });
+            return Err(err);
         }
         self.instance = Some(instance);
         Ok(instance)
+    }
+
+    /// Registers every instance-wide callback. ntgcalls callbacks carry
+    /// the chat or user id, so each is registered once per instance, not
+    /// per call. Stops at the first failure.
+    fn register_callbacks(
+        &self,
+        instance: NonNull<ntg_instance>,
+        user_data: *mut c_void,
+    ) -> Result<(), EngineError> {
+        let check = |op: &'static str, rc: i32| {
+            if rc == NTG_OK {
+                Ok(())
+            } else {
+                Err(EngineError::Engine { op, code: rc })
+            }
+        };
+        let raw = instance.as_ptr();
+        // SAFETY: (all registrations below) `raw` is the live instance and
+        // `user_data` points to `self.callback`, which outlives every
+        // registered callback: Drop clears them before the Arc goes. Each
+        // trampoline catches panics before returning to C.
+        check("ntg_on_signaling_data_callback", unsafe {
+            (self.api.ntg_on_signaling_data_callback)(raw, Some(signaling_trampoline), user_data)
+        })?;
+        // SAFETY: as above.
+        check("ntg_on_connection_change_callback", unsafe {
+            (self.api.ntg_on_connection_change_callback)(
+                raw,
+                Some(connection_trampoline),
+                user_data,
+            )
+        })?;
+        // SAFETY: as above.
+        check("ntg_on_frames_callback", unsafe {
+            (self.api.ntg_on_frames_callback)(raw, Some(frames_trampoline), user_data)
+        })?;
+        // SAFETY: as above.
+        check("ntg_on_remote_source_change_callback", unsafe {
+            (self.api.ntg_on_remote_source_change_callback)(
+                raw,
+                Some(remote_source_trampoline),
+                user_data,
+            )
+        })?;
+        // SAFETY: as above. Stream mode: ntgcalls asks for the stream's
+        // current time (RTMP only) and for segment parts.
+        check("ntg_on_request_broadcast_timestamp_callback", unsafe {
+            (self.api.ntg_on_request_broadcast_timestamp_callback)(
+                raw,
+                Some(broadcast_timestamp_trampoline),
+                user_data,
+            )
+        })?;
+        // SAFETY: as above.
+        check("ntg_on_request_broadcast_part_callback", unsafe {
+            (self.api.ntg_on_request_broadcast_part_callback)(
+                raw,
+                Some(broadcast_part_trampoline),
+                user_data,
+            )
+        })
+    }
+
+    /// Clears every instance-wide callback so no native callback can fire
+    /// into `self.callback` afterwards. Results are ignored: clearing is
+    /// teardown.
+    ///
+    /// # Safety
+    ///
+    /// `instance` must be the live instance this engine created.
+    unsafe fn clear_callbacks(&self, instance: NonNull<ntg_instance>) {
+        let raw = instance.as_ptr();
+        // SAFETY: the caller guarantees `raw` is live; a null callback with
+        // null user data is ntgcalls' documented way to unregister.
+        unsafe {
+            let _ = (self.api.ntg_on_signaling_data_callback)(raw, None, null_mut());
+            let _ = (self.api.ntg_on_connection_change_callback)(raw, None, null_mut());
+            let _ = (self.api.ntg_on_frames_callback)(raw, None, null_mut());
+            let _ = (self.api.ntg_on_remote_source_change_callback)(raw, None, null_mut());
+            let _ = (self.api.ntg_on_request_broadcast_timestamp_callback)(raw, None, null_mut());
+            let _ = (self.api.ntg_on_request_broadcast_part_callback)(raw, None, null_mut());
+        }
     }
 
     fn user_id(&self, call_id: i32) -> Result<i64, EngineError> {
@@ -233,6 +225,21 @@ impl NtgcallsEngine {
         }
     }
 
+    /// The mode ntgcalls chose for a connected group call. A failed query
+    /// is logged and read as RTC, the mode every call had before streams.
+    fn read_connection_mode(&self, instance: NonNull<ntg_instance>, chat_id: i64) -> GroupCallMode {
+        let mut raw: ntg_connection_mode = NTG_CONNECTION_MODE_NONE;
+        // SAFETY: the instance is live and `raw` is a valid C output for
+        // this synchronous call.
+        let rc =
+            unsafe { (self.api.ntg_get_connection_mode)(instance.as_ptr(), chat_id, &mut raw) };
+        if rc != NTG_OK {
+            eprintln!("quill: ntg_get_connection_mode failed for chat {chat_id}: {rc}");
+            return GroupCallMode::Rtc;
+        }
+        GroupCallMode::from_native(raw).unwrap_or(GroupCallMode::Rtc)
+    }
+
     fn issue_group_sources(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let media = self
             .group_calls
@@ -267,30 +274,55 @@ impl NtgcallsEngine {
             },
             screen: null_mut(),
         };
-        // SAFETY: `instance` is live and the descriptions are stack-local
-        // for the duration of this synchronous C call.
-        let rc = unsafe {
-            (self.api.ntg_set_stream_sources)(
-                instance.as_ptr(),
-                media.chat_id,
-                NTG_STREAM_MODE_CAPTURE,
-                capture,
-            )
-        };
-        if rc != NTG_OK {
-            return Err(EngineError::Engine {
-                op: "ntg_set_stream_sources",
-                code: rc,
-            });
+        // Both stream modes are receive-only, so no capture source (and
+        // no microphone) is opened for a listener. RTMP would also throw
+        // `RTMPStreamingUnsupported` for one (`group_call.cpp`,
+        // `set_stream_sources`). An MTProto stream carries nothing
+        // outgoing: ntgcalls only sends media again after a new connect
+        // with an RTC answer, which issues capture then.
+        if !media.mode.is_stream() {
+            // SAFETY: `instance` is live and the descriptions are
+            // stack-local for the duration of this synchronous C call.
+            let rc = unsafe {
+                (self.api.ntg_set_stream_sources)(
+                    instance.as_ptr(),
+                    media.chat_id,
+                    NTG_STREAM_MODE_CAPTURE,
+                    capture,
+                )
+            };
+            if rc != NTG_OK {
+                return Err(EngineError::Engine {
+                    op: "ntg_set_stream_sources",
+                    code: rc,
+                });
+            }
         }
         // Everyone else's voices: the call mixes them into its playback
         // "microphone" receiver, which names the output device.
         let mut speaker_audio = audio_description(speaker.as_ref());
+        // A stream's pictures reach the frames callback only through
+        // external playback writers (`stream_manager.cpp`,
+        // `optimize_sources` gates `enable_video_incoming` on them).
+        let mut stream_camera = ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_EXTERNAL,
+            ..Self::screen_video_description(None)
+        };
+        let mut stream_screen = stream_camera;
+        let is_stream = media.mode.is_stream();
         let playback = ntg_media_description {
             microphone: &mut speaker_audio,
             speaker: null_mut(),
-            camera: null_mut(),
-            screen: null_mut(),
+            camera: if is_stream {
+                &mut stream_camera
+            } else {
+                null_mut()
+            },
+            screen: if is_stream {
+                &mut stream_screen
+            } else {
+                null_mut()
+            },
         };
         // SAFETY: as above.
         let rc = unsafe {
@@ -555,21 +587,11 @@ impl Drop for NtgcallsEngine {
         let Some(instance) = self.instance.take() else {
             return;
         };
-        // SAFETY: unregister the callback before destroying the instance, so
-        // no new native callbacks can fire after teardown begins; the Arc
-        // field keeps `CallbackShared` alive until the struct is fully
+        // SAFETY: unregister the callbacks before destroying the instance,
+        // so no new native callbacks can fire after teardown begins; the
+        // Arc field keeps `CallbackShared` alive until the struct is fully
         // dropped.
-        unsafe {
-            let _ = (self.api.ntg_on_signaling_data_callback)(instance.as_ptr(), None, null_mut());
-            let _ =
-                (self.api.ntg_on_connection_change_callback)(instance.as_ptr(), None, null_mut());
-            let _ = (self.api.ntg_on_frames_callback)(instance.as_ptr(), None, null_mut());
-            let _ = (self.api.ntg_on_remote_source_change_callback)(
-                instance.as_ptr(),
-                None,
-                null_mut(),
-            );
-        }
+        unsafe { self.clear_callbacks(instance) };
         self.call_to_user.clear();
         self.callback.user_to_call.lock_or_recover().clear();
         // SAFETY: callback registration is gone and this is the matching

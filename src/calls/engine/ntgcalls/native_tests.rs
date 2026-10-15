@@ -84,3 +84,101 @@ fn native_default_audio_sources_before_connect() {
     }
     engine.hangup(1).expect("Teardown");
 }
+
+/// Stream mode on the vendored binary, offline: `{"rtmp": true}` is the
+/// join answer ntgcalls reads as an RTMP stream (`response_payload.cpp`).
+/// The connect must report `Rtmp`, issue playback-only sources (no capture
+/// device opens) and ask for the stream's time through the broadcast
+/// callback. Nothing reaches Telegram: segments would come from TDLib,
+/// which this test never calls.
+#[test]
+fn native_rtmp_connect_reports_stream_mode() {
+    if std::env::var_os("QUILL_VERIFY_NATIVE_CALLS").is_none() {
+        return;
+    }
+    let mut engine = NtgcallsEngine::load().expect("Native engine");
+    let (events_tx, events_rx) = std::sync::mpsc::channel();
+    engine.set_engine_event_callback(Arc::new(move |event| {
+        let _ = events_tx.send(event);
+    }));
+    let chat_id = -100_123;
+    engine
+        .create_group_call(7, chat_id)
+        .expect("Native group offer");
+    let result = engine.connect_group_call(7, r#"{"rtmp":true}"#, false);
+    eprintln!("rtmp connect: {result:?}");
+    assert_eq!(engine.group_call_mode(chat_id), Some(GroupCallMode::Rtmp));
+    result.expect("RTMP connect with playback-only sources");
+    let event = events_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("A broadcast timestamp request");
+    assert_eq!(
+        event,
+        EngineEvent::BroadcastTimestampRequested { chat_id },
+        "RTMP asks for the stream's current time first"
+    );
+    // "No stream yet": ntgcalls asks again a second later on its own.
+    engine
+        .send_broadcast_timestamp(chat_id, 0)
+        .expect("Timestamp answer");
+    let again = events_rx.recv_timeout(std::time::Duration::from_secs(5));
+    eprintln!("after a 0 answer: {again:?}");
+    assert_eq!(
+        again.ok(),
+        Some(EngineEvent::BroadcastTimestampRequested { chat_id })
+    );
+    engine.leave_group_call(7).expect("Teardown");
+}
+
+/// MTProto stream mode offline: connects without any capture source (no
+/// microphone for a listener), asks for parts on its own (no timestamp
+/// request), and keeps asking for parts after a NOT_READY answer.
+#[test]
+fn native_stream_connect_needs_no_capture_and_asks_for_parts() {
+    if std::env::var_os("QUILL_VERIFY_NATIVE_CALLS").is_none() {
+        return;
+    }
+    let mut engine = NtgcallsEngine::load().expect("Native engine");
+    let (events_tx, events_rx) = std::sync::mpsc::channel();
+    engine.set_engine_event_callback(Arc::new(move |event| {
+        let _ = events_tx.send(event);
+    }));
+    let chat_id = -100_124;
+    engine
+        .create_group_call(8, chat_id)
+        .expect("Native group offer");
+    let result = engine.connect_group_call(8, r#"{"stream":true}"#, false);
+    eprintln!("stream connect: {result:?}");
+    result.expect("Stream connect with playback-only sources");
+    assert_eq!(engine.group_call_mode(chat_id), Some(GroupCallMode::Stream));
+    let event = events_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("A broadcast part request");
+    eprintln!("first stream event: {event:?}");
+    let request = match event {
+        EngineEvent::BroadcastPartRequested { request, .. } => Some(request),
+        EngineEvent::BroadcastTimestampRequested { .. } => None,
+    }
+    .expect("An MTProto stream asks for parts, not the time");
+    assert_eq!(request.channel_id, 0, "the audio part comes first");
+    assert_eq!(request.quality, None);
+    engine
+        .send_broadcast_part(
+            chat_id,
+            &BroadcastPartAnswer {
+                segment_id: request.segment_id,
+                part_id: request.part_id,
+                status: BroadcastPartStatus::NotReady,
+                quality_update: false,
+                data: Vec::new(),
+            },
+        )
+        .expect("Part answer");
+    let again = events_rx.recv_timeout(std::time::Duration::from_secs(5));
+    eprintln!("after NOT_READY: {again:?}");
+    assert!(matches!(
+        again,
+        Ok(EngineEvent::BroadcastPartRequested { .. })
+    ));
+    engine.leave_group_call(8).expect("Teardown");
+}

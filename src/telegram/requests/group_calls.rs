@@ -208,6 +208,39 @@ pub fn get_group_call(extra: RequestId, group_call_id: i32) -> String {
     .to_string()
 }
 
+/// Stream mode: `getGroupCallStreams group_call_id:int32 =
+/// GroupCallStreams` (`schema/td_api.tl:14858`).
+pub fn get_group_call_streams(extra: RequestId, group_call_id: i32) -> String {
+    json!({
+        "@type": "getGroupCallStreams",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+    })
+    .to_string()
+}
+
+/// Stream mode: `getGroupCallStreamSegment group_call_id:int32
+/// time_offset:int53 scale:int32 channel_id:int32
+/// video_quality:GroupCallVideoQuality = Data` (`schema/td_api.tl:14866`).
+/// A `None` quality is sent as null ("the worst available quality").
+pub fn get_group_call_stream_segment(
+    extra: RequestId,
+    fetch: &crate::calls::engine::SegmentFetch,
+) -> String {
+    json!({
+        "@type": "getGroupCallStreamSegment",
+        "@extra": extra.as_extra(),
+        "group_call_id": fetch.group_call_id,
+        "time_offset": fetch.time_offset,
+        "scale": fetch.scale,
+        "channel_id": fetch.channel_id,
+        "video_quality": fetch
+            .quality
+            .map(|quality| json!({"@type": quality.td_type()})),
+    })
+    .to_string()
+}
+
 /// Phase C3a: `getGroupCallParticipants` (TDLib 1.8.67,
 /// `schema/td_api.tl:14449`):
 /// `getGroupCallParticipants input_group_call:InputGroupCall

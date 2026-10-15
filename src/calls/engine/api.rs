@@ -149,6 +149,61 @@ pub trait CallEngine {
         Ok(())
     }
 
+    /// Stream mode: engine -> app; register the hook receiving ntgcalls'
+    /// broadcast timestamp and part requests. The hook runs on an ntgcalls
+    /// thread and must only queue the event.
+    fn set_engine_event_callback(&mut self, callback: EngineEventCallback) {
+        let _ = callback;
+    }
+
+    /// Stream mode: engine -> app; register the hook receiving the picture
+    /// of a stream-mode call, keyed by chat id.
+    fn set_stream_frame_callback(&mut self, callback: StreamFrameCallback) {
+        let _ = callback;
+    }
+
+    /// How the connected group call in `chat_id` carries media, read with
+    /// `ntg_get_connection_mode` after `ntg_connect`. `None` when no
+    /// connected call uses that chat.
+    fn group_call_mode(&self, chat_id: i64) -> Option<GroupCallMode> {
+        let _ = chat_id;
+        None
+    }
+
+    /// Stream mode: the quality the stream tile needs (from its size). The
+    /// connect side reads it back with `stream_quality` for the next part
+    /// request; ntgcalls asks for quality-update parts itself.
+    fn set_stream_quality(&mut self, chat_id: i64, quality: StreamQuality) {
+        let _ = (chat_id, quality);
+    }
+
+    /// The last quality set with `set_stream_quality`.
+    fn stream_quality(&self, chat_id: i64) -> Option<StreamQuality> {
+        let _ = chat_id;
+        None
+    }
+
+    /// Stream mode: answer a timestamp request
+    /// (`ntg_send_broadcast_timestamp`); 0 means "no stream yet".
+    fn send_broadcast_timestamp(
+        &mut self,
+        chat_id: i64,
+        timestamp_ms: i64,
+    ) -> Result<(), EngineError> {
+        let _ = (chat_id, timestamp_ms);
+        Err(EngineError::Unavailable)
+    }
+
+    /// Stream mode: answer a part request (`ntg_send_broadcast_part`).
+    fn send_broadcast_part(
+        &mut self,
+        chat_id: i64,
+        answer: &BroadcastPartAnswer,
+    ) -> Result<(), EngineError> {
+        let _ = (chat_id, answer);
+        Err(EngineError::Unavailable)
+    }
+
     /// Phase C2g: app -> engine; tear down the group transport
     /// (`ntg_stop` on the chat id). Unknown group call ids succeed.
     fn leave_group_call(&mut self, group_call_id: i32) -> Result<(), EngineError>;
