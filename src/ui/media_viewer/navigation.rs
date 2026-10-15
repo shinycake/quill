@@ -200,7 +200,6 @@ impl QuillApp {
         self.viewer.rotated = None;
         self.viewer.hdr.reset();
         self.playback.error = None;
-        self.viewer.extra.oriented_frame = None;
         self.viewer.extra.share_at = None;
         if let Some(item) = self.viewer.state.current()
             && let Some(turns) = self

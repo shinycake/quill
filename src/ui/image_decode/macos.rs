@@ -11,8 +11,7 @@
 
 use super::{DecodeError, DecodeSize, area_allowed, unpremultiply};
 use objc2_core_foundation::{
-    CFBoolean, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType, CGPoint, CGRect,
-    CGSize,
+    CFBoolean, CFData, CFDictionary, CFNumber, CFString, CFType, CGPoint, CGRect, CGSize,
 };
 use objc2_core_graphics::{
     CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
@@ -82,7 +81,7 @@ fn pixel_count(properties: &CFDictionary<CFString, CFType>, key: &CFString) -> u
 
 /// Draw `image` into an 8-bit sRGB RGBA bitmap (ColorSync converts from the
 /// image's colour space) and return its straight-alpha pixels.
-fn draw_srgb(image: &CFRetained<CGImage>) -> Result<image::RgbaImage, DecodeError> {
+pub(crate) fn draw_srgb(image: &CGImage) -> Result<image::RgbaImage, DecodeError> {
     let width = CGImage::width(Some(image));
     let height = CGImage::height(Some(image));
     let (Ok(w32), Ok(h32)) = (u32::try_from(width), u32::try_from(height)) else {

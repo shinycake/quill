@@ -83,6 +83,21 @@ The package is a flat directory: `quill.exe` plus the DLLs beside it. Everything
   `QUILL_IDLE_FRAMES=0` to turn that off (upstream behavior: a frame every
   vblank) and report the case. Wayland and macOS do not read it.
 
+## Video diagnostics
+
+- `QUILL_TRACE_VIDEO=1` prints one CSV line to stderr per picture pull of
+  every playing video:
+  `VT,<player_id>,<wall_us>,<item_ms>,<new 0/1>,<display_ms>,<rate>`.
+  `wall_us` counts from the first traced pull, `item_ms` is the clip time
+  asked for (the moment the frame will be on screen), `new` says whether a
+  new picture came, `display_ms` is that picture's own time (`-1000` when
+  none) and `rate` is the playback rate (`0` while not playing). The gaps
+  between `new=1` lines, in display vsyncs, show the pacing; the analysis
+  script and how to run a measurement are in
+  `docs/decisions/video-player-core.md`.
+- `QUILL_VIDEO_BACKEND=ffmpeg` (macOS, development) plays through the
+  bundled FFmpeg shim instead of AVPlayer, the path Linux and Windows use.
+
 ## Native TDLib (optional)
 
 Ordinary `cargo test` / `cargo run` do **not** fetch or execute tdjson. To build the pinned runtime:

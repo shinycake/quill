@@ -133,14 +133,6 @@ impl FfmpegVideo {
         }
     }
 
-    pub(super) fn set_rate(&mut self, rate: f32) {
-        self.rate = f64::from(rate);
-        self.player.set_rate(self.rate);
-        if let Some(sound) = &self.sound {
-            sound.set_speed(self.rate);
-        }
-    }
-
     pub(super) fn position_secs(&self) -> f64 {
         self.player.position()
     }

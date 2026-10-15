@@ -46,6 +46,10 @@ pub(super) enum SliceKind {
     /// in its place: typing and the caret's blink redraw only this, not
     /// the history above it.
     Composer,
+    /// The media viewer's panel (top bar, media box, controls): the
+    /// playing picture is drawn by a layer above it
+    /// (`media_viewer::layer`), so a new video frame replays the panel.
+    Viewer,
 }
 
 pub(super) struct AppSlice {
@@ -67,6 +71,8 @@ pub(super) struct Slices {
     conversation: Option<SliceParts>,
     /// The composer slice, below the conversation slice.
     composer: Option<Entity<AppSlice>>,
+    /// The media viewer's panel, while the viewer is open.
+    viewer: Option<Entity<AppSlice>>,
     /// The composer's height as laid out last time: a cached slice's
     /// box is sized before its content renders, so the slot takes the
     /// measured height (a change redraws the slot next frame).
@@ -134,6 +140,10 @@ impl QuillApp {
             app: app.clone(),
             kind: SliceKind::Composer,
         }));
+        self.slices.viewer = Some(cx.new(|_| AppSlice {
+            app: app.clone(),
+            kind: SliceKind::Viewer,
+        }));
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
@@ -150,6 +160,7 @@ impl QuillApp {
             .chain(&self.slices.conversation)
             .map(|parts| parts.slice.entity_id())
             .chain(self.slices.composer.iter().map(Entity::entity_id))
+            .chain(self.slices.viewer.iter().map(Entity::entity_id))
             .collect();
         let app: &mut App = cx;
         for id in ids {
@@ -362,17 +373,37 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// The media viewer's panel as a cached slice filling the overlay
+    /// (`None` before the slices exist).
+    pub(super) fn viewer_slot(&self) -> Option<AnyElement> {
+        let slice = self.slices.viewer.as_ref()?;
+        super::image_budget::slice_shown(slice.entity_id());
+        Some(embed_slice(slice, full(), self.slices.a11y_active.get()))
+    }
+
     fn slice_layer(&self, kind: SliceKind) -> Option<Layer> {
         match kind {
             SliceKind::Sidebar => self.slices.sidebar.as_ref(),
             SliceKind::Conversation => self.slices.conversation.as_ref(),
-            SliceKind::Composer => None,
+            SliceKind::Composer | SliceKind::Viewer => None,
         }
         .map(|parts| parts.layer.clone())
     }
 
-    fn render_slice(&mut self, kind: SliceKind, cx: &mut Context<Self>) -> AnyElement {
+    fn render_slice(
+        &mut self,
+        kind: SliceKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         match kind {
+            SliceKind::Viewer => {
+                if self.viewer.state.is_open() && self.viewer.pip_window.is_none() {
+                    self.media_viewer_panel(true, window, cx)
+                } else {
+                    Empty.into_any_element()
+                }
+            }
             SliceKind::Sidebar => {
                 let auth_state = self.current_auth();
                 let auth = quill::auth::view_for(&auth_state);
@@ -436,13 +467,14 @@ fn embed_slice(slice: &Entity<AppSlice>, style: StyleRefinement, a11y_active: bo
 }
 
 impl Render for AppSlice {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let id = cx.entity_id();
         let kind = self.kind;
         super::frame_clock::trace_slice_render(match kind {
             SliceKind::Sidebar => "sidebar",
             SliceKind::Conversation => "conversation",
             SliceKind::Composer => "composer",
+            SliceKind::Viewer => "viewer",
         });
         let Some(app) = self.app.upgrade() else {
             return Empty.into_any_element();
@@ -452,8 +484,9 @@ impl Render for AppSlice {
             let scope = app.slices.scope.clone();
             let layer = app.slice_layer(kind);
             let outer = scope.replace(Some(id));
-            let child =
-                super::anim_layer::with_layer(layer.as_ref(), || app.render_slice(kind, cx));
+            let child = super::anim_layer::with_layer(layer.as_ref(), || {
+                app.render_slice(kind, window, cx)
+            });
             scope.set(outer);
             SliceScope {
                 id,

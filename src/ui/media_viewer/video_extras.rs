@@ -5,30 +5,6 @@
 use super::*;
 use quill::media_viewer::{VideoQualityOption, current_quality};
 
-/// A decoded frame turned to the viewer's orientation, cached for the
-/// source frame it was made from.
-pub(in crate::ui) struct OrientedFrame {
-    source: usize,
-    code: u8,
-    image: Arc<RenderImage>,
-}
-
-/// Turn a BGRA/RGBA `RenderImage` frame to `orientation`. Channel order
-/// does not matter: pixels move as four-byte units.
-fn orient_render_image(
-    frame: &RenderImage,
-    orientation: ViewerOrientation,
-) -> Option<Arc<RenderImage>> {
-    let size = frame.size(0);
-    let (width, height) = (size.width.0 as u32, size.height.0 as u32);
-    let bytes = frame.as_bytes(0)?;
-    let (pixels, width, height) = orient_rgba(bytes, width, height, orientation);
-    let image = image::RgbaImage::from_raw(width, height, pixels)?;
-    Some(Arc::new(RenderImage::new(SmallVec::from_buf([
-        image::Frame::new(image),
-    ]))))
-}
-
 /// Remember a video's turns for this run (tdesktop keeps them per document);
 /// no turns forgets the entry.
 pub(super) fn store_turns(map: &mut HashMap<(i64, i64), u8>, key: (i64, i64), turns: u8) {
@@ -45,13 +21,13 @@ pub(super) fn share_position_secs(elapsed: f64) -> i32 {
 }
 
 impl QuillApp {
-    /// Rotate works on the system player (its frames are turned in
-    /// `native_video_rotate`) and on the decoded frames.
+    /// Rotate works on the player's pictures (turned in
+    /// `native_video_rotate`).
     pub(in crate::ui) fn viewer_video_rotatable(&self) -> bool {
-        self.viewer.state.current().is_some_and(|item| {
-            item.kind.is_playable()
-                && (self.viewer.native.is_some() || !self.viewer.video_frames.is_empty())
-        })
+        self.viewer
+            .state
+            .current()
+            .is_some_and(|item| item.kind.is_playable() && self.viewer.player.is_some())
     }
 
     /// "Rotate": a quarter turn of the playing video (tdesktop turns by
@@ -63,7 +39,6 @@ impl QuillApp {
             return;
         }
         self.viewer.orientation.rotate_cw();
-        self.viewer.extra.oriented_frame = None;
         if let Some(item) = self.viewer.state.current() {
             store_turns(
                 &mut self.viewer.extra.rotations,
@@ -74,37 +49,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The frame on screen, turned to the viewer's orientation.
-    pub(in crate::ui) fn viewer_oriented_frame(&mut self) -> Option<Arc<RenderImage>> {
-        let frame = self.viewer_render_frame()?;
-        let orientation = self.viewer.orientation;
-        if orientation.is_identity() {
-            return Some(frame);
-        }
-        let source = Arc::as_ptr(&frame) as usize;
-        let code = orientation.code();
-        if let Some(cached) = &self.viewer.extra.oriented_frame
-            && cached.source == source
-            && cached.code == code
-        {
-            return Some(cached.image.clone());
-        }
-        let image = orient_render_image(&frame, orientation)?;
-        self.viewer.extra.oriented_frame = Some(OrientedFrame {
-            source,
-            code,
-            image: image.clone(),
-        });
-        Some(image)
+    /// The frame on screen (already turned to the viewer's orientation),
+    /// when it is a decoded image; a GPU surface can't be read back.
+    pub(in crate::ui) fn viewer_oriented_frame(&self) -> Option<Arc<RenderImage>> {
+        self.viewer.player.as_ref()?.current_picture()?.image()
     }
 
     /// The playback position of the playing video, in whole seconds.
     pub(in crate::ui) fn viewer_share_position(&self) -> i32 {
         share_position_secs(
-            self.viewer
-                .clock
-                .as_ref()
-                .map_or(0.0, |clock| clock.elapsed_secs()),
+            self.viewer_transport()
+                .map_or(0.0, |transport| transport.position),
         )
     }
 
@@ -134,12 +89,7 @@ impl QuillApp {
         if self.viewer_is_timed() || self.refuse_protected_copy(chat_id, cx) {
             return;
         }
-        if self
-            .viewer
-            .clock
-            .as_ref()
-            .is_some_and(|clock| clock.is_playing())
-        {
+        if self.viewer_video_playing() {
             self.pause_viewer_video(cx);
         }
         self.close_media_viewer(cx);
@@ -191,7 +141,7 @@ impl QuillApp {
     /// from where it was when the file to play changes.
     pub(in crate::ui) fn set_viewer_video_quality(&mut self, height: u32, cx: &mut Context<Self>) {
         self.set_media_pref(|prefs| prefs.video_quality = height, cx);
-        let elapsed = self.viewer.clock.as_ref().map(|clock| clock.elapsed_secs());
+        let elapsed = self.viewer_transport().map(|transport| transport.position);
         if !self.viewer.state.apply_video_quality(height) {
             return;
         }
@@ -279,10 +229,8 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{HashMap, orient_render_image, share_position_secs, store_turns};
-    use gpui_kit::RenderImage;
+    use super::{HashMap, share_position_secs, store_turns};
     use quill::media_viewer::ViewerOrientation;
-    use smallvec::SmallVec;
 
     #[test]
     fn turns_are_remembered_per_video_and_forgotten_at_zero() {
@@ -314,18 +262,5 @@ mod tests {
         orientation.rotate_cw();
         orientation.rotate_cw();
         assert!(orientation.is_identity());
-    }
-
-    #[test]
-    fn a_turned_frame_swaps_its_axes() {
-        let mut orientation = ViewerOrientation::default();
-        orientation.rotate_cw();
-        let source = image::RgbaImage::from_raw(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
-        let frame = RenderImage::new(SmallVec::from_buf([image::Frame::new(source)]));
-        let turned = orient_render_image(&frame, orientation).unwrap();
-        let size = turned.size(0);
-        assert_eq!((size.width.0, size.height.0), (1, 2));
-        // Clockwise: the left pixel ends on top.
-        assert_eq!(turned.as_bytes(0).unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

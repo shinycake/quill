@@ -199,15 +199,6 @@ impl NativeVideo {
         }
     }
 
-    /// Playback speed while playing (1.0 = normal).
-    pub(super) fn set_rate(&mut self, rate: f32) {
-        match &mut self.0 {
-            #[cfg(target_os = "macos")]
-            Backend::AvPlayer(v) => v.set_rate(rate),
-            Backend::Ffmpeg(v) => v.set_rate(rate),
-        }
-    }
-
     pub(super) fn position_secs(&self) -> f64 {
         match &self.0 {
             #[cfg(target_os = "macos")]
@@ -232,11 +223,6 @@ impl NativeVideo {
             Backend::AvPlayer(v) => v.error(),
             Backend::Ffmpeg(v) => v.error(),
         }
-    }
-
-    /// Show the picture turned by `turns` clockwise quarter turns.
-    pub(super) fn set_rotation(&mut self, turns: u8) {
-        self.set_orientation(turns, false);
     }
 
     /// Show the picture turned by `turns` clockwise quarter turns, then
@@ -296,6 +282,8 @@ mod avplayer {
         turns: u8,
         mirrored: bool,
         turned: Option<GpuiPixelBuffer>,
+        /// `QUILL_TRACE_VIDEO`'s id for this player.
+        trace_id: u64,
     }
 
     impl AvPlayerVideo {
@@ -330,6 +318,7 @@ mod avplayer {
                     turns: 0,
                     mirrored: false,
                     turned: None,
+                    trace_id: super::super::video_player::next_player_id(),
                 })
             }
         }
@@ -372,13 +361,6 @@ mod avplayer {
             unsafe { self.player.setVolume(volume.clamp(0.0, 1.0)) };
         }
 
-        pub(super) fn set_rate(&mut self, rate: f32) {
-            if self.playing {
-                // SAFETY: as above.
-                unsafe { self.player.setRate(rate) };
-            }
-        }
-
         pub(super) fn position_secs(&self) -> f64 {
             // SAFETY: reading the clock of a live player.
             let secs = unsafe { self.player.currentTime().seconds() };
@@ -418,17 +400,39 @@ mod avplayer {
 
         pub(super) fn frame(&mut self) -> Option<GpuiPixelBuffer> {
             // SAFETY: the copy returns a +1 CVPixelBuffer that ownership moves
-            // into the core-video wrapper GPUI draws (`wrap_under_create_rule`).
+            // into the core-video wrapper GPUI draws (`wrap_under_create_rule`);
+            // `display` outlives the copy that writes it.
             unsafe {
                 let now = self.item.currentTime();
+                let mut display = CMTime::with_seconds(0.0, SEEK_TIMESCALE);
+                let mut fresh = false;
                 if self.output.hasNewPixelBufferForItemTime(now)
                     && let Some(buffer) = self
                         .output
-                        .copyPixelBufferForItemTime_itemTimeForDisplay(now, std::ptr::null_mut())
+                        .copyPixelBufferForItemTime_itemTimeForDisplay(now, &mut display)
                 {
                     let raw = Retained::into_raw(buffer);
                     self.frame = Some(core_foundation_wrap(raw.cast()));
                     self.turned = None;
+                    fresh = true;
+                }
+                // `QUILL_TRACE_VIDEO=1`: the same pull trace as the viewer's
+                // player (`video_player::trace_line`).
+                if super::super::video_player::trace_video() {
+                    let rate = if self.playing {
+                        f64::from(self.player.rate())
+                    } else {
+                        0.0
+                    };
+                    let line = super::super::video_player::trace_line(
+                        self.trace_id,
+                        std::time::Instant::now(),
+                        now.seconds(),
+                        fresh,
+                        fresh.then(|| display.seconds()),
+                        rate,
+                    );
+                    eprintln!("{line}");
                 }
             }
             if self.turns != 0 || self.mirrored {

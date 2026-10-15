@@ -82,7 +82,7 @@ impl WindowSlot {
             composer_ui: ComposerUi::new(Vec::new()),
             message_ui: MessageUi::new(window, cx),
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
-            viewer: ViewerUi::new(&app.playback.audio.output()),
+            viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
             session: SessionView::of_chat(chat_id),
