@@ -1,2 +1,0 @@
-# Grams withdrawal (Collect) via Fragment; with #818, #819 and #824 the Fragment/TON flows are complete (docs/decisions/grams-balance.md)
-parity:premium-fragment-ton
