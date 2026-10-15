@@ -246,6 +246,7 @@ impl Session {
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),
             PaymentsPayload::TonWallet(payload) => self.apply_ton_wallet(payload, pending),
             PaymentsPayload::Grams(payload) => self.apply_grams(payload, pending),
+            PaymentsPayload::GiftValue(payload) => self.apply_gift_value(payload, pending),
             PaymentsPayload::Earn(payload) => self.apply_earn(payload, pending),
             PaymentsPayload::SuggestedPost(payload) => self.apply_suggested_post(payload),
             PaymentsPayload::GiftMarket(payload) => self.apply_gift_market(payload, pending),

@@ -55,6 +55,7 @@ impl Session {
                     });
                 }
             }
+            Some(RequestPurpose::GetGiftValueInfo) => self.apply_gift_value_error(err, pending),
             Some(RequestPurpose::CheckPremiumGiftCode | RequestPurpose::ApplyPremiumGiftCode) => {
                 self.apply_gift_code_error(err, pending);
             }

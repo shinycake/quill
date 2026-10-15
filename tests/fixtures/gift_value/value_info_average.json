@@ -1,0 +1,18 @@
+{
+  "@type": "upgradedGiftValueInfo",
+  "currency": "USD",
+  "value": 214900,
+  "is_value_average": true,
+  "initial_sale_date": 1735819200,
+  "initial_sale_star_count": 500,
+  "initial_sale_price": 750,
+  "last_sale_date": 0,
+  "last_sale_price": 0,
+  "is_last_sale_on_fragment": false,
+  "minimum_price": 182300,
+  "average_sale_price": 214900,
+  "telegram_listed_gift_count": 1,
+  "fragment_listed_gift_count": 0,
+  "fragment_url": "",
+  "@extra": "42"
+}

@@ -5,6 +5,7 @@ mod error;
 mod gift_code;
 mod gift_manage;
 mod gift_market;
+mod gift_value;
 mod giveaway;
 mod grams;
 mod limit;

@@ -780,6 +780,7 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
 }
 
 pub mod fragment;
+pub mod gift_value;
 pub mod promo;
 pub mod purchase;
 pub mod ton;
@@ -912,6 +913,8 @@ pub struct PremiumHub {
     pub limit_box: Option<(crate::premium_limits::PremiumLimitKind, i64)>,
     /// Settings → My Grams (`ton`).
     pub grams: ton::GramsHub,
+    /// The upgraded gift whose value is asked for or shown (`gift_value`).
+    pub gift_value: Option<gift_value::GiftValueLookup>,
 }
 
 impl PremiumHub {

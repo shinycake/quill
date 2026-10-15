@@ -34,6 +34,7 @@ mod forum_saved;
 mod gift_export;
 mod gift_manage;
 mod gift_market;
+mod gift_value;
 mod giveaway_members;
 mod giveaways;
 mod grams;

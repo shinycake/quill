@@ -50,6 +50,7 @@ mod attach_bot_icons;
 mod checklists;
 mod gift_manage;
 mod gift_market;
+mod gift_value;
 mod giveaway_members;
 mod grams;
 mod main_profile_tab;

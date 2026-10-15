@@ -74,6 +74,9 @@ pub enum PaymentsPurpose {
     /// `getCollectibleItemInfo` for a tapped collectible username or phone
     /// number. Response is `collectibleItemInfo`.
     GetCollectibleInfo,
+    /// `getUpgradedGiftValueInfo` for the unique gift box's Value row.
+    /// Response is `upgradedGiftValueInfo`.
+    GetGiftValueInfo,
     /// `getApplicationConfig` for `ton_blockchain_explorer_url`, asked
     /// when a TON address menu opens. Response is `jsonValueObject`.
     GetTonExplorerUrl,
@@ -206,6 +209,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     DeleteSavedCredentials,
     GetBankCardInfo,
     GetCollectibleInfo,
+    GetGiftValueInfo,
     GetTonExplorerUrl,
     CheckPremiumGiftCode,
     ApplyPremiumGiftCode,
