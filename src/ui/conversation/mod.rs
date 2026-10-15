@@ -411,7 +411,8 @@ impl QuillApp {
                         (kind_ok, kind_ok && c.video_chat.is_some())
                     })
                     .unwrap_or((false, false));
-                let voice_ok = voice_ok && thread_header.is_none();
+                let voice_ok =
+                    voice_ok && thread_header.is_none() && self.chat_call_button_visible(chat_id);
                 let view_in_chat = thread_header
                     .as_ref()
                     .is_some_and(|(_, _, comments)| *comments);

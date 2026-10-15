@@ -9,7 +9,7 @@ use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::calls::rtmp_start::{RtmpInfo, RtmpStart};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
 use std::sync::atomic::Ordering;
 
@@ -35,6 +35,9 @@ impl QuillApp {
     }
 }
 
+/// The URL request the seeded process waits for.
+pub(super) const REQUEST: RequestId = RequestId(7);
+
 /// The viewer administers the demo channel with the video chat right, as
 /// `updateSupergroup` reports it, and the channel has no video chat.
 pub(super) fn seed_manager(session: &mut quill::state::Session) {
@@ -58,8 +61,9 @@ pub(super) fn seed_manager(session: &mut quill::state::Session) {
 pub(super) fn seed_rtmp_start(session: &mut quill::state::Session) {
     seed_manager(session);
     let mut start = RtmpStart::new(ChatId(CHANNEL));
+    start.sent(REQUEST);
     start.accept(
-        ChatId(CHANNEL),
+        Some(REQUEST),
         RtmpInfo {
             url: "rtmps://dc4-1.rtmp.t.me/s/".into(),
             key: "0000000000:demo-placeholder-key".into(),

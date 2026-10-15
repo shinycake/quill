@@ -11,8 +11,9 @@ use std::time::Instant;
 pub(crate) struct GroupCallUi {
     /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
     pub(super) title_dialog: Option<GroupCallTitleDialog>,
-    /// Phase C2h: `createVideoChat` start/schedule dialog.
-    pub(super) start_dialog: Option<GroupCallStartDialog>,
+    /// Starting a video chat: leave-current, create and schedule boxes
+    /// (`dialogs/group_call_create.rs`).
+    pub(super) start_dialog: Option<super::dialogs::group_call_create::GroupCallCreate>,
     /// The call window's Settings box (`group_call_settings.rs`).
     pub(super) settings_open: bool,
     /// Phase C2h: in-call chat composer (sendGroupCallMessage).

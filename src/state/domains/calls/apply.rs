@@ -133,7 +133,7 @@ impl Session {
                     // tracked; the answer feeds its box instead.
                     if let Some(start) = self.calls.rtmp_start.as_mut() {
                         start.accept(
-                            crate::ids::ChatId(chat_id),
+                            extra,
                             crate::calls::rtmp_start::RtmpInfo {
                                 url: url.clone(),
                                 key: stream_key.clone(),

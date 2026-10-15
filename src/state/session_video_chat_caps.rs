@@ -42,3 +42,40 @@ impl Session {
         }
     }
 }
+
+impl Session {
+    /// The call that a new video chat would take the place of (tdesktop
+    /// `inCall()` / `inGroupCall()`): a one-to-one call that is not ending,
+    /// a joined video chat or a scheduled one. A tracked call you have not
+    /// joined is only being looked at and counts as none.
+    pub fn current_call_for_create(&self) -> crate::calls::group_call_create::CurrentCall {
+        use crate::calls::group_call_create::CurrentCall;
+        use crate::telegram::envelope::CallState;
+        let one_to_one = self.calls.active_call.as_ref().is_some_and(|call| {
+            !matches!(
+                call.state,
+                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
+            )
+        });
+        if one_to_one {
+            return CurrentCall::OneToOne;
+        }
+        let Some(call) = self.calls.active_group_call.as_ref() else {
+            return CurrentCall::None;
+        };
+        let scheduled = call.scheduled_start_date > 0;
+        if !call.is_joined && !scheduled {
+            return CurrentCall::None;
+        }
+        let chat = self.chats.values().find(|chat| {
+            chat.video_chat
+                .as_ref()
+                .is_some_and(|video_chat| video_chat.group_call_id == call.id)
+        });
+        CurrentCall::Group {
+            chat_id: chat.map(|chat| chat.id),
+            scheduled,
+            channel: chat.is_some_and(|chat| chat.kind.is_channel()),
+        }
+    }
+}

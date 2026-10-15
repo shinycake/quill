@@ -3,112 +3,12 @@
 
 use super::app::QuillApp;
 use super::group_call_stream_layout::StreamJoinIntent;
-use super::shell::{DialogKind, QuillShell};
 use super::*;
-use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::Textarea;
-use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::telegram::envelope::MessageSender;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
-    /// kit Phase 2 (redo): group-call start hosted in a kit `Dialog` via
-    /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
-    pub(super) fn build_group_call_start_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::GroupCallStart, |this, _, cx| {
-                this.close_group_call_start_dialog(cx);
-            });
-        app.update(cx, |this, cx| {
-            let Some(dialog_state) = this.group_call.start_dialog.as_ref() else {
-                return dialog
-                    .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Start voice chat"))
-                    .on_close(on_close.clone());
-            };
-            let selected = dialog_state.schedule_offset;
-            let mut presets = div().flex().flex_wrap().gap_2();
-            for (offset, label) in GROUP_CALL_SCHEDULE_PRESETS {
-                let active = offset == selected;
-                presets = presets.child(
-                    Button::new(format!("group-call-start-preset-{offset}"))
-                        .label(label)
-                        .when(!active, |b| b.ghost())
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.set_group_call_start_schedule(offset, cx);
-                            this.close_kit_dialog_if_done(DialogKind::GroupCallStart, window, cx);
-                        })),
-                );
-            }
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(
-                    Textarea::new(&dialog_state.title_input)
-                        .aria_label("Voice chat title")
-                        .h(px(40.)),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("When should it start?"),
-                )
-                .child(presets)
-                .into_any_element();
-            let footer = div()
-                .flex()
-                .gap_2()
-                .child(
-                    Button::new("group-call-start-confirm")
-                        .label(if selected == 0 {
-                            "Start now"
-                        } else {
-                            "Schedule"
-                        })
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.confirm_group_call_start(cx);
-                            this.close_kit_dialog_if_done(DialogKind::GroupCallStart, window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("group-call-start-cancel")
-                        .label("Cancel")
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_group_call_start_dialog(cx);
-                            this.close_kit_dialog_if_done(DialogKind::GroupCallStart, window, cx);
-                        })),
-                );
-            dialog
-                .overlay(true)
-                .title(crate::ui::shell::dialog_title("Start voice chat"))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .footer(footer)
-                .on_close(on_close)
-        })
-    }
-
     /// Phase C3a: header voice-chat affordance — join a live voice chat,
     /// or start one for a group/channel with none.
     pub(super) fn start_or_join_video_chat(
@@ -136,12 +36,15 @@ impl QuillApp {
                 let _ = session;
                 self.connection.status_note = "screenshot demo — voice chat (no audio yet)".into();
             }
-        } else if self.live.is_some() {
-            // Phase C2h: starting goes through the title/schedule
-            // dialog (`createVideoChat` with `start_date`).
-            self.open_group_call_start_dialog(chat_id, window, cx);
         } else {
-            self.connection.status_note = "Voice chats need a live connection.".into();
+            // No call yet: tdesktop's create confirmation (`Context::Create`
+            // in `startOrJoinGroupCall`).
+            self.begin_group_call_create(
+                chat_id,
+                quill::calls::group_call_create::CreateKind::Now,
+                window,
+                cx,
+            );
         }
         cx.notify();
     }
@@ -616,76 +519,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase C2h: open the start/schedule dialog (`createVideoChat`).
-    pub(super) fn open_group_call_start_dialog(
-        &mut self,
-        chat_id: ChatId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let chat_title = self
-            .session()
-            .and_then(|s| s.chats.get(&chat_id.0))
-            .map(|c| c.title.clone())
-            .unwrap_or_default();
-        self.group_call.start_dialog =
-            Some(GroupCallStartDialog::new(window, cx, chat_id, &chat_title));
-        cx.notify();
-    }
-
-    pub(super) fn close_group_call_start_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_call.start_dialog = None;
-        cx.notify();
-    }
-
-    pub(super) fn set_group_call_start_schedule(&mut self, offset: i64, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.group_call.start_dialog.as_mut() {
-            dialog.schedule_offset = offset;
-        }
-        cx.notify();
-    }
-
-    /// Phase C2h: confirm the start dialog — `createVideoChat` with
-    /// the chosen title and `start_date` (0 = immediate).
-    pub(super) fn confirm_group_call_start(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, title, offset) = match self.group_call.start_dialog.as_ref() {
-            Some(d) => (
-                d.chat_id,
-                d.title_input.read(cx).value().to_string(),
-                d.schedule_offset,
-            ),
-            None => return,
-        };
-        self.group_call.start_dialog = None;
-        let start_date = if offset == 0 {
-            0
-        } else {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64 + offset)
-                .unwrap_or(0)
-        };
-        if offset == 0 {
-            self.note_stream_join_intent(StreamJoinIntent::Chat(chat_id.0));
-        }
-        if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
-                match live.driver.start_video_chat(chat_id.0, title, start_date) {
-                    Ok(_) => {
-                        if offset == 0 {
-                            "Starting voice chat…".into()
-                        } else {
-                            "Scheduling voice chat…".into()
-                        }
-                    }
-                    Err(_) => "Couldn't start a voice chat here.".into(),
-                };
-        } else {
-            self.connection.status_note = "Voice chats need a live connection.".into();
-        }
-        cx.notify();
-    }
-
     /// Phase C2h: revoke the video-chat invite link
     /// (`revokeGroupCallInviteLink`); the cached link clears on `ok`.
     pub(super) fn revoke_group_call_invite_link(&mut self, cx: &mut Context<Self>) {
@@ -839,12 +672,4 @@ impl QuillApp {
         }
         cx.notify();
     }
-}
-
-crate::ui::shell::register_dialogs! {
-    GroupCallStart => DialogSpec::new(
-        400,
-        |app| app.group_call.start_dialog.is_some(),
-        QuillApp::build_group_call_start_dialog,
-    ),
 }

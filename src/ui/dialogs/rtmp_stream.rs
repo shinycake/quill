@@ -24,7 +24,10 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme, Selectable, Sizable, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::calls::rtmp_start::{RtmpInfo, RtmpStart, StartEntry, StartFacts, start_entries};
+use quill::calls::group_call_create::CreateKind;
+use quill::calls::rtmp_start::{
+    RtmpInfo, RtmpStart, StartEntry, StartFacts, call_button_visible, start_entries,
+};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatKind;
@@ -55,13 +58,17 @@ pub(crate) struct RtmpRows {
     pub(crate) url: String,
     pub(crate) key: String,
     pub(crate) key_shown: bool,
+    /// The "..." menu's item: "Revoke" in the start box
+    /// (`lng_group_invite_context_revoke`), "Revoke Stream Key" in the
+    /// stream window's Settings (`lng_group_call_rtmp_revoke`).
+    pub(crate) revoke_label: &'static str,
 }
 
 type RowAction = fn(&mut QuillApp, &mut Context<QuillApp>);
 
 /// The rows, with Copy buttons, the masked key and the "..." Revoke menu.
-/// `reveal` runs on a click on the hidden key, `revoke` on "Revoke Stream
-/// Key".
+/// `reveal` runs on a click on the hidden key, `revoke` on the menu's
+/// Revoke item.
 pub(crate) fn rtmp_info_rows(
     rows: RtmpRows,
     cx: &mut Context<QuillApp>,
@@ -73,6 +80,7 @@ pub(crate) fn rtmp_info_rows(
         url,
         key,
         key_shown: shown,
+        revoke_label,
     } = rows;
     let copy = |id: String, label: &'static str, value: String, toast: &'static str| {
         Button::new(id)
@@ -113,16 +121,12 @@ pub(crate) fn rtmp_info_rows(
                         .icon(IconName::EllipsisVertical)
                         .ghost()
                         .small()
-                        .accessibility_label(tr(keys::GROUP_CALL_RTMP_REVOKE))
+                        .accessibility_label(revoke_label)
                         .dropdown_menu(move |menu, _, _| {
                             let owner = owner.clone();
-                            menu.item(
-                                PopupMenuItem::new(tr(keys::GROUP_CALL_RTMP_REVOKE)).on_click(
-                                    move |_, _, cx| {
-                                        let _ = owner.update(cx, revoke);
-                                    },
-                                ),
-                            )
+                            menu.item(PopupMenuItem::new(revoke_label).on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, revoke);
+                            }))
                         }),
                 ),
         )
@@ -251,6 +255,17 @@ impl QuillApp {
         }
     }
 
+    /// Whether the chat header shows the call button
+    /// (`TopBarWidget::updateControlsVisibility`).
+    pub(in crate::ui) fn chat_call_button_visible(&self, chat_id: ChatId) -> bool {
+        let has_participants = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .and_then(|chat| chat.video_chat.as_ref())
+            .is_some_and(|video_chat| video_chat.has_participants);
+        call_button_visible(self.rtmp_start_facts(chat_id), has_participants)
+    }
+
     fn run_start_entry(
         &mut self,
         entry: StartEntry,
@@ -259,37 +274,30 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match entry {
-            StartEntry::Start => self.start_video_chat_now(chat_id, cx),
+            StartEntry::Start => self.begin_group_call_create(chat_id, CreateKind::Now, window, cx),
             StartEntry::Schedule => {
-                self.open_group_call_start_dialog(chat_id, window, cx);
-                self.set_group_call_start_schedule(3600, cx);
+                self.begin_group_call_create(chat_id, CreateKind::Schedule, window, cx)
             }
-            StartEntry::StreamWith => self.open_rtmp_start(chat_id, cx),
+            StartEntry::StreamWith => self.open_rtmp_start(chat_id, window, cx),
         }
-    }
-
-    /// "Start video chat" / "Start live stream": create it now and join
-    /// once it is tracked.
-    pub(in crate::ui) fn start_video_chat_now(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.note_stream_join_intent(StreamJoinIntent::Chat(chat_id.0));
-        self.connection.status_note = match self.live.as_mut() {
-            Some(live) => match live.driver.start_video_chat(chat_id.0, String::new(), 0) {
-                Ok(_) => tr(keys::Q_OPS_STARTING_VOICE_CHAT).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_START_VOICE_CHAT).into(),
-            },
-            None => tr(keys::Q_OPS_VOICE_CHATS_NEED_LIVE).into(),
-        };
-        cx.notify();
     }
 
     /// "Stream with...": ask for the RTMP URL; the box opens with the
     /// answer.
-    pub(in crate::ui) fn open_rtmp_start(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn open_rtmp_start(
+        &mut self,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.group_call.rtmp_start = RtmpStartUi::default();
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.begin_rtmp_start(chat_id).is_err() {
-                    self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_FETCH_STREAM_KEY).into();
+                    window.push_notification(
+                        Notification::new().message(tr(keys::Q_OPS_COULD_NOT_FETCH_STREAM_KEY)),
+                        cx,
+                    );
                 }
             }
             // Screenshot demos and tests have no TDLib: the process opens
@@ -317,9 +325,30 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Start Streaming": create the call as an RTMP stream, joined once
-    /// it is tracked.
-    pub(in crate::ui) fn confirm_rtmp_start(&mut self, cx: &mut Context<Self>) {
+    /// "Start Streaming": confirm leaving the call you are in first
+    /// (`showStartWithRtmp` → `confirmLeaveCurrent`), then create the
+    /// stream.
+    pub(in crate::ui) fn confirm_rtmp_start(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_id = self
+            .session()
+            .and_then(|s| s.calls.rtmp_start.as_ref())
+            .map(|start| start.chat_id);
+        if let Some(chat_id) = chat_id {
+            self.begin_group_call_create(chat_id, CreateKind::Rtmp, window, cx);
+        }
+    }
+
+    /// Create the call as an RTMP stream and end the process; the window
+    /// joins it once it is tracked, and only when the request went out.
+    pub(in crate::ui) fn start_rtmp_stream_now(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let chat_id = self
             .session()
             .and_then(|s| s.calls.rtmp_start.as_ref())
@@ -327,31 +356,41 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
-        self.note_stream_join_intent(StreamJoinIntent::Chat(chat_id.0));
+        self.end_current_call_for_create(cx);
         self.group_call.rtmp_start = RtmpStartUi::default();
-        self.connection.status_note = match self.live.as_mut() {
-            Some(live) => match live.driver.start_rtmp_stream() {
-                Ok(_) => tr(keys::Q_OPS_STARTING_VOICE_CHAT).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_START_VOICE_CHAT).into(),
-            },
-            None => {
-                if let Some(session) = self.demo_session.as_mut() {
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.start_rtmp_stream().is_ok(),
+            // Screenshot demos and tests have no TDLib: the process ends.
+            None => match self.demo_session.as_mut() {
+                Some(session) => {
                     session.calls.rtmp_start = None;
+                    true
                 }
-                String::new()
-            }
+                None => false,
+            },
         };
+        if sent {
+            self.note_stream_join_intent(StreamJoinIntent::Chat(chat_id.0));
+        } else {
+            window.push_notification(
+                Notification::new().message(tr(keys::Q_OPS_COULD_NOT_START_VOICE_CHAT)),
+                cx,
+            );
+        }
         cx.notify();
     }
 
     /// The revoke confirmation was accepted: ask for a new URL and key.
-    fn revoke_rtmp_start_key(&mut self, cx: &mut Context<Self>) {
+    fn revoke_rtmp_start_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.group_call.rtmp_start.confirm = None;
         self.group_call.rtmp_start.key_shown = false;
         if let Some(live) = self.live.as_mut()
             && live.driver.revoke_rtmp_start_key().is_err()
         {
-            self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_REGENERATE_STREAM_KEY).into();
+            window.push_notification(
+                Notification::new().message(tr(keys::Q_OPS_COULD_NOT_REGENERATE_STREAM_KEY)),
+                cx,
+            );
         }
         cx.notify();
     }
@@ -424,6 +463,7 @@ impl QuillApp {
                             url,
                             key,
                             key_shown: this.group_call.rtmp_start.key_shown,
+                            revoke_label: tr(keys::GROUP_INVITE_CONTEXT_REVOKE),
                         },
                         cx,
                         |this, cx| {
@@ -448,22 +488,9 @@ impl QuillApp {
             let footer = (confirm.is_none()).then(|| {
                 div()
                     .flex()
+                    .w_full()
+                    .justify_end()
                     .gap_2()
-                    .child(
-                        div().debug_selector(|| "rtmp-start-go".into()).child(
-                            Button::new("rtmp-start-go")
-                                .label(tr(keys::GROUP_CALL_RTMP_START))
-                                .primary()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.confirm_rtmp_start(cx);
-                                    this.close_kit_dialog_if_done(
-                                        DialogKind::RtmpStart,
-                                        window,
-                                        cx,
-                                    );
-                                })),
-                        ),
-                    )
                     .child(
                         Button::new("rtmp-start-cancel")
                             .label(tr(keys::CANCEL))
@@ -472,6 +499,21 @@ impl QuillApp {
                                 this.close_rtmp_start(cx);
                                 this.close_kit_dialog_if_done(DialogKind::RtmpStart, window, cx);
                             })),
+                    )
+                    .child(
+                        div().debug_selector(|| "rtmp-start-go".into()).child(
+                            Button::new("rtmp-start-go")
+                                .label(tr(keys::GROUP_CALL_RTMP_START))
+                                .primary()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.confirm_rtmp_start(window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::RtmpStart,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        ),
                     )
             });
             dialog
@@ -538,9 +580,12 @@ fn confirm_view(which: RtmpConfirm, cx: &mut Context<QuillApp>) -> AnyElement {
                     div().debug_selector(|| "rtmp-start-confirm".into()).child(
                         Button::new("rtmp-start-confirm")
                             .label(confirm_label)
-                            .primary()
-                            .on_click(cx.listener(move |this, _, _, cx| match which {
-                                RtmpConfirm::Revoke => this.revoke_rtmp_start_key(cx),
+                            // tdesktop `attentionBoxButton` for the key
+                            // warning, the default style for Revoke.
+                            .when(which == RtmpConfirm::KeyWarning, |button| button.danger())
+                            .when(which == RtmpConfirm::Revoke, |button| button.primary())
+                            .on_click(cx.listener(move |this, _, window, cx| match which {
+                                RtmpConfirm::Revoke => this.revoke_rtmp_start_key(window, cx),
                                 RtmpConfirm::KeyWarning => {
                                     this.group_call.rtmp_start.confirm = None;
                                     this.group_call.rtmp_start.key_shown = true;

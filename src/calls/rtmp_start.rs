@@ -12,7 +12,7 @@
 //! the server error as a toast.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ids::ChatId;
+use crate::ids::{ChatId, RequestId};
 
 /// The Server URL and Stream Key of a chat's stream (tdesktop `RtmpInfo`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -22,7 +22,7 @@ pub struct RtmpInfo {
 }
 
 /// One "Stream with..." process (tdesktop's `RtmpRequest`): the chat it is
-/// for and what the server answered so far.
+/// for, the requests it sent and what the server answered so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RtmpStart {
     pub chat_id: ChatId,
@@ -30,6 +30,10 @@ pub struct RtmpStart {
     pub info: Option<RtmpInfo>,
     /// A request failed: the UI shows the server error once and clears it.
     pub failed: bool,
+    /// The URL requests this process sent and still waits for. Only their
+    /// answers and failures count: a late one from an earlier process for
+    /// the same chat does not.
+    requests: Vec<RequestId>,
 }
 
 impl RtmpStart {
@@ -38,24 +42,37 @@ impl RtmpStart {
             chat_id,
             info: None,
             failed: false,
+            requests: Vec::new(),
         }
     }
 
-    /// An answer for `chat_id`: the box has data to show.
-    pub fn accept(&mut self, chat_id: ChatId, info: RtmpInfo) -> bool {
-        if self.chat_id != chat_id {
+    /// The process sent `request` (the URL, or the URL with `revoke`).
+    pub fn sent(&mut self, request: RequestId) {
+        self.requests.push(request);
+    }
+
+    /// Whether `request` is one this process waits for.
+    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
+        request.is_some_and(|request| self.requests.contains(&request))
+    }
+
+    /// The answer to `request`: the box has data to show.
+    pub fn accept(&mut self, request: Option<RequestId>, info: RtmpInfo) -> bool {
+        if !self.waits_for(request) {
             return false;
         }
+        self.requests.retain(|sent| Some(*sent) != request);
         self.info = Some(info);
         self.failed = false;
         true
     }
 
-    /// A request for `chat_id` failed.
-    pub fn fail(&mut self, chat_id: ChatId) -> bool {
-        if self.chat_id != chat_id {
+    /// `request` failed.
+    pub fn fail(&mut self, request: Option<RequestId>) -> bool {
+        if !self.waits_for(request) {
             return false;
         }
+        self.requests.retain(|sent| Some(*sent) != request);
         self.failed = true;
         true
     }
@@ -92,6 +109,14 @@ pub struct StartFacts {
 /// `HasGroupCallMenu`: the call button opens a menu instead of joining.
 pub fn call_button_has_menu(facts: StartFacts) -> bool {
     facts.is_group_chat && !facts.has_call && facts.manager
+}
+
+/// Whether the chat header shows the call button at all
+/// (`TopBarWidget::updateControlsVisibility`): a manager always sees it;
+/// anyone else only for a call nobody is in yet (`fullCount() == 0`; a call
+/// with people in it has the Join bar instead).
+pub fn call_button_visible(facts: StartFacts, call_has_participants: bool) -> bool {
+    facts.is_group_chat && (facts.manager || (facts.has_call && !call_has_participants))
 }
 
 /// The menu's entries (`FillVideoChatMenu`, without the Join entry that a
@@ -146,20 +171,39 @@ mod tests {
     }
 
     #[test]
-    fn answers_for_another_chat_are_ignored() {
+    fn the_call_button_shows_for_managers_and_empty_calls() {
+        assert!(call_button_visible(facts(true, false), false));
+        assert!(call_button_visible(facts(true, true), true));
+        assert!(!call_button_visible(facts(false, false), false));
+        assert!(call_button_visible(facts(false, true), false));
+        assert!(!call_button_visible(facts(false, true), true));
+        let user = StartFacts {
+            is_group_chat: false,
+            manager: true,
+            has_call: false,
+        };
+        assert!(!call_button_visible(user, false));
+    }
+
+    #[test]
+    fn only_this_process_answers_count() {
         let mut start = RtmpStart::new(ChatId(5));
-        assert!(!start.accept(ChatId(6), RtmpInfo::default()));
+        let info = RtmpInfo {
+            url: "rtmps://x".into(),
+            key: "k".into(),
+        };
+        // An answer to a request this process did not send.
+        assert!(!start.accept(Some(RequestId(9)), info.clone()));
+        assert!(!start.accept(None, info.clone()));
         assert!(!start.box_open());
-        assert!(start.accept(
-            ChatId(5),
-            RtmpInfo {
-                url: "rtmps://x".into(),
-                key: "k".into()
-            }
-        ));
+        start.sent(RequestId(1));
+        assert!(start.accept(Some(RequestId(1)), info));
         assert!(start.box_open());
-        assert!(!start.fail(ChatId(6)));
-        assert!(start.fail(ChatId(5)));
+        // A late failure of an earlier process's request.
+        assert!(!start.fail(Some(RequestId(1))));
+        assert!(!start.failed);
+        start.sent(RequestId(2));
+        assert!(start.fail(Some(RequestId(2))));
         assert!(start.failed);
     }
 }

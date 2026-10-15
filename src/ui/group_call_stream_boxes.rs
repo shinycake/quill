@@ -330,6 +330,7 @@ impl QuillApp {
                 url,
                 key,
                 key_shown: shown,
+                revoke_label: tr(keys::GROUP_CALL_RTMP_REVOKE),
             },
             cx,
             |this, cx| this.open_stream_overlay(StreamOverlay::KeyWarning, cx),

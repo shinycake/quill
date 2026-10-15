@@ -183,6 +183,18 @@ fn a_failed_request_marks_the_process_and_leaves_the_call_error_alone() {
 }
 
 #[test]
+fn a_late_failure_of_an_earlier_process_is_ignored() {
+    let (recorder, mut driver) = driver_with_channel(true);
+    driver.begin_rtmp_start(ChatId(CHAT)).expect("sends");
+    let first = last(&recorder);
+    driver.close_rtmp_start();
+    driver.begin_rtmp_start(ChatId(CHAT)).expect("sends again");
+    reply(&mut driver, error_answer(&first));
+    let start = driver.session.calls.rtmp_start.as_ref().expect("process");
+    assert!(!start.failed, "the new process did not fail");
+}
+
+#[test]
 fn administrator_rights_decide_who_manages_video_chats() {
     let id = ChatId(CHAT);
     let (_recorder, driver) = driver_with_channel(false);
@@ -232,4 +244,40 @@ fn a_direct_messages_chat_never_manages_video_chats() {
         r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":51,"member_count":9,"is_channel":false,"is_direct_messages_group":true,"is_administered_direct_messages_group":true,"status":{"@type":"chatMemberStatusCreator","is_anonymous":false,"is_member":true}}}"#,
     );
     assert!(!driver.session.chat_can_manage_video_chats(ChatId(CHAT)));
+}
+
+#[test]
+fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
+    let (recorder, mut driver) = driver_with_channel(true);
+    driver.session.calls.active_call = Some(ActiveCall {
+        id: 5,
+        user_id: 11,
+        is_outgoing: true,
+        is_video: false,
+        state: CallState::Ready,
+        started_at: std::time::Instant::now(),
+        ready_at: None,
+        ready: None,
+        transport: None,
+        transport_error: None,
+        signaling_queue: Vec::new(),
+        signaling_dropped: 0,
+        muted: false,
+        camera_on: false,
+        screen_sharing: false,
+        remote_video: RemoteVideoState::Inactive,
+        remote_screen: RemoteVideoState::Inactive,
+        remote_audio_muted: false,
+    });
+    assert!(
+        driver.start_video_chat(CHAT, String::new(), 0).is_err(),
+        "not while the call is on"
+    );
+    if let Some(call) = driver.session.calls.active_call.as_mut() {
+        call.state = CallState::HangingUp;
+    }
+    driver
+        .start_video_chat(CHAT, String::new(), 0)
+        .expect("the ending call is out of the way");
+    assert_eq!(last(&recorder)["@type"], "createVideoChat");
 }

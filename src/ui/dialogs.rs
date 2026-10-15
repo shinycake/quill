@@ -15,6 +15,7 @@ pub(crate) mod folder;
 pub(crate) mod forum;
 pub(crate) mod group_admin_settings;
 pub(crate) mod group_call;
+pub(crate) mod group_call_create;
 pub(crate) mod group_confirm;
 pub(crate) mod invite_link;
 pub(crate) mod local_storage;

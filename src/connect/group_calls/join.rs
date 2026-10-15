@@ -40,9 +40,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !is_group_or_channel {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.calls.active_group_call.is_some()
-            || self.session.calls.active_call.is_some()
-        {
+        // A 1:1 call being hung up no longer counts: the UI ends it right
+        // before creating (tdesktop `createGroupCall` →
+        // `destroyCurrentCall`).
+        use crate::telegram::envelope::CallState;
+        let in_call = self.session.calls.active_call.as_ref().is_some_and(|call| {
+            !matches!(
+                call.state,
+                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
+            )
+        });
+        if self.session.calls.active_group_call.is_some() || in_call {
             return Err(ConnectSendError::InvalidRequest);
         }
         let title = title.trim().to_string();

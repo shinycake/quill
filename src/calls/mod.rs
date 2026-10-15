@@ -4,6 +4,7 @@
 pub mod audio_level;
 pub mod capture;
 pub mod engine;
+pub mod group_call_create;
 #[cfg(feature = "ui")]
 pub mod level_tap;
 pub mod proxy;

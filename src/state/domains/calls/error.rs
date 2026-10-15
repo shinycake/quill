@@ -8,17 +8,18 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
-        // "Stream with...": a failed URL request is shown as a toast by
-        // the UI (tdesktop shows the server error), not on a call overlay.
+        // "Stream with...": a failed URL request of the process is shown
+        // as a toast by the UI (tdesktop shows the server error), not on a
+        // call overlay.
         if let Some(
-            RequestPurpose::Calls(CallsPurpose::GetVideoChatRtmpUrl { chat_id })
-            | RequestPurpose::Calls(CallsPurpose::ReplaceVideoChatRtmpUrl { chat_id }),
+            RequestPurpose::Calls(CallsPurpose::GetVideoChatRtmpUrl { .. })
+            | RequestPurpose::Calls(CallsPurpose::ReplaceVideoChatRtmpUrl { .. }),
         ) = pending.map(|p| p.purpose)
             && let Some(start) = self.calls.rtmp_start.as_mut()
-            && start.fail(crate::ids::ChatId(chat_id))
+            && start.fail(extra)
         {
             return;
         }

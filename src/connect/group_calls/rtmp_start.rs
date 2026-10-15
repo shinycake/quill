@@ -93,6 +93,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        if let Some(start) = self.session.calls.rtmp_start.as_mut() {
+            start.sent(extra);
+        }
         Ok(())
     }
 }
