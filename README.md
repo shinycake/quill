@@ -423,9 +423,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Share photo/video from the viewer — closes the viewer and opens the existing forward picker with the message selected <!-- parity:media-viewer-share -->
 - [x] Save viewer media to downloads folder — largest local photo size / full video clip (honest "download the media first" when not local; video never saves its thumbnail), `(n)` de-dup <!-- parity:media-viewer-save -->
 - [x] "Show in chat" jump from the viewer to the source message — closes the viewer, jumps via the existing reply-jump flow <!-- parity:media-viewer-show-in-chat -->
-- [ ] Pictures sent as files show their thumbnail in the file row (tdesktop's thumbed file layout) and open in the viewer, which pages over the chat's files and shows a card for other files <!-- parity:media-image-files -->
-- [ ] HEIC, AVIF and JPEG XL pictures decode on every platform, with EXIF orientation and colour profiles (Display P3 and others) converted to sRGB <!-- parity:media-image-formats -->
-- [ ] Sending a picture as a file keeps the original bytes and uploads a 320 px thumbnail where Telegram makes none (HEIC, AVIF, large files) <!-- parity:media-image-file-thumbnail-send -->
+- [x] Pictures sent as files show their thumbnail in the file row (tdesktop's thumbed file layout) and open in the viewer, which pages over the chat's files and shows a card for other files <!-- parity:media-image-files -->
+- [x] HEIC, AVIF and JPEG XL pictures decode on every platform, with EXIF orientation and colour profiles (Display P3 and others) converted to sRGB <!-- parity:media-image-formats -->
+- [x] Sending a picture as a file keeps the original bytes and uploads a 320 px thumbnail where Telegram makes none (HEIC, AVIF, large files) <!-- parity:media-image-file-thumbnail-send -->
 - [x] Play/pause video in the viewer with elapsed/total overlay (PlaybackClock, src/playback.rs:18; ui/mod.rs:4951) <!-- parity:media-video-play -->
 - [x] Seek scrubber in the fullscreen video player — drag scrubs (position preview in the elapsed label), release seeks the clock and restarts ffplay at `-ss` when playing <!-- parity:media-video-seek -->
 - [x] Playback speed control for voice/audio/video — speed button cycles the TGX set 0.5x–2.0x (single-tap cycle, not TGX's long-press dial); clock rate + ffplay `-af atempo=` stay in sync <!-- parity:media-playback-speed -->
@@ -532,10 +532,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Welcome message setup: Welcome-message row in the group/channel info panel opens the pack editor dialog (src/ui/mod.rs) <!-- parity:groups-welcome-setup -->
 - [x] Communities: create a community (createCommunity exists in TDLib 1.8.67; backend — builder + driver + state sync — plus "New community" dialog UI: name field, base-chat picker, hide-chat option) <!-- parity:communities-create -->
 - [x] Communities: browse and manage owned communities (backend — builders + drivers + state sync for create/loadFullInfo/setName — plus Communities hub dialog listing owned communities with per-row info buttons) <!-- parity:communities-hub -->
-- [ ] Communities: toggle community chat visibility (blocked: no TDLib 1.8.68 method to toggle hidden state) <!-- parity:communities-chat-visibility -->
+- [ ] Communities: toggle community chat visibility (blocked: TDLib 1.8.68 reads `communityChat.is_hidden` but has no method to change it; community methods are create, name, photo, permissions and delete only) <!-- parity:communities-chat-visibility -->
 - [x] Communities: community chat-list mode (view a community's chats as a filtered chat list) <!-- parity:communities-chatlist-mode -->
-- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.68 method) <!-- parity:communities-add-chat -->
-- [ ] Communities: admin-rights management (blocked: no TDLib 1.8.68 method) <!-- parity:communities-admin-rights -->
+- [ ] Communities: add a chat to a community (blocked: no TDLib 1.8.68 method; `createCommunity` takes only the first chat) <!-- parity:communities-add-chat -->
+- [ ] Communities: admin-rights management (blocked: TDLib 1.8.68 has the `communityAdministratorRights` type but no method to set them) <!-- parity:communities-admin-rights -->
 - [x] Communities: members can edit the chat list switch (setCommunityPermissions, TDLib 1.8.68) <!-- parity:communities-permissions -->
 - [x] Communities: delete a community, owner only, with confirmation (deleteCommunity, TDLib 1.8.68) <!-- parity:communities-delete -->
 - [x] Communities: info panel (backend — loadFullInfo/setName builders + drivers + state sync — plus community info panel UI: name with edit prompt, admin/banned/request counts, chat list with hidden badges) <!-- parity:communities-info -->
@@ -592,7 +592,6 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Per-media self-destruct timer/view-once picker in the composer (self_destruct_type on photo/video/voice/video-note inputs, live countdown + view-once in demo) (src/telegram/requests.rs:1614, src/ui/mod.rs:608) <!-- parity:secret-selfdestruct-media -->
 - [x] Chat-level self-destruct timer for secret chats (incl. text messages): ⏱ picker (Off/5s/30s/1m/1h/1d/1w), timer status line, "X set timer …" service rows, per-message auto_delete_in countdown chips (setChatMessageAutoDeleteTime; connect.rs:2513, ui/mod.rs:12882/11611, envelope.rs:3137) <!-- parity:secret-ttl-timer -->
 - [x] Incoming/outgoing "X took a screenshot" rendered as a chat service message (messageScreenshotTaken parsed in envelope.rs; "You took a screenshot" for own, "{name} took a screenshot" for peer) (src/telegram/envelope.rs, src/ui/mod.rs) <!-- parity:secret-screenshot-notify -->
-- [ ] Send screenshot-taken notification when the user screenshots (blocked: Linux desktop has no OS-level screenshot-detection API to trigger it; the TDLib mechanism exists — viewMessages with messageSourceScreenshot, td_api.tl:13230/:3234, as Telegram X's sendScreenshotMessage does — but nothing on Linux can tell us a screenshot happened) <!-- parity:secret-screenshot-send -->
 - [x] Screenshot capture prevention for secret chats on the desktop (macOS and Windows; Linux has no OS-level screen-capture prevention API — no FLAG_SECURE equivalent on X11/Wayland) <!-- parity:secret-screenshot-block -->
 - [x] Forwarding to/from secret chats: destination gate in submit_forward_to shows TGX's verbatim "This message cannot be forwarded to secret chats." (picker stays open); source gate hides the Forward/Select buttons on secret-chat messages, mirroring TGX only offering Forward when messageProperties.canBeForwarded (MessagesController.java:5287) (src/ui/mod.rs) <!-- parity:secret-no-forward -->
 - [x] Inline-bot warning alert in secret chats (Telegram X's `SecretChatContextBotAlert`: gates the `SwitchInline` button path and the typed `@bot` inline-mode path in secret chats — first inline use in a session shows the verbatim TGX warning above the composer with Confirm-only behavior before any query is sent) <!-- parity:secret-bot-alert -->
@@ -602,7 +601,6 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Secret-chat notification settings: "Custom notification settings for the Secret Chat with {name}." label (TGX NotificationChannelSecretChat) in the existing per-chat notification panel, which fully applies to secret chats; lock-screen hide behavior (TGX HideSecret/ShowSecretOn) is out of slice — Linux desktop exposes no lock-screen notification API (src/ui/mod.rs) <!-- parity:secret-notif-settings -->
 - [x] Per-secret-chat passcode hint in the chat info panel (TGX SecretPasscodeInfo verbatim with the peer's name); actually setting an additional per-chat passcode needs a full app passcode feature — out of slice (src/ui/mod.rs) <!-- parity:secret-passcode -->
 - [x] "Secret media and files" category in storage usage (new "💾 Storage usage" sidebar entry backed by getStorageStatistics; overlay lists TGX-ordered categories with counts and sizes, including the Secret media and files row for fileTypeSecret) <!-- parity:secret-storage-category -->
-- [ ] Secret-chat count shown when terminating a session that would cancel secret chats (impossible via TDLib 1.8.67: the `session` type (td_api.tl:9144) has no secret-chat linkage — `secretChat` (:2816) carries no session id, and the only secret-related session field is the capability flag `can_accept_secret_chats`; which auth-key a secret chat is bound to is server-side state. Telegram X shows no such count on session termination either — its `ClosingXSecretChats` string belongs to bulk chat deletion (ChatsController.java:1650), not sessions; Quill's terminate confirmations match TGX verbatim) <!-- parity:secret-session-terminate -->
 
 ### Stories
 
@@ -664,7 +662,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
 - [x] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [x] Story statistics and public forwards <!-- parity:stories-statistics -->
-- [ ] Live story stream playback (deferred: low impact) <!-- parity:stories-live-stream-playback -->
+- [ ] Live story stream playback (designed: same stream path as RTMP viewing plus joinLiveStory; quill-tools/designs/group-call-streams.md, queued) <!-- parity:stories-live-stream-playback -->
 
 ### Calls
 
@@ -725,17 +723,17 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Video chat invite link (`getVideoChatInviteLink` with Copy, `revokeGroupCallInviteLink`; code + demo only, live unverified) <!-- parity:calls-invite-link -->
 - [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
 - [x] Push-to-talk with a shortcut and release delay <!-- parity:calls-push-to-talk -->
-- [ ] Noise suppression toggle in group calls (blocked: the prebuilt ntgcalls exposes no audio-processing switch; see docs/decisions/codex-call-audio-controls.md) <!-- parity:calls-noise-suppression -->
+- [ ] Noise suppression toggle in group calls (designed: ntgcalls 3 accepts external microphone frames, so Quill can denoise the mic itself; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-noise-suppression -->
 - [x] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
 - [x] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
-- [ ] Screen source chooser with window and screen thumbnails (blocked: ntgcalls 3.0.2 exposes one opaque source per platform and opens the system picker; see docs/decisions/codex-calls-bundle.md) <!-- parity:calls-screen-source-chooser -->
-- [ ] Pause screen sharing (blocked: ntgcalls has no capturer pause event, which is what triggers it in Telegram Desktop) <!-- parity:calls-screen-share-pause -->
-- [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls (blocked: ntgcalls has no hook for TDLib's encryptGroupCallData/decryptGroupCallData) <!-- parity:calls-conference -->
+- [ ] Screen source chooser with window and screen thumbnails (designed: Quill captures screens and windows itself and feeds ntgcalls external frames; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-screen-source-chooser -->
+- [ ] Pause screen sharing (designed: with Quill's own capturer, a hidden or minimized window pauses through toggleGroupCallScreenSharingIsPaused; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-screen-share-pause -->
+- [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls (blocked: TDLib keeps the call's blockchain internal and exposes only encrypt/decryptGroupCallData, while ntgcalls 3 conference mode needs the raw blocks via ntg_init_conference/ntg_apply_blocks and has no external-encryption hook) <!-- parity:calls-conference -->
 - [x] Detect when you speak in a group call and show it to others <!-- parity:calls-speaking-detection -->
 - [x] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
-- [ ] Battery-low and microphone-off indicators for the other person (partial: microphone-off shipped; battery-low blocked: ntgcalls keeps the battery flag inside its own signaling) <!-- parity:calls-peer-indicators -->
+- [ ] Battery-low and microphone-off indicators for the other person (partial: microphone-off shipped; battery-low blocked: ntgcalls encrypts its own signaling, so the battery flag never reaches Quill) <!-- parity:calls-peer-indicators -->
 - [x] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
-- [ ] Watch channel live streams (RTMP) (deferred: low impact) <!-- parity:calls-rtmp-viewing -->
+- [ ] Watch channel live streams (RTMP) (designed: ntgcalls stream mode fed by getGroupCallStreamSegment; quill-tools/designs/group-call-streams.md, queued) <!-- parity:calls-rtmp-viewing -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
 - [x] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
@@ -861,7 +859,6 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Recurring payments: ⭐ Subscriptions dialog — `getStarSubscriptions` list with pagination + star balance, `editStarSubscription` cancel/re-enable (inline confirm), `reuseStarSubscription` to rejoin the chat of an active channel subscription when the type's `can_reuse` is set (expired channel subs renew via the type's `invite_link`, opened in the OS browser); mutations refetch from the authoritative `ok`, never optimistic; recurring-invoice terms (`recurring_payment_terms_of_service_url`) surfaced in the checkout dialog <!-- parity:bots-payment-recurring -->
 - [x] Clear payment/shipping info (privacy) <!-- parity:bots-payment-clear -->
 - [x] Signed gifts: personal comment when buying a collectible gift via Marketplace (sendResoldGift text) <!-- parity:gifts-signed-comment --> (merged #292: price-bound Stars/TON quotes, personal comment and receiver-only/public visibility; core and native AX checks passed; live purchase unverified)
-- [ ] Signed gifts: custom signature on Marketplace gift purchase (blocked: no TDLib/raw API for a gift signature field — concept-level search: sendResoldGift/inputInvoiceStarGiftResale carry text/message only) <!-- parity:gifts-signed-signature -->
 - [x] Mini Apps in an in-app window (blocked: needs a per-platform web view; GPUI has none) <!-- parity:bots-miniapp-inline -->
 - [x] Add a bot to a group or channel with admin rights <!-- parity:bots-add-to-group -->
 - [x] Bot verification badges and verify via bot <!-- parity:bots-verification-badge -->
@@ -1038,7 +1035,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Bots and websites: mini-app permissions (Telegram Desktop has no "delete cloud drafts") <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
-- [ ] Passkeys (blocked: Telegram only allows passkeys in its signed apps) <!-- parity:settings-passkeys -->
+- [ ] Passkeys (partial: listing and deleting passkeys in progress; creating one and signing in need WebAuthn, which tdesktop does on Linux and Windows without Telegram's signature: quill-tools/designs/passkeys.md, queued) <!-- parity:settings-passkeys -->
 - [x] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
 
 ### Settings: notifications
@@ -1085,7 +1082,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
 - [x] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
 - [x] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
-- [ ] Hardware decoding and renderer toggles (blocked: tdesktop-specific renderer options do not apply to GPUI) <!-- parity:data-hw-decode -->
+- [ ] Hardware decoding toggle (partial: tdesktop's toggle switches FFmpeg hardware decoding; macOS AVPlayer always decodes in hardware, and the toggle lands with hardware decode on Windows and Linux, a video player follow-up. tdesktop's renderer options don't apply to GPUI) <!-- parity:data-hw-decode -->
 
 ### Platform & edge cases
 
