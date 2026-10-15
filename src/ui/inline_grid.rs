@@ -24,7 +24,7 @@ use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButt
 use std::path::PathBuf;
 
 /// Chat id of the panel's players in the history's player table.
-const INLINE_PANEL_PLAYER_CHAT: i64 = i64::MIN;
+const INLINE_PANEL_PLAYER_CHAT: i64 = super::inline_players::PANEL_CHAT;
 
 /// Row title: the result title, falling back to a capitalized kind label
 /// (`sticker` results carry no title).
@@ -66,20 +66,20 @@ impl QuillApp {
             .and_then(|path| sandboxed_display_path(path, roots))
     }
 
-    /// The current frame of an animation result's clip: it plays muted and
-    /// looped on the history's native player, like a GIF in a chat, while
-    /// the panel shows it. Until the full clip is downloaded, the result's
-    /// MP4 thumbnail loop plays in its place. The player slots live in the
-    /// history's table under a key no chat uses, so a panel that closes
-    /// stops them.
+    /// The player of an animation result's clip: it plays muted and looped
+    /// on an inline player, like a GIF in a chat, while the panel shows it
+    /// (its `video_frame` asks for its own frames). Until the full clip is
+    /// downloaded, the result's MP4 thumbnail loop plays in its place. The
+    /// player slots live in the history's table under a key no chat uses,
+    /// so a panel that closes stops them.
     fn inline_clip_picture(
         &self,
         result: &InlineQueryResultSummary,
         roots: &[PathBuf],
         cx: &mut Context<Self>,
-    ) -> Option<super::native_video::VideoPicture> {
+    ) -> Option<super::video_player::VideoPlayer> {
         let media = result.media?;
-        if !super::native_video::supported()
+        if !super::video_player::supported()
             || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
         {
@@ -99,17 +99,17 @@ impl QuillApp {
             media.height,
             0,
         );
-        if super::native_video::decodes_in_process() && !tile.within_inline_area() {
+        if super::video_player::decodes_in_process() && !tile.within_inline_area() {
             return None;
         }
-        let frame = self.playback.inline_videos.borrow_mut().frame(
-            INLINE_PANEL_PLAYER_CHAT,
-            i64::from(clip.0),
+        let frame = self.playback.inline_videos.frame(
+            (INLINE_PANEL_PLAYER_CHAT, i64::from(clip.0)),
             tile,
+            None,
             || Some(path),
+            cx,
         )?;
-        self.request_animation_tick(30, cx);
-        Some(frame.picture)
+        Some(frame.player)
     }
 
     /// The panel for the current inline trigger. Clicks act on mouse-down
@@ -284,19 +284,33 @@ impl QuillApp {
             } else {
                 MEDIA_HEIGHT
             };
-            let fit = if cell.item.kind == CellKind::Sticker {
-                ObjectFit::Contain
-            } else {
-                ObjectFit::Cover
+            // `ObjectFit` is not `Copy`: make one per use.
+            let sticker = cell.item.kind == CellKind::Sticker;
+            let fit = move || {
+                if sticker {
+                    ObjectFit::Contain
+                } else {
+                    ObjectFit::Cover
+                }
             };
             let (w, h) = (px(cell.width as f32), px(height as f32));
             let playing = self.inline_clip_picture(result, roots, cx);
             let content = match (playing, path) {
-                (Some(picture), _) => picture.element(w, h, fit, Corners::all(px(0.))),
+                // The still shows under the clip until its first picture.
+                (Some(player), still) => div()
+                    .relative()
+                    .w(w)
+                    .h(h)
+                    .children(
+                        still
+                            .map(|path| img(path).absolute().inset_0().w(w).h(h).object_fit(fit())),
+                    )
+                    .child(super::video_player::video_frame(&player).object_fit(fit()))
+                    .into_any_element(),
                 (None, Some(path)) => img(path)
                     .w(w)
                     .h(h)
-                    .object_fit(fit)
+                    .object_fit(fit())
                     .with_fallback(move || div().size_full().bg(muted).into_any_element())
                     .into_any_element(),
                 (None, None) => div().size_full().bg(muted).into_any_element(),

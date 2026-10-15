@@ -72,7 +72,6 @@ impl Render for QuillApp {
             || !self.slices.conversation_shown.replace(false);
         self.playback
             .inline_videos
-            .borrow_mut()
             .frame_start(history_drawn, window.scale_factor());
         // Animations run while any Quill window is in front, a chat
         // window's included.
@@ -83,10 +82,7 @@ impl Render for QuillApp {
         // where the chat list was).
         let forum_column = self.forum_column_layout(window);
         if self.frame.window_active.replace(active) != active {
-            self.playback
-                .inline_videos
-                .borrow_mut()
-                .set_window_active(active);
+            self.playback.inline_videos.set_window_active(active);
         }
         // The viewer left video full screen: give the window back.
         if std::mem::take(&mut self.viewer.extra.restore_fullscreen) && window.is_fullscreen() {

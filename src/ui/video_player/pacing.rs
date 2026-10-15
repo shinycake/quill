@@ -18,6 +18,8 @@ const HISTORY: usize = 8;
 /// The fastest and slowest display the estimate accepts (240 Hz, 20 Hz).
 const MIN_INTERVAL: Duration = Duration::from_micros(4_167);
 const MAX_INTERVAL: Duration = Duration::from_millis(50);
+/// Two draw starts closer than this are the same frame.
+const SAME_FRAME: Duration = Duration::from_micros(3_125);
 /// Until two draws were seen: a 60 Hz display.
 const DEFAULT_INTERVAL: Duration = Duration::from_micros(16_667);
 /// A wake this close to now is not worth a timer: ask for the next frame.
@@ -39,6 +41,18 @@ impl PresentEstimator {
     /// A draw started at `at`.
     pub(crate) fn record_draw(&mut self, at: Instant) {
         if self.starts.back().is_some_and(|last| *last >= at) {
+            return;
+        }
+        // Drawn twice in one frame (an inline tile: its row in the
+        // conversation slice, then its copy in the animation layer): one
+        // start per frame, or the spacing would read as a 240 Hz display.
+        // Three quarters of the fastest display's interval: no two real
+        // frames are that close.
+        if self
+            .starts
+            .back()
+            .is_some_and(|last| at.saturating_duration_since(*last) < SAME_FRAME)
+        {
             return;
         }
         if self.starts.len() == HISTORY {

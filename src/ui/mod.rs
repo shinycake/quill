@@ -61,6 +61,7 @@ mod history_a11y;
 mod history_state;
 mod image_budget;
 mod image_decode;
+mod inline_players;
 mod inline_video;
 pub(crate) mod interface_zoom;
 mod links_state;

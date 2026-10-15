@@ -49,6 +49,13 @@ pub(crate) enum Purpose {
     /// A muted loop in the media viewer (GIFs): full size, no soundtrack
     /// decoded.
     ViewerLoop,
+    /// A muted loop in the history or the GIF panel, decoded at most
+    /// `max_edge` px on its longer side (FFmpeg; AVPlayer ignores it).
+    /// Turning the volume up (a round video played with sound) reopens
+    /// it with its soundtrack.
+    Inline { max_edge: u32 },
+    /// A story in the story viewer: full size, with sound.
+    Story,
 }
 
 /// A picture to draw.
@@ -189,6 +196,9 @@ struct PlayerCell {
     /// The frame request in flight: the view it redraws and when it counts
     /// as lost (`request_video_frame`).
     requested: FrameRequested,
+    /// How many times the picture was painted inside the visible area
+    /// (the inline players' off-screen policy compares it across a pass).
+    shown: Cell<u64>,
 }
 
 /// Shared with `frame_clock::request_video_frame`.
@@ -268,6 +278,7 @@ impl VideoPlayer {
             }),
             backend: Cell::new(Some(backend)),
             requested: Rc::new(Cell::new(None)),
+            shown: Cell::new(0),
         }))
     }
 
@@ -295,6 +306,17 @@ impl VideoPlayer {
                 }
             }
         })
+    }
+
+    /// How many times the element painted this player's picture inside
+    /// the visible area so far.
+    pub(crate) fn shown_count(&self) -> u64 {
+        self.0.shown.get()
+    }
+
+    /// The element painted the picture inside the visible area.
+    pub(super) fn note_shown(&self) {
+        self.0.shown.set(self.0.shown.get().wrapping_add(1));
     }
 
     pub(crate) fn downgrade(&self) -> WeakVideoPlayer {
@@ -688,6 +710,20 @@ fn open_backend(path: &Path, purpose: Purpose) -> Result<Box<dyn Backend>, Playe
             .map(|b| Box::new(b) as Box<dyn Backend>);
     }
     backend_ffmpeg::FfmpegBackend::open(path, purpose).map(|b| Box::new(b) as Box<dyn Backend>)
+}
+
+/// Whether clips can play in this process: always on macOS (AVPlayer);
+/// elsewhere once the bundled FFmpeg shim loads.
+pub(crate) fn supported() -> bool {
+    cfg!(target_os = "macos") || quill::video_decode::available()
+}
+
+/// Whether pictures are decoded in software into BGRA images in this
+/// process (FFmpeg): inline tiles then decode at their own size, leave
+/// clips above 1080p still and share a memory budget. AVPlayer decodes in
+/// hardware into buffers of its own.
+pub(crate) fn decodes_in_process() -> bool {
+    cfg!(not(target_os = "macos")) || backend_ffmpeg::preferred_on_macos()
 }
 
 /// Whether a `.gif` file can play through the player: only through FFmpeg

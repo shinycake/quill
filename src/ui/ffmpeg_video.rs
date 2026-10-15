@@ -137,10 +137,6 @@ impl FfmpegVideo {
         self.player.position()
     }
 
-    pub(super) fn duration_secs(&self) -> Option<f64> {
-        self.player.duration()
-    }
-
     pub(super) fn error(&self) -> Option<String> {
         self.player.error()
     }

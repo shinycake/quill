@@ -25,14 +25,6 @@ impl QuillApp {
         self.request_animation_tick_for(self.slices.current(), fps, cx);
     }
 
-    /// [`Self::request_animation_tick`] for media playing with sound, which
-    /// keeps drawing while the window is in the background (tdesktop only
-    /// pauses muted GIFs, stickers and loops there).
-    #[track_caller]
-    pub(super) fn request_media_tick(&self, fps: u32, cx: &mut Context<Self>) {
-        self.request_tick(self.slices.current(), fps, true, cx);
-    }
-
     /// [`Self::request_animation_tick`] for an explicit target: a slice or
     /// the chat list's animation layer by entity id, `None` for the app.
     #[track_caller]

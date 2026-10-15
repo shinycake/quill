@@ -33,8 +33,9 @@ pub(crate) struct VideoFrame {
     player: VideoPlayer,
     fit: ObjectFit,
     radii: Corners<Pixels>,
-    /// The color behind the element, painted over a surface's corners.
-    behind: Option<Hsla>,
+    /// The colors behind each corner (top-left, top-right, bottom-right,
+    /// bottom-left), painted over a surface's corner outsides.
+    behind: Option<[Hsla; 4]>,
     keep_alive: bool,
 }
 
@@ -46,8 +47,15 @@ impl VideoFrame {
 
     /// Round the corners; `behind` is the color under the element (a GPU
     /// surface is rounded by painting it over the corner outsides).
-    #[allow(dead_code)]
-    pub(crate) fn corner_radii(mut self, radii: Corners<Pixels>, behind: Hsla) -> Self {
+    pub(crate) fn corner_radii(self, radii: Corners<Pixels>, behind: Hsla) -> Self {
+        self.corner_radii_over(radii, [behind; 4])
+    }
+
+    /// [`Self::corner_radii`] with a color of its own behind each corner
+    /// (top-left, top-right, bottom-right, bottom-left): a tile in a
+    /// bubble has the bubble behind some corners and the chat behind
+    /// others.
+    pub(crate) fn corner_radii_over(mut self, radii: Corners<Pixels>, behind: [Hsla; 4]) -> Self {
         self.radii = radii;
         self.behind = Some(behind);
         self
@@ -76,8 +84,17 @@ impl RenderOnce for VideoFrame {
         let pump = canvas(
             |_, _, _| {},
             move |bounds, (), window, cx| {
-                if let Some(color) = mask {
-                    paint_corner_mask(bounds, radii, color, window);
+                if let Some(colors) = mask {
+                    paint_corner_mask(bounds, radii, colors, window);
+                }
+                if is_visible(bounds, window.content_mask().bounds) {
+                    player.note_shown();
+                }
+                // An inline tile's row, painted under the copy the
+                // conversation's animation layer draws: the layer asks for
+                // the frames, so the conversation is not redrawn for them.
+                if super::super::anim_layer::painting_under_layer() {
+                    return;
                 }
                 let now = Instant::now();
                 let demand = player.frame_demand(now);
@@ -119,6 +136,12 @@ impl RenderOnce for VideoFrame {
             .children(picture)
             .child(pump)
     }
+}
+
+/// Whether any of `bounds` shows inside the visible area `mask`.
+pub(super) fn is_visible(bounds: Bounds<Pixels>, mask: Bounds<Pixels>) -> bool {
+    let visible = bounds.intersect(&mask);
+    visible.size.width > Pixels::ZERO && visible.size.height > Pixels::ZERO
 }
 
 fn has_radius(radii: Corners<Pixels>) -> bool {
@@ -164,12 +187,12 @@ fn image_element(
         .into_any_element()
 }
 
-/// Paint `color` over the outsides of the rounded corners.
+/// Paint `colors` over the outsides of the rounded corners.
 #[cfg(target_os = "macos")]
 fn paint_corner_mask(
     bounds: Bounds<Pixels>,
     radii: Corners<Pixels>,
-    color: Hsla,
+    colors: [Hsla; 4],
     window: &mut Window,
 ) {
     let points = |value: Pixels| f32::from(value).round().max(0.0) as u32;
@@ -187,14 +210,14 @@ fn paint_corner_mask(
             points(radii.bottom_right),
             points(radii.bottom_left),
         ],
-        [color; 4],
+        colors,
     );
     // A failed paint leaves square corners; nothing else depends on it.
     let _ = window.paint_image(bounds, bounds, Corners::default(), mask, 0, false);
 }
 
 #[cfg(not(target_os = "macos"))]
-fn paint_corner_mask(_: Bounds<Pixels>, _: Corners<Pixels>, _: Hsla, _: &mut Window) {}
+fn paint_corner_mask(_: Bounds<Pixels>, _: Corners<Pixels>, _: [Hsla; 4], _: &mut Window) {}
 
 /// The display link's next present time (with its host ticks) and refresh
 /// period for this window's display.

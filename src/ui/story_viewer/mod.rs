@@ -136,7 +136,7 @@ impl QuillApp {
         self.stories.pause.reset();
         self.stories.native_failed = None;
         self.stories.video_wait_since = Some(Instant::now());
-        self.sync_story_video();
+        self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         self.ensure_story_custom_emoji_downloads();
@@ -780,7 +780,7 @@ impl QuillApp {
         // viewer is no longer open.
         self.stories.playback.stop();
         // B14: drop the player and the viewer's extra state with it.
-        *self.stories.native.borrow_mut() = None;
+        self.stories.player = None;
         self.stories.native_key = None;
         self.stories.native_failed = None;
         self.stories.pause.reset();
@@ -817,7 +817,7 @@ impl QuillApp {
         // Phase 9.6: manual nav restarts the playback clock for the new
         // current story (same as the official clients).
         self.stories.playback.start(Instant::now());
-        self.sync_story_video();
+        self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         self.ensure_story_custom_emoji_downloads();
@@ -866,7 +866,7 @@ impl QuillApp {
                         let now = Instant::now();
                         // B14: the native player drives video stories;
                         // the duration clock stays frozen meanwhile.
-                        this.sync_story_video();
+                        this.sync_story_video(cx);
                         let user_paused = this.story_playback_paused();
                         let video_driven = this.story_video_driven();
                         this.stories

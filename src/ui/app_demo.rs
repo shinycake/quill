@@ -556,10 +556,7 @@ impl QuillApp {
             let active = window.is_window_active() || super::frame_clock::assume_active();
             this.frame.window_active.set(active);
             this.viewer_window_activation(window, cx);
-            this.playback
-                .inline_videos
-                .borrow_mut()
-                .set_window_active(active);
+            this.playback.inline_videos.set_window_active(active);
             // The system accent may have changed while another app was in
             // front.
             if active && this.appearance.system_accent {

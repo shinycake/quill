@@ -73,7 +73,7 @@ impl QuillApp {
         } else {
             format!("{poster} · {kind_label}")
         };
-        let video_frame = self.story_video_element(cx);
+        let video_frame = self.story_video_element(path.clone());
         let visual: AnyElement = if let Some(frame) = video_frame {
             frame
         } else if let Some(path) = path {
