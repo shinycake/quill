@@ -403,6 +403,21 @@ impl QuillApp {
         // From here on, `progressed` marks results the UI drains (status
         // notes, finished exports, links): those redraw at once.
         let ingested = std::mem::take(&mut progressed);
+        // Picture-in-Picture: its account logging out, or its message
+        // deleted (tdesktop `sessionChanges`, `itemRemoved`), handled here
+        // too because the root render does not run while the main window
+        // is minimized or hidden.
+        if saw_logging_out
+            && let Some(account) = self
+                .live
+                .as_ref()
+                .map(|live| live.driver.session.account.clone())
+        {
+            self.video_pip_account_ended(&account, cx);
+        }
+        if ingested {
+            self.check_video_pip(cx);
+        }
         if let Some(result) = self
             .live
             .as_mut()

@@ -688,6 +688,22 @@ pub fn wayland_normalized(size: PipSize, ratio: PipSize) -> PipSize {
     }
 }
 
+/// A resize the window system made (a Wayland compositor, an X11 window
+/// manager): brought back to `ratio` (`handleWaylandResize`) and inside
+/// the limits for a `screen` this big (tdesktop sets them as the window's
+/// minimum and maximum size).
+pub fn fit_system_resize(size: PipSize, ratio: PipSize, screen: PipSize) -> PipSize {
+    let (minimal, maximal) = size_limits(ratio, screen);
+    let normalized = wayland_normalized(size, ratio);
+    if normalized.w < minimal.w || normalized.h < minimal.h {
+        minimal
+    } else if normalized.w > maximal.w || normalized.h > maximal.h {
+        scaled(ratio, maximal, AspectMode::Keep)
+    } else {
+        normalized
+    }
+}
+
 #[cfg(test)]
 #[path = "panel_tests.rs"]
 mod tests;

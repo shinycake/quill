@@ -229,15 +229,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         use crate::ui::video_player::{Purpose, VideoPlayer};
-        // Back from Picture-in-Picture: the same player goes on.
-        if let Some(player) = self.take_pip_handoff(item.message_id) {
+        // The clip Picture-in-Picture plays (back to the viewer, or
+        // opened again from the chat): the same player goes on
+        // (tdesktop `continueStreaming`).
+        if let Some(player) = self.take_pip_player_for(item, cx) {
             self.adopt_viewer_player(item, path, player, cx);
             return;
         }
         // A clip with sound ends Picture-in-Picture (tdesktop
         // `startStreamingPlayer`); a silent loop leaves it playing.
         if !item.kind.loops() {
-            self.close_video_pip(cx);
+            self.sound_starts(cx);
         }
         self.stop_voice_playback();
         self.stop_audio_playback();

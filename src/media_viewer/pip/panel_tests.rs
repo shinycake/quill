@@ -1,8 +1,8 @@
 use super::{
     AspectMode, BORDER_SKIP, DEFAULT_SIZE, DragStep, MINIMAL_SIZE, PipPoint, PipPosition, PipRect,
     PipSize, RectPart, Sides, aspect, clamp_to_edges, constrained, count_position, drag_step,
-    ease_out_circ, finish_drag, max_allowed_size, place_on_screen, resize_part, scaled,
-    size_limits, slide_point, transformed, wayland_normalized,
+    ease_out_circ, finish_drag, fit_system_resize, max_allowed_size, place_on_screen, resize_part,
+    scaled, size_limits, slide_point, transformed, wayland_normalized,
 };
 
 const SCREEN: PipRect = PipRect::new(0, 25, 1440, 875);
@@ -337,5 +337,29 @@ fn slides_ease_out_and_wayland_resizes_keep_the_aspect() {
     assert_eq!(
         wayland_normalized(PipSize::new(400, 100), WIDE),
         PipSize::new(177, 100)
+    );
+}
+
+#[test]
+fn a_system_resize_keeps_the_aspect_and_the_limits() {
+    let screen = SCREEN.size();
+    // A window manager stretched it: back to 16:9.
+    assert_eq!(
+        fit_system_resize(PipSize::new(400, 400), WIDE, screen),
+        PipSize::new(400, 225)
+    );
+    // Under the minimum for the aspect (the window's own minimum is only
+    // 120 × 120): up to 213 × 120.
+    assert_eq!(
+        fit_system_resize(PipSize::new(130, 130), WIDE, screen),
+        PipSize::new(213, 120)
+    );
+    // Over the screen's limit.
+    let big = fit_system_resize(PipSize::new(3000, 2000), WIDE, screen);
+    assert!(big.w <= 1380 && big.h <= 815, "{big:?}");
+    // Already right: unchanged.
+    assert_eq!(
+        fit_system_resize(PipSize::new(320, 180), WIDE, screen),
+        PipSize::new(320, 180)
     );
 }

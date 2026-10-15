@@ -26,7 +26,7 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = Rc::new(RefCell::new(None));
@@ -49,7 +49,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
-fn settle(vcx: &mut VisualTestContext) {
+pub(super) fn settle(vcx: &mut VisualTestContext) {
     for _ in 0..4 {
         vcx.update(|window, _| window.refresh());
         vcx.run_until_parked();
@@ -61,6 +61,19 @@ fn settle(vcx: &mut VisualTestContext) {
 fn open_pip(
     cx: &mut TestAppContext,
     script: &Rc<RefCell<Script>>,
+) -> (Entity<QuillApp>, VisualTestContext, VideoPlayer) {
+    open_pip_on(cx, script, |_| {}, MessageId(204), 0)
+}
+
+/// The demo chat with `setup` applied to its session, the viewer opened
+/// on `message`'s `offset`-th item played by `script`, then handed to
+/// Picture-in-Picture.
+pub(super) fn open_pip_on(
+    cx: &mut TestAppContext,
+    script: &Rc<RefCell<Script>>,
+    setup: impl FnOnce(&mut QuillApp),
+    message: MessageId,
+    offset: usize,
 ) -> (Entity<QuillApp>, VisualTestContext, VideoPlayer) {
     let (app, mut vcx) = new_app(cx);
     let vcx_ref = &mut vcx;
@@ -74,13 +87,14 @@ fn open_pip(
                 &app.demo_ui.seq,
             );
         }
+        setup(app);
         let focus = app.focus_handle(cx);
         window.focus(&focus, cx);
         cx.notify();
     });
     queue_backend(script);
     app.update_in(vcx_ref, |app, _, cx| {
-        app.open_media_viewer(ChatId(11), MessageId(204), cx);
+        app.open_media_viewer_at(ChatId(11), message, offset, cx);
     });
     settle(vcx_ref);
     let player = app
@@ -93,7 +107,7 @@ fn open_pip(
 }
 
 /// The window and its view.
-fn pip_of(
+pub(super) fn pip_of(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
 ) -> (WindowHandle<Root>, Entity<VideoPip>) {
@@ -110,7 +124,10 @@ fn pip_of(
     })
 }
 
-fn pip_player(view: &Entity<VideoPip>, vcx: &mut VisualTestContext) -> Option<VideoPlayer> {
+pub(super) fn pip_player(
+    view: &Entity<VideoPip>,
+    vcx: &mut VisualTestContext,
+) -> Option<VideoPlayer> {
     view.read_with(vcx, |pip, _| pip.player().cloned())
 }
 

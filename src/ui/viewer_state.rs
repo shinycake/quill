@@ -31,9 +31,6 @@ pub(crate) struct ViewerUi {
     /// The Picture-in-Picture window playing the viewer's clip, while
     /// one is open (the viewer itself is closed then).
     pub(super) pip: Option<super::media_viewer::PipLink>,
-    /// The player Picture-in-Picture handed back, until the viewer it
-    /// reopened takes it (`media_viewer::pip`).
-    pub(super) handoff: Option<(MessageId, super::video_player::VideoPlayer)>,
     /// Sandbox-checked local path of the viewer's clip.
     pub(super) video_path: Option<PathBuf>,
     /// The viewer clip's player (`video_player`): picture, sound and
@@ -91,7 +88,6 @@ impl ViewerUi {
             drag: None,
             video: None,
             pip: None,
-            handoff: None,
             video_path: None,
             player: None,
             gif: None,

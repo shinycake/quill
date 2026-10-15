@@ -245,6 +245,8 @@ impl QuillApp {
             return;
         };
         self.account.accounts.remove_confirm = None;
+        // Its Picture-in-Picture plays one of its files.
+        self.video_pip_account_ended(key, cx);
         // Close its background client first: TDLib must not be writing
         // while the account's folder is deleted.
         self.stop_background_account(key);

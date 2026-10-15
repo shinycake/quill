@@ -294,6 +294,26 @@ impl MediaViewer {
         self.items.get(self.index)
     }
 
+    /// The items paged over, oldest first.
+    pub fn items(&self) -> &[MediaViewerItem] {
+        &self.items
+    }
+
+    /// Which item of its message the current one is (0 for a single item;
+    /// the album position in a bought paid-media album).
+    pub fn current_offset(&self) -> usize {
+        let Some(current) = self.current() else {
+            return 0;
+        };
+        self.items.get(..self.index).map_or(0, |before| {
+            before
+                .iter()
+                .rev()
+                .take_while(|item| item.message_id == current.message_id)
+                .count()
+        })
+    }
+
     /// 1-based `(position, total)` for the "Photo 2 of 5" header. Over a
     /// Shared Media list the total is the tab's count and the position
     /// counts the older items that are not loaded yet.

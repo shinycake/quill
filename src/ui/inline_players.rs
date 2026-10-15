@@ -781,6 +781,18 @@ impl InlineVideos {
         Some(())
     }
 
+    /// Whether the clip plays with sound now (a round video played once
+    /// with sound, not paused).
+    pub(super) fn is_sounding(&self, key: Key) -> bool {
+        self.with(|state| {
+            state
+                .players
+                .get(&key)
+                .is_some_and(|slot| slot.sound && !slot.paused)
+        })
+        .unwrap_or(false)
+    }
+
     /// The slot's player, for tests.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]

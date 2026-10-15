@@ -488,7 +488,6 @@ impl VideoPlayer {
     }
 
     /// Whether `other` is a handle to this same player.
-    #[cfg(test)]
     pub(crate) fn same_as(&self, other: &VideoPlayer) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }

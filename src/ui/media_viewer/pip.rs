@@ -1,21 +1,23 @@
 //! The viewer's side of Picture-in-Picture (tdesktop
 //! `OverlayWidget::switchToPip` and the `closeAndContinue` it hands the
 //! window): the viewer's player moves into the window and the viewer
-//! closes; "back to the viewer" reopens the viewer on the same message
-//! with the same player, where it was.
+//! closes; "back to the viewer" reopens the viewer on the same clip with
+//! the same player, where it was. Opening that clip again from the chat
+//! does the same (tdesktop `continueStreaming`).
 //!
-//! The window goes when the clip's message is deleted, the app locks or
-//! the account changes (tdesktop's `itemRemoved`, `passcodeLockChanges`,
-//! `sessionChanges`), and when another clip with sound starts.
+//! The window goes when the clip's message is deleted, the app locks, the
+//! account it belongs to logs out (tdesktop's `itemRemoved`,
+//! `passcodeLockChanges`, `sessionChanges`), and when another sound
+//! starts ([`QuillApp::sound_starts`]). Switching to another account
+//! keeps it playing, as tdesktop keeps the other account's session.
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
 use crate::ui::video_player::VideoPlayer;
-use crate::ui::video_player::controls::pip::{
-    PipHooks, PipOpen, PipSource, PipWindow, open_pip_window,
-};
+use crate::ui::video_player::controls::pip::{PipHooks, PipOpen, PipWindow, open_pip_window};
 use quill::ids::AccountKey;
 use quill::lang::{keys, tr};
+use quill::media_viewer::pip::reopen::{ClipRef, reopen_index};
 use std::rc::Rc;
 
 /// An open Picture-in-Picture window.
@@ -23,7 +25,10 @@ pub(in crate::ui) struct PipLink {
     pub(in crate::ui) window: PipWindow,
     /// The account it was opened in.
     account: Option<AccountKey>,
-    source: PipSource,
+    /// The clip, and the viewer item it was opened from (the viewer
+    /// reopens on that item alone when its message is no longer loaded).
+    clip: ClipRef,
+    item: MediaViewerItem,
     /// The window the viewer was in, brought to the front on the way back.
     return_to: Option<AnyWindowHandle>,
 }
@@ -48,13 +53,14 @@ impl QuillApp {
         let Some(player) = self.viewer.player.take() else {
             return;
         };
-        let source = PipSource {
-            chat_id: item.chat_id,
+        let clip = ClipRef {
             message_id: item.message_id,
-            dimensions: item
-                .natural_size
-                .and_then(|(w, h)| Some((u32::try_from(w).ok()?, u32::try_from(h).ok()?))),
+            offset: self.viewer.state.current_offset(),
+            file_id: item.play_file_id,
         };
+        let dimensions = item
+            .natural_size
+            .and_then(|(w, h)| Some((u32::try_from(w).ok()?, u32::try_from(h).ok()?)));
         self.close_video_pip(cx);
         self.close_media_viewer(cx);
         let last_volume = if self.playback.volume > 0.0 {
@@ -77,7 +83,7 @@ impl QuillApp {
             let opened = open_pip_window(
                 PipOpen {
                     player,
-                    source,
+                    dimensions,
                     hooks,
                     last_volume,
                     display,
@@ -90,7 +96,8 @@ impl QuillApp {
                         app.viewer.pip = Some(PipLink {
                             window,
                             account,
-                            source,
+                            clip,
+                            item,
                             return_to,
                         })
                     }
@@ -105,8 +112,9 @@ impl QuillApp {
     }
 
     /// Close Picture-in-Picture: its player is dropped and the sound
-    /// stops.
-    pub(in crate::ui) fn close_video_pip(&mut self, cx: &mut Context<Self>) {
+    /// stops. Runs without the main window drawing (it may be minimized
+    /// or hidden to the tray).
+    pub(in crate::ui) fn close_video_pip(&mut self, cx: &mut App) {
         let Some(link) = self.viewer.pip.take() else {
             return;
         };
@@ -120,8 +128,43 @@ impl QuillApp {
         });
     }
 
-    /// Root render: the window closed itself, or its message, account or
-    /// unlocked state is gone.
+    /// Another sound starts (a viewer clip, a story, a voice message or
+    /// music, a recording preview, a round video with sound): one sound
+    /// plays at a time, so Picture-in-Picture closes (tdesktop
+    /// `startStreamingPlayer` drops `_pip`).
+    pub(in crate::ui) fn sound_starts(&mut self, cx: &mut App) {
+        self.close_video_pip(cx);
+    }
+
+    /// A round video was clicked: when it now plays with sound, that is
+    /// a sound starting.
+    pub(in crate::ui) fn round_sound_started(&mut self, key: (i64, i64), cx: &mut App) {
+        if self.playback.inline_videos.is_sounding(key) {
+            self.sound_starts(cx);
+        }
+    }
+
+    /// The account `account` logged out or was removed: its
+    /// Picture-in-Picture goes with it (tdesktop `sessionChanges`).
+    pub(in crate::ui) fn video_pip_account_ended(
+        &mut self,
+        account: &AccountKey,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .viewer
+            .pip
+            .as_ref()
+            .is_some_and(|link| link.account.as_ref() == Some(account))
+        {
+            self.close_video_pip(cx);
+        }
+    }
+
+    /// After updates land and at each root render: the window closed
+    /// itself, its message was deleted or the app is locked. Only a real
+    /// deletion counts (a tombstone), not the message leaving the loaded
+    /// part of the history.
     pub(in crate::ui) fn check_video_pip(&mut self, cx: &mut Context<Self>) {
         let Some(link) = self.viewer.pip.as_ref() else {
             return;
@@ -136,24 +179,39 @@ impl QuillApp {
             self.viewer.pip = None;
             return;
         }
-        let source = link.source;
-        let account = self.session().map(|session| session.account.clone());
+        let (chat, message) = (link.item.chat_id, link.clip.message_id);
         let deleted = self
             .session()
-            .and_then(|session| session.histories.get(&source.chat_id.0))
-            .is_some_and(|history| !history.messages.contains_key(&source.message_id.0));
-        if self.account.passcode.locked || account != link.account || deleted {
+            .filter(|session| Some(&session.account) == link.account.as_ref())
+            .and_then(|session| session.histories.get(&chat.0))
+            .is_some_and(|history| history.is_tombstone(message));
+        if self.account.passcode.locked || deleted {
             self.close_video_pip(cx);
         }
     }
 
-    /// The player Picture-in-Picture handed back for `message_id`, if the
-    /// viewer is opening that clip (`continueStreaming`).
-    pub(super) fn take_pip_handoff(&mut self, message_id: MessageId) -> Option<VideoPlayer> {
-        self.viewer
-            .handoff
-            .take_if(|(id, _)| *id == message_id)
-            .map(|(_, player)| player)
+    /// The viewer is opening `item`: when Picture-in-Picture plays that
+    /// very clip, its player comes back to the viewer (no restart) and the
+    /// window closes.
+    pub(super) fn take_pip_player_for(
+        &mut self,
+        item: &MediaViewerItem,
+        cx: &mut Context<Self>,
+    ) -> Option<VideoPlayer> {
+        let link = self.viewer.pip.as_ref()?;
+        let account = self.session().map(|session| session.account.clone());
+        if !link.clip.is(item) || link.item.chat_id != item.chat_id || account != link.account {
+            return None;
+        }
+        let view = link.window.view.upgrade()?;
+        let player = view.read(cx).player().cloned()?;
+        let link = self.viewer.pip.take()?;
+        cx.defer(move |cx| {
+            let _ = link.window.window.update(cx, |_, window, cx| {
+                view.update(cx, |pip, cx| pip.detach(window, cx));
+            });
+        });
+        Some(player)
     }
 
     /// The viewer plays `player` (from Picture-in-Picture) as it is: no
@@ -182,14 +240,54 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// "Back to the viewer": the viewer opens on the clip's message with
-    /// the window's player.
-    fn pip_enlarged(&mut self, source: PipSource, player: VideoPlayer, cx: &mut Context<Self>) {
-        let return_to = self.viewer.pip.take().and_then(|link| link.return_to);
-        self.viewer.handoff = Some((source.message_id, player));
-        self.open_media_viewer(source.chat_id, source.message_id, cx);
-        // Not taken (the message is gone): the player stops here.
-        self.viewer.handoff = None;
+    /// "Back to the viewer": reopen the viewer on the window's clip, which
+    /// takes the window's player (`take_pip_player_for`). The clip is found
+    /// by its album position and file in the chat's loaded media; a
+    /// message no longer loaded opens alone. When the viewer can't take the
+    /// player (another account is active, the file is gone), the window
+    /// stays.
+    fn pip_enlarge_requested(&mut self, cx: &mut Context<Self>) {
+        let Some(link) = self.viewer.pip.as_ref() else {
+            return;
+        };
+        let account = self.session().map(|session| session.account.clone());
+        if account != link.account {
+            return;
+        }
+        let Some(player) = link
+            .window
+            .view
+            .upgrade()
+            .and_then(|view| view.read(cx).player().cloned())
+        else {
+            return;
+        };
+        let (clip, item, return_to) = (link.clip, link.item.clone(), link.return_to);
+        let items = self
+            .session()
+            .and_then(|session| session.histories.get(&item.chat_id.0))
+            .map(|history| {
+                collect_media_items(&history.ordered().into_iter().cloned().collect::<Vec<_>>())
+            })
+            .unwrap_or_default();
+        self.viewer.state = match reopen_index(&items, &clip) {
+            Some(index) => MediaViewer::open(items, index),
+            None => MediaViewer::open(vec![item], 0),
+        };
+        self.viewer.open_gen += 1;
+        self.viewer_note_activity(false, cx);
+        self.reset_viewer_item_state(cx);
+        let taken = self
+            .viewer
+            .player
+            .as_ref()
+            .is_some_and(|viewer| viewer.same_as(&player));
+        if !taken {
+            // Nothing reopened the clip: the window keeps playing it.
+            self.close_media_viewer(cx);
+            cx.notify();
+            return;
+        }
         cx.defer(move |cx| {
             cx.activate(true);
             if let Some(handle) = return_to {
@@ -220,8 +318,8 @@ fn pip_hooks(app: WeakEntity<QuillApp>) -> PipHooks {
                 app.check_video_pip(cx);
             });
         }),
-        enlarge: Rc::new(move |source, player, cx| {
-            let _ = enlarge.update(cx, |app, cx| app.pip_enlarged(source, player, cx));
+        enlarge: Rc::new(move |cx| {
+            let _ = enlarge.update(cx, |app, cx| app.pip_enlarge_requested(cx));
         }),
         volume: Rc::new(move |volume, cx| {
             let _ = app.update(cx, |app, _| app.pip_volume(volume));
