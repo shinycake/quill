@@ -1,6 +1,7 @@
 //! Methods moved out of `history.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 pub(in crate::ui) fn session_history_row(
     message: &HistoryMessage,
@@ -89,54 +90,14 @@ pub(in crate::ui) fn session_history_row(
             ),
         );
     }
-    // Community service rows (`messageChatAddedToCommunity` and kin):
-    // centered notices in TGX's wording; the name comes from the
-    // `updateCommunity` cache, or TGX's nameless forms.
-    let community_name = |community_id: i64| {
-        session.and_then(|s| {
-            s.groups
-                .communities
-                .get(&community_id)
-                .map(|c| c.name.clone())
-        })
-    };
-    let community_service_row = |text: String| {
-        super::super::chat_wide_ui::wide_column(
+    // Community service rows (`messageChatAddedToCommunity` and kin).
+    if let Some(text) =
+        super::community_rows::community_service_text(message, session, sender.as_ref())
+    {
+        return super::super::chat_wide_ui::wide_column(
             wide,
             service_pill(("community-service-row", message.id.0 as u64), text, cx),
-        )
-    };
-    if let MessageContent::ChatAddedToCommunity { community_id } = &message.content {
-        let text = match community_name(*community_id) {
-            Some(name) => format!("This chat was added to community \"{name}\""),
-            None => "This chat was added to community".to_string(),
-        };
-        return community_service_row(text);
-    }
-    if matches!(message.content, MessageContent::ChatRemovedFromCommunity) {
-        return community_service_row("This chat was removed from community".to_string());
-    }
-    if let MessageContent::ChatJoinFromCommunity { community_id } = &message.content {
-        let community = community_name(*community_id);
-        let text = match (message.is_outgoing, community) {
-            (true, Some(name)) => {
-                format!("You joined the group from the community \"{name}\"")
-            }
-            (true, None) => "You joined the group from the community".to_string(),
-            (false, Some(name)) => format!(
-                "{} joined the group from the community \"{name}\"",
-                sender
-                    .as_ref()
-                    .map_or("Someone", |label| label.name.as_str())
-            ),
-            (false, None) => format!(
-                "{} joined the group from the community",
-                sender
-                    .as_ref()
-                    .map_or("Someone", |label| label.name.as_str())
-            ),
-        };
-        return community_service_row(text);
+        );
     }
     // Phase C2f: `messageGroupCall` invitation service row (schema
     // 1.8.67, line 5288) — incoming and pending: Accept / Decline.
@@ -161,9 +122,15 @@ pub(in crate::ui) fn session_history_row(
     let has_forward = forward_header.is_some();
     let forward_strip = forward_header.map(|header| {
         let original = (header.original_date > 0 && message.forward_info.is_some()).then(|| {
-            format!(
-                "Original: {}",
-                super::super::message_text::format_unix_date_time(header.original_date.into())
+            tr_with(
+                keys::Q_CHAT_ORIGINAL,
+                &[(
+                    "into",
+                    &(super::super::message_text::format_unix_date_time(
+                        header.original_date.into(),
+                    ))
+                    .to_string(),
+                )],
             )
         });
         forward_header_line(message.id, header, via_bot.clone(), original, on_fill, cx)
@@ -569,10 +536,10 @@ pub(in crate::ui) fn session_history_row(
                 .flex().flex_col().gap_2().p_3()
                 .child(div().id(("unsupported-message-label", message.id.0 as u64))
                     .role(Role::Label)
-                    .aria_label("Quill cannot display this message. A newer release may support it.")
-                    .child("Quill cannot display this message. A newer release may support it."))
+                    .aria_label(tr(keys::Q_CHAT_QUILL_CANNOT_DISPLAY_THIS_MESSAGE))
+                    .child(tr(keys::Q_CHAT_QUILL_CANNOT_DISPLAY_THIS_MESSAGE)))
                 .child(Button::new(("unsupported-update", message.id.0 as u64))
-                    .label("Get latest Quill")
+                    .label(tr(keys::Q_CHAT_GET_LATEST_QUILL))
                     .on_click(cx.listener(|_, _, _, cx| cx.open_url(quill::updater::RELEASES_URL))))
                 .into_any_element(),
         ),

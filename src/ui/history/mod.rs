@@ -661,6 +661,7 @@ pub(in crate::ui) mod bubble_width;
 mod reaction_chip_row;
 pub(in crate::ui) mod text_measure;
 use reaction_chip_row::reaction_chip_row;
+mod community_rows;
 mod session_history_row;
 mod wrap;
 #[allow(unused_imports)]
