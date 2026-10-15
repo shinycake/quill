@@ -55,8 +55,6 @@ ui = [
     "dep:block2",
     "dep:objc2-core-media",
     "dep:objc2-core-video",
-    "dep:core-video",
-    "dep:core-foundation",
     "dep:rodio",
     "dep:ogg",
     "dep:opus-decoder",
@@ -179,10 +177,10 @@ icu_locale_core = { version = "2", default-features = false }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
 # `sync`: plural rules live in the shared string snapshot (Send + Sync).
 icu_provider = { version = "2", default-features = false, features = ["sync"] }
-gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.8" }
+gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.9" }
 
 [dependencies.gpui-kit]
-version = "=0.7.1"
+version = "=0.7.3"
 optional = true
 default-features = false
 features = ["component", "assets"]
@@ -190,7 +188,7 @@ features = ["component", "assets"]
 # The input engine under gpui-kit (patched below), named directly for the
 # composer's formatting spans (docs/decisions/codex-composer-input.md).
 [dependencies.gpui-base]
-version = "=0.7.1"
+version = "=0.7.3"
 optional = true
 
 # tray-icon is GTK/libappindicator on Linux and needs gtk::init plus a GTK main
@@ -222,18 +220,18 @@ objc2-foundation = { version = "0.3.2", optional = true, default-features = fals
 objc2-av-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2-core-media", "objc2-core-video", "objc2-core-graphics", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "AVAssetImageGenerator", "AVAudioProcessingSettings", "AVTime", "AVMediaFormat", "AVCaptureDevice", "block2"] }
 block2 = { version = "0.6", optional = true }
 objc2-core-media = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CMTime", "CMTimeRange", "CMSampleBuffer", "objc2-core-video"] }
-objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "bitflags"] }
+# GPUI's `surface` takes a `CFRetained<CVPixelBuffer>`; `CVHostTime` paces
+# AVPlayer pulls on Mach host ticks.
+objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "CVHostTime", "bitflags"] }
 # Screen sharing in calls (src/calls/capture/screen_mac.rs): sources,
 # thumbnails and the NV12 stream from ScreenCaptureKit.
 objc2-screen-capture-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "SCShareableContent", "SCStream", "SCScreenshotManager", "SCError", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics", "objc2-core-foundation"] }
 dispatch2 = { version = "0.3.1", optional = true, default-features = false, features = ["std", "objc2"] }
-core-video = { version = "0.5.2", optional = true }
-core-foundation = { version = "0.10.1", optional = true }
 # Image files (HEIC, AVIF, JPEG XL and the rest) decoded and colour-managed
 # with ImageIO (src/ui/image_decode/macos.rs).
 objc2-image-io = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
 objc2-core-graphics = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace", "CGGeometry", "CGWindow", "CGDirectDisplay"] }
-objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes", "CFURL"] }
+objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes", "CFURL"] }
 # Passkeys from a phone: the caBLE advertisements over CoreBluetooth
 # (src/webauthn/hybrid/ble_macos.rs).
 objc2-core-bluetooth = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CBAdvertisementData", "CBCentralManager", "CBCentralManagerConstants", "CBManager", "CBPeer", "CBPeripheral", "CBUUID", "dispatch2"] }
@@ -243,7 +241,7 @@ objc2-user-notifications = { version = "0.3", optional = true }
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
 # crate GPUI already links.
-gpui_macos = { package = "gpui-pre-macos", version = "=0.3.8", optional = true, default-features = false }
+gpui_macos = { package = "gpui-pre-macos", version = "=0.3.9", optional = true, default-features = false }
 # Lock-screen / media-key Now Playing (MPNowPlayingInfoCenter, MPRemoteCommandCenter).
 objc2-media-player = { version = "0.3.2", optional = true, default-features = false, features = ["std", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPMediaItem", "MPRemoteCommandEvent", "block2"] }
 
@@ -293,18 +291,18 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
 # crate GPUI already links.
-gpui_windows = { package = "gpui-pre-windows", version = "=0.3.8", optional = true, default-features = false }
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.9", optional = true, default-features = false }
 
 # Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
-# 0.7.1 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
+# 0.7.3 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
 # the commit holding its pristine registry copy; a diff against it isolates the patch.
 [patch.crates-io]
 gpui-base = { path = "third_party/gpui-base" }
-# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.8 with a
+# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.9 with a
 # display link that stops while the window has nothing to draw.
 gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
 # Idle frames on X11 and Windows (docs/decisions/codex-idle-frames-x11-windows.md):
-# gpui-pre-linux and gpui-pre-windows 0.3.8, whose per-frame wake pauses while
+# gpui-pre-linux and gpui-pre-windows 0.3.9, whose per-frame wake pauses while
 # the window has nothing to draw.
 gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
 gpui-pre-windows = { path = "third_party/gpui-pre-windows" }

@@ -9,20 +9,18 @@
 
 use super::{HDR_MAX_PIXELS, HdrPixels, Headroom};
 use crate::ui::image_decode::{DecodeError, area_allowed};
-use core_foundation::base::{CFType, TCFType};
-use core_foundation::boolean::CFBoolean as CfBoolean;
-use core_foundation::dictionary::CFDictionary as CfDictionary;
-use core_foundation::number::CFNumber as CfNumber;
-use core_foundation::string::CFString as CfString;
-use core_video::buffer::{TCVBuffer, kCVAttachmentMode_ShouldNotPropagate};
-use core_video::pixel_buffer::{CVPixelBuffer, CVPixelBufferKeys};
 use objc2_core_foundation::{
-    CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType as ObjcCfType, CFURL, CGPoint,
-    CGRect, CGSize,
+    CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFURL, CGPoint, CGRect, CGSize,
 };
 use objc2_core_graphics::{
     CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
     CGImageByteOrderInfo, CGImageComponentInfo, kCGColorSpaceExtendedLinearSRGB,
+};
+use objc2_core_video::{
+    CVAttachmentMode, CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddress,
+    CVPixelBufferGetBytesPerRow, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
+    CVPixelBufferUnlockBaseAddress, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferMetalCompatibilityKey, kCVPixelFormatType_64RGBAHalf, kCVReturnSuccess,
 };
 use objc2_image_io::{
     CGImageSource, kCGImageAuxiliaryDataTypeHDRGainMap, kCGImagePropertyPixelHeight,
@@ -43,7 +41,7 @@ const HDR_PEAK_MIN: f32 = 1.01;
 
 /// A decoded HDR still's GPU buffer.
 pub(crate) struct Frame {
-    buffer: CVPixelBuffer,
+    buffer: CFRetained<CVPixelBuffer>,
 }
 
 // SAFETY: a CVPixelBuffer is a CoreFoundation object with atomic retain
@@ -52,18 +50,19 @@ pub(crate) struct Frame {
 unsafe impl Send for Frame {}
 
 impl Frame {
-    pub(crate) fn buffer(&self) -> CVPixelBuffer {
+    pub(crate) fn buffer(&self) -> CFRetained<CVPixelBuffer> {
         self.buffer.clone()
     }
 
     pub(crate) fn set_headroom(&self, headroom: f32) {
-        let key = CfString::from_static_string(HEADROOM_KEY);
-        let value = CfNumber::from(headroom);
-        self.buffer.as_buffer().set_attachment(
-            &key,
-            &value.as_CFType(),
-            kCVAttachmentMode_ShouldNotPropagate,
-        );
+        let key = CFString::from_static_str(HEADROOM_KEY);
+        let value = CFNumber::new_f32(headroom);
+        // SAFETY: the attachment is a CFNumber, which is what the renderer
+        // reads under this key.
+        unsafe {
+            self.buffer
+                .set_attachment(&key, &value, CVAttachmentMode::ShouldNotPropagate);
+        }
     }
 }
 
@@ -135,7 +134,7 @@ pub(crate) fn decode(path: &Path, long_edge: u32) -> Result<Option<HdrPixels>, D
             kCGImageSourceDecodeToHDR,
         )
     };
-    let values: [&ObjcCfType; 6] = [
+    let values: [&CFType; 6] = [
         yes.as_ref(),
         yes.as_ref(),
         yes.as_ref(),
@@ -143,7 +142,7 @@ pub(crate) fn decode(path: &Path, long_edge: u32) -> Result<Option<HdrPixels>, D
         max_pixels.as_ref(),
         hdr.as_ref(),
     ];
-    let options = CFDictionary::<CFString, ObjcCfType>::from_slices(&keys, &values);
+    let options = CFDictionary::<CFString, CFType>::from_slices(&keys, &values);
     // SAFETY: `options` has the CFString keys and CFBoolean / CFNumber /
     // CFString values the thumbnail call documents.
     let image = unsafe { source.thumbnail_at_index(index, Some(options.as_opaque())) }
@@ -160,7 +159,7 @@ fn natural_size(source: &CGImageSource, index: usize) -> Result<(u32, u32), Deco
     let properties =
         unsafe { source.properties_at_index(index, None) }.ok_or(DecodeError::Unsupported)?;
     // SAFETY: ImageIO's property dictionaries have CFString keys.
-    let properties = unsafe { properties.cast_unchecked::<CFString, ObjcCfType>() };
+    let properties = unsafe { properties.cast_unchecked::<CFString, CFType>() };
     // SAFETY: reading framework constants.
     let (width_key, height_key) =
         unsafe { (kCGImagePropertyPixelWidth, kCGImagePropertyPixelHeight) };
@@ -203,13 +202,17 @@ fn draw_half_float(image: &CFRetained<CGImage>) -> Result<Option<HdrPixels>, Dec
         return Err(DecodeError::TooLarge);
     }
     let buffer = pixel_buffer(width, height)?;
-    if buffer.lock_base_address(0) != 0 {
+    // SAFETY: locking a live buffer; unlocked below with the same flags.
+    if unsafe { CVPixelBufferLockBaseAddress(&buffer, CVPixelBufferLockFlags::empty()) }
+        != kCVReturnSuccess
+    {
         return Err(DecodeError::Failed(
             "could not lock the pixel buffer".into(),
         ));
     }
     let drawn = draw_locked(image, &buffer, width, height);
-    buffer.unlock_base_address(0);
+    // SAFETY: locked above with these flags.
+    unsafe { CVPixelBufferUnlockBaseAddress(&buffer, CVPixelBufferLockFlags::empty()) };
     let peak = drawn?;
     if peak < HDR_PEAK_MIN {
         return Ok(None);
@@ -221,25 +224,37 @@ fn draw_half_float(image: &CFRetained<CGImage>) -> Result<Option<HdrPixels>, Dec
     }))
 }
 
-fn pixel_buffer(width: usize, height: usize) -> Result<CVPixelBuffer, DecodeError> {
-    let surface_props = CfDictionary::<CfString, CFType>::from_CFType_pairs(&[]);
-    let options = CfDictionary::<CfString, CFType>::from_CFType_pairs(&[
-        (
-            CfString::from(CVPixelBufferKeys::IOSurfaceProperties),
-            surface_props.as_CFType(),
-        ),
-        (
-            CfString::from(CVPixelBufferKeys::MetalCompatibility),
-            CfBoolean::true_value().as_CFType(),
-        ),
-    ]);
-    CVPixelBuffer::new(
-        objc2_core_video::kCVPixelFormatType_64RGBAHalf,
-        width,
-        height,
-        Some(&options),
-    )
-    .map_err(|status| DecodeError::Failed(format!("CVPixelBufferCreate failed ({status})")))
+/// A `64RGBAHalf` pixel buffer backed by an IOSurface and usable by Metal
+/// (what the renderer's surface path draws).
+fn pixel_buffer(width: usize, height: usize) -> Result<CFRetained<CVPixelBuffer>, DecodeError> {
+    let surface_props = CFDictionary::<CFType, CFType>::empty();
+    // SAFETY: reading framework constants.
+    let keys: [&CFString; 2] = unsafe {
+        [
+            kCVPixelBufferIOSurfacePropertiesKey,
+            kCVPixelBufferMetalCompatibilityKey,
+        ]
+    };
+    let values: [&CFType; 2] = [&surface_props, CFBoolean::new(true)];
+    let options = CFDictionary::from_slices(&keys, &values);
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: `options` maps CoreVideo's CFString keys to CF values of the
+    // types they take, and `raw` is a valid out pointer.
+    let status = unsafe {
+        CVPixelBufferCreate(
+            None,
+            width,
+            height,
+            kCVPixelFormatType_64RGBAHalf,
+            Some(options.as_opaque()),
+            std::ptr::NonNull::from(&mut raw),
+        )
+    };
+    let created = std::ptr::NonNull::new(raw).filter(|_| status == kCVReturnSuccess);
+    // SAFETY: on success `raw` holds an owned (+1) pixel buffer.
+    created
+        .map(|raw| unsafe { CFRetained::from_raw(raw) })
+        .ok_or_else(|| DecodeError::Failed(format!("CVPixelBufferCreate failed ({status})")))
 }
 
 /// Draws into the locked `buffer` and returns the brightest channel.
@@ -249,13 +264,13 @@ fn draw_locked(
     width: usize,
     height: usize,
 ) -> Result<f32, DecodeError> {
-    let stride = buffer.get_bytes_per_row();
+    let stride = CVPixelBufferGetBytesPerRow(buffer);
     if stride < width.saturating_mul(8) {
         return Err(DecodeError::Failed("pixel buffer rows too short".into()));
     }
-    // SAFETY: the buffer is locked, so its base address is valid for
+    // The buffer is locked, so its base address is valid for
     // `stride * height` bytes until the caller unlocks it.
-    let base = unsafe { buffer.get_base_address() };
+    let base = CVPixelBufferGetBaseAddress(buffer);
     if base.is_null() {
         return Err(DecodeError::Failed("pixel buffer has no memory".into()));
     }

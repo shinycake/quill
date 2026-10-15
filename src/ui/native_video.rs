@@ -60,7 +60,7 @@ fn ffmpeg_on_macos() -> bool {
 pub(super) enum VideoPicture {
     /// A GPU pixel buffer (AVPlayer), drawn by GPUI's `surface`.
     #[cfg(target_os = "macos")]
-    Surface(core_video::pixel_buffer::CVPixelBuffer),
+    Surface(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>),
     /// A decoded BGRA image (FFmpeg), drawn by `img`.
     Image(Arc<RenderImage>),
 }
@@ -251,7 +251,6 @@ impl NativeVideo {
 
 #[cfg(target_os = "macos")]
 mod avplayer {
-    use core_video::pixel_buffer::CVPixelBuffer as GpuiPixelBuffer;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{AnyThread, MainThreadMarker};
@@ -259,9 +258,11 @@ mod avplayer {
         AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus,
         AVPlayerItemVideoOutput,
     };
+    use objc2_core_foundation::CFRetained;
     use objc2_core_media::CMTime;
     use objc2_core_video::{
-        kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+        CVPixelBuffer, kCVPixelBufferPixelFormatTypeKey,
+        kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
     };
     use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
     use std::path::Path;
@@ -275,13 +276,13 @@ mod avplayer {
         output: Retained<AVPlayerItemVideoOutput>,
         /// The last frame handed out, kept so a paused or between-frames
         /// render still has a picture.
-        frame: Option<GpuiPixelBuffer>,
+        frame: Option<CFRetained<CVPixelBuffer>>,
         playing: bool,
         /// Quarter turns to show the picture at, whether it is mirrored after
         /// them, and the last frame turned.
         turns: u8,
         mirrored: bool,
-        turned: Option<GpuiPixelBuffer>,
+        turned: Option<CFRetained<CVPixelBuffer>>,
         /// `QUILL_TRACE_VIDEO`'s id for this player.
         trace_id: u64,
     }
@@ -398,9 +399,9 @@ mod avplayer {
             }
         }
 
-        pub(super) fn frame(&mut self) -> Option<GpuiPixelBuffer> {
-            // SAFETY: the copy returns a +1 CVPixelBuffer that ownership moves
-            // into the core-video wrapper GPUI draws (`wrap_under_create_rule`);
+        pub(super) fn frame(&mut self) -> Option<CFRetained<CVPixelBuffer>> {
+            // SAFETY: plain queries of a live output and item on the main
+            // thread; the copy returns an owned (+1) CVPixelBuffer, and
             // `display` outlives the copy that writes it.
             unsafe {
                 let now = self.item.currentTime();
@@ -411,8 +412,7 @@ mod avplayer {
                         .output
                         .copyPixelBufferForItemTime_itemTimeForDisplay(now, &mut display)
                 {
-                    let raw = Retained::into_raw(buffer);
-                    self.frame = Some(core_foundation_wrap(raw.cast()));
+                    self.frame = Some(CFRetained::from(buffer));
                     self.turned = None;
                     fresh = true;
                 }
@@ -458,12 +458,5 @@ mod avplayer {
             // SAFETY: stop audio before the player is released.
             unsafe { self.player.pause() };
         }
-    }
-
-    /// Take ownership of a +1 `CVPixelBufferRef` as GPUI's wrapper type.
-    unsafe fn core_foundation_wrap(raw: *mut std::ffi::c_void) -> GpuiPixelBuffer {
-        use core_foundation::base::TCFType;
-        // SAFETY: the caller passes an owned (+1) CVPixelBufferRef.
-        unsafe { GpuiPixelBuffer::wrap_under_create_rule(raw.cast()) }
     }
 }
