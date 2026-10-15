@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Slice G1: `replacePrimaryChatInviteLink` (schema 1.8.67, line
@@ -18,10 +19,10 @@ impl QuillApp {
     pub(super) fn replace_primary_invite_link(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         let note = match self.live.as_mut() {
             Some(live) => match live.driver.replace_primary_chat_invite_link(chat_id) {
-                Ok(_) => "replacing primary invite link".into(),
-                Err(_) => "could not replace invite link".into(),
+                Ok(_) => tr(keys::Q_PEOPLE_REPLACING_PRIMARY_INVITE_LINK).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_REPLACE_INVITE_LINK).into(),
             },
-            None => "invite links need a live connection (demo)".into(),
+            None => tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into(),
         };
         self.connection.status_note = note;
         cx.notify();
@@ -39,15 +40,15 @@ impl QuillApp {
                 {
                     Ok(_) => {
                         if current {
-                            "join requests disabled".into()
+                            tr(keys::Q_PEOPLE_JOIN_REQUESTS_DISABLED).into()
                         } else {
-                            "join requests enabled".into()
+                            tr(keys::Q_PEOPLE_JOIN_REQUESTS_ENABLED).into()
                         }
                     }
-                    Err(_) => "could not toggle join requests".into(),
+                    Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_TOGGLE_JOIN_REQUESTS).into(),
                 }
             }
-            None => "join requests need a live connection (demo)".into(),
+            None => tr(keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE).into(),
         };
         self.connection.status_note = note;
         cx.notify();
@@ -127,15 +128,15 @@ impl QuillApp {
                 };
                 self.admin.invite_link_dialog = None;
                 self.connection.status_note = match result {
-                    Some(Ok(_)) => "saving invite link…".into(),
-                    Some(Err(_)) => "could not save invite link".into(),
-                    None => "invite links need a live connection (demo)".into(),
+                    Some(Ok(_)) => tr(keys::Q_PEOPLE_SAVING_INVITE_LINK).into(),
+                    Some(Err(_)) => tr(keys::Q_PEOPLE_COULD_NOT_SAVE_INVITE_LINK).into(),
+                    None => tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into(),
                 };
                 cx.notify();
                 return;
             }
             if !stars_text.trim().is_empty() && stars_text.trim().parse::<i64>().is_err() {
-                self.connection.status_note = "Stars price must be a whole number".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_STARS_PRICE_MUST_BE_A).into();
                 cx.notify();
                 return;
             }
@@ -150,7 +151,7 @@ impl QuillApp {
                         Ok(days) if days >= 0 => days,
                         _ => {
                             self.connection.status_note =
-                                "expiration must be a non-negative number of days".into();
+                                tr(keys::Q_PEOPLE_EXPIRATION_MUST_BE_A_NON).into();
                             cx.notify();
                             return;
                         }
@@ -159,7 +160,7 @@ impl QuillApp {
                         Ok(limit) if limit >= 0 => limit,
                         _ => {
                             self.connection.status_note =
-                                "member limit must be a non-negative number".into();
+                                tr(keys::Q_PEOPLE_MEMBER_LIMIT_MUST_BE_A).into();
                             cx.notify();
                             return;
                         }
@@ -194,16 +195,17 @@ impl QuillApp {
             ) {
                 Ok(_) => {
                     self.admin.invite_link_dialog = None;
-                    self.connection.status_note = "creating invite link…".into();
+                    self.connection.status_note = tr(keys::Q_PEOPLE_CREATING_INVITE_LINK).into();
                 }
                 Err(_) => {
-                    self.connection.status_note = "could not create invite link".into();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_CREATE_INVITE_LINK).into();
                 }
             }
         } else {
             // Screenshot demos have no live driver; close the dialog honestly.
             self.admin.invite_link_dialog = None;
-            self.connection.status_note = "invite links need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into();
         }
         let _ = window;
         cx.notify();
@@ -216,9 +218,9 @@ impl QuillApp {
         let creates_join_request = dialog.creates_join_request;
         let editing = dialog.edit_link.is_some();
         let title = if editing {
-            "Rename subscription link"
+            tr(keys::Q_PEOPLE_RENAME_SUBSCRIPTION_LINK)
         } else {
-            "New invite link"
+            tr(keys::Q_PEOPLE_NEW_INVITE_LINK)
         };
         let panel = div()
             .id("invite-link-dialog")
@@ -233,19 +235,19 @@ impl QuillApp {
             .child(div().text_sm().font_semibold().child(title))
             .child(
                 Textarea::new(&dialog.name_input)
-                    .aria_label("Invite link name")
+                    .aria_label(tr(keys::Q_PEOPLE_INVITE_LINK_NAME))
                     .h(px(40.)),
             )
             .when(!editing, |panel| {
                 panel
                     .child(
                         Textarea::new(&dialog.expiration_days_input)
-                            .aria_label("Invite link duration in days")
+                            .aria_label(tr(keys::Q_PEOPLE_INVITE_LINK_DURATION_IN_DAYS))
                             .h(px(40.)),
                     )
                     .child(
                         Textarea::new(&dialog.member_limit_input)
-                            .aria_label("Invite link member limit")
+                            .aria_label(tr(keys::Q_PEOPLE_INVITE_LINK_MEMBER_LIMIT))
                             .h(px(40.)),
                     )
                     .child(
@@ -253,7 +255,7 @@ impl QuillApp {
                         // check label). Controlled: writes the requested
                         // value.
                         Checkbox::new("invite-link-dialog-toggle-join-request")
-                            .label("Approval required to join")
+                            .label(tr(keys::Q_PEOPLE_APPROVAL_REQUIRED_TO_JOIN))
                             .checked(creates_join_request)
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 if let Some(dialog) = this.admin.invite_link_dialog.as_mut() {
@@ -269,14 +271,14 @@ impl QuillApp {
                 panel
                     .child(
                         Textarea::new(&dialog.stars_input)
-                            .aria_label("Stars per month")
+                            .aria_label(tr(keys::Q_PEOPLE_STARS_PER_MONTH))
                             .h(px(40.)),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(text_muted())
-                            .child("A Stars price charges people monthly to join through this link. Expiry, limit and approval do not apply."),
+                            .child(tr(keys::Q_PEOPLE_A_STARS_PRICE_CHARGES_PEOPLE)),
                     )
             })
             .child(
@@ -285,14 +287,18 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("invite-link-dialog-create")
-                            .label(if editing { "Save" } else { "Create link" })
+                            .label(if editing {
+                                tr(keys::SETTINGS_SAVE)
+                            } else {
+                                tr(keys::Q_PEOPLE_CREATE_LINK)
+                            })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_invite_link_dialog(window, cx);
                             })),
                     )
                     .child(
                         Button::new("invite-link-dialog-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_invite_link_dialog(cx);

@@ -14,6 +14,7 @@ use gpui_kit::*;
 use quill::business_info::{
     self, BusinessInfo, OpeningHours, format_day, opens_in_text, week_minute,
 };
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, now_unix, weekday_name};
 
 /// Expanded schedule and chosen time zone of the hours row.
@@ -35,8 +36,8 @@ pub(super) fn fragment_note_menu(menu: PopupMenu, muted: Hsla, url: String) -> P
             .text_color(muted)
             .child(text_with_link(
                 "fragment-phone-note",
-                "This number is not tied to a SIM card and was acquired on ",
-                "Fragment",
+                tr(keys::Q_PEOPLE_THIS_NUMBER_IS_NOT_TIED),
+                tr(keys::INFO_MOBILE_CONTEXT_MENU_FRAGMENT_ABOUT_LINK),
                 ".",
                 url.clone(),
                 cx,
@@ -80,7 +81,7 @@ impl QuillApp {
         let url = location.map_url();
         let address = location.address.clone();
         let value = if address.is_empty() {
-            "Open on map".to_string()
+            tr(keys::Q_PEOPLE_OPEN_ON_MAP).to_string()
         } else {
             address.clone()
         };
@@ -94,19 +95,32 @@ impl QuillApp {
             .border_color(cx.theme().border)
             .cursor_pointer()
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("Location: {value}"))
+            .aria_label(tr_with(
+                keys::Q_PEOPLE_LOCATION,
+                &[("value", &value.to_string())],
+            ))
             .tab_index(0)
             .hover(move |style| style.bg(hover))
             .child(super::bidi_line::aligned_block(value).text_sm())
-            .child(div().text_xs().text_color(muted).child("Location"))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::INFO_LOCATION_LABEL)),
+            )
             .on_click(cx.listener(move |this, _, _, cx| match &url {
                 Some(url) => {
                     if !quill::platform::open_external_url(url) {
-                        this.connection.status_note = "Couldn't open the map".into();
+                        this.connection.status_note =
+                            tr(keys::Q_PEOPLE_COULDNT_OPEN_THE_MAP).into();
                         cx.notify();
                     }
                 }
-                None => this.copy_profile_text(&address, "Address copied to clipboard", cx),
+                None => this.copy_profile_text(
+                    &address,
+                    tr(keys::Q_PEOPLE_ADDRESS_COPIED_TO_CLIPBOARD),
+                    cx,
+                ),
             }))
             .into_any_element()
     }
@@ -145,14 +159,14 @@ impl QuillApp {
         let state = if until_open.is_none() {
             None
         } else if is_open {
-            Some("Open")
+            Some(tr(keys::PROFILE_OPEN_APP_SHORT))
         } else {
-            Some("Closed")
+            Some(tr(keys::INFO_WORK_CLOSED))
         };
         let switch_label = if use_business {
-            "my time"
+            tr(keys::INFO_HOURS_MY_TIME)
         } else {
-            "local time"
+            tr(keys::INFO_HOURS_LOCAL_TIME)
         };
         let mut column = div()
             .id("info-business-hours")
@@ -193,7 +207,7 @@ impl QuillApp {
                     .items_center()
                     .text_xs()
                     .text_color(muted)
-                    .child("Business hours")
+                    .child(tr(keys::INFO_HOURS_LABEL))
                     .when(distinct, |this| {
                         this.child(
                             div()

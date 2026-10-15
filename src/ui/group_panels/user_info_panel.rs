@@ -1,6 +1,7 @@
 //! Methods moved out of `group_panels.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// User profile panel: photo (downloaded `userFullInfo.photo` size, or
@@ -17,7 +18,7 @@ impl QuillApp {
         let name = user
             .as_ref()
             .map(|u| u.display_name())
-            .unwrap_or_else(|| format!("User {user_id}"));
+            .unwrap_or_else(|| tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())]));
         let status = user
             .as_ref()
             .map(|u| {
@@ -61,7 +62,7 @@ impl QuillApp {
                 .id(("info-panel-photo-open", user_id as u64))
                 .cursor_pointer()
                 .role(gpui_kit::Role::Button)
-                .aria_label("View profile photos")
+                .aria_label(tr(keys::Q_PEOPLE_VIEW_PROFILE_PHOTOS))
                 .tab_index(0)
                 .on_click(cx.listener(move |this, _, _, cx| this.open_profile_photos(user_id, cx)))
                 .child(avatar)
@@ -128,7 +129,7 @@ impl QuillApp {
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.copy_profile_text(
                                             &name_for_copy,
-                                            "Name copied to clipboard",
+                                            tr(keys::Q_PEOPLE_NAME_COPIED_TO_CLIPBOARD),
                                             cx,
                                         );
                                     }))
@@ -187,7 +188,7 @@ impl QuillApp {
                 action_row(
                     "info-panel-chat-look",
                     Some(gpui_kit::assets::IconName::Palette),
-                    "Change colors and wallpaper",
+                    tr(keys::Q_PEOPLE_CHANGE_COLORS_AND_WALLPAPER),
                     false,
                     cx,
                 )
@@ -226,9 +227,9 @@ impl QuillApp {
                     "info-panel-block-user",
                     Some(gpui_kit::assets::IconName::Ban),
                     if blocked {
-                        "Unblock user"
+                        tr(keys::PROFILE_UNBLOCK_USER)
                     } else {
-                        "Block user"
+                        tr(keys::PROFILE_BLOCK_USER)
                     },
                     !blocked,
                     cx,
@@ -249,7 +250,7 @@ impl QuillApp {
                     action_row(
                         "info-panel-delete-contact",
                         Some(gpui_kit::assets::IconName::UserX),
-                        "Delete contact",
+                        tr(keys::INFO_DELETE_CONTACT),
                         true,
                         cx,
                     )
@@ -287,7 +288,7 @@ impl QuillApp {
         user_id: i64,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let name = Self::secret_peer_name(self.session(), user_id, "this chat");
+        let name = Self::secret_peer_name(self.session(), user_id, tr(keys::Q_PEOPLE_THIS_CHAT));
         div()
             .flex()
             .flex_col()
@@ -301,7 +302,7 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Passcode"),
+                    .child(tr(keys::Q_PEOPLE_PASSCODE)),
             )
             .child(
                 div()
@@ -337,7 +338,10 @@ impl QuillApp {
             })
             .unwrap_or_else(|| {
                 (
-                    format!("Group {supergroup_id}"),
+                    tr_with(
+                        keys::Q_PEOPLE_GROUP,
+                        &[("supergroup_id", &supergroup_id.to_string())],
+                    ),
                     ChatId(supergroup_id),
                     false,
                 )
@@ -419,13 +423,13 @@ impl QuillApp {
                         let actions = [
                             CopyAction {
                                 text: mention.clone(),
-                                menu: "Copy Username",
-                                toast: "Username copied to clipboard",
+                                menu: tr(keys::Q_PEOPLE_COPY_USERNAME),
+                                toast: tr(keys::Q_PEOPLE_USERNAME_COPIED_TO_CLIPBOARD),
                             },
                             CopyAction {
                                 text: quill::profile_forms::profile_link(&name),
-                                menu: "Copy Link",
-                                toast: "Link copied to clipboard",
+                                menu: tr(keys::GROUP_INVITE_COPY),
+                                toast: tr(keys::STAR_REF_LINK_COPIED_TITLE),
                             },
                         ];
                         let tapped = actions[0].clone();
@@ -467,7 +471,7 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Description"),
+                            .child(tr(keys::INFO_ABOUT_LABEL)),
                     )
                     .child(div().text_sm().child(description)),
             );
@@ -490,7 +494,7 @@ impl QuillApp {
             let current_delay = info.as_ref().map(|i| i.slow_mode_delay).unwrap_or(0);
             let mut value_row = div().id("slow-mode-values").flex().flex_wrap().gap_1();
             for (label, value) in [
-                ("Off", 0),
+                (tr(keys::Q_PEOPLE_OFF), 0),
                 ("5s", 5),
                 ("10s", 10),
                 ("30s", 30),
@@ -524,13 +528,13 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Slow mode"),
+                            .child(tr(keys::Q_PEOPLE_SLOW_MODE)),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Delay between messages for members"),
+                            .child(tr(keys::Q_PEOPLE_DELAY_BETWEEN_MESSAGES_FOR_MEMBERS)),
                     )
                     .child(value_row),
             );
@@ -542,7 +546,7 @@ impl QuillApp {
             let stats_chat_id = chat_id;
             body = body.child(
                 Button::new("open-channel-statistics")
-                    .label("Statistics")
+                    .label(tr(keys::Q_PEOPLE_STATISTICS))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_info_panel_target(
                             InfoPanelTarget::Statistics(stats_chat_id.0),
@@ -600,7 +604,15 @@ impl QuillApp {
                     _ => None,
                 })
             })
-            .unwrap_or_else(|| (format!("Group {basic_group_id}"), ChatId(basic_group_id)));
+            .unwrap_or_else(|| {
+                (
+                    tr_with(
+                        keys::Q_PEOPLE_GROUP_2,
+                        &[("basic_group_id", &basic_group_id.to_string())],
+                    ),
+                    ChatId(basic_group_id),
+                )
+            });
         let member_count = self
             .session()
             .and_then(|s| s.groups.basic_group_members.get(&chat_id.0))

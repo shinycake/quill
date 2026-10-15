@@ -3,6 +3,7 @@
 //! choices in a dialog next to the other profile settings rows.
 
 use super::*;
+use quill::lang::{keys, tr};
 use quill::profile_tab::ProfileTab;
 
 impl QuillApp {
@@ -13,7 +14,7 @@ impl QuillApp {
 
     fn choose_main_profile_tab(&mut self, tab: ProfileTab, cx: &mut Context<Self>) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: this needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into();
             cx.notify();
             return true;
         };
@@ -23,7 +24,8 @@ impl QuillApp {
                 true
             }
             Err(_) => {
-                self.connection.status_note = "Couldn't reach Telegram; try again.".into();
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
                 cx.notify();
                 false
             }
@@ -42,7 +44,7 @@ impl QuillApp {
                 .text_xs()
                 .text_color(muted)
                 .pb_1()
-                .child("Choose which tab your profile opens on."),
+                .child(tr(keys::Q_PEOPLE_CHOOSE_WHICH_TAB_YOUR_PROFILE)),
         );
         for (index, tab) in ProfileTab::ALL.into_iter().enumerate() {
             body = body.child(
@@ -62,14 +64,14 @@ impl QuillApp {
             );
         }
         let footer = Button::new("main-tab-close")
-            .label("Close")
+            .label(tr(keys::CLOSE))
             .ghost()
             .on_click(cx.listener(|this, _, window, cx| {
                 this.close_profile_dialog(cx);
                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
             }));
         Some((
-            "Main tab".into(),
+            tr(keys::Q_PEOPLE_MAIN_TAB).into(),
             body.into_any_element(),
             div().flex().gap_2().child(footer).into_any_element(),
         ))

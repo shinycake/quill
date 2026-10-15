@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, RequestId};
+use quill::lang::{keys, tr};
 use quill::state::GroupsPurpose;
 use quill::state::{MemberListFilter, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
@@ -196,7 +197,11 @@ pub(super) fn apply_ready_channels(session: &mut Session, sink: &Arc<MemorySink>
     let post = |id: i64, text: &str, view_count: i32| {
         // Phase D2: channel author signatures (`message.author_signature`,
         // schema 1.8.67 line 3165) render below the post.
-        let signature = if id == 201 { "Demo Admin" } else { "News Desk" };
+        let signature = if id == 201 {
+            tr(keys::Q_PEOPLE_DEMO_ADMIN)
+        } else {
+            tr(keys::Q_PEOPLE_NEWS_DESK)
+        };
         format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,"author_signature":"{signature}",{},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#,
             views(view_count),
@@ -211,8 +216,8 @@ pub(super) fn apply_ready_channels(session: &mut Session, sink: &Arc<MemorySink>
             r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{{"@type":"chatMemberStatusLeft"}}}}"#,
             member_extra.0,
         ),
-        post(201, "Broadcast one — channel post from the channel itself.", 12345),
-        post(202, "Broadcast two — a second post with fewer views.", 987),
+        post(201, tr(keys::Q_PEOPLE_BROADCAST_ONE_CHANNEL_POST_FROM), 12345),
+        post(202, tr(keys::Q_PEOPLE_BROADCAST_TWO_A_SECOND_POST), 987),
         // Live view-count bump on the first post.
         r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":201,"interaction_info":{"@type":"messageInteractionInfo","view_count":12402,"forward_count":7,"reply_info":null,"reactions":null}}"#
             .to_string(),
@@ -247,7 +252,11 @@ pub(super) fn apply_ready_channels_admin(
     let post = |id: i64, text: &str, view_count: i32| {
         // Phase D2: channel author signatures (`message.author_signature`,
         // schema 1.8.67 line 3165) render below the post.
-        let signature = if id == 201 { "Demo Admin" } else { "News Desk" };
+        let signature = if id == 201 {
+            tr(keys::Q_PEOPLE_DEMO_ADMIN)
+        } else {
+            tr(keys::Q_PEOPLE_NEWS_DESK)
+        };
         format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,"author_signature":"{signature}",{},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#,
             views(view_count),
@@ -266,8 +275,8 @@ pub(super) fn apply_ready_channels_admin(
             r#"{{"@type":"chatMember","@extra":"{}","member_id":{{"@type":"messageSenderUser","user_id":777}},"tag":"","inviter_user_id":0,"joined_chat_date":0,"status":{}}}"#,
             member_extra.0, admin_status,
         ),
-        post(201, "Broadcast one — channel post from the channel itself.", 12345),
-        post(202, "Broadcast two — a second post with fewer views.", 987),
+        post(201, tr(keys::Q_PEOPLE_BROADCAST_ONE_CHANNEL_POST_FROM), 12345),
+        post(202, tr(keys::Q_PEOPLE_BROADCAST_TWO_A_SECOND_POST), 987),
         // Live view-count bump on the first post.
         r#"{"@type":"updateMessageInteractionInfo","chat_id":13,"message_id":201,"interaction_info":{"@type":"messageInteractionInfo","view_count":12402,"forward_count":7,"reply_info":null,"reactions":null}}"#
             .to_string(),
@@ -332,7 +341,7 @@ pub(super) fn apply_ready_group_manage(
             r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{chat_id},"is_forum":false,"status":{{"@type":"chatMemberStatusAdministrator","can_be_edited":true,"rights":{}}}}}}}"#,
             admin_rights(true),
         ),
-        user(777, "Demo", "Viewer"),
+        user(777, tr(keys::Q_PEOPLE_DEMO), tr(keys::Q_PEOPLE_VIEWER)),
         format!(
             r#"{{"@type":"user","@extra":"{}","id":777,"first_name":"Demo","last_name":"Viewer","usernames":null,"phone_number":"","status":null,"profile_photo":null,"is_contact":false,"is_mutual_contact":false,"is_close_friend":false,"is_verified":false,"is_premium":false,"is_support":false,"restriction_reason":"","is_scam":false,"is_fake":false,"is_bot":false,"type":{{"@type":"userTypeRegular"}}}}"#,
             me_extra.0,
@@ -342,10 +351,10 @@ pub(super) fn apply_ready_group_manage(
             member_extra.0,
             admin_rights(true),
         ),
-        user(1, "Idan", "Founder"),
-        user(2, "Dana", "Levi"),
-        user(5, "Omar", "Haddad"),
-        user(6, "Maya", "Sharon"),
+        user(1, tr(keys::Q_PEOPLE_IDAN), tr(keys::Q_PEOPLE_FOUNDER)),
+        user(2, tr(keys::Q_PEOPLE_DANA), tr(keys::Q_PEOPLE_LEVI)),
+        user(5, tr(keys::Q_PEOPLE_OMAR), tr(keys::Q_PEOPLE_HADDAD)),
+        user(6, tr(keys::Q_PEOPLE_MAYA), tr(keys::Q_PEOPLE_SHARON)),
         format!(
             r#"{{"@type":"chatMembers","@extra":"{}","total_count":5,"members":[{},{},{},{},{}]}}"#,
             members_extra.0,
@@ -359,7 +368,7 @@ pub(super) fn apply_ready_group_manage(
             ),
             member(
                 1,
-                "Founder",
+                tr(keys::Q_PEOPLE_FOUNDER),
                 &format!(
                     r#"{{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{}}}"#,
                     admin_rights(false)
@@ -386,11 +395,12 @@ impl QuillApp {
             match live.driver.refresh_chat_invite_links(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note = "could not refresh invite links".into();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_REFRESH_INVITE_LINKS).into();
                 }
             }
         } else {
-            self.connection.status_note = "invite links need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -398,7 +408,7 @@ impl QuillApp {
     /// Phase D3a: copy an invite-link URL to the clipboard.
     pub(super) fn copy_invite_link(&mut self, invite_link: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(invite_link.to_string()));
-        self.connection.status_note = "Invite link copied".into();
+        self.connection.status_note = tr(keys::Q_PEOPLE_INVITE_LINK_COPIED).into();
         cx.notify();
     }
 
@@ -415,11 +425,12 @@ impl QuillApp {
             match live.driver.revoke_chat_invite_link(chat_id, invite_link) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note = "could not revoke invite link".into();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_REVOKE_INVITE_LINK).into();
                 }
             }
         } else {
-            self.connection.status_note = "invite links need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_INVITE_LINKS_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -430,11 +441,12 @@ impl QuillApp {
             match live.driver.refresh_chat_join_requests(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note = "could not refresh join requests".into();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_REFRESH_JOIN_REQUESTS).into();
                 }
             }
         } else {
-            self.connection.status_note = "join requests need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -454,11 +466,12 @@ impl QuillApp {
             {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note = "could not process join request".into();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_PROCESS_JOIN_REQUEST).into();
                 }
             }
         } else {
-            self.connection.status_note = "join requests need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_JOIN_REQUESTS_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -471,11 +484,13 @@ impl QuillApp {
             match live.driver.refresh_chat_administrators(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note = "could not refresh administrators".into();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_REFRESH_ADMINISTRATORS).into();
                 }
             }
         } else {
-            self.connection.status_note = "administrators need a live connection (demo)".into();
+            self.connection.status_note =
+                tr(keys::Q_PEOPLE_ADMINISTRATORS_NEED_A_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -497,11 +512,15 @@ impl QuillApp {
                 .driver
                 .toggle_sign_messages(chat_id, sign_messages, show_message_sender)
             {
-                Ok(_) => self.connection.status_note = "signatures updated".into(),
-                Err(_) => self.connection.status_note = "could not change signatures".into(),
+                Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_SIGNATURES_UPDATED).into(),
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_SIGNATURES).into()
+                }
             }
         } else {
-            self.connection.status_note = "signatures need a live connection (demo)".into();
+            self.connection.status_note =
+                tr(keys::Q_PEOPLE_SIGNATURES_NEED_A_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -514,11 +533,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.toggle_auto_translate(chat_id, enabled)
             {
-                Ok(()) => "auto-translate updated".into(),
-                Err(_) => "could not change auto-translate".into(),
+                Ok(()) => tr(keys::Q_PEOPLE_AUTO_TRANSLATE_UPDATED).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_AUTO_TRANSLATE).into(),
             };
         } else {
-            self.connection.status_note = "auto-translate needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_AUTO_TRANSLATE_NEEDS_A_LIVE).into();
         }
         cx.notify();
     }
@@ -528,11 +547,14 @@ impl QuillApp {
     pub(super) fn set_anti_spam(&mut self, chat_id: ChatId, enabled: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.toggle_aggressive_anti_spam(chat_id, enabled) {
-                Ok(_) => self.connection.status_note = "anti-spam updated".into(),
-                Err(_) => self.connection.status_note = "could not change anti-spam".into(),
+                Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_ANTI_SPAM_UPDATED).into(),
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_ANTI_SPAM).into()
+                }
             }
         } else {
-            self.connection.status_note = "anti-spam needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_ANTI_SPAM_NEEDS_A_LIVE).into();
         }
         cx.notify();
     }
@@ -617,7 +639,7 @@ impl QuillApp {
         let user_ids = dialog.selected_users.clone();
         if title.is_empty() {
             self.admin.create_chat_dialog = Some(dialog);
-            self.connection.status_note = "Name cannot be empty".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY).into();
             cx.notify();
             return;
         }
@@ -647,7 +669,7 @@ impl QuillApp {
             }
             None => {
                 self.admin.create_chat_dialog = Some(dialog);
-                "creating chats needs a live connection (demo)".to_string()
+                tr(keys::Q_PEOPLE_CREATING_CHATS_NEEDS_A_LIVE).to_string()
             }
         };
         self.connection.status_note = note;
@@ -692,13 +714,13 @@ impl QuillApp {
         let hide_chat = dialog.hide_chat;
         if name.is_empty() {
             self.admin.community.create_dialog = Some(dialog);
-            self.connection.status_note = "Name cannot be empty".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY).into();
             cx.notify();
             return;
         }
         let Some(chat_id) = dialog.chat_id else {
             self.admin.community.create_dialog = Some(dialog);
-            self.connection.status_note = "Pick a chat for the community".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_PICK_A_CHAT_FOR_THE).into();
             cx.notify();
             return;
         };
@@ -708,16 +730,16 @@ impl QuillApp {
                     .driver
                     .create_community(ChatId(chat_id), &name, hide_chat)
                 {
-                    Ok(Some(_)) => "Community created".to_string(),
+                    Ok(Some(_)) => tr(keys::Q_PEOPLE_COMMUNITY_CREATED).to_string(),
                     _ => {
                         self.admin.community.create_dialog = Some(dialog);
-                        "could not create community".to_string()
+                        tr(keys::Q_PEOPLE_COULD_NOT_CREATE_COMMUNITY).to_string()
                     }
                 }
             }
             None => {
                 self.admin.community.create_dialog = Some(dialog);
-                "creating communities needs a live connection (demo)".to_string()
+                tr(keys::Q_PEOPLE_CREATING_COMMUNITIES_NEEDS_A_LIVE).to_string()
             }
         };
         self.connection.status_note = note;
@@ -745,7 +767,7 @@ impl QuillApp {
             ChatId(community_id),
             TextPromptKind::CommunityName { community_id },
             &current,
-            "Community name",
+            tr(keys::COMMUNITY_MANAGE_NAME),
         ));
         cx.notify();
     }
@@ -762,11 +784,11 @@ impl QuillApp {
     ) {
         self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.set_community_permissions(community_id, allowed) {
-                Ok(Some(_)) => "updating community permissions…".into(),
-                Ok(None) => "you can't change this community's permissions".into(),
-                Err(_) => "could not update community permissions".into(),
+                Ok(Some(_)) => tr(keys::Q_PEOPLE_UPDATING_COMMUNITY_PERMISSIONS).into(),
+                Ok(None) => tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THIS_COMMUNITYS).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_COMMUNITY_PERMISSIONS).into(),
             },
-            None => "community permissions need a live connection (demo)".into(),
+            None => tr(keys::Q_PEOPLE_COMMUNITY_PERMISSIONS_NEED_A_LIVE).into(),
         };
         cx.notify();
     }
@@ -784,7 +806,7 @@ impl QuillApp {
             chat_id,
             TextPromptKind::Username,
             &current,
-            "Public username (empty = remove)",
+            tr(keys::Q_PEOPLE_PUBLIC_USERNAME_EMPTY_REMOVE),
         ));
         cx.notify();
     }
@@ -809,7 +831,7 @@ impl QuillApp {
             chat_id,
             TextPromptKind::GroupTitle,
             &current,
-            "Group title (1–128 characters)",
+            tr(keys::Q_PEOPLE_GROUP_TITLE_1_128_CHARACTERS),
         ));
         cx.notify();
     }
@@ -844,7 +866,7 @@ impl QuillApp {
             chat_id,
             TextPromptKind::GroupDescription,
             &current,
-            "Description (0–255 characters, empty = clear)",
+            tr(keys::Q_PEOPLE_DESCRIPTION_0_255_CHARACTERS_EMPTY),
         ));
         cx.notify();
     }
@@ -865,7 +887,7 @@ impl QuillApp {
             chat_id,
             TextPromptKind::GroupPhoto,
             "",
-            "Photo file path (empty = remove current photo)",
+            tr(keys::Q_PEOPLE_PHOTO_FILE_PATH_EMPTY_REMOVE),
         ));
         cx.notify();
     }

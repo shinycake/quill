@@ -17,6 +17,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
 use quill::telegram::envelope::ForumTopic;
@@ -156,7 +157,7 @@ impl QuillApp {
             return;
         };
         if name.is_empty() {
-            self.connection.status_note = "topic name cannot be empty".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_TOPIC_NAME_CANNOT_BE_EMPTY).into();
             cx.notify();
             return;
         }
@@ -188,13 +189,13 @@ impl QuillApp {
                 }
             };
             self.connection.status_note = match (result, editor.target) {
-                (Ok(_), None) => "topic created".into(),
-                (Ok(_), Some(_)) => "topic saved".into(),
-                (Err(_), None) => "could not create topic".into(),
-                (Err(_), Some(_)) => "could not save topic".into(),
+                (Ok(_), None) => tr(keys::Q_PEOPLE_TOPIC_CREATED).into(),
+                (Ok(_), Some(_)) => tr(keys::Q_PEOPLE_TOPIC_SAVED).into(),
+                (Err(_), None) => tr(keys::Q_PEOPLE_COULD_NOT_CREATE_TOPIC).into(),
+                (Err(_), Some(_)) => tr(keys::Q_PEOPLE_COULD_NOT_SAVE_TOPIC).into(),
             };
         } else {
-            self.connection.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION).into();
         }
         if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.editor = None;
@@ -237,12 +238,14 @@ impl QuillApp {
                 // The topic list refetches after the server confirms
                 // (the render path reloads when the cache is dropped).
                 Ok(_) => {
-                    self.connection.status_note = "topic updated".into();
+                    self.connection.status_note = tr(keys::Q_PEOPLE_TOPIC_UPDATED).into();
                 }
-                Err(_) => self.connection.status_note = "could not update topic".into(),
+                Err(_) => {
+                    self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_TOPIC).into()
+                }
             }
         } else {
-            self.connection.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -266,9 +269,9 @@ impl QuillApp {
             let chat_id = dialog_state.chat_id;
             let editor = dialog_state.editor.clone();
             let title = match &editor {
-                None => "Manage topics",
-                Some(e) if e.target.is_none() => "New Topic",
-                Some(_) => "Edit Topic",
+                None => tr(keys::RIGHTS_GROUP_TOPICS),
+                Some(e) if e.target.is_none() => tr(keys::FORUM_TOPIC_NEW),
+                Some(_) => tr(keys::FORUM_TOPIC_EDIT),
             };
             let dialog = dialog
                 .overlay(true)
@@ -278,39 +281,40 @@ impl QuillApp {
             {
                 live.driver.download_forum_topic_icons();
             }
-            let body =
-                match editor {
-                    Some(editor) => this.topic_editor_body(&editor, cx),
-                    None => {
-                        let topics: Vec<ForumTopic> = this
-                            .session()
-                            .map(|session| session.ordered_forum_topics(chat_id))
-                            .unwrap_or_default();
-                        let mut list = div()
-                            .id("g2-topic-list")
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .max_h(px(320.))
-                            .overflow_y_scroll();
-                        for topic in &topics {
-                            list = list.child(this.forum_topic_manage_row(chat_id, topic, cx));
-                        }
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(div().flex().justify_end().child(
-                                Button::new("g2-topic-new").label("New Topic").on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.begin_topic_editor(None, window, cx);
-                                    }),
-                                ),
-                            ))
-                            .child(list)
-                            .into_any_element()
+            let body = match editor {
+                Some(editor) => this.topic_editor_body(&editor, cx),
+                None => {
+                    let topics: Vec<ForumTopic> = this
+                        .session()
+                        .map(|session| session.ordered_forum_topics(chat_id))
+                        .unwrap_or_default();
+                    let mut list = div()
+                        .id("g2-topic-list")
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .max_h(px(320.))
+                        .overflow_y_scroll();
+                    for topic in &topics {
+                        list = list.child(this.forum_topic_manage_row(chat_id, topic, cx));
                     }
-                };
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div().flex().justify_end().child(
+                                Button::new("g2-topic-new")
+                                    .label(tr(keys::FORUM_TOPIC_NEW))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.begin_topic_editor(None, window, cx);
+                                    })),
+                            ),
+                        )
+                        .child(list)
+                        .into_any_element()
+                }
+            };
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
@@ -391,13 +395,13 @@ impl QuillApp {
             .max_h(px(200.))
             .overflow_y_scroll()
             .role(Role::List)
-            .aria_label("Topic icons")
+            .aria_label(tr(keys::Q_PEOPLE_TOPIC_ICONS))
             .child(
                 tile(editor.icon_emoji == 0)
                     .id("topic-icon-default")
                     .pressable(cx.theme())
                     .role(Role::Button)
-                    .aria_label("Default icon")
+                    .aria_label(tr(keys::Q_PEOPLE_DEFAULT_ICON))
                     .tab_index(0)
                     .on_click(cx.listener(|this, _, _, cx| this.set_topic_editor_emoji(0, cx)))
                     .child(letter_icon(&name, editor.color, 28.)),
@@ -417,7 +421,7 @@ impl QuillApp {
                     .pressable(cx.theme())
                     .role(Role::Button)
                     .aria_label(if sticker.emoji.is_empty() {
-                        "Topic icon".to_string()
+                        tr(keys::Q_PEOPLE_TOPIC_ICON).to_string()
                     } else {
                         format!("Topic icon {}", sticker.emoji)
                     })
@@ -453,9 +457,9 @@ impl QuillApp {
                             .justify_center()
                             .role(Role::Button)
                             .aria_label(if changeable {
-                                "Change icon color"
+                                tr(keys::Q_PEOPLE_CHANGE_ICON_COLOR)
                             } else {
-                                "Topic icon"
+                                tr(keys::Q_PEOPLE_TOPIC_ICON)
                             })
                             .when(changeable, |this| {
                                 this.pressable(cx.theme()).tab_index(0).on_click(
@@ -467,7 +471,7 @@ impl QuillApp {
                     .child(
                         div().flex_1().child(
                             Textarea::new(&dialog.name_input)
-                                .aria_label("Topic name")
+                                .aria_label(tr(keys::FORUM_TOPIC_TITLE))
                                 .h(px(36.)),
                         ),
                     ),
@@ -476,7 +480,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Choose a topic name and icon"),
+                    .child(tr(keys::FORUM_CHOOSE_TITLE_AND_ICON)),
             )
             .child(grid)
             .when(loading, |this| {
@@ -484,7 +488,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading icons"),
+                        .child(tr(keys::Q_PEOPLE_LOADING_ICONS)),
                 )
             })
             .child(
@@ -494,13 +498,17 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("topic-editor-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| this.cancel_topic_editor(cx))),
                     )
                     .child(
                         Button::new("topic-editor-save")
-                            .label(if creating { "Create" } else { "Save" })
+                            .label(if creating {
+                                tr(keys::CREATE_GROUP_CREATE)
+                            } else {
+                                tr(keys::SETTINGS_SAVE)
+                            })
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| this.submit_topic_editor(cx))),
                     ),
@@ -520,13 +528,13 @@ impl QuillApp {
         let topic_id = topic.forum_topic_id;
         let mut badges = String::new();
         if topic.is_general {
-            badges.push_str(" · General");
+            badges.push_str(tr(keys::Q_PEOPLE_GENERAL_2));
         }
         if topic.is_closed {
-            badges.push_str(" · closed");
+            badges.push_str(tr(keys::Q_PEOPLE_CLOSED_2));
         }
         if topic.is_pinned {
-            badges.push_str(" · pinned");
+            badges.push_str(tr(keys::Q_PEOPLE_PINNED_2));
         }
         let row = div().flex().flex_col().w_full().gap_1().child(
             div()
@@ -551,14 +559,18 @@ impl QuillApp {
         let mut actions = div().flex().flex_wrap().gap_1();
         actions = actions.child(
             Button::new(format!("g2-topic-rename-{topic_id}"))
-                .label("Edit")
+                .label(tr(keys::GROUP_INVITE_CONTEXT_EDIT))
                 .ghost()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.begin_topic_editor(Some(topic_id), window, cx);
                 })),
         );
         if topic.is_general {
-            let hide_label = if topic.is_hidden { "Show" } else { "Hide" };
+            let hide_label = if topic.is_hidden {
+                tr(keys::Q_PEOPLE_SHOW)
+            } else {
+                tr(keys::Q_PEOPLE_HIDE)
+            };
             let hide_action = if topic.is_hidden {
                 ForumTopicAction::ShowGeneral
             } else {
@@ -573,13 +585,21 @@ impl QuillApp {
                     })),
             );
         } else {
-            let close_label = if topic.is_closed { "Reopen" } else { "Close" };
+            let close_label = if topic.is_closed {
+                tr(keys::Q_PEOPLE_REOPEN)
+            } else {
+                tr(keys::Q_PEOPLE_CLOSE_TOPIC)
+            };
             let close_action = if topic.is_closed {
                 ForumTopicAction::Reopen
             } else {
                 ForumTopicAction::Close
             };
-            let pin_label = if topic.is_pinned { "Unpin" } else { "Pin" };
+            let pin_label = if topic.is_pinned {
+                tr(keys::Q_PEOPLE_UNPIN)
+            } else {
+                tr(keys::CONTEXT_PIN_MSG)
+            };
             let pin_action = if topic.is_pinned {
                 ForumTopicAction::Unpin
             } else {
@@ -588,7 +608,11 @@ impl QuillApp {
             for (id, label, action_kind) in [
                 ("close", close_label, close_action),
                 ("pin", pin_label, pin_action),
-                ("delete", "Delete", ForumTopicAction::Delete),
+                (
+                    "delete",
+                    tr(keys::FORUM_TOPIC_DELETE),
+                    ForumTopicAction::Delete,
+                ),
             ] {
                 actions = actions.child(
                     Button::new(format!("g2-topic-{id}-{topic_id}"))
@@ -626,7 +650,7 @@ impl QuillApp {
             .bg(cx.theme().sidebar)
             .child(
                 Button::new("forum-topic-back")
-                    .label("\u{2039} Topics")
+                    .label(tr(keys::Q_PEOPLE_TOPICS))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.deselect_topic_ui(cx);
@@ -636,8 +660,8 @@ impl QuillApp {
                 Button::new("forum-topic-info-toggle")
                     .icon(gpui_kit::assets::IconName::Info)
                     .ghost()
-                    .tooltip("Topic info")
-                    .accessibility_label("Topic info")
+                    .tooltip(tr(keys::Q_PEOPLE_TOPIC_INFO))
+                    .accessibility_label(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.history.topic_info_open = !this.history.topic_info_open;
                         cx.notify();
@@ -657,7 +681,7 @@ impl QuillApp {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("General"),
+                                    .child(tr(keys::Q_PEOPLE_GENERAL)),
                             )
                         },
                     )
@@ -666,7 +690,7 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Pinned"),
+                                .child(tr(keys::Q_PEOPLE_PINNED)),
                         )
                     })
                     .when(info.is_closed, |this| {
@@ -674,7 +698,7 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Closed"),
+                                .child(tr(keys::Q_PEOPLE_CLOSED)),
                         )
                     });
                 if unread > 0 {

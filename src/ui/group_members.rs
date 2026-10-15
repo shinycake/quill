@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind, MessageSender};
 use std::cell::RefCell;
@@ -95,7 +96,7 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
-            self.connection.status_note = "could not load members".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS).into();
         }
         cx.notify();
     }
@@ -128,16 +129,16 @@ impl QuillApp {
             None => return,
         };
         if user_ids.is_empty() {
-            self.connection.status_note = "pick at least one contact to add".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_PICK_AT_LEAST_ONE_CONTACT).into();
             cx.notify();
             return;
         }
         let note = match self.live.as_mut() {
             Some(live) => match live.driver.add_chat_members(chat_id, &user_ids) {
-                Ok(_) => "adding members".into(),
-                Err(_) => "could not add members".into(),
+                Ok(_) => tr(keys::Q_PEOPLE_ADDING_MEMBERS).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS).into(),
             },
-            None => "adding members needs a live connection (demo)".into(),
+            None => tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE).into(),
         };
         self.connection.status_note = note;
         // `updateChatMember` drops the cached member list and marks the
@@ -160,7 +161,9 @@ impl QuillApp {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.admin.member_dialog.as_ref() else {
                 return dialog
-                    .title(crate::ui::shell::dialog_title("Manage members"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::Q_PEOPLE_MANAGE_MEMBERS,
+                    )))
                     .on_close(on_close);
             };
             let chat_id = dialog_state.chat_id;
@@ -233,7 +236,7 @@ impl QuillApp {
                         .child(div().text_sm().text_color(danger_pale()).child(error))
                         .child(
                             Button::new("g1-member-action-error-dismiss")
-                                .label("Dismiss")
+                                .label(tr(keys::GROUP_REQUESTS_DISMISS))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.dismiss_member_action_error(chat_id, cx);
@@ -252,13 +255,13 @@ impl QuillApp {
                         .child(
                             div().flex_1().child(
                                 Textarea::new(&dialog_state.search_input)
-                                    .aria_label("Search members")
+                                    .aria_label(tr(keys::Q_PEOPLE_SEARCH_MEMBERS))
                                     .h(px(40.)),
                             ),
                         )
                         .child(
                             Button::new("g1-member-search")
-                                .label("Search")
+                                .label(tr(keys::Q_PEOPLE_SEARCH))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.refresh_member_dialog(cx);
@@ -281,7 +284,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Loading members…"),
+                            .child(tr(keys::Q_PEOPLE_LOADING_MEMBERS)),
                     );
                 }
                 Some(SupergroupMembersFetch::Failed(message)) => {
@@ -299,7 +302,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("g1-member-retry")
-                                    .label("Retry")
+                                    .label(tr(keys::Q_PEOPLE_RETRY))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.refresh_member_dialog(cx);
@@ -318,7 +321,7 @@ impl QuillApp {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No members"),
+                                .child(tr(keys::Q_PEOPLE_NO_MEMBERS)),
                         );
                     }
                     for member in members.iter().take(200) {
@@ -330,9 +333,9 @@ impl QuillApp {
             // Add-members section.
             if can_add && tab == MemberTab::All {
                 let toggle_label = if add_open {
-                    "▾ Add members"
+                    tr(keys::Q_PEOPLE_ADD_MEMBERS)
                 } else {
-                    "▸ Add members"
+                    tr(keys::Q_PEOPLE_ADD_MEMBERS_2)
                 };
                 body = body.child(
                     Button::new("g1-add-toggle")
@@ -353,43 +356,43 @@ impl QuillApp {
                         .copied()
                         .filter(|count| *count > 0)
                     {
-                        body =
-                            body.child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div().flex_1().text_xs().text_color(danger()).child(
-                                            format!("{failed} member(s) could not be added"),
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new("g1-add-failed-dismiss")
-                                            .label("Dismiss")
-                                            .ghost()
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                if let Some(live) = this.live.as_mut() {
-                                                    live.driver
-                                                        .session
-                                                        .groups
-                                                        .add_members_failed
-                                                        .remove(&chat_id.0);
-                                                }
-                                                cx.notify();
-                                                this.close_kit_dialog_if_done(
-                                                    DialogKind::Member,
-                                                    window,
-                                                    cx,
-                                                );
-                                            })),
+                        body = body.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(div().flex_1().text_xs().text_color(danger()).child(
+                                    tr_with(
+                                        keys::Q_PEOPLE_MEMBER_S_COULD_NOT_BE,
+                                        &[("failed", &failed.to_string())],
                                     ),
-                            );
+                                ))
+                                .child(
+                                    Button::new("g1-add-failed-dismiss")
+                                        .label(tr(keys::GROUP_REQUESTS_DISMISS))
+                                        .ghost()
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            if let Some(live) = this.live.as_mut() {
+                                                live.driver
+                                                    .session
+                                                    .groups
+                                                    .add_members_failed
+                                                    .remove(&chat_id.0);
+                                            }
+                                            cx.notify();
+                                            this.close_kit_dialog_if_done(
+                                                DialogKind::Member,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                ),
+                        );
                     }
                     body = body.child(
                         div().flex_1().child(
                             Textarea::new(&dialog_state.add_search)
-                                .aria_label("Search people to add")
+                                .aria_label(tr(keys::Q_PEOPLE_SEARCH_PEOPLE_TO_ADD))
                                 .h(px(40.)),
                         ),
                     );
@@ -415,7 +418,7 @@ impl QuillApp {
                     body = body.child(
                         Button::new("g1-add-submit")
                             .label(if add_selected.is_empty() {
-                                "Add members".to_string()
+                                tr(keys::CHANNEL_ADD_MEMBERS).to_string()
                             } else {
                                 format!("Add {} member(s)", add_selected.len())
                             })
@@ -429,9 +432,9 @@ impl QuillApp {
             let body = body.into_any_element();
             dialog
                 .title(crate::ui::shell::dialog_title(if is_basic_group {
-                    "Group members"
+                    tr(keys::SELECT_NEXT_OWNER_BOX_SUB_MEMBERS_GROUP)
                 } else {
-                    "Manage members"
+                    tr(keys::Q_PEOPLE_MANAGE_MEMBERS)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
@@ -590,8 +593,13 @@ impl QuillApp {
                     .map(|user| user.display_name())
             })
             .unwrap_or_else(|| match member.member_id {
-                MessageSender::User { user_id } => format!("User {user_id}"),
-                MessageSender::Chat { chat_id } => format!("Channel {chat_id}"),
+                MessageSender::User { user_id } => {
+                    tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())])
+                }
+                MessageSender::Chat { chat_id } => tr_with(
+                    keys::Q_PEOPLE_CHANNEL_2,
+                    &[("chat_id", &chat_id.to_string())],
+                ),
             });
         let status_label = match member.restriction {
             Some(restriction) => super::restricted_exceptions::restricted_row_status(restriction),
@@ -639,7 +647,7 @@ impl QuillApp {
                         .icon(gpui_kit::assets::IconName::EllipsisVertical)
                         .ghost()
                         .xsmall()
-                        .accessibility_label("Member actions")
+                        .accessibility_label(tr(keys::Q_PEOPLE_MEMBER_ACTIONS))
                         .dropdown_menu(move |menu, window, cx| for_button(menu, window, cx)),
                 )
                 .context_menu(move |menu, window, cx| build(menu, window, cx))

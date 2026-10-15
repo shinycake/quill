@@ -1,6 +1,7 @@
 //! Methods moved out of `groups.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// kit Phase 2 (redo): group confirm hosted in a kit `Dialog` via
@@ -18,7 +19,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.admin.group_confirm_dialog.as_ref() else {
-                return dialog.title(crate::ui::shell::dialog_title("Confirm")).on_close(on_close);
+                return dialog.title(crate::ui::shell::dialog_title(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CONFIRM))).on_close(on_close);
             };
             let (title, message, confirm_label): (String, String, String) =
                 match dialog_state.action {
@@ -28,104 +29,104 @@ impl QuillApp {
                             .and_then(|session| session.chats.get(&dialog_state.chat_id.0))
                             .is_some_and(|chat| chat.is_channel());
                         (
-                            if is_channel { "Delete channel" } else { "Delete group" }
+                            if is_channel { tr(keys::PROFILE_DELETE_CHANNEL) } else { tr(keys::PROFILE_DELETE_GROUP) }
                                 .to_string(),
                             quill::admin_extras::delete_chat_text(is_channel).to_string(),
-                            "Delete".to_string(),
+                            tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
                     GroupConfirmAction::RemoveFromList => (
-                        "Delete chat".to_string(),
-                        "Delete this chat and its history from your chat list?".to_string(),
-                        "Delete".to_string(),
+                        tr(keys::Q_PEOPLE_DELETE_CHAT).to_string(),
+                        tr(keys::Q_PEOPLE_DELETE_THIS_CHAT_AND_ITS).to_string(),
+                        tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                     ),
                     GroupConfirmAction::BlockUser { block } => {
                         if block {
                             (
-                                "Block user".to_string(),
-                                "Block this user? They won't be able to send you messages."
+                                tr(keys::PROFILE_BLOCK_USER).to_string(),
+                                tr(keys::Q_PEOPLE_BLOCK_THIS_USER_THEY_WONT)
                                     .to_string(),
-                                "Block".to_string(),
+                                tr(keys::BLOCKED_LIST_CONFIRM_OK).to_string(),
                             )
                         } else {
                             (
-                                "Unblock user".to_string(),
-                                "Unblock this user?".to_string(),
-                                "Unblock".to_string(),
+                                tr(keys::PROFILE_UNBLOCK_USER).to_string(),
+                                tr(keys::Q_PEOPLE_UNBLOCK_THIS_USER).to_string(),
+                                tr(keys::Q_PEOPLE_UNBLOCK).to_string(),
                             )
                         }
                     }
                     GroupConfirmAction::RemoveSelectedChats => (
-                        "Delete chats".to_string(),
-                        "Delete the selected chats and their history from your chat list?"
+                        tr(keys::Q_PEOPLE_DELETE_CHATS).to_string(),
+                        tr(keys::Q_PEOPLE_DELETE_THE_SELECTED_CHATS_AND)
                             .to_string(),
-                        "Delete".to_string(),
+                        tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                     ),
                     GroupConfirmAction::LeaveChat => (
-                        "Leave chat".to_string(),
-                        "Leave this chat? You can rejoin with an invite link.".to_string(),
-                        "Leave".to_string(),
+                        tr(keys::Q_PEOPLE_LEAVE_CHAT).to_string(),
+                        tr(keys::Q_PEOPLE_LEAVE_THIS_CHAT_YOU_CAN).to_string(),
+                        tr(keys::Q_PEOPLE_LEAVE).to_string(),
                     ),
                     GroupConfirmAction::BroadcastIntro => (
-                        "Broadcast Groups".to_string(),
+                        tr(keys::Q_PEOPLE_BROADCAST_GROUPS).to_string(),
                         quill::admin_extras::broadcast_features_text(),
-                        "Convert".to_string(),
+                        tr(keys::Q_PEOPLE_CONVERT).to_string(),
                     ),
                     GroupConfirmAction::BroadcastUpgrade => (
-                        "Are you sure?".to_string(),
+                        tr(keys::Q_PEOPLE_ARE_YOU_SURE).to_string(),
                         quill::admin_extras::BROADCAST_WARNING.to_string(),
-                        "Convert".to_string(),
+                        tr(keys::Q_PEOPLE_CONVERT).to_string(),
                     ),
                     GroupConfirmAction::ClearHistory { revoke } => (
-                        "Clear history".to_string(),
+                        tr(keys::Q_PEOPLE_CLEAR_HISTORY).to_string(),
                         if revoke {
-                            "Delete all messages in this chat for everyone? This cannot be undone."
+                            tr(keys::Q_PEOPLE_DELETE_ALL_MESSAGES_IN_THIS)
                         } else {
-                            "Delete all messages in this chat for you? This cannot be undone."
+                            tr(keys::Q_PEOPLE_DELETE_ALL_MESSAGES_IN_THIS_2)
                         }
                         .to_string(),
-                        "Clear".to_string(),
+                        tr(keys::Q_PEOPLE_CLEAR).to_string(),
                     ),
                     GroupConfirmAction::RestartBot => (
-                        "Restart bot".to_string(),
-                        "Clear this bot's chat history and send /start again? This cannot be undone."
+                        tr(keys::Q_PEOPLE_RESTART_BOT).to_string(),
+                        tr(keys::Q_PEOPLE_CLEAR_THIS_BOTS_CHAT_HISTORY)
                             .to_string(),
-                        "Restart".to_string(),
+                        tr(keys::Q_PEOPLE_RESTART).to_string(),
                     ),
                     GroupConfirmAction::AbortRecoveryEmailSetup => (
-                        "Abort recovery email setup".to_string(),
-                        "Are you sure you want to abort recovery email setup? The new address will not be activated."
+                        tr(keys::Q_PEOPLE_ABORT_RECOVERY_EMAIL_SETUP).to_string(),
+                        tr(keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT)
                             .to_string(),
-                        "Abort".to_string(),
+                        tr(keys::Q_PEOPLE_ABORT).to_string(),
                     ),
                     GroupConfirmAction::BlockContact { user_id, block } => {
                         let name = this.contact_display_name(user_id);
                         if block {
                             (
-                                "Block user".to_string(),
-                                format!("Are you sure you want to block {name}?"),
-                                "Block".to_string(),
+                                tr(keys::PROFILE_BLOCK_USER).to_string(),
+                                tr_with(keys::Q_PEOPLE_ARE_YOU_SURE_YOU_WANT_2, &[("name", &name.to_string())]),
+                                tr(keys::BLOCKED_LIST_CONFIRM_OK).to_string(),
                             )
                         } else {
                             (
-                                "Unblock user".to_string(),
-                                format!("Unblock {name}?"),
-                                "Unblock".to_string(),
+                                tr(keys::PROFILE_UNBLOCK_USER).to_string(),
+                                tr_with(keys::Q_PEOPLE_UNBLOCK_2, &[("name", &name.to_string())]),
+                                tr(keys::Q_PEOPLE_UNBLOCK).to_string(),
                             )
                         }
                     }
                     GroupConfirmAction::DeleteContact { user_id } => {
                         let name = this.contact_display_name(user_id);
                         (
-                            "Delete contact".to_string(),
-                            format!("Delete {name} from contacts?"),
-                            "Delete".to_string(),
+                            tr(keys::INFO_DELETE_CONTACT).to_string(),
+                            tr_with(keys::Q_PEOPLE_DELETE_FROM_CONTACTS, &[("name", &name.to_string())]),
+                            tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
                     GroupConfirmAction::DeleteSyncedContacts => (
-                        "Delete synced contacts".to_string(),
-                        "This will remove your contacts from the Telegram servers. If 'Sync contacts' is enabled, contacts will be re-synced.".to_string(),
-                        "Delete".to_string(),
+                        tr(keys::Q_PEOPLE_DELETE_SYNCED_CONTACTS).to_string(),
+                        tr(keys::Q_PEOPLE_THIS_WILL_REMOVE_YOUR_CONTACTS).to_string(),
+                        tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                     ),
                     GroupConfirmAction::DeleteForumTopic { forum_topic_id } => {
                         let name = this
@@ -138,11 +139,11 @@ impl QuillApp {
                                         .map(|t| t.name.clone())
                                 })
                             })
-                            .unwrap_or_else(|| "this topic".to_string());
+                            .unwrap_or_else(|| tr(keys::Q_PEOPLE_THIS_TOPIC).to_string());
                         (
-                            "Delete topic".to_string(),
-                            format!("Delete {name} and all its messages? This cannot be undone."),
-                            "Delete".to_string(),
+                            tr(keys::Q_PEOPLE_DELETE_TOPIC).to_string(),
+                            tr_with(keys::Q_PEOPLE_DELETE_AND_ALL_ITS_MESSAGES, &[("name", &name.to_string())]),
+                            tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
                     GroupConfirmAction::DeleteSavedSublist { topic_id } => {
@@ -154,30 +155,30 @@ impl QuillApp {
                                     .get(&topic_id)
                                     .map(|topic| s.saved_topic_title(topic))
                             })
-                            .unwrap_or_else(|| "this chat".to_string());
+                            .unwrap_or_else(|| tr(keys::Q_PEOPLE_THIS_CHAT).to_string());
                         (
-                            "Delete chat".to_string(),
+                            tr(keys::Q_PEOPLE_DELETE_CHAT).to_string(),
                             format!(
                                 "Delete all messages saved from {name}? This cannot be undone."
                             ),
-                            "Delete".to_string(),
+                            tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
                     GroupConfirmAction::RemoveSavedGif { .. } => (
-                        "Remove saved GIF".to_string(),
-                        "Remove this GIF from your saved GIFs?".to_string(),
-                        "Remove".to_string(),
+                        tr(keys::Q_PEOPLE_REMOVE_SAVED_GIF).to_string(),
+                        tr(keys::Q_PEOPLE_REMOVE_THIS_GIF_FROM_YOUR).to_string(),
+                        tr(keys::BOX_REMOVE).to_string(),
                     ),
                     GroupConfirmAction::RemoveInstalledStickerSets => (
-                        "Remove installed sticker sets".to_string(),
+                        tr(keys::Q_PEOPLE_REMOVE_INSTALLED_STICKER_SETS).to_string(),
                         format!("Remove all {} installed sticker sets? You can install them again later.",this.session().map(|s|s.stickers.stickers.sets.len()).unwrap_or(0)),
-                        "Remove all".to_string(),
+                        tr(keys::Q_PEOPLE_REMOVE_ALL).to_string(),
                     ),
-                    GroupConfirmAction::RemoveEmojiSet { .. } => ("Remove emoji pack".to_string(),"Remove this emoji pack? You can install it again later.".to_string(),"Remove".to_string()),
+                    GroupConfirmAction::RemoveEmojiSet { .. } => (tr(keys::Q_PEOPLE_REMOVE_EMOJI_PACK).to_string(),tr(keys::Q_PEOPLE_REMOVE_THIS_EMOJI_PACK_YOU).to_string(),tr(keys::BOX_REMOVE).to_string()),
                     GroupConfirmAction::RemoveStickerSet { .. } => (
-                        "Remove sticker set".to_string(),
-                        "Remove this sticker set from your installed stickers? You can install it again later.".to_string(),
-                        "Remove".to_string(),
+                        tr(keys::Q_PEOPLE_REMOVE_STICKER_SET).to_string(),
+                        tr(keys::Q_PEOPLE_REMOVE_THIS_STICKER_SET_FROM).to_string(),
+                        tr(keys::BOX_REMOVE).to_string(),
                     ),
                     GroupConfirmAction::RemoveMember { user_id } => {
                         let name = this.contact_display_name(user_id);
@@ -187,28 +188,28 @@ impl QuillApp {
                             "group"
                         };
                         (
-                            "Remove member".to_string(),
-                            format!("Remove {name} from the {place}?"),
-                            "Remove".to_string(),
+                            tr(keys::Q_PEOPLE_REMOVE_MEMBER).to_string(),
+                            tr_with(keys::Q_PEOPLE_REMOVE_FROM_THE, &[("name", &name.to_string()), ("place", place)]),
+                            tr(keys::BOX_REMOVE).to_string(),
                         )
                     }
                     GroupConfirmAction::ClearPaymentInfo => (
-                        "Clear saved payment info".to_string(),
-                        "Delete the shipping info and payment credentials Telegram saved from past checkouts? This cannot be undone.".to_string(),
-                        "Clear".to_string(),
+                        tr(keys::Q_PEOPLE_CLEAR_SAVED_PAYMENT_INFO).to_string(),
+                        tr(keys::Q_PEOPLE_DELETE_THE_SHIPPING_INFO_AND).to_string(),
+                        tr(keys::Q_PEOPLE_CLEAR).to_string(),
                     ),
                     GroupConfirmAction::DeleteCommunity { community_id } => {
                         let name = this
                             .session()
                             .and_then(|s| s.groups.communities.get(&community_id))
                             .map(|c| c.name.clone())
-                            .unwrap_or_else(|| "this community".to_string());
+                            .unwrap_or_else(|| tr(keys::Q_PEOPLE_THIS_COMMUNITY).to_string());
                         (
-                            "Delete community".to_string(),
+                            tr(keys::Q_PEOPLE_DELETE_COMMUNITY).to_string(),
                             format!(
                                 "Delete {name} for all members? Its chats stay, but they leave the community. This cannot be undone."
                             ),
-                            "Delete".to_string(),
+                            tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                         )
                     }
                 };
@@ -236,7 +237,7 @@ impl QuillApp {
                 .into_any_element();
             let footer = div().flex().justify_end().gap_2().child(
                 Button::new("g1-confirm-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_group_confirm(cx);
@@ -296,8 +297,8 @@ impl QuillApp {
                 Button::new("channel-direct-messages")
                     .icon(gpui_kit::assets::IconName::MessageCircle)
                     .ghost()
-                    .tooltip("Direct messages")
-                    .accessibility_label("Direct messages")
+                    .tooltip(tr(keys::MANAGE_MONOFORUM))
+                    .accessibility_label(tr(keys::MANAGE_MONOFORUM))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_listed_chat(direct, window, cx);
                     }))
@@ -310,7 +311,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Checking channel membership…"),
+                            .child(tr(keys::Q_PEOPLE_CHECKING_CHANNEL_MEMBERSHIP)),
                     )
                     .into_any_element(),
             ),
@@ -320,7 +321,7 @@ impl QuillApp {
                     .children(direct_button(cx))
                     .child(
                         Button::new("channel-join")
-                            .label("Join channel")
+                            .label(tr(keys::PROFILE_JOIN_CHANNEL))
                             .primary()
                             .w_full()
                             .max_w(px(360.))
@@ -362,10 +363,10 @@ impl QuillApp {
                         .when_some(discussion, |this, discussion| {
                             this.child(
                                 Button::new("channel-discuss")
-                                    .label("Discuss")
+                                    .label(tr(keys::Q_PEOPLE_DISCUSS))
                                     .ghost()
-                                    .tooltip("Open the discussion group")
-                                    .accessibility_label("Discuss")
+                                    .tooltip(tr(keys::Q_PEOPLE_OPEN_THE_DISCUSSION_GROUP))
+                                    .accessibility_label(tr(keys::Q_PEOPLE_DISCUSS))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.select_listed_chat(ChatId(discussion), window, cx);
                                     })),
@@ -379,13 +380,13 @@ impl QuillApp {
                 let note = if can_post {
                     format!("Posting as {}.", chat.title)
                 } else {
-                    "You are an admin, but posting is disabled for you.".to_string()
+                    tr(keys::Q_PEOPLE_YOU_ARE_AN_ADMIN_BUT).to_string()
                 };
                 Some(
                     footer
                         .child(
                             Button::new("channel-leave")
-                                .label("Leave channel")
+                                .label(tr(keys::PROFILE_LEAVE_CHANNEL))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.leave_channel(open, cx);
@@ -416,7 +417,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("You are banned from this channel."),
+                            .child(tr(keys::Q_PEOPLE_YOU_ARE_BANNED_FROM_THIS)),
                     )
                     .into_any_element(),
             ),
@@ -426,7 +427,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Channel membership is unknown."),
+                            .child(tr(keys::Q_PEOPLE_CHANNEL_MEMBERSHIP_IS_UNKNOWN)),
                     )
                     .into_any_element(),
             ),
@@ -438,14 +439,14 @@ impl QuillApp {
     pub(in crate::ui) fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.join_channel(chat_id) {
-                Ok(()) => "joining channel…".into(),
-                Err(_) => "could not join channel".into(),
+                Ok(()) => tr(keys::Q_PEOPLE_JOINING_CHANNEL).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_JOIN_CHANNEL).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.set_member_status(ChannelMemberStatus::Member, None);
             }
-            self.connection.status_note = "joined channel (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_JOINED_CHANNEL_DEMO).into();
         }
         cx.notify();
     }
@@ -454,14 +455,14 @@ impl QuillApp {
     pub(in crate::ui) fn leave_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.leave_channel(chat_id) {
-                Ok(()) => "leaving channel…".into(),
-                Err(_) => "could not leave channel".into(),
+                Ok(()) => tr(keys::Q_PEOPLE_LEAVING_CHANNEL).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_LEAVE_CHANNEL).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(chat) = session.chats.get_mut(&chat_id.0) {
                 chat.set_member_status(ChannelMemberStatus::Left, None);
             }
-            self.connection.status_note = "left channel (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_LEFT_CHANNEL_DEMO).into();
         }
         cx.notify();
     }

@@ -4,6 +4,7 @@
 //! a title, which the kit dialog always renders).
 
 use super::*;
+use quill::lang::{keys, tr};
 
 /// `lng_change_phone_error`.
 pub(super) const CHANGE_PHONE_ERROR: &str = "You can only change your phone number using mobile Telegram apps. Please use an official Telegram app on your phone to update your number.";
@@ -27,7 +28,7 @@ impl QuillApp {
                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
             }));
         Some((
-            "Change phone number".into(),
+            tr(keys::Q_PEOPLE_CHANGE_PHONE_NUMBER).into(),
             body.into_any_element(),
             div().flex().gap_2().child(footer).into_any_element(),
         ))

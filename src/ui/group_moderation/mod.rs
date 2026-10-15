@@ -19,6 +19,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::moderation::{RestrictUntil, UntilError, validate_restrict_until};
 use quill::moderation_exceptions::initial_until;
@@ -43,7 +44,7 @@ impl QuillApp {
                 .fetch_supergroup_members(chat_id, MemberListFilter::Recent, "")
                 .is_err()
         {
-            self.connection.status_note = "could not load members".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS).into();
         }
         cx.notify();
     }
@@ -71,10 +72,10 @@ impl QuillApp {
                 .refresh_supergroup_members(chat_id, filter, query.trim())
                 .is_err()
             {
-                self.connection.status_note = "could not search members".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS).into();
             }
         } else {
-            self.connection.status_note = "member search needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_MEMBER_SEARCH_NEEDS_A_LIVE).into();
         }
         cx.notify();
     }
@@ -99,7 +100,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_admin_rights(chat_id, user_id).is_err()
         {
-            self.connection.status_note = "could not load admin rights".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS).into();
         }
         cx.notify();
     }
@@ -142,23 +143,27 @@ impl QuillApp {
                         .driver
                         .promote_chat_member(dialog.chat_id, *user_id, rights)
                     {
-                        Ok(_) => (false, "Member promoted".to_string()),
-                        Err(_) => (true, "could not promote member".to_string()),
+                        Ok(_) => (false, tr(keys::Q_PEOPLE_MEMBER_PROMOTED).to_string()),
+                        Err(_) => (
+                            true,
+                            tr(keys::Q_PEOPLE_COULD_NOT_PROMOTE_MEMBER).to_string(),
+                        ),
                     }
                 }
                 None => (
                     true,
-                    "admin actions need a live connection (demo)".to_string(),
+                    tr(keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE).to_string(),
                 ),
             },
             AdminDialogKind::Promote {
                 selected_user: None,
                 ..
-            } => (true, "select a member first".to_string()),
+            } => (true, tr(keys::Q_PEOPLE_SELECT_A_MEMBER_FIRST).to_string()),
             AdminDialogKind::EditRights { user_id, rights } => {
                 let Some(rights) = rights else {
                     self.admin.admin_dialog = Some(dialog);
-                    self.connection.status_note = "rights are still loading".into();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING).into();
                     cx.notify();
                     return;
                 };
@@ -168,24 +173,27 @@ impl QuillApp {
                             .driver
                             .edit_admin_rights(dialog.chat_id, *user_id, rights)
                         {
-                            Ok(_) => (false, "Admin rights updated".to_string()),
-                            Err(_) => (true, "could not update admin rights".to_string()),
+                            Ok(_) => (false, tr(keys::Q_PEOPLE_ADMIN_RIGHTS_UPDATED).to_string()),
+                            Err(_) => (
+                                true,
+                                tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_ADMIN_RIGHTS).to_string(),
+                            ),
                         }
                     }
                     None => (
                         true,
-                        "admin actions need a live connection (demo)".to_string(),
+                        tr(keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE).to_string(),
                     ),
                 }
             }
             AdminDialogKind::DemoteConfirm { user_id } => match self.live.as_mut() {
                 Some(live) => match live.driver.demote_chat_member(dialog.chat_id, *user_id) {
-                    Ok(_) => (false, "Admin demoted".to_string()),
-                    Err(_) => (true, "could not demote admin".to_string()),
+                    Ok(_) => (false, tr(keys::Q_PEOPLE_ADMIN_DEMOTED).to_string()),
+                    Err(_) => (true, tr(keys::Q_PEOPLE_COULD_NOT_DEMOTE_ADMIN).to_string()),
                 },
                 None => (
                     true,
-                    "admin actions need a live connection (demo)".to_string(),
+                    tr(keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE).to_string(),
                 ),
             },
         };
@@ -299,20 +307,20 @@ impl QuillApp {
                     // say so instead of claiming it happened.
                     Ok(Some(_)) => {
                         if dialog.ban {
-                            "member banned".into()
+                            tr(keys::Q_PEOPLE_MEMBER_BANNED).into()
                         } else {
-                            "member restricted".into()
+                            tr(keys::Q_PEOPLE_MEMBER_RESTRICTED).into()
                         }
                     }
                     Ok(None) | Err(_) => {
                         self.admin.restrict_dialog = Some(dialog);
-                        "could not update member status".into()
+                        tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS).into()
                     }
                 }
             }
             None => {
                 self.admin.restrict_dialog = Some(dialog);
-                "member actions need a live connection (demo)".into()
+                tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE).into()
             }
         };
         self.connection.status_note = note;
@@ -326,11 +334,11 @@ impl QuillApp {
             // Slice G1 fix-up: `Ok(None)` is a driver refusal, not
             // success — report it honestly.
             Some(live) => match live.driver.unban_chat_member(chat_id, user_id) {
-                Ok(Some(_)) => "member unbanned".into(),
-                Ok(None) => "could not unban member".into(),
-                Err(_) => "could not unban member".into(),
+                Ok(Some(_)) => tr(keys::Q_PEOPLE_MEMBER_UNBANNED).into(),
+                Ok(None) => tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_UNBAN_MEMBER).into(),
             },
-            None => "member actions need a live connection (demo)".into(),
+            None => tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE).into(),
         };
         self.connection.status_note = note;
         self.refresh_member_dialog(cx);
@@ -374,15 +382,15 @@ impl QuillApp {
                 .driver
                 .set_chat_permissions(dialog.chat_id, &dialog.permissions)
             {
-                Ok(_) => "permissions updated".into(),
+                Ok(_) => tr(keys::Q_PEOPLE_PERMISSIONS_UPDATED).into(),
                 Err(_) => {
                     self.admin.permissions_dialog = Some(dialog);
-                    "could not update permissions".into()
+                    tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_PERMISSIONS).into()
                 }
             },
             None => {
                 self.admin.permissions_dialog = Some(dialog);
-                "permissions need a live connection (demo)".into()
+                tr(keys::Q_PEOPLE_PERMISSIONS_NEED_A_LIVE_CONNECTION).into()
             }
         };
         self.connection.status_note = note;
@@ -404,7 +412,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Default permissions"));
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_PEOPLE_DEFAULT_PERMISSIONS,
+                )));
             let Some(dialog_state) = this.admin.permissions_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -416,30 +426,31 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("What new members may do by default"),
+                        .child(tr(keys::Q_PEOPLE_WHAT_NEW_MEMBERS_MAY_DO)),
                 )
                 .child(this.permission_checkboxes(&dialog_state.permissions, cx))
                 .into_any_element();
-            let footer =
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("g1-permissions-cancel")
-                            .label("Cancel")
-                            .ghost()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.close_permissions_dialog(cx);
-                                this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
-                            })),
-                    )
-                    .child(Button::new("g1-permissions-submit").label("Save").on_click(
-                        cx.listener(|this, _, window, cx| {
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("g1-permissions-cancel")
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_permissions_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("g1-permissions-submit")
+                        .label(tr(keys::SETTINGS_SAVE))
+                        .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_permissions_dialog(cx);
                             this.close_kit_dialog_if_done(DialogKind::Permissions, window, cx);
-                        }),
-                    ));
+                        })),
+                );
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
@@ -474,7 +485,7 @@ impl QuillApp {
             let dialog = dialog.overlay(true);
             let Some(dialog_state) = this.admin.restrict_dialog.as_ref() else {
                 return dialog
-                    .title(crate::ui::shell::dialog_title("Restrict"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::Q_PEOPLE_RESTRICT)))
                     .on_close(on_close);
             };
             let name = this
@@ -484,7 +495,11 @@ impl QuillApp {
                 .unwrap_or_else(|| format!("User {}", dialog_state.user_id));
             let title = format!(
                 "{} {name}",
-                if dialog_state.ban { "Ban" } else { "Restrict" }
+                if dialog_state.ban {
+                    tr(keys::Q_PEOPLE_BAN)
+                } else {
+                    tr(keys::Q_PEOPLE_RESTRICT)
+                }
             );
             let mut body = div().flex().flex_col().gap_2();
             if !dialog_state.ban {
@@ -493,7 +508,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Allowed while restricted"),
+                            .child(tr(keys::Q_PEOPLE_ALLOWED_WHILE_RESTRICTED)),
                     )
                     .child(this.restrict_permission_checkboxes(&dialog_state.permissions, cx));
             }
@@ -517,9 +532,9 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if dialog_state.ban {
-                            "Banned until"
+                            tr(keys::Q_PEOPLE_BANNED_UNTIL)
                         } else {
-                            "Restricted until"
+                            tr(keys::Q_PEOPLE_RESTRICTED_UNTIL)
                         }),
                 )
                 .child(
@@ -541,7 +556,8 @@ impl QuillApp {
                 );
             if matches!(until, RestrictUntil::Custom(_)) {
                 body = body.child(
-                    DatePicker::new(&dialog_state.custom).placeholder("Pick a date and time"),
+                    DatePicker::new(&dialog_state.custom)
+                        .placeholder(tr(keys::Q_PEOPLE_PICK_A_DATE_AND_TIME)),
                 );
             }
             if let Some(error) = dialog_state.error {
@@ -559,7 +575,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("g1-restrict-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_restrict_dialog(cx);
@@ -568,7 +584,11 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("g1-restrict-submit")
-                        .label(if dialog_state.ban { "Ban" } else { "Restrict" })
+                        .label(if dialog_state.ban {
+                            tr(keys::Q_PEOPLE_BAN)
+                        } else {
+                            tr(keys::Q_PEOPLE_RESTRICT)
+                        })
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_restrict_dialog(cx);
                             this.close_kit_dialog_if_done(DialogKind::Restrict, window, cx);

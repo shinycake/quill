@@ -1,6 +1,7 @@
 //! Methods moved out of `groups_forum.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Phase 5.1: the topic list for a forum supergroup — one row per
@@ -31,8 +32,8 @@ impl QuillApp {
             .gap_1();
         if topics.is_empty() {
             return pane_placeholder(
-                "No topics yet",
-                "The topic list arrives via getForumTopics.",
+                tr(keys::Q_PEOPLE_NO_TOPICS_YET),
+                tr(keys::Q_PEOPLE_THE_TOPIC_LIST_ARRIVES_VIA),
                 cx,
             )
             .into_any_element();
@@ -95,27 +96,31 @@ impl QuillApp {
                         if can_pin {
                             let pin_owner = owner.clone();
                             menu = menu.item(
-                                PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" })
-                                    .icon(if pinned {
-                                        IconName::PinOff
-                                    } else {
-                                        IconName::Pin
-                                    })
-                                    .on_click(move |_, _, cx| {
-                                        let _ = pin_owner.update(cx, |this, cx| {
-                                            let action = if pinned {
-                                                ForumTopicAction::Unpin
-                                            } else {
-                                                ForumTopicAction::Pin
-                                            };
-                                            this.forum_topic_action(
-                                                chat_for_menu,
-                                                topic_id,
-                                                action,
-                                                cx,
-                                            );
-                                        });
-                                    }),
+                                PopupMenuItem::new(if pinned {
+                                    tr(keys::Q_PEOPLE_UNPIN)
+                                } else {
+                                    tr(keys::CONTEXT_PIN_MSG)
+                                })
+                                .icon(if pinned {
+                                    IconName::PinOff
+                                } else {
+                                    IconName::Pin
+                                })
+                                .on_click(move |_, _, cx| {
+                                    let _ = pin_owner.update(cx, |this, cx| {
+                                        let action = if pinned {
+                                            ForumTopicAction::Unpin
+                                        } else {
+                                            ForumTopicAction::Pin
+                                        };
+                                        this.forum_topic_action(
+                                            chat_for_menu,
+                                            topic_id,
+                                            action,
+                                            cx,
+                                        );
+                                    });
+                                }),
                             );
                         }
                         super::forum_extras::add_topic_extras(
@@ -147,7 +152,7 @@ impl QuillApp {
                                                 div()
                                                     .text_xs()
                                                     .text_color(cx.theme().muted_foreground)
-                                                    .child("General"),
+                                                    .child(tr(keys::Q_PEOPLE_GENERAL)),
                                             )
                                         },
                                     )
@@ -156,7 +161,7 @@ impl QuillApp {
                                             div()
                                                 .text_xs()
                                                 .text_color(cx.theme().muted_foreground)
-                                                .child("Pinned"),
+                                                .child(tr(keys::Q_PEOPLE_PINNED)),
                                         )
                                     })
                                     .when(topic.is_closed, |this| {
@@ -164,7 +169,7 @@ impl QuillApp {
                                             div()
                                                 .text_xs()
                                                 .text_color(cx.theme().muted_foreground)
-                                                .child("Closed"),
+                                                .child(tr(keys::Q_PEOPLE_CLOSED)),
                                         )
                                     });
                                 if unread > 0 {
@@ -261,8 +266,8 @@ impl QuillApp {
                             Button::new("forum-column-chats")
                                 .icon(gpui_kit::assets::IconName::ChevronLeft)
                                 .ghost()
-                                .tooltip("Show chats")
-                                .accessibility_label("Show chats")
+                                .tooltip(tr(keys::Q_PEOPLE_SHOW_CHATS))
+                                .accessibility_label(tr(keys::Q_PEOPLE_SHOW_CHATS))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.chat_list.forum_chats_peek = true;
                                     cx.notify();
@@ -280,7 +285,7 @@ impl QuillApp {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(match count {
-                                        1 => "1 topic".to_owned(),
+                                        1 => tr(keys::Q_PEOPLE_1_TOPIC).to_owned(),
                                         n => format!("{n} topics"),
                                     }),
                             ),
@@ -309,8 +314,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.select_topic(forum_topic_id);
             self.connection.status_note = match result {
-                Ok(_) => "topic selected".into(),
-                Err(_) => "could not open topic".into(),
+                Ok(_) => tr(keys::Q_PEOPLE_TOPIC_SELECTED).into(),
+                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(chat_id) = session.open_chat
@@ -330,7 +335,7 @@ impl QuillApp {
             session.deselect_topic();
         }
         self.request_draft_restore();
-        self.connection.status_note = "back to topics".into();
+        self.connection.status_note = tr(keys::Q_PEOPLE_BACK_TO_TOPICS).into();
         cx.notify();
     }
 }

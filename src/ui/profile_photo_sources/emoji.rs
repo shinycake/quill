@@ -9,6 +9,7 @@ use crate::ui::pressable::PressableDiv;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::profile_photo_gradient::render_background;
 use quill::profile_photo_sources::{PRESET_COUNT, PhotoSticker, gradient_preset};
@@ -304,7 +305,7 @@ impl QuillApp {
                 .bg(theme.muted)
                 .cursor_pointer()
                 .role(Role::Button)
-                .aria_label("Custom background")
+                .aria_label(tr(keys::Q_PEOPLE_CUSTOM_BACKGROUND))
                 .tab_index(0)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.choose_background(PRESET_COUNT, window, cx);
@@ -359,9 +360,9 @@ impl QuillApp {
                     })
                     .unwrap_or_default();
                 let empty = if failed {
-                    Some("Couldn't load the emoji. Go back and open this again to retry.")
+                    Some(tr(keys::Q_PEOPLE_COULDNT_LOAD_THE_EMOJI_GO))
                 } else if items.is_empty() {
-                    Some("Loading emoji…")
+                    Some(tr(keys::Q_PEOPLE_LOADING_EMOJI))
                 } else {
                     None
                 };
@@ -384,7 +385,7 @@ impl QuillApp {
                     .collect();
                 let empty = items
                     .is_empty()
-                    .then_some("Your recent and favorite animated stickers show up here.");
+                    .then_some(tr(keys::Q_PEOPLE_YOUR_RECENT_AND_FAVORITE_ANIMATED));
                 (items, empty)
             }
         };
@@ -397,8 +398,8 @@ impl QuillApp {
             .overflow_y_scroll()
             .role(Role::List)
             .aria_label(match builder.tab {
-                Tab::Emoji => "Emoji",
-                Tab::Stickers => "Stickers",
+                Tab::Emoji => tr(keys::SWITCH_EMOJI),
+                Tab::Stickers => tr(keys::Q_PEOPLE_STICKERS),
             });
         for (ix, (pick, item)) in items.into_iter().enumerate() {
             let tile = div()
@@ -414,7 +415,7 @@ impl QuillApp {
                 tile.pressable(theme)
                     .role(Role::Button)
                     .aria_label(if item.emoji.is_empty() {
-                        "Item".to_string()
+                        tr(keys::Q_PEOPLE_ITEM).to_string()
                     } else {
                         format!("Item {}", item.emoji)
                     })
@@ -435,7 +436,7 @@ impl QuillApp {
             .child(
                 div()
                     .font_semibold()
-                    .child("Use an emoji or sticker as your photo"),
+                    .child(tr(keys::Q_PEOPLE_USE_AN_EMOJI_OR_STICKER)),
             )
             .child(div().flex().justify_center().child(preview))
             .child(palette)
@@ -443,17 +444,21 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_1()
-                    .child(tab_button("profile-photo-tab-emoji", "Emoji", Tab::Emoji))
+                    .child(tab_button(
+                        "profile-photo-tab-emoji",
+                        tr(keys::SWITCH_EMOJI),
+                        Tab::Emoji,
+                    ))
                     .child(tab_button(
                         "profile-photo-tab-stickers",
-                        "Stickers",
+                        tr(keys::Q_PEOPLE_STICKERS),
                         Tab::Stickers,
                     )),
             )
             .child(grid)
             .children(empty.map(|text| div().text_sm().text_color(muted).child(text)))
             .child(self.source_buttons(
-                "Set photo",
+                tr(keys::PROFILE_SET_PHOTO_BUTTON),
                 builder.pick.is_some() && !builder.colors().is_empty(),
                 |this, cx| this.use_emoji_avatar(cx),
                 cx,

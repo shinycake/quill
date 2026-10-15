@@ -10,6 +10,7 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::WelcomeMessagesFetch;
 use quill::telegram::envelope::ParsedWelcomeMessage;
 use std::cell::RefCell;
@@ -26,7 +27,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_chat_welcome_messages(chat_id).is_err()
         {
-            self.connection.status_note = "could not load welcome messages".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_WELCOME_MESSAGES).into();
         }
         cx.notify();
     }
@@ -47,17 +48,22 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.connection.status_note = "welcome message cannot be empty".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY).into();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             match live.driver.add_chat_welcome_message(chat_id, &text) {
-                Ok(_) => self.connection.status_note = "welcome message added".into(),
-                Err(_) => self.connection.status_note = "could not add welcome message".into(),
+                Ok(_) => {
+                    self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_ADDED).into()
+                }
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_ADD_WELCOME_MESSAGE).into()
+                }
             }
         } else {
-            self.connection.status_note = "welcome messages need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE).into();
         }
         if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.new_input.update(cx, |input, cx| {
@@ -81,7 +87,7 @@ impl QuillApp {
             None => return,
         };
         if text.is_empty() {
-            self.connection.status_note = "welcome message cannot be empty".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_CANNOT_BE_EMPTY).into();
             cx.notify();
             return;
         }
@@ -90,11 +96,16 @@ impl QuillApp {
                 .driver
                 .edit_chat_welcome_message(chat_id, welcome_id, &text)
             {
-                Ok(_) => self.connection.status_note = "welcome message updated".into(),
-                Err(_) => self.connection.status_note = "could not edit welcome message".into(),
+                Ok(_) => {
+                    self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_UPDATED).into()
+                }
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_EDIT_WELCOME_MESSAGE).into()
+                }
             }
         } else {
-            self.connection.status_note = "welcome messages need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE).into();
         }
         if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.editing = None;
@@ -111,11 +122,16 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.delete_chat_welcome_message(chat_id, welcome_id) {
-                Ok(_) => self.connection.status_note = "welcome message deleted".into(),
-                Err(_) => self.connection.status_note = "could not delete welcome message".into(),
+                Ok(_) => {
+                    self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGE_DELETED).into()
+                }
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_COULD_NOT_DELETE_WELCOME_MESSAGE).into()
+                }
             }
         } else {
-            self.connection.status_note = "welcome messages need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_WELCOME_MESSAGES_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -135,7 +151,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Welcome message"));
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::MANAGE_PEER_WELCOME_MESSAGES,
+                )));
             let Some(dialog_state) = this.admin.welcome_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -160,13 +178,13 @@ impl QuillApp {
                     .child(
                         div().flex_1().child(
                             Textarea::new(&dialog_state.new_input)
-                                .aria_label("New welcome message")
+                                .aria_label(tr(keys::Q_PEOPLE_NEW_WELCOME_MESSAGE))
                                 .h(px(64.)),
                         ),
                     )
                     .child(
                         Button::new("g2-welcome-add")
-                            .label("Add")
+                            .label(tr(keys::SETTINGS_CHANNEL_ADD))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_welcome_add(window, cx);
                                 this.close_kit_dialog_if_done(DialogKind::Welcome, window, cx);
@@ -190,7 +208,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("g2-welcome-retry")
-                                    .label("Retry")
+                                    .label(tr(keys::Q_PEOPLE_RETRY))
                                     .ghost()
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.open_welcome_dialog(chat_id, window, cx);
@@ -209,7 +227,7 @@ impl QuillApp {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No welcome messages yet."),
+                                .child(tr(keys::Q_PEOPLE_NO_WELCOME_MESSAGES_YET)),
                         );
                     } else {
                         let mut list = div()
@@ -231,7 +249,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Loading welcome messages…"),
+                            .child(tr(keys::Q_PEOPLE_LOADING_WELCOME_MESSAGES)),
                     );
                 }
             }
@@ -264,7 +282,7 @@ impl QuillApp {
     ) -> AnyElement {
         let welcome_id = message.id;
         let text = Self::message_copyable_text(&message.content)
-            .unwrap_or_else(|| "(no text)".to_string());
+            .unwrap_or_else(|| tr(keys::Q_PEOPLE_NO_TEXT).to_string());
         let mut row = div()
             .flex()
             .flex_col()
@@ -282,7 +300,7 @@ impl QuillApp {
                 edit_row = edit_row.child(
                     div().flex_1().child(
                         Textarea::new(&input)
-                            .aria_label("Welcome message")
+                            .aria_label(tr(keys::MANAGE_PEER_WELCOME_MESSAGES))
                             .h(px(56.)),
                     ),
                 );
@@ -290,14 +308,14 @@ impl QuillApp {
             edit_row = edit_row
                 .child(
                     Button::new(format!("g2-welcome-save-{welcome_id}"))
-                        .label("Save")
+                        .label(tr(keys::SETTINGS_SAVE))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_welcome_edit(window, cx);
                         })),
                 )
                 .child(
                     Button::new(format!("g2-welcome-cancel-{welcome_id}"))
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(dialog) = this.admin.welcome_dialog.as_mut() {
@@ -314,7 +332,7 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         Button::new(format!("g2-welcome-edit-{welcome_id}"))
-                            .label("Edit")
+                            .label(tr(keys::GROUP_INVITE_CONTEXT_EDIT))
                             .ghost()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let text = this
@@ -339,7 +357,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("g2-welcome-delete-{welcome_id}"))
-                            .label("Delete")
+                            .label(tr(keys::GROUP_INVITE_CONTEXT_DELETE))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.delete_welcome_message(chat_id, welcome_id, cx);

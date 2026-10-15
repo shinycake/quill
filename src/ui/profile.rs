@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
+use quill::lang::{keys, tr};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::UsernameCheckResult;
@@ -67,14 +68,16 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Edit profile"));
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_PEOPLE_EDIT_PROFILE,
+                )));
             this.photo_sources_prepare_render(cx);
             let Some(body) = this.edit_profile_dialog_body(cx) else {
                 return dialog.on_close(on_close);
             };
             let footer = div().flex().justify_end().child(
                 Button::new("edit-profile-close")
-                    .label("Done")
+                    .label(tr(keys::BOX_DONE))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_edit_profile_dialog(cx);
                         this.close_kit_dialog_if_done(DialogKind::EditProfile, window, cx);
@@ -158,18 +161,18 @@ impl QuillApp {
             .trim()
             .to_string();
         if first.is_empty() {
-            self.connection.status_note = "First name can't be empty.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_FIRST_NAME_CANT_BE_EMPTY).into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_name(&first, &last) {
-            Ok(_) => self.connection.status_note = "Name update requested.".into(),
+            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED).into(),
             Err(err) => self.connection.status_note = format!("set name failed: {err:?}"),
         }
         cx.notify();
@@ -183,13 +186,13 @@ impl QuillApp {
         };
         let bio = EditProfileDialog::text(&dialog.bio_input, cx).replace(['\n', '\r'], " ");
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_bio(bio.trim()) {
-            Ok(_) => self.connection.status_note = "Bio update requested.".into(),
+            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_BIO_UPDATE_REQUESTED).into(),
             Err(err) => self.connection.status_note = format!("set bio failed: {err:?}"),
         }
         cx.notify();
@@ -204,13 +207,12 @@ impl QuillApp {
         };
         let username = dialog.username_text(cx);
         if username.is_empty() {
-            self.connection.status_note =
-                "Enter a username to check, or save it empty to remove it.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_USERNAME_TO_CHECK).into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
@@ -243,18 +245,20 @@ impl QuillApp {
             });
         if !username.is_empty() && username != editable && !checked_ok {
             self.connection.status_note =
-                "Check availability first — the text changed since the last check.".into();
+                tr(keys::Q_PEOPLE_CHECK_AVAILABILITY_FIRST_THE_TEXT).into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_username(&username) {
-            Ok(_) => self.connection.status_note = "Username update requested.".into(),
+            Ok(_) => {
+                self.connection.status_note = tr(keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED).into()
+            }
             Err(err) => self.connection.status_note = format!("set username failed: {err:?}"),
         }
         cx.notify();
@@ -288,7 +292,7 @@ impl QuillApp {
         let mut new_order = order;
         new_order.swap(pos, swap);
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
@@ -307,13 +311,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.toggle_username_is_active(username, is_active) {
-            Ok(_) => self.connection.status_note = "Username update requested.".into(),
+            Ok(_) => {
+                self.connection.status_note = tr(keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED).into()
+            }
             Err(err) => self.connection.status_note = format!("username toggle failed: {err:?}"),
         }
         cx.notify();
@@ -330,18 +336,18 @@ impl QuillApp {
             .trim()
             .to_string();
         if path.is_empty() {
-            self.connection.status_note = "Enter a photo path first.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_PHOTO_PATH_FIRST).into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_profile_photo(&path) {
-            Ok(_) => self.connection.status_note = "Photo update requested.".into(),
+            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED).into(),
             Err(err) => self.connection.status_note = format!("set photo failed: {err:?}"),
         }
         cx.notify();
@@ -356,18 +362,20 @@ impl QuillApp {
             .and_then(|me| self.session().and_then(|s| s.user_full_info(me)))
             .and_then(|info| info.photo_id);
         let Some(photo_id) = photo_id else {
-            self.connection.status_note = "No profile photo to remove.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_NO_PROFILE_PHOTO_TO_REMOVE).into();
             cx.notify();
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: profile edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.delete_profile_photo(photo_id) {
-            Ok(_) => self.connection.status_note = "Photo removal requested.".into(),
+            Ok(_) => {
+                self.connection.status_note = tr(keys::Q_PEOPLE_PHOTO_REMOVAL_REQUESTED).into()
+            }
             Err(err) => self.connection.status_note = format!("remove photo failed: {err:?}"),
         }
         cx.notify();
@@ -424,7 +432,7 @@ impl QuillApp {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("Checking…")
+                .child(tr(keys::Q_PEOPLE_CHECKING))
                 .into_any_element()
         } else if verdict == Some(UsernameCheckResult::Purchasable) {
             // tdesktop `UsernameCheckInfo::PurchaseAvailable`: the Fragment
@@ -442,8 +450,8 @@ impl QuillApp {
                     .text_color(cx.theme().muted_foreground)
                     .child(super::fragment_link::text_with_link(
                         "edit-profile-username-fragment",
-                        "Sorry, this link is taken. But it's available for purchase. ",
-                        "Learn more...",
+                        tr(keys::Q_PEOPLE_SORRY_THIS_LINK_IS_TAKEN),
+                        tr(keys::Q_PEOPLE_LEARN_MORE),
                         "",
                         url,
                         cx,
@@ -457,12 +465,16 @@ impl QuillApp {
             }
         } else if let Some(result) = verdict {
             let (text, color) = match result {
-                UsernameCheckResult::Available => ("Available", success()),
-                UsernameCheckResult::Occupied => ("Occupied", danger()),
-                UsernameCheckResult::Invalid => ("Invalid username", danger()),
+                UsernameCheckResult::Available => (tr(keys::Q_PEOPLE_AVAILABLE), success()),
+                UsernameCheckResult::Occupied => (tr(keys::Q_PEOPLE_OCCUPIED), danger()),
+                UsernameCheckResult::Invalid => (tr(keys::Q_PEOPLE_INVALID_USERNAME), danger()),
                 UsernameCheckResult::Purchasable => ("", danger()),
-                UsernameCheckResult::PublicChatsTooMany => ("Too many public usernames", danger()),
-                UsernameCheckResult::PublicGroupsUnavailable => ("Unavailable", danger()),
+                UsernameCheckResult::PublicChatsTooMany => {
+                    (tr(keys::Q_PEOPLE_TOO_MANY_PUBLIC_USERNAMES), danger())
+                }
+                UsernameCheckResult::PublicGroupsUnavailable => {
+                    (tr(keys::Q_PEOPLE_UNAVAILABLE), danger())
+                }
             };
             div()
                 .text_sm()
@@ -473,7 +485,7 @@ impl QuillApp {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("Press Check to validate the username.")
+                .child(tr(keys::Q_PEOPLE_PRESS_CHECK_TO_VALIDATE_THE))
                 .into_any_element()
         };
         let mut usernames_body = div().flex().flex_col().gap_1();
@@ -513,7 +525,7 @@ impl QuillApp {
             if *name != editable {
                 actions = actions.child(
                     Button::new(format!("edit-profile-deactivate-{i}"))
-                        .label("Deactivate")
+                        .label(tr(keys::Q_PEOPLE_DEACTIVATE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_profile_username(&name_toggle, false, cx);
@@ -539,7 +551,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("edit-profile-activate-{i}"))
-                            .label("Activate")
+                            .label(tr(keys::Q_PEOPLE_ACTIVATE))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.toggle_profile_username(&name_toggle, true, cx);
@@ -559,10 +571,10 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(section("Photo"))
+                    .child(section(tr(keys::Q_PEOPLE_PHOTO)))
                     .child(
                         Textarea::new(&dialog.photo_path_input)
-                            .aria_label("Profile photo file path")
+                            .aria_label(tr(keys::Q_PEOPLE_PROFILE_PHOTO_FILE_PATH))
                             .h(px(40.)),
                     )
                     .child(
@@ -571,7 +583,7 @@ impl QuillApp {
                             .gap_2()
                             .child(
                                 Button::new("edit-profile-set-photo")
-                                    .label("Set photo")
+                                    .label(tr(keys::PROFILE_SET_PHOTO_BUTTON))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.submit_profile_photo(cx);
                                     })),
@@ -582,7 +594,7 @@ impl QuillApp {
                                 div().when(has_photo, |this| {
                                     this.child(
                                         Button::new("edit-profile-remove-photo")
-                                            .label("Remove photo")
+                                            .label(tr(keys::Q_PEOPLE_REMOVE_PHOTO))
                                             .ghost()
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.remove_profile_photo(cx);
@@ -598,21 +610,21 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(section("Name"))
+                    .child(section(tr(keys::Q_PEOPLE_NAME)))
                     .child(
                         Textarea::new(&dialog.first_name_input)
-                            .aria_label("First name")
+                            .aria_label(tr(keys::Q_PEOPLE_FIRST_NAME))
                             .h(px(40.)),
                     )
                     .child(
                         Textarea::new(&dialog.last_name_input)
-                            .aria_label("Last name")
+                            .aria_label(tr(keys::Q_PEOPLE_LAST_NAME))
                             .h(px(40.)),
                     )
                     .child(
                         div().flex().gap_2().child(
                             Button::new("edit-profile-save-name")
-                                .label("Save name")
+                                .label(tr(keys::Q_PEOPLE_SAVE_NAME))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit_profile_name(cx);
                                 })),
@@ -624,10 +636,10 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(section("Username"))
+                    .child(section(tr(keys::INFO_USERNAME_LABEL)))
                     .child(
                         Textarea::new(&dialog.username_input)
-                            .aria_label("Public username")
+                            .aria_label(tr(keys::Q_PEOPLE_PUBLIC_USERNAME_2))
                             .h(px(40.)),
                     )
                     .child(verdict_line)
@@ -637,7 +649,7 @@ impl QuillApp {
                             .gap_2()
                             .child(
                                 Button::new("edit-profile-check-username")
-                                    .label("Check")
+                                    .label(tr(keys::Q_PEOPLE_CHECK))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.check_profile_username(cx);
@@ -645,7 +657,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("edit-profile-save-username")
-                                    .label("Set username")
+                                    .label(tr(keys::Q_PEOPLE_SET_USERNAME))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.submit_profile_username(cx);
                                     })),
@@ -658,16 +670,16 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(section("Bio"))
+                    .child(section(tr(keys::INFO_BIO_LABEL)))
                     .child(
                         Textarea::new(&dialog.bio_input)
-                            .aria_label("Bio")
+                            .aria_label(tr(keys::INFO_BIO_LABEL))
                             .h(px(40.)),
                     )
                     .child(
                         div().flex().gap_2().child(
                             Button::new("edit-profile-save-bio")
-                                .label("Save bio")
+                                .label(tr(keys::Q_PEOPLE_SAVE_BIO))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit_profile_bio(cx);
                                 })),
@@ -685,12 +697,12 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(section("Phone number"))
+                .child(section(tr(keys::Q_PEOPLE_PHONE_NUMBER)))
                 .child(div().text_sm().child(phone))
                 .child(
                     div().flex().gap_2().child(
                         Button::new("edit-profile-change-phone")
-                            .label("Change number…")
+                            .label(tr(keys::Q_PEOPLE_CHANGE_NUMBER))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_change_phone_dialog(cx);
@@ -705,11 +717,11 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(section("Colors"))
+                .child(section(tr(keys::Q_PEOPLE_COLORS)))
                 .child(
                     div().flex().gap_2().child(
                         Button::new("edit-profile-colors")
-                            .label("Name and profile color…")
+                            .label(tr(keys::Q_PEOPLE_NAME_AND_PROFILE_COLOR))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_peer_color_dialog(
                                     quill::peer_color::PeerColorTab::Profile,

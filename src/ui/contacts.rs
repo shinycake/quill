@@ -11,6 +11,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, InfoPanelTarget};
 use quill::telegram::requests::{VCARD_IMPORT_LIMIT, parse_vcard};
 use std::cell::RefCell;
@@ -30,7 +31,11 @@ impl QuillApp {
                 this.close_import_contacts_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let dialog = dialog.overlay(true).title(crate::ui::shell::dialog_title("Import contacts"));
+            let dialog = dialog
+                .overlay(true)
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_PEOPLE_IMPORT_CONTACTS,
+                )));
             let Some(dialog_state) = this.dialogs.import_contacts_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
@@ -42,37 +47,47 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Paste the contents of a .vcf file. Only cards with a phone number are imported."),
+                        .child(tr(keys::Q_PEOPLE_PASTE_THE_CONTENTS_OF_A)),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(&dialog_state.input).aria_label("Contacts to import").h(px(220.))),
+                    div().flex_1().child(
+                        Textarea::new(&dialog_state.input)
+                            .aria_label(tr(keys::Q_PEOPLE_CONTACTS_TO_IMPORT))
+                            .h(px(220.)),
+                    ),
                 )
                 .into_any_element();
-            let footer = div().flex().justify_end().gap_2().child(
-                Button::new("import-contacts-cancel")
-                    .label("Cancel")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_import_contacts_dialog(cx);
-                        this.close_kit_dialog_if_done(DialogKind::ImportContacts, window, cx);
-                    })),
-            ).child(
-                Button::new("import-contacts-submit")
-                    .label("Import")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.submit_import_contacts_dialog(window, cx);
-                        this.close_kit_dialog_if_done(DialogKind::ImportContacts, window, cx);
-                    })),
-            );
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("import-contacts-cancel")
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_import_contacts_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::ImportContacts, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("import-contacts-submit")
+                        .label(tr(keys::Q_PEOPLE_IMPORT))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_import_contacts_dialog(window, cx);
+                            this.close_kit_dialog_if_done(DialogKind::ImportContacts, window, cx);
+                        })),
+                );
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body.borrow_mut().take().unwrap_or_else(|| div().into_any_element());
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -106,7 +121,9 @@ impl QuillApp {
             let Some(dialog_state) = this.dialogs.add_contact_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Add contact"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::Q_PEOPLE_ADD_CONTACT,
+                    )))
                     .on_close(on_close);
             };
             let name = this
@@ -127,11 +144,11 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Phone number"),
+                                .child(tr(keys::Q_PEOPLE_PHONE_NUMBER)),
                         )
                         .child(
                             Textarea::new(&dialog_state.phone_input)
-                                .aria_label("Phone number")
+                                .aria_label(tr(keys::Q_PEOPLE_PHONE_NUMBER))
                                 .h(px(40.)),
                         ),
                 )
@@ -144,11 +161,11 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("First name"),
+                                .child(tr(keys::Q_PEOPLE_FIRST_NAME)),
                         )
                         .child(
                             Textarea::new(&dialog_state.first_name_input)
-                                .aria_label("First name")
+                                .aria_label(tr(keys::Q_PEOPLE_FIRST_NAME))
                                 .h(px(40.)),
                         ),
                 )
@@ -161,11 +178,11 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Last name"),
+                                .child(tr(keys::Q_PEOPLE_LAST_NAME)),
                         )
                         .child(
                             Textarea::new(&dialog_state.last_name_input)
-                                .aria_label("Last name")
+                                .aria_label(tr(keys::Q_PEOPLE_LAST_NAME))
                                 .h(px(40.)),
                         ),
                 )
@@ -175,7 +192,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("add-contact-submit")
-                        .label("Add contact")
+                        .label(tr(keys::Q_PEOPLE_ADD_CONTACT))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_add_contact_dialog(window, cx);
                             this.close_kit_dialog_if_done(DialogKind::AddContact, window, cx);
@@ -183,7 +200,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("add-contact-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_add_contact_dialog(cx);
@@ -192,8 +209,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(format!(
-                    "Add {name} to contacts"
+                .title(crate::ui::shell::dialog_title(tr_with(
+                    keys::NEW_CONTACT_ADD_NAME,
+                    &[("user", &name.to_string())],
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
@@ -245,16 +263,18 @@ impl QuillApp {
         };
         let mut list = div().id("contacts-list").flex().flex_col();
         if failed {
-            list = list.child(note("Couldn’t load contacts.", cx)).child(
-                Button::new("contacts-retry")
-                    .label("Retry")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.retry_contacts(cx);
-                    })),
-            );
+            list = list
+                .child(note(tr(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS), cx))
+                .child(
+                    Button::new("contacts-retry")
+                        .label(tr(keys::Q_PEOPLE_RETRY))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.retry_contacts(cx);
+                        })),
+                );
         } else if loading {
-            list = list.child(note("Loading contacts…", cx));
+            list = list.child(note(tr(keys::Q_PEOPLE_LOADING_CONTACTS), cx));
         } else if items.is_empty() {
             let searching = !self
                 .chat_list
@@ -266,9 +286,9 @@ impl QuillApp {
                 .is_empty();
             list = list.child(note(
                 if searching {
-                    "No contacts found"
+                    tr(keys::CONTACTS_NOT_FOUND)
                 } else {
-                    "No contacts yet."
+                    tr(keys::Q_PEOPLE_NO_CONTACTS_YET)
                 },
                 cx,
             ));
@@ -305,7 +325,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.contact_prefs.sync_enabled = next;
             if let Err(err) = live.driver.save_contact_prefs() {
-                self.connection.status_note = format!("couldn't save contact prefs: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PEOPLE_COULDNT_SAVE_CONTACT_PREFS,
+                    &[("err", &err.to_string())],
+                );
             }
             if next && live.driver.session.users_state.contacts.is_none() {
                 // Re-enable refetches the server list so the tab
@@ -331,7 +354,7 @@ impl QuillApp {
     ) {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Paste vCard (.vcf) text…")
+                .placeholder(tr(keys::Q_PEOPLE_PASTE_VCARD_VCF_TEXT))
                 .auto_grow(4, 12)
                 .submit_on_enter(false)
         });
@@ -357,7 +380,7 @@ impl QuillApp {
         let (contacts, skipped, truncated) = parse_vcard(&text);
         if contacts.is_empty() {
             self.connection.status_note =
-                "No phone-number contacts found in that vCard.".to_string();
+                tr(keys::Q_PEOPLE_NO_PHONE_NUMBER_CONTACTS_FOUND).to_string();
             cx.notify();
             return;
         }
@@ -365,11 +388,14 @@ impl QuillApp {
             match live.driver.import_contacts(&contacts) {
                 Ok(Some(_)) => {
                     self.connection.status_note = if skipped == 0 && truncated == 0 {
-                        "importing contacts…".to_string()
+                        tr(keys::Q_PEOPLE_IMPORTING_CONTACTS).to_string()
                     } else {
                         let mut details = Vec::new();
                         if skipped > 0 {
-                            details.push(format!("{skipped} skipped without phone"));
+                            details.push(tr_with(
+                                keys::Q_PEOPLE_SKIPPED_WITHOUT_PHONE,
+                                &[("skipped", &skipped.to_string())],
+                            ));
                         }
                         if truncated > 0 {
                             details.push(format!(
@@ -380,7 +406,8 @@ impl QuillApp {
                     };
                 }
                 Ok(None) => {
-                    self.connection.status_note = "request already in flight".to_string();
+                    self.connection.status_note =
+                        tr(keys::Q_PEOPLE_REQUEST_ALREADY_IN_FLIGHT).to_string();
                     cx.notify();
                     return;
                 }
@@ -545,7 +572,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|dialog| dialog.draft(cx));
         let Some((user_id, phone, first, last)) = draft else {
-            self.connection.status_note = "Enter a name or phone number to add the contact.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_NAME_OR_PHONE).into();
             cx.notify();
             return;
         };
@@ -553,7 +580,7 @@ impl QuillApp {
             match live.driver.add_contact(user_id, &phone, &first, &last) {
                 Ok(_) => {
                     self.dialogs.add_contact_dialog = None;
-                    self.connection.status_note = "Contact add requested.".into();
+                    self.connection.status_note = tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED).into();
                 }
                 Err(err) => {
                     self.connection.status_note = format!("add contact failed: {err:?}");
@@ -562,7 +589,7 @@ impl QuillApp {
         } else {
             // Demo: no driver — just close.
             self.dialogs.add_contact_dialog = None;
-            self.connection.status_note = "Contact add requested.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED).into();
         }
         let _ = window;
         cx.notify();

@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::{civil_local, day_label, now_unix};
 use quill::telegram::envelope::{ParsedBoostSource, ParsedChatBoost, SupergroupUsernames};
 
@@ -17,7 +18,7 @@ use quill::telegram::envelope::{ParsedBoostSource, ParsedChatBoost, SupergroupUs
 pub(crate) fn username_status(lists: &SupergroupUsernames, name: &str) -> &'static str {
     if lists.active.iter().any(|n| n == name) {
         if name == lists.editable {
-            "main link"
+            tr(keys::Q_PEOPLE_MAIN_LINK)
         } else {
             "active"
         }
@@ -42,9 +43,9 @@ pub(crate) fn username_rows(lists: &SupergroupUsernames) -> Vec<String> {
 pub(crate) fn username_confirm_text(channel: bool, show: bool) -> String {
     let place = if channel { "channel" } else { "group" };
     if show {
-        format!("Show this link on the {place} info page?")
+        tr_with(keys::Q_PEOPLE_SHOW_THIS_LINK_ON_THE, &[("place", place)])
     } else {
-        format!("Hide this link from the {place} info page?")
+        tr_with(keys::Q_PEOPLE_HIDE_THIS_LINK_FROM_THE, &[("place", place)])
     }
 }
 
@@ -55,30 +56,32 @@ pub(crate) fn boost_status(boost: &ParsedChatBoost, now_unix_secs: i64) -> Strin
     let expires = format!("boost expires on {}", day_label(&at, &now));
     match boost.source {
         ParsedBoostSource::Premium { .. } => expires,
-        ParsedBoostSource::GiftCode { .. } => format!("gift code · {expires}"),
+        ParsedBoostSource::GiftCode { .. } => tr_with(
+            keys::Q_PEOPLE_GIFT_CODE,
+            &[("expires", &expires.to_string())],
+        ),
         ParsedBoostSource::Giveaway {
             is_unclaimed: true, ..
-        } => "To be distributed".into(),
-        ParsedBoostSource::Giveaway { .. } => format!("giveaway · {expires}"),
+        } => tr(keys::BOOSTS_LIST_PENDING).into(),
+        ParsedBoostSource::Giveaway { .. } => tr_with(
+            keys::Q_PEOPLE_GIVEAWAY,
+            &[("expires", &expires.to_string())],
+        ),
     }
 }
 
 /// "12 boosts" / "1 boost" (tdesktop `lng_boosts_list_title`).
 pub(crate) fn boost_count_title(count: i32) -> String {
-    if count == 1 {
-        "1 boost".into()
-    } else {
-        format!("{count} boosts")
-    }
+    trn(keys::BOOSTS_LIST_TITLE, count)
 }
 
 /// "Show N more boosts" tail: "11 more boosts" / "1 more boost".
 pub(crate) fn more_boosts_label(left: i32) -> String {
     let left = left.max(1);
     if left == 1 {
-        "1 more boost".into()
+        tr(keys::Q_PEOPLE_1_MORE_BOOST).into()
     } else {
-        format!("{left} more boosts")
+        tr_with(keys::Q_PEOPLE_MORE_BOOSTS, &[("left", &left.to_string())])
     }
 }
 
@@ -122,11 +125,11 @@ impl QuillApp {
                 };
                 match sent {
                     Ok(Some(_)) => String::new(),
-                    Ok(None) => "That link can't be changed right now.".into(),
-                    Err(_) => "Couldn't send the change. Try again.".into(),
+                    Ok(None) => tr(keys::Q_PEOPLE_THAT_LINK_CANT_BE_CHANGED).into(),
+                    Err(_) => tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY).into(),
                 }
             }
-            None => "Demo mode: this needs a live session.".into(),
+            None => tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into(),
         };
         cx.notify();
     }
@@ -145,10 +148,21 @@ impl QuillApp {
             let app = app.clone();
             let name = name.clone();
             alert
-                .title(format!("{} @{name}?", if show { "Show" } else { "Hide" }))
+                .title(format!(
+                    "{} @{name}?",
+                    if show {
+                        tr(keys::Q_PEOPLE_SHOW)
+                    } else {
+                        tr(keys::Q_PEOPLE_HIDE)
+                    }
+                ))
                 .description(username_confirm_text(channel, show))
-                .ok_text(if show { "Show" } else { "Hide" })
-                .cancel_text("Cancel")
+                .ok_text(if show {
+                    tr(keys::Q_PEOPLE_SHOW)
+                } else {
+                    tr(keys::Q_PEOPLE_HIDE)
+                })
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
@@ -171,7 +185,7 @@ impl QuillApp {
                 .px_2()
                 .text_sm()
                 .text_color(muted)
-                .child("No links to arrange.")
+                .child(tr(keys::Q_PEOPLE_NO_LINKS_TO_ARRANGE))
                 .into_any_element();
         };
         let rows = username_rows(&lists);
@@ -190,8 +204,8 @@ impl QuillApp {
                         .icon(IconName::ArrowUp)
                         .ghost()
                         .xsmall()
-                        .tooltip("Move up")
-                        .accessibility_label("Move up")
+                        .tooltip(tr(keys::Q_PEOPLE_MOVE_UP))
+                        .accessibility_label(tr(keys::Q_PEOPLE_MOVE_UP))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.change_username(chat_id, &up, UsernameChange::Move(true), cx);
                         })),
@@ -203,8 +217,8 @@ impl QuillApp {
                         .icon(IconName::ArrowDown)
                         .ghost()
                         .xsmall()
-                        .tooltip("Move down")
-                        .accessibility_label("Move down")
+                        .tooltip(tr(keys::Q_PEOPLE_MOVE_DOWN))
+                        .accessibility_label(tr(keys::Q_PEOPLE_MOVE_DOWN))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.change_username(chat_id, &down, UsernameChange::Move(false), cx);
                         })),
@@ -214,7 +228,11 @@ impl QuillApp {
             if *name != lists.editable {
                 actions = actions.child(
                     Button::new(("username-toggle", index as u64))
-                        .label(if active { "Hide" } else { "Show" })
+                        .label(if active {
+                            tr(keys::Q_PEOPLE_HIDE)
+                        } else {
+                            tr(keys::Q_PEOPLE_SHOW)
+                        })
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -260,7 +278,7 @@ impl QuillApp {
                 .pt_1()
                 .text_xs()
                 .text_color(muted)
-                .child("Links are shown on the info page in this order."),
+                .child(tr(keys::Q_PEOPLE_LINKS_ARE_SHOWN_ON_THE)),
         )
         .into_any_element()
     }
@@ -293,14 +311,18 @@ impl QuillApp {
                 .items_center()
                 .gap_1()
                 .child({
-                    let b = Button::new("boosts-tab-all").label("All boosts").small();
+                    let b = Button::new("boosts-tab-all")
+                        .label(tr(keys::Q_PEOPLE_ALL_BOOSTS))
+                        .small();
                     let b = if only_gifts { b.ghost() } else { b };
                     b.on_click(cx.listener(move |this, _, _, cx| {
                         this.switch_boosts_tab(chat_id, false, cx);
                     }))
                 })
                 .child({
-                    let b = Button::new("boosts-tab-gifts").label("Gifts").small();
+                    let b = Button::new("boosts-tab-gifts")
+                        .label(tr(keys::Q_PEOPLE_GIFTS))
+                        .small();
                     let b = if only_gifts { b } else { b.ghost() };
                     b.on_click(cx.listener(move |this, _, _, cx| {
                         this.switch_boosts_tab(chat_id, true, cx);
@@ -309,7 +331,12 @@ impl QuillApp {
         );
         match &list {
             None => {
-                body = body.child(div().text_xs().text_color(muted).child("Loading…"));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_PEOPLE_LOADING)),
+                );
             }
             Some(state) => {
                 if !state.loading || !state.boosts.is_empty() {
@@ -321,13 +348,17 @@ impl QuillApp {
                             .child(boost_count_title(state.total_count)),
                     );
                     if state.boosts.is_empty() {
-                        body =
-                            body.child(div().text_xs().text_color(muted).child("No boosts yet."));
+                        body = body.child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(keys::Q_PEOPLE_NO_BOOSTS_YET)),
+                        );
                     } else {
                         body = body.child(div().text_xs().text_color(muted).child(if channel {
-                            "Your channel is currently boosted by these users."
+                            tr(keys::BOOSTS_LIST_SUBTEXT)
                         } else {
-                            "Your group is currently boosted by these users."
+                            tr(keys::BOOSTS_LIST_SUBTEXT_GROUP)
                         }));
                     }
                 }
@@ -335,7 +366,7 @@ impl QuillApp {
                 for (index, boost) in state.boosts.iter().enumerate() {
                     let uid = boost.source.user_id();
                     let title = if uid == 0 {
-                        "Unclaimed".to_string()
+                        tr(keys::BOOSTS_LIST_UNCLAIMED).to_string()
                     } else {
                         self.contact_display_name(uid)
                     };
@@ -382,7 +413,12 @@ impl QuillApp {
                     body = body.child(div().text_xs().text_color(muted).child(error));
                 }
                 if state.loading && !state.boosts.is_empty() {
-                    body = body.child(div().text_xs().text_color(muted).child("Loading…"));
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_PEOPLE_LOADING)),
+                    );
                 } else if !state.next_offset.is_empty() && !state.loading {
                     let left = state.total_count - state.boosts.len() as i32;
                     body = body.child(
@@ -409,7 +445,7 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child("Link for boosting"),
+                        .child(tr(keys::BOOSTS_LINK_TITLE)),
                 )
                 .child(
                     div()
@@ -427,20 +463,21 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("boost-link-copy")
-                                .label("Copy")
+                                .label(tr(keys::GROUP_INVITE_CONTEXT_COPY))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
-                                    this.connection.status_note = "Boost link copied".into();
+                                    this.connection.status_note =
+                                        tr(keys::Q_PEOPLE_BOOST_LINK_COPIED).into();
                                     cx.notify();
                                 })),
                         ),
                 )
                 .child(div().text_xs().text_color(muted).child(if channel {
-                    "Share this link with your subscribers to get more boosts."
+                    tr(keys::BOOSTS_LINK_SUBTEXT)
                 } else {
-                    "Share this link with the members of your group to get more boosts."
+                    tr(keys::BOOSTS_LINK_SUBTEXT_GROUP)
                 }));
         }
         body.into_any_element()
