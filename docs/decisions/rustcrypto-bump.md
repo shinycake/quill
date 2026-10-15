@@ -41,13 +41,20 @@ after the bump:
 
 ## Duplicates
 
-`cargo tree -d --target all` for the RustCrypto crates: before, sha2, digest,
-hmac, hkdf, block-buffer, cipher, crypto-common, inout, cpufeatures each had an
-older and a newer copy. After, the same set remains, plus pbkdf2 (0.12 and
-0.13), which was a single version before. The old copies are only used by `oo7` 0.6 (via GPUI on
-Linux: sha2 0.10, hmac 0.12, pbkdf2 0.12), which we cannot change. Quill's own
-code is on a single generation. `aead`, `chacha20`, `poly1305` and
-`universal-hash` are not duplicated before or after.
+`cargo tree -d --target all` for the RustCrypto crates, against main at 7250673e.
+
+Before: aead (0.5.2, 0.6.1), aes (0.8.4, 0.9.3), block-buffer, cbc, chacha20
+(0.9.1, 0.10.2), cipher, cpufeatures, crypto-common, digest, hkdf, hmac, inout,
+sha2 (0.10.9, 0.11.1), universal-hash (0.5.1, 0.6.1). Each had an older and a
+newer copy.
+
+After: the same set minus aead, chacha20 and universal-hash (chacha20poly1305
+0.11 moves to the same aead 0.6 / chacha20 0.10 / universal-hash 0.6 that
+aes-gcm 0.11 already used, and poly1305 follows), plus pbkdf2 (0.12.2 and
+0.13.0), which was a single version before. Every remaining old copy
+(sha2 0.10.9, hmac 0.12, pbkdf2 0.12.2, aes 0.8, cbc 0.1, ...) comes from `oo7` 0.6 via
+`gpui-pre-linux` (verified with `cargo tree -i`), which Quill cannot change.
+Quill's own code is on a single generation, and `sha2_next` is gone.
 
 ## Unverified
 
