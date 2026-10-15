@@ -36,16 +36,18 @@ pub fn install(app_root: &Path, id: EmojiSetId, zip: &[u8]) -> Result<(), String
 /// Install a pack the user downloaded by hand (the landing page links the
 /// release zips): the file's hash says which set it is, so any name works.
 pub fn install_file(app_root: &Path, file: &Path) -> Result<EmojiSetId, String> {
+    use std::io::Read;
+
     use super::catalog::MAX_PACK_BYTES;
 
     const NOT_A_PACK: &str = "That file isn't a Quill emoji set.";
-    let len = std::fs::metadata(file)
-        .map_err(|_| "Couldn't read that file.")?
-        .len();
-    if len > MAX_PACK_BYTES {
+    let mut zip = Vec::new();
+    std::fs::File::open(file)
+        .and_then(|f| f.take(MAX_PACK_BYTES + 1).read_to_end(&mut zip))
+        .map_err(|_| "Couldn't read that file.")?;
+    if zip.len() as u64 > MAX_PACK_BYTES {
         return Err(NOT_A_PACK.into());
     }
-    let zip = std::fs::read(file).map_err(|_| "Couldn't read that file.")?;
     let hash = Sha256::digest(&zip);
     let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
     let id = EmojiSetId::ALL

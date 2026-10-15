@@ -162,6 +162,7 @@ impl QuillApp {
 
     pub(super) fn open_emoji_set_style(&mut self, cx: &mut Context<Self>) {
         self.settings.emoji_style.open = true;
+        self.settings.emoji_style.file_error = None;
         cx.notify();
     }
 
@@ -228,6 +229,7 @@ impl QuillApp {
             previous.progress.cancel();
         }
         state.failed = None;
+        state.file_error = None;
         let progress = Arc::new(Progress::default());
         state.download = Some(ActiveDownload {
             id,
@@ -271,6 +273,9 @@ impl QuillApp {
     /// file's hash picks the set, then it is switched to like a download.
     fn install_emoji_set_file(&mut self, cx: &mut Context<Self>) {
         let Some(root) = app_root() else {
+            self.settings.emoji_style.file_error =
+                Some("Couldn't open Quill's data folder.".into());
+            cx.notify();
             return;
         };
         self.settings.emoji_style.file_error = None;
@@ -295,6 +300,11 @@ impl QuillApp {
                 match result {
                     Ok(id) => {
                         let state = &mut this.settings.emoji_style;
+                        // The file wins over a download in flight, which
+                        // would switch sets again when it lands.
+                        if let Some(previous) = state.download.take() {
+                            previous.progress.cancel();
+                        }
                         state.ready.insert(id);
                         if state.failed.as_ref().is_some_and(|(f, _)| *f == id) {
                             state.failed = None;
