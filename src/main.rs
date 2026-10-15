@@ -98,6 +98,11 @@ fn main() {
             args.get(2).map(String::as_str),
         ));
     }
+    if args.get(1).is_some_and(|a| a == "--passkey-probe") {
+        std::process::exit(quill::passkey_probe::cli_exit_code(
+            args.get(2).is_some_and(|a| a == "login"),
+        ));
+    }
     if args.iter().skip(1).any(|a| a == "--connect-smoke") {
         std::process::exit(quill::connect_smoke::cli_exit_code());
     }
