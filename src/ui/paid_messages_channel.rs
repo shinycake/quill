@@ -19,6 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::paid_messages::{
     DEFAULT_CHANNEL_PRICE, DirectMessagesChoice, channel_price_about, price_steps, stars_text,
 };
@@ -83,7 +84,7 @@ impl QuillApp {
             action_row(
                 "direct-messages-row",
                 Some(IconName::MessagesSquare),
-                "Direct messages",
+                tr(keys::PROFILE_DIRECT_MESSAGES),
                 false,
                 cx,
             )
@@ -148,10 +149,10 @@ impl QuillApp {
                 .is_err()
             {
                 self.connection.status_note =
-                    "Couldn't change the direct messages. Try again.".into();
+                    tr(keys::Q_MONEY_COULDNT_CHANGE_THE_DIRECT_MESSAGES).into();
             }
         } else {
-            self.connection.status_note = "Direct messages need a live session.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_DIRECT_MESSAGES_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -194,9 +195,10 @@ impl QuillApp {
                 .and_then(|lists| lists.active.first().cloned())
                 .map(|name| format!("https://t.me/{name}?direct"));
             let mut body = div().flex().flex_col().gap_3().child(
-                div().text_sm().text_color(muted).child(
-                    "Allow users to send messages to your channel, with the option to charge a fee for each message.",
-                ),
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::MANAGE_MONOFORUM_ABOUT)),
             );
             body = body.child(
                 div()
@@ -206,7 +208,7 @@ impl QuillApp {
                     .child(
                         Switch::new("direct-messages-enabled")
                             .checked(boxed.enabled)
-                            .accessibility_label("Allow Channel Messages")
+                            .accessibility_label(tr(keys::Q_MONEY_ALLOW_CHANNEL_MESSAGES))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 if let Some(boxed) = this.paid_messages.direct.as_mut() {
                                     boxed.enabled = on;
@@ -214,7 +216,11 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     )
-                    .child(div().text_sm().child("Allow Channel Messages")),
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_MONEY_ALLOW_CHANNEL_MESSAGES)),
+                    ),
             );
             if boxed.enabled && can_charge {
                 body = body
@@ -223,20 +229,15 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(muted)
-                            .child("Price for each message"),
+                            .child(tr(keys::MANAGE_MONOFORUM_PRICE)),
                     )
-                    .child(
-                        div().flex().justify_center().child(
-                            div()
-                                .text_lg()
-                                .font_semibold()
-                                .child(if price == 0 {
-                                    "Free".to_string()
-                                } else {
-                                    format!("\u{2B50} {}", group_digits(price))
-                                }),
-                        ),
-                    )
+                    .child(div().flex().justify_center().child(
+                        div().text_lg().font_semibold().child(if price == 0 {
+                            tr(keys::Q_MONEY_FREE).to_string()
+                        } else {
+                            format!("\u{2B50} {}", group_digits(price))
+                        }),
+                    ))
                     .child(Slider::new(&boxed.price.slider).bg(cx.theme().primary))
                     .child(
                         div()
@@ -244,7 +245,7 @@ impl QuillApp {
                             .justify_between()
                             .text_xs()
                             .text_color(muted)
-                            .child("Free")
+                            .child(tr(keys::Q_MONEY_FREE))
                             .child(group_digits(max)),
                     )
                     .when(price > 0, |this| {
@@ -261,7 +262,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Messages to this channel are free: charging isn't available for it."),
+                        .child(tr(keys::Q_MONEY_MESSAGES_TO_THIS_CHANNEL_ARE)),
                 );
             }
             if let Some(link) = link.filter(|_| boxed.enabled && was_enabled) {
@@ -275,12 +276,13 @@ impl QuillApp {
                         .child(div().text_sm().text_color(text_muted()).child(shown))
                         .child(
                             Button::new("direct-messages-copy")
-                                .label("Copy link")
+                                .label(tr(keys::BOOST_CHANNEL_ASK_BUTTON))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                                    this.connection.status_note = "link copied".into();
+                                    this.connection.status_note =
+                                        tr(keys::Q_MONEY_LINK_COPIED).into();
                                     cx.notify();
                                 })),
                         ),
@@ -291,19 +293,17 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("The current price is still loading. Move the slider to set a new one."),
+                        .child(tr(keys::Q_MONEY_THE_CURRENT_PRICE_IS_STILL)),
                 );
             }
             if let Some(line) = error {
                 body = body.child(div().text_xs().text_color(danger()).child(line));
             }
             if boxed.enabled && price > 0 && can_charge {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(format!("Each message costs senders {}.", stars_text(price))),
-                );
+                body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                    keys::Q_MONEY_EACH_MESSAGE_COSTS_SENDERS,
+                    &[("stars_text", &(stars_text(price)).to_string())],
+                )));
             }
             let body = body.into_any_element();
             let footer = div()
@@ -312,7 +312,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("direct-messages-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_direct_messages(cx);
@@ -321,7 +321,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("direct-messages-save")
-                        .label("Save")
+                        .label(tr(keys::SETTINGS_SAVE))
                         .primary()
                         .disabled(!changed || saving)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -331,7 +331,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Direct Messages"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::PROFILE_DIRECT_MESSAGES,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

@@ -6,6 +6,7 @@ use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::local_time::{civil_local, now_unix};
 use quill::stat_chart::{
     PostCounters, Sheet, StatChart, chat_statistics_sheets, export_file_name, parse_chart,
@@ -87,14 +88,14 @@ pub(super) fn page_workbook(session: &Session, chat_id: i64) -> Option<(Vec<Shee
                 counters,
                 &[
                     (
-                        "Interactions",
+                        tr(keys::Q_MONEY_INTERACTIONS),
                         resolve(session, chat_id, &stats.interaction_graph),
                     ),
                     (
-                        "Reactions",
+                        tr(keys::Q_MONEY_REACTIONS),
                         resolve(session, chat_id, &stats.reaction_graph),
                     ),
-                    ("Poll votes", poll),
+                    (tr(keys::Q_MONEY_POLL_VOTES), poll),
                 ],
             );
             Some((
@@ -127,11 +128,11 @@ pub(super) fn page_workbook(session: &Session, chat_id: i64) -> Option<(Vec<Shee
                 counters,
                 &[
                     (
-                        "Interactions",
+                        tr(keys::Q_MONEY_INTERACTIONS),
                         resolve(session, chat_id, &stats.interaction_graph),
                     ),
                     (
-                        "Reactions",
+                        tr(keys::Q_MONEY_REACTIONS),
                         resolve(session, chat_id, &stats.reaction_graph),
                     ),
                 ],
@@ -148,7 +149,7 @@ impl QuillApp {
     /// "Export to File…": ask where, then write the workbook there.
     pub(super) fn export_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) {
         let Some((sheets, name)) = self.session().and_then(|s| page_workbook(s, chat_id)) else {
-            self.connection.status_note = "The statistics are still loading.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_THE_STATISTICS_ARE_STILL_LOADING).into();
             cx.notify();
             return;
         };
@@ -174,9 +175,9 @@ impl QuillApp {
                         "Statistics saved to {}.",
                         dest.file_name()
                             .and_then(|n| n.to_str())
-                            .unwrap_or("the file")
+                            .unwrap_or(tr(keys::Q_MONEY_THE_FILE))
                     ),
-                    Err(()) => "Could not save statistics.".into(),
+                    Err(()) => tr(keys::STATS_EXPORT_ERROR).into(),
                 };
                 cx.notify();
             });
@@ -188,7 +189,7 @@ impl QuillApp {
 /// The page's "Export to file…" button.
 pub(super) fn export_button(chat_id: i64, cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("statistics-export")
-        .label("Export to file…")
+        .label(tr(keys::Q_MONEY_EXPORT_TO_FILE))
         .ghost()
         .small()
         .on_click(cx.listener(move |this, _, _, cx| this.export_statistics(chat_id, cx)))

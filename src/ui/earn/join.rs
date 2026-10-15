@@ -8,6 +8,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
+use quill::lang::{keys, tr, tr_with};
 
 /// How many screens ahead of the end the next page loads (tdesktop
 /// `PeerListContent`'s `PreloadHeightsCount`).
@@ -150,39 +151,42 @@ impl QuillApp {
             )
             .context_menu(move |menu, _, _| {
                 let open = owner.clone();
-                let mut menu =
-                    menu.item(PopupMenuItem::new("Open App").icon(IconName::Bot).on_click(
-                        move |_, window, cx| {
+                let mut menu = menu.item(
+                    PopupMenuItem::new(tr(keys::Q_MONEY_OPEN_APP))
+                        .icon(IconName::Bot)
+                        .on_click(move |_, window, cx| {
                             let _ = open.update(cx, |this, cx| {
                                 this.open_user_chat(bot_user_id, window, cx);
                             });
-                        },
-                    ));
+                        }),
+                );
                 if let Some(program) = menu_link.clone().filter(|p| !p.url.is_empty()) {
                     let copy = owner.clone();
                     let leave = owner.clone();
                     let url = program.url.clone();
                     menu = menu
                         .item(
-                            PopupMenuItem::new("Copy Link")
+                            PopupMenuItem::new(tr(keys::CONTEXT_COPY_LINK))
                                 .icon(IconName::Copy)
                                 .on_click(move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
                                     let _ = copy.update(cx, |this, cx| {
                                         this.connection.status_note =
-                                            "Link copied to clipboard.".into();
+                                            tr(keys::STICKERS_COPIED).into();
                                         cx.notify();
                                     });
                                 }),
                         )
-                        .item(PopupMenuItem::new("Leave").icon(IconName::LogOut).on_click(
-                            move |_, _, cx| {
-                                let program = program.clone();
-                                let _ = leave.update(cx, |this, cx| {
-                                    this.ask_revoke(program, cx);
-                                });
-                            },
-                        ));
+                        .item(
+                            PopupMenuItem::new(tr(keys::BOX_LEAVE))
+                                .icon(IconName::LogOut)
+                                .on_click(move |_, _, cx| {
+                                    let program = program.clone();
+                                    let _ = leave.update(cx, |this, cx| {
+                                        this.ask_revoke(program, cx);
+                                    });
+                                }),
+                        );
                 }
                 menu
             })
@@ -209,7 +213,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.earn_call("Couldn't open the program", cx, |driver| {
+        self.earn_call(tr(keys::Q_MONEY_COULDNT_OPEN_THE_PROGRAM), cx, |driver| {
             driver.open_affiliate_program(bot_user_id, for_box)
         });
     }
@@ -261,30 +265,30 @@ impl QuillApp {
                                     .text_color(cx.theme().primary_foreground),
                             ),
                     )
-                    .child(div().text_lg().font_semibold().child("Affiliate Programs"))
                     .child(
-                        about(
-                            "Promote mini apps to your subscribers and earn a share of their revenue in Stars.",
-                        )
-                        .text_center(),
-                    ),
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .child(tr(keys::Q_MONEY_AFFILIATE_PROGRAMS)),
+                    )
+                    .child(about(tr(keys::STAR_REF_LIST_ABOUT_CHANNEL)).text_center()),
             )
             .child(info_point(
                 IconName::ShieldCheck,
-                "Reliable",
-                "Receive guaranteed commissions for spending by users you refer.",
+                tr(keys::Q_MONEY_RELIABLE),
+                tr(keys::STAR_REF_RELIABLE_ABOUT),
                 cx,
             ))
             .child(info_point(
                 IconName::Eye,
-                "Transparent",
-                "Track your commissions from referred users in real time.",
+                tr(keys::Q_MONEY_TRANSPARENT),
+                tr(keys::STAR_REF_TRANSPARENT_ABOUT),
                 cx,
             ))
             .child(info_point(
                 IconName::ThumbsUp,
-                "Simple",
-                "Choose a mini app below, get your referral link, and start earning Stars.",
+                tr(keys::Q_MONEY_SIMPLE),
+                tr(keys::STAR_REF_SIMPLE_ABOUT),
                 cx,
             ))
             .child(divider(cx));
@@ -300,7 +304,10 @@ impl QuillApp {
                 .into_any_element();
         };
         if !join.mine.programs.is_empty() {
-            let mut mine = div().flex().flex_col().child(header("My Programs", cx));
+            let mut mine = div()
+                .flex()
+                .flex_col()
+                .child(header(tr(keys::Q_MONEY_MY_PROGRAMS), cx));
             for (index, program) in join.mine.programs.iter().enumerate() {
                 mine = mine.child(self.program_row(
                     session,
@@ -318,7 +325,7 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(header("Programs", cx))
+                    .child(header(tr(keys::Q_MONEY_PROGRAMS), cx))
                     .child(self.sort_menu(join.sort, cx)),
             );
             for (index, program) in join.found.programs.iter().enumerate() {
@@ -342,7 +349,7 @@ impl QuillApp {
     fn sort_menu(&self, sort: ProgramSort, cx: &mut Context<Self>) -> AnyElement {
         let owner = cx.entity().downgrade();
         Button::new("earn-sort")
-            .label(format!("Sort by {}", sort.label()))
+            .label(tr_with(keys::Q_MONEY_SORT_BY, &[("label", (sort.label()))]))
             .ghost()
             .xsmall()
             .dropdown_menu(move |mut menu, _, _| {
@@ -353,9 +360,11 @@ impl QuillApp {
                             .checked(order == sort)
                             .on_click(move |_, _, cx| {
                                 let _ = owner.update(cx, |this, cx| {
-                                    this.earn_call("Couldn't load the programs", cx, |driver| {
-                                        driver.set_starref_sort(order)
-                                    });
+                                    this.earn_call(
+                                        tr(keys::Q_MONEY_COULDNT_LOAD_THE_PROGRAMS),
+                                        cx,
+                                        |driver| driver.set_starref_sort(order),
+                                    );
                                 });
                             }),
                     );

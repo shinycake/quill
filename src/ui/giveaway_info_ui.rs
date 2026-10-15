@@ -16,6 +16,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::giveaway::{AboutText, GiveawayTextContext, about_text};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_time::{civil_local, day_label, hhmm, now_unix};
 use quill::state::{GiveawayInfoLookup, Session};
 use quill::telegram::envelope::{GiftCard, GiftCardKind, GiveawayInfoData, GiveawaySummary};
@@ -66,7 +67,7 @@ pub(super) fn giveaway_learn_more(
     let summary = card.giveaway.clone()?;
     Some(
         Button::new(("giveaway-learn-more", row_id))
-            .label("Learn more")
+            .label(tr(keys::Q_MONEY_LEARN_MORE_2))
             .small()
             .ghost()
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -101,7 +102,8 @@ pub(super) fn about_for(
                 }
             )
         });
-    let title = |id: i64| chat_title(session, id).unwrap_or_else(|| "a channel".into());
+    let title =
+        |id: i64| chat_title(session, id).unwrap_or_else(|| tr(keys::Q_MONEY_A_CHANNEL).into());
     let ctx = GiveawayTextContext {
         first_channel: chat_title(session, boosted).unwrap_or_else(|| "channel".into()),
         group,
@@ -136,11 +138,13 @@ impl QuillApp {
                     .request_giveaway_info(chat, message, summary)
                     .is_err()
                 {
-                    self.connection.status_note = "could not load the giveaway".into();
+                    self.connection.status_note =
+                        tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_GIVEAWAY).into();
                 }
             }
             None => {
-                self.connection.status_note = "giveaway details need a signed-in account".into();
+                self.connection.status_note =
+                    tr(keys::Q_MONEY_GIVEAWAY_DETAILS_NEED_A_SIGNED).into();
             }
         }
         cx.notify();
@@ -161,7 +165,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Loading the giveaway…"),
+                        .child(tr(keys::Q_MONEY_LOADING_THE_GIVEAWAY)),
                 )
                 .into_any_element();
         }
@@ -169,7 +173,7 @@ impl QuillApp {
             let reason = lookup
                 .error
                 .clone()
-                .unwrap_or_else(|| "This giveaway is not available any more.".into());
+                .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_GIVEAWAY_IS_NOT_AVAILABLE).into());
             return body
                 .child(div().id("giveaway-info-error").text_sm().child(reason))
                 .into_any_element();
@@ -232,10 +236,13 @@ impl QuillApp {
             let Some(lookup) = lookup else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("About this giveaway"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::Q_MONEY_ABOUT_THIS_GIVEAWAY,
+                    )))
                     .on_close(on_close.clone());
             };
-            let title = about_for(session, &lookup).map_or("About this giveaway", |t| t.title);
+            let title = about_for(session, &lookup)
+                .map_or(tr(keys::Q_MONEY_ABOUT_THIS_GIVEAWAY), |t| t.title);
             let prize_code = match &lookup.info {
                 Some(GiveawayInfoData::Completed { gift_code, .. }) if !gift_code.0.is_empty() => {
                     Some(gift_code.0.clone())
@@ -249,7 +256,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("giveaway-info-close")
-                        .label("Close")
+                        .label(tr(keys::CLOSE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_giveaway_info(cx);
@@ -259,7 +266,7 @@ impl QuillApp {
                 .when_some(prize_code, |footer, code| {
                     footer.child(
                         Button::new("giveaway-view-prize")
-                            .label("View my prize")
+                            .label(tr(keys::Q_MONEY_VIEW_MY_PRIZE))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.close_giveaway_info(cx);
                                 this.close_kit_dialog_if_done(DialogKind::GiveawayInfo, window, cx);

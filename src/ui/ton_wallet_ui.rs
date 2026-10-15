@@ -17,6 +17,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{HistoryMessage, Session};
 use quill::telegram::envelope::{MessageContent, ServiceAction};
 use quill::text::LinkTarget;
@@ -59,7 +60,7 @@ impl QuillApp {
     /// "Copy Address" (iOS toast: "Address copied").
     pub(super) fn copy_ton_address(&mut self, address: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(address));
-        self.connection.status_note = "address copied to clipboard".into();
+        self.connection.status_note = tr(keys::Q_MONEY_ADDRESS_COPIED_TO_CLIPBOARD).into();
         cx.notify();
     }
 }
@@ -95,7 +96,10 @@ impl QuillApp {
                 .border_color(cx.theme().border)
                 .cursor_pointer()
                 .role(gpui_kit::Role::Button)
-                .aria_label(format!("Wallet address: {address}"))
+                .aria_label(tr_with(
+                    keys::Q_MONEY_WALLET_ADDRESS,
+                    &[("address", &address.to_string())],
+                ))
                 .tab_index(0)
                 .hover(move |style| style.bg(hover))
                 .debug_selector(|| "info-ton-wallet".to_string())
@@ -105,7 +109,12 @@ impl QuillApp {
                         .font_family(MONO_FONT)
                         .child(group_address(&address)),
                 )
-                .child(div().text_xs().text_color(muted).child("Wallet address"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MONEY_WALLET_ADDRESS_2)),
+                )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.copy_ton_address(copy.clone(), cx);
                 }))
@@ -114,19 +123,21 @@ impl QuillApp {
                     let open_owner = owner.clone();
                     let copy = menu_address.clone();
                     let open = menu_address.clone();
-                    menu.item(
-                        PopupMenuItem::new("Copy Address").on_click(move |_, _, cx| {
+                    menu.item(PopupMenuItem::new(tr(keys::Q_MONEY_COPY_ADDRESS)).on_click(
+                        move |_, _, cx| {
                             let _ = copy_owner.update(cx, |this, cx| {
                                 this.copy_ton_address(copy.clone(), cx);
                             });
-                        }),
-                    )
+                        },
+                    ))
                     .item(
-                        PopupMenuItem::new("View in Explorer").on_click(move |_, _, cx| {
-                            let _ = open_owner.update(cx, |this, cx| {
-                                this.open_ton_explorer(&open, cx);
-                            });
-                        }),
+                        PopupMenuItem::new(tr(keys::Q_MONEY_VIEW_IN_EXPLORER)).on_click(
+                            move |_, _, cx| {
+                                let _ = open_owner.update(cx, |this, cx| {
+                                    this.open_ton_explorer(&open, cx);
+                                });
+                            },
+                        ),
                     )
                 })
                 .into_any_element(),
@@ -179,10 +190,10 @@ pub(super) fn explorer_menu_row(
         .text_color(text_menu())
         .hover(|style| style.bg(row_hover))
         .role(gpui_kit::Role::MenuItem)
-        .aria_label("View in Explorer")
+        .aria_label(tr(keys::Q_MONEY_VIEW_IN_EXPLORER))
         .debug_selector(move || id.to_string())
         .child(Icon::new(gpui_kit::assets::IconName::Search).size(px(16.)))
-        .child("View in Explorer")
+        .child(tr(keys::Q_MONEY_VIEW_IN_EXPLORER))
         .on_click(cx.listener(move |this, _, _, cx| {
             on_open(this);
             this.open_ton_explorer(&address, cx);
@@ -215,7 +226,7 @@ pub(super) fn transfer_card(
     let received = transfer.is_received();
     let amount = signed_gram_amount(transfer.amount, received);
     let peer = if message.chat_id.0 == SERVICE_NOTIFICATIONS_CHAT_ID {
-        "UNKNOWN USER".to_string()
+        tr(keys::Q_MONEY_UNKNOWN_USER).to_string()
     } else {
         session
             .and_then(|session| session.chats.get(&message.chat_id.0))
@@ -233,7 +244,11 @@ pub(super) fn transfer_card(
     let transaction_id = transfer.transaction_id.clone();
     let label = format!(
         "{} {}{}",
-        if received { "Received" } else { "Sent" },
+        if received {
+            tr(keys::Q_MONEY_RECEIVED)
+        } else {
+            tr(keys::Q_MONEY_SENT)
+        },
         amount,
         if peer.is_empty() {
             String::new()
@@ -326,7 +341,7 @@ pub(super) fn transfer_card(
                 MediaCorners::small(),
             )
             .role(gpui_kit::Role::Image)
-            .aria_label("Encrypted comment")
+            .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
             .debug_selector(move || format!("ton-transfer-encrypted-{row_id}"))
             .into_any_element(),
         )

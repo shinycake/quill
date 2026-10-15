@@ -8,6 +8,7 @@ use super::pressable::PressableDiv;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::group_digits;
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageReaction;
@@ -53,8 +54,9 @@ pub(super) fn paid_reaction_chip(
         .rounded_full()
         .text_xs()
         .role(gpui_kit::Role::Button)
-        .aria_label(format!(
-            "Star reaction, {count} Stars. Click to send a Star."
+        .aria_label(tr_with(
+            keys::Q_MONEY_STAR_REACTION_STARS_CLICK_TO,
+            &[("count", &count.to_string())],
         ))
         .tab_index(0)
         .cursor_pointer()
@@ -68,7 +70,7 @@ pub(super) fn paid_reaction_chip(
         })
         .text_color(text_primary())
         .tooltip(|window, cx| {
-            gpui_kit::component::tooltip::Tooltip::new("Send a Star. Right-click for more.")
+            gpui_kit::component::tooltip::Tooltip::new(tr(keys::Q_MONEY_SEND_A_STAR_RIGHT_CLICK))
                 .build(window, cx)
         })
         .on_mouse_down(

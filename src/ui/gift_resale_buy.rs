@@ -14,6 +14,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_market::{BuyStep, ResaleBuy, listing_price};
+use quill::lang::{keys, tr, tr_with};
 use quill::marketplace::GiftPrice;
 use quill::premium_hub::upgraded::Rarity;
 
@@ -90,11 +91,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.buy_gift_resale(price, &text, hide).is_err() {
-                    self.connection.status_note = "Couldn't buy the gift.".into();
+                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_BUY_THE_GIFT).into();
                 }
             }
             None => {
-                self.connection.status_note = "Buying gifts needs a signed-in account.".into();
+                self.connection.status_note = tr(keys::Q_MONEY_BUYING_GIFTS_NEEDS_A_SIGNED).into();
             }
         }
         cx.notify();
@@ -129,41 +130,44 @@ impl QuillApp {
                             .flex_col()
                             .gap_2()
                             .child(attribute_row(
-                                "Model",
+                                tr(keys::GIFT_RESALE_MODEL),
                                 &gift.model.name,
                                 gift.model.rarity,
                                 cx,
                             ))
                             .child(attribute_row(
-                                "Backdrop",
+                                tr(keys::GIFT_RESALE_BACKDROP),
                                 &gift.backdrop.name,
                                 gift.backdrop.rarity,
                                 cx,
                             ))
                             .child(attribute_row(
-                                "Symbol",
+                                tr(keys::GIFT_RESALE_SYMBOL),
                                 &gift.symbol.name,
                                 gift.symbol.rarity,
                                 cx,
                             )),
                     );
                 if gift.resale.is_some_and(|r| r.gram_only) {
-                    body = body.child(hint("The seller only accepts Grams as payment.", cx));
+                    body = body.child(hint(tr(keys::GIFT_BUY_RESALE_ONLY_TON), cx));
                 }
             }
             BuyStep::Send => {
-                let about = format!(
-                    "You can hide your name and message from visitors to {}'s profile. {} will still see your name and message.",
-                    buy.recipient.name, buy.recipient.name
+                let about = tr_with(
+                    keys::GIFT_SEND_ANONYMOUS_ABOUT,
+                    &[
+                        ("user", &buy.recipient.name.to_string()),
+                        ("recipient", &buy.recipient.name.to_string()),
+                    ],
                 );
                 body = body
                     .child(
                         Textarea::new(&self.payments.gift_message_input)
-                            .aria_label("Enter Message"),
+                            .aria_label(tr(keys::GIFT_SEND_MESSAGE)),
                     )
                     .child(
                         Checkbox::new("resale-buy-hide-name")
-                            .label("Hide My Name")
+                            .label(tr(keys::GIFT_SEND_ANONYMOUS))
                             .checked(self.payments.gift_hide_name)
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.payments.gift_hide_name = on;
@@ -180,8 +184,8 @@ impl QuillApp {
                     body = body.child(
                         TabBar::new("resale-buy-currency")
                             .pill()
-                            .child(Tab::new().label("Pay in Stars"))
-                            .child(Tab::new().label("Pay in Grams"))
+                            .child(Tab::new().label(tr(keys::GIFT_BUY_RESALE_PAY_STARS)))
+                            .child(Tab::new().label(tr(keys::GIFT_BUY_RESALE_PAY_TON)))
                             .selected_index(usize::from(buy.pay_in_grams))
                             .on_click(move |ix, _, cx| {
                                 let grams = *ix == 1;
@@ -192,17 +196,21 @@ impl QuillApp {
                 let shown = price.map(price_text).unwrap_or_default();
                 if let Some(changed) = buy.price_changed {
                     body = body
-                        .child(div().text_sm().font_semibold().child("Price change!"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::GIFT_BUY_PRICE_CHANGE_TITLE)),
+                        )
                         .child(div().text_sm().child(format!(
                             "This gift price was changed and now is {}. Do you still want to buy?",
                             price_text(changed)
                         )));
                 } else if buy.recipient.is_self {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .child(format!("Do you want to buy {name} for {shown}?")),
-                    );
+                    body = body.child(div().text_sm().child(tr_with(
+                        keys::GIFT_BUY_RESALE_CONFIRM_SELF,
+                        &[("name", &name.to_string()), ("price", &shown.to_string())],
+                    )));
                 } else {
                     body = body.child(div().text_sm().child(format!(
                         "Do you want to buy {name} for {shown} and gift it to {}?",
@@ -212,7 +220,13 @@ impl QuillApp {
                 // The other currency's amount (tdesktop "Equals to").
                 let other = listing_price(gift, !buy.pay_in_grams).filter(|p| Some(*p) != price);
                 if both && let Some(other) = other {
-                    body = body.child(hint(format!("Equals to {}", price_text(other)), cx));
+                    body = body.child(hint(
+                        tr_with(
+                            keys::GIFT_BUY_RESALE_EQUALS,
+                            &[("cost", &(price_text(other)).to_string())],
+                        ),
+                        cx,
+                    ));
                 }
                 if let Some(balance) = session.payments.hub.balance {
                     body = body.child(div().text_xs().text_color(muted).child(format!(
@@ -227,10 +241,13 @@ impl QuillApp {
         let sending = buy.sending;
         let action = match (step, price) {
             (_, None) => Button::new("resale-buy-next")
-                .label("Not for sale")
+                .label(tr(keys::Q_MONEY_NOT_FOR_SALE))
                 .disabled(true),
             (BuyStep::View, Some(price)) => Button::new("resale-buy-next")
-                .label(format!("Buy for {}", price_text(price)))
+                .label(tr_with(
+                    keys::GIFT_BUY_RESALE_BUTTON,
+                    &[("cost", &(price_text(price)).to_string())],
+                ))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let next = if is_self {
                         BuyStep::Confirm
@@ -240,13 +257,19 @@ impl QuillApp {
                     this.set_buy_step(next, cx);
                 })),
             (BuyStep::Send, Some(price)) => Button::new("resale-buy-next")
-                .label(format!("Buy for {}", price_text(price)))
+                .label(tr_with(
+                    keys::GIFT_BUY_RESALE_BUTTON,
+                    &[("cost", &(price_text(price)).to_string())],
+                ))
                 .on_click(cx.listener(|this, _, _, cx| this.set_buy_step(BuyStep::Confirm, cx))),
             (BuyStep::Confirm, Some(price)) => Button::new("resale-buy-confirm")
                 .label(if sending {
-                    "Buying\u{2026}".to_string()
+                    tr(keys::Q_MONEY_BUYING).to_string()
                 } else {
-                    format!("Buy for {}", price_text(price))
+                    tr_with(
+                        keys::GIFT_BUY_RESALE_BUTTON,
+                        &[("cost", &(price_text(price)).to_string())],
+                    )
                 })
                 .loading(sending)
                 .disabled(sending)
@@ -254,9 +277,9 @@ impl QuillApp {
         };
         let back = Button::new("resale-buy-back")
             .label(if step == BuyStep::View {
-                "Back"
+                tr(keys::Q_MONEY_BACK)
             } else {
-                "Cancel"
+                tr(keys::CANCEL)
             })
             .ghost()
             .on_click(cx.listener(move |this, _, window, cx| match step {
@@ -270,8 +293,10 @@ impl QuillApp {
             }));
         let title = match step {
             BuyStep::View => name,
-            BuyStep::Send => "Send a Gift".to_string(),
-            BuyStep::Confirm => format!("Buy {name}"),
+            BuyStep::Send => tr(keys::GIFT_SEND_TITLE).to_string(),
+            BuyStep::Confirm => {
+                tr_with(keys::GIFT_BUY_RESALE_TITLE, &[("name", &name.to_string())])
+            }
         };
         BoxView::new(title, body).footer(
             div()

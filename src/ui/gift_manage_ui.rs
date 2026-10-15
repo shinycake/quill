@@ -11,11 +11,15 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{GiftFlow, GiftManageState};
+use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::group_digits;
 use quill::state::Session;
 
 pub(super) fn stars(n: i64) -> String {
-    format!("{} Stars", group_digits(n))
+    tr_with(
+        keys::Q_MONEY_STARS_4,
+        &[("group_digits", &(group_digits(n)).to_string())],
+    )
 }
 
 pub(super) fn panel(cx: &App) -> Div {
@@ -97,7 +101,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.select_gift_collection(id));
         if let Some(Err(_)) = sent {
-            self.note_gift_refused("could not open the collection");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_OPEN_THE_COLLECTION));
         }
         cx.notify();
     }
@@ -108,7 +112,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.set_gift_pinned(id, pinned));
         if let Some(Err(_)) = sent {
-            self.note_gift_refused("could not change the pinned gifts");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_CHANGE_THE_PINNED));
         }
         cx.notify();
     }
@@ -128,7 +132,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.upgrade_received_gift(id, keep_details));
         if let Some(Err(_)) = sent {
-            self.note_gift_refused("could not upgrade the gift");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_UPGRADE_THE_GIFT));
         }
         cx.notify();
     }
@@ -141,7 +145,7 @@ impl QuillApp {
                 .map(|live| live.driver.transfer_received_gift(id, chat))
         });
         if !matches!(sent, Some(Ok(_)) | None) {
-            self.note_gift_refused("could not transfer the gift");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_TRANSFER_THE_GIFT));
         }
         cx.notify();
     }
@@ -152,7 +156,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.set_received_gift_resale_price(id, price));
         if let Some(Err(_)) = sent {
-            self.note_gift_refused("could not change the resale price");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_CHANGE_THE_RESALE));
         }
         cx.notify();
     }
@@ -169,7 +173,7 @@ impl QuillApp {
                 .change_gift_collection(collection_id, gift_id, add)
         });
         if let Some(Err(_)) = sent {
-            self.note_gift_refused("could not change the collection");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_CHANGE_THE_COLLECTION));
         }
         cx.notify();
     }
@@ -186,7 +190,7 @@ impl QuillApp {
             None => live.driver.create_gift_collection(&name),
         });
         if let Some(Err(_)) = sent {
-            self.note_gift_refused("could not save the collection");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_SAVE_THE_COLLECTION));
         }
         cx.notify();
     }
@@ -197,7 +201,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.delete_gift_collection(id));
         if let Some(Err(_)) = sent {
-            self.note_gift_refused("could not delete the collection");
+            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_DELETE_THE_COLLECTION));
         }
         cx.notify();
     }
@@ -220,7 +224,7 @@ pub(super) fn gift_collection_tabs(
     let mut tabs = div().flex().flex_wrap().gap_1();
     tabs = tabs.child(
         Button::new("gift-collection-all")
-            .label("All gifts")
+            .label(tr(keys::GIFT_COLLECTION_ALL))
             .small()
             .selected(active == 0)
             .on_click(cx.listener(|this, _, _, cx| this.pick_gift_collection(0, cx))),
@@ -239,7 +243,7 @@ pub(super) fn gift_collection_tabs(
     if mine && can_add {
         tabs = tabs.child(
             Button::new("gift-collection-new")
-                .label("+ New collection")
+                .label(tr(keys::Q_MONEY_NEW_COLLECTION))
                 .small()
                 .ghost()
                 .disabled(busy)
@@ -256,7 +260,7 @@ pub(super) fn gift_collection_tabs(
                 .gap_1()
                 .child(
                     Button::new("gift-collection-rename")
-                        .label("Rename")
+                        .label(tr(keys::Q_MONEY_RENAME))
                         .small()
                         .ghost()
                         .disabled(busy)
@@ -266,7 +270,7 @@ pub(super) fn gift_collection_tabs(
                 )
                 .child(
                     Button::new("gift-collection-delete")
-                        .label("Delete collection")
+                        .label(tr(keys::GIFT_COLLECTION_DELETE))
                         .small()
                         .ghost()
                         .disabled(busy)
@@ -300,7 +304,7 @@ pub(super) fn gift_collection_tabs(
                             .gap_2()
                             .child(
                                 Button::new("gift-collection-delete-yes")
-                                    .label("Delete")
+                                    .label(tr(keys::GIFT_COLLECTION_DELETE_BUTTON))
                                     .danger()
                                     .disabled(busy)
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -309,7 +313,7 @@ pub(super) fn gift_collection_tabs(
                             )
                             .child(
                                 Button::new("gift-collection-delete-no")
-                                    .label("Keep")
+                                    .label(tr(keys::Q_MONEY_KEEP))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.set_gift_flow(None, window, cx)
@@ -322,9 +326,9 @@ pub(super) fn gift_collection_tabs(
     }
     if mine && !can_add {
         col = col.child(hint(
-            format!(
-                "You can have up to {} collections.",
-                manage.limits.collections()
+            tr_with(
+                keys::Q_MONEY_YOU_CAN_HAVE_UP_TO,
+                &[("collections", &(manage.limits.collections()).to_string())],
             ),
             cx,
         ));
@@ -340,22 +344,23 @@ fn collection_name_form(
 ) -> impl IntoElement {
     panel(cx)
         .child(div().text_sm().child(if rename.is_some() {
-            "Rename the collection"
+            tr(keys::Q_MONEY_RENAME_THE_COLLECTION)
         } else {
-            "Name the new collection"
+            tr(keys::Q_MONEY_NAME_THE_NEW_COLLECTION)
         }))
-        .child(Input::new(name_input).aria_label("Collection name"))
-        .child(hint(
-            "Up to 12 characters. Add gifts from a gift's page.",
-            cx,
-        ))
+        .child(Input::new(name_input).aria_label(tr(keys::Q_MONEY_COLLECTION_NAME)))
+        .child(hint(tr(keys::Q_MONEY_UP_TO_12_CHARACTERS_ADD), cx))
         .child(
             div()
                 .flex()
                 .gap_2()
                 .child(
                     Button::new("gift-collection-save")
-                        .label(if rename.is_some() { "Save" } else { "Create" })
+                        .label(if rename.is_some() {
+                            tr(keys::SETTINGS_SAVE)
+                        } else {
+                            tr(keys::GIFT_COLLECTION_NEW_CREATE)
+                        })
                         .disabled(busy)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.submit_collection_name(rename, cx)
@@ -363,7 +368,7 @@ fn collection_name_form(
                 )
                 .child(
                     Button::new("gift-collection-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(
                             cx.listener(|this, _, window, cx| this.set_gift_flow(None, window, cx)),

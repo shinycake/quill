@@ -8,6 +8,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::{
     InlineKeyboardButton, InlineKeyboardButtonStyle, InlineKeyboardButtonType, InvoiceContent,
@@ -164,7 +165,7 @@ pub(super) fn inline_keyboard_button(
             InlineKeyboardButtonType::Unknown { type_name } if !type_name.is_empty() => {
                 format!("({type_name})")
             }
-            _ => "(button)".to_string(),
+            _ => tr(keys::Q_MONEY_BUTTON).to_string(),
         }
     } else {
         button.text.clone()
@@ -284,8 +285,8 @@ pub(super) fn button_tooltip(button: &InlineKeyboardButton) -> &'static str {
         | InlineKeyboardButtonType::CopyText { .. }
         | InlineKeyboardButtonType::User { .. } => "",
         InlineKeyboardButtonType::Buy => "",
-        InlineKeyboardButtonType::Disabled => "This button is disabled",
-        InlineKeyboardButtonType::Unknown { .. } => "Unsupported button",
+        InlineKeyboardButtonType::Disabled => tr(keys::Q_MONEY_THIS_BUTTON_IS_DISABLED),
+        InlineKeyboardButtonType::Unknown { .. } => tr(keys::Q_MONEY_UNSUPPORTED_BUTTON),
     }
 }
 
@@ -339,7 +340,7 @@ pub(super) fn invoice_body(
         let receipt_id = invoice.receipt_message_id;
         card = card.child(
             Button::new(format!("invoice-receipt-{receipt_id}"))
-                .label("View receipt")
+                .label(tr(keys::Q_MONEY_VIEW_RECEIPT))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_payment_receipt(chat_id, MessageId(receipt_id), cx);
@@ -355,12 +356,15 @@ pub(super) fn payment_success_row(
     success: &PaymentSuccessContent,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let mut label = format!(
-        "✅ Payment successful — {}",
-        format_payment_price(&success.currency, success.total_amount)
+    let mut label = tr_with(
+        keys::Q_MONEY_PAYMENT_SUCCESSFUL,
+        &[(
+            "total_amount",
+            &(format_payment_price(&success.currency, success.total_amount)).to_string(),
+        )],
     );
     if success.is_recurring {
-        label.push_str(" (recurring)");
+        label.push_str(tr(keys::Q_MONEY_RECURRING));
     }
     div()
         .text_xs()
@@ -373,12 +377,15 @@ pub(super) fn payment_received_row(
     received: &PaymentReceivedContent,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
-    let mut label = format!(
-        "💸 Payment received — {}",
-        format_payment_price(&received.currency, received.total_amount)
+    let mut label = tr_with(
+        keys::Q_MONEY_PAYMENT_RECEIVED,
+        &[(
+            "total_amount",
+            &(format_payment_price(&received.currency, received.total_amount)).to_string(),
+        )],
     );
     if received.is_recurring {
-        label.push_str(" (recurring)");
+        label.push_str(tr(keys::Q_MONEY_RECURRING));
     }
     div()
         .text_xs()

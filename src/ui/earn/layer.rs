@@ -9,6 +9,7 @@ use super::*;
 use crate::ui::chat_theme::bg_canvas;
 use crate::ui::motion::{Glide, ease_out_circ};
 use gpui_kit::assets::IconName;
+use quill::lang::{keys, tr};
 use std::time::{Duration, Instant};
 
 /// tdesktop `infoDesiredWidth`.
@@ -179,7 +180,7 @@ impl QuillApp {
             bar = bar.child(
                 Button::new("earn-back")
                     .debug_selector(|| "earn-back".into())
-                    .accessibility_label("Back")
+                    .accessibility_label(tr(keys::Q_MONEY_BACK))
                     .icon(IconName::ArrowLeft)
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| this.earn_back(window, cx))),
@@ -200,7 +201,7 @@ impl QuillApp {
             .child(
                 Button::new("earn-layer-close")
                     .debug_selector(|| "earn-layer-close".into())
-                    .accessibility_label("Close")
+                    .accessibility_label(tr(keys::CLOSE))
                     .icon(IconName::X)
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.close_earn_layer(cx))),

@@ -9,17 +9,16 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{UNRESTRICT_BOOST_CHOICES, UNRESTRICT_BOOST_MAX};
 
 /// "Boost the group N times" help under the unrestrict buttons
 /// (`lng_rights_boosts_about` and `_about_on`).
 pub(crate) fn unrestrict_about(count: i32) -> String {
     if count > 0 {
-        "Choose how many boosts a user must give to the group to bypass restrictions on sending messages."
-            .into()
+        tr(keys::RIGHTS_BOOSTS_ABOUT_ON).into()
     } else {
-        "Turn this on to always allow users who boosted your group to send messages and media."
-            .into()
+        tr(keys::RIGHTS_BOOSTS_ABOUT).into()
     }
 }
 
@@ -43,7 +42,7 @@ impl QuillApp {
                 .set_unrestrict_boost_count(chat_id, unrestrict_clamped(count))
                 .is_err()
         {
-            self.connection.status_note = "could not save the setting".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SAVE_THE_SETTING).into();
         }
         cx.notify();
     }
@@ -71,11 +70,14 @@ impl QuillApp {
                         .justify_between()
                         .text_xs()
                         .text_color(muted)
-                        .child(format!("Level {}", status.level))
+                        .child(tr_with(
+                            keys::Q_MONEY_LEVEL_2,
+                            &[("level", &status.level.to_string())],
+                        ))
                         .child(if status.next_level_boost_count > 0 {
-                            format!("Level {next}")
+                            tr_with(keys::Q_MONEY_LEVEL_3, &[("next", &next.to_string())])
                         } else {
-                            "Maximum level".to_string()
+                            tr(keys::Q_MONEY_MAXIMUM_LEVEL).to_string()
                         }),
                 )
                 .child(
@@ -88,21 +90,21 @@ impl QuillApp {
                     ),
                 );
             let mut stats = vec![
-                ("Level", status.level.to_string()),
-                ("Existing boosts", status.boost_count.to_string()),
+                (tr(keys::BOOSTS_LEVEL), status.level.to_string()),
+                (tr(keys::BOOSTS_EXISTING), status.boost_count.to_string()),
             ];
             if status.premium_member_count > 0 || status.premium_member_percentage > 0.0 {
                 stats.push((
                     if group {
-                        "Premium members"
+                        tr(keys::BOOSTS_PREMIUM_MEMBERS)
                     } else {
-                        "Premium subscribers"
+                        tr(keys::BOOSTS_PREMIUM_AUDIENCE)
                     },
                     status.premium_audience_text(),
                 ));
             }
             if let Some(left) = status.boosts_to_next_level() {
-                stats.push(("Boosts to level up", left.to_string()));
+                stats.push((tr(keys::BOOSTS_NEXT_LEVEL), left.to_string()));
             }
             for (label, value) in stats {
                 body = body.child(
@@ -124,7 +126,7 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child("What each level unlocks"),
+                        .child(tr(keys::Q_MONEY_WHAT_EACH_LEVEL_UNLOCKS)),
                 );
                 for (level, lines) in table {
                     body = body.child(
@@ -132,12 +134,10 @@ impl QuillApp {
                             .flex()
                             .gap_2()
                             .text_sm()
-                            .child(
-                                div()
-                                    .w(px(56.))
-                                    .text_color(muted)
-                                    .child(format!("Level {level}")),
-                            )
+                            .child(div().w(px(56.)).text_color(muted).child(tr_with(
+                                keys::Q_MONEY_LEVEL_2,
+                                &[("level", &level.to_string())],
+                            )))
                             .child(div().flex_1().child(lines.join(", "))),
                     );
                 }
@@ -146,7 +146,9 @@ impl QuillApp {
         if session.chat_can_edit_unrestrict_boosts(chat_id) {
             let current = session.chat_unrestrict_boost_count(chat_id);
             let mut choices = div().flex().flex_wrap().items_center().gap_1().child({
-                let b = Button::new("unrestrict-off").label("Off").small();
+                let b = Button::new("unrestrict-off")
+                    .label(tr(keys::Q_MONEY_OFF))
+                    .small();
                 let b = if current != 0 { b.ghost() } else { b };
                 b.on_click(cx.listener(move |this, _, _, cx| {
                     this.set_unrestrict_boosts(chat_id, 0, cx);
@@ -170,7 +172,7 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child("Do not restrict boosters"),
+                        .child(tr(keys::RIGHTS_BOOSTS_NO_RESTRICT)),
                 )
                 .child(choices)
                 .child(

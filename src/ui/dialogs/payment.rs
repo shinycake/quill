@@ -1,6 +1,7 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::{AddressData, OrderInfoData, PaymentFormData, PaymentFormTypeData};
 /// Slice P1: the payment checkout dialog. The text inputs mirror the
 /// `orderInfo` fields the invoice needs (`need_name` / `need_phone_number`
@@ -45,16 +46,16 @@ impl PaymentDialog {
             })
         };
         Self {
-            name_input: input(cx, "Full name"),
-            phone_input: input(cx, "Phone number"),
-            email_input: input(cx, "Email address"),
-            street1_input: input(cx, "Street address"),
-            street2_input: input(cx, "Street address (line 2, optional)"),
-            city_input: input(cx, "City"),
-            state_input: input(cx, "State"),
-            country_input: input(cx, "Country code (e.g. US)"),
-            postal_input: input(cx, "Postal code"),
-            token_input: input(cx, "Provider credential token"),
+            name_input: input(cx, tr(keys::Q_MONEY_FULL_NAME)),
+            phone_input: input(cx, tr(keys::Q_MONEY_PHONE_NUMBER)),
+            email_input: input(cx, tr(keys::Q_MONEY_EMAIL_ADDRESS)),
+            street1_input: input(cx, tr(keys::Q_MONEY_STREET_ADDRESS)),
+            street2_input: input(cx, tr(keys::Q_MONEY_STREET_ADDRESS_LINE_2_OPTIONAL)),
+            city_input: input(cx, tr(keys::PAYMENTS_ADDRESS_CITY)),
+            state_input: input(cx, tr(keys::Q_MONEY_STATE)),
+            country_input: input(cx, tr(keys::Q_MONEY_COUNTRY_CODE_E_G_US)),
+            postal_input: input(cx, tr(keys::Q_MONEY_POSTAL_CODE)),
+            token_input: input(cx, tr(keys::Q_MONEY_PROVIDER_CREDENTIAL_TOKEN)),
             credential_choice: PaymentCredentialChoice::NewToken,
             terms_accepted: false,
             allow_save_order: true,

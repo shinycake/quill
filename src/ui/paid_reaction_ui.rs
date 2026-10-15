@@ -20,6 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::paid_reaction::{
     DEFAULT_AMOUNT, PaidSender, QUICK_AMOUNT, SLIDER_STEPS, amount_for_step, step_for_amount,
 };
@@ -98,7 +99,7 @@ impl QuillApp {
                 .cursor_pointer()
                 .hover(|style| style.bg(bg_subtle()))
                 .role(gpui_kit::Role::Button)
-                .aria_label("React with Stars")
+                .aria_label(tr(keys::PAID_REACTION_TITLE))
                 .child(div().text_size(px(22.)).child("\u{2B50}"))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.message_ui.menu = None;
@@ -210,15 +211,18 @@ impl QuillApp {
         let message_id = MessageId(pending.message_id);
         let anonymous = pending.sender == Some(PaidSender::Anonymous);
         let title = match (pending.stars, anonymous) {
-            (1, false) => "Star sent!",
-            (_, false) => "Stars sent!",
-            (1, true) => "Star sent anonymously!",
-            (_, true) => "Stars sent anonymously!",
+            (1, false) => tr(keys::Q_MONEY_STAR_SENT),
+            (_, false) => tr(keys::Q_MONEY_STARS_SENT),
+            (1, true) => tr(keys::Q_MONEY_STAR_SENT_ANONYMOUSLY),
+            (_, true) => tr(keys::Q_MONEY_STARS_SENT_ANONYMOUSLY),
         };
         let body = if pending.stars == 1 {
-            "You reacted with 1 Star.".to_string()
+            tr(keys::Q_MONEY_YOU_REACTED_WITH_1_STAR).to_string()
         } else {
-            format!("You reacted with {} Stars.", group_digits(pending.stars))
+            tr_with(
+                keys::Q_MONEY_YOU_REACTED_WITH_STARS,
+                &[("stars", &(group_digits(pending.stars)).to_string())],
+            )
         };
         let seconds = pending.seconds_left(unix_ms_now());
         Some(
@@ -251,7 +255,10 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("paid-reaction-undo")
-                        .label(format!("Undo ({seconds})"))
+                        .label(tr_with(
+                            keys::Q_MONEY_UNDO,
+                            &[("seconds", &seconds.to_string())],
+                        ))
                         .ghost()
                         .small()
                         .text_color(accent())
@@ -276,16 +283,16 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Star Reaction"));
+                .title(crate::ui::shell::dialog_title(tr(keys::PAID_REACT_TITLE)));
             let (Some(session), Some(boxed)) = (this.session(), this.paid_reaction.boxed.as_ref())
             else {
                 return dialog.on_close(on_close);
             };
             let muted = cx.theme().muted_foreground;
-            let channel = session
-                .chats
-                .get(&boxed.chat_id.0)
-                .map_or_else(|| "this channel".to_string(), |chat| chat.title.clone());
+            let channel = session.chats.get(&boxed.chat_id.0).map_or_else(
+                || tr(keys::Q_MONEY_THIS_CHANNEL).to_string(),
+                |chat| chat.title.clone(),
+            );
             let message = session
                 .histories
                 .get(&boxed.chat_id.0)
@@ -309,8 +316,9 @@ impl QuillApp {
                 balance.map(|b| b.stars),
             );
             let mut body = div().flex().flex_col().gap_3();
-            body = body.child(div().text_sm().child(format!(
-                "Choose how many Stars you want to send to {channel} to support this post."
+            body = body.child(div().text_sm().child(tr_with(
+                keys::Q_MONEY_CHOOSE_HOW_MANY_STARS_YOU,
+                &[("channel", &channel.to_string())],
             )));
             body = body.child(
                 div().flex().flex_col().items_center().py_1().child(
@@ -325,9 +333,12 @@ impl QuillApp {
                 body = body.child(div().text_xs().text_color(muted).child(format!(
                     "You sent {} to support this post.",
                     if already == 1 {
-                        "1 Star".to_string()
+                        tr(keys::Q_MONEY_1_STAR).to_string()
                     } else {
-                        format!("{} Stars", group_digits(already))
+                        tr_with(
+                            keys::Q_MONEY_STARS_4,
+                            &[("group_digits", &(group_digits(already)).to_string())],
+                        )
                     }
                 )));
             }
@@ -339,7 +350,7 @@ impl QuillApp {
                     .child(
                         Switch::new("paid-reaction-top")
                             .checked(boxed.sender == PaidSender::Regular)
-                            .accessibility_label("Show me in Top Senders")
+                            .accessibility_label(tr(keys::PAID_REACT_SHOW_IN_TOP))
                             .on_click(cx.listener(|this, on: &bool, _, cx| {
                                 if let Some(boxed) = this.paid_reaction.boxed.as_mut() {
                                     boxed.sender = if *on {
@@ -351,7 +362,7 @@ impl QuillApp {
                                 cx.notify();
                             })),
                     )
-                    .child(div().text_sm().child("Show me in Top Senders")),
+                    .child(div().text_sm().child(tr(keys::PAID_REACT_SHOW_IN_TOP))),
             );
             // Channels the account manages: send the Stars as one of them.
             for (ix, channel_id) in session
@@ -368,7 +379,10 @@ impl QuillApp {
                 });
                 body = body.child(
                     Button::new(("paid-reaction-as", ix as u64))
-                        .label(format!("Send as {title}"))
+                        .label(tr_with(
+                            keys::Q_MONEY_SEND_AS,
+                            &[("title", &title.to_string())],
+                        ))
                         .small()
                         .when(chosen, |b| b.primary())
                         .when(!chosen, |b| b.ghost())
@@ -391,16 +405,16 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child("Top Senders"),
+                        .child(tr(keys::PAID_REACT_TOP_TITLE)),
                 );
                 for (ix, reactor) in reactors.iter().take(10).enumerate() {
                     let name = match reactor.sender {
-                        _ if reactor.is_anonymous => "Anonymous".to_string(),
+                        _ if reactor.is_anonymous => tr(keys::PAID_REACT_ANONYMOUS).to_string(),
                         Some(sender) => session.sender_label(sender),
-                        None => "Anonymous".to_string(),
+                        None => tr(keys::PAID_REACT_ANONYMOUS).to_string(),
                     };
                     let label = if reactor.is_me {
-                        format!("{name} (you)")
+                        tr_with(keys::Q_MONEY_YOU, &[("name", &name.to_string())])
                     } else {
                         name.clone()
                     };
@@ -434,7 +448,10 @@ impl QuillApp {
             }
             body = body.child(
                 Button::new("paid-reaction-send")
-                    .label(format!("Send \u{2B50} {}", group_digits(amount)))
+                    .label(tr_with(
+                        keys::Q_MONEY_SEND,
+                        &[("group_digits", &(group_digits(amount)).to_string())],
+                    ))
                     .primary()
                     .disabled(refusal.is_some())
                     .on_click(cx.listener(|this, _, _, cx| this.send_paid_box(cx))),

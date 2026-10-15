@@ -12,6 +12,7 @@ use gpui_kit::component::dialog::{Dialog, DialogContent};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
+use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -99,9 +100,12 @@ fn ease_out_back(t: f32) -> f32 {
 
 fn opened_through(users: i64, app: &str) -> String {
     match users {
-        0 => format!("No one have opened {app} through this link."),
-        1 => format!("1 user have opened {app} through this link."),
-        n => format!("{n} users have opened {app} through this link."),
+        0 => tr_with(keys::STAR_REF_LINK_COPY_NONE, &[("app", app)]),
+        1 => tr_with(keys::Q_MONEY_1_USER_HAVE_OPENED_THROUGH, &[("app", app)]),
+        n => tr_with(
+            keys::Q_MONEY_USERS_HAVE_OPENED_THROUGH_THIS,
+            &[("n", &n.to_string()), ("app", app)],
+        ),
     }
 }
 
@@ -132,14 +136,18 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let exists = setup.exists();
-            let mut body = div().flex().flex_col().gap_3().child(box_title("Warning"));
+            let mut body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(box_title(tr(keys::Q_MONEY_WARNING)));
             let action = match confirm {
                 SetupConfirm::Save => {
                     body = body
                         .child(div().text_sm().child(if exists {
-                            "This change is irreversible. You won't be able to reduce commission or duration. You can only increase these parameters or end the program, which will disable all previously shared referral links."
+                            tr(keys::STAR_REF_WARNING_CHANGE)
                         } else {
-                            "Once you start the affiliate program, you won't be able to decrease its commission or duration. You can only increase these parameters or end the program, which will disable all previously distributed referral links."
+                            tr(keys::STAR_REF_WARNING_TEXT)
                         }))
                         .child(
                             div()
@@ -148,45 +156,51 @@ impl QuillApp {
                                 .rounded_md()
                                 .overflow_hidden()
                                 .child(table_row(
-                                    "Commission",
+                                    tr(keys::Q_MONEY_COMMISSION),
                                     format_commission(setup.params.commission_per_mille),
                                     cx,
                                 ))
                                 .child(table_row(
-                                    "Duration",
+                                    tr(keys::Q_MONEY_DURATION),
                                     format_program_duration(setup.params.month_count),
                                     cx,
                                 )),
                         );
                     Button::new("earn-setup-confirm")
-                        .label(if exists { "Update" } else { "Start" })
+                        .label(if exists {
+                            tr(keys::Q_MONEY_UPDATE)
+                        } else {
+                            tr(keys::Q_MONEY_START)
+                        })
                         .primary()
                         .loading(setup.saving)
                         .disabled(setup.saving)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.earn_call("Couldn't save the affiliate program", cx, |driver| {
-                                driver.save_starref_program()
-                            });
+                            this.earn_call(
+                                tr(keys::Q_MONEY_COULDNT_SAVE_THE_AFFILIATE_PROGRAM),
+                                cx,
+                                |driver| driver.save_starref_program(),
+                            );
                         }))
                 }
                 SetupConfirm::End => {
                     body = body
-                        .child(div().text_sm().child("If you end your affiliate program:"))
-                        .child(Self::bullet(
-                            "Any referral links already shared will be disabled in 24 hours.",
-                        ))
-                        .child(Self::bullet("All participating affiliates will be notified."))
-                        .child(Self::bullet(
-                            "You will be able to start a new affiliate program only in 24 hours.",
-                        ));
+                        .child(div().text_sm().child(tr(keys::STAR_REF_WARNING_IF_END)))
+                        .child(Self::bullet(tr(
+                            keys::Q_MONEY_ANY_REFERRAL_LINKS_ALREADY_SHARED,
+                        )))
+                        .child(Self::bullet(tr(keys::STAR_REF_WARNING_IF_END2)))
+                        .child(Self::bullet(tr(keys::Q_MONEY_YOU_WILL_BE_ABLE_TO)));
                     Button::new("earn-setup-end-confirm")
-                        .label("End Anyway")
+                        .label(tr(keys::Q_MONEY_END_ANYWAY))
                         .danger()
                         .on_click(cx.listener(|this, _, window, cx| {
                             // tdesktop closes this box before the request.
-                            this.earn_call("Couldn't end the affiliate program", cx, |driver| {
-                                driver.end_starref_program()
-                            });
+                            this.earn_call(
+                                tr(keys::Q_MONEY_COULDNT_END_THE_AFFILIATE_PROGRAM),
+                                cx,
+                                |driver| driver.end_starref_program(),
+                            );
                             this.close_setup_confirm(cx);
                             this.close_kit_dialog_if_done(DialogKind::EarnSetupConfirm, window, cx);
                         }))
@@ -197,13 +211,16 @@ impl QuillApp {
                 .justify_end()
                 .gap_2()
                 .w_full()
-                .child(Button::new("earn-setup-cancel")
-                        .debug_selector(|| "earn-setup-cancel".into()).label("Cancel").ghost().on_click(
-                    cx.listener(|this, _, window, cx| {
-                        this.close_setup_confirm(cx);
-                        this.close_kit_dialog_if_done(DialogKind::EarnSetupConfirm, window, cx);
-                    }),
-                ))
+                .child(
+                    Button::new("earn-setup-cancel")
+                        .debug_selector(|| "earn-setup-cancel".into())
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_setup_confirm(cx);
+                            this.close_kit_dialog_if_done(DialogKind::EarnSetupConfirm, window, cx);
+                        })),
+                )
                 .child(action);
             dialog
                 .overlay(true)
@@ -295,12 +312,13 @@ impl QuillApp {
                             this.close_kit_dialog_if_done(DialogKind::EarnPrograms, window, cx);
                         }))
                         .child(Icon::new(IconName::Plus).size(px(20.)))
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_semibold()
-                                .child(format!("Add {}", peer_name(session, EarnPeer::User(bot)))),
-                        ),
+                        .child(div().text_sm().font_semibold().child(tr_with(
+                            keys::Q_MONEY_ADD_2,
+                            &[(
+                                "peer_name",
+                                &(peer_name(session, EarnPeer::User(bot))).to_string(),
+                            )],
+                        ))),
                 );
             }
             for (index, program) in list.programs.iter().enumerate() {
@@ -313,7 +331,7 @@ impl QuillApp {
                 ));
             }
             if !list.loaded {
-                rows = rows.child(about("Loading...").py_2());
+                rows = rows.child(about(tr(keys::Q_MONEY_LOADING_2)).py_2());
             } else if list.loading {
                 rows = rows.child(div().flex().justify_center().py_2().child(Spinner::new()));
             }
@@ -321,11 +339,11 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(box_title("Affiliate Programs"))
+                .child(box_title(tr(keys::Q_MONEY_AFFILIATE_PROGRAMS)))
                 .child(rows);
             let footer = div().flex().justify_end().w_full().child(
                 Button::new("earn-programs-close")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_programs_box(cx);
@@ -424,11 +442,20 @@ impl QuillApp {
                 .flex_col()
                 .gap_3()
                 .child(this.transfer_userpics(session, bot, join.recipient, cx))
-                .child(box_title("Affiliate Program"))
-                .child(centered(format!(
-                    "{app_name} will share {} of the revenue from each user you refer to it {}.",
-                    format_commission(params.commission_per_mille),
-                    format_for_program_duration(params.month_count),
+                .child(box_title(tr(keys::Q_MONEY_AFFILIATE_PROGRAM)))
+                .child(centered(tr_with(
+                    keys::STAR_REF_ONE_ABOUT,
+                    &[
+                        ("app", &app_name.to_string()),
+                        (
+                            "amount",
+                            &(format_commission(params.commission_per_mille)).to_string(),
+                        ),
+                        (
+                            "duration",
+                            &(format_for_program_duration(params.month_count)).to_string(),
+                        ),
+                    ],
                 )));
             let daily = join.info.daily_revenue_per_user;
             if daily.stars > 0 || daily.nanos > 0 {
@@ -439,7 +466,7 @@ impl QuillApp {
                         .items_center()
                         .gap_1()
                         .text_sm()
-                        .child("Daily revenue per user:")
+                        .child(tr(keys::Q_MONEY_DAILY_REVENUE_PER_USER))
                         .child(star_icon(14.))
                         .child(div().font_semibold().child(daily.label())),
                 );
@@ -455,7 +482,7 @@ impl QuillApp {
                 Vec::new()
             };
             if !list.is_empty() {
-                body = body.child(centered("Commissions will be sent to:"));
+                body = body.child(centered(tr(keys::STAR_REF_LINK_RECIPIENT)));
                 let bubble = this.earn_peer_bubble(session, join.recipient, cx);
                 if list.len() > 1 {
                     let names: Vec<(EarnPeer, String)> = list
@@ -510,22 +537,24 @@ impl QuillApp {
                 .child(
                     Button::new("earn-join-program")
                         .debug_selector(|| "earn-join-program".into())
-                        .label("Join Program")
+                        .label(tr(keys::Q_MONEY_JOIN_PROGRAM))
                         .primary()
                         .w_full()
                         .loading(join.joining)
                         .disabled(join.joining)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.earn_call("Couldn't join the program", cx, |driver| {
-                                driver.join_affiliate_program()
-                            });
+                            this.earn_call(
+                                tr(keys::Q_MONEY_COULDNT_JOIN_THE_PROGRAM),
+                                cx,
+                                |driver| driver.join_affiliate_program(),
+                            );
                         })),
                 )
                 .child(about_link(
                     "earn-join-terms",
-                    "By joining this program, you agree to the",
-                    "terms and conditions",
-                    "of Affiliate Programs.",
+                    tr(keys::Q_MONEY_BY_JOINING_THIS_PROGRAM_YOU),
+                    tr(keys::Q_MONEY_TERMS_AND_CONDITIONS),
+                    tr(keys::Q_MONEY_OF_AFFILIATE_PROGRAMS),
                     |_, cx| cx.open_url(STARREF_TOS_URL),
                     cx,
                 ));
@@ -546,7 +575,7 @@ impl QuillApp {
 
     fn copy_affiliate_link(&mut self, url: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(url.to_string()));
-        self.connection.status_note = "Link copied to clipboard.".into();
+        self.connection.status_note = tr(keys::STICKERS_COPIED).into();
         cx.notify();
     }
 
@@ -637,19 +666,28 @@ impl QuillApp {
                 .flex_col()
                 .gap_3()
                 .child(icon)
-                .child(box_title("Referral Link"))
-                .child(centered(format!(
-                    "Share this link with your {audience} to earn a {} commission on their spending in {app_name} {}.",
-                    format_commission(params.commission_per_mille),
-                    format_for_program_duration(params.month_count),
+                .child(box_title(tr(keys::Q_MONEY_REFERRAL_LINK)))
+                .child(centered(tr_with(
+                    keys::Q_MONEY_SHARE_THIS_LINK_WITH_YOUR,
+                    &[
+                        ("audience", audience),
+                        (
+                            "commission_per_mille",
+                            &(format_commission(params.commission_per_mille)).to_string(),
+                        ),
+                        ("app_name", &app_name.to_string()),
+                        (
+                            "month_count",
+                            &(format_for_program_duration(params.month_count)).to_string(),
+                        ),
+                    ],
                 )))
-                .child(centered("Commissions will be sent to:"))
-                .child(
-                    div()
-                        .flex()
-                        .justify_center()
-                        .child(this.earn_peer_bubble(session, link.recipient, cx)),
-                )
+                .child(centered(tr(keys::STAR_REF_LINK_RECIPIENT)))
+                .child(div().flex().justify_center().child(this.earn_peer_bubble(
+                    session,
+                    link.recipient,
+                    cx,
+                )))
                 .child(
                     div()
                         .id("earn-link-preview")
@@ -661,15 +699,12 @@ impl QuillApp {
                         .truncate()
                         .cursor_pointer()
                         .role(gpui_kit::Role::Button)
-                        .aria_label("Copy Link")
+                        .aria_label(tr(keys::CONTEXT_COPY_LINK))
                         .tab_index(0)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.copy_affiliate_link(&preview_url, cx);
                         }))
-                        .child(
-                            url.trim_start_matches("https://")
-                                .to_string(),
-                        ),
+                        .child(url.trim_start_matches("https://").to_string()),
                 );
             let footer = div()
                 .flex()
@@ -679,7 +714,7 @@ impl QuillApp {
                 .child(
                     Button::new("earn-link-copy")
                         .debug_selector(|| "earn-link-copy".into())
-                        .label("Copy Link")
+                        .label(tr(keys::CONTEXT_COPY_LINK))
                         .icon(IconName::Copy)
                         .primary()
                         .w_full()
@@ -728,9 +763,15 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_lg().font_semibold().child("Revoke Link"))
-                .child(div().text_sm().child(format!(
-                    "Are you sure you want to revoke the link of {bot}?"
+                .child(
+                    div()
+                        .text_lg()
+                        .font_semibold()
+                        .child(tr(keys::Q_MONEY_REVOKE_LINK)),
+                )
+                .child(div().text_sm().child(tr_with(
+                    keys::STAR_REF_REVOKE_TEXT,
+                    &[("bot", &bot.to_string())],
                 )));
             let footer = div()
                 .flex()
@@ -740,7 +781,7 @@ impl QuillApp {
                 .child(
                     Button::new("earn-revoke-cancel")
                         .debug_selector(|| "earn-revoke-cancel".into())
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_revoke(cx);
@@ -755,9 +796,11 @@ impl QuillApp {
                         .loading(revoke.sending)
                         .disabled(revoke.sending)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.earn_call("Couldn't revoke the link", cx, |driver| {
-                                driver.revoke_affiliate_link()
-                            });
+                            this.earn_call(
+                                tr(keys::Q_MONEY_COULDNT_REVOKE_THE_LINK),
+                                cx,
+                                |driver| driver.revoke_affiliate_link(),
+                            );
                         })),
                 );
             dialog

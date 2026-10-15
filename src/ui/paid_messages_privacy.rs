@@ -16,6 +16,7 @@ use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::paid_messages::{
     DEFAULT_PRIVATE_PRICE, MessagesPolicy, price_about, price_steps, stars_text, step_for_price,
 };
@@ -100,7 +101,7 @@ impl QuillApp {
                 .font_semibold()
                 .px_1()
                 .text_color(muted)
-                .child("Who can send me messages"),
+                .child(tr(keys::MESSAGES_PRIVACY_SUBTITLE)),
         );
         match self.new_chat_settings() {
             Some(NewChatPrivacyState::Ready(settings)) => {
@@ -112,11 +113,17 @@ impl QuillApp {
                         .text_xs()
                         .px_2()
                         .text_color(muted)
-                        .child("Couldn't load this setting."),
+                        .child(tr(keys::Q_MONEY_COULDNT_LOAD_THIS_SETTING)),
                 );
             }
             _ => {
-                body = body.child(div().text_xs().px_2().text_color(muted).child("Loading…"));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .px_2()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MONEY_LOADING)),
+                );
             }
         }
         if !can_restrict {
@@ -126,11 +133,11 @@ impl QuillApp {
                         .text_xs()
                         .px_2()
                         .text_color(muted)
-                        .child("Restricting new chats needs Telegram Premium."),
+                        .child(tr(keys::Q_MONEY_RESTRICTING_NEW_CHATS_NEEDS_TELEGRAM)),
                 )
                 .child(
                     Button::new("messages-privacy-premium")
-                        .label("Subscribe to Telegram Premium")
+                        .label(tr(keys::MESSAGES_PRIVACY_PREMIUM_BUTTON))
                         .ghost()
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| this.open_premium(cx))),
@@ -139,7 +146,12 @@ impl QuillApp {
         for line in [error, paid_error].into_iter().flatten() {
             body = body.child(div().text_xs().px_2().text_color(danger()).child(line));
         }
-        self.privacy_shell(cx, "editor", "Who can message me", body.into_any_element())
+        self.privacy_shell(
+            cx,
+            "editor",
+            tr(keys::Q_MONEY_WHO_CAN_MESSAGE_ME),
+            body.into_any_element(),
+        )
     }
 
     fn messages_choices(
@@ -157,7 +169,7 @@ impl QuillApp {
             .child(self.choice_row(
                 cx,
                 "privacy-new-chat-everyone".into(),
-                "Everybody",
+                tr(keys::MESSAGES_PRIVACY_EVERYONE),
                 None,
                 matches!(policy, MessagesPolicy::Everybody) && !charging,
                 |this, cx| this.pick_messages_policy(MessagesPolicy::Everybody, cx),
@@ -165,8 +177,8 @@ impl QuillApp {
             .child(self.choice_row(
                 cx,
                 "privacy-new-chat-restricted".into(),
-                "My contacts and Premium users",
-                Some("Non-contacts need Telegram Premium to write to you.".into()),
+                tr(keys::MESSAGES_PRIVACY_RESTRICTED),
+                Some(tr(keys::Q_MONEY_NON_CONTACTS_NEED_TELEGRAM_PREMIUM).into()),
                 matches!(policy, MessagesPolicy::ContactsAndPremium) && !charging,
                 |this, cx| this.pick_messages_policy(MessagesPolicy::ContactsAndPremium, cx),
             ));
@@ -174,8 +186,8 @@ impl QuillApp {
             body = body.child(self.choice_row(
                 cx,
                 "privacy-new-chat-charge".into(),
-                "Charge for messages",
-                Some("Non-contacts pay Stars for each message to you.".into()),
+                tr(keys::MESSAGES_PRIVACY_CHARGE),
+                Some(tr(keys::Q_MONEY_NON_CONTACTS_PAY_STARS_FOR).into()),
                 charging || matches!(policy, MessagesPolicy::Charge(_)),
                 |this, cx| this.open_charge_draft(cx),
             ));
@@ -208,7 +220,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("privacy-new-chat-change-price")
-                            .label("Change price")
+                            .label(tr(keys::Q_MONEY_CHANGE_PRICE))
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| this.open_charge_draft(cx))),
@@ -247,7 +259,7 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(muted)
-                    .child("Set your price per message"),
+                    .child(tr(keys::MESSAGES_PRIVACY_PRICE)),
             )
             .child(
                 div().flex().justify_center().child(
@@ -280,7 +292,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("privacy-new-chat-charge-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -291,9 +303,9 @@ impl QuillApp {
                     .child(
                         Button::new("privacy-new-chat-charge-save")
                             .label(if saved.is_some() {
-                                "Save price"
+                                tr(keys::Q_MONEY_SAVE_PRICE)
                             } else {
-                                "Start charging"
+                                tr(keys::Q_MONEY_START_CHARGING)
                             })
                             .primary()
                             .small()
@@ -306,7 +318,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(warning())
-                        .child("Charging needs Telegram Premium."),
+                        .child(tr(keys::Q_MONEY_CHARGING_NEEDS_TELEGRAM_PREMIUM)),
                 )
             })
     }
@@ -333,7 +345,7 @@ impl QuillApp {
                 div()
                     .id("privacy-new-chat-exceptions")
                     .role(gpui_kit::Role::Button)
-                    .aria_label("Exceptions · Remove fee")
+                    .aria_label(tr(keys::Q_MONEY_EXCEPTIONS_REMOVE_FEE))
                     .tab_index(0)
                     .cursor_pointer()
                     .flex()
@@ -342,13 +354,17 @@ impl QuillApp {
                     .px_2()
                     .py_1()
                     .rounded_md()
-                    .child(div().text_sm().child("Exceptions: remove fee"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_MONEY_EXCEPTIONS_REMOVE_FEE_2)),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(text_muted())
                             .child(if count == 0 {
-                                "Add".to_string()
+                                tr(keys::Q_MONEY_ADD).to_string()
                             } else {
                                 format!("{count} added")
                             }),
@@ -374,7 +390,8 @@ impl QuillApp {
     pub(super) fn pick_messages_policy(&mut self, policy: MessagesPolicy, cx: &mut Context<Self>) {
         self.paid_messages.charge = None;
         if !matches!(policy, MessagesPolicy::Everybody) && !self.can_restrict_new_chats() {
-            self.connection.status_note = "Restricting new chats needs Telegram Premium.".into();
+            self.connection.status_note =
+                tr(keys::Q_MONEY_RESTRICTING_NEW_CHATS_NEEDS_TELEGRAM).into();
             cx.notify();
             return;
         }
@@ -384,7 +401,8 @@ impl QuillApp {
     /// Opens the price slider on the saved price, or the default one.
     pub(super) fn open_charge_draft(&mut self, cx: &mut Context<Self>) {
         if !self.can_restrict_new_chats() {
-            self.connection.status_note = "Charging for messages needs Telegram Premium.".into();
+            self.connection.status_note =
+                tr(keys::Q_MONEY_CHARGING_FOR_MESSAGES_NEEDS_TELEGRAM).into();
             cx.notify();
             return;
         }

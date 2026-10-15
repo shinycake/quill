@@ -21,6 +21,7 @@ use quill::boost_box::{
     BoostBoxState, BoostCounters, BoostPhase, reassign_text, replace_question, row_status,
 };
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session};
 
 fn chat_title(session: &Session, chat_id: i64) -> String {
@@ -29,7 +30,7 @@ fn chat_title(session: &Session, chat_id: i64) -> String {
         .get(&chat_id)
         .map(|chat| chat.title.clone())
         .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "another chat".into())
+        .unwrap_or_else(|| tr(keys::Q_MONEY_ANOTHER_CHAT).into())
 }
 
 impl QuillApp {
@@ -45,10 +46,17 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => match live.driver.open_boost_box(chat_id) {
                 Ok(true) => {}
-                Ok(false) => self.connection.status_note = "this chat can't be boosted".into(),
-                Err(_) => self.connection.status_note = "could not load boost status".into(),
+                Ok(false) => {
+                    self.connection.status_note = tr(keys::Q_MONEY_THIS_CHAT_CANT_BE_BOOSTED).into()
+                }
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_MONEY_COULD_NOT_LOAD_BOOST_STATUS).into()
+                }
             },
-            None => self.connection.status_note = "boosts need a live connection".into(),
+            None => {
+                self.connection.status_note = tr(keys::Q_MONEY_BOOSTS_NEED_A_LIVE_CONNECTION).into()
+            }
         }
         cx.notify();
     }
@@ -70,7 +78,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.request_chat_boost(chat_id).is_err()
         {
-            self.connection.status_note = "could not boost".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_BOOST).into();
         }
         cx.notify();
     }
@@ -108,7 +116,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.reassign_boosts().is_err()
         {
-            self.connection.status_note = "could not reassign the boost".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_REASSIGN_THE_BOOST).into();
         }
         cx.notify();
     }
@@ -122,9 +130,12 @@ impl QuillApp {
     pub(super) fn boost_progress(counters: &BoostCounters, cx: &App) -> AnyElement {
         let theme = cx.theme();
         let next = if counters.next_level_boosts > 0 {
-            format!("Level {}", counters.level + 1)
+            tr_with(
+                keys::Q_MONEY_LEVEL_4,
+                &[("level_1", &(counters.level + 1).to_string())],
+            )
         } else {
-            "Maximum level".to_string()
+            tr(keys::Q_MONEY_MAXIMUM_LEVEL).to_string()
         };
         div()
             .flex()
@@ -136,7 +147,10 @@ impl QuillApp {
                     .justify_between()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(format!("Level {}", counters.level))
+                    .child(tr_with(
+                        keys::Q_MONEY_LEVEL_2,
+                        &[("level", &counters.level.to_string())],
+                    ))
                     .child(next),
             )
             .child(
@@ -158,7 +172,11 @@ impl QuillApp {
                     .flex()
                     .justify_between()
                     .text_sm()
-                    .child(div().text_color(text_muted()).child("Existing boosts"))
+                    .child(
+                        div()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_MONEY_EXISTING_BOOSTS)),
+                    )
                     .child(counters.boosts.to_string()),
             )
             .into_any_element()
@@ -191,7 +209,7 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(text_muted())
-                .child("What each level unlocks"),
+                .child(tr(keys::Q_MONEY_WHAT_EACH_LEVEL_UNLOCKS)),
         );
         for (level, lines) in rows {
             list = list.child(
@@ -199,12 +217,10 @@ impl QuillApp {
                     .flex()
                     .gap_2()
                     .text_sm()
-                    .child(
-                        div()
-                            .w(px(56.))
-                            .text_color(text_muted())
-                            .child(format!("Level {level}")),
-                    )
+                    .child(div().w(px(56.)).text_color(text_muted()).child(tr_with(
+                        keys::Q_MONEY_LEVEL_2,
+                        &[("level", &level.to_string())],
+                    )))
                     .child(div().flex_1().child(lines.join(", "))),
             );
         }
@@ -257,7 +273,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Loading boost status…"),
+                        .child(tr(keys::Q_MONEY_LOADING_BOOST_STATUS)),
                 );
             }
             None => {
@@ -271,11 +287,11 @@ impl QuillApp {
                                 .flex_1()
                                 .text_sm()
                                 .text_color(text_muted())
-                                .child("Boost status unavailable."),
+                                .child(tr(keys::Q_MONEY_BOOST_STATUS_UNAVAILABLE)),
                         )
                         .child(
                             Button::new("boost-box-retry")
-                                .label("Retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.boost_box_retry(chat_id, cx)
@@ -368,7 +384,7 @@ impl QuillApp {
             let Some(state) = session.groups.boost_box.clone() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Boost"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::VIEW_BUTTON_BOOST)))
                     .on_close(on_close.clone());
             };
             let chat_id = ChatId(state.chat_id);
@@ -390,7 +406,7 @@ impl QuillApp {
                         .get(&state.chat_id)
                         .map(BoostCounters::from);
                     let working = matches!(state.phase, BoostPhase::Working);
-                    footer = footer.child(close_button("Close"));
+                    footer = footer.child(close_button(tr(keys::CLOSE)));
                     if let Some(counters) = counters {
                         let allow_multi = session.groups.boosts_per_gift.unwrap_or(0) > 0;
                         let button = counters.button(state.group, allow_multi);
@@ -415,9 +431,9 @@ impl QuillApp {
                         );
                     }
                     let title = if state.group {
-                        "Boost Group"
+                        tr(keys::BOOST_GROUP_BUTTON)
                     } else {
-                        "Boost Channel"
+                        tr(keys::BOOST_CHANNEL_BUTTON)
                     };
                     (title, this.boost_main_body(session, &state, cx))
                 }
@@ -428,7 +444,7 @@ impl QuillApp {
                     footer = footer
                         .child(
                             Button::new("boost-box-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.boost_box_cancel_reassign(cx);
@@ -436,7 +452,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("boost-box-reassign")
-                                .label(if single { "Replace" } else { "Reassign" })
+                                .label(if single { tr(keys::BOOST_NOW_REPLACE) } else { tr(keys::BOOST_REASSIGN_BUTTON) })
                                 .primary()
                                 .disabled(!can_move)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -445,9 +461,9 @@ impl QuillApp {
                         );
                     (
                         if single {
-                            "Replace boost"
+                            tr(keys::Q_MONEY_REPLACE_BOOST)
                         } else {
-                            "Reassign boost"
+                            tr(keys::BOOST_REASSIGN_TITLE)
                         },
                         this.boost_reassign_body(session, &state, slots, selected, cx),
                     )
@@ -455,9 +471,9 @@ impl QuillApp {
                 BoostPhase::Notice(notice) => {
                     let notice = *notice;
                     if notice.offers_premium() {
-                        footer = footer.child(close_button("Cancel")).child(
+                        footer = footer.child(close_button(tr(keys::CANCEL))).child(
                             Button::new("boost-box-premium")
-                                .label("Yes")
+                                .label(tr(keys::BOX_YES))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.boost_box_open_premium(window, cx);

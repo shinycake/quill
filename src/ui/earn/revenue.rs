@@ -11,6 +11,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::prelude::FluentBuilder;
 use quill::earn::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::{StarAmount, TxFilter};
 use quill::telegram::envelope::ChatKind;
 
@@ -28,9 +29,9 @@ fn loading() -> AnyElement {
             div()
                 .text_sm()
                 .font_semibold()
-                .child("Loading rewards info..."),
+                .child(tr(keys::STATS_EARN_LOADING)),
         )
-        .child(about("Please wait a few moments while we generate your stats.").text_center())
+        .child(about(tr(keys::STATS_EARN_LOADING_SUBTEXT)).text_center())
         .into_any_element()
 }
 
@@ -137,7 +138,7 @@ impl QuillApp {
         if page.ton.ready().is_none() && page.stars.ready().is_none() {
             let failed = match (&page.ton, &page.stars) {
                 (Load::Failed(text), _) | (_, Load::Failed(text)) => text.clone(),
-                _ => "No Results".to_string(),
+                _ => tr(keys::Q_MONEY_NO_RESULTS).to_string(),
             };
             return div()
                 .id("earn-empty")
@@ -172,9 +173,9 @@ impl QuillApp {
             body = body.child(learn_more_band(
                 "earn-learn",
                 if is_bot {
-                    "Telegram shares 50% of the revenue from ads displayed in your bot."
+                    tr(keys::Q_MONEY_TELEGRAM_SHARES_50_OF_THE)
                 } else {
-                    "Telegram shares 50% of the revenue from ads displayed in your channel as rewards."
+                    tr(keys::Q_MONEY_TELEGRAM_SHARES_50_OF_THE_2)
                 },
                 open_learn(cx),
                 cx,
@@ -188,7 +189,7 @@ impl QuillApp {
                 charts.extend(self.earn_chart(
                     chart_chat,
                     "earn-chart-hours",
-                    "Ad impressions",
+                    tr(keys::CHANNEL_EARN_CHART_TOP_HOURS),
                     graph,
                     EarnChartKind::Steps,
                     0.0,
@@ -199,7 +200,7 @@ impl QuillApp {
                 charts.extend(self.earn_chart(
                     chart_chat,
                     "earn-chart-ton",
-                    "Ad rewards",
+                    tr(keys::CHANNEL_EARN_CHART_REVENUE),
                     graph,
                     EarnChartKind::Columns,
                     ton.usd_rate * NANOS_PER_TON as f64,
@@ -212,7 +213,7 @@ impl QuillApp {
             charts.extend(self.earn_chart(
                 chart_chat,
                 "earn-chart-stars",
-                "Revenue",
+                tr(keys::BOT_EARN_CHART_REVENUE),
                 graph,
                 EarnChartKind::Columns,
                 rate,
@@ -233,20 +234,20 @@ impl QuillApp {
         let has_stars = stars.is_some_and(|s| s.status.has_any());
         let ton_rate = ton.map_or(0.0, |t| t.usd_rate);
         let star_rate = stars.map_or(0.0, |s| s.usd_rate);
-        body = body.child(header("Rewards overview", cx));
+        body = body.child(header(tr(keys::CHANNEL_EARN_OVERVIEW_TITLE), cx));
         let rows: [(&'static str, i64, StarAmount); 3] = [
             (
-                "Rewards available for collection",
+                tr(keys::CHANNEL_EARN_AVAILABLE),
                 ton.map_or(0, |t| t.amounts.available),
                 stars.map_or_else(StarAmount::default, |s| s.status.available),
             ),
             (
-                "Rewards since last collection",
+                tr(keys::CHANNEL_EARN_REWARD),
                 ton.map_or(0, |t| t.amounts.balance),
                 stars.map_or_else(StarAmount::default, |s| s.status.current),
             ),
             (
-                "Total lifetime rewards",
+                tr(keys::CHANNEL_EARN_TOTAL),
                 ton.map_or(0, |t| t.amounts.total),
                 stars.map_or_else(StarAmount::default, |s| s.status.total),
             ),
@@ -299,7 +300,7 @@ impl QuillApp {
         }
         if let Some(stars) = stars.filter(|s| s.status.available.stars > 0) {
             body = body
-                .child(header("Available balance", cx))
+                .child(header(tr(keys::BOT_EARN_AVAILABLE), cx))
                 .child(self.stars_withdrawal(session, page, stars, cx));
         }
         if session.earn_join_allowed(peer) {
@@ -339,7 +340,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(header("Available reward", cx))
+            .child(header(tr(keys::CHANNEL_EARN_BALANCE_TITLE), cx))
             .child(
                 div()
                     .flex()
@@ -354,7 +355,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("earn-collect")
-                        .debug_selector(|| "earn-collect".into())
+                    .debug_selector(|| "earn-collect".into())
                     .label("COLLECT")
                     .primary()
                     .w_full()
@@ -366,9 +367,9 @@ impl QuillApp {
             .child(learn_more_band(
                 "earn-learn-collect",
                 if enabled {
-                    "Collect your reward using Fragment, a third-party platform used by advertisers to pay for ads."
+                    tr(keys::Q_MONEY_COLLECT_YOUR_REWARD_USING_FRAGMENT)
                 } else {
-                    "In the coming weeks you will be able to collect your reward using Fragment, a third-party platform used by advertisers to pay ads."
+                    tr(keys::Q_MONEY_IN_THE_COMING_WEEKS_YOU)
                 },
                 open_learn(cx),
                 cx,
@@ -385,7 +386,7 @@ impl QuillApp {
             .rounded_md()
             .cursor_pointer()
             .role(gpui_kit::Role::Button)
-            .aria_label("Earn Stars")
+            .aria_label(tr(keys::CREDITS_SUMMARY_EARN_TITLE))
             .tab_index(0)
             .hover(|s| s.bg(cx.theme().secondary))
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -398,10 +399,13 @@ impl QuillApp {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_sm().font_semibold().child("Earn Stars"))
-                    .child(about(
-                        "Distribute links to mini apps and earn a share of their revenue in Stars.",
-                    )),
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(keys::CREDITS_SUMMARY_EARN_TITLE)),
+                    )
+                    .child(about(tr(keys::CREDITS_SUMMARY_EARN_ABOUT))),
             )
             .child(
                 Icon::new(gpui_kit::assets::IconName::ChevronRight)
@@ -451,13 +455,23 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_1()
-                    .child(tab("earn-tab-ton", "TON Transactions", false, cx))
-                    .child(tab("earn-tab-stars", "Stars Transactions", true, cx)),
+                    .child(tab(
+                        "earn-tab-ton",
+                        tr(keys::CHANNEL_EARN_CURRENCY_HISTORY),
+                        false,
+                        cx,
+                    ))
+                    .child(tab(
+                        "earn-tab-stars",
+                        tr(keys::CHANNEL_EARN_CREDITS_HISTORY),
+                        true,
+                        cx,
+                    )),
             );
         } else if has_ton {
-            block = block.child(header("Transaction history", cx));
+            block = block.child(header(tr(keys::CHANNEL_EARN_HISTORY_TITLE), cx));
         } else {
-            block = block.child(header("Stars Transactions", cx));
+            block = block.child(header(tr(keys::CHANNEL_EARN_CREDITS_HISTORY), cx));
         }
         if show_stars {
             block = block.child(self.star_rows(session, page, TxFilter::All, cx));
@@ -518,9 +532,9 @@ impl QuillApp {
             list = list.child(
                 Button::new("earn-ton-more")
                     .label(if history.loading {
-                        "Loading\u{2026}"
+                        tr(keys::Q_MONEY_LOADING)
                     } else {
-                        "Show more"
+                        tr(keys::Q_MONEY_SHOW_MORE)
                     })
                     .ghost()
                     .disabled(history.loading)
@@ -561,9 +575,9 @@ impl QuillApp {
             list = list.child(
                 Button::new(("earn-star-more", filter as usize))
                     .label(if history.loading {
-                        "Loading\u{2026}"
+                        tr(keys::Q_MONEY_LOADING)
                     } else {
-                        "Show more"
+                        tr(keys::Q_MONEY_SHOW_MORE)
                     })
                     .ghost()
                     .disabled(history.loading)
@@ -584,7 +598,7 @@ impl QuillApp {
         let Some(stats) = page.stars.ready() else {
             let text = match &page.stars {
                 Load::Failed(text) => text.clone(),
-                _ => "No Results".to_string(),
+                _ => tr(keys::Q_MONEY_NO_RESULTS).to_string(),
             };
             return div().py_6().text_sm().font_semibold().child(text);
         };
@@ -595,7 +609,7 @@ impl QuillApp {
             && let Some(chart) = self.earn_chart(
                 peer.chat_id(),
                 "earn-chart-bot",
-                "Revenue",
+                tr(keys::BOT_EARN_CHART_REVENUE),
                 graph,
                 EarnChartKind::Columns,
                 stats.usd_rate,
@@ -604,11 +618,11 @@ impl QuillApp {
         {
             body = body.child(chart).child(divider(cx));
         }
-        body = body.child(header("Proceeds overview", cx));
+        body = body.child(header(tr(keys::BOT_EARN_OVERVIEW_TITLE), cx));
         let rows = [
-            ("Available balance", stats.status.available),
-            ("Total balance", stats.status.current),
-            ("Total lifetime proceeds", stats.status.total),
+            (tr(keys::BOT_EARN_AVAILABLE), stats.status.available),
+            (tr(keys::BOT_EARN_REWARD), stats.status.current),
+            (tr(keys::BOT_EARN_TOTAL), stats.status.total),
         ];
         for (ix, (label, amount)) in rows.into_iter().enumerate() {
             body = body.child(
@@ -631,13 +645,8 @@ impl QuillApp {
             );
         }
         body = body
-            .child(divider_label(
-                about(
-                    "Stars from your total balance can be used for ads or withdrawn as rewards 21 days after they are earned.",
-                ),
-                cx,
-            ))
-            .child(header("Available balance", cx))
+            .child(divider_label(about(tr(keys::BOT_EARN_BALANCE_ABOUT)), cx))
+            .child(header(tr(keys::BOT_EARN_AVAILABLE), cx))
             .child(self.stars_withdrawal(session, page, stats, cx));
         if !is_self && session.earn_join_allowed(peer) {
             body = body
@@ -677,14 +686,14 @@ impl QuillApp {
         };
         let mut block = div().flex().flex_col().gap_2();
         if tabs.len() == 1 {
-            block = block.child(header("All Transactions", cx));
+            block = block.child(header(tr(keys::Q_MONEY_ALL_TRANSACTIONS), cx));
         } else {
             let mut row = div().flex().gap_1();
             for filter in tabs {
                 let label = match filter {
-                    TxFilter::All => "All Transactions",
-                    TxFilter::Incoming => "Incoming",
-                    TxFilter::Outgoing => "Outgoing",
+                    TxFilter::All => tr(keys::Q_MONEY_ALL_TRANSACTIONS),
+                    TxFilter::Incoming => tr(keys::Q_MONEY_INCOMING),
+                    TxFilter::Outgoing => tr(keys::Q_MONEY_OUTGOING),
                 };
                 let button = Button::new(("earn-star-tab", filter as usize))
                     .label(label)
@@ -725,9 +734,14 @@ impl QuillApp {
             });
         let level = session.groups.chat_boost_status.get(&chat_id).map(|s| s.0);
         let locked = matches!((level, required), (Some(level), Some(required)) if level < required);
-        let mut row =
-            crate::ui::pressable::action_row("earn-ads-off", None, "Switch Off Ads", false, cx)
-                .aria_selected(off);
+        let mut row = crate::ui::pressable::action_row(
+            "earn-ads-off",
+            None,
+            tr(keys::CHANNEL_EARN_OFF),
+            false,
+            cx,
+        )
+        .aria_selected(off);
         if let Some(required) = required {
             row = row.child(
                 div()
@@ -738,7 +752,10 @@ impl QuillApp {
                     .bg(cx.theme().primary)
                     .text_color(cx.theme().primary_foreground)
                     .when(locked, |d| d.child("\u{1F512} "))
-                    .child(format!("Level {required}")),
+                    .child(tr_with(
+                        keys::Q_MONEY_LEVEL,
+                        &[("required", &required.to_string())],
+                    )),
             );
         }
         row = row
@@ -757,7 +774,8 @@ impl QuillApp {
                         .driver
                         .set_channel_sponsored_messages(quill::ids::ChatId(chat_id), off);
                     if sent.is_err() {
-                        this.connection.status_note = "Couldn't change the ads setting".into();
+                        this.connection.status_note =
+                            tr(keys::Q_MONEY_COULDNT_CHANGE_THE_ADS_SETTING).into();
                     }
                 }
                 cx.notify();
@@ -767,9 +785,6 @@ impl QuillApp {
             .flex_col()
             .gap_1()
             .child(row)
-            .child(divider_label(
-                about("You will not be eligible for any rewards if you switch off ads."),
-                cx,
-            ))
+            .child(divider_label(about(tr(keys::CHANNEL_EARN_OFF_ABOUT)), cx))
     }
 }

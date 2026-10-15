@@ -15,6 +15,7 @@ use gpui_kit::*;
 use quill::gift_manage::{
     GiftFlow, PinGate, ResaleGate, TransferGate, parse_stars_input, pinned_ids,
 };
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::premium_hub::ReceivedGift;
 use quill::state::Session;
@@ -36,9 +37,12 @@ pub(super) fn gift_owner_actions(
     let balance = hub.balance;
     let poor = |cost: i64| balance.is_some_and(|b| b.stars < cost);
     let balance_line = || {
-        format!(
-            "Your balance ({}) is too low.",
-            balance.map(|b| stars(b.stars)).unwrap_or_default()
+        tr_with(
+            keys::Q_MONEY_YOUR_BALANCE_IS_TOO_LOW_3,
+            &[(
+                "unwrap_or_default",
+                &(balance.map(|b| stars(b.stars)).unwrap_or_default()).to_string(),
+            )],
         )
     };
     let mut col = div().flex().flex_col().gap_2();
@@ -58,9 +62,12 @@ pub(super) fn gift_owner_actions(
     match gift.transfer_gate(true, now) {
         TransferGate::Later(date) => {
             col = col.child(hint(
-                format!(
-                    "You can transfer this gift after {}.",
-                    format_unix_date_time(i64::from(date))
+                tr_with(
+                    keys::Q_MONEY_YOU_CAN_TRANSFER_THIS_GIFT,
+                    &[(
+                        "format_unix_date_time",
+                        &(format_unix_date_time(i64::from(date))).to_string(),
+                    )],
                 ),
                 cx,
             ));
@@ -82,18 +89,18 @@ pub(super) fn gift_owner_actions(
     match gift.resale_gate(true, now) {
         ResaleGate::Later(date) => {
             col = col.child(hint(
-                format!(
-                    "You can sell this gift after {}.",
-                    format_unix_date_time(i64::from(date))
+                tr_with(
+                    keys::Q_MONEY_YOU_CAN_SELL_THIS_GIFT,
+                    &[(
+                        "format_unix_date_time",
+                        &(format_unix_date_time(i64::from(date))).to_string(),
+                    )],
                 ),
                 cx,
             ));
         }
         ResaleGate::TonOnly => {
-            col = col.child(hint(
-                "This gift is listed for TON. Change the listing in an official app.",
-                cx,
-            ));
+            col = col.child(hint(tr(keys::Q_MONEY_THIS_GIFT_IS_LISTED_FOR), cx));
         }
         ResaleGate::Ready => {
             col = resale_section(col, gift, manage, price_input, price_text, busy, cx);
@@ -104,7 +111,7 @@ pub(super) fn gift_owner_actions(
     if let Some(craft) = super::gift_craft_ui::craft_gift_of(gift) {
         col = col.child(
             Button::new("gift-craft")
-                .label("Craft")
+                .label(tr(keys::GIFT_CRAFT_MENU_BUTTON))
                 .small()
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -133,7 +140,9 @@ pub(super) fn gift_owner_actions(
                     })),
             );
         }
-        col = col.child(hint("Collections", cx)).child(chips);
+        col = col
+            .child(hint(tr(keys::Q_MONEY_COLLECTIONS), cx))
+            .child(chips);
     }
     col.into_any_element()
 }
@@ -155,14 +164,14 @@ fn pin_section(
     match gift.pin_gate(true, pinned_ids(gifts).len(), limit) {
         PinGate::Pin => col.child(
             Button::new("gift-pin")
-                .label("Pin to the top of my profile")
+                .label(tr(keys::Q_MONEY_PIN_TO_THE_TOP_OF))
                 .ghost()
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, _, cx| this.pin_received_gift(&id, true, cx))),
         ),
         PinGate::Unpin => col.child(
             Button::new("gift-unpin")
-                .label("Unpin from the top")
+                .label(tr(keys::Q_MONEY_UNPIN_FROM_THE_TOP))
                 .ghost()
                 .disabled(busy)
                 .on_click(
@@ -170,7 +179,10 @@ fn pin_section(
                 ),
         ),
         PinGate::Full => col.child(hint(
-            format!("You can pin up to {limit} gifts. Unpin one to pin this gift."),
+            tr_with(
+                keys::Q_MONEY_YOU_CAN_PIN_UP_TO,
+                &[("limit", &limit.to_string())],
+            ),
             cx,
         )),
         PinGate::Unavailable => col,
@@ -197,9 +209,12 @@ fn upgrade_section(
         return col.child(
             Button::new("gift-upgrade")
                 .label(if cost == 0 {
-                    "Upgrade to a collectible (free)".to_string()
+                    tr(keys::Q_MONEY_UPGRADE_TO_A_COLLECTIBLE_FREE).to_string()
                 } else {
-                    format!("Upgrade to a collectible ({})", stars(cost))
+                    tr_with(
+                        keys::Q_MONEY_UPGRADE_TO_A_COLLECTIBLE,
+                        &[("stars", &(stars(cost)).to_string())],
+                    )
                 })
                 .ghost()
                 .disabled(busy)
@@ -220,17 +235,16 @@ fn upgrade_section(
     }
     let keep = *keep_details;
     let mut p = panel(cx).child(div().text_sm().child(if cost == 0 {
-        "Upgrade this gift to a collectible. The sender already paid for it, so it costs you nothing."
-            .to_string()
+        tr(keys::Q_MONEY_UPGRADE_THIS_GIFT_TO_A).to_string()
     } else {
-        format!(
-            "Upgrade this gift to a collectible for {}? The Stars leave your balance and this cannot be undone.",
-            stars(cost)
+        tr_with(
+            keys::Q_MONEY_UPGRADE_THIS_GIFT_TO_A_2,
+            &[("stars", &(stars(cost)).to_string())],
         )
     }));
     p = p.child(
         Checkbox::new("gift-upgrade-keep")
-            .label("Keep the original sender and message")
+            .label(tr(keys::Q_MONEY_KEEP_THE_ORIGINAL_SENDER_AND))
             .checked(keep)
             .on_click(cx.listener(|this, _, _, cx| this.toggle_keep_details(cx))),
     );
@@ -245,9 +259,12 @@ fn upgrade_section(
                 .child(
                     Button::new("gift-upgrade-yes")
                         .label(if cost == 0 {
-                            "Upgrade".to_string()
+                            tr(keys::GIFT_UNIQUE_UPGRADE).to_string()
                         } else {
-                            format!("Upgrade for {}", stars(cost))
+                            tr_with(
+                                keys::GIFT_UPGRADE_BUTTON,
+                                &[("price", &(stars(cost)).to_string())],
+                            )
                         })
                         .disabled(busy || too_poor)
                         .on_click(
@@ -256,7 +273,7 @@ fn upgrade_section(
                 )
                 .child(
                     Button::new("gift-upgrade-no")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(
                             cx.listener(|this, _, window, cx| this.set_gift_flow(None, window, cx)),
@@ -283,7 +300,7 @@ fn transfer_section(
     if !open {
         return col.child(
             Button::new("gift-transfer")
-                .label("Transfer to the open chat\u{2026}")
+                .label(tr(keys::Q_MONEY_TRANSFER_TO_THE_OPEN_CHAT))
                 .ghost()
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -296,27 +313,37 @@ fn transfer_section(
         .and_then(|chat| session.gift_recipient(chat))
         .filter(|r| !r.is_self);
     let cancel = Button::new("gift-transfer-no")
-        .label("Cancel")
+        .label(tr(keys::CANCEL))
         .ghost()
         .on_click(cx.listener(|this, _, window, cx| this.set_gift_flow(None, window, cx)));
     let Some(recipient) = recipient else {
         return col.child(
             panel(cx)
-                .child(div().text_sm().child(
-                    "Open the chat of the person or channel that should get this gift, then come back here.",
-                ))
+                .child(
+                    div()
+                        .text_sm()
+                        .child(tr(keys::Q_MONEY_OPEN_THE_CHAT_OF_THE)),
+                )
                 .child(div().flex().child(cancel)),
         );
     };
-    let mut p = panel(cx).child(div().text_sm().child(format!(
-        "Transfer this gift to {}? It leaves your profile{} This cannot be undone.",
-        recipient.name,
-        if star_count > 0 {
-            format!(" and {} are taken from your balance.", stars(star_count))
-        } else {
-            ".".to_string()
-        }
-    )));
+    let mut p = panel(cx).child(
+        div().text_sm().child(tr_with(
+            keys::Q_MONEY_TRANSFER_THIS_GIFT_TO_IT,
+            &[
+                ("name", &recipient.name.to_string()),
+                (
+                    "to_string",
+                    &(if star_count > 0 {
+                        format!(" and {} are taken from your balance.", stars(star_count))
+                    } else {
+                        ".".to_string()
+                    })
+                    .to_string(),
+                ),
+            ],
+        )),
+    );
     if too_poor {
         p = p.child(hint(balance_line.to_string(), cx));
     }
@@ -328,9 +355,12 @@ fn transfer_section(
                 .child(
                     Button::new("gift-transfer-yes")
                         .label(if star_count > 0 {
-                            format!("Transfer for {}", stars(star_count))
+                            tr_with(
+                                keys::GIFT_TRANSFER_BUTTON_FOR,
+                                &[("price", &(stars(star_count)).to_string())],
+                            )
                         } else {
-                            "Transfer".to_string()
+                            tr(keys::GIFT_TRANSFER_BUTTON).to_string()
                         })
                         .danger()
                         .disabled(busy || too_poor)
@@ -359,9 +389,9 @@ fn resale_section(
         let open_id = id.clone();
         let edit = Button::new("gift-resale")
             .label(if listed {
-                "Change the price"
+                tr(keys::Q_MONEY_CHANGE_THE_PRICE)
             } else {
-                "Sell on the marketplace\u{2026}"
+                tr(keys::Q_MONEY_SELL_ON_THE_MARKETPLACE)
             })
             .ghost()
             .disabled(busy)
@@ -379,13 +409,19 @@ fn resale_section(
         }
         return col
             .child(hint(
-                format!("On sale for {}.", stars(gift.manage.resale_star_count)),
+                tr_with(
+                    keys::Q_MONEY_ON_SALE_FOR,
+                    &[(
+                        "resale_star_count",
+                        &(stars(gift.manage.resale_star_count)).to_string(),
+                    )],
+                ),
                 cx,
             ))
             .child(
                 div().flex().gap_2().child(edit).child(
                     Button::new("gift-resale-remove")
-                        .label("Remove from sale")
+                        .label(tr(keys::Q_MONEY_REMOVE_FROM_SALE))
                         .ghost()
                         .disabled(busy)
                         .on_click(
@@ -398,12 +434,20 @@ fn resale_section(
     let price = parse_stars_input(price_text).filter(|p| manage.limits.resale_price_ok(*p));
     col.child(
         panel(cx)
-            .child(div().text_sm().child(
-                "Put this gift on the marketplace. Anyone can buy it for the price you set.",
-            ))
-            .child(Input::new(price_input).aria_label("Resale price in Stars"))
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr(keys::Q_MONEY_PUT_THIS_GIFT_ON_THE)),
+            )
+            .child(Input::new(price_input).aria_label(tr(keys::Q_MONEY_RESALE_PRICE_IN_STARS)))
             .child(hint(
-                format!("Between {} and {}.", stars(min), stars(max)),
+                tr_with(
+                    keys::Q_MONEY_BETWEEN_AND,
+                    &[
+                        ("stars", &(stars(min)).to_string()),
+                        ("stars_2", &(stars(max)).to_string()),
+                    ],
+                ),
                 cx,
             ))
             .child(
@@ -413,9 +457,15 @@ fn resale_section(
                     .child(
                         Button::new("gift-resale-yes")
                             .label(match price {
-                                Some(p) if listed => format!("Change price to {}", stars(p)),
-                                Some(p) => format!("List for {}", stars(p)),
-                                None => "List for sale".to_string(),
+                                Some(p) if listed => tr_with(
+                                    keys::Q_MONEY_CHANGE_PRICE_TO,
+                                    &[("stars", &(stars(p)).to_string())],
+                                ),
+                                Some(p) => tr_with(
+                                    keys::Q_MONEY_LIST_FOR,
+                                    &[("stars", &(stars(p)).to_string())],
+                                ),
+                                None => tr(keys::Q_MONEY_LIST_FOR_SALE).to_string(),
                             })
                             .disabled(busy || price.is_none())
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -426,7 +476,7 @@ fn resale_section(
                     )
                     .child(
                         Button::new("gift-resale-no")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.set_gift_flow(None, window, cx)

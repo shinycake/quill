@@ -12,6 +12,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::group_digits;
 use quill::stars_gift::can_gift_stars;
 use quill::telegram::envelope::{ChatKind, format_payment_price};
@@ -23,7 +24,7 @@ const ROWS_MAX: usize = 100;
 /// The "Gift Stars" button under the Stars dialog's packs.
 pub(super) fn gift_stars_button(cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("stars-gift-open")
-        .label("Gift Stars")
+        .label(tr(keys::GIFT_STARS_SUBTITLE))
         .small()
         .ghost()
         .on_click(cx.listener(|this, _, window, cx| this.open_stars_gift_dialog(window, cx)))
@@ -38,7 +39,7 @@ impl QuillApp {
             .update(cx, |input, cx| input.set_value("", window, cx));
         let opened = self.live.as_mut().map(|live| live.driver.open_stars_gift());
         if !matches!(opened, Some(Ok(()))) {
-            self.connection.status_note = "could not open Gift Stars".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_OPEN_GIFT_STARS).into();
         }
         cx.notify();
     }
@@ -65,7 +66,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.choose_stars_gift_user(user_id, &name));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not load the Star packs".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_STAR).into();
         }
         cx.notify();
     }
@@ -86,7 +87,7 @@ impl QuillApp {
         });
         match invoice {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
-            None => self.set_status_note("That Stars option is no longer offered.", cx),
+            None => self.set_status_note(tr(keys::Q_MONEY_THAT_STARS_OPTION_IS_NO), cx),
         }
     }
 
@@ -111,23 +112,21 @@ impl QuillApp {
                 body = body
                     .child(
                         Button::new("stars-gift-back")
-                            .label("\u{2039} Contacts")
+                            .label(tr(keys::Q_MONEY_CONTACTS))
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| this.stars_gift_back(cx))),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .child(format!("Choose how many Stars {} gets", target.name)),
-                    );
+                    .child(div().text_sm().font_semibold().child(tr_with(
+                        keys::Q_MONEY_CHOOSE_HOW_MANY_STARS_GETS,
+                        &[("name", &target.name.to_string())],
+                    )));
                 if gift.loading {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("Loading options\u{2026}"),
+                            .child(tr(keys::Q_MONEY_LOADING_OPTIONS)),
                     );
                 } else if let Some(error) = gift.error.as_ref() {
                     body = body.child(div().text_sm().child(error.clone()));
@@ -136,7 +135,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("No options available."),
+                            .child(tr(keys::Q_MONEY_NO_OPTIONS_AVAILABLE)),
                     );
                 }
                 for (ix, pack) in gift.options.iter().enumerate() {
@@ -176,11 +175,16 @@ impl QuillApp {
                             ),
                     );
                 }
-                body = body.child(div().text_xs().text_color(muted).child(
-                    "You pay in the checkout. The Stars go to this person, not to your balance.",
-                ));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MONEY_YOU_PAY_IN_THE_CHECKOUT)),
+                );
             } else {
-                body = body.child(Input::new(&this.payments.pick_search).aria_label("Search"));
+                body = body.child(
+                    Input::new(&this.payments.pick_search).aria_label(tr(keys::Q_MONEY_SEARCH)),
+                );
                 let query = this
                     .payments
                     .pick_search
@@ -230,7 +234,7 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(muted)
-                            .child("Frequent contacts"),
+                            .child(tr(keys::Q_MONEY_FREQUENT_CONTACTS)),
                     );
                     for (id, name) in frequent {
                         let label = name.clone();
@@ -248,7 +252,7 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(muted)
-                            .child("Contacts"),
+                            .child(tr(keys::MENU_CONTACTS)),
                     );
                 }
                 for (id, name) in people.into_iter().take(ROWS_MAX) {
@@ -265,7 +269,7 @@ impl QuillApp {
             }
             let footer = div().flex().justify_end().child(
                 Button::new("stars-gift-close")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_stars_gift_dialog(cx);

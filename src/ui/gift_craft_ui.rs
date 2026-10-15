@@ -24,6 +24,7 @@ use quill::gift_market::{
     ResaleSearch, attribute_chances, craft_colors, craft_failed_text, format_percent,
     shows_craftable_link,
 };
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, hhmm, month_name, now_unix};
 use quill::premium_hub::ReceivedGift;
 use quill::telegram::envelope::StickerContent;
@@ -68,7 +69,7 @@ fn craft_when(unix: i32) -> (String, String) {
 /// The "Crafting unavailable" text for a gate, if it blocks.
 pub(super) fn gate_notice(gate: CraftGate) -> Option<MarketBox> {
     gate.message(craft_when).map(|text| MarketBox::Notice {
-        title: "Crafting unavailable".into(),
+        title: tr(keys::GIFT_CRAFT_UNAVAILABLE).into(),
         text,
     })
 }
@@ -182,7 +183,7 @@ impl QuillApp {
         if started {
             self.market_replace(MarketBox::Craft, cx);
         } else {
-            self.connection.status_note = "Couldn't start crafting.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_START_CRAFTING).into();
             cx.notify();
         }
     }
@@ -221,7 +222,7 @@ impl QuillApp {
         if started {
             self.gift_market.forge_started = Some(Instant::now());
         } else {
-            self.connection.status_note = "Couldn't craft the gift.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT).into();
         }
         cx.notify();
     }
@@ -296,7 +297,7 @@ impl QuillApp {
                 }
             }
             Some(CraftResult::InvalidGift) => {
-                self.connection.status_note = "This gift can't be used for crafting.".into();
+                self.connection.status_note = tr(keys::Q_MONEY_THIS_GIFT_CANT_BE_USED).into();
                 cx.notify();
             }
             // An error: its note is shown, the craft box stays.
@@ -349,25 +350,25 @@ impl QuillApp {
                             .text_sm()
                             .text_center()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Turn your gifts into rare, epic and legendary versions."),
+                            .child(tr(keys::GIFT_CRAFT_INFO_ABOUT)),
                     ),
             );
         }
         let rows = [
             (
                 IconName::Star,
-                "Get Rare Models",
-                "Select up to 4 gifts to craft a new exclusive model.",
+                tr(keys::GIFT_CRAFT_RARE_TITLE),
+                tr(keys::GIFT_CRAFT_RARE_ABOUT),
             ),
             (
                 IconName::Plus,
-                "Maximize Chances",
-                "Combine more gifts to increase your odds of success.",
+                tr(keys::GIFT_CRAFT_CHANCE_TITLE),
+                tr(keys::GIFT_CRAFT_CHANCE_ABOUT),
             ),
             (
                 IconName::RefreshCw,
-                "Affect the Result",
-                "Use gifts with the same attribute to boost its chance.",
+                tr(keys::GIFT_CRAFT_AFFECT_TITLE),
+                tr(keys::GIFT_CRAFT_AFFECT_ABOUT),
             ),
         ];
         for (icon, title, text) in rows {
@@ -378,10 +379,10 @@ impl QuillApp {
                 .flex()
                 .justify_end()
                 .gap_2()
-                .child(self.market_back_button("craft-info-back", "Cancel", cx))
+                .child(self.market_back_button("craft-info-back", tr(keys::CANCEL), cx))
                 .child(
                     Button::new("craft-info-start")
-                        .label("Start Crafting")
+                        .label(tr(keys::GIFT_CRAFT_START_BUTTON))
                         .primary()
                         .on_click(cx.listener(|this, _, _, cx| this.start_crafting(cx))),
                 ),
@@ -462,13 +463,16 @@ impl QuillApp {
                         .border_color(panel_ink().opacity(EMPTY_SLOT_BORDER_ALPHA))
                         .bg(panel_ink().opacity(EMPTY_SLOT_FILL_ALPHA))
                         .text_color(panel_ink())
-                        .accessibility_label("Add a gift")
+                        .accessibility_label(tr(keys::Q_MONEY_ADD_A_GIFT))
                         .on_click(cx.listener(|this, _, _, cx| this.open_craft_select(cx))),
                 ),
             };
             grid = grid.child(slot);
         }
-        let about = format!("Add up to 4 gifts to craft new {name}.");
+        let about = tr_with(
+            keys::Q_MONEY_ADD_UP_TO_4_GIFTS,
+            &[("name", &name.to_string())],
+        );
         let mut panel = craft_panel(craft.slots.len())
             .child(grid)
             .child(
@@ -482,7 +486,7 @@ impl QuillApp {
                     .text_sm()
                     .text_center()
                     .opacity(PANEL_MUTED_ALPHA)
-                    .child("If crafting fails, all used gifts will be lost."),
+                    .child(tr(keys::GIFT_CRAFT_ABOUT2)),
             );
         let chances = attribute_chances(&craft.slots, &craft.probabilities);
         let mut chips = div().flex().flex_wrap().justify_center().gap_2();
@@ -521,7 +525,7 @@ impl QuillApp {
             let gift_id = craft.regular_gift_id;
             panel = panel.child(
                 Button::new("craft-view-all")
-                    .label("View all craftable models \u{203A}")
+                    .label(tr(keys::Q_MONEY_VIEW_ALL_CRAFTABLE_MODELS))
                     .ghost()
                     .text_color(panel_ink())
                     .small()
@@ -534,8 +538,11 @@ impl QuillApp {
         let ready = !craft.slots.is_empty() && !craft.crafting;
         let craft_button = two_line_button(
             "craft-start",
-            format!("Craft {name}"),
-            format!("{success} Success Chance"),
+            tr_with(keys::GIFT_CRAFT_BUTTON, &[("gift", &name.to_string())]),
+            tr_with(
+                keys::GIFT_CRAFT_BUTTON_CHANCE,
+                &[("percent", &success.to_string())],
+            ),
         )
         .disabled(!ready)
         .on_click(cx.listener(|this, _, _, cx| this.craft_now(cx)));
@@ -544,7 +551,7 @@ impl QuillApp {
                 .flex()
                 .justify_end()
                 .gap_2()
-                .child(self.market_back_button("craft-back", "Back", cx))
+                .child(self.market_back_button("craft-back", tr(keys::Q_MONEY_BACK), cx))
                 .child(craft_button),
         )
     }
@@ -608,24 +615,25 @@ impl QuillApp {
                     .value(progress * 100.)
                     .loading(waiting)
                     .color(rgb(glow))
-                    .accessibility_label("Crafting"),
+                    .accessibility_label(tr(keys::GIFT_CRAFT_PROGRESS)),
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_center()
-                    .child(with_bold(format!("Crafting {name}"), &[&name])),
-            )
-            .child(div().text_sm().text_center().child(format!(
-                "{} success chance",
-                format_percent(craft.success_per_mille())
+            .child(div().text_sm().text_center().child(with_bold(
+                tr_with(keys::Q_MONEY_CRAFTING, &[("name", &name.to_string())]),
+                &[&name],
+            )))
+            .child(div().text_sm().text_center().child(tr_with(
+                keys::GIFT_CRAFT_BUTTON_CHANCE,
+                &[(
+                    "percent",
+                    &(format_percent(craft.success_per_mille())).to_string(),
+                )],
             )))
             .child(
                 div()
                     .text_sm()
                     .text_center()
                     .opacity(PANEL_MUTED_ALPHA)
-                    .child("If crafting fails, all used gifts will be lost."),
+                    .child(tr(keys::GIFT_CRAFT_ABOUT2)),
             );
         BoxView::new("Crafting", div().child(panel))
     }
@@ -639,7 +647,7 @@ impl QuillApp {
             return BoxView::new("Crafting Failed", div());
         };
         let close = Button::new("craft-result-close")
-            .label("Close")
+            .label(tr(keys::CLOSE))
             .ghost()
             .on_click(cx.listener(|this, _, window, cx| {
                 this.gift_market.stack.clear();
@@ -669,24 +677,25 @@ impl QuillApp {
                         160.,
                     )))
                     .child(attribute_row(
-                        "Model",
+                        tr(keys::GIFT_RESALE_MODEL),
                         &gift.model.name,
                         gift.model.rarity,
                         cx,
                     ))
                     .child(attribute_row(
-                        "Backdrop",
+                        tr(keys::GIFT_RESALE_BACKDROP),
                         &gift.backdrop.name,
                         gift.backdrop.rarity,
                         cx,
                     ))
                     .child(attribute_row(
-                        "Symbol",
+                        tr(keys::GIFT_RESALE_SYMBOL),
                         &gift.symbol.name,
                         gift.symbol.rarity,
                         cx,
                     ));
-                BoxView::new(gift.full_name(), body).footer(footer("Craft Another Gift", cx))
+                BoxView::new(gift.full_name(), body)
+                    .footer(footer(tr(keys::GIFT_CRAFT_ANOTHER_BUTTON), cx))
             }
             _ => {
                 let count = craft.slots.len();
@@ -702,7 +711,8 @@ impl QuillApp {
                         text.lines()
                             .map(|line| with_bold(line.to_string(), &[lost.as_str()])),
                     );
-                BoxView::new("Crafting Failed", body).footer(footer("Craft New Gift", cx))
+                BoxView::new("Crafting Failed", body)
+                    .footer(footer(tr(keys::GIFT_CRAFT_NEW_BUTTON), cx))
             }
         }
     }

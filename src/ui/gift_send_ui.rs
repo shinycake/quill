@@ -21,6 +21,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_manage::{AvailableGift, SendGate};
 use quill::gift_market::{auction_tile, resale_tile_price};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::state::Session;
 use std::cell::RefCell;
@@ -46,8 +47,7 @@ impl QuillApp {
                 self.payments.gift_pay_upgrade = false;
             }
             _ => {
-                self.connection.status_note =
-                    "Open a chat with a person or a channel to choose who gets the gift.".into();
+                self.connection.status_note = tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A).into();
             }
         }
         cx.notify();
@@ -91,7 +91,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.send_star_gift(gift_id, &text, hide, upgrade));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = "could not send the gift".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SEND_THE_GIFT).into();
         }
         cx.notify();
     }
@@ -113,9 +113,12 @@ impl QuillApp {
             };
             let send = &session.payments.gifts_manage.send;
             let title = match send.recipient.as_ref() {
-                Some(r) if r.is_self => "Send a gift to yourself".to_string(),
-                Some(r) => format!("Send a gift to {}", r.name),
-                None => "Send a gift".to_string(),
+                Some(r) if r.is_self => tr(keys::Q_MONEY_SEND_A_GIFT_TO_YOURSELF).to_string(),
+                Some(r) => tr_with(
+                    keys::Q_MONEY_SEND_A_GIFT_TO_2,
+                    &[("name", &r.name.to_string())],
+                ),
+                None => tr(keys::GIFT_SEND_TITLE).to_string(),
             };
             let dialog = dialog
                 .overlay(true)
@@ -144,28 +147,31 @@ impl QuillApp {
                 if !send.premium_options.is_empty() {
                     body = body.child(premium_section(this, session, cx));
                 }
-                body = body.child(div().text_sm().font_semibold().child("Gifts for Stars"));
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(keys::Q_MONEY_GIFTS_FOR_STARS)),
+                );
                 if let Some(balance) = session.payments.hub.balance {
-                    body = body.child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(format!("Your balance: {}", stars(balance.stars))),
-                    );
+                    body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                        keys::Q_MONEY_YOUR_BALANCE_2,
+                        &[("stars", &(stars(balance.stars)).to_string())],
+                    )));
                 }
                 if send.gifts_loading {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("Loading gifts\u{2026}"),
+                            .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
                 } else if send.gifts.is_empty() && send.gifts_loaded {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("No gifts are available."),
+                            .child(tr(keys::Q_MONEY_NO_GIFTS_ARE_AVAILABLE)),
                     );
                 }
                 let mut grid = div().flex().flex_wrap().gap_2();
@@ -174,7 +180,7 @@ impl QuillApp {
                 }
                 body = body.child(grid).child(
                     Button::new("gift-by-name")
-                        .label("Buy a collectible by name\u{2026}")
+                        .label(tr(keys::Q_MONEY_BUY_A_COLLECTIBLE_BY_NAME))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_send_gift_dialog(cx);
@@ -239,7 +245,7 @@ fn gift_tile(
     let clickable = ready || !matches!(market, TileMarket::None);
     let id = gift.id;
     let reason = match (&market, gate) {
-        (TileMarket::None, SendGate::Auction) => Some("Not for channels"),
+        (TileMarket::None, SendGate::Auction) => Some(tr(keys::Q_MONEY_NOT_FOR_CHANNELS)),
         (TileMarket::None, gate) => gate.reason(),
         _ => None,
     };
@@ -274,12 +280,23 @@ fn gift_tile(
         ),
     };
     let label = match &market {
-        TileMarket::Auction(badge, line) => format!("Gift auction, {badge}, {line}"),
-        TileMarket::Resale(price) => format!("Gift on resale from {price} Stars"),
-        TileMarket::None => format!(
-            "Gift for {}{}",
-            stars(gift.star_count),
-            reason.map(|r| format!(", {r}")).unwrap_or_default()
+        TileMarket::Auction(badge, line) => tr_with(
+            keys::Q_MONEY_GIFT_AUCTION,
+            &[("badge", badge), ("line", line)],
+        ),
+        TileMarket::Resale(price) => tr_with(
+            keys::Q_MONEY_GIFT_ON_RESALE_FROM_STARS,
+            &[("price", &price.to_string())],
+        ),
+        TileMarket::None => tr_with(
+            keys::Q_MONEY_GIFT_FOR,
+            &[
+                ("star_count", &(stars(gift.star_count)).to_string()),
+                (
+                    "unwrap_or_default",
+                    &(reason.map(|r| format!(", {r}")).unwrap_or_default()).to_string(),
+                ),
+            ],
         ),
     };
     let tile = div()
@@ -364,7 +381,7 @@ fn selected_gift_panel(
     col = col
         .child(
             Button::new("send-gift-back")
-                .label("\u{2039} All gifts")
+                .label(tr(keys::Q_MONEY_ALL_GIFTS))
                 .ghost()
                 .small()
                 .on_click(cx.listener(|this, _, window, cx| this.pick_send_gift(None, window, cx))),
@@ -393,12 +410,21 @@ fn selected_gift_panel(
         );
     if let Some(max) = limit {
         col = col
-            .child(Textarea::new(&this.payments.gift_message_input).aria_label("Gift message"))
-            .child(hint(format!("Optional. Up to {max} characters."), cx));
+            .child(
+                Textarea::new(&this.payments.gift_message_input)
+                    .aria_label(tr(keys::Q_MONEY_GIFT_MESSAGE)),
+            )
+            .child(hint(
+                tr_with(
+                    keys::Q_MONEY_OPTIONAL_UP_TO_CHARACTERS,
+                    &[("max", &max.to_string())],
+                ),
+                cx,
+            ));
     }
     col = col.child(
         Checkbox::new("send-gift-hide-name")
-            .label("Hide my name and message")
+            .label(tr(keys::Q_MONEY_HIDE_MY_NAME_AND_MESSAGE))
             .checked(this.payments.gift_hide_name)
             .on_click(cx.listener(|this, &on, _, cx| {
                 this.payments.gift_hide_name = on;
@@ -419,35 +445,46 @@ fn selected_gift_panel(
                         cx.notify();
                     })),
             )
-            .child(hint(
-                "The receiver can turn it into a collectible for free.",
-                cx,
-            ));
+            .child(hint(tr(keys::Q_MONEY_THE_RECEIVER_CAN_TURN_IT), cx));
     }
-    let mut footer = panel(cx).child(div().text_sm().child(format!(
-        "This takes {} from your balance{}.",
-        stars(total),
-        balance
-            .map(|b| format!(" ({} left after)", stars((b.stars - total).max(0))))
-            .unwrap_or_default()
-    )));
+    let mut footer = panel(cx).child(
+        div().text_sm().child(tr_with(
+            keys::Q_MONEY_THIS_TAKES_FROM_YOUR_BALANCE,
+            &[
+                ("stars", &(stars(total)).to_string()),
+                (
+                    "unwrap_or_default",
+                    &(balance
+                        .map(|b| format!(" ({} left after)", stars((b.stars - total).max(0))))
+                        .unwrap_or_default())
+                    .to_string(),
+                ),
+            ],
+        )),
+    );
     if too_poor {
         footer = footer.child(
             div()
                 .text_sm()
                 .text_color(cx.theme().danger)
-                .child("Your balance is too low for this gift."),
+                .child(tr(keys::Q_MONEY_YOUR_BALANCE_IS_TOO_LOW)),
         );
     }
     col.child(
         footer.child(
             Button::new("send-gift-confirm")
                 .label(if send.sending {
-                    "Sending\u{2026}".to_string()
+                    tr(keys::Q_MONEY_SENDING).to_string()
                 } else if recipient.is_self {
-                    format!("Buy for myself: {}", stars(total))
+                    tr_with(
+                        keys::Q_MONEY_BUY_FOR_MYSELF,
+                        &[("stars", &(stars(total)).to_string())],
+                    )
                 } else {
-                    format!("Send for {}", stars(total))
+                    tr_with(
+                        keys::Q_MONEY_SEND_FOR,
+                        &[("stars", &(stars(total)).to_string())],
+                    )
                 })
                 .disabled(send.sending || too_poor)
                 .on_click(cx.listener(move |this, _, _, cx| this.submit_send_gift(id, cx))),
@@ -466,19 +503,28 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
         div()
             .text_sm()
             .font_semibold()
-            .child("Gift Telegram Premium"),
+            .child(tr(keys::PREMIUM_GIFT_TITLE)),
     );
     if can_pay && let Some(max) = session.payments.gift_text_length_max {
         col = col
-            .child(Textarea::new(&this.payments.gift_message_input).aria_label("Gift message"))
-            .child(hint(format!("Optional. Up to {max} characters."), cx));
+            .child(
+                Textarea::new(&this.payments.gift_message_input)
+                    .aria_label(tr(keys::Q_MONEY_GIFT_MESSAGE)),
+            )
+            .child(hint(
+                tr_with(
+                    keys::Q_MONEY_OPTIONAL_UP_TO_CHARACTERS,
+                    &[("max", &max.to_string())],
+                ),
+                cx,
+            ));
     }
     let stars_offered = can_pay && send.premium_options.iter().any(|o| o.star_count > 0);
     let by_stars = stars_offered && this.payments.gift_premium_by_stars;
     if stars_offered {
         col = col.child(
             Checkbox::new("premium-gift-by-stars")
-                .label("Pay with Stars instead")
+                .label(tr(keys::Q_MONEY_PAY_WITH_STARS_INSTEAD))
                 .checked(by_stars)
                 .on_click(cx.listener(|this, &on, _, cx| {
                     this.payments.gift_premium_by_stars = on;
@@ -486,7 +532,13 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
                 })),
         );
         if let Some(balance) = session.payments.hub.balance {
-            col = col.child(hint(format!("Your balance: {}", stars(balance.stars)), cx));
+            col = col.child(hint(
+                tr_with(
+                    keys::Q_MONEY_YOUR_BALANCE_2,
+                    &[("stars", &(stars(balance.stars)).to_string())],
+                ),
+                cx,
+            ));
         }
     }
     for (ix, option) in send.premium_options.iter().enumerate() {
@@ -521,7 +573,13 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
             row.cursor_pointer()
                 .tab_index(0)
                 .role(gpui_kit::Role::Button)
-                .aria_label(format!("Gift Premium for {}, {}", option.title(), price))
+                .aria_label(tr_with(
+                    keys::Q_MONEY_GIFT_PREMIUM_FOR,
+                    &[
+                        ("title", &(option.title()).to_string()),
+                        ("price", &price.to_string()),
+                    ],
+                ))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.buy_premium_gift(option.clone(), paid_in_stars, window, cx);
                 }))
@@ -531,9 +589,9 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
     }
     col.child(hint(
         if can_pay {
-            "You pay for Premium in the checkout."
+            tr(keys::Q_MONEY_YOU_PAY_FOR_PREMIUM_IN)
         } else {
-            "Premium can only be gifted to another person."
+            tr(keys::Q_MONEY_PREMIUM_CAN_ONLY_BE_GIFTED)
         },
         cx,
     ))

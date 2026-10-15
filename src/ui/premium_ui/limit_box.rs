@@ -10,6 +10,7 @@
 use super::*;
 use crate::ui::folder_share::finish_dialog;
 use quill::composer::ComposerAttachment;
+use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::promo::limit_pair;
 use quill::premium_limits::{
     FileSizeCheck, LimitPair, PremiumLimitKind, check_file_size, gif_limit_reached, limit_box_text,
@@ -23,7 +24,7 @@ const PREMIUM_TO: u32 = 0xe46ace;
 /// A number on the line, with its unit where it has one.
 fn value_text(kind: PremiumLimitKind, value: i64) -> String {
     if kind == PremiumLimitKind::FileSize {
-        format!("{value} GB")
+        tr_with(keys::Q_MONEY_GB, &[("value", &value.to_string())])
     } else {
         value.to_string()
     }
@@ -114,7 +115,7 @@ fn limit_line(kind: PremiumLimitKind, view: &LimitView, cx: &App) -> impl IntoEl
             cell()
                 .w(relative(view.ratio))
                 .bg(cx.theme().muted)
-                .child("Free")
+                .child(tr(keys::PREMIUM_FREE))
                 .child(value_text(kind, view.pair.default_value)),
         )
         .child(
@@ -126,7 +127,7 @@ fn limit_line(kind: PremiumLimitKind, view: &LimitView, cx: &App) -> impl IntoEl
                     linear_color_stop(rgb(PREMIUM_FROM), 0.),
                     linear_color_stop(rgb(PREMIUM_TO), 1.),
                 ))
-                .child("Premium")
+                .child(tr(keys::AI_COMPOSE_TONE_SAVED_LIMIT_LINK))
                 .child(value_text(kind, view.pair.premium_value)),
         )
 }
@@ -222,13 +223,17 @@ impl QuillApp {
             let Some((kind, extra)) = this.session().and_then(|s| s.payments.hub.limit_box) else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Limit Reached"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::CAPTION_LIMIT_TITLE,
+                    )))
                     .on_close(on_close);
             };
             let Some(view) = this.session().map(|s| view_of(s, kind, extra)) else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Limit Reached"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::CAPTION_LIMIT_TITLE,
+                    )))
                     .on_close(on_close);
             };
             let mut body = div().flex().flex_col().gap_3();
@@ -246,7 +251,7 @@ impl QuillApp {
                 footer = footer
                     .child(
                         Button::new("premium-limit-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.dismiss_premium_limit();
@@ -256,7 +261,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("premium-limit-increase")
-                            .label("Increase Limit")
+                            .label(tr(keys::AI_COMPOSE_INCREASE_LIMIT))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.dismiss_premium_limit();

@@ -8,6 +8,7 @@ use super::*;
 use crate::ui::native_video::{NativeVideo, Purpose};
 use gpui_kit::assets::IconName;
 use quill::ids::FileId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::premium_hub::promo::{
     PromoPage, animation_for, button_plan, limit_lines, step_preview, subscribe_label,
@@ -190,13 +191,16 @@ impl QuillApp {
     /// Title of the Premium dialog on the current page.
     pub(super) fn promo_title(&self) -> String {
         match self.promo_page() {
-            PromoPage::Overview => "Telegram Premium".into(),
-            PromoPage::Limits => "Doubled Limits".into(),
+            PromoPage::Overview => tr(keys::SCHEDULE_REPEAT_PROMO_LINK).into(),
+            PromoPage::Limits => tr(keys::PREMIUM_SUMMARY_SUBTITLE_DOUBLE_LIMITS).into(),
             PromoPage::Preview(index) => self
                 .session()
                 .and_then(|s| s.payments.hub.premium.as_ref())
                 .and_then(|info| info.features.get(index))
-                .map_or_else(|| "Telegram Premium".into(), |f| f.title.to_string()),
+                .map_or_else(
+                    || tr(keys::SCHEDULE_REPEAT_PROMO_LINK).into(),
+                    |f| f.title.to_string(),
+                ),
         }
     }
 
@@ -275,19 +279,20 @@ impl QuillApp {
                         ),
                 )
                 .when(subscribed, |this| {
-                    this.child(div().text_lg().font_semibold().child("You are all set!"))
+                    this.child(
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .child(tr(keys::PREMIUM_SUMMARY_TITLE_SUBSCRIBED)),
+                    )
                 })
-                .child(
-                    div().text_sm().text_color(muted).text_center().child(
-                        match (subscribed, state_text) {
-                            (true, Some(text)) => text,
-                            (true, None) => "Thank you for subscribing to Telegram Premium.".into(),
-                            (false, _) => "Go beyond the limits and unlock dozens of exclusive \
-                                           features by subscribing to Telegram Premium."
-                                .into(),
-                        },
-                    ),
-                ),
+                .child(div().text_sm().text_color(muted).text_center().child(
+                    match (subscribed, state_text) {
+                        (true, Some(text)) => text,
+                        (true, None) => tr(keys::Q_MONEY_THANK_YOU_FOR_SUBSCRIBING_TO).into(),
+                        (false, _) => tr(keys::Q_MONEY_GO_BEYOND_THE_LIMITS_AND).into(),
+                    },
+                )),
         );
         if let Some(err) = hub.premium_error.as_ref() {
             body = body.child(div().text_sm().child(err.clone()));
@@ -297,13 +302,13 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Loading features\u{2026}"),
+                    .child(tr(keys::Q_MONEY_LOADING_FEATURES)),
             );
         }
         if let Some(info) = hub.premium.as_ref() {
             let mut list = div().flex().flex_col().gap_1();
             for (index, feature) in info.features.iter().enumerate() {
-                let limits_row = feature.title == "Doubled limits";
+                let limits_row = feature.title == tr(keys::PREMIUM_SUMMARY_SUBTITLE_DOUBLE_LIMITS);
                 let mut row = div()
                     .id(("premium-feature", index))
                     .flex()
@@ -355,7 +360,7 @@ impl QuillApp {
                 .text_xs()
                 .text_color(muted)
                 .text_center()
-                .child("Telegram Premium is not available for this account right now.");
+                .child(tr(keys::Q_MONEY_TELEGRAM_PREMIUM_IS_NOT_AVAILABLE));
         }
         let plans = session
             .payments
@@ -396,12 +401,10 @@ impl QuillApp {
                         .child(format!("-{}%", plan.discount_percentage)),
                 );
             }
-            price = price.child(
-                div()
-                    .text_sm()
-                    .font_medium()
-                    .child(format!("{} / month", plan.per_month_text())),
-            );
+            price = price.child(div().text_sm().font_medium().child(tr_with(
+                keys::PREMIUM_GIFT_PER,
+                &[("cost", &(plan.per_month_text()).to_string())],
+            )));
             row = row.child(price);
             if Some(plan.months) == chosen {
                 row = row.border_1().border_color(rgb(0x6b93ff));
@@ -427,7 +430,7 @@ impl QuillApp {
             div()
                 .text_sm()
                 .text_color(muted)
-                .child("Premium accounts get higher limits."),
+                .child(tr(keys::Q_MONEY_PREMIUM_ACCOUNTS_GET_HIGHER_LIMITS)),
         );
         for line in limit_lines(info) {
             body = body.child(
@@ -464,7 +467,7 @@ impl QuillApp {
         }
         body.child(
             Button::new("premium-limits-back")
-                .label("Back")
+                .label(tr(keys::Q_MONEY_BACK))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.set_promo_page(PromoPage::Overview, cx);
@@ -649,7 +652,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("premium-preview-prev")
-                            .label("Previous")
+                            .label(tr(keys::Q_MONEY_PREVIOUS))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set_promo_page(
@@ -660,7 +663,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("premium-preview-next")
-                            .label("Next")
+                            .label(tr(keys::CREATE_GROUP_NEXT))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set_promo_page(
@@ -675,7 +678,7 @@ impl QuillApp {
         }
         body.child(
             Button::new("premium-preview-back")
-                .label("Back")
+                .label(tr(keys::Q_MONEY_BACK))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.set_promo_page(PromoPage::Overview, cx);

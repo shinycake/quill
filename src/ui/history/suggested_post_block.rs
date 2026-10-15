@@ -10,6 +10,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::local_time::{civil_local, now_unix};
 use quill::state::{HistoryMessage, Session};
 use quill::suggested_posts::{
@@ -51,7 +52,7 @@ pub(in crate::ui) fn suggested_post_block(
             &civil_local(now_unix()),
         )
     } else {
-        "Anytime".to_string()
+        tr(keys::Q_MONEY_ANYTIME).to_string()
     };
     // 12px text on the service background: labels keep the full
     // foreground for contrast (WCAG AA 4.5:1) and step back by weight
@@ -123,7 +124,7 @@ pub(in crate::ui) fn suggestion_buttons(
     let mut first = div().flex().gap_1();
     if buttons.decline {
         first = first.child(
-            keyboard_button(("suggest-decline", id), "Decline")
+            keyboard_button(("suggest-decline", id), tr(keys::Q_MONEY_DECLINE))
                 .flex_1()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_suggest_decline(chat_id, message_id, window, cx);
@@ -132,7 +133,7 @@ pub(in crate::ui) fn suggestion_buttons(
     }
     if buttons.accept {
         first = first.child(
-            keyboard_button(("suggest-accept", id), "Accept")
+            keyboard_button(("suggest-accept", id), tr(keys::Q_MONEY_ACCEPT))
                 .flex_1()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.begin_suggest_accept(chat_id, message_id, window, cx);
@@ -141,13 +142,13 @@ pub(in crate::ui) fn suggestion_buttons(
     }
     let owner = cx.entity().downgrade();
     let change = buttons.change.then(|| {
-        keyboard_button(("suggest-change", id), "Suggest Changes")
+        keyboard_button(("suggest-change", id), tr(keys::Q_MONEY_SUGGEST_CHANGES))
             .w_full()
             .dropdown_menu(move |mut menu, _, _| {
                 if can_edit {
                     let owner = owner.clone();
                     menu = menu.item(
-                        PopupMenuItem::new("Edit Message")
+                        PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_MESSAGE))
                             .icon(IconName::Pencil)
                             .on_click(move |_, window, cx| {
                                 let _ = owner.update(cx, |this, cx| {
@@ -159,7 +160,7 @@ pub(in crate::ui) fn suggestion_buttons(
                 let price_owner = owner.clone();
                 let time_owner = owner.clone();
                 menu.item(
-                    PopupMenuItem::new("Edit Price")
+                    PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_PRICE))
                         .icon(IconName::Coins)
                         .on_click(move |_, window, cx| {
                             let _ = price_owner.update(cx, |this, cx| {
@@ -168,7 +169,7 @@ pub(in crate::ui) fn suggestion_buttons(
                         }),
                 )
                 .item(
-                    PopupMenuItem::new("Edit Time")
+                    PopupMenuItem::new(tr(keys::Q_MONEY_EDIT_TIME))
                         .icon(IconName::Clock)
                         .on_click(move |_, window, cx| {
                             let _ = time_owner.update(cx, |this, cx| {

@@ -11,6 +11,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputContentType};
 use gpui_kit::prelude::FluentBuilder;
 use quill::earn::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::group_digits;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -57,7 +58,7 @@ impl QuillApp {
     /// Collect or Withdraw.
     pub(super) fn earn_withdraw(&mut self, target: WithdrawTarget, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: this needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A).into();
             cx.notify();
             return;
         };
@@ -65,7 +66,7 @@ impl QuillApp {
         // cloud password state (tdesktop `cloudPassword().reload()`).
         let _ = live.driver.fetch_password_state();
         if live.driver.start_withdrawal(target).is_err() {
-            self.connection.status_note = "Couldn't withdraw right now".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW).into();
         }
         cx.notify();
     }
@@ -117,9 +118,12 @@ impl QuillApp {
         }
         let typed = typed_amount(&self.earn.amount.read(cx).value());
         let label = if typed >= available.stars {
-            "Withdraw all stars".to_string()
+            tr(keys::BOT_EARN_BALANCE_BUTTON_ALL).to_string()
         } else {
-            format!("Withdraw \u{2B50} {}", group_digits(typed))
+            tr_with(
+                keys::Q_MONEY_WITHDRAW,
+                &[("group_digits", &(group_digits(typed)).to_string())],
+            )
         };
         let mut block = div()
             .flex()
@@ -150,7 +154,10 @@ impl QuillApp {
         if enabled || ad_url.is_some() {
             let withdraw = Button::new("earn-withdraw")
                 .label(if locked {
-                    format!("Withdraw \u{1F512} {}", format_time_left(left))
+                    tr_with(
+                        keys::Q_MONEY_WITHDRAW_2,
+                        &[("format_time_left", &(format_time_left(left)).to_string())],
+                    )
                 } else {
                     label
                 })
@@ -162,7 +169,7 @@ impl QuillApp {
             if let Some(url) = ad_url {
                 buttons = buttons.child(
                     Button::new("earn-buy-ads")
-                        .label("Buy Ads")
+                        .label(tr(keys::BOT_EARN_BALANCE_BUTTON_BUY_ADS))
                         .primary()
                         .flex_1()
                         .on_click(move |_, _, cx| cx.open_url(&url)),
@@ -176,10 +183,12 @@ impl QuillApp {
                         .gap_2()
                         .child(star_icon(16.))
                         .child(
-                            div().flex_1().child(
-                                Input::new(&self.earn.amount)
-                                    .aria_label(format!("Enter amount to withdraw (max. {max})")),
-                            ),
+                            div()
+                                .flex_1()
+                                .child(Input::new(&self.earn.amount).aria_label(tr_with(
+                                    keys::BOT_EARN_OUT_PH_MAX,
+                                    &[("amount", &max.to_string())],
+                                ))),
                         ),
                 )
                 .child(buttons);
@@ -188,9 +197,9 @@ impl QuillApp {
         block.child(learn_more_band(
             "earn-learn-stars",
             if is_self {
-                "You can withdraw from 10 Stars using Fragment."
+                tr(keys::Q_MONEY_YOU_CAN_WITHDRAW_FROM_10)
             } else {
-                "You can withdraw Stars using Fragment, or use Stars to advertise your bot."
+                tr(keys::Q_MONEY_YOU_CAN_WITHDRAW_STARS_USING)
             },
             |_, cx| cx.open_url(STARS_TOS_URL),
             cx,
@@ -209,7 +218,7 @@ impl QuillApp {
             .password
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = "Couldn't withdraw right now".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW).into();
         }
         cx.notify();
     }
@@ -230,7 +239,7 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && live.driver.request_password_recovery().is_err()
         {
-            self.connection.status_note = "Couldn't send the recovery code".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE).into();
         }
         cx.notify();
     }
@@ -271,11 +280,11 @@ impl QuillApp {
                         .flex_col()
                         .gap_2()
                         .text_sm()
-                        .child("You can withdraw only if you have:")
-                        .child("\u{2022} Enabled Two-Step Verification more than 7 days ago.")
-                        .child("\u{2022} Logged in on this device more than 24 hours ago.");
+                        .child(tr(keys::CHANNEL_EARN_OUT_CHECK_PASSWORD_ABOUT))
+                        .child(tr(keys::Q_MONEY_ENABLED_TWO_STEP_VERIFICATION_MORE))
+                        .child(tr(keys::Q_MONEY_LOGGED_IN_ON_THIS_DEVICE));
                     if later {
-                        body = body.child("Please come back later.");
+                        body = body.child(tr(keys::RIGHTS_TRANSFER_CHECK_LATER));
                     }
                     let mut footer = div().flex().justify_end().gap_2();
                     if later {
@@ -295,7 +304,7 @@ impl QuillApp {
                         footer = footer
                             .child(
                                 Button::new("earn-check-cancel")
-                                    .label("Cancel")
+                                    .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.cancel_withdraw(window, cx);
@@ -308,7 +317,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("earn-check-set")
-                                    .label("Set password")
+                                    .label(tr(keys::Q_MONEY_SET_PASSWORD))
                                     .primary()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.cancel_withdraw(window, cx);
@@ -321,12 +330,12 @@ impl QuillApp {
                                     })),
                             );
                     }
-                    ("Security check", body, footer)
+                    (tr(keys::Q_MONEY_SECURITY_CHECK), body, footer)
                 }
                 WithdrawStep::Password { sending, error } => {
                     let description = match withdraw.target {
                         WithdrawTarget::Ton { .. } | WithdrawTarget::Stars { .. } => {
-                            "Please enter your password to collect."
+                            tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION)
                         }
                     };
                     let hint = this
@@ -346,7 +355,7 @@ impl QuillApp {
                                 .text_xs()
                                 .text_color(muted)
                                 .truncate()
-                                .child(format!("Hint: {hint}")),
+                                .child(tr_with(keys::Q_MONEY_HINT, &[("hint", &hint.to_string())])),
                         ),
                         (None, None) => None,
                     };
@@ -356,7 +365,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Input::new(&this.earn.password)
-                                .aria_label("Enter current password")
+                                .aria_label(tr(keys::Q_MONEY_ENTER_CURRENT_PASSWORD))
                                 .content_type(InputContentType::Password),
                         )
                         .children(under)
@@ -364,7 +373,7 @@ impl QuillApp {
                             div().child(
                                 Button::new("earn-password-forgot")
                                     .debug_selector(|| "earn-password-forgot".into())
-                                    .label("Forgot password?")
+                                    .label(tr(keys::Q_MONEY_FORGOT_PASSWORD))
                                     .ghost()
                                     .small()
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -379,7 +388,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("earn-password-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.cancel_withdraw(window, cx);
@@ -392,14 +401,14 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("earn-password-submit")
-                                .label("Submit")
+                                .label(tr(keys::Q_MONEY_SUBMIT))
                                 .primary()
                                 .loading(sending)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.submit_withdraw_password(window, cx);
                                 })),
                         );
-                    ("Two-step verification", body, footer)
+                    (tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE), body, footer)
                 }
                 WithdrawStep::Checking => {
                     return dialog.on_close(on_close);

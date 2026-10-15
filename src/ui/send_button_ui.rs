@@ -15,6 +15,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{TestSupportExt, *};
+use quill::lang::{keys, tr};
 use quill::send_button::{
     SendButtonInputs, SendButtonKind, SendMorph, format_slowmode, morph_layers, send_button_kind,
 };
@@ -126,11 +127,11 @@ impl QuillApp {
             .p_0()
             .tooltip(kind.tooltip(wait))
             .accessibility_label(match kind {
-                SendButtonKind::Send => "Send message",
-                SendButtonKind::Save => "Save message",
-                SendButtonKind::Schedule => "Schedule message",
-                SendButtonKind::Slowmode => "Slow mode",
-                SendButtonKind::Record { .. } => "Record",
+                SendButtonKind::Send => tr(keys::CONTEXT_SEND_MESSAGE),
+                SendButtonKind::Save => tr(keys::Q_MONEY_SAVE_MESSAGE),
+                SendButtonKind::Schedule => tr(keys::Q_MONEY_SCHEDULE_MESSAGE),
+                SendButtonKind::Slowmode => tr(keys::Q_MONEY_SLOW_MODE),
+                SendButtonKind::Record { .. } => tr(keys::Q_MONEY_RECORD),
             })
             .child(glyphs)
             .on_click(cx.listener(move |this, _, window, cx| {

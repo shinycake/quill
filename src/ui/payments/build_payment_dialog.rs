@@ -1,6 +1,7 @@
 //! Methods moved out of `payments.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// kit Phase 2 (redo): payment checkout hosted in a kit `Dialog` via
@@ -18,7 +19,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Checkout"));
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::PAYMENTS_CHECKOUT_TITLE,
+                )));
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close.clone());
             };
@@ -33,7 +36,11 @@ impl QuillApp {
             };
             let mut body = div().flex().flex_col().gap_3();
             if session.payments.form_loading {
-                body = body.child(div().text_sm().child("Loading payment form…"));
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .child(tr(keys::Q_MONEY_LOADING_PAYMENT_FORM)),
+                );
             }
             if let Some(note) = &session.payments.note {
                 body = body.child(
@@ -68,13 +75,15 @@ impl QuillApp {
                     body = body.child(
                         div()
                             .text_sm()
-                            .child("Star subscriptions are not available yet."),
+                            .child(tr(keys::Q_MONEY_STAR_SUBSCRIPTIONS_ARE_NOT_AVAILABLE)),
                     );
                 }
                 PaymentFormTypeData::Unknown => {
-                    body = body.child(div().text_sm().child(
-                        "This invoice uses a payment form type this client doesn't support.",
-                    ));
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_MONEY_THIS_INVOICE_USES_A_PAYMENT)),
+                    );
                 }
                 PaymentFormTypeData::Regular(regular) => {
                     body = this.payment_form_body(
@@ -125,14 +134,19 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Payment receipt"));
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_MONEY_PAYMENT_RECEIPT,
+                )));
             let session = this.session();
             let receipt = session.as_ref().and_then(|s| s.payments.receipt.as_ref());
             let Some(receipt) = receipt else {
                 return dialog.on_close(on_close);
             };
             let total = if receipt.is_stars {
-                format!("{} Stars", receipt.star_count)
+                tr_with(
+                    keys::Q_MONEY_STARS_3,
+                    &[("star_count", &receipt.star_count.to_string())],
+                )
             } else {
                 format_payment_price(&receipt.currency, receipt.total_amount)
             };
@@ -157,7 +171,7 @@ impl QuillApp {
                         .flex()
                         .justify_between()
                         .text_sm()
-                        .child(div().child("Total"))
+                        .child(div().child(tr(keys::PAYMENTS_TOTAL_LABEL)))
                         .child(div().font_semibold().child(total)),
                 );
             if !receipt.credentials_title.is_empty() {
@@ -166,7 +180,7 @@ impl QuillApp {
                         .flex()
                         .justify_between()
                         .text_sm()
-                        .child(div().child("Paid with"))
+                        .child(div().child(tr(keys::Q_MONEY_PAID_WITH)))
                         .child(div().child(receipt.credentials_title.clone())),
                 );
             }
@@ -176,7 +190,7 @@ impl QuillApp {
                         .flex()
                         .justify_between()
                         .text_sm()
-                        .child(div().child("Tip"))
+                        .child(div().child(tr(keys::Q_MONEY_TIP)))
                         .child(
                             div()
                                 .child(format_payment_price(&receipt.currency, receipt.tip_amount)),
@@ -220,7 +234,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("⭐ Subscriptions"));
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_MONEY_SUBSCRIPTIONS,
+                )));
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
@@ -231,7 +247,7 @@ impl QuillApp {
                         .flex()
                         .justify_between()
                         .text_sm()
-                        .child(div().child("Star balance"))
+                        .child(div().child(tr(keys::Q_MONEY_STAR_BALANCE)))
                         .child(
                             div()
                                 .font_semibold()
@@ -257,7 +273,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading subscriptions…"),
+                        .child(tr(keys::Q_MONEY_LOADING_SUBSCRIPTIONS)),
                 );
             }
             if let Some(err) = session.payments.star_subscriptions_error.as_ref() {
@@ -269,7 +285,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No active subscriptions."),
+                            .child(tr(keys::Q_MONEY_NO_ACTIVE_SUBSCRIPTIONS)),
                     );
                 }
                 let mutating = session.payments.star_subscriptions_mutating;
@@ -290,9 +306,9 @@ impl QuillApp {
                 }
                 if !subs.next_offset.is_empty() {
                     let label = if session.payments.star_subscriptions_loading {
-                        "Loading…"
+                        tr(keys::Q_MONEY_LOADING)
                     } else {
-                        "Load more"
+                        tr(keys::Q_MONEY_LOAD_MORE)
                     };
                     body = body.child(
                         Button::new("subs-load-more")
@@ -329,7 +345,7 @@ impl QuillApp {
             live.driver.maybe_fetch_star_subscriptions()
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not load subscriptions".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_SUBSCRIPTIONS).into();
         }
         cx.notify();
     }
@@ -351,7 +367,8 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.fetch_more_star_subscriptions());
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not load more subscriptions".into();
+            self.connection.status_note =
+                tr(keys::Q_MONEY_COULD_NOT_LOAD_MORE_SUBSCRIPTIONS).into();
         }
         cx.notify();
     }
@@ -380,7 +397,8 @@ impl QuillApp {
             live.driver.edit_star_subscription(&id, true)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not cancel the subscription".into();
+            self.connection.status_note =
+                tr(keys::Q_MONEY_COULD_NOT_CANCEL_THE_SUBSCRIPTION).into();
         }
         cx.notify();
     }
@@ -402,7 +420,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.edit_star_subscription(&id, false));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not re-enable the subscription".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_RE_ENABLE_THE).into();
         }
         cx.notify();
     }
@@ -416,7 +434,8 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.reuse_star_subscription(&id));
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not rejoin the subscription".into();
+            self.connection.status_note =
+                tr(keys::Q_MONEY_COULD_NOT_REJOIN_THE_SUBSCRIPTION).into();
         }
         cx.notify();
     }
