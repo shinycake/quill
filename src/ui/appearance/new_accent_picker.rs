@@ -553,6 +553,7 @@ impl QuillApp {
             .gap_3()
             .child(suggest)
             .child(replace)
+            .child(self.emoji_set_settings_row(cx))
             .into_any_element();
         // tdesktop Chat settings "Large emoji": one to three emoji alone in
         // a message show as big glyphs (the history renderer reads the same

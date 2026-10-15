@@ -117,6 +117,9 @@ rusty-opus = { version = "1", optional = true }
 resvg = { version = "0.48", default-features = false, features = ["svgz"], optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.10"
+# Emoji set packs (docs/decisions/emoji-set-style.md): stored (uncompressed)
+# zip entries only, so no compression features.
+zip = { version = "9", default-features = false }
 # Local passcode (docs/decisions/codex-local-passcode.md): PBKDF2-HMAC-SHA512 key
 # derivation and an XChaCha20-Poly1305 key wrap; no hand-rolled crypto.
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }

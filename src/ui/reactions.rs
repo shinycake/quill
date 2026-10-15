@@ -194,7 +194,13 @@ impl QuillApp {
                     .hover(|style| style.bg(bg_subtle()))
                     .role(gpui_kit::Role::Button)
                     .aria_label(format!("Quick reaction {glyph}"))
-                    .child(glyph)
+                    .child(
+                        super::emoji_sprites::glyph(
+                            &glyph,
+                            super::emoji_sprites::edge_for(px(20.)),
+                        )
+                        .unwrap_or_else(|| glyph.clone().into_any_element()),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.set_default_reaction(pick.clone(), cx);
                     })),
@@ -369,11 +375,19 @@ impl QuillApp {
     /// (its fallback emoji until the file lands).
     pub(super) fn reaction_glyph(&self, choice: &ReactionChoice, size: f32) -> AnyElement {
         match choice {
-            ReactionChoice::Emoji(emoji) => div()
-                .text_size(px(size))
-                .line_height(px(size + 4.))
-                .child(emoji_presentation(emoji))
-                .into_any_element(),
+            ReactionChoice::Emoji(emoji) => {
+                match super::emoji_sprites::glyph(
+                    &emoji_presentation(emoji),
+                    super::emoji_sprites::edge_for(px(size)),
+                ) {
+                    Some(sprite) => sprite,
+                    None => div()
+                        .text_size(px(size))
+                        .line_height(px(size + 4.))
+                        .child(emoji_presentation(emoji))
+                        .into_any_element(),
+                }
+            }
             ReactionChoice::CustomEmoji(id) => match self.custom_emoji_still(*id) {
                 Some(path) => img(path)
                     .size(px(size))

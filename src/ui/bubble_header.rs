@@ -156,7 +156,11 @@ pub(super) fn reply_header_strip(
                             muted
                         })
                         .when(state != ReplyState::Ready, |this| this.italic())
-                        .child(super::bidi_line::one_line_plain(text)),
+                        .child(
+                            super::emoji_sprites::one_line(&text, px(12.)).unwrap_or_else(|| {
+                                super::bidi_line::one_line_plain(text).into_any_element()
+                            }),
+                        ),
                 ),
         )
         .into_any_element()

@@ -1,5 +1,7 @@
 # Emoji set style picker (parity:emoji-set-style) - not implemented
 
+> Superseded: the emoji set picker shipped; see `docs/decisions/emoji-set-style.md`.
+
 ## What tdesktop does
 
 Settings > Chat Settings has "Manage emoji sets" (`lng_emoji_manage_sets`, `Ui::Emoji::ManageSetsBox` in

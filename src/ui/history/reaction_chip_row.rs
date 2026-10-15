@@ -51,9 +51,11 @@ pub(super) fn reaction_chip_row(
                 Default::default()
             };
         let glyph: AnyElement = match &choice {
-            quill::state::ReactionChoice::Emoji(emoji) => div()
-                .child(super::super::reactions::emoji_presentation(emoji))
-                .into_any_element(),
+            quill::state::ReactionChoice::Emoji(emoji) => {
+                let emoji = super::super::reactions::emoji_presentation(emoji);
+                super::super::emoji_sprites::glyph(&emoji, px(super::super::reactions::CHIP_GLYPH))
+                    .unwrap_or_else(|| div().child(emoji).into_any_element())
+            }
             quill::state::ReactionChoice::CustomEmoji(id) => {
                 custom_emoji_chip_glyph(*id, session, files, media_roots)
             }
