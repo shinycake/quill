@@ -165,6 +165,10 @@ upload is Idan's step).
   than "Android").
 - Packs come from Quill's GitHub release, not Telegram's channel.
 - Composer, dialog titles and toasts keep system emoji.
+- "Install from file…" in the box (Quill-only): installs a zip downloaded
+  by hand from the landing page footer, for a machine that can't reach the
+  release. The file's SHA-256 picks the set, so a renamed zip works and
+  anything else is refused before unpacking.
 
 ## What the build changed from this design
 

@@ -286,3 +286,4 @@ section { scroll-margin-top: 72px; }
 .foot-brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 650; margin-bottom: 12px; }
 .foot-brand img { border-radius: 6px; }
 .foot p { margin: 6px 0; max-width: 760px; }
+.foot .foot-small { font-size: 12.5px; }
