@@ -381,4 +381,90 @@ mod viewer {
         });
         assert!(script.borrow().dropped, "closing released the backend");
     }
+
+    /// Space through the whole window: the key-down reaches the viewer's
+    /// key handler and the key-up `QuillApp`'s root capture listener, so a
+    /// tap toggles pause and a hold plays at 2x until release.
+    #[gpui_kit::test]
+    fn space_taps_toggle_and_holds_boost(cx: &mut TestAppContext) {
+        use gpui_kit::{Focusable as _, KeyUpEvent, Keystroke};
+        use quill::media_viewer::SPEED_BOOST_HOLD_MS;
+        use std::time::Duration;
+
+        let (app, mut vcx) = new_app(cx);
+        let vcx = &mut vcx;
+        // A background window ends holds (its key-up goes elsewhere).
+        vcx.update(|window, _| window.activate_window());
+        app.update_in(vcx, |app, window, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+                crate::ui::inline_playback::apply_ready_video_viewer(
+                    session,
+                    &app.demo_ui.sink,
+                    &app.demo_ui.seq,
+                );
+            }
+            let focus = app.focus_handle(cx);
+            window.focus(&focus, cx);
+            cx.notify();
+        });
+        let script = Rc::new(RefCell::new(Script {
+            ready: true,
+            ..Script::default()
+        }));
+        NEXT_BACKEND.with(|next| *next.borrow_mut() = Some(Box::new(Scripted(script.clone()))));
+        app.update_in(vcx, |app, _, cx| {
+            app.open_media_viewer(ChatId(11), MessageId(204), cx);
+        });
+        settle(vcx);
+        let state = |vcx: &mut VisualTestContext| {
+            app.read_with(vcx, |app, _| {
+                (
+                    app.viewer_video_playing(),
+                    app.viewer.controls.boost.is_active(),
+                )
+            })
+        };
+        let space_up = |vcx: &mut VisualTestContext| {
+            vcx.simulate_event(KeyUpEvent {
+                keystroke: Keystroke::parse("space").unwrap(),
+            });
+            settle(vcx);
+        };
+        assert_eq!(state(vcx), (true, false), "the clip autoplays");
+        script.borrow_mut().calls.clear();
+
+        // A tap: nothing on the press, pause on the release.
+        vcx.simulate_keystrokes("space");
+        assert_eq!(state(vcx), (true, false));
+        space_up(vcx);
+        assert_eq!(state(vcx), (false, false));
+        assert!(script.borrow().calls.contains(&"pause".to_string()));
+        script.borrow_mut().calls.clear();
+
+        // A hold: 2x after the delay (even while paused, like tdesktop),
+        // back to the chosen rate on release, and no toggle.
+        vcx.simulate_keystrokes("space");
+        vcx.executor()
+            .advance_clock(Duration::from_millis(SPEED_BOOST_HOLD_MS + 50));
+        settle(vcx);
+        assert_eq!(state(vcx), (false, true));
+        space_up(vcx);
+        assert_eq!(state(vcx), (false, false));
+        let calls = std::mem::take(&mut script.borrow_mut().calls);
+        assert!(
+            calls.iter().any(|c| c.starts_with("rate 2 ")),
+            "boosted: {calls:?}"
+        );
+        assert!(
+            calls.last().is_some_and(|c| c.starts_with("rate 1 ")),
+            "restored: {calls:?}"
+        );
+        assert!(!calls.iter().any(|c| c.starts_with("play")), "{calls:?}");
+
+        // Paused: `.` and `,` step one frame.
+        vcx.simulate_keystrokes(". ,");
+        let calls = std::mem::take(&mut script.borrow_mut().calls);
+        assert_eq!(calls, ["step true", "step false"]);
+    }
 }

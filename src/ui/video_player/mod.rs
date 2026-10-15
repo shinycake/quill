@@ -17,6 +17,7 @@
 mod backend_ffmpeg;
 #[cfg(feature = "demo-capture")]
 mod backend_still;
+pub(crate) mod controls;
 mod element;
 pub(super) mod pacing;
 mod transport;
@@ -360,10 +361,8 @@ impl VideoPlayer {
         self.with_backend(|backend| backend.seek(target));
     }
 
-    /// One picture forward (`true`) or back, while paused. The viewer's
-    /// key for it comes with the restyled controls (design build plan,
-    /// PR 2); the backends and this are tested now.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// One picture forward (`true`) or back, while paused (the viewer's
+    /// `.` and `,`).
     pub(crate) fn step_frame(&self, forward: bool) {
         if self
             .read_inner(|inner| inner.machine.state().animates())

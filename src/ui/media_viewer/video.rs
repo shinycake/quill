@@ -281,18 +281,7 @@ impl QuillApp {
 
     /// MED1: the seek and volume sliders of the player panel.
     fn create_viewer_sliders(&mut self, duration: f64, cx: &mut Context<Self>) {
-        // MED1: viewer seek slider (the history-row seek bar pattern).
-        let slider = cx.new(|_| {
-            SliderState::new()
-                .min(0.0)
-                .max(duration.max(1.0) as f32)
-                .default_value(0.0)
-        });
-        cx.subscribe(&slider, |this, _, event, cx| {
-            this.on_viewer_seek_event(event, cx);
-        })
-        .detach();
-        self.viewer.seek_slider = Some(slider);
+        self.create_viewer_seek_slider(duration, cx);
         // MED1: volume slider (0–100%); applies on release.
         let volume = cx.new(|_| {
             SliderState::new()
@@ -304,7 +293,29 @@ impl QuillApp {
             this.on_viewer_volume_event(event, cx);
         })
         .detach();
-        self.viewer.volume_slider = Some(volume);
+        self.viewer.controls.volume = Some(volume);
+    }
+
+    /// The seek slider, in seconds over `0..=duration` (0.1 s steps): the
+    /// scrubber's `Change` previews, `Release` seeks. Made again when the
+    /// player learns a different length (`sync_viewer_seek_slider`).
+    pub(super) fn create_viewer_seek_slider(&mut self, duration: f64, cx: &mut Context<Self>) {
+        let position = self
+            .viewer_transport()
+            .map_or(0.0, |transport| transport.position.max(0.0));
+        let max = duration.max(1.0);
+        let slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(max as f32)
+                .step(0.1)
+                .default_value(position.min(max) as f32)
+        });
+        cx.subscribe(&slider, |this, _, event, cx| {
+            this.on_viewer_seek_event(event, cx);
+        })
+        .detach();
+        self.viewer.controls.seek = Some(slider);
     }
 
     /// Pause, keeping the item active so the controls stay and Play
@@ -405,11 +416,8 @@ impl QuillApp {
         self.viewer.video = None;
         self.viewer.video_path = None;
         self.viewer.pending_play = None;
-        self.viewer.seek_slider = None;
-        self.viewer.seek_scrubbing = false;
-        self.viewer.seek_preview_secs = None;
-        self.viewer.volume_slider = None;
-        self.viewer.volume_scrubbing = false;
+        // The player is gone, so a boost has nothing to restore.
+        let _ = self.viewer.controls.clear_clip();
     }
 }
 

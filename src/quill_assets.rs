@@ -60,6 +60,8 @@ gpui_kit::assets::icon_assets!(
         Star,
         Volume2,
         VolumeX,
+        Volume1,
+        Gauge,
         SkipBack,
         SkipForward,
         Repeat,

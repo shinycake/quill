@@ -14,13 +14,11 @@ impl QuillApp {
     ) {
         match event {
             SliderEvent::Change(value) => {
-                self.viewer.seek_scrubbing = true;
-                self.viewer.seek_preview_secs = Some(f64::from(value.end()));
-                cx.notify();
+                self.viewer.controls.seek_preview = Some(f64::from(value.end()));
+                self.notify_viewer_panel(cx);
             }
             SliderEvent::Release(value) => {
-                self.viewer.seek_scrubbing = false;
-                self.viewer.seek_preview_secs = None;
+                self.viewer.controls.seek_preview = None;
                 self.seek_viewer_to(f64::from(value.end()), cx);
             }
         }
@@ -75,17 +73,28 @@ impl QuillApp {
             alt: modifiers.alt,
             shift: modifiers.shift,
         };
+        let paused = self
+            .viewer_transport()
+            .is_some_and(|transport| !transport.is_playing());
         let Some(action) = viewer_key_action(
             &keystroke.key,
             mods,
             kind,
             self.viewer.extra.video_fullscreen,
+            paused,
         ) else {
             return false;
         };
         self.viewer_note_activity(false, cx);
         match action {
             ViewerKeyAction::TogglePlayback => self.toggle_viewer_video(cx),
+            ViewerKeyAction::HoldSpace => self.viewer_space_down(window, cx),
+            ViewerKeyAction::StepFrame(forward) => {
+                if let Some(player) = &self.viewer.player {
+                    player.step_frame(forward);
+                }
+                cx.notify();
+            }
             ViewerKeyAction::SeekBy(secs) => self.seek_viewer_by(secs, cx),
             ViewerKeyAction::SeekToFraction(fraction) => self.seek_viewer_to_fraction(fraction, cx),
             ViewerKeyAction::ToggleFullscreen => self.viewer_toggle_fullscreen(window, cx),
@@ -125,6 +134,11 @@ impl QuillApp {
     /// Looping clips play only while the window is active (tdesktop pauses
     /// them in the background): pause on deactivation, resume on return.
     pub(super) fn sync_viewer_window_activity(&mut self, active: bool, cx: &mut Context<Self>) {
+        // The Space key-up goes elsewhere once the window is in the
+        // background: end a hold there.
+        if !active {
+            self.cancel_viewer_boost(cx);
+        }
         if !self.viewer_loops() || self.viewer.player.is_none() {
             return;
         }
@@ -164,13 +178,26 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.seek_scrubbing {
+        if self.viewer.controls.seek_preview.is_some() {
             return;
         }
-        if let (Some(slider), Some(transport)) =
-            (self.viewer.seek_slider.as_ref(), self.viewer_transport())
-        {
-            let value = transport.position.clamp(0.0, transport.total()) as f32;
+        let Some(transport) = self.viewer_transport() else {
+            return;
+        };
+        // The length became known (or differs from the message's): the
+        // slider's range has no setter, so it is made again.
+        let total = transport.total();
+        let stale = self
+            .viewer
+            .controls
+            .seek
+            .as_ref()
+            .is_some_and(|slider| (f64::from(slider.read(cx).max_value()) - total).abs() > 0.5);
+        if total > 0.0 && stale {
+            self.create_viewer_seek_slider(total, cx);
+        }
+        if let Some(slider) = self.viewer.controls.seek.as_ref() {
+            let value = transport.position.clamp(0.0, total.max(0.0)) as f32;
             let changed = slider.read(cx).value() != SliderValue::Single(value);
             if changed {
                 slider.update(cx, |state, cx| {
@@ -189,11 +216,11 @@ impl QuillApp {
     ) {
         match event {
             SliderEvent::Change(_) => {
-                self.viewer.volume_scrubbing = true;
-                cx.notify();
+                self.viewer.controls.volume_dragging = true;
+                self.notify_viewer_panel(cx);
             }
             SliderEvent::Release(value) => {
-                self.viewer.volume_scrubbing = false;
+                self.viewer.controls.volume_dragging = false;
                 self.set_playback_volume(f64::from(value.end()) as f32 / 100.0, cx);
             }
         }
@@ -206,10 +233,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.volume_scrubbing {
+        if self.viewer.controls.volume_dragging {
             return;
         }
-        if let Some(slider) = self.viewer.volume_slider.as_ref() {
+        if let Some(slider) = self.viewer.controls.volume.as_ref() {
             let value = (self.playback.volume * 100.0).round();
             let changed = slider.read(cx).value() != SliderValue::Single(value);
             if changed {
@@ -240,7 +267,10 @@ impl QuillApp {
     pub(in crate::ui) fn set_playback_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
         let next = quill::viewer_extras::clamp_speed(speed);
         self.playback.speed = next;
-        self.viewer.extra.speed_preview = None;
+        self.viewer.controls.speed_preview = None;
+        // A chosen speed ends a Space hold (the rate is set below).
+        self.viewer.controls.boost_timer = None;
+        let _ = self.viewer.controls.boost.cancel();
         let mut restarted = false;
         if let Some(clock) = self.playback.clock.as_mut() {
             let was_playing = clock.is_playing();
@@ -262,7 +292,7 @@ impl QuillApp {
 
     /// The speed slider of the speed dial, created on first use.
     fn ensure_speed_slider(&mut self, cx: &mut Context<Self>) -> Entity<SliderState> {
-        if let Some(slider) = self.viewer.extra.speed_slider.clone() {
+        if let Some(slider) = self.viewer.controls.speed.clone() {
             return slider;
         }
         let slider = cx.new(|_| {
@@ -274,7 +304,7 @@ impl QuillApp {
         });
         cx.subscribe(&slider, |this, _, event, cx| match event {
             SliderEvent::Change(value) => {
-                this.viewer.extra.speed_preview =
+                this.viewer.controls.speed_preview =
                     Some(quill::viewer_extras::snap_speed(f64::from(value.end())));
                 cx.notify();
             }
@@ -284,43 +314,38 @@ impl QuillApp {
             }
         })
         .detach();
-        self.viewer.extra.speed_slider = Some(slider.clone());
+        self.viewer.controls.speed = Some(slider.clone());
         slider
     }
 
     /// Move the speed dial's thumb to the current speed.
     fn sync_speed_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let speed = self.playback.speed as f32;
-        if let Some(slider) = self.viewer.extra.speed_slider.as_ref() {
+        if let Some(slider) = self.viewer.controls.speed.as_ref() {
             slider.update(cx, |state, cx| state.set_value(speed, window, cx));
         }
     }
 
-    /// Telegram Desktop's speed dial: the current speed on a button that
-    /// opens a slider from 0.5x to 2.5x (sticking to the usual speeds)
-    /// above the named presets.
+    /// Telegram Desktop's speed dial: `trigger` opens a slider from 0.5x
+    /// to 2.5x (sticking to the usual speeds) above the named presets
+    /// (`video_player::controls::SpeedMenu`). Shared by the viewer's
+    /// controller and the audio player bar.
     pub(in crate::ui) fn speed_dial(
         &mut self,
         id: &'static str,
+        trigger: Button,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        use quill::viewer_extras::{SPEED_PRESETS, equal_speeds, speed_label};
+        use crate::ui::video_player::controls::SpeedMenu;
         let slider = self.ensure_speed_slider(cx);
-        let dragging = self.viewer.extra.speed_preview.is_some();
+        let dragging = self.viewer.controls.speed_preview.is_some();
         let current = self.playback.speed;
-        let shown = self.viewer.extra.speed_preview.unwrap_or(current);
+        let shown = self.viewer.controls.speed_preview.unwrap_or(current);
         let view = cx.entity().downgrade();
         Popover::new((id, 1usize))
             .anchor(Anchor::BottomRight)
-            .default_open(self.viewer.extra.demo_speed_dial_open)
-            .trigger(
-                Button::new((id, 0usize))
-                    .label(speed_label(shown))
-                    .ghost()
-                    .text_color(gpui_kit::white())
-                    .tooltip("Playback speed")
-                    .accessibility_label("Playback speed"),
-            )
+            .default_open(self.viewer.controls.demo_speed_open)
+            .trigger(trigger)
             .content(move |_state, window, cx| {
                 // Another control (a row's speed link) may have moved the
                 // speed since the thumb was last set.
@@ -330,36 +355,37 @@ impl QuillApp {
                         slider.update(cx, |state, cx| state.set_value(want, window, cx));
                     }
                 }
-                let rows = SPEED_PRESETS.iter().map(|(speed, name)| {
-                    let (speed, name) = (*speed, *name);
-                    let chosen = equal_speeds(speed, current);
-                    let view = view.clone();
-                    let popover = cx.entity();
-                    Button::new((id, 100 + (speed * 10.0) as usize))
-                        .label(format!("{name}  {}", speed_label(speed)))
-                        .ghost()
-                        .small()
-                        .w_full()
-                        .when(chosen, |button| {
-                            button.icon(gpui_kit::assets::IconName::Check)
-                        })
-                        .on_click(move |_, window, cx| {
-                            let _ = view.update(cx, |this, cx| {
-                                this.set_playback_speed(speed, cx);
-                                this.sync_speed_slider(window, cx);
-                            });
-                            popover.update(cx, |state, cx| state.dismiss(window, cx));
-                        })
-                });
-                div()
-                    .w(px(220.))
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(div().px_2().py_1().child(Slider::new(&slider)))
-                    .children(rows)
+                let view = view.clone();
+                let popover = cx.entity();
+                SpeedMenu::new(
+                    id,
+                    slider.clone(),
+                    shown,
+                    std::rc::Rc::new(move |speed, window, cx| {
+                        let _ = view.update(cx, |this, cx| {
+                            this.set_playback_speed(speed, cx);
+                            this.sync_speed_slider(window, cx);
+                        });
+                        popover.update(cx, |state, cx| state.dismiss(window, cx));
+                    }),
+                )
             })
             .into_any_element()
+    }
+
+    /// The player bar's speed button: the speed as text.
+    pub(in crate::ui) fn speed_label_trigger(&self, id: &'static str) -> Button {
+        let shown = self
+            .viewer
+            .controls
+            .speed_preview
+            .unwrap_or(self.playback.speed);
+        Button::new((id, 0usize))
+            .label(Self::speed_label(shown))
+            .ghost()
+            .text_color(gpui_kit::white())
+            .tooltip("Playback speed")
+            .accessibility_label("Playback speed")
     }
 
     /// MED1: short "1.5×" style label for the speed button.

@@ -16,11 +16,28 @@ register_demos![
         "screenshot demo — in-viewer video playback"
     )
     .setup(|app, window, cx| app.demo_video_playback(VideoPlaybackDemo::VideoPip, window, cx)),
+    DemoSpec::ready(
+        "ready-video-controls",
+        seed_ready_media_session,
+        "screenshot demo — the viewer's video controller"
+    )
+    .setup(|app, window, cx| app.demo_video_playback(VideoPlaybackDemo::Controls, window, cx)),
+    DemoSpec::ready(
+        "ready-video-speed",
+        seed_ready_media_session,
+        "screenshot demo — the viewer's speed popover"
+    )
+    .setup(|app, window, cx| app.demo_video_playback(VideoPlaybackDemo::Speed, window, cx)),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum VideoPlaybackDemo {
     VideoPip,
+    /// The controller with the pointer over the scrubber (thumb and time
+    /// bubble) at 1.5×.
+    Controls,
+    /// The speed popover open.
+    Speed,
 }
 
 impl QuillApp {
@@ -47,11 +64,21 @@ impl QuillApp {
             player.seek(0.0);
         }
         self.connection.status_note = "screenshot demo — in-viewer video playback".into();
-        if demo == VideoPlaybackDemo::VideoPip {
-            let weak = cx.entity().downgrade();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, cx| this.open_video_pip(cx));
-            });
+        match demo {
+            VideoPlaybackDemo::VideoPip => {
+                let weak = cx.entity().downgrade();
+                cx.defer(move |cx| {
+                    let _ = weak.update(cx, |this, cx| this.open_video_pip(cx));
+                });
+            }
+            VideoPlaybackDemo::Controls => {
+                self.set_playback_speed(1.5, cx);
+                self.viewer.controls.hover = Some(0.42);
+            }
+            VideoPlaybackDemo::Speed => {
+                self.set_playback_speed(1.5, cx);
+                self.viewer.controls.demo_speed_open = true;
+            }
         }
     }
 }

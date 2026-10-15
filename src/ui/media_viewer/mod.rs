@@ -13,16 +13,16 @@ use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState, SliderValue};
+use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
-    MediaViewer, MediaViewerItem, MediaViewerKind, VIEWER_FADE_MS, VIEWER_SHOW_MS,
-    VIEWER_WAIT_HIDE_MS, VIEWER_WHEEL_NOTCH_PX, ViewerKeyAction, ViewerKeyMods, ViewerOrientation,
-    ViewerSource, ViewerVideoStart, ViewerZoom, collect_media_items, controls_hide_wait_ms,
+    MediaViewer, MediaViewerItem, MediaViewerKind, VIEWER_SHOW_MS, VIEWER_WAIT_HIDE_MS,
+    VIEWER_WHEEL_NOTCH_PX, ViewerKeyAction, ViewerKeyMods, ViewerOrientation, ViewerSource,
+    ViewerVideoStart, ViewerZoom, collect_media_items, controls_fade_ms, controls_hide_wait_ms,
     controls_should_hide, decide_viewer_video_start, orient_rgba, save_media_to_downloads,
     seek_target_secs, viewer_delete_gate, viewer_key_action, wheel_zoom_factor,
 };
@@ -30,7 +30,6 @@ use quill::settings::MediaPrefs;
 use quill::state::HistoryMessage;
 use quill::state::SharedMediaTab;
 use quill::telegram::envelope::ParsedFile;
-use quill::voice::format_voice_duration;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -39,6 +38,7 @@ use std::time::Duration;
 
 mod actions;
 mod caption;
+mod controller;
 mod files;
 mod files_demo;
 mod layer;
@@ -77,11 +77,6 @@ pub(super) struct ViewerExtra {
     /// newer save restarts the hide timer).
     pub saved_toast: Option<quill::viewer_extras::SavedToast>,
     pub saved_toast_gen: u64,
-    /// The speed dial's slider and the speed shown while it is dragged.
-    pub speed_slider: Option<Entity<SliderState>>,
-    pub speed_preview: Option<f64>,
-    /// Screenshot demo: open the speed dial on the first frame.
-    pub demo_speed_dial_open: bool,
     /// "Share at": the message and second the forward picker was opened at.
     pub share_at: Option<(ChatId, MessageId, i32)>,
     /// Turns of videos rotated in this run, by `(chat, message)`.
@@ -96,9 +91,10 @@ fn still_frame() -> bool {
     std::env::var_os("QUILL_DEMO_CAPTURE").is_some()
 }
 
-/// Fade a group of viewer controls in or out over `VIEWER_FADE_MS`
-/// (tdesktop `mediaviewFadeDuration`). The animation id carries the flip
-/// generation, so each show/hide restarts it.
+/// Fade a group of viewer controls in over 200 ms or out over 600 ms
+/// (tdesktop `mediaviewShowDuration` / `mediaviewHideDuration`, linear).
+/// The animation id carries the flip generation, so each show/hide
+/// restarts it.
 fn fade_controls<E: Styled + IntoElement + 'static>(
     element: E,
     id: &'static str,
@@ -107,7 +103,7 @@ fn fade_controls<E: Styled + IntoElement + 'static>(
 ) -> AnimationElement<E> {
     element.with_animation(
         (id, generation as usize),
-        Animation::new(Duration::from_millis(VIEWER_FADE_MS)),
+        Animation::new(Duration::from_millis(controls_fade_ms(hidden))),
         move |element, t| {
             let t = if still_frame() { 1.0 } else { t };
             element.opacity(if hidden { 1.0 - t } else { t })

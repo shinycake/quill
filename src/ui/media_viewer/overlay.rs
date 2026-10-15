@@ -26,6 +26,8 @@ impl QuillApp {
         self.prune_deleted_viewer_items(cx);
         self.sync_shared_media_viewer(cx);
         self.sync_viewer_window_activity(window.is_window_active(), cx);
+        // A hover over the scrubber redraws only this view.
+        self.viewer.controls.panel_view = Some(window.current_view());
         // MED1: keep the viewer seek/volume thumbs on the transport.
         self.sync_viewer_seek_slider(window, cx);
         self.sync_viewer_volume_slider(window, cx);
@@ -304,6 +306,10 @@ impl QuillApp {
                 .into_any_element(),
             None => content,
         };
+        // The download ring, the "can't be played" plate, or (chat
+        // windows) the waiting spinner, over the picture.
+        let picture_overlay =
+            self.viewer_picture_overlay(&item, row_id, &files, &downloading, layered, cx);
         let visual = {
             let view = cx.entity().downgrade();
             let scroll_view = view.clone();
@@ -356,6 +362,7 @@ impl QuillApp {
                         .h(px(zoom_h))
                         .child(content),
                 )
+                .children(picture_overlay)
                 .on_scroll_wheel(move |event, _window, cx| {
                     let dy = match event.delta {
                         ScrollDelta::Pixels(p) => f32::from(p.y),
@@ -496,13 +503,16 @@ impl QuillApp {
                 })
         };
         // Parity slice 5: the video player panel (or a download CTA).
-        let video_controls: Option<AnyElement> = (item.kind == MediaViewerKind::Video)
-            .then(|| self.viewer_video_controls(&item, row_id, &files, &downloading, cx));
-        let transport = Self::viewer_zoom_controls(zoom, row_id, cx);
+        let is_video = item.kind == MediaViewerKind::Video;
+        let video_controls: Option<AnyElement> = is_video
+            .then(|| self.viewer_video_controls(&item, row_id, cx))
+            .flatten();
+        let key_focus = self.viewer_key_focus_probe(cx);
         // Videos get the player panel; zoom controls are for photos.
-        let transport = match video_controls {
-            Some(controls) => controls,
-            None => transport.into_any_element(),
+        let transport: Option<AnyElement> = if is_video {
+            video_controls
+        } else {
+            Some(Self::viewer_zoom_controls(zoom, row_id, cx).into_any_element())
         };
         // Custom emoji in the caption render like they do in message text:
         // the resolved sticker images, the span text until they are.
@@ -772,7 +782,15 @@ impl QuillApp {
         // Layered, the panel takes no clicks itself: the backdrop under it
         // closes the viewer.
         let root = if layered {
-            div().absolute().inset_0()
+            // The slice's box has no height of its own (a cached view over
+            // absolute content): size the panel to the window, or `bottom_0`
+            // puts the controller above the top edge.
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .w(viewport.width)
+                .h(viewport.height)
         } else {
             div().absolute().inset_0().child(
                 div()
@@ -851,34 +869,38 @@ impl QuillApp {
                     .children(caption)
                     // MED1: honest playback error (unsupported format /
                     // player failure) instead of a silent stall.
-                    .when_some(self.playback.error.clone(), |this, err| {
-                        let can_open = item.kind.is_playable() && has_local_clip;
-                        this.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(div().text_sm().text_color(danger_bright()).child(err))
-                                .when(can_open, |row| {
-                                    row.child(
-                                        Button::new(("media-viewer-open-externally", row_id))
-                                            .label("Open externally")
-                                            .ghost()
-                                            .text_color(gpui_kit::white())
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.open_viewer_clip_externally(cx);
-                                            })),
-                                    )
-                                }),
-                        )
-                    })
-                    .child(transport),
+                    .when_some(
+                        self.playback.error.clone().filter(|_| !is_video),
+                        |this, err| {
+                            let can_open = item.kind.is_playable() && has_local_clip;
+                            this.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().text_sm().text_color(danger_bright()).child(err))
+                                    .when(can_open, |row| {
+                                        row.child(
+                                            Button::new(("media-viewer-open-externally", row_id))
+                                                .label("Open externally")
+                                                .ghost()
+                                                .text_color(gpui_kit::white())
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.open_viewer_clip_externally(cx);
+                                                })),
+                                        )
+                                    }),
+                            )
+                        },
+                    )
+                    .children(transport),
                 "viewer-bottom-fade",
                 fade_gen,
                 hidden,
             ))
             .children(ttl_badge)
             .children(saved_toast)
+            .child(key_focus)
             // Fade in over 200 ms when it opens (tdesktop
             // `mediaviewShowDuration`). Closing is instant: a fade-out
             // would have to keep the closed viewer's state alive.

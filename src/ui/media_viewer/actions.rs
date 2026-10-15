@@ -504,12 +504,14 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         let idle = this.viewer.last_activity.elapsed().as_millis() as u64;
                         let done = !this.viewer.state.is_open() || this.viewer.controls_hidden;
-                        if !done && controls_should_hide(idle, this.viewer.over_controls) {
+                        // Never mid-drag (a seek, volume or speed thumb).
+                        let held = this.viewer.over_controls || this.viewer.controls.dragging();
+                        if !done && controls_should_hide(idle, held) {
                             this.viewer.controls_hidden = true;
                             this.viewer.controls_gen += 1;
                             cx.notify();
                         } else if !done {
-                            return Some(if this.viewer.over_controls {
+                            return Some(if held {
                                 VIEWER_WAIT_HIDE_MS
                             } else {
                                 controls_hide_wait_ms(idle).max(16)
