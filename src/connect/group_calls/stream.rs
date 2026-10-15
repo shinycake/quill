@@ -12,37 +12,39 @@ use crate::state::Session;
 use crate::telegram::envelope::{CallsPayload, Envelope, EnvelopePayload, ErrorClass, TdError};
 use crate::telegram::requests::{get_group_call_stream_segment, get_group_call_streams};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-
-/// Broadcast requests that may wait for the driver. ntgcalls keeps a few
-/// seconds of segments in flight, so this is far above what a healthy
-/// stream queues; past it a request is dropped (ntgcalls asks again).
-const EVENT_QUEUE: usize = 256;
 
 /// Events handled per poll, so a burst never stalls the UI thread.
 const EVENTS_PER_TICK: usize = 64;
 
 /// The driver's stream-mode state: the event queue from the engine, a
 /// feeder per stream chat and the latest stream picture per chat.
+///
+/// The queue is unbounded on purpose. ntgcalls never asks again for a
+/// request nobody answered: a part stays Downloading until its answer, and
+/// the time request stays outstanding until `send_broadcast_timestamp`.
+/// So a dropped request would stall the stream for good. ntgcalls bounds
+/// the backlog itself: it keeps only a few segments pending, each with one
+/// request per part, plus at most one time request.
 pub(crate) struct GroupCallStreams {
-    events_tx: SyncSender<EngineEvent>,
+    events_tx: Sender<EngineEvent>,
     events_rx: Mutex<Receiver<EngineEvent>>,
-    dropped_events: Arc<AtomicU64>,
     feeders: HashMap<i64, StreamFeeder>,
     quality: HashMap<i64, StreamQualityTracker>,
-    frames: Arc<Mutex<HashMap<i64, VideoFrame>>>,
+    /// One slot per chat with a live feeder. The engine hook only fills
+    /// an existing slot, so a picture that arrives between the drain and
+    /// the native stop is dropped instead of bringing the slot back.
+    frames: Arc<Mutex<HashMap<i64, Option<VideoFrame>>>>,
 }
 
 impl Default for GroupCallStreams {
     fn default() -> Self {
-        let (events_tx, events_rx) = sync_channel(EVENT_QUEUE);
+        let (events_tx, events_rx) = channel();
         Self {
             events_tx,
             events_rx: Mutex::new(events_rx),
-            dropped_events: Arc::new(AtomicU64::new(0)),
             feeders: HashMap::new(),
             quality: HashMap::new(),
             frames: Arc::new(Mutex::new(HashMap::new())),
@@ -116,6 +118,7 @@ impl<S: JsonSender> StreamPort for DriverStreamPort<'_, S> {
 pub(crate) fn stream_fetch_error(err: &TdError) -> StreamFetchError {
     match err.class {
         ErrorClass::GroupCallRejoin => StreamFetchError::RejoinNeeded,
+        ErrorClass::GroupCallLeft => StreamFetchError::CallLeft,
         ErrorClass::StreamTimeTooBig => StreamFetchError::TimeTooBig,
         _ if err.is_flood() || err.code == 420 => StreamFetchError::Flood,
         _ => StreamFetchError::Other,
@@ -124,30 +127,21 @@ pub(crate) fn stream_fetch_error(err: &TdError) -> StreamFetchError {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Routes the engine's broadcast requests and stream pictures into the
-    /// driver. The hooks run on ntgcalls threads: they only `try_send` or
-    /// store, and a full queue drops the request (logged) instead of
-    /// blocking.
+    /// driver. The hooks run on ntgcalls threads: they only queue or store
+    /// and never block. The queue never drops a request (see
+    /// [`GroupCallStreams`]); a send only fails once the driver is gone.
     pub(crate) fn install_stream_hooks(&self, engine: &mut dyn CallEngine) {
         let events = self.group_call_streams.events_tx.clone();
-        let dropped = self.group_call_streams.dropped_events.clone();
         engine.set_engine_event_callback(Arc::new(move |event| {
-            if let Err(err) = events.try_send(event) {
-                let count = dropped.fetch_add(1, Ordering::Relaxed);
-                if count.is_multiple_of(100) {
-                    let why = match err {
-                        TrySendError::Full(_) => "queue full",
-                        TrySendError::Disconnected(_) => "driver gone",
-                    };
-                    eprintln!(
-                        "quill: dropped a stream request ({why}; {} so far)",
-                        count.saturating_add(1)
-                    );
-                }
+            if events.send(event).is_err() {
+                eprintln!("quill: stream request after the driver closed; ignored");
             }
         }));
         let frames = self.group_call_streams.frames.clone();
         engine.set_stream_frame_callback(Arc::new(move |chat_id, frame| {
-            frames.lock_or_recover().insert(chat_id, frame);
+            if let Some(slot) = frames.lock_or_recover().get_mut(&chat_id) {
+                *slot = Some(frame);
+            }
         }));
     }
 
@@ -157,11 +151,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .frames
             .lock_or_recover()
             .get(&chat_id)
-            .cloned()
+            .and_then(Clone::clone)
     }
 
     /// The stream tile's width in logical pixels. The quality bucket goes
-    /// to the engine and the feeder only when it changes.
+    /// to the engine only when it changes. ntgcalls 3.0.3 has no API to
+    /// pick a stream's quality (it asks Full for RTMP and chooses per
+    /// endpoint for MTProto streams), so the engine records it for the
+    /// window and for a later ntgcalls that has one; segment requests keep
+    /// the quality ntgcalls asked for.
     pub fn report_stream_tile_width(&mut self, chat_id: i64, width: f32) {
         let Some(quality) = self
             .group_call_streams
@@ -174,9 +172,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if let Some(engine) = self.call_engine.as_deref_mut() {
             engine.set_stream_quality(chat_id, quality);
-        }
-        if let Some(feeder) = self.group_call_streams.feeders.get_mut(&chat_id) {
-            feeder.set_quality(quality);
         }
     }
 
@@ -204,20 +199,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !mode.is_stream() {
             return;
         }
-        let mut feeder = StreamFeeder::new(group_call_id, chat_id);
-        if let Some(quality) = self
-            .call_engine
-            .as_deref()
-            .and_then(|engine| engine.stream_quality(chat_id))
-        {
-            feeder.set_quality(quality);
-        }
-        self.group_call_streams.feeders.insert(chat_id, feeder);
+        self.group_call_streams
+            .feeders
+            .insert(chat_id, StreamFeeder::new(group_call_id, chat_id));
+        self.group_call_streams
+            .frames
+            .lock_or_recover()
+            .insert(chat_id, None);
     }
 
-    /// The native connect failed because this build cannot play the
-    /// stream: a fatal join error shown as the Unsupported state.
-    pub(super) fn mark_stream_unsupported(&mut self, group_call_id: i32) {
+    /// `ntg_connect` refused the stream: a fatal join error shown as the
+    /// Unsupported state. The mode comes from the join answer (the native
+    /// call never got one), and the native call is stopped so no context
+    /// is left connected without a feeder.
+    pub(super) fn mark_stream_unsupported(&mut self, group_call_id: i32, answer: &str) {
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            let _ = engine.leave_group_call(group_call_id);
+        }
         if let Some(call) = self
             .session
             .calls
@@ -225,7 +223,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_mut()
             .filter(|call| call.id == group_call_id)
         {
-            call.stream_mode = GroupCallMode::Rtmp;
+            call.stream_mode = GroupCallMode::from_join_answer(answer);
             call.stream = StreamState::Unsupported;
             // Not retried on every pump: the Join button can try again.
             call.join_payload.clear();
@@ -344,7 +342,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             EnvelopePayload::Calls(CallsPayload::GroupCallStreams { streams }) => {
                 StreamReply::Streams(streams)
             }
-            EnvelopePayload::Calls(CallsPayload::Data { base64 }) => StreamReply::Data(base64),
+            EnvelopePayload::Calls(CallsPayload::Data {
+                base64: Some(base64),
+            }) => StreamReply::Data(base64),
+            // A `data` answer without bytes is not a segment.
+            EnvelopePayload::Calls(CallsPayload::Data { base64: None }) => {
+                StreamReply::Error(StreamFetchError::Other)
+            }
             EnvelopePayload::Error(err) => StreamReply::Error(stream_fetch_error(err)),
             _ => StreamReply::Error(StreamFetchError::Other),
         };
@@ -360,17 +364,35 @@ impl<S: JsonSender> ConnectDriver<S> {
             sender: &*sender,
             engine: call_engine.as_deref_mut(),
         };
-        let mut rejoin = false;
+        let mut outcome = ReplyOutcome::NotMine;
+        let mut feeder_call = None;
         for feeder in group_call_streams.feeders.values_mut() {
-            match feeder.on_reply(extra, reply, now, &mut port) {
-                ReplyOutcome::NotMine => continue,
-                ReplyOutcome::Handled => {}
-                ReplyOutcome::Rejoin => rejoin = true,
+            outcome = feeder.on_reply(extra, reply, now, &mut port);
+            if outcome != ReplyOutcome::NotMine {
+                feeder_call = Some(feeder.group_call_id());
+                break;
             }
-            break;
         }
         self.sync_stream_state();
-        if rejoin {
+        if outcome == ReplyOutcome::Left
+            && let Some(group_call_id) = feeder_call
+        {
+            // TDLib's `on_group_call_left` without a rejoin: answer what is
+            // pending and stop the native call. The tracked call stays
+            // until TDLib's `updateGroupCall` says otherwise.
+            self.teardown_group_call_transport(group_call_id);
+            if let Some(call) = self
+                .session
+                .calls
+                .active_group_call
+                .as_mut()
+                .filter(|call| call.id == group_call_id)
+            {
+                call.transport_ready = false;
+                call.join_payload.clear();
+            }
+        }
+        if outcome == ReplyOutcome::Rejoin {
             // tdesktop's `startRejoin`, through the existing rejoin path
             // (`join.rs`, at most 3 attempts).
             if let Some(call) = self.session.calls.active_group_call.as_mut() {

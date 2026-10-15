@@ -61,6 +61,9 @@ pub enum ErrorClass {
     /// `GROUPCALL_JOIN_MISSING` / `GROUPCALL_FORBIDDEN`: a group call
     /// request needs the call rejoined (tdesktop's `startRejoin`).
     GroupCallRejoin,
+    /// `GROUPCALL_INVALID`: the call is gone; TDLib treats it as having
+    /// left the call (`GroupCallManager::on_group_call_left`).
+    GroupCallLeft,
     /// `TIME_TOO_BIG`: a stream segment is not on the server yet.
     StreamTimeTooBig,
     Other,
@@ -524,6 +527,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         }
         // Stream segments: known server constants, safe to match.
         Some("GROUPCALL_JOIN_MISSING" | "GROUPCALL_FORBIDDEN") => Some(ErrorClass::GroupCallRejoin),
+        Some("GROUPCALL_INVALID") => Some(ErrorClass::GroupCallLeft),
         Some("TIME_TOO_BIG") => Some(ErrorClass::StreamTimeTooBig),
         _ => None,
     };
@@ -571,6 +575,7 @@ mod tests {
         for (message, class) in [
             ("GROUPCALL_JOIN_MISSING", ErrorClass::GroupCallRejoin),
             ("GROUPCALL_FORBIDDEN", ErrorClass::GroupCallRejoin),
+            ("GROUPCALL_INVALID", ErrorClass::GroupCallLeft),
             ("TIME_TOO_BIG", ErrorClass::StreamTimeTooBig),
         ] {
             let value = serde_json::json!({"@type": "error", "code": 400, "message": message});

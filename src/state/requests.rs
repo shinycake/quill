@@ -196,7 +196,7 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
             return format!("Could not {action} (error {})", err.code);
         }
         // Group-call classes keep the line their plain code gave.
-        ErrorClass::GroupCallRejoin | ErrorClass::StreamTimeTooBig => {
+        ErrorClass::GroupCallRejoin | ErrorClass::GroupCallLeft | ErrorClass::StreamTimeTooBig => {
             return sessions_error_line(action, &TdError::from_code(err.code));
         }
     };
@@ -226,7 +226,7 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         // is the fallback for any generic path.
         ErrorClass::AiComposeFloodPremium => "AI request limit reached".to_string(),
         // Group-call classes keep the text their plain code gave.
-        ErrorClass::GroupCallRejoin | ErrorClass::StreamTimeTooBig => {
+        ErrorClass::GroupCallRejoin | ErrorClass::GroupCallLeft | ErrorClass::StreamTimeTooBig => {
             error_reason(&TdError::from_code(err.code))
         }
         ErrorClass::StickersForbidden | ErrorClass::GifsForbidden => err

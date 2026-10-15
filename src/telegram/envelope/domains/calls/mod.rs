@@ -95,6 +95,7 @@ pub enum CallsPayload {
         streams: Vec<crate::calls::engine::StreamChannel>,
     },
     /// `data` (line 10437) — a `getGroupCallStreamSegment` answer, still
-    /// base64; consumed by the driver's stream feeder.
-    Data { base64: String },
+    /// base64; consumed by the driver's stream feeder. `None` when the
+    /// answer has no `data` string, which the feeder answers RESYNC_NEEDED.
+    Data { base64: Option<String> },
 }

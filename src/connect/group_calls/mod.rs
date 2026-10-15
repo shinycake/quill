@@ -126,7 +126,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             if unsupported {
-                self.mark_stream_unsupported(group_call_id);
+                self.mark_stream_unsupported(group_call_id, &answer);
             }
             if connected {
                 self.start_stream_feeder(group_call_id);

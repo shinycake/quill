@@ -96,7 +96,8 @@ fn timestamp_request_answers_the_first_channels_time_offset() {
     );
     assert_eq!(outcome, ReplyOutcome::Handled);
     assert_eq!(port.timestamps, vec![(51, 1_700_000_123_456)]);
-    assert_eq!(feeder.stream_state(), StreamState::Live);
+    // A stream exists, but it is Live only from its first segment on.
+    assert_eq!(feeder.stream_state(), StreamState::Connecting);
     assert_eq!(feeder.channels().len(), 2);
     assert_eq!(feeder.last_timestamp_ms(), 1_700_000_123_456);
 }
@@ -130,7 +131,7 @@ fn empty_stream_list_answers_zero_and_shows_no_stream() {
         Instant::now(),
         &mut port,
     );
-    assert_eq!(feeder.stream_state(), StreamState::Live);
+    assert_eq!(feeder.stream_state(), StreamState::Connecting);
     assert_eq!(port.timestamps.last(), Some(&(51, 5_000)));
 }
 
@@ -198,10 +199,9 @@ fn part_request_fetches_the_segment_at_scale_zero() {
 }
 
 #[test]
-fn video_parts_use_the_tiles_quality_and_audio_parts_none() {
+fn parts_keep_the_quality_ntgcalls_asked_for() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
-    feeder.set_quality(StreamQuality::Thumbnail);
     feeder.on_part_request(
         part(1, Some(StreamQuality::Full)),
         Instant::now(),
@@ -219,9 +219,9 @@ fn video_parts_use_the_tiles_quality_and_audio_parts_none() {
     assert_eq!(
         qualities,
         vec![
-            Some(StreamQuality::Thumbnail),
+            Some(StreamQuality::Full),
+            // Audio parts carry no video quality.
             None,
-            // A quality update keeps the quality ntgcalls asked for.
             Some(StreamQuality::Medium),
         ]
     );
@@ -276,6 +276,64 @@ fn bad_base64_answers_resync_needed() {
 }
 
 #[test]
+fn empty_data_is_still_a_success() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    feeder.on_part_request(part(4, None), Instant::now(), &mut port);
+    let (id, _) = *port.segment_requests.first().expect("segment request");
+    feeder.on_reply(id, StreamReply::Data(""), Instant::now(), &mut port);
+    assert_eq!(last_part(&port).status, BroadcastPartStatus::Success);
+    assert!(last_part(&port).data.is_empty());
+}
+
+#[test]
+fn the_first_successful_segment_makes_the_stream_live() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    feeder.on_part_request(part(1, None), Instant::now(), &mut port);
+    feeder.on_part_request(part(2, None), Instant::now(), &mut port);
+    let (first, _) = port.segment_requests[0];
+    let (second, _) = port.segment_requests[1];
+    feeder.on_reply(
+        first,
+        StreamReply::Error(StreamFetchError::TimeTooBig),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(feeder.stream_state(), StreamState::Connecting);
+    feeder.on_reply(second, StreamReply::Data("AQID"), Instant::now(), &mut port);
+    assert_eq!(feeder.stream_state(), StreamState::Live);
+}
+
+#[test]
+fn call_invalid_counts_as_left() {
+    let mut port = FakePort::default();
+    let mut feeder = feeder();
+    feeder.on_part_request(part(1, None), Instant::now(), &mut port);
+    let (id, _) = *port.segment_requests.first().expect("segment request");
+    let outcome = feeder.on_reply(
+        id,
+        StreamReply::Error(StreamFetchError::CallLeft),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(outcome, ReplyOutcome::Left);
+    assert_eq!(last_part(&port).status, BroadcastPartStatus::ResyncNeeded);
+    assert_eq!(feeder.stream_state(), StreamState::Ended);
+
+    let mut feeder = super::StreamFeeder::new(555, 51);
+    feeder.on_timestamp_request(&mut port);
+    let outcome = feeder.on_reply(
+        RequestId(port.next_id),
+        StreamReply::Error(StreamFetchError::CallLeft),
+        Instant::now(),
+        &mut port,
+    );
+    assert_eq!(outcome, ReplyOutcome::Left);
+    assert_eq!(port.timestamps.last(), Some(&(51, 0)));
+}
+
+#[test]
 fn part_errors_map_like_tdesktop() {
     let cases = [
         (
@@ -292,6 +350,11 @@ fn part_errors_map_like_tdesktop() {
             StreamFetchError::RejoinNeeded,
             BroadcastPartStatus::NotReady,
             ReplyOutcome::Rejoin,
+        ),
+        (
+            StreamFetchError::CallLeft,
+            BroadcastPartStatus::ResyncNeeded,
+            ReplyOutcome::Left,
         ),
         (
             StreamFetchError::Other,
@@ -311,7 +374,7 @@ fn part_errors_map_like_tdesktop() {
 }
 
 #[test]
-fn more_than_eight_pending_parts_answer_not_ready() {
+fn parts_over_the_pending_cap_answer_not_ready() {
     let mut port = FakePort::default();
     let mut feeder = feeder();
     for segment in 0..MAX_PENDING_PARTS {

@@ -206,15 +206,16 @@ pub enum EngineError {
 }
 
 impl EngineError {
-    /// This build's ntgcalls cannot play the stream the call joined
+    /// `ntg_connect` refused the stream the call joined
     /// (`NTG_ERR_RTMP_STREAMING_UNSUPPORTED`). A fatal join error: the
-    /// call shows the Unsupported state instead of a picture.
+    /// call shows the Unsupported state instead of a picture. The same
+    /// code from any other operation is an ordinary engine error.
     pub fn is_stream_unsupported(&self) -> bool {
         matches!(
             self,
             EngineError::Engine {
+                op: "ntg_connect",
                 code: ntgcalls_sys::NTG_ERR_RTMP_STREAMING_UNSUPPORTED,
-                ..
             }
         )
     }

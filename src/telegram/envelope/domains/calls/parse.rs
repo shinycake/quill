@@ -187,14 +187,13 @@ pub(crate) fn parse_calls_payload(
                 .unwrap_or_default(),
         })),
         // Stream mode: a `getGroupCallStreamSegment` answer. The bytes stay
-        // base64 until the stream feeder decodes them (a bad encoding is
-        // answered RESYNC_NEEDED there).
+        // base64 until the stream feeder decodes them. A missing field or
+        // a bad encoding is answered RESYNC_NEEDED there, never SUCCESS.
         "data" => Ok(EnvelopePayload::Calls(CallsPayload::Data {
             base64: value
                 .get("data")
                 .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+                .map(str::to_string),
         })),
         "rtmpUrl" => Ok(EnvelopePayload::Calls(CallsPayload::RtmpUrl {
             url: value

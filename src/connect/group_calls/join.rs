@@ -331,13 +331,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `create_group_call` below replaces the old media entry — a
         // live presentation would be orphaned (still capturing on the
         // native side). Snapshot it before the entry is replaced.
-        let orphaned_presentation = self
+        let mut orphaned_presentation = self
             .call_engine
             .as_ref()
             .is_some_and(|engine| engine.presentation_active(group_call_id));
-        // A stream's pending parts are answered before the fresh native
-        // context replaces the old one; the new connect starts a new feeder.
+        // A stream's pending parts are answered, then the old native call
+        // stops, before the fresh context replaces it. Without the stop
+        // ntgcalls keeps the old connection for the chat: the new offer
+        // fails and the old stream keeps asking for parts that nobody
+        // serves. The new connect starts a new feeder.
         self.drain_stream_feeder(group_call_id);
+        if let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.leave_group_call(group_call_id).is_ok()
+        {
+            // The leave stopped the presentation first (privacy order).
+            orphaned_presentation = false;
+        }
         let params = self.group_join_params(group_call_id, is_muted);
         if let Err(err) =
             self.sender
@@ -472,7 +481,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2g: drop the native transport and retained frames for one
     /// group call id. Unknown ids succeed (idempotent cleanup).
-    fn teardown_group_call_transport(&mut self, group_call_id: i32) {
+    pub(super) fn teardown_group_call_transport(&mut self, group_call_id: i32) {
         self.drain_stream_feeder(group_call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.leave_group_call(group_call_id);

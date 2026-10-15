@@ -38,6 +38,23 @@ impl GroupCallMode {
         !matches!(self, GroupCallMode::Rtc)
     }
 
+    /// The mode ntgcalls picks for a `joinVideoChat` answer, read the way
+    /// its `ResponsePayload` does: an `rtmp` key is RTMP, a `stream` key
+    /// is an MTProto stream, anything else is RTC. Used when the connect
+    /// failed, so `ntg_get_connection_mode` has nothing to report.
+    pub fn from_join_answer(answer: &str) -> Self {
+        let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(answer) else {
+            return GroupCallMode::Rtc;
+        };
+        if fields.contains_key("rtmp") {
+            GroupCallMode::Rtmp
+        } else if fields.contains_key("stream") {
+            GroupCallMode::Stream
+        } else {
+            GroupCallMode::Rtc
+        }
+    }
+
     /// `ntg_connection_mode` to a mode; `NONE` (not connected) and unknown
     /// values have no mode.
     pub(crate) fn from_native(mode: ntg_connection_mode) -> Option<Self> {
@@ -156,6 +173,30 @@ pub struct BroadcastPartAnswer {
     pub data: Vec<u8>,
 }
 
+impl BroadcastPartAnswer {
+    /// The data pointer for `ntg_send_broadcast_part`. The C wrapper turns
+    /// a null pointer into "no data", which ntgcalls must only see for
+    /// NOT_READY and RESYNC_NEEDED: a SUCCESS without data makes it ask
+    /// for the part forever, or throw on its media thread for a quality
+    /// update. So SUCCESS always passes a non-null pointer, even for 0
+    /// bytes (an empty `Vec`'s pointer is dangling but non-null, and
+    /// ntgcalls reads `len` = 0 bytes from it).
+    pub(crate) fn native_data_ptr(&self) -> *const u8 {
+        match self.status {
+            BroadcastPartStatus::Success => self.data.as_ptr(),
+            BroadcastPartStatus::NotReady | BroadcastPartStatus::ResyncNeeded => std::ptr::null(),
+        }
+    }
+
+    /// The length to pass with [`Self::native_data_ptr`].
+    pub(crate) fn native_data_len(&self) -> usize {
+        match self.status {
+            BroadcastPartStatus::Success => self.data.len(),
+            BroadcastPartStatus::NotReady | BroadcastPartStatus::ResyncNeeded => 0,
+        }
+    }
+}
+
 /// Engine -> connect side: what ntgcalls asked for on one of its own
 /// threads. The native trampolines copy the request and hand it over
 /// without blocking.
@@ -239,6 +280,58 @@ pub enum StreamState {
 mod tests {
     use super::*;
     use ntgcalls_sys::{NTG_STREAM_DEVICE_MICROPHONE, NTG_STREAM_DEVICE_SPEAKER};
+
+    fn answer(status: BroadcastPartStatus, data: Vec<u8>) -> BroadcastPartAnswer {
+        BroadcastPartAnswer {
+            segment_id: 1,
+            part_id: 0,
+            status,
+            quality_update: false,
+            data,
+        }
+    }
+
+    #[test]
+    fn join_answer_mode_follows_ntgcalls_response_payload() {
+        assert_eq!(
+            GroupCallMode::from_join_answer(r#"{"rtmp":true}"#),
+            GroupCallMode::Rtmp
+        );
+        assert_eq!(
+            GroupCallMode::from_join_answer(r#"{"stream":true}"#),
+            GroupCallMode::Stream
+        );
+        assert_eq!(
+            GroupCallMode::from_join_answer(r#"{"transport":{}}"#),
+            GroupCallMode::Rtc
+        );
+        assert_eq!(
+            GroupCallMode::from_join_answer("not json"),
+            GroupCallMode::Rtc
+        );
+    }
+
+    #[test]
+    fn success_always_passes_a_non_null_data_pointer() {
+        let empty = answer(BroadcastPartStatus::Success, Vec::new());
+        assert!(!empty.native_data_ptr().is_null());
+        assert_eq!(empty.native_data_len(), 0);
+        let full = answer(BroadcastPartStatus::Success, vec![1, 2, 3]);
+        assert_eq!(full.native_data_ptr(), full.data.as_ptr());
+        assert_eq!(full.native_data_len(), 3);
+    }
+
+    #[test]
+    fn not_ready_and_resync_pass_no_data() {
+        for status in [
+            BroadcastPartStatus::NotReady,
+            BroadcastPartStatus::ResyncNeeded,
+        ] {
+            let answer = answer(status, vec![9]);
+            assert!(answer.native_data_ptr().is_null());
+            assert_eq!(answer.native_data_len(), 0);
+        }
+    }
 
     #[test]
     fn quality_buckets_follow_tile_width() {

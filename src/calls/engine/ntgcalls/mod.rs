@@ -274,10 +274,13 @@ impl NtgcallsEngine {
             },
             screen: null_mut(),
         };
-        // An RTMP stream is watch-only: ntgcalls throws
-        // `RTMPStreamingUnsupported` for any capture source in that mode
-        // (`group_call.cpp`, `set_stream_sources`), so none is issued.
-        if media.mode != GroupCallMode::Rtmp {
+        // Both stream modes are receive-only, so no capture source (and
+        // no microphone) is opened for a listener. RTMP would also throw
+        // `RTMPStreamingUnsupported` for one (`group_call.cpp`,
+        // `set_stream_sources`). An MTProto stream carries nothing
+        // outgoing: ntgcalls only sends media again after a new connect
+        // with an RTC answer, which issues capture then.
+        if !media.mode.is_stream() {
             // SAFETY: `instance` is live and the descriptions are
             // stack-local for the duration of this synchronous C call.
             let rc = unsafe {

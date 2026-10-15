@@ -317,6 +317,13 @@ impl CallEngine for NtgcallsEngine {
                 ..GroupCallMedia::default()
             },
         );
+        // A fresh context has no mode until it connects: an RTC call after
+        // a stream session in the same chat must not route its video to
+        // the stream slot.
+        self.callback
+            .stream_chats
+            .lock_or_recover()
+            .remove(&chat_id);
         self.callback
             .group_chat_to_call
             .lock_or_recover()
@@ -366,8 +373,13 @@ impl CallEngine for NtgcallsEngine {
         // ntgcalls picks the mode from the answer (`{"stream": true}` or
         // `{"rtmp": true}`); stream-mode frames skip the ssrc lookup.
         let mode = self.read_connection_mode(instance, chat_id);
-        if mode.is_stream() {
-            self.callback.stream_chats.lock_or_recover().insert(chat_id);
+        {
+            let mut stream_chats = self.callback.stream_chats.lock_or_recover();
+            if mode.is_stream() {
+                stream_chats.insert(chat_id);
+            } else {
+                stream_chats.remove(&chat_id);
+            }
         }
         let media = self
             .group_calls
@@ -437,16 +449,11 @@ impl CallEngine for NtgcallsEngine {
         answer: &BroadcastPartAnswer,
     ) -> Result<(), EngineError> {
         let instance = self.instance.ok_or(EngineError::NullInstance)?;
-        // A null pointer with length 0 is valid for the non-success
-        // statuses (and for an empty success).
-        let data = if answer.data.is_empty() {
-            std::ptr::null()
-        } else {
-            answer.data.as_ptr()
-        };
+        let data = answer.native_data_ptr();
         // SAFETY: the instance is live and `data` is null with length 0 or
-        // points to `answer.data`, which outlives this synchronous call
-        // (ntgcalls copies the bytes before returning).
+        // points to `answer.data` (dangling but non-null when empty, read
+        // for 0 bytes), which outlives this synchronous call (ntgcalls
+        // copies the bytes before returning).
         let rc = unsafe {
             (self.api.ntg_send_broadcast_part)(
                 instance.as_ptr(),
@@ -456,7 +463,7 @@ impl CallEngine for NtgcallsEngine {
                 answer.status.to_native(),
                 answer.quality_update,
                 data,
-                answer.data.len(),
+                answer.native_data_len(),
             )
         };
         if rc == NTG_OK {

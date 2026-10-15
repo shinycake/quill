@@ -100,7 +100,8 @@ fn timestamp_request_asks_tdlib_and_answers_the_engine() {
         ),
     );
     assert_eq!(handle.broadcast_timestamps(), vec![(51, 1_700_000_123_456)]);
-    assert_eq!(stream_state(&driver).1, StreamState::Live);
+    // Live comes with the first segment, not the stream list.
+    assert_eq!(stream_state(&driver).1, StreamState::Connecting);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -152,6 +153,7 @@ fn part_request_sends_the_segment_request_and_data_answers_success() {
     assert_eq!(answer.segment_id, 3);
     assert_eq!(answer.status, BroadcastPartStatus::Success);
     assert_eq!(answer.data, vec![1, 2, 3]);
+    assert_eq!(stream_state(&driver).1, StreamState::Live);
     // The answer never reached the reducer as a pending request.
     assert!(
         driver
@@ -211,13 +213,120 @@ fn segment_errors_map_to_part_statuses() {
 
 #[test]
 fn join_missing_answers_not_ready_and_rejoins() {
-    let (status, _handle, offers) = answer_part_with_error(400, "GROUPCALL_JOIN_MISSING");
+    let (status, handle, offers) = answer_part_with_error(400, "GROUPCALL_JOIN_MISSING");
     assert_eq!(status, BroadcastPartStatus::NotReady);
-    // The first join made one offer; the rejoin made a second.
+    // The first join made one offer; the rejoin made a second, after
+    // stopping the old native call.
     assert_eq!(offers, 2);
-    let (status, _handle, offers) = answer_part_with_error(403, "GROUPCALL_FORBIDDEN");
+    assert_eq!(handle.group_leaves(), vec![555]);
+    let (status, handle, offers) = answer_part_with_error(403, "GROUPCALL_FORBIDDEN");
     assert_eq!(status, BroadcastPartStatus::NotReady);
     assert_eq!(offers, 2);
+    assert_eq!(handle.group_leaves(), vec![555]);
+}
+
+#[test]
+fn rejoin_drains_and_stops_the_old_native_call_first() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);
+    request_part(&mut driver, &handle, 1);
+    request_part(&mut driver, &handle, 2);
+    // TDLib says the call needs a rejoin (network loss).
+    ingest_call_json(&mut driver, &seq, &sink, &group_call_json(10, true));
+    let statuses: Vec<_> = handle
+        .broadcast_parts()
+        .iter()
+        .map(|(_, answer)| answer.status)
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            BroadcastPartStatus::ResyncNeeded,
+            BroadcastPartStatus::ResyncNeeded
+        ]
+    );
+    assert_eq!(handle.group_leaves(), vec![555]);
+    assert_eq!(handle.group_offers().len(), 2);
+    // The old feeder is gone: a late request is answered at once instead
+    // of attaching to the new context.
+    request_part(&mut driver, &handle, 3);
+    assert_eq!(
+        handle.broadcast_parts().last().map(|(_, a)| a.status),
+        Some(BroadcastPartStatus::ResyncNeeded)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn call_invalid_stops_the_stream_without_a_rejoin() {
+    let (status, handle, offers) = answer_part_with_error(400, "GROUPCALL_INVALID");
+    assert_eq!(status, BroadcastPartStatus::ResyncNeeded);
+    assert_eq!(offers, 1, "no rejoin");
+    assert_eq!(handle.group_leaves(), vec![555]);
+}
+
+#[test]
+fn call_invalid_marks_the_stream_ended() {
+    let (dir, mut driver, recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);
+    request_part(&mut driver, &handle, 1);
+    let request = sent_request(&recorder, "getGroupCallStreamSegment");
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"GROUPCALL_INVALID","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert_eq!(stream_state(&driver).1, StreamState::Ended);
+    let call = driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .expect("call");
+    assert!(!call.transport_ready);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn data_without_bytes_answers_resync_needed() {
+    let (dir, mut driver, recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);
+    request_part(&mut driver, &handle, 1);
+    let request = sent_request(&recorder, "getGroupCallStreamSegment");
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"data","@extra":"{}"}}"#, extra_of(&request)),
+    );
+    let status = handle.broadcast_parts().last().map(|(_, a)| a.status);
+    assert_eq!(status, Some(BroadcastPartStatus::ResyncNeeded));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn every_queued_request_is_answered() {
+    let (dir, mut driver, recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
+    // Far more than one tick handles and more than the old bounded queue
+    // held: none may be dropped, since ntgcalls never asks again.
+    for segment in 0..600 {
+        handle.emit_engine_event(EngineEvent::BroadcastPartRequested {
+            chat_id: 51,
+            request: part(segment),
+        });
+    }
+    for _ in 0..20 {
+        driver.request_tick(Instant::now());
+    }
+    let sent = recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains("getGroupCallStreamSegment"))
+        .count();
+    // The feeder sends up to its cap and answers the rest NOT_READY.
+    assert_eq!(sent + handle.broadcast_parts().len(), 600);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -278,11 +387,13 @@ fn tile_width_reports_quality_only_on_bucket_change() {
         handle.stream_qualities(),
         vec![(51, StreamQuality::Full), (51, StreamQuality::Thumbnail)]
     );
+    // The tile's quality is recorded, but the request keeps what ntgcalls
+    // asked for (Full for RTMP, as tgcalls asks for tdesktop).
     request_part(&mut driver, &handle, 2);
     let request = sent_request(&recorder, "getGroupCallStreamSegment");
     assert_eq!(
         request["video_quality"]["@type"],
-        "groupCallVideoQualityThumbnail"
+        "groupCallVideoQualityFull"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -313,7 +424,23 @@ fn unsupported_stream_is_a_join_error_not_a_crash() {
         .expect("call");
     assert!(!call.transport_ready);
     assert!(call.transport_error.is_some());
+    // No native call is left connected without a feeder.
+    assert_eq!(handle.group_leaves(), vec![555]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn unsupported_code_from_another_operation_is_an_ordinary_error() {
+    let err = crate::calls::engine::EngineError::Engine {
+        op: "ntg_set_stream_sources",
+        code: NTG_ERR_RTMP_STREAMING_UNSUPPORTED,
+    };
+    assert!(!err.is_stream_unsupported());
+    let err = crate::calls::engine::EngineError::Engine {
+        op: "ntg_connect",
+        code: NTG_ERR_RTMP_STREAMING_UNSUPPORTED,
+    };
+    assert!(err.is_stream_unsupported());
 }
 
 #[test]
@@ -334,6 +461,27 @@ fn stream_pictures_land_in_the_chats_stream_slot() {
     let frame = driver.latest_stream_frame(51).expect("stream frame");
     assert_eq!((frame.width, frame.height), (2, 2));
     assert!(driver.latest_stream_frame(52).is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_picture_after_leaving_does_not_bring_the_slot_back() {
+    let (dir, mut driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
+    driver.leave_group_call().expect("leave");
+    // ntgcalls can still deliver a frame between the drain and the stop.
+    handle.emit_stream_frame(
+        51,
+        VideoFrame {
+            seq: 0,
+            width: 2,
+            height: 2,
+            rgba: vec![0; 16],
+            is_local: false,
+            participant_user_id: None,
+            is_screen: false,
+        },
+    );
+    assert!(driver.latest_stream_frame(51).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
