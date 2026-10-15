@@ -142,6 +142,19 @@ impl WaitingGate {
     }
 }
 
+/// The seek slider's range: the clip length, at least one second (a
+/// zero-width range has no drag).
+pub(crate) fn seek_range(total: f64) -> f64 {
+    total.max(1.0)
+}
+
+/// The seek slider was built for another length: its range has no setter,
+/// so it is made again. Compared against [`seek_range`], so a clip under a
+/// second keeps its one slider.
+pub(crate) fn seek_range_stale(max: f32, total: f64) -> bool {
+    total > 0.0 && (f64::from(max) - seek_range(total)).abs() > 0.5
+}
+
 /// The volume icon's tier (tdesktop `VolumeController`: off at 0, the
 /// small speaker under half, the full one above).
 pub(crate) fn volume_icon(level: f32) -> IconName {

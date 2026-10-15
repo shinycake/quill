@@ -134,11 +134,6 @@ impl QuillApp {
     /// Looping clips play only while the window is active (tdesktop pauses
     /// them in the background): pause on deactivation, resume on return.
     pub(super) fn sync_viewer_window_activity(&mut self, active: bool, cx: &mut Context<Self>) {
-        // The Space key-up goes elsewhere once the window is in the
-        // background: end a hold there.
-        if !active {
-            self.cancel_viewer_boost(cx);
-        }
         if !self.viewer_loops() || self.viewer.player.is_none() {
             return;
         }
@@ -187,13 +182,10 @@ impl QuillApp {
         // The length became known (or differs from the message's): the
         // slider's range has no setter, so it is made again.
         let total = transport.total();
-        let stale = self
-            .viewer
-            .controls
-            .seek
-            .as_ref()
-            .is_some_and(|slider| (f64::from(slider.read(cx).max_value()) - total).abs() > 0.5);
-        if total > 0.0 && stale {
+        let stale = self.viewer.controls.seek.as_ref().is_some_and(|slider| {
+            crate::ui::video_player::controls::seek_range_stale(slider.read(cx).max_value(), total)
+        });
+        if stale {
             self.create_viewer_seek_slider(total, cx);
         }
         if let Some(slider) = self.viewer.controls.seek.as_ref() {

@@ -41,6 +41,7 @@ impl Render for QuillApp {
         self.set_window_scope(None);
         self.windows.main = Some(window.window_handle());
         self.slices.a11y_active.set(self.screen_reader_on(window));
+        self.release_viewer_key_probe(window, cx);
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();

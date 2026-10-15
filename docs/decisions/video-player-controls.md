@@ -52,7 +52,26 @@ a tap toggles pause on release.
   release; a 200 ms hold timer starts the boost. The key-up comes through a
   `capture_key_up` on `QuillApp`'s root. When nothing is focused, the
   viewer focuses a zero-size probe on Space, so the release reaches the
-  window path.
+  window path. Once the viewer closes, the next root render lets go of
+  that focus (`release_viewer_key_probe`).
+- A hold also ends when the window loses activation (the observer in
+  `app_demo.rs`, not a render) and when PiP opens: in both cases the
+  release goes to another window.
+- Chat windows: the keystroke interceptor is app-wide and puts the
+  window's slot in place first, so Space key-downs reach a chat-window
+  viewer's hold logic too. The chat-window root therefore has the same
+  `capture_key_up`, with its scope set, and releases its probe the same
+  way.
+- The scrubber reports hover in whole pixels, so a move inside one pixel
+  does not redraw the viewer slice.
+- The seek slider is labeled "Seek" and the volume slider "Volume". The
+  label is set on `SliderState` through a small patch to the vendored
+  gpui-base (`third_party/gpui-base/QUILL-CHANGES.md`, "Slider labels"),
+  because neither the kit `Slider` nor the base `Slider` takes a name.
+- The seek slider's range is at least one second (`seek_range`), and its
+  staleness check compares against that same range. Comparing against the
+  raw length rebuilt the slider and its subscription on every render for
+  clips under half a second.
 - Controls fade out over 600 ms and back in over 200 ms. They stay up while
   the pointer is on them or a slider is being dragged.
 - The picture shows a spinner after 500 ms of waiting, a 48 px progress
@@ -73,7 +92,10 @@ In layered mode the viewer's cached slice root was
 `div().absolute().inset_0()`. The slice box gives it no height, so the root
 measured 1200 x 0 and `bottom_0` pushed the bottom bar above the window. The
 controls could not be seen at all. The root now takes the viewport size
-(`overlay.rs`).
+(`overlay.rs`). No test caught it; the first capture of this PR did.
+`the_controller_sits_inside_the_window` now covers it: in layered mode the
+panel must lie inside the window, in its lower half. Run against the old
+root, the test fails with the panel at y = −88.
 
 ## Why the scrubber is composed
 
@@ -112,6 +134,9 @@ at the pointer fraction).
   focus mid-hold, or a platform dropped it), a press 2.5 s after the last
   sign of Space (`BOOST_STALE_MS`) starts fresh instead of being read as a key
   repeat. A deactivated window also ends a hold.
+- **Fade restart.** `fade_controls` restarts its animation at t = 0 on each
+  show/hide flip. tdesktop animates from the current opacity, so a flip
+  halfway through a fade jumps in Quill instead of turning around smoothly.
 - **Layout** follows the design (scrubber row on top, buttons under it).
   tdesktop puts the scrubber at the bottom of the panel.
 - **Two demo kinds** were added (`ready-video-controls`,
@@ -145,6 +170,16 @@ at the pointer fraction).
   - A hold sets rate 2 after 200 ms, does not toggle, and restores the rate
     on release.
   - `.` and `,` step forward and back while paused.
+  - Deactivating the window mid-hold restores the rate with no key-up
+    (`a_hold_ends_when_the_window_deactivates`).
+  - A 0.3 s clip keeps one seek slider across ticks
+    (`a_short_clip_keeps_one_seek_slider`).
+  - The key probe lets go of focus when the viewer closes
+    (`the_key_probe_lets_go_when_the_viewer_closes`).
+  - The controller lies inside the window in layered mode
+    (`the_controller_sits_inside_the_window`).
+- The chat-window key-up path is covered by reading the code only: no test
+  drives a second window.
 - Captures (`QUILL_DEMO_CAPTURE`, 1200 x 900, both themes):
   `ready-video-controls`, `ready-video-speed` and `ready-video-pip`. Checked
   for overlap, clipping and contrast. The panel, labels, hover thumb, time
@@ -161,4 +196,6 @@ Not verified:
   test clock and the scripted stall only.
 - The download ring against a real TDLib download.
 - Live-account playback.
+- The "Seek" and "Volume" names with a real screen reader. The patch only
+  sets `aria_label` on the slider's root, like any other labeled element.
 - Linux and Windows: built by CI only, not run.

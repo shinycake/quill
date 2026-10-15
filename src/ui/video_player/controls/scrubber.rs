@@ -48,13 +48,16 @@ pub(crate) fn buffered_spans(buffered: &[Range<f64>], total: f64) -> Vec<(f32, f
 }
 
 /// The pointer's fraction along a track that starts at `left` and is
-/// `width` wide; `None` before the track has been laid out.
+/// `width` wide; `None` before the track has been laid out. Snapped to
+/// whole pixels, so a move inside the same pixel reports the same value
+/// (and the hover handler skips the redraw).
 pub(crate) fn pointer_fraction(x: Pixels, left: Pixels, width: Pixels) -> Option<f32> {
     let width = f32::from(width);
     if width.is_nan() || width <= 0.0 {
         return None;
     }
-    Some(((f32::from(x) - f32::from(left)) / width).clamp(0.0, 1.0))
+    let pixel = (f32::from(x) - f32::from(left)).clamp(0.0, width).round();
+    Some((pixel / width).clamp(0.0, 1.0))
 }
 
 /// The elapsed label (tdesktop `FormatDurationText` of the played part).
@@ -321,6 +324,10 @@ mod tests {
         assert_eq!(at(200.), Some(0.5));
         assert_eq!(at(350.), Some(1.0));
         assert_eq!(at(20.), Some(0.0));
+        // Moves inside one pixel report the same value (no redraw).
+        assert_eq!(at(150.2), at(149.8));
+        assert_eq!(at(150.2), Some(0.25));
+        assert_ne!(at(150.2), at(151.0));
         // Not laid out yet.
         assert_eq!(pointer_fraction(px(10.), px(0.), px(0.)), None);
     }

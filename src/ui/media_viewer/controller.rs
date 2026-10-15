@@ -205,6 +205,36 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// The window's activation changed: once it is in the background a
+    /// Space hold's key-up goes to another window, so the hold ends here,
+    /// not at the next render or press.
+    pub(in crate::ui) fn viewer_window_activation(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !window.is_window_active() {
+            self.cancel_viewer_boost(cx);
+        }
+    }
+
+    /// The viewer closed: let go of the key probe (Space focuses it when
+    /// nothing else has focus), so the window's keys go back to the app.
+    pub(in crate::ui) fn release_viewer_key_probe(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.viewer.state.is_open() {
+            return;
+        }
+        if let Some(focus) = self.viewer.controls.focus.take()
+            && focus.is_focused(window)
+        {
+            window.blur(cx);
+        }
+    }
+
     /// Space went down (key repeats included): arm the hold check.
     pub(super) fn viewer_space_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // GIFs have no transport to speed up: Space just toggles.
@@ -284,7 +314,7 @@ impl QuillApp {
 
     /// Forget a Space press whose key-up will not come (the window went to
     /// the background); a running boost ends.
-    pub(super) fn cancel_viewer_boost(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn cancel_viewer_boost(&mut self, cx: &mut Context<Self>) {
         self.viewer.controls.boost_timer = None;
         if self.viewer.controls.boost.cancel() {
             self.restore_viewer_rate(cx);

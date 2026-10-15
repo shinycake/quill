@@ -288,6 +288,7 @@ impl QuillApp {
                 .min(0.0)
                 .max(100.0)
                 .default_value((self.playback.volume * 100.0).round())
+                .label("Volume")
         });
         cx.subscribe(&volume, |this, _, event, cx| {
             this.on_viewer_volume_event(event, cx);
@@ -303,13 +304,14 @@ impl QuillApp {
         let position = self
             .viewer_transport()
             .map_or(0.0, |transport| transport.position.max(0.0));
-        let max = duration.max(1.0);
+        let max = crate::ui::video_player::controls::seek_range(duration);
         let slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
                 .max(max as f32)
                 .step(0.1)
                 .default_value(position.min(max) as f32)
+                .label("Seek")
         });
         cx.subscribe(&slider, |this, _, event, cx| {
             this.on_viewer_seek_event(event, cx);

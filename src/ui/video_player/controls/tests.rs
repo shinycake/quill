@@ -101,9 +101,9 @@ fn the_time_labels_pass_aa_on_any_picture() {
 #[cfg(feature = "demo-capture")]
 mod ui {
     use super::super::{
-        ControllerActions, PictureOverlay, PictureState, VideoController, speed_trigger,
+        ControllerActions, PictureOverlay, PictureState, VideoController, VideoControlsState,
+        WaitingCheck, WaitingGate, speed_trigger,
     };
-    use super::*;
     use crate::ui::chat_theme::set_theme_mode;
     use crate::ui::video_player::PlayState;
     use crate::ui::video_player::Transport;
@@ -117,6 +117,7 @@ mod ui {
     use gpui_kit::{TestAppContext, VisualTestContext};
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::time::{Duration, Instant};
 
     fn transport(state: PlayState, volume: f32) -> Transport {
         Transport {
