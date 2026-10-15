@@ -125,6 +125,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                 }
             }
+            self.note_stream_rtmp_info(group_call_id, &answer);
             if unsupported {
                 self.mark_stream_unsupported(group_call_id, &answer);
             }

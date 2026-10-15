@@ -331,6 +331,26 @@ impl CallEngine for NtgcallsEngine {
         Ok(offer)
     }
 
+    fn set_group_playback(
+        &mut self,
+        group_call_id: i32,
+        speaker: Option<&str>,
+        muted: bool,
+    ) -> Result<(), EngineError> {
+        let media = self
+            .group_calls
+            .get_mut(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        let changed = media.speaker.as_deref() != speaker || media.playback_muted != muted;
+        media.speaker = speaker.map(str::to_owned);
+        media.playback_muted = muted;
+        if changed && media.connected {
+            self.issue_group_playback(group_call_id)
+        } else {
+            Ok(())
+        }
+    }
+
     fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
         self.group_calls
             .get_mut(&group_call_id)

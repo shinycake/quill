@@ -891,3 +891,7 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod call_again;
+pub(super) mod stream_controls;
+pub(super) mod stream_picture;
+pub(super) mod stream_tile;
+pub(super) mod stream_title;

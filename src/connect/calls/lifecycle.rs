@@ -221,8 +221,54 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             engine.select_devices(call.id, selection.0.as_deref(), selection.1.as_deref())?;
         }
+        // A group call (a live stream's Speakers row) plays on the new
+        // output right away, also while its join is on the way.
+        if let Some(call) = self.session.calls.active_group_call.as_ref()
+            && let Some(engine) = self.call_engine.as_deref_mut()
+        {
+            match engine.set_group_playback(
+                call.id,
+                selection.1.as_deref(),
+                self.group_playback_muted == Some(call.id),
+            ) {
+                // No native call (joined without the engine): nothing plays.
+                Ok(()) | Err(EngineError::NoSuchCall(_)) => {}
+                Err(err) => return Err(err),
+            }
+        }
         self.selected_devices = selection;
         Ok(())
+    }
+
+    /// Mute or unmute the tracked group call's sound for yourself only
+    /// (tdesktop's local mute in the live stream's settings).
+    pub fn set_group_call_playback_muted(&mut self, muted: bool) -> Result<(), EngineError> {
+        let Some(id) = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .map(|call| call.id)
+        else {
+            return Err(EngineError::NoSuchCall(0));
+        };
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            match engine.set_group_playback(id, self.selected_devices.1.as_deref(), muted) {
+                Ok(()) | Err(EngineError::NoSuchCall(_)) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        self.group_playback_muted = muted.then_some(id);
+        Ok(())
+    }
+
+    /// Whether you muted the tracked group call's sound for yourself.
+    pub fn group_call_playback_muted(&self) -> bool {
+        self.session
+            .calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| self.group_playback_muted == Some(call.id))
     }
 
     /// Phase C1: `sendCallRating` for the last ended call (the 1–5

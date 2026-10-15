@@ -58,6 +58,7 @@ struct MockInner {
     engine_event_hook: Option<EngineEventCallback>,
     stream_frame_hook: Option<StreamFrameCallback>,
     stream_qualities: Vec<(i64, StreamQuality)>,
+    group_playbacks: Vec<(i32, Option<String>, bool)>,
     broadcast_timestamps: Vec<(i64, i64)>,
     broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
     /// External frames pushed through `external_frame_sender`.
@@ -194,6 +195,10 @@ impl MockEngine {
     /// (e.g. `NTG_ERR_RTMP_STREAMING_UNSUPPORTED`).
     pub fn fail_next_group_connect(&self, code: i32) {
         self.inner.lock_or_recover().fail_group_connect = Some(code);
+    }
+
+    pub fn group_playbacks(&self) -> Vec<(i32, Option<String>, bool)> {
+        self.inner.lock_or_recover().group_playbacks.clone()
     }
 
     pub fn stream_qualities(&self) -> Vec<(i64, StreamQuality)> {
@@ -638,6 +643,20 @@ impl CallEngine for MockEngine {
             .lock_or_recover()
             .presentations
             .contains(&group_call_id)
+    }
+
+    fn set_group_playback(
+        &mut self,
+        group_call_id: i32,
+        speaker: Option<&str>,
+        muted: bool,
+    ) -> Result<(), EngineError> {
+        self.inner.lock_or_recover().group_playbacks.push((
+            group_call_id,
+            speaker.map(str::to_owned),
+            muted,
+        ));
+        Ok(())
     }
 
     fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {

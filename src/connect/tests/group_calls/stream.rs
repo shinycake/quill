@@ -506,3 +506,108 @@ fn viewer_count_follows_participant_count() {
     assert_eq!(call.viewer_count, 0, "a negative count is no viewers");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_newest_picture_is_known_by_its_sequence() {
+    let (dir, driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
+    assert_eq!(driver.latest_stream_frame_seq(51), None);
+    let mut seqs = Vec::new();
+    for _ in 0..2 {
+        handle.emit_stream_frame(
+            51,
+            VideoFrame {
+                seq: 0,
+                width: 2,
+                height: 2,
+                rgba: vec![0; 16],
+                is_local: false,
+                participant_user_id: None,
+                is_screen: false,
+            },
+        );
+        // The engine numbers its pictures.
+        seqs.push(driver.latest_stream_frame(51).map(|frame| frame.seq));
+    }
+    assert_ne!(seqs.first(), seqs.get(1), "each picture has its own number");
+    assert_eq!(
+        driver.latest_stream_frame_seq(51),
+        seqs.get(1).copied().flatten()
+    );
+    assert_eq!(driver.latest_stream_frame_seq(52), None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_rtmp_join_answer_for_the_admin_keeps_the_server_url() {
+    use crate::connect::group_calls::stream::rtmp_info_from_join_answer;
+    let answer =
+        r#"{"rtmp":true,"rtmp_stream_url":"rtmps://dc4-1.rtmp.t.me/s/","rtmp_stream_key":"1:abc"}"#;
+    assert_eq!(
+        rtmp_info_from_join_answer(answer),
+        Some(("rtmps://dc4-1.rtmp.t.me/s/".into(), "1:abc".into()))
+    );
+    assert_eq!(
+        rtmp_info_from_join_answer(r#"{"rtmp":true}"#),
+        Some((String::new(), String::new()))
+    );
+    assert_eq!(rtmp_info_from_join_answer(r#"{"stream":true}"#), None);
+    assert_eq!(rtmp_info_from_join_answer("not json"), None);
+
+    let (dir, mut driver, _recorder, _handle, sink, seq) = ready_group_call_driver();
+    let extra = driver.join_video_chat(555).expect("join tracked call");
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"text","text":{},"@extra":{}}}"#,
+            serde_json::to_string(answer).expect("json"),
+            extra.0
+        ),
+    );
+    let call = driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .expect("tracked call");
+    assert_eq!(call.rtmp_url.as_deref(), Some("rtmps://dc4-1.rtmp.t.me/s/"));
+    assert_eq!(call.rtmp_stream_key.as_deref(), Some("1:abc"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_chosen_speaker_plays_the_stream_and_follows_a_change() {
+    let (dir, mut driver, _recorder, handle, ..) = ready_group_call_driver();
+    driver
+        .select_call_devices(None, Some("usb-headset".into()))
+        .expect("select before the call");
+    handle.set_group_call_mode(51, GroupCallMode::Rtmp);
+    driver.join_video_chat(555).expect("join tracked call");
+    // The pick reaches the tracked call before the join (a change while
+    // a join is on its way), and the join creates the call with it.
+    assert_eq!(
+        handle.group_playbacks(),
+        vec![(555, Some("usb-headset".to_string()), false); 2],
+        "the join creates the call with the chosen output"
+    );
+    if let Some(call) = driver.session.calls.active_group_call.as_mut() {
+        call.is_joined = true;
+    }
+    driver
+        .select_call_devices(None, Some("speakers".into()))
+        .expect("switch output");
+    driver
+        .set_group_call_playback_muted(true)
+        .expect("mute for me");
+    assert!(driver.group_call_playback_muted());
+    assert_eq!(
+        handle.group_playbacks().get(2..).map(<[_]>::to_vec),
+        Some(vec![
+            (555, Some("speakers".to_string()), false),
+            (555, Some("speakers".to_string()), true),
+        ]),
+        "a change and the local mute reach the joined call"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

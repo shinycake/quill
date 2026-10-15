@@ -31,7 +31,7 @@ pub(super) const LINK_COPIED: &str = "Invite link copied to clipboard.";
 
 impl QuillApp {
     /// The chat a video chat belongs to.
-    fn group_call_chat(&self, call: &ActiveGroupCall) -> Option<&ChatSummary> {
+    pub(super) fn group_call_chat(&self, call: &ActiveGroupCall) -> Option<&ChatSummary> {
         let session = self.session()?;
         session.chats.values().find(|chat| {
             chat.video_chat

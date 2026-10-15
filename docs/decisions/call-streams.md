@@ -216,3 +216,11 @@ soon as TDLib returns them. That covers three pending segments with four
 video endpoints and a quality update; past it a part answers NOT_READY
 and ntgcalls asks again 100 ms later. The event queue holds only what
 ntgcalls asked for and has not been answered.
+
+## PR 2 note
+
+The stream picture is not drawn through `video_player` as the design
+planned. `StreamTile` (`src/ui/calls/stream_tile.rs`) draws it like the
+group tiles: a `RenderImage` per frame sequence, `object_fit(Contain)`,
+redraws through the frame clock at the stream's interval. See
+`call-stream-window.md`.

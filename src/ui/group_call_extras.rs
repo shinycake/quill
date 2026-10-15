@@ -64,7 +64,9 @@ impl QuillApp {
     /// The push-to-talk key went down (window or system-wide). Returns
     /// whether it was handled.
     fn ptt_press(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.group_call_joined() {
+        // A live stream's viewer has no microphone: the key does nothing
+        // there (tdesktop's push-to-talk acts only on a voice chat).
+        if !self.group_call_joined() || self.group_call_is_stream() {
             return false;
         }
         // An admin-muted participant cannot open the microphone by key.

@@ -36,7 +36,7 @@ pub(crate) struct GroupCallStreams {
     /// One slot per chat with a live feeder. The engine hook only fills
     /// an existing slot, so a picture that arrives between the drain and
     /// the native stop is dropped instead of bringing the slot back.
-    frames: Arc<Mutex<HashMap<i64, Option<VideoFrame>>>>,
+    frames: Arc<Mutex<HashMap<i64, Option<Arc<VideoFrame>>>>>,
 }
 
 impl Default for GroupCallStreams {
@@ -140,18 +140,51 @@ impl<S: JsonSender> ConnectDriver<S> {
         let frames = self.group_call_streams.frames.clone();
         engine.set_stream_frame_callback(Arc::new(move |chat_id, frame| {
             if let Some(slot) = frames.lock_or_recover().get_mut(&chat_id) {
-                *slot = Some(frame);
+                // Shared, not copied: the window converts it off the UI
+                // thread while the next picture replaces it here.
+                *slot = Some(Arc::new(frame));
             }
         }));
     }
 
     /// The newest picture of the stream-mode call in `chat_id`.
-    pub fn latest_stream_frame(&self, chat_id: i64) -> Option<VideoFrame> {
+    pub fn latest_stream_frame(&self, chat_id: i64) -> Option<Arc<VideoFrame>> {
         self.group_call_streams
             .frames
             .lock_or_recover()
             .get(&chat_id)
             .and_then(Clone::clone)
+    }
+
+    /// The sequence number of the newest picture in `chat_id`'s stream
+    /// slot, so the window copies a picture only when it changed.
+    pub fn latest_stream_frame_seq(&self, chat_id: i64) -> Option<u64> {
+        self.group_call_streams
+            .frames
+            .lock_or_recover()
+            .get(&chat_id)
+            .and_then(|frame| frame.as_ref().map(|frame| frame.seq))
+    }
+
+    /// An RTMP join answer carries the stream's server URL and key when you
+    /// can manage it (`rtmp_stream_url`, `rtmp_stream_key`). tdesktop keeps
+    /// them as the call's RTMP info (`GroupCall` join handling), which
+    /// picks the admin text when nobody is broadcasting. Other answers
+    /// leave the call alone.
+    pub(super) fn note_stream_rtmp_info(&mut self, group_call_id: i32, answer: &str) {
+        let Some((url, key)) = rtmp_info_from_join_answer(answer) else {
+            return;
+        };
+        if let Some(call) = self
+            .session
+            .calls
+            .active_group_call
+            .as_mut()
+            .filter(|call| call.id == group_call_id)
+        {
+            call.rtmp_url = Some(url).filter(|url| !url.is_empty());
+            call.rtmp_stream_key = Some(key).filter(|key| !key.is_empty());
+        }
     }
 
     /// The stream tile's width in logical pixels. The quality bucket goes
@@ -420,4 +453,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             call.stream = feeder.stream_state();
         }
     }
+}
+
+/// `(url, key)` of an RTMP join answer (tdesktop `ParseJoinResponse`:
+/// `rtmp_stream_url` and `rtmp_stream_key`, empty when absent); `None`
+/// for an answer that is not an RTMP stream.
+pub(crate) fn rtmp_info_from_join_answer(answer: &str) -> Option<(String, String)> {
+    let serde_json::Value::Object(fields) = serde_json::from_str(answer).ok()? else {
+        return None;
+    };
+    if GroupCallMode::from_join_answer(answer) != GroupCallMode::Rtmp {
+        return None;
+    }
+    let text = |name: &str| {
+        fields
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    Some((text("rtmp_stream_url"), text("rtmp_stream_key")))
 }

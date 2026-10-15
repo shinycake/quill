@@ -53,6 +53,8 @@ pub(crate) struct GroupCallUi {
     /// `(group_call_id, user_id, is_screen)` → `(frame seq, image)`,
     /// rebuilt only when that slot's frame sequence changes.
     pub(super) video_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
+    /// The live stream layout (RTMP): picture, placeholder and controls.
+    pub(super) stream: super::group_call_stream_layout::StreamWindow,
 }
 
 impl GroupCallUi {
@@ -83,6 +85,7 @@ impl GroupCallUi {
             ),
             level_seen: 0.0,
             video_images: HashMap::new(),
+            stream: Default::default(),
         }
     }
 }

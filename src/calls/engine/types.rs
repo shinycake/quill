@@ -336,6 +336,10 @@ pub(crate) struct GroupCallMedia {
     pub(crate) mode: GroupCallMode,
     /// Last quality the stream tile reported (stream mode only).
     pub(crate) stream_quality: Option<StreamQuality>,
+    /// The output device for the call's sound; `None` is the default.
+    pub(crate) speaker: Option<String>,
+    /// You muted the call's sound for yourself: no output writer.
+    pub(crate) playback_muted: bool,
 }
 
 pub(crate) struct NativeRtcServers {
