@@ -216,8 +216,10 @@ impl Session {
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { .. }))
                 ) {
+                    let has_password = state.has_password;
                     self.auth_state.password_state = Some(state);
                     self.auth_state.password_state_loading = false;
+                    self.route_gift_export_on_password(has_password);
                     self.auth_state.password_op_error = None;
                     if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                         pending.map(|p| p.purpose)

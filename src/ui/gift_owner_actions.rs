@@ -1,7 +1,8 @@
 //! The owner's actions on one received gift: pin, upgrade, transfer, resale
-//! price, crafting and collection membership (tdesktop's gift view box). Upgrade and
-//! transfer spend Stars, so each opens an inline confirmation that names the
-//! price; the handlers are in `gift_manage_ui`.
+//! price, crafting and collection membership (tdesktop's gift view box). Upgrade
+//! spends Stars, so it opens an inline confirmation that names the price; the
+//! handlers are in `gift_manage_ui`. Transfer opens the transfer picker
+//! (`gift_transfer_ui`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -72,17 +73,11 @@ pub(super) fn gift_owner_actions(
                 cx,
             ));
         }
-        TransferGate::Ready { star_count } => {
-            col = transfer_section(
-                col,
-                gift,
-                session,
-                star_count,
-                poor(star_count),
-                &balance_line(),
-                busy,
-                cx,
-            );
+        TransferGate::Ready { .. } => col = col.child(transfer_button(gift, busy, cx)),
+        // tdesktop offers Transfer for a collectible in a TON wallet too;
+        // it opens "Action Locked".
+        TransferGate::Unavailable if gift.held_outside_telegram() && !gift.was_refunded => {
+            col = col.child(transfer_button(gift, busy, cx));
         }
         TransferGate::Unavailable => {}
     }
@@ -283,94 +278,14 @@ fn upgrade_section(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn transfer_section(
-    col: Div,
-    gift: &ReceivedGift,
-    session: &Session,
-    star_count: i64,
-    too_poor: bool,
-    balance_line: &str,
-    busy: bool,
-    cx: &mut Context<QuillApp>,
-) -> Div {
+/// "Transfer": opens the transfer picker (tdesktop `ShowTransferGiftBox`).
+fn transfer_button(gift: &ReceivedGift, busy: bool, cx: &mut Context<QuillApp>) -> Button {
     let id = gift.id.clone();
-    let manage = &session.payments.gifts_manage;
-    let open = matches!(&manage.flow, Some(GiftFlow::Transfer { id: open }) if *open == gift.id);
-    if !open {
-        return col.child(
-            Button::new("gift-transfer")
-                .label(tr(keys::Q_MONEY_TRANSFER_TO_THE_OPEN_CHAT))
-                .ghost()
-                .disabled(busy)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.set_gift_flow(Some(GiftFlow::Transfer { id: id.clone() }), window, cx)
-                })),
-        );
-    }
-    let recipient = session
-        .open_chat
-        .and_then(|chat| session.gift_recipient(chat))
-        .filter(|r| !r.is_self);
-    let cancel = Button::new("gift-transfer-no")
-        .label(tr(keys::CANCEL))
+    Button::new("gift-transfer")
+        .label(tr(keys::GIFT_TRANSFER_BUTTON))
         .ghost()
-        .on_click(cx.listener(|this, _, window, cx| this.set_gift_flow(None, window, cx)));
-    let Some(recipient) = recipient else {
-        return col.child(
-            panel(cx)
-                .child(
-                    div()
-                        .text_sm()
-                        .child(tr(keys::Q_MONEY_OPEN_THE_CHAT_OF_THE)),
-                )
-                .child(div().flex().child(cancel)),
-        );
-    };
-    let mut p = panel(cx).child(
-        div().text_sm().child(tr_with(
-            keys::Q_MONEY_TRANSFER_THIS_GIFT_TO_IT,
-            &[
-                ("name", &recipient.name.to_string()),
-                (
-                    "to_string",
-                    &(if star_count > 0 {
-                        format!(" and {} are taken from your balance.", stars(star_count))
-                    } else {
-                        ".".to_string()
-                    })
-                    .to_string(),
-                ),
-            ],
-        )),
-    );
-    if too_poor {
-        p = p.child(hint(balance_line.to_string(), cx));
-    }
-    col.child(
-        p.child(
-            div()
-                .flex()
-                .gap_2()
-                .child(
-                    Button::new("gift-transfer-yes")
-                        .label(if star_count > 0 {
-                            tr_with(
-                                keys::GIFT_TRANSFER_BUTTON_FOR,
-                                &[("price", &(stars(star_count)).to_string())],
-                            )
-                        } else {
-                            tr(keys::GIFT_TRANSFER_BUTTON).to_string()
-                        })
-                        .danger()
-                        .disabled(busy || too_poor)
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.confirm_transfer(&id, cx)),
-                        ),
-                )
-                .child(cancel),
-        ),
-    )
+        .disabled(busy)
+        .on_click(cx.listener(move |this, _, window, cx| this.open_gift_transfer(&id, window, cx)))
 }
 
 fn resale_section(

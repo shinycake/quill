@@ -32,6 +32,16 @@ pub(crate) struct PaymentUi {
     /// Stars, members to award, countries (`stars_gift_ui`,
     /// `giveaway_pick_ui`).
     pub(super) pick_search: Entity<InputState>,
+    /// The 2-step verification password of "Send via Blockchain"
+    /// (`gift_transfer_ui`); emptied when it is sent and when the box
+    /// closes.
+    pub(super) gift_export_password: Entity<InputState>,
+    /// The password box has taken the keyboard since it last opened.
+    pub(super) gift_export_password_focused: bool,
+    /// The transfer picker's people for the current search
+    /// (`gift_transfer_view`).
+    pub(super) transfer_people:
+        std::cell::RefCell<Option<super::gift_transfer_view::CandidateCache>>,
 }
 
 impl PaymentUi {
@@ -47,6 +57,23 @@ impl PaymentUi {
             |this, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.pick_search_changed(cx);
+                }
+            },
+        )
+        .detach();
+        let gift_export_password = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr(keys::Q_MONEY_ENTER_CURRENT_PASSWORD))
+                .masked(true)
+                .submit_on_enter(false)
+        });
+        // Enter submits the password box, like its Submit button.
+        cx.subscribe_in(
+            &gift_export_password,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.submit_gift_export_password(window, cx);
                 }
             },
         )
@@ -84,6 +111,9 @@ impl PaymentUi {
             gift_pay_upgrade: false,
             gift_premium_by_stars: false,
             pick_search,
+            gift_export_password,
+            gift_export_password_focused: false,
+            transfer_people: std::cell::RefCell::new(None),
         }
     }
 }

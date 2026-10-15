@@ -253,6 +253,14 @@ fn classifies_withdrawal_errors() {
         error_hint("PASSWORD_HASH_INVALID"),
         Some(EarnErrorHint::PasswordInvalid)
     );
+    assert_eq!(
+        error_hint("SRP_PASSWORD_CHANGED"),
+        Some(EarnErrorHint::SrpPasswordChanged)
+    );
+    assert_eq!(
+        error_hint("SRP_ID_INVALID"),
+        Some(EarnErrorHint::SrpIdInvalid)
+    );
     assert_eq!(error_hint("SOMETHING_ELSE"), None);
 }
 

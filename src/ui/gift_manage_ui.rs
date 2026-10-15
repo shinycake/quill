@@ -40,7 +40,7 @@ pub(super) fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
 }
 
 impl QuillApp {
-    fn gift_manage_mut(&mut self) -> Option<&mut GiftManageState> {
+    pub(super) fn gift_manage_mut(&mut self) -> Option<&mut GiftManageState> {
         if let Some(live) = self.live.as_mut() {
             Some(&mut live.driver.session.payments.gifts_manage)
         } else {
@@ -91,7 +91,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn note_gift_refused(&mut self, text: &str) {
+    pub(super) fn note_gift_refused(&mut self, text: &str) {
         self.connection.status_note = text.into();
     }
 
@@ -133,19 +133,6 @@ impl QuillApp {
             .map(|live| live.driver.upgrade_received_gift(id, keep_details));
         if let Some(Err(_)) = sent {
             self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_UPGRADE_THE_GIFT));
-        }
-        cx.notify();
-    }
-
-    pub(super) fn confirm_transfer(&mut self, id: &str, cx: &mut Context<Self>) {
-        let chat = self.session().and_then(|s| s.open_chat);
-        let sent = chat.and_then(|chat| {
-            self.live
-                .as_mut()
-                .map(|live| live.driver.transfer_received_gift(id, chat))
-        });
-        if !matches!(sent, Some(Ok(_)) | None) {
-            self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_TRANSFER_THE_GIFT));
         }
         cx.notify();
     }
