@@ -141,6 +141,18 @@ unicode-bidi = "0.3"
 spellbook = "0.4"
 encoding_rs = "0.8"
 zeroize = { version = "1", features = ["zeroize_derive"] }
+# Passkeys on a USB security key (docs/decisions/passkeys-ceremony.md): CTAP2
+# over HID is written in-tree; CBOR and the PIN protocol crypto (P-256 ECDH,
+# HKDF and HMAC with SHA-256, AES-256-CBC) come from RustCrypto. No OpenSSL.
+# `sha2_next` is sha2 0.11, the digest generation hmac 0.13 and hkdf 0.13 use
+# (the passcode code above still uses sha2 0.10 with pbkdf2 0.12).
+ciborium = "0.2"
+p256 = { version = "0.14", default-features = false, features = ["arithmetic", "ecdh"] }
+aes = "0.9"
+cbc = "0.2"
+hmac = "0.13"
+hkdf = "0.13"
+sha2_next = { package = "sha2", version = "0.11" }
 interprocess = { version = "2", default-features = false }
 # Interface language packs (docs/decisions/language-packs.md): lock-free reads
 # of the current strings from render code, CLDR plural rules (ICU4X,
@@ -181,6 +193,8 @@ zbus = { version = "5", optional = true }
 x11rb = { version = "0.13", default-features = false, features = ["record"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Security keys over IOKit HID (src/webauthn/ctap2/hid_macos.rs).
+core-foundation-sys = "0.8"
 security-framework = "3"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAlert", "NSHapticFeedback", "NSMenu", "NSView", "NSWindow", "NSScreen", "NSPasteboard", "NSPasteboardItem", "NSImage", "NSFont", "NSStringDrawing", "NSAttributedString", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSSpellChecker", "NSApplication", "NSDockTile", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSResponder", "NSAppearance", "NSBezierPath", "NSColor", "NSColorSpace", "NSGraphicsContext", "NSWorkspace", "NSTouchBar", "NSTouchBarItem", "NSCustomTouchBarItem", "NSPopoverTouchBarItem", "NSScrubber", "NSScrubberItemView", "NSScrubberLayout", "NSSegmentedControl", "NSSlider", "NSImageView", "NSScrollView", "NSClipView", "NSGestureRecognizer", "NSPressGestureRecognizer", "NSTouch", "NSEvent", "NSTextField", "NSUserInterfaceItemIdentification", "NSCell", "NSText", "NSParagraphStyle", "NSTextAttachment", "block2"], optional = true }
 # Native video playback (AVPlayer → CVPixelBuffer → GPUI surface).

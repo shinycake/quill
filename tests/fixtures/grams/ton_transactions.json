@@ -1,0 +1,112 @@
+{
+  "@type": "tonTransactions",
+  "gram_amount": 12750000000,
+  "next_offset": "page-2",
+  "transactions": [
+    {
+      "@type": "tonTransaction",
+      "id": "tx-topup",
+      "gram_amount": 25000000000,
+      "is_refund": false,
+      "date": 1760500000,
+      "type": {"@type": "tonTransactionTypeFragmentDeposit", "is_gift": false, "sticker": null}
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-gift-deposit",
+      "gram_amount": 5000000000,
+      "is_refund": false,
+      "date": 1760400000,
+      "type": {"@type": "tonTransactionTypeFragmentDeposit", "is_gift": true, "sticker": null}
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-withdrawal",
+      "gram_amount": -10000000000,
+      "is_refund": false,
+      "date": 1760300000,
+      "type": {
+        "@type": "tonTransactionTypeFragmentWithdrawal",
+        "withdrawal_state": {"@type": "revenueWithdrawalStatePending"}
+      }
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-suggested",
+      "gram_amount": -2500000000,
+      "is_refund": false,
+      "date": 1760200000,
+      "type": {"@type": "tonTransactionTypeSuggestedPostPayment", "chat_id": 13}
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-offer",
+      "gram_amount": -3000000000,
+      "is_refund": false,
+      "date": 1760100000,
+      "type": {
+        "@type": "tonTransactionTypeGiftPurchaseOffer",
+        "gift": {"@type": "upgradedGift", "id": "501", "title": "Plush Pepe", "number": 1204}
+      }
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-purchase",
+      "gram_amount": -4200000000,
+      "is_refund": false,
+      "date": 1760000000,
+      "type": {
+        "@type": "tonTransactionTypeUpgradedGiftPurchase",
+        "user_id": 11,
+        "gift": {"@type": "upgradedGift", "id": "502", "title": "Homemade Cake", "number": 77}
+      }
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-sale",
+      "gram_amount": 3800000000,
+      "is_refund": false,
+      "date": 1759900000,
+      "type": {
+        "@type": "tonTransactionTypeUpgradedGiftSale",
+        "user_id": 12,
+        "gift": {"@type": "upgradedGift", "id": "503", "title": "Signet Ring", "number": 19},
+        "commission_per_mille": 50,
+        "commission_gram_amount": "200000000",
+        "via_offer": true
+      }
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-stake",
+      "gram_amount": -1000000000,
+      "is_refund": false,
+      "date": 1759800000,
+      "type": {"@type": "tonTransactionTypeStakeDiceStake"}
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-payout",
+      "gram_amount": 1950000000,
+      "is_refund": false,
+      "date": 1759700000,
+      "type": {"@type": "tonTransactionTypeStakeDicePayout"}
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-refund",
+      "gram_amount": 10000000000,
+      "is_refund": true,
+      "date": 1759600000,
+      "type": {"@type": "tonTransactionTypeFragmentWithdrawal", "withdrawal_state": null}
+    },
+    {
+      "@type": "tonTransaction",
+      "id": "tx-unsupported",
+      "gram_amount": -50000000,
+      "is_refund": false,
+      "date": 1759500000,
+      "type": {"@type": "tonTransactionTypeUnsupported"}
+    }
+  ]
+}

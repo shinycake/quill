@@ -71,15 +71,75 @@ fn the_row_label_follows_tdesktop() {
 }
 
 #[test]
-fn the_row_shows_only_with_passkeys_while_webauthn_is_missing() {
-    assert!(!webauthn_supported());
-    assert!(!known(vec![]).row_shown());
+fn the_row_follows_webauthn_and_the_passkeys() {
+    // WebAuthn (a USB key over CTAP2) on macOS and Linux, not yet Windows.
+    assert_eq!(
+        webauthn_supported(),
+        cfg!(any(target_os = "macos", target_os = "linux"))
+    );
+    // Without passkeys the row shows only when one can be created.
+    assert_eq!(known(vec![]).row_shown(), webauthn_supported());
     assert!(known(vec![key("a", "x")]).row_shown());
     // The server's `settings_display_passkeys` hides it either way.
     let mut hidden = known(vec![key("a", "x")]);
     hidden.display_allowed = false;
     assert!(!hidden.row_shown());
-    assert!(!known(vec![]).can_register());
+    assert_eq!(known(vec![]).can_register(), webauthn_supported());
+}
+
+#[test]
+fn registering_stops_at_the_passkey_limit() {
+    let mut state = known(vec![key("a", "x"), key("b", "y")]);
+    assert_eq!(state.can_register(), webauthn_supported());
+    state.max_passkeys = Some(2);
+    assert!(!state.can_register());
+    // Ten when the app config does not say (tdesktop's default).
+    state.max_passkeys = None;
+    state.list = (0..10).map(|i| key(&i.to_string(), "k")).collect();
+    assert!(!state.can_register());
+}
+
+#[test]
+fn parameters_start_the_ceremony_and_the_added_passkey_joins_the_list() {
+    let mut state = known(vec![key("a", "x")]);
+    let now = Instant::now();
+    assert!(!state.accept_parameters("{}", now));
+    assert!(state.ceremony.is_none());
+    let json = r#"{"publicKey":{"rp":{"id":"telegram.org"},"challenge":"AQ","timeout":1000}}"#;
+    assert!(state.accept_parameters(json, now));
+    let options = state.ceremony.take().unwrap();
+    assert_eq!(options.rp_id, "telegram.org");
+    // The options stay fresh for their own timeout.
+    let pending = state.registration.clone().unwrap();
+    assert!(pending.fresh(now + Duration::from_millis(999)));
+    assert!(!pending.fresh(now + Duration::from_millis(1000)));
+    state.adding = true;
+    state.accept_added(key("n", "YubiKey"));
+    assert_eq!(state.list.len(), 2);
+    assert_eq!(state.list.last().unwrap().id, "n");
+    assert!(state.added && !state.adding && state.registration.is_none());
+    let value = serde_json::json!({"@type": "passkey", "id": "n", "name": "YubiKey"});
+    assert!(matches!(
+        parse_payload("passkey", &value),
+        Some(PasskeysPayload::Added(p)) if p.id == "n"
+    ));
+}
+
+#[test]
+fn add_login_passkey_sends_base64_bytes() {
+    let registration = crate::webauthn::Registration {
+        credential_id: vec![1],
+        attestation_object: vec![0xA3, 0xFF],
+        client_data_json: r#"{"type":"webauthn.create"}"#.into(),
+    };
+    let json: serde_json::Value =
+        serde_json::from_str(&add_login_passkey(RequestId(7), &registration)).unwrap();
+    assert_eq!(json["@type"], "addLoginPasskey");
+    assert_eq!(json["attestation_object"], "o/8=");
+    assert_eq!(json["client_data"], r#"{"type":"webauthn.create"}"#);
+    let json: serde_json::Value =
+        serde_json::from_str(&get_passkey_parameters(RequestId(8))).unwrap();
+    assert_eq!(json["@type"], "getPasskeyParameters");
 }
 
 #[test]
@@ -158,4 +218,15 @@ fn reads_the_display_switch_from_the_app_config() {
     assert!(!display_allowed_from_config(
         &serde_json::json!({"@type": "jsonValueObject", "members": []})
     ));
+    let with_max = serde_json::json!({"@type": "jsonValueObject", "members": [
+        {"@type": "jsonObjectMember", "key": "passkeys_account_passkeys_max",
+         "value": {"@type": "jsonValueNumber", "value": 5.0}}
+    ]});
+    assert_eq!(
+        config_from_app_config(&with_max),
+        PasskeysConfig {
+            display: false,
+            max: Some(5)
+        }
+    );
 }

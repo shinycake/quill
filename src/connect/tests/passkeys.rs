@@ -177,3 +177,100 @@ fn failures_are_shown_and_keep_the_list() {
     );
     assert_eq!(count(&p.1, "getLoginPasskeys"), 1);
 }
+
+const OPTIONS: &str = r#"{"publicKey":{"rp":{"id":"telegram.org","name":"Telegram"},"user":{"id":"AQ","name":"me","displayName":"Me"},"challenge":"3q2-7w","pubKeyCredParams":[{"type":"public-key","alg":-7}],"timeout":60000}}"#;
+
+fn registration_for(options: &crate::webauthn::CreationOptions) -> crate::webauthn::Registration {
+    crate::webauthn::Registration {
+        credential_id: vec![1, 2],
+        attestation_object: vec![0xA3],
+        client_data_json: options.client_data_json(),
+    }
+}
+
+#[test]
+fn creating_a_passkey_fetches_options_then_adds_the_result() {
+    if !crate::passkeys::webauthn_supported() {
+        return;
+    }
+    let mut p = parts();
+    listed(&mut p);
+    assert!(p.0.begin_register().unwrap().is_some());
+    assert!(p.0.passkey_parameters_pending());
+    // A second click while the options are on their way sends nothing.
+    assert!(p.0.begin_register().unwrap().is_none());
+    answer(
+        &mut p,
+        "getPasskeyParameters",
+        json!({"@type": "text", "text": OPTIONS}),
+    );
+    let options = p.0.session.settings.passkeys.ceremony.take().unwrap();
+    assert_eq!(options.rp_id, "telegram.org");
+    assert_eq!(options.challenge, vec![0xde, 0xad, 0xbe, 0xef]);
+    // Within their timeout the same options are used again, no request.
+    assert!(p.0.begin_register().unwrap().is_none());
+    assert!(p.0.session.settings.passkeys.ceremony.take().is_some());
+    assert_eq!(count(&p.1, "getPasskeyParameters"), 1);
+
+    let registration = registration_for(&options);
+    p.0.finish_register(&registration).unwrap();
+    let sent = sent_request(&p.1, "addLoginPasskey");
+    assert_eq!(sent["attestation_object"], "ow==");
+    assert_eq!(
+        sent["client_data"],
+        r#"{"challenge":"3q2-7w","crossOrigin":false,"origin":"https://telegram.org","type":"webauthn.create"}"#
+    );
+    // One at a time.
+    assert!(p.0.finish_register(&registration).is_err());
+    answer(
+        &mut p,
+        "addLoginPasskey",
+        json!({"@type": "passkey", "id": "k3", "name": "YubiKey 5 NFC",
+               "addition_date": 1_790_600_000, "last_usage_date": 0,
+               "software_icon_custom_emoji_id": "0"}),
+    );
+    let state = &p.0.session.settings.passkeys;
+    assert_eq!(state.list.len(), 3);
+    assert_eq!(state.list.last().map(|k| k.id.as_str()), Some("k3"));
+    assert!(state.added && !state.adding);
+    assert!(state.registration.is_none());
+}
+
+#[test]
+fn a_failed_registration_forgets_the_options() {
+    if !crate::passkeys::webauthn_supported() {
+        return;
+    }
+    let mut p = parts();
+    listed(&mut p);
+    p.0.begin_register().unwrap();
+    answer(
+        &mut p,
+        "getPasskeyParameters",
+        json!({"@type": "text", "text": OPTIONS}),
+    );
+    let options = p.0.session.settings.passkeys.ceremony.take().unwrap();
+    p.0.finish_register(&registration_for(&options)).unwrap();
+    answer(
+        &mut p,
+        "addLoginPasskey",
+        json!({"@type": "error", "code": 400, "message": "PASSKEY_CREDENTIAL_NOT_FOUND"}),
+    );
+    let state = &p.0.session.settings.passkeys;
+    assert!(!state.adding && !state.added);
+    assert!(state.registration.is_none());
+    assert_eq!(state.list.len(), 2);
+    assert!(state.error.is_some());
+    // The next try asks for new options.
+    p.0.begin_register().unwrap();
+    assert_eq!(count(&p.1, "getPasskeyParameters"), 2);
+    // Unreadable options: an error, no ceremony.
+    answer(
+        &mut p,
+        "getPasskeyParameters",
+        json!({"@type": "text", "text": "{}"}),
+    );
+    let state = &p.0.session.settings.passkeys;
+    assert!(state.ceremony.is_none());
+    assert!(state.error.is_some());
+}

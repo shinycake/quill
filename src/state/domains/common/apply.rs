@@ -189,6 +189,9 @@ impl Session {
                         self.auth_state.guessed_country_iso = Some(iso);
                     }
                 }
+                Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
+                    crate::passkeys::PasskeysPurpose::Parameters,
+                ))) => self.apply_passkey_parameters(&text),
                 Some(RequestPurpose::Bots(purpose @ BotsPurpose::GetBotEditText { .. })) => {
                     self.apply_owned_bot_text(purpose, text);
                 }

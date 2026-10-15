@@ -782,6 +782,7 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
 pub mod fragment;
 pub mod promo;
 pub mod purchase;
+pub mod ton;
 pub mod upgraded;
 
 /// `premiumFeatures`: the feature rows and limits Telegram reports, plus the
@@ -909,6 +910,8 @@ pub struct PremiumHub {
     /// The limit box that is open (pins, caption, GIFs, ...), with how far
     /// over the limit the action went when that is known (caption).
     pub limit_box: Option<(crate::premium_limits::PremiumLimitKind, i64)>,
+    /// Settings → My Grams (`ton`).
+    pub grams: ton::GramsHub,
 }
 
 impl PremiumHub {

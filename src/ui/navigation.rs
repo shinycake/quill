@@ -586,6 +586,23 @@ impl QuillApp {
                                     });
                                 }),
                         );
+                        if matches!(action, NavigationAction::Stars) {
+                            // tdesktop "My Grams" follows "My Stars".
+                            let app = app_c.clone();
+                            let grams = app_c.update(cx, |this, cx| {
+                                this.grams_settings_row(
+                                    move |window, cx| {
+                                        app.update(cx, |this, cx| {
+                                            this.settings.open = false;
+                                            window.close_dialog(cx);
+                                            this.open_grams(cx);
+                                        })
+                                    },
+                                    cx,
+                                )
+                            });
+                            list = list.children(grams);
+                        }
                     }
                     content
                         .children(app_c.update(cx, |this, cx| this.settings_phone_suggestion(cx)))

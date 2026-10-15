@@ -39,6 +39,12 @@ pub(in crate::ui) struct PasskeysUi {
     pub(in crate::ui) about_open: bool,
     /// The passkey the delete confirmation asks about.
     pub(in crate::ui) confirm: Option<String>,
+    /// The ceremony dialog over the box (`passkey_ceremony`).
+    pub(in crate::ui) ceremony: Option<super::passkey_ceremony::CeremonyUi>,
+    /// The PIN field of the ceremony, kept so it is made once.
+    pub(in crate::ui) pin_input: Option<Entity<gpui_kit::component::input::InputState>>,
+    /// Whether the ceremony ticker runs.
+    pub(in crate::ui) ticking: bool,
 }
 
 impl QuillApp {
@@ -106,7 +112,12 @@ impl QuillApp {
     }
 
     fn close_passkeys(&mut self, cx: &mut Context<Self>) {
-        self.privacy.passkeys = PasskeysUi::default();
+        let ui = &mut self.privacy.passkeys;
+        *ui = PasskeysUi {
+            pin_input: ui.pin_input.take(),
+            ticking: ui.ticking,
+            ..PasskeysUi::default()
+        };
         cx.notify();
     }
 
@@ -152,13 +163,6 @@ impl QuillApp {
             let list = std::mem::take(&mut passkeys.list);
             passkeys.accept_list(list);
         }
-        cx.notify();
-    }
-
-    /// Where "Create Passkey" will start WebAuthn registration
-    /// (`getPasskeyParameters`, the platform prompt, `addLoginPasskey`).
-    /// Unreachable until `quill::passkeys::webauthn_supported` is on.
-    fn start_passkey_creation(&mut self, cx: &mut Context<Self>) {
         cx.notify();
     }
 
@@ -444,6 +448,8 @@ impl QuillApp {
             let can_register = this
                 .passkeys_state()
                 .is_some_and(PasskeysState::can_register);
+            let busy = this.passkey_creation_busy();
+            let error = this.passkeys_state().and_then(|s| s.error.clone());
             let entry = |icon: IconName, title: &'static str, about: &'static str| {
                 div()
                     .flex()
@@ -501,19 +507,34 @@ impl QuillApp {
                     IconName::Lock,
                     "Store Passkey securely",
                     "Your passkey is stored safely in the cloud service you choose.",
-                ));
+                ))
+                .when_some(error, |body, error| {
+                    body.child(
+                        div()
+                            .id("passkeys-about-error")
+                            .test_support()
+                            .role(Role::Alert)
+                            .aria_label(error.clone())
+                            .text_sm()
+                            .text_color(danger())
+                            .child(error),
+                    )
+                });
             // Without WebAuthn the button reads "Unsupported" and does
             // nothing (tdesktop's own state when it can't register).
             let button = Button::new("passkeys-create")
-                .label(if can_register {
-                    "Create Passkey"
+                .label(tr(if can_register {
+                    keys::SETTINGS_PASSKEYS_NONE_BUTTON
                 } else {
-                    "Unsupported"
-                })
+                    keys::SETTINGS_PASSKEYS_NONE_BUTTON_UNSUPPORTED
+                }))
                 .primary()
                 .w_full()
                 .disabled(!can_register)
-                .on_click(cx.listener(|this, _, _, cx| this.start_passkey_creation(cx)));
+                .loading(busy)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.start_passkey_creation(window, cx);
+                }));
             dialog
                 .width(px(440.))
                 .content(crate::ui::shell::scrollable_dialog_content(once(
@@ -527,7 +548,7 @@ impl QuillApp {
 
 /// `content` needs an `Fn` closure, but the body is built once per dialog
 /// render: hand it over through a one-shot cell.
-fn once(
+pub(super) fn once(
     body: AnyElement,
 ) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
     let body = std::rc::Rc::new(std::cell::RefCell::new(Some(body)));
