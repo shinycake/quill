@@ -270,7 +270,7 @@ pub(crate) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     register_actions(window.window_handle(), cx.entity().downgrade(), cx);
     #[cfg(target_os = "windows")]
     cx.set_dock_menu(vec![MenuItem::action(
-        tr(keys::Q_MISC_QUIT_QUILL),
+        quill::lang::tr(quill::lang::keys::Q_MISC_QUIT_QUILL),
         super::actions::QuitApp,
     )]);
     #[cfg(target_os = "macos")]
