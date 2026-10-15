@@ -17,7 +17,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{PublicKey, SecretKey};
 use rand::RngCore;
-use sha2_next::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 /// `authenticatorClientPIN` subcommands.

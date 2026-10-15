@@ -1,8 +1,10 @@
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // compiles the `hdr_surface` shaders. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 
 fn main() {
+    #[cfg(not(all(target_os = "windows", not(debug_assertions))))]
+    println!("cargo:rerun-if-changed=build.rs");
     #[cfg(target_os = "windows")]
     {
         // Compile HLSL shaders

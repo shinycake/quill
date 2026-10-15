@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-linux 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
 // the refresh timer parks while the window is idle. See third_party/gpui-pre-linux/QUILL-CHANGES.md.
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
@@ -1825,6 +1825,10 @@ impl PlatformWindow for X11Window {
     fn on_moved(&self, callback: Box<dyn FnMut()>) {
         self.0.callbacks.borrow_mut().moved = Some(callback);
     }
+
+    // A GPUI display on X11 is an X screen, which spans every monitor, and a
+    // window never changes screen.
+    fn on_display_changed(&self, _callback: Box<dyn FnMut()>) {}
 
     fn on_should_close(&self, callback: Box<dyn FnMut() -> bool>) {
         self.0.callbacks.borrow_mut().should_close = Some(callback);

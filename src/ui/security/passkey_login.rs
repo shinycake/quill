@@ -126,8 +126,7 @@ crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::signed_out("wait-qr-passkey", || {
         (
             crate::ui::connect_ui::ConnectUiStatus::DemoWaitPhone,
-            "screenshot demo — QR sign-in with the passkey link (injected auth, no live Telegram)"
-                .into(),
+            tr(keys::Q_PREFS_SCREENSHOT_DEMO_QR_SIGN_IN).into(),
             AuthorizationState::WaitOtherDeviceConfirmation {
                 link: "tg://login?token=AQID".into(),
             },

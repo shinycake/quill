@@ -22,7 +22,7 @@ use super::pin::{Protocol, agree, cose_key, public_from_cose};
 use super::{command, status};
 use ciborium::Value;
 use p256::SecretKey;
-use sha2_next::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

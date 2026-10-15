@@ -81,6 +81,33 @@ fn transaction_types_map_to_titles() {
     assert_eq!(page.transactions[3].title, "Transaction");
 }
 
+/// TDLib 1.8.68+ documents `product_info` of the bot subscription transaction
+/// types as nullable; a JSON null (or a missing key) falls back to the label.
+#[test]
+fn null_product_info_falls_back_to_generic_titles() {
+    let page = parse_star_transactions(&json!({
+        "@type": "starTransactions",
+        "star_amount": {"star_count": 0, "nanostar_count": 0},
+        "next_offset": "",
+        "transactions": [
+            {"id": "a", "star_amount": {"star_count": -5}, "date": 1,
+             "type": {"@type": "starTransactionTypeBotSubscriptionPurchase", "user_id": 9,
+                      "subscription_period": 2592000, "product_info": null}},
+            {"id": "b", "star_amount": {"star_count": 5}, "date": 2,
+             "type": {"@type": "starTransactionTypeBotSubscriptionSale", "user_id": 9,
+                      "subscription_period": 2592000, "product_info": null}},
+            {"id": "c", "star_amount": {"star_count": -5}, "date": 3,
+             "type": {"@type": "starTransactionTypeBotSubscriptionPurchase", "user_id": 9,
+                      "subscription_period": 2592000}}
+        ]
+    }));
+    assert_eq!(page.transactions.len(), 3);
+    assert_eq!(page.transactions[0].title, "Subscription");
+    assert_eq!(page.transactions[0].detail, "monthly");
+    assert_eq!(page.transactions[1].title, "Subscription sale");
+    assert_eq!(page.transactions[2].title, "Subscription");
+}
+
 #[test]
 fn received_gifts_parse_regular_and_collectible() {
     let page = parse_received_gifts(&json!({

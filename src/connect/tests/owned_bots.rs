@@ -191,6 +191,17 @@ fn creating_a_bot_records_the_new_user() {
 }
 
 #[test]
+fn creating_from_the_keyboard_button_is_not_via_link() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    driver
+        .create_managed_bot(5, "Cool", "coolbot", false)
+        .unwrap();
+    let request = sent_request(&recorder, "createBot");
+    assert_eq!(request["via_link"], false);
+    assert_eq!(request["username"], "coolbot");
+}
+
+#[test]
 fn a_failed_create_keeps_the_dialog_open_with_a_reason() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     driver

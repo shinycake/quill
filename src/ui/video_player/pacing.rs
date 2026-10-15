@@ -3,11 +3,13 @@
 //! Pure (no GPUI), so the decisions are unit-tested.
 //!
 //! On macOS the display link reports the refresh period and the vsync the
-//! current frame targets (the present "hint"). Elsewhere the element's draw
-//! starts stand in: the typical spacing of the closest draws is the frame
-//! interval (a player that sleeps between pictures draws at whole multiples
-//! of it, so only the shortest gaps count), and the next vsync is predicted
-//! from the last start.
+//! current frame targets (the present "hint"). On Windows and Wayland GPUI
+//! reports the display's refresh period (`Window::refresh_interval`).
+//! Without a period (X11) the element's draw starts stand in: the typical
+//! spacing of the closest draws is the frame interval (a player that sleeps
+//! between pictures draws at whole multiples of it, so only the shortest
+//! gaps count). Without a hint the next vsync is predicted from the last
+//! start.
 #![deny(clippy::indexing_slicing)]
 
 use std::collections::VecDeque;
@@ -83,7 +85,8 @@ impl PresentEstimator {
         }
     }
 
-    /// The platform's refresh period (macOS display link), or `None`.
+    /// The platform's refresh period (macOS display link, else the
+    /// window's display as GPUI reports it), or `None`.
     pub(crate) fn set_period(&mut self, period: Option<Duration>) {
         self.period = period.filter(|period| *period >= MIN_INTERVAL && *period <= MAX_INTERVAL);
     }
@@ -278,6 +281,33 @@ mod tests {
         // A nonsense period is ignored.
         estimator.set_period(Some(Duration::from_secs(1)));
         assert!(estimator.interval() > hz(30.0));
+    }
+
+    #[test]
+    fn a_reported_period_paces_the_first_frames_instead_of_60hz() {
+        // A clip starting on a 144 Hz display: before two draws were seen
+        // the estimate says 60 Hz; the display's reported period does not.
+        let now = Instant::now();
+        let mut estimator = PresentEstimator::default();
+        estimator.set_period(Some(hz(144.0)));
+        assert!(close(estimator.predict(now).duration_since(now), hz(144.0)));
+        assert!(close(estimator.lead(), hz(144.0)));
+        // A 60 fps clip: its next picture is over two 144 Hz frames away,
+        // so the player sleeps between pictures. With the 60 Hz guess it
+        // asks for the very next frame instead.
+        let due = now + hz(60.0);
+        assert!(matches!(
+            request_policy(now, Some(due), estimator.interval(), estimator.lead()),
+            FrameRequest::SleepUntil(_)
+        ));
+        let sixty = PresentEstimator::default();
+        assert_eq!(
+            request_policy(now, Some(due), sixty.interval(), sixty.lead()),
+            FrameRequest::NextFrame
+        );
+        // A 360 Hz display is past what the estimate accepts: ignored.
+        estimator.set_period(Some(hz(360.0)));
+        assert!(close(estimator.interval(), hz(60.0)));
     }
 
     #[test]

@@ -55,8 +55,6 @@ ui = [
     "dep:block2",
     "dep:objc2-core-media",
     "dep:objc2-core-video",
-    "dep:core-video",
-    "dep:core-foundation",
     "dep:rodio",
     "dep:ogg",
     "dep:opus-decoder",
@@ -72,6 +70,9 @@ ui = [
     "dep:objc2-screen-capture-kit",
     "dep:dispatch2",
     "dep:jxl-oxide",
+    "dep:objc2-core-bluetooth",
+    "dep:async-io",
+    "dep:futures-lite",
 ]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
@@ -105,14 +106,14 @@ serde_json = "1"
 semver = "1"
 # In-process audio: call tones, notification sounds, voice/audio playback
 # (CoreAudio / WASAPI / ALSA via cpal; MP3/AAC/FLAC/Vorbis/WAV via symphonia).
-rodio = { version = "0.22", optional = true, default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }
+rodio = { version = "0.23", optional = true, default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }
 # Ogg/Opus voice notes (symphonia has no Opus decoder): pure-Rust Ogg demux
 # and RFC 8251-conformant Opus decoder, no C dependency.
 ogg = { version = "0.9", optional = true }
 opus-decoder = { version = "0.1", optional = true }
 # Voice-note recording: microphone via cpal (same backend rodio plays
 # through) and a pure-Rust Opus encoder, muxed with `ogg`. No external binary.
-cpal = { version = "0.17", optional = true, default-features = false }
+cpal = { version = "0.18", optional = true, default-features = false }
 # Call noise suppression (docs/decisions/call-capture.md): RNNoise ported to
 # Rust, run on Quill's own 10 ms microphone frames before ntgcalls encodes
 # them. Pure Rust; the library only, not its command-line tool.
@@ -122,14 +123,14 @@ rusty-opus = { version = "1", optional = true }
 # lockfile through GPUI; no text or raster-image features are needed.
 resvg = { version = "0.48", default-features = false, features = ["svgz"], optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
-sha2 = "0.10"
+sha2 = "0.11"
 # Emoji set packs (docs/decisions/emoji-set-style.md): stored (uncompressed)
 # zip entries only, so no compression features.
 zip = { version = "9", default-features = false }
 # Local passcode (docs/decisions/codex-local-passcode.md): PBKDF2-HMAC-SHA512 key
 # derivation and an XChaCha20-Poly1305 key wrap; no hand-rolled crypto.
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
-chacha20poly1305 = "0.10"
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 smallvec = { version = "1", optional = true }
 # Interface scale (docs/decisions/codex-interface-scale-full.md): the platform
 # decorator names GPUI's oneshot receiver type. Already in the lockfile via GPUI.
@@ -150,15 +151,21 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 # Passkeys on a USB security key (docs/decisions/passkeys-ceremony.md): CTAP2
 # over HID is written in-tree; CBOR and the PIN protocol crypto (P-256 ECDH,
 # HKDF and HMAC with SHA-256, AES-256-CBC) come from RustCrypto. No OpenSSL.
-# `sha2_next` is sha2 0.11, the digest generation hmac 0.13 and hkdf 0.13 use
-# (the passcode code above still uses sha2 0.10 with pbkdf2 0.12).
+# sha2 0.11 is the digest generation hmac 0.13, hkdf 0.13 and pbkdf2 0.13 use.
 ciborium = "0.2"
 p256 = { version = "0.14", default-features = false, features = ["arithmetic", "ecdh"] }
 aes = "0.9"
 cbc = "0.2"
 hmac = "0.13"
 hkdf = "0.13"
-sha2_next = { package = "sha2", version = "0.11" }
+# Passkeys from a phone (hybrid / caBLE v2, docs/decisions/passkeys-hybrid.md):
+# the tunnel's AES-256-GCM, and its websocket. tungstenite brings no TLS of its
+# own; it runs over a rustls stream with the ring provider and the webpki
+# roots, the same stack ureq already links. No OpenSSL.
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 interprocess = { version = "2", default-features = false }
 # Interface language packs (docs/decisions/language-packs.md): lock-free reads
 # of the current strings from render code, CLDR plural rules (ICU4X,
@@ -170,10 +177,10 @@ icu_locale_core = { version = "2", default-features = false }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
 # `sync`: plural rules live in the shared string snapshot (Send + Sync).
 icu_provider = { version = "2", default-features = false, features = ["sync"] }
-gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.8" }
+gpui_shared_string = { package = "gpui-pre-shared-string", version = "=0.3.9" }
 
 [dependencies.gpui-kit]
-version = "=0.7.1"
+version = "=0.7.3"
 optional = true
 default-features = false
 features = ["component", "assets"]
@@ -181,7 +188,7 @@ features = ["component", "assets"]
 # The input engine under gpui-kit (patched below), named directly for the
 # composer's formatting spans (docs/decisions/codex-composer-input.md).
 [dependencies.gpui-base]
-version = "=0.7.1"
+version = "=0.7.3"
 optional = true
 
 # tray-icon is GTK/libappindicator on Linux and needs gtk::init plus a GTK main
@@ -194,6 +201,10 @@ tray-icon = { version = "0.26", optional = true, default-features = false }
 ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io", "blocking"] }
 # MPRIS (org.mpris.MediaPlayer2) on the session bus; same zbus GPUI and ksni already link.
 zbus = { version = "5", optional = true }
+# Passkeys from a phone: the BlueZ scan (src/webauthn/hybrid/ble_linux.rs)
+# waits on D-Bus signals with a timeout. Both already in the lockfile via zbus.
+async-io = { version = "2", optional = true }
+futures-lite = { version = "2", optional = true }
 # System-wide push-to-talk (docs/decisions/codex-ptt-global.md): the X11 RECORD
 # extension. Same x11rb 0.13 GPUI already links; only the `record` feature is new.
 x11rb = { version = "0.13", default-features = false, features = ["record"] }
@@ -205,29 +216,32 @@ security-framework = "3"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAlert", "NSHapticFeedback", "NSMenu", "NSView", "NSWindow", "NSScreen", "NSPasteboard", "NSPasteboardItem", "NSImage", "NSFont", "NSStringDrawing", "NSAttributedString", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSSpellChecker", "NSApplication", "NSDockTile", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSResponder", "NSAppearance", "NSBezierPath", "NSColor", "NSColorSpace", "NSGraphicsContext", "NSWorkspace", "NSTouchBar", "NSTouchBarItem", "NSCustomTouchBarItem", "NSPopoverTouchBarItem", "NSScrubber", "NSScrubberItemView", "NSScrubberLayout", "NSSegmentedControl", "NSSlider", "NSImageView", "NSScrollView", "NSClipView", "NSGestureRecognizer", "NSPressGestureRecognizer", "NSTouch", "NSEvent", "NSTextField", "NSUserInterfaceItemIdentification", "NSCell", "NSText", "NSParagraphStyle", "NSTextAttachment", "block2"], optional = true }
 # Native video playback (AVPlayer → CVPixelBuffer → GPUI surface).
 objc2 = { version = "0.6", optional = true }
-objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSProcessInfo", "NSString", "NSURL", "NSDictionary", "NSValue", "NSObject", "NSError", "NSArray", "NSData", "NSGeometry", "NSAttributedString", "NSRange", "NSLocale", "NSTimer", "NSDate", "NSSet", "NSIndexSet", "NSEnumerator", "block2"] }
+objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSProcessInfo", "NSString", "NSURL", "NSDictionary", "NSValue", "NSObject", "NSError", "NSArray", "NSData", "NSGeometry", "NSAttributedString", "NSRange", "NSLocale", "NSTimer", "NSDate", "NSSet", "NSIndexSet", "NSEnumerator", "NSBundle", "block2"] }
 objc2-av-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2-core-media", "objc2-core-video", "objc2-core-graphics", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "AVAssetImageGenerator", "AVAudioProcessingSettings", "AVTime", "AVMediaFormat", "AVCaptureDevice", "block2"] }
 block2 = { version = "0.6", optional = true }
 objc2-core-media = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CMTime", "CMTimeRange", "CMSampleBuffer", "objc2-core-video"] }
-objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "bitflags"] }
+# GPUI's `surface` takes a `CFRetained<CVPixelBuffer>`; `CVHostTime` paces
+# AVPlayer pulls on Mach host ticks.
+objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "CVHostTime", "bitflags"] }
 # Screen sharing in calls (src/calls/capture/screen_mac.rs): sources,
 # thumbnails and the NV12 stream from ScreenCaptureKit.
 objc2-screen-capture-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "SCShareableContent", "SCStream", "SCScreenshotManager", "SCError", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics", "objc2-core-foundation"] }
 dispatch2 = { version = "0.3.1", optional = true, default-features = false, features = ["std", "objc2"] }
-core-video = { version = "0.5.2", optional = true }
-core-foundation = { version = "0.10.1", optional = true }
 # Image files (HEIC, AVIF, JPEG XL and the rest) decoded and colour-managed
 # with ImageIO (src/ui/image_decode/macos.rs).
 objc2-image-io = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
 objc2-core-graphics = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace", "CGGeometry", "CGWindow", "CGDirectDisplay"] }
-objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes", "CFURL"] }
+objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes", "CFURL"] }
+# Passkeys from a phone: the caBLE advertisements over CoreBluetooth
+# (src/webauthn/hybrid/ble_macos.rs).
+objc2-core-bluetooth = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CBAdvertisementData", "CBCentralManager", "CBCentralManagerConstants", "CBManager", "CBPeer", "CBPeripheral", "CBUUID", "dispatch2"] }
 # Badge authorization (the Dock draws badges only for apps allowed to badge).
 objc2-user-notifications = { version = "0.3", optional = true }
 # OS notifications: the inline reply field and the sender picture ride beside
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
 # crate GPUI already links.
-gpui_macos = { package = "gpui-pre-macos", version = "=0.3.8", optional = true, default-features = false }
+gpui_macos = { package = "gpui-pre-macos", version = "=0.3.9", optional = true, default-features = false }
 # Lock-screen / media-key Now Playing (MPNowPlayingInfoCenter, MPRemoteCommandCenter).
 objc2-media-player = { version = "0.3.2", optional = true, default-features = false, features = ["std", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPMediaItem", "MPRemoteCommandEvent", "block2"] }
 
@@ -277,18 +291,18 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalizati
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same
 # crate GPUI already links.
-gpui_windows = { package = "gpui-pre-windows", version = "=0.3.8", optional = true, default-features = false }
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.9", optional = true, default-features = false }
 
 # Right-to-left composer typing (docs/decisions/codex-rtl-composer.md): gpui-base
-# 0.7.1 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
+# 0.7.3 with a bidi-aware input engine. Each patched crate's QUILL-CHANGES.md names
 # the commit holding its pristine registry copy; a diff against it isolates the patch.
 [patch.crates-io]
 gpui-base = { path = "third_party/gpui-base" }
-# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.8 with a
+# Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.9 with a
 # display link that stops while the window has nothing to draw.
 gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
 # Idle frames on X11 and Windows (docs/decisions/codex-idle-frames-x11-windows.md):
-# gpui-pre-linux and gpui-pre-windows 0.3.8, whose per-frame wake pauses while
+# gpui-pre-linux and gpui-pre-windows 0.3.9, whose per-frame wake pauses while
 # the window has nothing to draw.
 gpui-pre-linux = { path = "third_party/gpui-pre-linux" }
 gpui-pre-windows = { path = "third_party/gpui-pre-windows" }

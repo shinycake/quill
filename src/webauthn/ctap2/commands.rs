@@ -120,7 +120,13 @@ pub fn make_credential(
         params.push(int_entry(9, int(token.protocol.number())));
     }
     let answer = key.call(command::MAKE_CREDENTIAL, Some(Value::Map(params)), control)?;
-    let entries = map(&answer).ok_or(CtapError::Malformed("makeCredential"))?;
+    parse_made_credential(&answer)
+}
+
+/// The authenticator data and credential id of a makeCredential answer
+/// (also the phone's answer over the hybrid tunnel).
+pub fn parse_made_credential(answer: &Value) -> Result<MadeCredential, CtapError> {
+    let entries = map(answer).ok_or(CtapError::Malformed("makeCredential"))?;
     let auth_data = get_int_key(entries, 2)
         .and_then(as_bytes)
         .ok_or(CtapError::Malformed("authData"))?
@@ -178,14 +184,20 @@ pub fn get_assertion(
         params.push(int_entry(7, int(token.protocol.number())));
     }
     let answer = key.call(command::GET_ASSERTION, Some(Value::Map(params)), control)?;
-    let entries = map(&answer).ok_or(CtapError::Malformed("getAssertion"))?;
+    parse_got_assertion(&answer, &options.allow_credentials)
+}
+
+/// The first assertion of a getAssertion answer (also the phone's answer
+/// over the hybrid tunnel). `allowed` is the request's allow list.
+pub fn parse_got_assertion(answer: &Value, allowed: &[Vec<u8>]) -> Result<GotAssertion, CtapError> {
+    let entries = map(answer).ok_or(CtapError::Malformed("getAssertion"))?;
     // With exactly one allowed credential the key may leave it out.
     let credential_id = get_int_key(entries, 1)
         .and_then(map)
         .and_then(|credential| get_text_key(credential, "id"))
         .and_then(as_bytes)
         .map(<[u8]>::to_vec)
-        .or_else(|| match options.allow_credentials.as_slice() {
+        .or_else(|| match allowed {
             [only] => Some(only.clone()),
             _ => None,
         })

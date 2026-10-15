@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-macos 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
 // inline text-input actions, typed-text responses and an image attachment,
 // through `notification_extras`. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 //! System notifications through the `UNUserNotificationCenter` API.

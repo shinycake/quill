@@ -364,6 +364,28 @@ fn request_users_and_chat_buttons_keep_their_restrictions() {
 }
 
 #[test]
+fn request_managed_bot_button_keeps_its_suggestions() {
+    let env = parse_envelope(
+        r#"{"@type":"updateNewMessage","message":{"id":311,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupShowKeyboard","rows":[[{"@type":"keyboardButton","text":"Make bot","type":{"@type":"keyboardButtonTypeRequestManagedBot","id":9,"suggested_name":"Cool","suggested_username":"coolbot"}}]],"is_persistent":false,"resize_keyboard":false,"one_time":false,"is_personal":false,"force_reply":false,"input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
+    )
+    .unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("not a message");
+    };
+    let Some(ReplyMarkup::ShowKeyboard(keyboard)) = message.reply_markup else {
+        panic!("no keyboard");
+    };
+    assert_eq!(
+        keyboard.rows[0][0].kind,
+        KeyboardButtonType::RequestManagedBot(RequestManagedBotSpec {
+            id: 9,
+            suggested_name: "Cool".into(),
+            suggested_username: "coolbot".into(),
+        })
+    );
+}
+
+#[test]
 fn update_chat_reply_markup_parses_the_message_and_null() {
     let env = parse_envelope(
         r#"{"@type":"updateChatReplyMarkup","chat_id":21,"reply_markup_message":{"id":12,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupRemoveKeyboard","is_personal":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,

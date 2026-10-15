@@ -254,6 +254,14 @@ impl QuillApp {
                     );
                 }))
             }
+            KeyboardButtonType::RequestManagedBot(spec) => {
+                let spec = spec.clone();
+                element.on_click(cx.listener(move |this, _, window, cx| {
+                    this.press_request_managed_bot(
+                        chat_id, message_id, &spec, one_time, window, cx,
+                    );
+                }))
+            }
             _ => element.disabled(true),
         }
     }
@@ -267,7 +275,7 @@ impl QuillApp {
             KeyboardButtonType::RequestPoll => tr(keys::Q_MISC_CREATING_A_POLL_IS_NOT),
             KeyboardButtonType::RequestUsers(_) => tr(keys::Q_MISC_CHOOSE_USERS_TO_SHARE_WITH),
             KeyboardButtonType::RequestChat(_) => tr(keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE),
-            KeyboardButtonType::RequestManagedBot => tr(keys::Q_MISC_BOT_SETUP_IS_NOT_SUPPORTED),
+            KeyboardButtonType::RequestManagedBot(_) => tr(keys::Q_MISC_CREATE_A_BOT_THIS_BOT),
             KeyboardButtonType::Unknown { .. } => tr(keys::Q_MISC_UNSUPPORTED_BUTTON),
         }
     }

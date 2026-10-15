@@ -29,10 +29,6 @@ use quill::text::LinkTarget;
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
-use std::time::Duration;
-
-/// How long the pointer rests on a link before its tooltip shows.
-const TOOLTIP_DELAY: Duration = Duration::from_millis(450);
 
 /// A clicked link waiting for render: the link and the message it is in
 /// (chat id, message id).
@@ -366,8 +362,10 @@ impl QuillApp {
                     token,
                     shown: false,
                 });
+                // Same delay as every kit tooltip (`ui::tooltip_timing`).
+                let delay = super::tooltip_timing::show_delay(cx);
                 cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(TOOLTIP_DELAY).await;
+                    cx.background_executor().timer(delay).await;
                     let _ = this.update(cx, |this, cx| {
                         if let Some(tooltip) = this.message_ui.link_tooltip.as_mut()
                             && tooltip.token == token

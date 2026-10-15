@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // an inline text field with its send button, the typed text on activation and
 // a circle-cropped `appLogoOverride`, through `notification_extras`. See
 // third_party/gpui-pre-windows/QUILL-CHANGES.md.

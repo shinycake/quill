@@ -345,23 +345,34 @@ impl QuillApp {
     fn notify_show_next(&mut self, cx: &mut Context<Self>) {
         let limit = custom::clamp_count(quill::notify_prefs::current().count);
         let free = limit.saturating_sub(self.notify.windows.live());
-        let display = self.notify_display(cx);
-        match display {
-            Some((display_id, area)) => {
-                for (key, pending) in self.notify.windows.queue.take(free) {
-                    self.open_notification(key, pending, display_id, area, cx);
-                }
+        // With no display to show them on, they wait for one to be
+        // connected (`custom_notify_displays_changed`; tdesktop keeps its
+        // queue for `screenAdded`).
+        if let Some((display_id, area)) = self.notify_display(cx) {
+            for (key, pending) in self.notify.windows.queue.take(free) {
+                self.open_notification(key, pending, display_id, area, cx);
             }
-            // No display to show them on: drop them rather than keep a
-            // queue nothing drains.
-            None if !self.notify.windows.queue.is_empty() => {
-                eprintln!("quill: no display for notification windows");
-                self.notify.windows.queue.clear();
-            }
-            None => {}
         }
         self.notify_restack(cx);
         self.ensure_notify_clock(cx);
+    }
+
+    /// A display was connected, disconnected or resized: put the windows
+    /// back in place on the notification display (the next clock step
+    /// moves them) and show what waited for a display.
+    pub(in crate::ui) fn custom_notify_displays_changed(&mut self, cx: &mut Context<Self>) {
+        let windows = &self.notify.windows;
+        if windows.shown.is_empty()
+            && windows.hide_all.is_none()
+            && windows.samples.is_empty()
+            && windows.queue.is_empty()
+        {
+            return;
+        }
+        for popup in self.all_popups_mut() {
+            popup.placed = None;
+        }
+        self.notify_show_next(cx);
     }
 
     fn open_notification(

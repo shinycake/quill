@@ -60,7 +60,6 @@
 1 src/ui/profile_panels/submit_personal_photo.rs
 1 src/ui/profile_photo_sources/mod.rs
 1 src/ui/saved_sublists.rs
-12 src/ui/security/passkeys.rs
 1 src/ui/security_recovery.rs
 1 src/ui/send_box_options.rs
 2 src/ui/send_effects/preview.rs
