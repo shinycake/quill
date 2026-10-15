@@ -1773,7 +1773,7 @@ Apache License
 
 Used by:
 - [gpui-base 0.7.3](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.7.1](https://crates.io/crates/gpui-component-macros)
+- [gpui-component-macros 0.7.3](https://crates.io/crates/gpui-component-macros)
 - [gpui-component 0.7.3](https://github.com/longbridge/gpui-kit)
 
 ````text
