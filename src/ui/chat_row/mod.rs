@@ -48,7 +48,7 @@ pub(super) fn chat_preview_line(
     id: u64,
 ) -> (String, String, u64) {
     let name = if is_outgoing {
-        tr(keys::Q_CHATLIST_YOU).to_string()
+        tr(keys::FROM_YOU).to_string()
     } else {
         author_signature.unwrap_or(peer_title).to_string()
     };
@@ -345,7 +345,7 @@ pub(super) fn session_chat_row(
     let id = chat.id;
     let topic_line = topic_names.clone().filter(|_| row_style.preview_lines < 3);
     let title: String = if saved {
-        tr(keys::SHORTCUTS_CHAT_SELF).to_string()
+        tr(keys::SAVED_MESSAGES).to_string()
     } else {
         chat.title.clone()
     };
