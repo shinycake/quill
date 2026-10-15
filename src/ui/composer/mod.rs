@@ -24,7 +24,7 @@ use quill::composer::{
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::schedule::ScheduleKind;
 use quill::send_rights::SendKind;
 use quill::state::{Session, effective_preview};
@@ -601,10 +601,7 @@ impl QuillApp {
             &mut self.composer_ui.pending_attachments,
             paths,
         ) {
-            Ok(count) => tr_with(
-                keys::Q_CHAT_ATTACHED_FILES_SEND_TO_UPLOAD,
-                &[("count", &count.to_string())],
-            ),
+            Ok(count) => trn(keys::Q_CHAT_ATTACHED_FILES_SEND_TO_UPLOAD, count),
             Err(note) => note.into(),
         };
         self.check_tray_videos(cx);

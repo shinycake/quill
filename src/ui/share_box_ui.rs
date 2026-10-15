@@ -19,7 +19,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::ComposerSnapshot;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn, trn_with};
 use quill::schedule::ScheduleKind;
 use quill::share_box::{ShareSend, forward_bar_lines, share_done_label};
 use quill::telegram::envelope::{ChatKind, MessageSender};
@@ -444,18 +444,16 @@ impl QuillApp {
                 &[("from_title", &from_title.to_string())],
             )
         } else {
-            tr_with(
+            trn_with(
                 keys::Q_OPS_FORWARD_MESSAGES_FROM,
-                &[
-                    ("count", &count.to_string()),
-                    ("from_title", &from_title.to_string()),
-                ],
+                count,
+                &[("from_title", &from_title.to_string())],
             )
         };
         let summary = match selected {
             0 => tr(keys::Q_OPS_CHOOSE_ONE_OR_MORE_CHATS).to_string(),
             1 => tr(keys::Q_OPS_1_CHAT_SELECTED).to_string(),
-            n => tr_with(keys::Q_OPS_CHATS_SELECTED, &[("n", &n.to_string())]),
+            n => trn(keys::Q_OPS_CHATS_SELECTED, n),
         };
         let mut list = div()
             .id("forward-dest-list")

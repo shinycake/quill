@@ -152,7 +152,8 @@
 "qll_chatlist_invite_friends" = "Invite friends";
 "qll_chatlist_invite_link_name" = "Invite link name";
 "qll_chatlist_joining_1_chat" = "joining 1 chat…";
-"qll_chatlist_joining_chats" = "joining {n} chats…";
+"qll_chatlist_joining_chats#one" = "joining {count} chat…";
+"qll_chatlist_joining_chats#other" = "joining {count} chats…";
 "qll_chatlist_link_names_are_at_most" = "Link names are at most 32 characters.";
 "qll_chatlist_loading_community" = "Loading community…";
 "qll_chatlist_loading_folder" = "Loading folder…";

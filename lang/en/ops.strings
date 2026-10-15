@@ -291,7 +291,8 @@
 "qll_ops_chat_types" = "Chat types";
 "qll_ops_chats" = "Chats ({len})";
 "qll_ops_chats_could_not_be_read" = "{failed_chats} chats could not be read and have no messages in the export.";
-"qll_ops_chats_selected" = "{n} chats selected";
+"qll_ops_chats_selected#one" = "{count} chat selected";
+"qll_ops_chats_selected#other" = "{count} chats selected";
 "qll_ops_chats_with_protected_content_were" = "{protected_chats} chats with protected content were left out.";
 "qll_ops_check_for_updates" = "Check for updates";
 "qll_ops_check_for_updates_on_launch" = "Check for updates on launch";
@@ -519,8 +520,10 @@
 "qll_ops_exported_messages_to" = "Exported {messages} messages to {display}";
 "qll_ops_failed" = "Failed";
 "qll_ops_file" = "File {file_id}";
-"qll_ops_files" = "{count} files · {size}";
-"qll_ops_files_2" = "{count} files · {format_storage_bytes}";
+"qll_ops_files#one" = "{count} file · {size}";
+"qll_ops_files#other" = "{count} files · {size}";
+"qll_ops_files_2#one" = "{count} file · {format_storage_bytes}";
+"qll_ops_files_2#other" = "{count} files · {format_storage_bytes}";
 "qll_ops_files_saved_left_out_of" = "{files} files saved, {skipped} left out of the export.";
 "qll_ops_filter_event_log" = "Filter event log";
 "qll_ops_finding_out_who_becomes_the" = "Finding out who becomes the next owner…";
@@ -533,7 +536,8 @@
 "qll_ops_forward" = "Forward";
 "qll_ops_forward_1_message_from" = "Forward 1 message from {from_title}";
 "qll_ops_forward_bar_ready_press_send" = "forward bar ready — press Send";
-"qll_ops_forward_messages_from" = "Forward {count} messages from {from_title}";
+"qll_ops_forward_messages_from#one" = "Forward {count} message from {from_title}";
+"qll_ops_forward_messages_from#other" = "Forward {count} messages from {from_title}";
 "qll_ops_forward_to" = "Forward to…";
 "qll_ops_forwarding" = "forwarding…";
 "qll_ops_france" = "France";

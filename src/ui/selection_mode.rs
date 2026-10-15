@@ -12,7 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::telegram::envelope::effective_content;
 
 /// A history row's selection-mode decoration (see
@@ -453,7 +453,7 @@ impl QuillApp {
         }
         self.connection.status_note = match missing.len() {
             1 => tr(keys::Q_CHAT_DOWNLOADING_1_FILE).into(),
-            n => tr_with(keys::Q_CHAT_DOWNLOADING_FILES, &[("n", &n.to_string())]),
+            n => trn(keys::Q_CHAT_DOWNLOADING_FILES, n),
         };
         cx.notify();
     }
@@ -528,7 +528,7 @@ impl QuillApp {
             let _ = this.update(cx, |this, cx| {
                 this.connection.status_note = match saved {
                     1 => tr(keys::Q_CHAT_SAVED_1_FILE).into(),
-                    n => tr_with(keys::Q_CHAT_SAVED_FILES, &[("n", &n.to_string())]),
+                    n => trn(keys::Q_CHAT_SAVED_FILES, n),
                 };
                 cx.notify();
             });
@@ -654,10 +654,7 @@ impl QuillApp {
         let question = if ids.len() == 1 {
             tr(keys::SELECTED_DELETE_SURE_THIS).to_string()
         } else {
-            tr_with(
-                keys::Q_CHAT_DO_YOU_WANT_TO_DELETE,
-                &[("len", &(ids.len()).to_string())],
-            )
+            trn(keys::Q_CHAT_DO_YOU_WANT_TO_DELETE, ids.len())
         };
         let revoke = std::rc::Rc::new(std::cell::Cell::new(true));
         let app = cx.entity().downgrade();

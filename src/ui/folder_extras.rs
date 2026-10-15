@@ -402,7 +402,7 @@ impl QuillApp {
                     self.connection.status_note = match ids.len() {
                         0 => tr(keys::Q_CHATLIST_NEW_CHATS_HIDDEN).into(),
                         1 => tr(keys::Q_CHATLIST_JOINING_1_CHAT).into(),
-                        n => tr_with(keys::Q_CHATLIST_JOINING_CHATS, &[("n", &n.to_string())]),
+                        n => trn(keys::Q_CHATLIST_JOINING_CHATS, n),
                     }
                 }
                 Err(err) => {

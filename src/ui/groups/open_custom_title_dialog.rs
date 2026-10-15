@@ -1,7 +1,7 @@
 //! Methods moved out of `groups.rs` to keep files under 1000 lines.
 
 use super::*;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn, trn_with};
 
 impl QuillApp {
     /// Slice G1: admin custom-title prompt (`setChatMemberTag`, schema
@@ -413,9 +413,10 @@ impl QuillApp {
                         }
                         let total = chat_ids.len();
                         self.chat_list.selected.clear();
-                        Ok(tr_with(
+                        Ok(trn_with(
                             keys::Q_PEOPLE_DELETING_OF_CHATS,
-                            &[("sent", &sent.to_string()), ("total", &total.to_string())],
+                            total,
+                            &[("sent", &sent.to_string())],
                         ))
                     }
                     // Slice A2: abort the pending recovery-email setup
@@ -584,10 +585,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(tr_with(
-                                keys::Q_PEOPLE_MEMBERS_SELECTED,
-                                &[("len", &(selected.len()).to_string())],
-                            )),
+                            .child(trn(keys::Q_PEOPLE_MEMBERS_SELECTED, selected.len())),
                     );
                 }
             }

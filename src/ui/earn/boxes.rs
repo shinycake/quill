@@ -10,7 +10,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::{Dialog, DialogContent};
 use quill::boost_box::BoostCounters;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -36,10 +36,7 @@ fn diamonds_toast(count: u32) -> String {
     match count {
         100.. => tr(keys::Q_MONEY_YOU_ARE_RICH_NOW).into(),
         1 => tr(keys::Q_MONEY_YOU_HAVE_EARNED_1_DIAMOND).into(),
-        n => tr_with(
-            keys::Q_MONEY_YOU_HAVE_EARNED_DIAMONDS,
-            &[("n", &n.to_string())],
-        ),
+        n => trn(keys::Q_MONEY_YOU_HAVE_EARNED_DIAMONDS, n),
     }
 }
 
