@@ -101,7 +101,8 @@
 "qll_chat_also_delete_for" = "Also delete for {first_name}";
 "qll_chat_archive" = "Archive";
 "qll_chat_attach" = "Attach";
-"qll_chat_attached_files_send_to_upload" = "Attached {count} files. Send to upload.";
+"qll_chat_attached_files_send_to_upload#one" = "Attached {count} file. Send to upload.";
+"qll_chat_attached_files_send_to_upload#other" = "Attached {count} files. Send to upload.";
 "qll_chat_attachment_cleared" = "attachment cleared";
 "qll_chat_auto_detect" = "Auto-Detect";
 "qll_chat_back" = "Back";
@@ -227,7 +228,8 @@
 "qll_chat_divider" = "— Divider";
 "qll_chat_do_not_preview" = "Do Not Preview";
 "qll_chat_do_you_want_to_add" = "Do you want to add {count} requested people to the {place}?";
-"qll_chat_do_you_want_to_delete" = "Do you want to delete {len} messages?";
+"qll_chat_do_you_want_to_delete#one" = "Do you want to delete {count} message?";
+"qll_chat_do_you_want_to_delete#other" = "Do you want to delete {count} messages?";
 "qll_chat_do_you_want_to_dismiss" = "Do you want to dismiss {count} join requests?";
 "qll_chat_download" = "Download";
 "qll_chat_download_selected" = "Download Selected";
@@ -235,7 +237,8 @@
 "qll_chat_downloading_1_file" = "downloading 1 file…";
 "qll_chat_downloading_choose_save_again_when" = "downloading… choose Save again when it finishes";
 "qll_chat_downloading_choose_save_as_again" = "downloading… choose Save As again when it finishes";
-"qll_chat_downloading_files" = "downloading {n} files…";
+"qll_chat_downloading_files#one" = "downloading {count} file…";
+"qll_chat_downloading_files#other" = "downloading {count} files…";
 "qll_chat_drop_a_single_file_to" = "Drop a single file to replace the attachment.";
 "qll_chat_edit" = "Edit";
 "qll_chat_edit_cancelled" = "edit cancelled";
@@ -410,7 +413,8 @@
 "qll_chat_save_selected" = "Save Selected";
 "qll_chat_save_to" = "Save to...";
 "qll_chat_saved_1_file" = "saved 1 file";
-"qll_chat_saved_files" = "saved {n} files";
+"qll_chat_saved_files#one" = "saved {count} file";
+"qll_chat_saved_files#other" = "saved {count} files";
 "qll_chat_saved_to_saved_messages" = "saved to Saved Messages";
 "qll_chat_saving_edit" = "saving edit…";
 "qll_chat_saving_gif" = "saving GIF…";

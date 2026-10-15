@@ -14,7 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::data_settings::top_chats_by_size;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::storage_limits::{
     KEEP_LIMITS, SIZE_LIMITS, StorageOptionValue, keep_label, options_for, size_limit_label,
 };
@@ -69,12 +69,10 @@ impl QuillApp {
                 ),
         );
         for category in &categories {
-            let size_text = tr_with(
+            let size_text = trn_with(
                 keys::Q_OPS_FILES,
-                &[
-                    ("count", &category.count.to_string()),
-                    ("size", &(format_storage_bytes(category.size)).to_string()),
-                ],
+                category.count,
+                &[("size", &(format_storage_bytes(category.size)).to_string())],
             );
             let row = div().flex().items_center().justify_between().gap_2();
             let label = category.label;
@@ -305,15 +303,13 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(tr_with(
+                                .child(trn_with(
                                     keys::Q_OPS_FILES_2,
-                                    &[
-                                        ("count", &count.to_string()),
-                                        (
-                                            "format_storage_bytes",
-                                            &(format_storage_bytes(size)).to_string(),
-                                        ),
-                                    ],
+                                    count,
+                                    &[(
+                                        "format_storage_bytes",
+                                        format_storage_bytes(size).as_str(),
+                                    )],
                                 )),
                         )
                         .text_right(),

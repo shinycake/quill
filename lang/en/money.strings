@@ -483,7 +483,8 @@
 "qll_money_maximum_level" = "Maximum level";
 "qll_money_maximum_price_is" = "Maximum price is {label}.";
 "qll_money_members" = "Members";
-"qll_money_members_get_a_gift_code" = "{n} members get a gift code";
+"qll_money_members_get_a_gift_code#one" = "{count} member gets a gift code";
+"qll_money_members_get_a_gift_code#other" = "{count} members get a gift code";
 "qll_money_message" = "Message";
 "qll_money_message_statistics" = "Message statistics";
 "qll_money_messages" = "Messages";
@@ -713,7 +714,8 @@
 "qll_money_upgrade_to_a_collectible_free" = "Upgrade to a collectible (free)";
 "qll_money_user" = "User {id}";
 "qll_money_user_2" = "User {user_id}";
-"qll_money_users_have_opened_through_this" = "{n} users have opened {app} through this link.";
+"qll_money_users_have_opened_through_this#one" = "{count} user has opened {app} through this link.";
+"qll_money_users_have_opened_through_this#other" = "{count} users have opened {app} through this link.";
 "qll_money_validate_the_order_info_first" = "validate the order info first";
 "qll_money_value" = "Value";
 "qll_money_view_all_craftable_models" = "View all craftable models ›";
@@ -748,7 +750,8 @@
 "qll_money_you_can_withdraw_stars_using" = "You can withdraw Stars using Fragment, or use Stars to advertise your bot.";
 "qll_money_you_dont_have_a_wallet" = "You don't have a wallet yet.";
 "qll_money_you_have_earned_1_diamond" = "You have earned 1 diamond!";
-"qll_money_you_have_earned_diamonds" = "You have earned {n} diamonds!";
+"qll_money_you_have_earned_diamonds#one" = "You have earned {count} diamond!";
+"qll_money_you_have_earned_diamonds#other" = "You have earned {count} diamonds!";
 "qll_money_you_need_to" = "You need {label} to {what}.";
 "qll_money_you_need_to_add_up" = "You need to add up to 3 gifts from the same collection for crafting.";
 "qll_money_you_pay_for_premium_in" = "You pay for Premium in the checkout.";

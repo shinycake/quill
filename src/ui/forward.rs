@@ -9,7 +9,7 @@ use gpui_kit::*;
 use quill::composer::{ForwardDraft, cancel_forward_draft};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::state::{ForwardResult, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -110,7 +110,7 @@ impl QuillApp {
         }
         self.connection.status_note = match self.share.pending_forward.as_ref().map(|d| d.count()) {
             Some(1) => tr(keys::Q_MISC_1_MESSAGE_SELECTED).into(),
-            Some(n) => tr_with(keys::Q_MISC_MESSAGES_SELECTED, &[("n", &n.to_string())]),
+            Some(n) => trn(keys::Q_MISC_MESSAGES_SELECTED, n),
             None => tr(keys::Q_MISC_SELECTION_CLEARED).into(),
         };
         cx.notify();
@@ -268,10 +268,7 @@ impl QuillApp {
         let label = if count == 1 {
             tr(keys::Q_MISC_1_MESSAGE_SELECTED).to_string()
         } else {
-            tr_with(
-                keys::Q_MISC_MESSAGES_SELECTED_2,
-                &[("count", &count.to_string())],
-            )
+            trn(keys::Q_MISC_MESSAGES_SELECTED_2, count)
         };
         div()
             .id("forward-selection")

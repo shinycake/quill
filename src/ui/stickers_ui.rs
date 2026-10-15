@@ -13,7 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::StickersPurpose;
 use quill::state::{RequestPurpose, StickerTab};
@@ -605,16 +605,14 @@ impl QuillApp {
                     let owner = owner.clone();
                     let ids = batch_ids.clone();
                     menu = menu.item(
-                        PopupMenuItem::new(tr_with(
-                            keys::Q_MEDIA_ADD_SETS_SHOWN,
-                            &[("len", &(ids.len()).to_string())],
-                        ))
-                        .disabled(!batch_idle)
-                        .on_click(move |_, _, cx| {
-                            let ids = ids.clone();
-                            let _ = owner
-                                .update(cx, |this, cx| this.batch_install_sticker_sets(&ids, cx));
-                        }),
+                        PopupMenuItem::new(trn(keys::Q_MEDIA_ADD_SETS_SHOWN, ids.len()))
+                            .disabled(!batch_idle)
+                            .on_click(move |_, _, cx| {
+                                let ids = ids.clone();
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.batch_install_sticker_sets(&ids, cx)
+                                });
+                            }),
                     );
                 }
                 if can_remove_all {

@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, RequestId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::GroupsPurpose;
 use quill::state::{MemberListFilter, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
@@ -106,12 +106,10 @@ pub fn admin_rights_summary(rights: &ChatAdminRights) -> String {
     let enabled = (0..ADMIN_RIGHT_LABELS.len())
         .filter(|&i| admin_right_get(rights, i))
         .count();
-    tr_with(
+    trn_with(
         keys::Q_PEOPLE_OF_RIGHTS,
-        &[
-            ("enabled", &enabled.to_string()),
-            ("len", &(ADMIN_RIGHT_LABELS.len()).to_string()),
-        ],
+        ADMIN_RIGHT_LABELS.len(),
+        &[("enabled", &enabled.to_string())],
     )
 }
 

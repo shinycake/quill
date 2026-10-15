@@ -119,7 +119,8 @@
 "qll_media_add_details_optional" = "Add details (optional)";
 "qll_media_add_details_or_cancel_the" = "add details or cancel the report";
 "qll_media_add_option" = "Add option";
-"qll_media_add_sets_shown" = "Add {len} sets shown";
+"qll_media_add_sets_shown#one" = "Add {count} set shown";
+"qll_media_add_sets_shown#other" = "Add {count} sets shown";
 "qll_media_add_stickers" = "Add {count} Stickers";
 "qll_media_add_stories_to_album" = "add stories to album";
 "qll_media_add_tasks" = "Add Tasks";

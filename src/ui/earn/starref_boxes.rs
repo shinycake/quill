@@ -12,7 +12,7 @@ use gpui_kit::component::dialog::{Dialog, DialogContent};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use quill::earn::*;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn_with};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -102,9 +102,10 @@ fn opened_through(users: i64, app: &str) -> String {
     match users {
         0 => tr_with(keys::STAR_REF_LINK_COPY_NONE, &[("app", app)]),
         1 => tr_with(keys::Q_MONEY_1_USER_HAVE_OPENED_THROUGH, &[("app", app)]),
-        n => tr_with(
+        n => trn_with(
             keys::Q_MONEY_USERS_HAVE_OPENED_THROUGH_THIS,
-            &[("n", &n.to_string()), ("app", app)],
+            n,
+            &[("app", app)],
         ),
     }
 }

@@ -21,7 +21,7 @@ use quill::giveaway::{
     gift_code_months, gift_code_price,
 };
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::now_unix;
 use quill::state::{GiveawayOptions, Session};
 use quill::telegram::envelope::{ChatKind, format_payment_price};
@@ -276,10 +276,7 @@ impl QuillApp {
             .child(div().id("giveaway-award").text_sm().child(match count {
                 0 => tr(keys::Q_MONEY_RANDOM_WINNERS).to_string(),
                 1 => tr(keys::Q_MONEY_1_MEMBER_GETS_A_GIFT).to_string(),
-                n => tr_with(
-                    keys::Q_MONEY_MEMBERS_GET_A_GIFT_CODE,
-                    &[("n", &n.to_string())],
-                ),
+                n => trn(keys::Q_MONEY_MEMBERS_GET_A_GIFT_CODE, n),
             }))
             .child(
                 div()

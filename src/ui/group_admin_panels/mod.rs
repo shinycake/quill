@@ -9,7 +9,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::{AdminListFetch, InviteLinkFetch, JoinRequestFetch, RequestPurpose};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatAdministratorEntry, ChatKind};
 impl QuillApp {
@@ -183,12 +183,10 @@ impl QuillApp {
                                 .flex_1()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(tr_with(
+                                .child(trn_with(
                                     keys::Q_PEOPLE_LEVEL_BOOSTS,
-                                    &[
-                                        ("level", &level.to_string()),
-                                        ("boost_count", &boost_count.to_string()),
-                                    ],
+                                    boost_count,
+                                    &[("level", &level.to_string())],
                                 )),
                         )
                         .child(

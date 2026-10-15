@@ -17,7 +17,7 @@ use quill::drop_modes::{
     plan_drop, zones,
 };
 use quill::folder_archive::{ARCHIVE_SIZE_LIMIT, ArchiveError, build_archive};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, trn};
 use std::path::PathBuf;
 
 impl QuillApp {
@@ -88,10 +88,7 @@ impl QuillApp {
                     &mut self.composer_ui.pending_attachments,
                     &planned,
                 ) {
-                    Ok(count) => tr_with(
-                        keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD,
-                        &[("count", &count.to_string())],
-                    ),
+                    Ok(count) => trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count),
                     Err(note) => note.into(),
                 };
                 cx.notify();

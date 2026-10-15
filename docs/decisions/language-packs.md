@@ -408,6 +408,14 @@ areas. Several strings still build English plurals by hand ("{n} files",
 "{len} messages"). Moving them to plural keys needs a change at each call
 site and is the next PR.
 
+## PR 11: plural keys for counted text
+
+Twenty strings that built English plurals by hand ("{n} files",
+"{len} members selected") are now Quill plural keys with `#one` and
+`#other` forms, called through `trn` and `trn_with`, so each pack applies
+its own plural rules. One line counting admins, banned users and pending
+requests together keeps a single template, since it holds three counts.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

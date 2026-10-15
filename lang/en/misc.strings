@@ -116,7 +116,8 @@
 "qll_misc_archive" = "Archive";
 "qll_misc_archived" = "Archived";
 "qll_misc_archived_chats" = "Archived Chats";
-"qll_misc_attached_files_send_to_upload" = "Attached {count} files. Send to upload.";
+"qll_misc_attached_files_send_to_upload#one" = "Attached {count} file. Send to upload.";
+"qll_misc_attached_files_send_to_upload#other" = "Attached {count} files. Send to upload.";
 "qll_misc_attached_the_archive_send_to" = "Attached the archive. Send to upload.";
 "qll_misc_auto_night_mode_is_off" = "Auto-night mode is off now, so the chosen theme stays.";
 "qll_misc_b" = "{n} B";
@@ -384,8 +385,10 @@
 "qll_misc_mask_order_unchanged_or_an" = "Mask order unchanged or an update is in progress.";
 "qll_misc_members_can_use_these_emoji" = "Members can use these emoji in the group even without Premium.";
 "qll_misc_mentions_marked_as_read" = "mentions marked as read";
-"qll_misc_messages_selected" = "{n} messages selected";
-"qll_misc_messages_selected_2" = "{count} messages selected";
+"qll_misc_messages_selected#one" = "{count} message selected";
+"qll_misc_messages_selected#other" = "{count} messages selected";
+"qll_misc_messages_selected_2#one" = "{count} message selected";
+"qll_misc_messages_selected_2#other" = "{count} messages selected";
 "qll_misc_microphone" = "Microphone";
 "qll_misc_monospace" = "Monospace";
 "qll_misc_more_archived_masks" = "More archived masks";

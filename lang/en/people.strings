@@ -329,7 +329,8 @@
 "qll_people_deleting_chat" = "deleting chat…";
 "qll_people_deleting_community" = "deleting community…";
 "qll_people_deleting_contact" = "deleting contact…";
-"qll_people_deleting_of_chats" = "deleting {sent} of {total} chats…";
+"qll_people_deleting_of_chats#one" = "deleting {sent} of {count} chat…";
+"qll_people_deleting_of_chats#other" = "deleting {sent} of {count} chats…";
 "qll_people_deleting_saved_messages" = "deleting saved messages…";
 "qll_people_deleting_synced_contacts" = "deleting synced contacts…";
 "qll_people_deleting_topic" = "deleting topic…";
@@ -418,7 +419,8 @@
 "qll_people_left_channel_demo" = "left channel (demo)";
 "qll_people_left_the_chat" = "left the chat";
 "qll_people_level" = "Level {level} · {boost_count_title}";
-"qll_people_level_boosts" = "Level {level} · {boost_count} boosts";
+"qll_people_level_boosts#one" = "Level {level} · {count} boost";
+"qll_people_level_boosts#other" = "Level {level} · {count} boosts";
 "qll_people_levi" = "Levi";
 "qll_people_lightness" = "Lightness";
 "qll_people_link_order" = "Link order";
@@ -457,7 +459,8 @@
 "qll_people_member_search_needs_a_live" = "member search needs a live connection (demo)";
 "qll_people_member_unbanned" = "member unbanned";
 "qll_people_members" = "Members";
-"qll_people_members_selected" = "{len} members selected";
+"qll_people_members_selected#one" = "{count} member selected";
+"qll_people_members_selected#other" = "{count} members selected";
 "qll_people_month" = "Month";
 "qll_people_more_boosts" = "{left} more boosts";
 "qll_people_move_down" = "Move down";
@@ -501,7 +504,8 @@
 "qll_people_note_only_visible_to_you" = "Note (only visible to you)";
 "qll_people_nothing_to_delete" = "nothing to delete";
 "qll_people_occupied" = "Occupied";
-"qll_people_of_rights" = "{enabled} of {len} rights";
+"qll_people_of_rights#one" = "{enabled} of {count} right";
+"qll_people_of_rights#other" = "{enabled} of {count} rights";
 "qll_people_off" = "Off";
 "qll_people_omar" = "Omar";
 "qll_people_on" = "On";
