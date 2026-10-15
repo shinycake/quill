@@ -1,0 +1,56 @@
+Quill worker rules (every brief points here; read in full before starting)
+
+UX
+- Match Telegram Desktop exactly, the first time. Read the source first (~/Developer/Reference/tdesktop, lib_ui; Telegram X in ~/Developer/Reference for TDLib usage) and check the live "Telegram 2" app when behavior is unclear. Reference repos are read-only: never push, branch or PR there.
+- If tdesktop does not actually do something, stop and report. Never invent behavior. Never change Quill's default look; follow the gpui-kit Design Guides for anything tdesktop leaves open.
+- Close every deviation before reporting. No reduced first slices: an item is done only when it fully matches.
+- Limits come from TDLib options, not hardcoded numbers. Never block the UI thread.
+- Main-window animations use the frame clock (QuillApp::request_animation_tick, src/ui/frame_clock.rs), never a repeating with_animation.
+- Cross-platform: everything must work on Linux and Windows too, or have a documented fallback.
+- UI copy calls the app Quill; "Telegram" only for the service, accounts, Premium, links.
+
+Components and skills (owner, 2026-10-13)
+- Before any UI work, load the `gpui-kit` and `gpui-kit-design-guides` skills (and `dataviz` for any chart, graph, meter or stat tile) with the Skill tool, and read them.
+- Use existing gpui-kit components (gpui_kit::component::*: charts in chart/ and plot/, lists, tables, dialogs, inputs, menus, badges, progress, etc.) before writing custom drawing or widget code. Hand-rolled widgets are rejected in review when a kit component exists; if you must draw custom, say why in the decision doc.
+- Secondary text must meet WCAG AA contrast in light and dark themes.
+
+Never crash (owner policy, 2026-10-13; full rules in docs/contributing/panic-safety.md once on main, read it)
+- No unchecked indexing or slicing at non-char boundaries in production code. Keep RefCell borrows short, never held across GPUI, native or callback calls. Rust called from C must never unwind.
+- No new unwrap/expect/panic!/todo!/unimplemented!/unreachable! in first-party code unless truly unavoidable, with a comment saying why.
+- Use get() instead of indexing/slicing where bounds are not proven; checked arithmetic where overflow is possible.
+- Never borrow or update a RefCell, ListState or entity that may already be borrowed: nothing inside list/row closures or render/update callbacks may query state the caller holds (the #747 crash).
+- Every unsafe block needs a SAFETY comment. Errors go through Result with a graceful fallback.
+
+Tests
+- Unit tests for core logic, driver tests with the recording sender for TDLib requests, and a GPUI UI test for every new flow (no `use super::*` in UI test modules).
+- Visual check with the demo-capture feature (QUILL_DEMO_CAPTURE) for new screens when practical.
+
+Structure
+- Stay out of hotspot files beyond what scripts/hotspots.txt allows: `bash scripts/check-hotspots.sh origin/main` must pass. If a hotspot change is truly needed, put `Hotspot-change: <reason>` directly above `Co-Authored-By:` in the same last paragraph of the commit message.
+- check-hotspots.sh also fails when a central `pub enum` (>40 variants) or `match` (>30 arms) grows. Prefer your own domain enum/handler; if growth is unavoidable, use the Hotspot-change trailer.
+- Files under 1,000 lines: `bash scripts/check-file-size.sh` must pass.
+- Own only the area named in your brief. Other agents are working elsewhere at the same time.
+
+Disk (owner hard rule, 2026-10-13: never let a disk fill up)
+- Build storage is the external SSD /Volumes/Idan1TB (APFS). First thing in your worktree: `bash /Users/idan/Developer/Projects/quill-tools/ssd-target.sh`, which links ./target to /Volumes/Idan1TB/quill-work/target/<worktree-name> so every cargo command builds on the SSD (gate.sh also does it). Never set CARGO_TARGET_DIR elsewhere.
+- Scratch, demo captures, bench and profiler output go in /Volumes/Idan1TB/quill-work/scratch/<branch>/, never in the repo or the internal disk.
+- If the SSD drops, ssd-target.sh (run by gate.sh) falls back to a local ./target on the internal disk when there is room (30 GB + 20 GB per local build) and moves back to the SSD, wiping the possibly half-built SSD target, once it returns. Run ssd-target.sh again before any cargo command after a drop. If it exits 2 (no room), stop building and report. A build that failed with SIGBUS or I/O errors mid-run: re-run ssd-target.sh and rebuild.
+- Floor: 30 GB free on the internal Data volume AND on the SSD. gate.sh refuses to build below it; if it does, stop and report. Never delete other worktrees or their targets.
+- No extra cargo builds beyond gate.sh and what the task needs (no parallel cargo invocations, no release builds unless asked).
+- When you finish (PR opened, or work abandoned): `rm -rf "$(readlink target)" target` in your worktree and delete your scratch dir.
+
+Git
+- Work in your own worktree. Branch name: short and readable, says what it is for, no forced prefix (e.g. `message-effects-picker`).
+- Run `bash /Users/idan/Developer/Projects/quill-tools/gate.sh` from the worktree root in the FOREGROUND until it prints GATE OK.
+- `git fetch origin main && git rebase origin/main` before pushing; re-run the gate if the rebase pulled changes.
+- Decision doc: docs/decisions/<branch-with-dashes>.md (what tdesktop does, what changed, how verified, anything unverified).
+- Parity: parity-fragments/<branch-with-dashes>.txt listing only the README ids (parity:<id>) that are fully done. Never edit README.md.
+- Open the PR with `gh pr create --repo shinycake/quill`. Body starts with:
+  <!-- claude-projects-attribution: {"github_login":"shinycake"} -->
+  _Requested by **Idan**_
+  then Before:/After: paragraphs and a short How. End with "🤖 Generated with [Claude Code](https://claude.com/claude-code)". Commit trailer: Co-Authored-By line for the model you run as.
+- Never merge, never stack PRs on other PR branches, never delete user data, never message anyone, never enter credentials.
+- Scratch files go in your own /private/tmp/claude-501/<branch>/ directory.
+- Do not call any mcp__hearthbot__ tools.
+
+Report: PR URL, what was done per parity id, what was verified, anything unverified or deviating from tdesktop.
