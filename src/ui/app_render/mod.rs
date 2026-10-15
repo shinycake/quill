@@ -76,6 +76,9 @@ impl Render for QuillApp {
         // A viewer covers the chat: its clips stop even if a cached
         // conversation replays its animation layer; a closed GIF panel
         // stops the panel's.
+        // Picture-in-Picture outlives neither its message, the account
+        // nor an unlocked app.
+        self.check_video_pip(cx);
         if self.viewer.state.is_open() || self.stories.viewer.is_open() {
             self.playback.inline_videos.clear();
         } else if !self.composer_ui.inline_results_open {
@@ -753,10 +756,9 @@ impl Render for QuillApp {
                     )
                 },
             )
-            .when(
-                self.viewer.state.is_open() && self.viewer.pip_window.is_none(),
-                |this| this.child(self.media_viewer_overlay(window, cx)),
-            )
+            .when(self.viewer.state.is_open(), |this| {
+                this.child(self.media_viewer_overlay(window, cx))
+            })
             // Live: the latest status note is a transient toast floating
             // above the composer — no layout shift, no click capture, gone
             // after a few seconds. It paints above the media viewer too

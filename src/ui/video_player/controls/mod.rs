@@ -13,6 +13,7 @@
 
 mod metrics;
 mod overlay;
+pub(crate) mod pip;
 mod scrubber;
 mod speed;
 
@@ -193,7 +194,7 @@ pub(crate) struct ControllerActions {
     pub(crate) toggle_play: Handler,
     pub(crate) toggle_mute: Handler,
     pub(crate) fullscreen: Handler,
-    /// `None` hides the button (no Picture-in-Picture backend here).
+    /// `None` hides the button (no clip playing yet).
     pub(crate) pip: Option<Handler>,
     pub(crate) hover: HoverHandler,
 }

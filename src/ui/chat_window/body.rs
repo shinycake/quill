@@ -90,7 +90,7 @@ impl QuillApp {
                     .children(self.pull_hint_overlay(cx)),
             )
             .children(drop_overlay);
-        let viewer_open = self.viewer.state.is_open() && self.viewer.pip_window.is_none();
+        let viewer_open = self.viewer.state.is_open();
         div()
             .id("chat-window-body")
             .relative()

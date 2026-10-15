@@ -474,6 +474,7 @@ impl QuillApp {
                 self.stop_audio_playback();
                 self.stop_animation_playback();
                 self.stop_viewer_video();
+                self.close_video_pip(cx);
                 self.playback.pending_video_play = None;
                 if self
                     .playback

@@ -229,6 +229,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         use crate::ui::video_player::{Purpose, VideoPlayer};
+        // Back from Picture-in-Picture: the same player goes on.
+        if let Some(player) = self.take_pip_handoff(item.message_id) {
+            self.adopt_viewer_player(item, path, player, cx);
+            return;
+        }
+        // A clip with sound ends Picture-in-Picture (tdesktop
+        // `startStreamingPlayer`); a silent loop leaves it playing.
+        if !item.kind.loops() {
+            self.close_video_pip(cx);
+        }
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_video_playback();
@@ -289,7 +299,7 @@ impl QuillApp {
     }
 
     /// MED1: the seek and volume sliders of the player panel.
-    fn create_viewer_sliders(&mut self, duration: f64, cx: &mut Context<Self>) {
+    pub(super) fn create_viewer_sliders(&mut self, duration: f64, cx: &mut Context<Self>) {
         self.create_viewer_seek_slider(duration, cx);
         // MED1: volume slider (0–100%); applies on release.
         let volume = cx.new(|_| {
@@ -421,7 +431,6 @@ impl QuillApp {
     /// Full stop: drop the player and clear all viewer-video state.
     /// Called on viewer close/step and when any other player starts.
     pub(in crate::ui) fn stop_viewer_video(&mut self) {
-        self.viewer.pip_window = None;
         self.viewer.player = None;
         self.viewer.gif = None;
         self.viewer.video = None;

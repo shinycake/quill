@@ -45,12 +45,14 @@ mod layer;
 mod navigation;
 mod overlay;
 mod overlay_controls;
+mod pip;
 mod playback;
 mod ttl_ui;
 mod video;
 mod video_extras;
 
 pub(in crate::ui) use layer::ViewerVideoLayer;
+pub(in crate::ui) use pip::PipLink;
 
 /// Viewer state that is not part of the item list: Shared Media paging,
 /// video full screen, and the inactive-window pause of looping clips.

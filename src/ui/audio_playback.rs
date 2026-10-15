@@ -142,6 +142,7 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
+        self.close_video_pip(cx);
         // The sound was replaced, so a recording preview is over.
         self.recording.preview = None;
         self.playback.error = None;

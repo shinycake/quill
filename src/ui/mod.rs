@@ -447,7 +447,6 @@ mod video_editor_controls;
 mod video_editor_set;
 mod video_editor_timeline;
 mod video_editor_tools;
-mod video_pip;
 mod video_player;
 mod wallpaper;
 mod wallpaper_cache;
