@@ -757,6 +757,9 @@ fn gift_details(
             cx,
         ));
     }
+    if let Some(value) = gift.gift.collectible.as_deref() {
+        col = col.children(super::gift_value_ui::gift_value_row(session, value, cx));
+    }
     if gift.was_refunded {
         col = col.child(fact_row(
             tr(keys::Q_MONEY_STATUS),

@@ -136,6 +136,11 @@ pub struct Collectible {
     /// The resale listing: Stars and 1/100 Gram prices, and whether the
     /// seller takes Grams only. `None` when not on sale.
     pub resale: Option<ResaleListingPrice>,
+    /// The estimated value (`value_currency`, `value_amount` in the
+    /// currency's smallest units); the unique gift box shows its "Value"
+    /// row only when both are set (`crate::premium_hub::gift_value`).
+    pub value_currency: String,
+    pub value_amount: i64,
 }
 
 /// `giftResaleParameters`.
@@ -192,5 +197,7 @@ pub fn parse_collectible(gift: &Value) -> Option<Collectible> {
         is_crafted: flag(gift, "is_crafted"),
         is_burned: flag(gift, "is_burned"),
         resale,
+        value_currency: text_of(gift, "value_currency"),
+        value_amount: int(gift.get("value_amount")).max(0),
     })
 }

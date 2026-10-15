@@ -250,6 +250,8 @@ mod gift_send_ui;
 mod gift_transfer_demo;
 mod gift_transfer_ui;
 mod gift_transfer_view;
+mod gift_value_demo;
+mod gift_value_ui;
 mod giveaway_boosts_ui;
 mod giveaway_create_ui;
 mod giveaway_info_ui;

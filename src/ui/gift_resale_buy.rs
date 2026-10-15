@@ -147,7 +147,8 @@ impl QuillApp {
                                 gift.symbol.rarity,
                                 cx,
                             )),
-                    );
+                    )
+                    .children(super::gift_value_ui::gift_value_row(session, gift, cx));
                 if gift.resale.is_some_and(|r| r.gram_only) {
                     body = body.child(hint(tr(keys::GIFT_BUY_RESALE_ONLY_TON), cx));
                 }

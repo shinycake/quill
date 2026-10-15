@@ -485,18 +485,23 @@ pub fn price_parts_total(parts: &[LabeledPrice]) -> i64 {
 /// otherwise) — amounts the API returns are always smallest units, so the
 /// exponent has to come from the currency, not the payload.
 pub fn format_payment_price(currency: &str, amount: i64) -> String {
-    let exponent: u32 = match currency {
-        "BIF" | "CLP" | "DJF" | "GNF" | "JPY" | "KMF" | "KRW" | "MGA" | "PYG" | "RWF" | "UGX"
-        | "UYI" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
-        "BHD" | "IQD" | "JOD" | "KWD" | "OMR" | "TND" => 3,
-        _ => 2,
-    };
+    let exponent = currency_exponent(currency);
     let divisor = 10_i64.pow(exponent);
     let (whole, frac) = (amount.div_euclid(divisor), amount.rem_euclid(divisor));
     match exponent {
         0 => format!("{currency} {whole}"),
         3 => format!("{currency} {whole}.{frac:03}"),
         _ => format!("{currency} {whole}.{frac:02}"),
+    }
+}
+
+/// Digits after the decimal point of an ISO 4217 currency's smallest unit.
+pub fn currency_exponent(currency: &str) -> u32 {
+    match currency {
+        "BIF" | "CLP" | "DJF" | "GNF" | "JPY" | "KMF" | "KRW" | "MGA" | "PYG" | "RWF" | "UGX"
+        | "UYI" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
+        "BHD" | "IQD" | "JOD" | "KWD" | "OMR" | "TND" => 3,
+        _ => 2,
     }
 }
 
