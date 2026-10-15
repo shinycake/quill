@@ -1,0 +1,2 @@
+# video-pip: Picture-in-Picture on the shared player, tdesktop chrome, macOS / Windows / Linux
+parity:media-video-pip
