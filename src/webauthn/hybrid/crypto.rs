@@ -11,7 +11,7 @@ use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use p256::elliptic_curve::sec1::ToSec1Point;
 use p256::{PublicKey, SecretKey};
-use sha2_next::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 
 /// An uncompressed P-256 point: 0x04, x, y.
 pub const X962_LEN: usize = 65;

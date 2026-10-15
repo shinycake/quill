@@ -125,14 +125,14 @@ rusty-opus = { version = "1", optional = true }
 # lockfile through GPUI; no text or raster-image features are needed.
 resvg = { version = "0.48", default-features = false, features = ["svgz"], optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
-sha2 = "0.10"
+sha2 = "0.11"
 # Emoji set packs (docs/decisions/emoji-set-style.md): stored (uncompressed)
 # zip entries only, so no compression features.
 zip = { version = "9", default-features = false }
 # Local passcode (docs/decisions/codex-local-passcode.md): PBKDF2-HMAC-SHA512 key
 # derivation and an XChaCha20-Poly1305 key wrap; no hand-rolled crypto.
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
-chacha20poly1305 = "0.10"
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 smallvec = { version = "1", optional = true }
 # Interface scale (docs/decisions/codex-interface-scale-full.md): the platform
 # decorator names GPUI's oneshot receiver type. Already in the lockfile via GPUI.
@@ -153,15 +153,13 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 # Passkeys on a USB security key (docs/decisions/passkeys-ceremony.md): CTAP2
 # over HID is written in-tree; CBOR and the PIN protocol crypto (P-256 ECDH,
 # HKDF and HMAC with SHA-256, AES-256-CBC) come from RustCrypto. No OpenSSL.
-# `sha2_next` is sha2 0.11, the digest generation hmac 0.13 and hkdf 0.13 use
-# (the passcode code above still uses sha2 0.10 with pbkdf2 0.12).
+# sha2 0.11 is the digest generation hmac 0.13, hkdf 0.13 and pbkdf2 0.13 use.
 ciborium = "0.2"
 p256 = { version = "0.14", default-features = false, features = ["arithmetic", "ecdh"] }
 aes = "0.9"
 cbc = "0.2"
 hmac = "0.13"
 hkdf = "0.13"
-sha2_next = { package = "sha2", version = "0.11" }
 # Passkeys from a phone (hybrid / caBLE v2, docs/decisions/passkeys-hybrid.md):
 # the tunnel's AES-256-GCM, and its websocket. tungstenite brings no TLS of its
 # own; it runs over a rustls stream with the ring provider and the webpki
