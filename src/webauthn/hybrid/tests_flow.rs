@@ -109,11 +109,19 @@ fn qr_of(event: CeremonyEvent) -> String {
     }
 }
 
-/// Scan the QR, start the phone's tunnel and advertise to the scanner.
-fn phone_appears(rig: &Rig, qr_text: &str, script: PhoneScript) -> (FakePhone, [u8; 16]) {
+/// Scan the QR, start the phone's tunnel, give the connector its address
+/// and advertise to the scanner. The address goes in before the advert:
+/// the worker connects as soon as it sees the advert.
+fn phone_appears(
+    rig: &Rig,
+    addr: &Mutex<Option<std::net::SocketAddr>>,
+    qr_text: &str,
+    script: PhoneScript,
+) -> (FakePhone, [u8; 16]) {
     let scanned = scan_qr(qr_text);
     let eid = make_eid([0xab, 0xcd, 0xef], 0);
     let phone = serve(scanned.clone(), eid, script);
+    *addr.lock().unwrap() = Some(phone.addr);
     let sender = rig.events.lock().unwrap().clone().expect("scanning");
     // Someone else's phone first: ignored.
     let mut other = scanned.clone();
@@ -145,8 +153,7 @@ fn registers_on_a_phone() {
     assert_eq!(scanned.request, "mc");
     assert_eq!(scanned.domains, 2);
     assert_eq!(scanned.timestamp, 1_760_000_000);
-    let (phone, _) = phone_appears(&rig, &qr_text, phone_script);
-    *qr_holder.lock().unwrap() = Some(phone.addr);
+    let (phone, _) = phone_appears(&rig, &qr_holder, &qr_text, phone_script);
     assert_eq!(next(&mut ceremony), CeremonyEvent::PhoneConnecting);
     assert_eq!(next(&mut ceremony), CeremonyEvent::PhoneContinue);
     let registration = match next(&mut ceremony) {
@@ -226,6 +233,7 @@ fn signs_in_with_an_older_phone() {
     assert_eq!(scan_qr(&qr_text).request, "ga");
     let (phone, _) = phone_appears(
         &rig,
+        &addr,
         &qr_text,
         PhoneScript {
             revision: 0,
@@ -235,7 +243,6 @@ fn signs_in_with_an_older_phone() {
             answer: get_assertion_answer(&[0xc1], &[0x0a, 0x0b]),
         },
     );
-    *addr.lock().unwrap() = Some(phone.addr);
     assert_eq!(next(&mut ceremony), CeremonyEvent::PhoneConnecting);
     assert_eq!(next(&mut ceremony), CeremonyEvent::PhoneContinue);
     let assertion = match next(&mut ceremony) {
@@ -259,6 +266,7 @@ fn a_phone_error_ends_with_the_phone_error() {
     let qr_text = qr_of(next(&mut ceremony));
     let (phone, _) = phone_appears(
         &rig,
+        &addr,
         &qr_text,
         PhoneScript {
             revision: 1,
@@ -268,7 +276,6 @@ fn a_phone_error_ends_with_the_phone_error() {
             answer: make_credential_answer(&[1]),
         },
     );
-    *addr.lock().unwrap() = Some(phone.addr);
     assert_eq!(next(&mut ceremony), CeremonyEvent::PhoneConnecting);
     assert_eq!(next(&mut ceremony), CeremonyEvent::PhoneContinue);
     assert_eq!(
