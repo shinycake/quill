@@ -1,9 +1,11 @@
 //! Grams (TON) balance and history of the signed-in user: Settings → My
 //! Grams, tdesktop's `Settings::Credits` with `CreditsType::Ton`.
 //!
-//! Read-only. The requests here are `getTonTransactions` and
-//! `getGramRevenueStatistics`; top-up opens the Fragment page in the
-//! browser. Nothing here moves Grams. Amounts are nano-Grams (1e-9).
+//! The requests here are `getTonTransactions` and
+//! `getGramRevenueStatistics`, plus `getGramWithdrawalUrl` behind the
+//! password box (`ton_withdraw.rs`); top-up and withdrawal open Fragment's
+//! page in the browser. Nothing here moves Grams. Amounts are nano-Grams
+//! (1e-9).
 #![deny(clippy::indexing_slicing)]
 
 use super::{GiftInfo, TxFilter, group_digits, parse_gift_info, parse_gift_sticker};
@@ -407,6 +409,9 @@ pub enum GramsPurpose {
     PeerUser,
     /// `getChat` for such a chat.
     PeerChat,
+    /// `getGramWithdrawalUrl` from the password box of Collect. Response
+    /// is `httpUrl`.
+    WithdrawalUrl,
 }
 
 /// `getTonTransactions`; the direction is omitted (null) for All.
@@ -480,6 +485,13 @@ pub struct GramsHub {
     pub missing_chats: BTreeSet<i64>,
     /// A page landed; its peers still need checking.
     pub peers_dirty: bool,
+    /// Collect's password box or security check, while open.
+    pub withdraw: Option<GramWithdraw>,
+    /// Fragment's page from `getGramWithdrawalUrl`, for the UI to open
+    /// once (through the link policy).
+    pub withdraw_url: Option<String>,
+    /// `AMOUNT_TOO_SMALL` closed the box: the UI shows the toast once.
+    pub withdraw_too_small: bool,
 }
 
 impl GramsHub {
@@ -551,6 +563,10 @@ impl GramsHub {
         self.revenue.as_ref().filter(|r| r.available_nano > 0)
     }
 }
+
+#[path = "ton_withdraw.rs"]
+mod withdraw;
+pub use withdraw::*;
 
 #[cfg(test)]
 #[path = "ton_tests.rs"]

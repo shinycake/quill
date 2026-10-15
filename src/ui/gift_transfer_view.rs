@@ -5,16 +5,16 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::fragment_password::{PasswordBox, SecurityCheck};
 use super::gift_market_ui::collectible_tile;
 use super::gift_resale_buy::attribute_row;
 use super::gift_transfer_ui::{balance_hint, transfer_price};
 use super::message_text::kit_avatar_element;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::input::{Input, InputContentType};
+use gpui_kit::component::input::Input;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_manage::{
     ExportError, ExportState, TransferCandidate, TransferGate, TransferPicker, TransferStage,
@@ -472,8 +472,7 @@ fn confirm_export_view(gift_name: &str, probing: bool, cx: &mut Context<QuillApp
 }
 
 /// tdesktop `PasscodeBox` with the gift's custom title, description and
-/// Submit: the field, the error or the hint, "Forgot password?" and the
-/// description.
+/// Submit (`fragment_password::PasswordBox`).
 fn password_view(
     app: &QuillApp,
     session: &Session,
@@ -481,129 +480,38 @@ fn password_view(
     error: Option<&ExportError>,
     cx: &mut Context<QuillApp>,
 ) -> StageView {
-    let muted = cx.theme().muted_foreground;
-    let state = session.auth_state.password_state.as_ref();
-    let hint = state
-        .map(|state| state.password_hint.clone())
-        .filter(|hint| !hint.is_empty());
-    // tdesktop `_showRecoverLink`: a recovery email, or no reset pending.
-    let show_forgot =
-        state.is_none_or(|state| state.has_recovery_email_address || state.pending_reset_date == 0);
-    let under = match (error, hint) {
-        (Some(error), _) => Some(
-            div()
-                .text_xs()
-                .text_color(cx.theme().danger)
-                .child(export_error_text(error)),
-        ),
-        (None, Some(hint)) => Some(
-            div()
-                .text_xs()
-                .text_color(muted)
-                .truncate()
-                .child(tr_with(keys::Q_MONEY_HINT, &[("hint", &hint)])),
-        ),
-        (None, None) => None,
-    };
-    let body = v_flex()
-        .gap_2()
-        .child(
-            Input::new(&app.payments.gift_export_password)
-                .aria_label(tr(keys::Q_MONEY_ENTER_CURRENT_PASSWORD))
-                .content_type(InputContentType::Password)
-                .disabled(sending),
-        )
-        .children(under)
-        .when(show_forgot, |body| {
-            body.child(
-                div().child(
-                    Button::new("gift-transfer-password-forgot")
-                        .label(tr(keys::Q_MONEY_FORGOT_PASSWORD))
-                        .ghost()
-                        .small()
-                        .disabled(sending)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.forgot_gift_export_password(window, cx)
-                        })),
-                ),
-            )
-        })
-        .child(
-            div()
-                .text_sm()
-                .text_color(muted)
-                .child(tr(keys::GIFT_TRANSFER_PASSWORD_DESCRIPTION)),
-        );
+    let (body, footer) = PasswordBox {
+        id: "gift-transfer",
+        input: &app.payments.gift_export_password,
+        description: tr(keys::GIFT_TRANSFER_PASSWORD_DESCRIPTION),
+        sending,
+        error,
+        on_submit: QuillApp::submit_gift_export_password,
+        on_cancel: QuillApp::transfer_step_back,
+        on_forgot: QuillApp::forgot_gift_export_password,
+    }
+    .render(session, cx);
     StageView {
         title: Some(tr(keys::GIFT_TRANSFER_PASSWORD_TITLE).to_string()),
-        body: body.into_any_element(),
-        footer: footer()
-            .child(cancel_button("gift-transfer-password-cancel", cx).disabled(sending))
-            .child(
-                Button::new("gift-transfer-password-submit")
-                    .label(tr(keys::PASSCODE_SUBMIT))
-                    .primary()
-                    .loading(sending)
-                    .disabled(sending)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.submit_gift_export_password(window, cx)
-                    })),
-            )
-            .into_any_element(),
-    }
-}
-
-/// The line under the password field for a failed try.
-pub(super) fn export_error_text(error: &ExportError) -> SharedString {
-    match error {
-        ExportError::WrongPassword => tr(keys::CLOUD_PASSWORD_WRONG).into(),
-        ExportError::Flood => tr(keys::FLOOD_ERROR).into(),
-        ExportError::ServerError => tr(keys::Q_MONEY_SERVER_ERROR).into(),
-        ExportError::Other(reason) if reason.is_empty() => {
-            tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into()
-        }
-        ExportError::Other(reason) => tr_with(
-            keys::Q_MONEY_COULDNT_OPEN_FRAGMENT_REASON,
-            &[("reason", reason)],
-        )
-        .into(),
+        body,
+        footer,
     }
 }
 
 /// tdesktop `TransferPasswordError` with the gift's about line.
 fn security_check_view(later: bool, cx: &mut Context<QuillApp>) -> StageView {
-    let mut body = v_flex()
-        .gap_2()
-        .text_sm()
-        .child(tr(keys::GIFT_TRANSFER_PASSWORD_ABOUT))
-        .child(tr(keys::Q_MONEY_ENABLED_TWO_STEP_VERIFICATION_MORE))
-        .child(tr(keys::Q_MONEY_LOGGED_IN_ON_THIS_DEVICE));
-    if later {
-        body = body.child(tr(keys::RIGHTS_TRANSFER_CHECK_LATER));
+    let (body, footer) = SecurityCheck {
+        id: "gift-transfer",
+        about: tr(keys::GIFT_TRANSFER_PASSWORD_ABOUT),
+        later,
+        on_close: QuillApp::transfer_step_back,
+        on_set_password: QuillApp::set_password_for_export,
     }
-    let footer = if later {
-        footer().child(
-            Button::new("gift-transfer-check-ok")
-                .label(tr(keys::BOX_OK))
-                .primary()
-                .on_click(cx.listener(|this, _, window, cx| this.transfer_step_back(window, cx))),
-        )
-    } else {
-        footer()
-            .child(cancel_button("gift-transfer-check-cancel", cx))
-            .child(
-                Button::new("gift-transfer-check-set")
-                    .label(tr(keys::RIGHTS_TRANSFER_SET_PASSWORD))
-                    .primary()
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.set_password_for_export(window, cx)),
-                    ),
-            )
-    };
+    .render(cx);
     StageView {
         title: Some(tr(keys::Q_MONEY_SECURITY_CHECK).to_string()),
-        body: body.into_any_element(),
-        footer: footer.into_any_element(),
+        body,
+        footer,
     }
 }
 

@@ -15,6 +15,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::fragment_password::keep_password_field;
 use super::gift_manage_ui::{hint, stars};
 use super::gift_transfer_view::{StageView, stage_view};
 use super::shell::{DialogKind, QuillShell};
@@ -26,9 +27,7 @@ use quill::gift_manage::{
     ExportError, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
 };
 use quill::lang::{keys, tr, tr_with};
-use quill::link_policy::{OpenDecision, open_decision};
 use quill::local_time::now_unix;
-use quill::text::LinkTarget;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -205,20 +204,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let has_email = self
-            .session()
-            .and_then(|s| s.auth_state.password_state.as_ref())
-            .is_some_and(|state| state.has_recovery_email_address);
         self.close_gift_transfer(window, cx);
-        self.open_twofa(cx);
-        self.goto_twofa_view(crate::ui::dialogs::callback_password::TwofaView::Recover);
-        if has_email
-            && let Some(live) = self.live.as_mut()
-            && live.driver.request_password_recovery().is_err()
-        {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE).into();
-        }
-        cx.notify();
+        self.recover_cloud_password(cx);
     }
 
     /// "Set password" in the security check.
@@ -244,20 +231,6 @@ impl QuillApp {
         self.close_gift_transfer(window, cx);
     }
 
-    /// Open a Fragment page in the browser, only when the link policy
-    /// opens it without asking (an https address with nothing suspicious).
-    fn open_fragment_url(&mut self, url: &str, cx: &mut Context<Self>) {
-        let link = LinkTarget::Url {
-            url: url.to_string(),
-            label: None,
-        };
-        if url.starts_with("https://") && open_decision(&link) == OpenDecision::Open {
-            cx.open_url(url);
-        } else {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE).into();
-        }
-    }
-
     /// Per frame: open Fragment's export page, toast a finished transfer
     /// and open the recipient's chat, and keep the password field empty
     /// whenever the password box is not on screen.
@@ -280,26 +253,14 @@ impl QuillApp {
             }
             None => (None, None, false, false),
         };
-        // The password box takes the keyboard when it opens and after each
-        // answer (tdesktop `PasscodeBox` focuses and selects the field).
-        if idle_password && !self.payments.gift_export_password_focused {
-            self.payments.gift_export_password_focused = true;
-            self.payments
-                .gift_export_password
-                .update(cx, |input, cx| input.focus(window, cx));
-        } else if !idle_password {
-            self.payments.gift_export_password_focused = false;
-        }
-        if !in_password
-            && !self
-                .payments
-                .gift_export_password
-                .read(cx)
-                .value()
-                .is_empty()
-        {
-            self.clear_export_password(window, cx);
-        }
+        keep_password_field(
+            &self.payments.gift_export_password,
+            &mut self.payments.gift_export_password_focused,
+            in_password,
+            idle_password,
+            window,
+            cx,
+        );
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             self.clear_transfer_inputs(window, cx);

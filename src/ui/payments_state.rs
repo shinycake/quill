@@ -38,6 +38,11 @@ pub(crate) struct PaymentUi {
     pub(super) gift_export_password: Entity<InputState>,
     /// The password box has taken the keyboard since it last opened.
     pub(super) gift_export_password_focused: bool,
+    /// The 2-step verification password of the Gram withdrawal
+    /// (`premium_ui::grams_withdraw`); emptied when it is sent and when the
+    /// box closes.
+    pub(super) grams_withdraw_password: Entity<InputState>,
+    pub(super) grams_withdraw_password_focused: bool,
     /// The transfer picker's people for the current search
     /// (`gift_transfer_view`).
     pub(super) transfer_people:
@@ -78,6 +83,22 @@ impl PaymentUi {
             },
         )
         .detach();
+        let grams_withdraw_password = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr(keys::Q_MONEY_ENTER_CURRENT_PASSWORD))
+                .masked(true)
+                .submit_on_enter(false)
+        });
+        cx.subscribe_in(
+            &grams_withdraw_password,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.submit_grams_withdraw_password(window, cx);
+                }
+            },
+        )
+        .detach();
         Self {
             dialog: None,
             marketplace_open: false,
@@ -113,6 +134,8 @@ impl PaymentUi {
             pick_search,
             gift_export_password,
             gift_export_password_focused: false,
+            grams_withdraw_password,
+            grams_withdraw_password_focused: false,
             transfer_people: std::cell::RefCell::new(None),
         }
     }

@@ -2,7 +2,8 @@
 //! the recorded `tonTransactions` fixture (injected, no live Telegram).
 //! `QUILL_DEMO_GRAMS` picks the view: unset or `overview` for the screen,
 //! `receipt` for a gift sale's receipt, `settings` for the Settings list
-//! with the "My Grams" row.
+//! with the "My Grams" row, `withdraw` for Collect's password box and
+//! `withdraw-check` for its security check (no password set).
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -10,7 +11,7 @@ use crate::ui::demo::seed_ready_chats_session;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::premium_hub::ton::{GramRevenue, parse_ton_transactions};
+use quill::premium_hub::ton::{GramRevenue, GramWithdraw, parse_ton_transactions};
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -71,6 +72,16 @@ impl QuillApp {
             .as_str()
         {
             "settings" => self.settings.open = true,
+            "withdraw" => {
+                self.open_grams(cx);
+                self.start_grams_withdraw(cx);
+            }
+            "withdraw-check" => {
+                self.open_grams(cx);
+                if let Some(grams) = self.grams_mut() {
+                    grams.withdraw = Some(GramWithdraw::SecurityCheck { later: false });
+                }
+            }
             "receipt" => {
                 self.open_grams(cx);
                 self.select_grams_tx(Some("tx-sale".into()), cx);

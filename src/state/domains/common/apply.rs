@@ -219,6 +219,13 @@ impl Session {
                     // "Send via Blockchain": Fragment's export page.
                     self.apply_gift_export_url(url);
                 } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::Payments(PaymentsPurpose::Grams(
+                        crate::premium_hub::ton::GramsPurpose::WithdrawalUrl,
+                    )))
+                {
+                    // Collect: Fragment's withdrawal page.
+                    self.apply_gram_withdrawal_url(url, pending.map(|p| p.id));
+                } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::Payments(PaymentsPurpose::GiftExportProbe))
                 {
                     // The password-less probe: the URL is dropped unread.

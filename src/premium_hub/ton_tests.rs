@@ -330,3 +330,41 @@ fn revenue_and_its_updates_parse() {
     hub.revenue = Some(revenue);
     assert!(hub.withdrawable().is_some());
 }
+
+#[test]
+fn collect_routes_on_the_password_state() {
+    use super::GramWithdraw;
+    // Unknown or set: the password box; known unset: the security check.
+    assert_eq!(GramWithdraw::open(None), GramWithdraw::idle(None));
+    assert_eq!(GramWithdraw::open(Some(true)), GramWithdraw::idle(None));
+    assert_eq!(
+        GramWithdraw::open(Some(false)),
+        GramWithdraw::SecurityCheck { later: false }
+    );
+    // A late "no password" turns only the idle box into the check.
+    let mut idle = GramWithdraw::idle(None);
+    idle.password_state_known(false);
+    assert_eq!(idle, GramWithdraw::SecurityCheck { later: false });
+    let mut sending = GramWithdraw::Password {
+        request: Some(RequestId(9)),
+        error: None,
+    };
+    sending.password_state_known(false);
+    assert!(sending.sending() && !sending.can_submit());
+    assert!(sending.waits_for(Some(RequestId(9))));
+    assert!(!sending.waits_for(Some(RequestId(8))) && !sending.waits_for(None));
+    let mut set = GramWithdraw::idle(None);
+    set.password_state_known(true);
+    assert!(set.can_submit());
+}
+
+#[test]
+fn the_withdrawal_request_has_the_schema_shape() {
+    let request: Value =
+        serde_json::from_str(&super::get_gram_withdrawal_url(RequestId(5), "pw")).unwrap();
+    assert_eq!(request["@type"], "getGramWithdrawalUrl");
+    assert_eq!(request["password"], "pw");
+    assert_eq!(request.as_object().map(|o| o.len()), Some(3));
+    let schema = include_str!("../../schema/td_api.tl");
+    assert!(schema.contains("getGramWithdrawalUrl password:string = HttpUrl;"));
+}

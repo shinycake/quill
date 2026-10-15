@@ -4,12 +4,21 @@
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
-use crate::ui::shell::QuillShell;
+use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use quill::gift_manage::ExportError;
 use quill::premium_hub::TxFilter;
+use quill::premium_hub::ton::GramWithdraw;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    let (app, _shell, vcx) = new_app_with_shell(cx);
+    (app, vcx)
+}
+
+fn new_app_with_shell(
+    cx: &mut TestAppContext,
+) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -19,12 +28,12 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-grams")))
         });
         let shell = cx.new(|_| QuillShell::new(view.clone()));
-        *slot_in.borrow_mut() = Some(view);
+        *slot_in.borrow_mut() = Some((view, shell.clone()));
         Root::new(shell, window, cx)
     });
-    let app = slot.borrow().clone().expect("app view");
+    let (app, shell) = slot.borrow().clone().expect("app view");
     let vcx = VisualTestContext::from_window(handle.into(), cx);
-    (app, vcx)
+    (app, shell, vcx)
 }
 
 fn grams_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
@@ -143,4 +152,130 @@ fn an_unknown_peer_shows_a_placeholder_then_a_name(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     assert_eq!(title(&app, vcx), Some("Deleted Account".to_string()));
+}
+
+fn withdraw(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<GramWithdraw> {
+    app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.payments.hub.grams.withdraw.clone())
+    })
+}
+
+fn password_value(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
+    app.read_with(vcx, |app, cx| {
+        app.payments
+            .grams_withdraw_password
+            .read(cx)
+            .value()
+            .to_string()
+    })
+}
+
+#[gpui_kit::test]
+fn collect_opens_the_password_box_over_the_screen(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app_with_shell(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| app.open_grams(cx));
+    vcx.run_until_parked();
+    // The button sits in the withdrawal section.
+    assert!(vcx.debug_bounds("grams-withdraw").is_some());
+    app.update_in(vcx, |app, _, cx| app.start_grams_withdraw(cx));
+    vcx.run_until_parked();
+    shell.read_with(vcx, |shell, _| {
+        assert_eq!(shell.open_dialog, Some(DialogKind::GramsWithdraw));
+    });
+    assert_eq!(withdraw(&app, vcx), Some(GramWithdraw::idle(None)));
+
+    // The field took the keyboard; Enter submits (the demo sends
+    // nothing) and the field is emptied at once.
+    vcx.simulate_keystrokes("a b c");
+    assert_eq!(password_value(&app, vcx), "abc");
+    vcx.simulate_keystrokes("enter");
+    assert!(password_value(&app, vcx).is_empty());
+
+    // An error stays on screen under the field.
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
+            grams.withdraw = Some(GramWithdraw::idle(Some(ExportError::WrongPassword)));
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    shell.read_with(vcx, |shell, _| {
+        assert_eq!(shell.open_dialog, Some(DialogKind::GramsWithdraw));
+    });
+
+    // Cancel closes the box, empties the field and shows the screen again.
+    app.update_in(vcx, |app, window, cx| {
+        app.payments
+            .grams_withdraw_password
+            .update(cx, |input, cx| input.set_value("CANARY", window, cx));
+        app.cancel_grams_withdraw(window, cx);
+    });
+    vcx.run_until_parked();
+    assert_eq!(withdraw(&app, vcx), None);
+    assert!(password_value(&app, vcx).is_empty());
+    shell.read_with(vcx, |shell, _| {
+        assert_eq!(shell.open_dialog, Some(DialogKind::Grams));
+    });
+
+    // The security check replaces the box when there is no password.
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
+            grams.withdraw = Some(GramWithdraw::SecurityCheck { later: false });
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    shell.read_with(vcx, |shell, _| {
+        assert_eq!(shell.open_dialog, Some(DialogKind::GramsWithdraw));
+    });
+}
+
+#[gpui_kit::test]
+fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| app.open_grams(cx));
+    vcx.run_until_parked();
+    let hand_over = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, url: &str| {
+        let url = url.to_string();
+        app.update_in(vcx, |app, _, cx| {
+            if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
+                grams.withdraw_url = Some(url);
+            }
+            cx.notify();
+        });
+        vcx.run_until_parked();
+    };
+    // Not https: never opened, the status line says so.
+    hand_over(&app, vcx, "http://fragment.com/withdraw");
+    assert_eq!(vcx.opened_url(), None);
+    // A look-alike address (Cyrillic "а") asks first: the link box opens,
+    // the browser does not.
+    let look_alike = "https://fr\u{0430}gment.com/withdraw";
+    hand_over(&app, vcx, look_alike);
+    assert_eq!(vcx.opened_url(), None);
+    let asked = app.read_with(vcx, |app, _| {
+        app.message_ui
+            .open_link_confirm
+            .as_ref()
+            .map(|confirm| confirm.url.clone())
+    });
+    assert_eq!(asked.as_deref(), Some(look_alike));
+    app.update_in(vcx, |app, _, cx| {
+        app.message_ui.open_link_confirm = None;
+        cx.notify();
+    });
+    // Fragment's https page opens in the browser, once.
+    hand_over(&app, vcx, "https://fragment.com/withdraw?token=1");
+    assert_eq!(
+        vcx.opened_url().as_deref(),
+        Some("https://fragment.com/withdraw?token=1")
+    );
+    let left = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.payments.hub.grams.withdraw_url.clone())
+    });
+    assert_eq!(left, None);
 }

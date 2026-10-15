@@ -3,8 +3,9 @@
 //! `CreditsType::Ton`). The Stars screen's layout with the currency
 //! switched: same history rows, tabs and receipt, amounts in Grams.
 //!
-//! Read-only: "Top-up via Fragment" opens Fragment in the browser through
-//! the link policy; nothing here moves Grams.
+//! "Top-up via Fragment" opens Fragment in the browser through the link
+//! policy; Collect (`grams_withdraw`) asks for the 2-step password, then
+//! opens Fragment's withdrawal page. Nothing here moves Grams.
 #![deny(clippy::indexing_slicing)]
 
 use super::sticker_tile;
@@ -124,7 +125,7 @@ fn fact_row(label: &str, value: String, cx: &App) -> Div {
 }
 
 impl QuillApp {
-    fn grams_mut(&mut self) -> Option<&mut GramsHub> {
+    pub(super) fn grams_mut(&mut self) -> Option<&mut GramsHub> {
         if let Some(live) = self.live.as_mut() {
             Some(&mut live.driver.session.payments.hub.grams)
         } else {
@@ -155,6 +156,7 @@ impl QuillApp {
         if let Some(grams) = self.grams_mut() {
             grams.open = false;
             grams.selected = None;
+            grams.withdraw = None;
         }
         cx.notify();
     }
@@ -333,6 +335,7 @@ fn overview(
                             .child(usd)
                     }),
                 )
+                .child(super::grams_withdraw::collect_button(cx))
                 .child(muted_note(tr(keys::CREDITS_CURRENCY_SUMMARY_SUBTITLE), cx)),
         );
     }
