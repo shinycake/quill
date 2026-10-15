@@ -359,3 +359,164 @@ for a 1920 × 1080 frame:
   owner's manual check on macOS 14+.
 - A real voice chat receiving `toggleGroupCallScreenSharingIsPaused` and
   other members seeing the paused tile.
+
+# Slice 3: Windows screen capture and system audio
+
+Slice 3 of 4. Brings the chooser, pause and Quill's own screen capture
+(slice 2) to Windows, and adds tdesktop's "Share System Audio". Linux keeps
+ntgcalls' desktop capture until slice 4.
+
+**Only compile-checked.** No Windows machine was available. All Windows
+code (`screen_win.rs`, `system_audio_cpal.rs` and the `cfg(windows)`
+paths) was type-checked and linted with `cargo check` and `cargo clippy
+--target x86_64-pc-windows-msvc --features ui` from macOS, with stub C
+tools standing in for the MSVC ones. It has never run. The BGRA
+conversion, the frame pacer, the system audio queue and its mixing, the
+driver and the chooser are platform independent and were tested on
+macOS.
+
+## What tdesktop does
+
+- Windows lists screens and windows through tgcalls' WebRTC capturer:
+  visible, unowned, titled top-level windows that are not tool windows
+  and not cloaked (other virtual desktops, suspended Store apps).
+- **System audio** (`calls_group_call.cpp`, `calls_call.cpp`):
+  - The chooser shows "Share System Audio"
+    (`lng_group_call_screen_share_audio`) only when
+    `Webrtc::LoopbackAudioCaptureSupported()`, which is Windows. It is in
+    both the voice chat and the 1:1 chooser.
+  - The box starts as the running share has it
+    (`chooseSourceActiveWithAudio`). Stop Sharing shows only when the
+    selection is the shared source *and* the box matches
+    (`updateButtonsVisibility`); otherwise Share Screen restarts the share
+    with the new choice.
+  - Group calls send it on the screen instance through
+    `LoopbackAudioDeviceModuleCreator` (`calls_group_call.cpp:3174`),
+    muted unless the share has audio (`:938`). 1:1 calls capture it with
+    `Webrtc::CreateSystemAudioCapture` and hand the samples to
+    `addExternalAudioSamples` (`calls_call.cpp:1522`), which mixes them
+    into the call's own audio.
+
+## What changed
+
+- **`src/calls/capture/screen_win.rs`** (new, Windows + `ui`) uses
+  Windows.Graphics.Capture:
+  - It needs Windows 10 1903 (UniversalApiContract 8) and
+    `GraphicsCaptureSession::IsSupported()`. Older systems get
+    `CaptureError::Unsupported` with "Screen sharing needs Windows 10
+    version 1903 or later." (`qll_ops_screen_unsupported`), which the
+    chooser shows as the status note.
+  - Screens come from `EnumDisplayMonitors`, the primary first. Windows
+    come from `EnumWindows` with tdesktop's filters, plus: not minimised,
+    at least 100 × 100 (as on macOS), and not Quill's own.
+  - `IGraphicsCaptureItemInterop` makes the item for a monitor or window.
+    A free-threaded `Direct3D11CaptureFramePool` (BGRA8, one buffer)
+    delivers frames on a system thread. Each due frame (the pacer keeps
+    15 fps) is copied to a staging texture, mapped and converted to I420
+    at the call's size. A resized window remakes the pool. The cursor is
+    captured. The yellow border is turned off where Windows allows it
+    (errors ignored).
+  - The item's `Closed` event ends the share. A shared window is polled
+    every 500 ms: minimised pauses, restored resumes, gone ends.
+  - Thumbnails come from a one-frame session per source, with a 2 s
+    timeout.
+  - Access is always granted; Windows has no screen recording permission.
+- **`src/calls/capture/screen_bgra.rs`** (new, every platform): BGRA →
+  I420 (nearest scaling, BT.601 video range, libyuv's integer form, 2 × 2
+  chroma average), BGRA → RGBA thumbnails, and `FramePacer`.
+- **System audio:**
+  - `system_audio.rs` (new) holds `SystemAudioMix`, a 200 ms queue of 48
+    kHz mono samples.
+  - `system_audio_cpal.rs` (new, Windows) records it with WASAPI
+    loopback: cpal 0.17 opens an input stream on the default output
+    device. Samples are down-mixed and resampled to 48 kHz.
+  - The microphone path (`denoise.rs`) adds it to each frame after noise
+    suppression and after the level window. A muted microphone drops it,
+    so unmuting does not replay old sound.
+  - The driver (`call_screen.rs`) starts the loopback while a share
+    picked with the box runs. It hands the queue to the call microphone
+    (`CallCapture::set_system_audio`, kept for microphones opened later)
+    and stops both when the share stops or the box is cleared. If the
+    loopback fails, the screen keeps going and the error is kept.
+- **Chooser:** a "Share System Audio" box at the bottom left where loopback
+  exists, starting as the running share has it. Stop Sharing follows
+  tdesktop's rule above. The demo shows the box with
+  `QUILL_DEMO_SCREEN_AUDIO=1`.
+- **Turned on for Windows:** `native_backend()`,
+  `external_screen_capture_enabled()` and the 1:1 call's share button.
+- **`windows` crate features** added: `Foundation_Metadata`, `Graphics`,
+  `Graphics_Capture`, `Graphics_DirectX`, `Graphics_DirectX_Direct3D11`,
+  `Win32_Graphics_Direct3D`, `Win32_Graphics_Direct3D11`,
+  `Win32_Graphics_Dxgi`, `Win32_Graphics_Dxgi_Common`, `Win32_Graphics_Gdi`,
+  `Win32_Graphics_Dwm`, `Win32_System_WinRT`,
+  `Win32_System_WinRT_Direct3D11` and
+  `Win32_System_WinRT_Graphics_Capture`. No new crates.
+- **Windows build fix:** the dock menu's Quit item (`os_menus`) used a
+  language key without its imports and broke the Windows build since
+  a8e52046. That fix is its own commit.
+
+## Deviations
+
+- **System audio joins after noise suppression, not before** (the design
+  said before). RNNoise treats music as noise and would remove most of
+  it. tgcalls' `addExternalAudioSamples` also mixes after its processing.
+- **Group calls carry system audio in your microphone audio, not on the
+  presentation.** ntgcalls routes the microphone device only to the main
+  connection, so there is no audio channel on the presentation to use.
+  Members hear it as part of your voice (as in tdesktop 1:1 calls), it
+  is silent while you are muted, and it does not light your speaking
+  indicator.
+- System audio needs Quill's own microphone capture. Under
+  `QUILL_CALL_CAPTURE=native` neither the chooser nor the box is used.
+- Thumbnails are one frame per source, as in slice 2 and tdesktop. The
+  design said one per second.
+
+## Cost
+
+BGRA → I420 for a 1920 × 1080 frame, measured on this Mac (the Windows
+build has the same Rust loop):
+
+| Build | First version | Final | Notes |
+|---|---|---|---|
+| Release (`cargo test --release`) | 8.3 ms | 3.3 ms | 15 fps: about 50 ms of one core per second (5 %) |
+| Debug (`cargo test`) | 377 ms | 152 ms | debug builds cannot keep 15 fps |
+| Release, 2560 × 1440 → 1080p | 8.4 ms | 3.2 ms | scaling costs nothing extra |
+| Release, 442 × 250 thumbnail | 0.23 ms | 0.23 ms | once per source |
+
+The final version reads each 2 × 2 block once for both luma and chroma,
+and works out the source column offsets once per frame.
+
+- Memory: the staging texture is one BGRA frame of the source size (8.3
+  MB at 1080p), in addition to slice 2's figures. The system audio queue
+  holds at most 9,600 floats (38 KB).
+- The GPU copy and map were not measured; they need Windows.
+- With no share running nothing captures. The pause poll runs only while
+  a window is shared.
+
+## Verified
+
+- Windows: `cargo check` and `cargo clippy` for
+  `x86_64-pc-windows-msvc --features ui`, and `cargo check --lib --tests`,
+  with no new warnings. This is a compile check only.
+- Unit tests (macOS): BGRA colours (white, black, red, blue after
+  scaling), refusals, thumbnails, the pacer turning 60 Hz into 15 fps; the
+  mix queue (order, limit, clean samples); system audio added after
+  denoise, not counted in the level and dropped while muted.
+- Driver tests (fake loopback and microphone): the audio reaches the
+  running microphone and stops with the share or the box; a microphone
+  opened later still gets it; a failed loopback keeps the screen and the
+  error; without loopback the box is ignored.
+- GPUI test: no box without loopback; with it, the box starts as the
+  share has it, and clearing it on the shared screen shares again instead
+  of stopping.
+- Demo capture (scratch only): the chooser with the box ticked and Stop
+  Sharing.
+
+## Not verified
+
+- Everything that needs Windows: listing, thumbnails, capture, resizing,
+  the pause poll, the `Closed` event, the 1903 check, the border switch
+  and WASAPI loopback. The owner should check these on Windows 10 1903+
+  and Windows 11 before the slice is trusted, and a Windows 10 1809
+  machine for the Unsupported note.
+- A real call hearing the system audio.

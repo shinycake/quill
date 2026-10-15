@@ -92,10 +92,14 @@ fn the_first_screen_or_the_shared_source_starts_selected() {
 fn stop_sharing_shows_for_the_shared_source_only() {
     let a = SourceId("a".into());
     let b = SourceId("b".into());
-    assert!(!shows_stop(Some(&a), None));
-    assert!(shows_stop(Some(&a), Some(&a)));
-    assert!(!shows_stop(Some(&b), Some(&a)));
-    assert!(shows_stop(None, Some(&a)));
+    assert!(!shows_stop(Some(&a), None, false, false));
+    assert!(shows_stop(Some(&a), Some(&a), false, false));
+    assert!(!shows_stop(Some(&b), Some(&a), false, false));
+    assert!(shows_stop(None, Some(&a), false, false));
+    // tdesktop: a different audio box is a new share, not a stop.
+    assert!(shows_stop(Some(&a), Some(&a), true, true));
+    assert!(!shows_stop(Some(&a), Some(&a), true, false));
+    assert!(!shows_stop(Some(&a), Some(&a), false, true));
 }
 
 #[gpui_kit::test]
@@ -229,6 +233,61 @@ fn without_a_backend_sharing_stays_direct(cx: &mut TestAppContext) {
         assert!(!app.open_screen_chooser(ScreenFor::Group, cx));
         assert!(app.screen_share.privacy_for.is_none());
     });
+}
+
+#[gpui_kit::test]
+fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
+    let vcx = &mut vcx;
+    // Without loopback (macOS, Linux) there is no box, and Share Screen
+    // never asks for audio.
+    app.update_in(vcx, |app, _, cx| {
+        assert!(!app.offers_system_audio());
+        app.screen_share.with_audio = true;
+        assert!(app.open_screen_chooser(ScreenFor::Group, cx));
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        assert!(!app.screen_share.with_audio, "reset on open");
+        app.screen_share.with_audio = true;
+        app.accept_screen_source(cx);
+        assert!(!app.screen_share.demo_active_audio);
+        app.stop_screen_source(cx);
+    });
+    vcx.run_until_parked();
+
+    // As on Windows: the box starts as the running share has it.
+    app.update_in(vcx, |app, _, cx| {
+        app.screen_share.demo_system_audio = true;
+        assert!(app.open_screen_chooser(ScreenFor::Group, cx));
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        assert!(!app.screen_share.with_audio, "not sharing: off");
+        app.set_screen_audio(true, cx);
+        app.accept_screen_source(cx);
+        assert_eq!(
+            app.screen_share.demo_active,
+            Some(SourceId("display:1".into()))
+        );
+        assert!(app.screen_share.demo_active_audio);
+    });
+    vcx.run_until_parked();
+    assert!(group_sharing(&app, vcx));
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.open_screen_chooser(ScreenFor::Group, cx));
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.screen_share.with_audio, "the share has audio");
+        // Clearing it on the shared screen shares again without audio
+        // instead of stopping.
+        app.set_screen_audio(false, cx);
+        app.accept_screen_source(cx);
+        assert!(!app.screen_share.demo_active_audio);
+    });
+    vcx.run_until_parked();
+    assert!(group_sharing(&app, vcx));
 }
 
 #[test]

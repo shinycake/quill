@@ -235,7 +235,7 @@ impl QuillApp {
             muted: call.muted,
             camera_on: call.camera_on,
             screen_sharing: call.screen_sharing,
-            can_share_screen: ready && cfg!(target_os = "macos"),
+            can_share_screen: ready && cfg!(any(target_os = "macos", windows)),
             emojis: call
                 .ready
                 .as_ref()

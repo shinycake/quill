@@ -8,11 +8,16 @@
 //! stream at once. The same stream feeds your level
 //! (`call_audio`), so the microphone is opened once.
 //!
+//! Shared system audio (`call_screen`, Windows) is handed to the running
+//! microphone's controls and mixed into its frames
+//! (`calls::capture::system_audio`).
+//!
 //! `QUILL_CALL_CAPTURE=native` turns this off: ntgcalls opens the device
 //! itself, as before (`calls::engine::external_capture_enabled`).
 
 use super::*;
 use crate::calls::capture::feeder::AUDIO_SINK_FRAMES;
+use crate::calls::capture::system_audio::SystemAudioMix;
 use crate::calls::capture::{
     AudioFrame, CaptureError, CaptureEvent, CaptureFeeder, FrameSink, LevelCell, MicCapture,
     MicControls,
@@ -46,6 +51,8 @@ pub struct CallCapture {
     level: Arc<LevelCell>,
     opener: Option<MicOpener>,
     failed_at: Option<Instant>,
+    /// System audio to mix into the microphone frames, while shared.
+    system_audio: Option<Arc<SystemAudioMix>>,
     /// Why the microphone could not be opened or stopped, for the call
     /// window's note.
     pub error: Option<String>,
@@ -115,6 +122,27 @@ impl CallCapture {
         self.active = None;
     }
 
+    /// Mix `mix` into the microphone frames (or stop mixing), now and in
+    /// every microphone opened later.
+    pub fn set_system_audio(&mut self, mix: Option<Arc<SystemAudioMix>>) {
+        if let Some(active) = self.active.as_ref() {
+            active.controls.set_system_audio(mix.clone());
+        }
+        self.system_audio = mix;
+    }
+
+    /// The system audio handed to the microphone.
+    pub fn system_audio(&self) -> Option<&Arc<SystemAudioMix>> {
+        self.system_audio.as_ref()
+    }
+
+    /// Whether system audio is mixed into the running microphone.
+    pub fn mixes_system_audio(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.controls.system_audio().is_some())
+    }
+
     fn open(
         &mut self,
         target: CaptureTarget,
@@ -125,6 +153,7 @@ impl CallCapture {
     ) {
         let controls = Arc::new(MicControls::new(noise_suppression, self.level.clone()));
         controls.set_muted(muted);
+        controls.set_system_audio(self.system_audio.clone());
         let sink = FrameSink::new(AUDIO_SINK_FRAMES);
         let opened = match self.opener.as_mut() {
             Some(opener) => opener(device.as_deref(), controls.clone(), sink.clone()),

@@ -1,7 +1,9 @@
 //! Screenshot demo of screen sharing in a voice chat (no live Telegram, no
 //! real capture): you share a window that is hidden, so your tile is
 //! paused, and the chooser is open over four made-up sources.
-//! `QUILL_DEMO_SCREEN_DENIED=1` shows the privacy box instead.
+//! `QUILL_DEMO_SCREEN_DENIED=1` shows the privacy box instead;
+//! `QUILL_DEMO_SCREEN_AUDIO=1` adds Windows' "Share System Audio" box,
+//! ticked for the running share.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -172,6 +174,7 @@ fn frame(user_id: i64, screen: bool, variant: usize) -> VideoFrame {
 impl QuillApp {
     fn demo_call_screen_share(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let denied = std::env::var_os("QUILL_DEMO_SCREEN_DENIED").is_some();
+        let audio = std::env::var_os("QUILL_DEMO_SCREEN_AUDIO").is_some();
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
@@ -203,6 +206,8 @@ impl QuillApp {
             },
         }));
         self.screen_share.demo_active = Some(SourceId(SHARED.into()));
+        self.screen_share.demo_system_audio = audio;
+        self.screen_share.demo_active_audio = audio;
         self.open_screen_chooser(ScreenFor::Group, cx);
         cx.notify();
     }

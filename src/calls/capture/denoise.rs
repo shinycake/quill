@@ -77,6 +77,11 @@ impl MicProcessor {
     fn process_frame(&mut self, input: &[f32; FRAME], controls: &MicControls) -> Vec<i16> {
         if controls.muted() {
             self.denoised_last = false;
+            // Muted means silent: the system audio of this frame is dropped
+            // too, so unmuting does not replay it late.
+            if let Some(mix) = controls.system_audio() {
+                mix.mix_into(&mut [0.0; FRAME], 0.0);
+            }
             self.window
                 .push(&[0.0; FRAME], |level| controls.level().record(level));
             return vec![0; FRAME];
@@ -103,7 +108,13 @@ impl MicProcessor {
         }
         self.window
             .push(&normalized, |level| controls.level().record(level));
-        processed.iter().map(|&sample| to_i16(sample)).collect()
+        // Shared system audio joins after noise suppression and the level
+        // (`system_audio`).
+        let mut out = processed;
+        if let Some(mix) = controls.system_audio() {
+            mix.mix_into(&mut out, I16_SCALE);
+        }
+        out.iter().map(|&sample| to_i16(sample)).collect()
     }
 }
 
@@ -270,5 +281,28 @@ mod tests {
             level > 1.0,
             "a loud input is voice on tgcalls' scale: {level}"
         );
+    }
+
+    #[test]
+    fn system_audio_joins_after_denoise_and_not_while_muted() {
+        let controls = controls(true);
+        let mix =
+            std::sync::Arc::new(crate::calls::capture::system_audio::SystemAudioMix::default());
+        controls.set_system_audio(Some(mix.clone()));
+        let mut processor = MicProcessor::new();
+        mix.push(&[0.25; FRAME]);
+        let frames = collect(&mut processor, &[0.0; FRAME], &controls);
+        // Silence through RNNoise stays silence; the music is added after.
+        assert!(
+            frames[0].pcm.iter().all(|&s| s == 8192),
+            "{:?}",
+            &frames[0].pcm[..4]
+        );
+        assert_eq!(controls.level().take(), None, "no level window yet");
+        controls.set_muted(true);
+        mix.push(&[0.25; FRAME]);
+        let frames = collect(&mut processor, &[0.0; FRAME], &controls);
+        assert!(frames[0].pcm.iter().all(|&s| s == 0));
+        assert_eq!(mix.queued(), 0, "dropped, not replayed after unmuting");
     }
 }
