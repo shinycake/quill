@@ -250,6 +250,44 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn a_round_video_playing_with_sound_keeps_going_off_screen(cx: &mut TestAppContext) {
+    let scripts: Vec<_> = (0..16).map(|_| ready_script()).collect();
+    for script in &scripts {
+        queue_backend(script);
+    }
+    let (app, mut vcx) = new_app_sized(cx, 460.);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    scroll(vcx, 3000.);
+    scroll_until_playing(&app, vcx, -40.);
+    // A click plays it from the start with sound.
+    assert!(app.read_with(vcx, |app, _| {
+        app.playback.inline_videos.toggle_sound(ROUND.0, ROUND.1)
+    }));
+    settle(vcx);
+    let player = app
+        .read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        .expect("the sounding player");
+    // Scrolled until its picture leaves the view: still heard, never
+    // paused or released.
+    let mut steps = 0;
+    while !app.read_with(vcx, |app, _| app.playback.inline_videos.is_hidden(ROUND)) {
+        steps += 1;
+        assert!(steps < 60, "never left the view");
+        scroll(vcx, -10.);
+    }
+    assert!(player.wants_play(), "kept playing off screen");
+    vcx.executor().advance_clock(RELEASE_AFTER * 2);
+    vcx.run_until_parked();
+    let kept = app.read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND));
+    assert!(
+        kept.is_some_and(|kept| kept.wants_play()),
+        "not released while heard"
+    );
+}
+
+#[gpui_kit::test]
 fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

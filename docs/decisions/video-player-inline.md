@@ -54,6 +54,11 @@ run):
     - not painted: paused at once (`Hide`), so no more decoding and no frame
       requests
     - hidden for 2 s (`RELEASE_AFTER`): released by a timer (`Release`)
+    - a clip playing with sound (a round video after its click) is neither
+      paused nor released off screen: it is heard until it ends or the row
+      stops rendering, then goes back to its muted loop and the policy
+      above. tdesktop keeps such a clip playing too (it hands it to the
+      floating player).
   - Only the sweep clears the hold. A row that keeps rendering while its
     picture is outside the view (the list's first row scrolled half away)
     stays paused with no play/pause churn; a paused player still paints its
@@ -281,6 +286,11 @@ after.
     four more history passes make no play or pause call; advancing the
     executor clock by `RELEASE_AFTER` releases its backend, and a later pass
     reopens it held, not playing; scrolling back plays it.
+  - The same round video clicked to play with sound and scrolled out of
+    view keeps playing, and is still there and playing after twice
+    `RELEASE_AFTER`. Both scroll tests step the wheel until the round video
+    plays instead of assuming where one long scroll lands, since the
+    history's text metrics differ between macOS and Linux.
   - A story player paused (`apply_story_native_pause`) while its clip is
     still opening does not start once the backend is ready.
 - **Captures** of `ready-video-inline` in light and dark (in-process

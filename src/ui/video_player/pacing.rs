@@ -51,8 +51,8 @@ impl PresentEstimator {
         // Drawn twice in one frame (an inline tile: its row in the
         // conversation slice, then its copy in the animation layer): one
         // start per frame, or the spacing would read as a 240 Hz display.
-        // Three quarters of the fastest display's interval: no two real
-        // frames are that close.
+        // Under half a 240 Hz interval: a late frame followed by an early
+        // one still counts as two.
         if self
             .starts
             .back()

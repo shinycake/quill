@@ -205,7 +205,10 @@ impl Slot {
     fn wants_play(&self, inactive: bool) -> bool {
         !(self.paused
             || self.seeking.is_some()
-            || self.hidden_since.is_some()
+            // A clip playing with sound keeps going off screen, as in
+            // tdesktop (it hands it to the floating player); only muted
+            // loops hold still there.
+            || (self.hidden_since.is_some() && !self.sound)
             // Behind another app muted loops hold still (tdesktop pauses
             // GIFs and round loops there).
             || (inactive && !self.sound))
@@ -441,6 +444,8 @@ impl InlineVideos {
                     OffScreenStep::Show => slot.hidden_since = None,
                     OffScreenStep::Hide => slot.hidden_since = Some(now),
                     OffScreenStep::Stay => {}
+                    // Never cut a clip short while it is heard.
+                    OffScreenStep::Release if slot.sound => {}
                     OffScreenStep::Release => {
                         if let Some(slot) = state.players.remove(&key) {
                             released.push(slot);
