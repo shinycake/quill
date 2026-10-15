@@ -108,14 +108,14 @@ serde_json = "1"
 semver = "1"
 # In-process audio: call tones, notification sounds, voice/audio playback
 # (CoreAudio / WASAPI / ALSA via cpal; MP3/AAC/FLAC/Vorbis/WAV via symphonia).
-rodio = { version = "0.22", optional = true, default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }
+rodio = { version = "0.23", optional = true, default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }
 # Ogg/Opus voice notes (symphonia has no Opus decoder): pure-Rust Ogg demux
 # and RFC 8251-conformant Opus decoder, no C dependency.
 ogg = { version = "0.9", optional = true }
 opus-decoder = { version = "0.1", optional = true }
 # Voice-note recording: microphone via cpal (same backend rodio plays
 # through) and a pure-Rust Opus encoder, muxed with `ogg`. No external binary.
-cpal = { version = "0.17", optional = true, default-features = false }
+cpal = { version = "0.18", optional = true, default-features = false }
 # Call noise suppression (docs/decisions/call-capture.md): RNNoise ported to
 # Rust, run on Quill's own 10 ms microphone frames before ntgcalls encodes
 # them. Pure Rust; the library only, not its command-line tool.

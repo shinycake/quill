@@ -11,7 +11,7 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 690
+- MIT License: 691
 - Apache License 2.0: 44
 - Unicode License v3: 24
 - ISC License: 22
@@ -595,7 +595,7 @@ Used by:
 - [ciborium-ll 0.2.2](https://github.com/enarx/ciborium)
 - [ciborium 0.2.2](https://github.com/enarx/ciborium)
 - [codespan-reporting 0.13.1](https://github.com/brendanzab/codespan)
-- [cpal 0.17.3](https://github.com/RustAudio/cpal)
+- [cpal 0.18.2](https://github.com/RustAudio/cpal)
 - [self_cell 1.3.0](https://github.com/Voultapher/self_cell)
 - [unicode-linebreak 0.1.5](https://github.com/axelf4/unicode-linebreak)
 
@@ -7415,6 +7415,7 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 - [mach2 0.5.0](https://github.com/JohnTitor/mach2)
+- [mach2 0.6.0](https://github.com/JohnTitor/mach2)
 
 ````text
 Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
@@ -9093,7 +9094,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [rodio 0.22.2](https://github.com/RustAudio/rodio)
+- [rodio 0.23.0](https://github.com/RustAudio/rodio)
 
 ````text
 Copyright (c) The Rodio Project Contributors
