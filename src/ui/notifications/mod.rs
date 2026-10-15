@@ -719,9 +719,10 @@ impl QuillApp {
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
-        // Where Quill's own notification windows would go.
+        // Where Quill's own notification windows would go. The main
+        // window's display is noted when it changes (`display_events`):
+        // looking it up enumerates every display.
         self.notify.windows.platform = super::notify_windows::platform_of(window);
-        self.notify.windows.main_display = window.display(cx).map(|display| display.id());
         self.post_debug_notification_once(cx);
         // Inline replies and "Mark as read" need no window; what is left
         // opens a chat.

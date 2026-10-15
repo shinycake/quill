@@ -493,8 +493,9 @@ impl VideoPlayer {
     /// The draw that contains the picture started at `now`: predict when
     /// it is shown (`hint`: the display link's present time and host
     /// ticks), take the picture due then, and return what to paint.
-    /// The display's refresh period as the platform reports it (macOS);
-    /// without one the interval is learned from draw spacing.
+    /// The display's refresh period as the platform reports it (the macOS
+    /// display link, else GPUI's per-display rate); without one the
+    /// interval is learned from draw spacing.
     pub(super) fn set_refresh_period(&self, period: Option<Duration>) {
         self.with_inner(|inner| inner.estimator.set_period(period));
     }

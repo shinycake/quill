@@ -575,6 +575,8 @@ impl QuillApp {
             this.schedule_window_state_save(window, cx);
         })
         .detach();
+        // The main window's display, and displays added, removed or resized.
+        super::display_events::install(&mut app, window, cx);
         // Performance fixture: a steady stream of synthetic TDLib updates
         // (`demo_stream`), to measure what an idle signed-in window costs.
         if demo.is_some()
