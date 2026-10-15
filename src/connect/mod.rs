@@ -49,6 +49,7 @@ mod checklists;
 mod gift_manage;
 mod gift_market;
 mod giveaway_members;
+mod grams;
 mod main_profile_tab;
 mod message_actions;
 mod message_link_at;

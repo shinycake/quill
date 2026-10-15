@@ -250,6 +250,7 @@ impl QuillApp {
         // read receipts run here, chat opens wake the window.
         self.drain_background_clicks(cx);
         self.drain_account_clicks(cx);
+        let settings_open = self.settings.open;
         let Some(live) = self.live.as_mut() else {
             return false;
         };
@@ -321,6 +322,10 @@ impl QuillApp {
         if live.driver.request_tick(std::time::Instant::now()) {
             progressed = true;
             need = RedrawNeed::Now;
+        }
+        // Settings → My Grams: the balance probe and unknown names.
+        if live.driver.grams_tick(settings_open) {
+            progressed = true;
         }
         // `parity:proxy-settings`: first `getProxies` + auto-switch.
         if live.driver.proxy_tick(quill::state::unix_ms_now()) {

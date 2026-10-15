@@ -74,6 +74,7 @@ pub(crate) fn parse_users_payload(
         }
         "user" => Ok(EnvelopePayload::Users(UsersPayload::Me {
             user_id: int53(value.get("id"))?,
+            user: parse_user(value).map(Box::new),
         })),
         "userFullInfo" => Ok(EnvelopePayload::Users(UsersPayload::UserFullInfo {
             extras: crate::telegram::envelope::envelope_types::parse_user_profile_extras(Some(

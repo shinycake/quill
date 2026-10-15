@@ -18,6 +18,11 @@ pub(crate) fn parse_payments_payload(
             payload,
         ))));
     }
+    if let Some(payload) = crate::premium_hub::ton::parse_payload(type_name, value) {
+        return Ok(Some(EnvelopePayload::Payments(PaymentsPayload::Grams(
+            payload,
+        ))));
+    }
     if let Some(payload) = crate::suggested_posts::parse_payload(type_name, value) {
         return Ok(Some(EnvelopePayload::Payments(
             PaymentsPayload::SuggestedPost(payload),

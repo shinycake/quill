@@ -39,8 +39,12 @@ pub enum UsersPayload {
     /// Correlated by `@extra` in `ConnectDriver` before `apply` takes the
     /// pending request (the response carries no chat id).
     CheckChatUsernameResult(UsernameCheckResult),
-    /// `user` — `getMe` response; only the id is kept.
-    Me { user_id: i64 },
+    /// `user` — a `getMe` / `getUser` answer. `user` is the parsed
+    /// object, kept for callers that store it (Settings → My Grams).
+    Me {
+        user_id: i64,
+        user: Option<Box<ParsedUser>>,
+    },
     /// `userFullInfo` — `getUserFullInfo` response (schema 1.8.67,
     /// `getUserFullInfo user_id:int53 = UserFullInfo`, line 11501). The
     /// response carries no user id; it is resolved from the pending
