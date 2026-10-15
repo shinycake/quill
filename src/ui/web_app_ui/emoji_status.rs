@@ -16,6 +16,7 @@
 //! tdesktop paints the custom emoji.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 use std::time::{Duration as StdDuration, Instant};
 
 /// How long the suggested emoji may take to resolve before the request fails
@@ -56,30 +57,30 @@ enum SetStage {
 
 fn access_popup(bot_name: &str) -> Popup {
     popup(
-        "Emoji Status",
-        format!(
-            "{bot_name} requests access to set your emoji status. You will be able to revoke \
-             this access in the profile page of {bot_name}."
+        tr(keys::PROFILE_BOT_EMOJI_STATUS_ACCESS),
+        tr_with(
+            keys::Q_MEDIA_REQUESTS_ACCESS_TO_SET_YOUR,
+            &[("bot_name", bot_name), ("bot_name_2", bot_name)],
         ),
         vec![
-            ("cancel", "Cancel", "cancel"),
-            ("allow", "Allow", "default"),
+            ("cancel", tr(keys::CANCEL), "cancel"),
+            ("allow", tr(keys::BOT_EMOJI_STATUS_ACCESS_ALLOW), "default"),
         ],
     )
 }
 
 fn confirm_popup(bot_name: &str, alt: &str) -> Popup {
-    let mut message = format!("Do you want to set this emoji status suggested by {bot_name}?");
+    let mut message = tr_with(keys::BOT_EMOJI_STATUS_TEXT, &[("bot", bot_name)]);
     if !alt.is_empty() {
         message.push_str("\n\n");
         message.push_str(alt);
     }
     popup(
-        "Set Emoji Status",
+        tr(keys::BOT_EMOJI_STATUS_TITLE),
         message,
         vec![
-            ("cancel", "Cancel", "cancel"),
-            ("confirm", "Confirm", "default"),
+            ("cancel", tr(keys::CANCEL), "cancel"),
+            ("confirm", tr(keys::BOT_EMOJI_STATUS_CONFIRM), "default"),
         ],
     )
 }

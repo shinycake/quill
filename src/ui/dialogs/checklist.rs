@@ -3,6 +3,7 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::checklist::{CHECKLIST_TASKS_MAX, ChecklistDraft};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 
 /// B15: the checklist composer ("New Checklist") or, with `add_to` set, the
 /// "Add Tasks" box for an existing list. Mirrors tdesktop's
@@ -26,8 +27,8 @@ impl ChecklistDialog {
         window: &mut Window,
         cx: &mut Context<QuillApp>,
     ) -> Self {
-        let title_input = Self::textarea(window, cx, "Title");
-        let task_inputs = vec![Self::textarea(window, cx, "Add a task...")];
+        let title_input = Self::textarea(window, cx, tr(keys::Q_MEDIA_TITLE));
+        let task_inputs = vec![Self::textarea(window, cx, tr(keys::Q_MEDIA_ADD_A_TASK))];
         Self {
             add_to,
             title_input,
@@ -55,7 +56,7 @@ impl ChecklistDialog {
     pub(crate) fn push_task_row(&mut self, window: &mut Window, cx: &mut Context<QuillApp>) {
         if self.task_inputs.len() < CHECKLIST_TASKS_MAX {
             self.task_inputs
-                .push(Self::textarea(window, cx, "Add a task..."));
+                .push(Self::textarea(window, cx, tr(keys::Q_MEDIA_ADD_A_TASK)));
         }
     }
 

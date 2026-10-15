@@ -4,6 +4,7 @@
 //! driver; the demo applies what it can to its own session.
 use super::state::{CreateSticker, PickExisting};
 use super::*;
+use quill::lang::{keys, tr};
 use quill::sticker_image::{Corners, prepared_sticker_image};
 use quill::sticker_set_box::{
     EMOJI_REQUIRED_NOTE, MAX_EMOJIS, OPEN_FAILED_NOTE, emoji_or_default, joined_emojis,
@@ -17,15 +18,15 @@ use std::path::PathBuf;
 /// `lng_stickers_already_in_set`, `lng_emoji_already_in_set`).
 fn full_note(kind: SetKind) -> &'static str {
     match kind {
-        SetKind::Stickers => "This Sticker Set is full.",
-        SetKind::Emoji => "This Emoji Set is full.",
+        SetKind::Stickers => tr(keys::STICKERS_SET_IS_FULL),
+        SetKind::Emoji => tr(keys::EMOJI_SET_IS_FULL),
     }
 }
 
 fn already_note(kind: SetKind) -> &'static str {
     match kind {
-        SetKind::Stickers => "This Sticker is already in the Set.",
-        SetKind::Emoji => "This Emoji is already in the Set.",
+        SetKind::Stickers => tr(keys::STICKERS_ALREADY_IN_SET),
+        SetKind::Emoji => tr(keys::EMOJI_ALREADY_IN_SET),
     }
 }
 
@@ -59,7 +60,7 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if live.driver.move_sticker_in_set(set_id, from, to).is_err() {
-                self.connection.status_note = "Couldn't move the sticker.".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_MOVE_THE_STICKER).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.move_viewed_sticker(set_id, from, to);
@@ -92,7 +93,7 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if live.driver.rename_sticker_set(set_id, &title).is_err() {
-                self.connection.status_note = "Couldn't rename the set.".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_RENAME_THE_SET).into();
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(view) = session.stickers.sticker_set_view.as_mut()
@@ -122,7 +123,7 @@ impl QuillApp {
                 .remove_sticker_from_set(set_id, item.file_id)
                 .is_err()
             {
-                self.connection.status_note = "Couldn't delete the sticker.".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_DELETE_THE_STICKER).into();
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(view) = session.stickers.sticker_set_view.as_mut()
@@ -138,7 +139,7 @@ impl QuillApp {
         self.sticker_box.delete_set_open = false;
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_owned_sticker_set(set_id).is_err() {
-                self.connection.status_note = "Couldn't delete the set.".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_DELETE_THE_SET).into();
             }
         } else {
             self.close_sticker_set_dialog(cx);
@@ -164,7 +165,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose Image".into()),
+            prompt: Some(tr(keys::Q_MEDIA_CHOOSE_IMAGE).into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -240,7 +241,10 @@ impl QuillApp {
                             video: None,
                         });
                     }
-                    None => this.connection.status_note = "Couldn't save the image.".into(),
+                    None => {
+                        this.connection.status_note =
+                            tr(keys::Q_MEDIA_COULDNT_SAVE_THE_IMAGE).into()
+                    }
                 }
                 cx.notify();
             });
@@ -295,7 +299,7 @@ impl QuillApp {
                 self.connection.status_note = quill::sticker_set_box::UPLOAD_FAILED_NOTE.into();
             }
         } else {
-            self.connection.status_note = "demo — stickers upload with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKERS_UPLOAD_WITH_LIVE).into();
         }
         self.sticker_box.create = None;
         self.sticker_box.encoding = None;
@@ -442,7 +446,7 @@ impl QuillApp {
                     quill::sticker_set_box::ADD_EXISTING_FAILED_NOTE.into();
             }
         } else {
-            self.connection.status_note = "demo — stickers are added with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKERS_ARE_ADDED_WITH).into();
         }
         self.message_ui.menu = None;
         cx.notify();

@@ -11,6 +11,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::connect::LiveConnect;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::story_composer::StoryPrivacy;
 use quill::story_page::{StoryPageOpState, parse_story_id_list};
 use quill::telegram::envelope::StoryAreaKind;
@@ -50,9 +51,7 @@ impl QuillApp {
                 self.connection.status_note = format!("could not load archived stories: {err:?}");
             }
         } else {
-            self.connection.status_note =
-                "demo — story albums, chat-page stories and the archive load with live TDLib"
-                    .into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_ALBUMS_CHAT_PAGE).into();
         }
         cx.notify();
     }
@@ -104,7 +103,7 @@ impl QuillApp {
                 self.connection.status_note = format!("could not load album stories: {err:?}");
             }
         } else {
-            self.connection.status_note = "demo — album stories load with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_ALBUM_STORIES_LOAD_WITH).into();
         }
         cx.notify();
     }
@@ -129,7 +128,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = format!("demo — {what} runs with live TDLib");
+            self.connection.status_note =
+                tr_with(keys::Q_MEDIA_DEMO_RUNS_WITH_LIVE_TDLIB, &[("what", what)]);
             cx.notify();
             return;
         };
@@ -159,7 +159,7 @@ impl QuillApp {
                 format!("skipped stories that can't be added to albums: {skipped:?}");
         }
         self.story_page_mutate(
-            "create story album",
+            tr(keys::Q_MEDIA_CREATE_STORY_ALBUM),
             |live| {
                 live.driver
                     .create_story_album(chat_id, &name, &story_ids)
@@ -183,7 +183,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "rename story album",
+            tr(keys::Q_MEDIA_RENAME_STORY_ALBUM),
             |live| {
                 live.driver
                     .set_story_album_name(chat_id, album_id, &name)
@@ -206,7 +206,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "delete story album",
+            tr(keys::Q_MEDIA_DELETE_STORY_ALBUM),
             |live| {
                 live.driver
                     .delete_story_album(chat_id, album_id)
@@ -250,7 +250,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "reorder story albums",
+            tr(keys::Q_MEDIA_REORDER_STORY_ALBUMS),
             |live| {
                 live.driver
                     .reorder_story_albums(chat_id, &order)
@@ -297,7 +297,7 @@ impl QuillApp {
             None => return,
         };
         if story_ids.is_empty() {
-            self.connection.status_note = "enter at least one story id".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_ENTER_AT_LEAST_ONE_STORY).into();
             cx.notify();
             return;
         }
@@ -313,7 +313,7 @@ impl QuillApp {
                 format!("skipped stories that can't be added to albums: {skipped:?}");
         }
         self.story_page_mutate(
-            "add stories to album",
+            tr(keys::Q_MEDIA_ADD_STORIES_TO_ALBUM),
             |live| {
                 live.driver
                     .add_story_album_stories(chat_id, album_id, &story_ids)
@@ -336,7 +336,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "remove story from album",
+            tr(keys::Q_MEDIA_REMOVE_STORY_FROM_ALBUM),
             |live| {
                 live.driver
                     .remove_story_album_stories(chat_id, album_id, &[story_id])
@@ -359,7 +359,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "reorder album stories",
+            tr(keys::Q_MEDIA_REORDER_ALBUM_STORIES),
             |live| {
                 live.driver
                     .reorder_story_album_stories(chat_id, album_id, &[story_id])
@@ -380,7 +380,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "load archived stories",
+            tr(keys::Q_MEDIA_LOAD_ARCHIVED_STORIES),
             |live| {
                 live.driver
                     .get_chat_archived_stories(chat_id, from_story_id, 50)
@@ -404,7 +404,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "load chat page stories",
+            tr(keys::Q_MEDIA_LOAD_CHAT_PAGE_STORIES),
             |live| {
                 live.driver
                     .get_chat_posted_to_chat_page_stories(chat_id, from_story_id, 50)
@@ -436,7 +436,7 @@ impl QuillApp {
             None => return,
         };
         self.story_page_mutate(
-            "pin stories",
+            tr(keys::Q_MEDIA_PIN_STORIES),
             |live| {
                 live.driver
                     .set_chat_pinned_stories(chat_id, &pinned)
@@ -451,7 +451,7 @@ impl QuillApp {
     pub(super) fn story_manage_status(&self) -> Option<String> {
         let manage = self.session()?.stories.manage.clone();
         if manage.pending {
-            Some("Saving…".into())
+            Some(tr(keys::Q_MEDIA_SAVING).into())
         } else {
             manage.error
         }
@@ -486,16 +486,16 @@ impl QuillApp {
             .child(
                 div().flex_1().child(
                     Textarea::new(&self.stories.cover_input)
-                        .aria_label("Story cover file path")
+                        .aria_label(tr(keys::Q_MEDIA_STORY_COVER_FILE_PATH))
                         .h(px(32.)),
                 ),
             )
             .child(
                 Button::new("story-cover-set")
                     .label(if self.stories.cover_sent {
-                        "Saving…"
+                        tr(keys::Q_MEDIA_SAVING)
                     } else {
-                        "Set"
+                        tr(keys::Q_MEDIA_SET_2)
                     })
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -519,7 +519,8 @@ impl QuillApp {
         // — management calls need live TDLib.
         if self.live.is_none() {
             if let Some(demo) = self.demo_session.as_mut() {
-                demo.stories.manage.error = Some("demo — editing runs with live TDLib".into());
+                demo.stories.manage.error =
+                    Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
             }
             cx.notify();
             return;
@@ -530,7 +531,7 @@ impl QuillApp {
             _ => {
                 if let Some(live) = self.live.as_mut() {
                     live.driver.session.stories.manage.error =
-                        Some("Enter the cover time in seconds (0 or more)".into());
+                        Some(tr(keys::Q_MEDIA_ENTER_THE_COVER_TIME_IN).into());
                 }
                 cx.notify();
                 return;
@@ -544,7 +545,7 @@ impl QuillApp {
                 Ok(_) => self.stories.cover_sent = true,
                 Err(_) => {
                     live.driver.session.stories.manage.error =
-                        Some("Could not send the cover request".into());
+                        Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_COVER).into());
                 }
             }
         }
@@ -609,7 +610,7 @@ impl QuillApp {
                 .text_sm()
                 .font_semibold()
                 .text_color(text_bright())
-                .child("Who can see this story"),
+                .child(tr(keys::Q_MEDIA_WHO_CAN_SEE_THIS_STORY)),
         );
         // Phase 6: kit RadioGroup (was: buttons with a ☑/☐ prefix).
         // Controlled: the chosen index writes the value.
@@ -635,7 +636,7 @@ impl QuillApp {
             // B14: the list behind "Close friends" is edited here too.
             panel = panel.child(
                 Button::new("story-privacy-edit-close-friends")
-                    .label("Edit close friends…")
+                    .label(tr(keys::Q_MEDIA_EDIT_CLOSE_FRIENDS))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -659,7 +660,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("No contacts found"),
+                        .child(tr(keys::Q_MEDIA_NO_CONTACTS_FOUND)),
                 );
             }
             for row in rows.iter().take(50) {
@@ -678,7 +679,7 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         Textarea::new(&self.stories.privacy_user_search)
-                            .aria_label("Search story privacy exceptions")
+                            .aria_label(tr(keys::Q_MEDIA_SEARCH_STORY_PRIVACY_EXCEPTIONS))
                             .h(px(32.)),
                     )
                     .child(list),
@@ -694,7 +695,11 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("story-privacy-save")
-                        .label(if busy { "Saving…" } else { "Save" })
+                        .label(if busy {
+                            tr(keys::Q_MEDIA_SAVING)
+                        } else {
+                            tr(keys::SETTINGS_SAVE)
+                        })
                         .disabled(manage_busy)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.story_privacy_save(cx);
@@ -702,7 +707,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("story-privacy-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .text_color(text_bright())
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -729,7 +734,8 @@ impl QuillApp {
         // — management calls need live TDLib.
         if self.live.is_none() {
             if let Some(demo) = self.demo_session.as_mut() {
-                demo.stories.manage.error = Some("demo — editing runs with live TDLib".into());
+                demo.stories.manage.error =
+                    Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
             }
             cx.notify();
             return;
@@ -737,7 +743,7 @@ impl QuillApp {
         if edit.privacy == StoryPrivacy::SelectedUsers && edit.selected_user_ids.is_empty() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.stories.manage.error =
-                    Some("Pick at least one user for \"Selected users\"".into());
+                    Some(tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER).into());
             }
             cx.notify();
             return;
@@ -752,7 +758,7 @@ impl QuillApp {
                 Ok(_) => self.stories.privacy_sent = true,
                 Err(_) => {
                     live.driver.session.stories.manage.error =
-                        Some("Could not send the privacy request".into());
+                        Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_PRIVACY).into());
                 }
             }
         }

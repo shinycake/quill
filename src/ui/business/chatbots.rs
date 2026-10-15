@@ -15,6 +15,7 @@ use quill::business_bots::{
     BotRight, BotRights, ConnectedBot, RIGHT_GROUPS, merge_found_bots, parse_username_query,
 };
 use quill::business_settings::BusinessRecipients;
+use quill::lang::{keys, tr, tr_with};
 use std::time::Duration;
 
 const ABOUT: &str = "Add a bot to answer messages on your behalf.";
@@ -37,7 +38,7 @@ impl QuillApp {
     ) -> ChatbotDraft {
         let username = cx.new(|cx| {
             gpui_kit::component::input::InputState::new(window, cx)
-                .placeholder("Enter bot URL or username")
+                .placeholder(tr(keys::CHATBOTS_PLACEHOLDER))
         });
         // tdesktop debounces the lookup by 400 ms.
         cx.subscribe_in(
@@ -148,7 +149,12 @@ impl QuillApp {
         self.session()
             .and_then(|s| s.users.get(&user_id))
             .map_or_else(
-                || (format!("Bot {user_id}"), String::new()),
+                || {
+                    (
+                        tr_with(keys::Q_MEDIA_BOT_3, &[("user_id", &user_id.to_string())]),
+                        String::new(),
+                    )
+                },
                 |u| (u.display_name(), u.username.clone()),
             )
     }
@@ -194,7 +200,10 @@ impl QuillApp {
             bot.committed = Some(user_id);
             bot.confirm_leave = false;
         }
-        self.business_note(format!("{name} now manages your account."), cx);
+        self.business_note(
+            tr_with(keys::CHATBOTS_ADDED_SUCCESS, &[("bot", &name.to_string())]),
+            cx,
+        );
     }
 
     fn remove_business_bot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -227,8 +236,12 @@ impl QuillApp {
         if let Some(bot) = self.business_mut().and_then(|d| d.chatbot.as_mut()) {
             let was = bot.rights;
             bot.rights.set(right, on);
-            bot.warning = BotRights::warning(&was, &bot.rights)
-                .map(|text| text.replace("{bot}", name.as_deref().unwrap_or("this bot")));
+            bot.warning = BotRights::warning(&was, &bot.rights).map(|text| {
+                text.replace(
+                    "{bot}",
+                    name.as_deref().unwrap_or(tr(keys::Q_MEDIA_THIS_BOT)),
+                )
+            });
         }
         cx.notify();
     }
@@ -261,10 +274,13 @@ impl QuillApp {
             .when(can_add, |this| {
                 this.child(
                     Button::new(("business-bot-add", user_id as u64))
-                        .label("Add")
+                        .label(tr(keys::CHATBOTS_ADD))
                         .primary()
                         .small()
-                        .accessibility_label(format!("Add {name}"))
+                        .accessibility_label(tr_with(
+                            keys::Q_MEDIA_ADD_3,
+                            &[("name", &name.to_string())],
+                        ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.add_business_bot(user_id, cx);
                         })),
@@ -274,11 +290,12 @@ impl QuillApp {
 
     fn business_bot_rights(&self, rights: BotRights, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
-        let mut block = div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(div().text_sm().font_semibold().child("Bot permissions"));
+        let mut block = div().flex().flex_col().gap_1().child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .child(tr(keys::CHATBOTS_PERMISSIONS_TITLE)),
+        );
         for (group, (title, list)) in RIGHT_GROUPS.iter().enumerate() {
             if let Some(title) = title {
                 block = block.child(
@@ -296,8 +313,8 @@ impl QuillApp {
                     Checkbox::new("business-bot-right-read")
                         .checked(true)
                         .disabled(true)
-                        .label("Read Messages")
-                        .tooltip("You cannot change this permission."),
+                        .label(tr(keys::CHATBOTS_READ))
+                        .tooltip(tr(keys::RIGHTS_PERMISSION_CANT_EDIT)),
                 );
             }
             for (index, (right, label)) in list.iter().enumerate() {
@@ -341,7 +358,12 @@ impl QuillApp {
             .gap_3()
             .child(div().text_sm().text_color(muted).child(ABOUT));
         if !loaded {
-            return body.child(div().text_sm().text_color(muted).child("Loading…"));
+            return body.child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MEDIA_LOADING)),
+            );
         }
         if let Some(warning) = warning {
             body =
@@ -354,7 +376,12 @@ impl QuillApp {
                         .rounded_md()
                         .border_1()
                         .border_color(cx.theme().warning)
-                        .child(div().text_sm().font_semibold().child("Warning"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::CHATBOTS_WARNING_TITLE)),
+                        )
                         .child(div().text_sm().child(warning))
                         .child(div().flex().justify_end().child(
                             Button::new("business-bot-warning-ok").label("OK").on_click(
@@ -380,11 +407,16 @@ impl QuillApp {
                     .rounded_md()
                     .border_1()
                     .border_color(cx.theme().border)
-                    .child(div().text_sm().font_semibold().child("No Bot Added"))
                     .child(
                         div()
                             .text_sm()
-                            .child("You haven't added a bot to manage your account. Leave anyway?"),
+                            .font_semibold()
+                            .child(tr(keys::CHATBOTS_LEAVE_WITHOUT_ADDED_TITLE)),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::CHATBOTS_LEAVE_WITHOUT_ADDED_TEXT)),
                     )
                     .child(
                         div()
@@ -393,7 +425,7 @@ impl QuillApp {
                             .gap_2()
                             .child(
                                 Button::new("business-bot-stay")
-                                    .label("Cancel")
+                                    .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(bot) =
@@ -406,7 +438,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("business-bot-leave")
-                                    .label("Leave")
+                                    .label(tr(keys::BOX_LEAVE))
                                     .primary()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         // Clearing the field drops the found bots,
@@ -429,10 +461,15 @@ impl QuillApp {
         match committed {
             Some(bot) => body = body.child(self.business_bot_row(bot, false, cx)),
             None => {
-                body = body.child(Input::new(&username).aria_label("Bot username"));
+                body = body.child(Input::new(&username).aria_label(tr(keys::Q_MEDIA_BOT_USERNAME)));
                 match &found {
                     Found::Loading => {
-                        body = body.child(div().text_sm().text_color(muted).child("Searching…"));
+                        body = body.child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(tr(keys::Q_MEDIA_SEARCHING)),
+                        );
                     }
                     Found::Bots(bots) => {
                         for bot in bots {
@@ -445,7 +482,7 @@ impl QuillApp {
                                 .text_sm()
                                 .text_color(muted)
                                 .text_center()
-                                .child("Chatbot not found."),
+                                .child(tr(keys::CHATBOTS_NOT_FOUND)),
                         );
                     }
                     Found::Unsupported => {
@@ -454,7 +491,7 @@ impl QuillApp {
                                 .text_sm()
                                 .text_color(muted)
                                 .text_center()
-                                .child("This bot doesn't support Telegram Business yet."),
+                                .child(tr(keys::CHATBOTS_NOT_SUPPORTED)),
                         );
                     }
                     Found::Nothing => {}
@@ -477,7 +514,7 @@ impl QuillApp {
                 crate::ui::pressable::action_row(
                     "business-bot-remove",
                     None,
-                    "Remove Bot",
+                    tr(keys::CHATBOTS_REMOVE_BOT),
                     true,
                     cx,
                 )
@@ -525,7 +562,7 @@ impl QuillApp {
             return Leave::Go(None);
         }
         let previous = server.map(|b| b.bot_user_id);
-        self.business_send("chatbot settings", |driver| {
+        self.business_send(tr(keys::Q_MEDIA_CHATBOT_SETTINGS), |driver| {
             driver.save_connected_bot(wanted.as_ref(), previous).is_ok()
         })
     }

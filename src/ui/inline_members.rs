@@ -7,6 +7,7 @@ use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::inline_members::{MoreAction, next_more};
+use quill::lang::{keys, tr};
 use quill::state::{InfoPanelTarget, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
 
@@ -102,7 +103,7 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
-            self.connection.status_note = "could not load members".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS).into();
             cx.notify();
         }
     }

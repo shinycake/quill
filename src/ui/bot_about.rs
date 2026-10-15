@@ -5,6 +5,7 @@
 use super::app::QuillApp;
 use gpui_kit::component::{ActiveTheme, StyledExt};
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::BotInfo;
 
 /// The text the intro shows, or `None` when the bot has no description.
@@ -41,7 +42,7 @@ impl QuillApp {
                         .p_4()
                         .rounded_lg()
                         .bg(cx.theme().muted)
-                        .child(div().font_semibold().child("What can this bot do?"))
+                        .child(div().font_semibold().child(tr(keys::BOT_DESCRIPTION)))
                         .child(div().text_sm().child(text)),
                 )
                 .into_any_element(),

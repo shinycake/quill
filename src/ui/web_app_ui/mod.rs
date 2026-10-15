@@ -24,6 +24,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::state::{DeepLinkAction, WebAppOpenResult, WriteAccessResult};
 use quill::telegram::envelope::{AttachChatKind, AttachmentMenuBot, ChatKind, MessageSender};
@@ -344,7 +345,7 @@ impl QuillApp {
             let chat_id = session.open_chat?;
             Some((chat_id, session.bot_user_id_for_chat(chat_id)?))
         }) else {
-            self.set_status_note("Open the bot's chat to use its menu.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_OPEN_THE_BOTS_CHAT_TO), cx);
             return;
         };
         self.start_web_app(
@@ -382,7 +383,7 @@ impl QuillApp {
             }
         });
         let Some(bot_id) = bot_id else {
-            self.set_status_note("Only a bot can open a mini app.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_ONLY_A_BOT_CAN_OPEN), cx);
             return;
         };
         self.start_web_app(
@@ -408,7 +409,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.bot_user_id_for_chat(chat_id))
         else {
-            self.set_status_note("Only a bot can open a mini app.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_ONLY_A_BOT_CAN_OPEN), cx);
             return;
         };
         self.start_web_app(
@@ -518,7 +519,7 @@ impl QuillApp {
                     });
                     self.ensure_mini_app_poll(cx);
                 } else {
-                    self.set_status_note("Couldn't look up that app.", cx);
+                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_LOOK_UP_THAT_APP), cx);
                 }
             }
             DeepLinkAction::OpenMainWebApp {
@@ -550,7 +551,7 @@ impl QuillApp {
                     });
                     self.ensure_mini_app_poll(cx);
                 } else {
-                    self.set_status_note("This bot can't be added to the attachment menu.", cx);
+                    self.set_status_note(tr(keys::BOT_MENU_NOT_SUPPORTED), cx);
                 }
             }
             _ => return false,
@@ -573,14 +574,11 @@ impl QuillApp {
     /// Ask first when tdesktop would (`confirmOpen`), then call TDLib.
     fn start_web_app(&mut self, open: PendingOpen, cx: &mut Context<Self>) {
         if self.live.is_none() {
-            self.set_status_note("Mini apps need a Telegram connection.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_MINI_APPS_NEED_A_TELEGRAM), cx);
             return;
         }
         if helper_path().is_none() {
-            self.set_status_note(
-                "The mini app window (quill-webview) is missing next to Quill.",
-                cx,
-            );
+            self.set_status_note(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL), cx);
             return;
         }
         let bot_id = open.bot_id();
@@ -659,10 +657,10 @@ impl QuillApp {
                 .map(|_| ()),
         });
         if matches!(sent, Some(Ok(()))) {
-            self.set_status_note("Opening the mini app…", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_OPENING_THE_MINI_APP), cx);
             self.ensure_mini_app_poll(cx);
         } else {
-            self.set_status_note("Couldn't open the mini app.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_MINI_APP), cx);
         }
     }
 
@@ -688,7 +686,7 @@ impl QuillApp {
                 if matches!(sent, Some(Ok(_))) {
                     self.close_mini_app_window(cx);
                 } else {
-                    self.set_status_note("Couldn't remove the bot from the menu.", cx);
+                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_REMOVE_THE_BOT_FROM), cx);
                 }
             }
             WebAppConfirm::AddToMenu {
@@ -710,7 +708,7 @@ impl QuillApp {
                     self.mini_apps.awaiting_toggle = Some(then);
                     self.ensure_mini_app_poll(cx);
                 } else {
-                    self.set_status_note("Couldn't add the bot to the menu.", cx);
+                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_ADD_THE_BOT_TO), cx);
                 }
             }
         }
@@ -751,7 +749,7 @@ impl QuillApp {
                 this.session()
                     .and_then(|session| session.users.get(&bot_id))
                     .map(|user| user.display_name())
-                    .unwrap_or_else(|| "the bot".into())
+                    .unwrap_or_else(|| tr(keys::Q_MEDIA_THE_BOT).into())
             };
             let (title, lines, checkbox, action): (String, Vec<String>, Option<(bool, String)>, &str) =
                 match &confirm {
@@ -762,13 +760,13 @@ impl QuillApp {
                     } => {
                         let name = bot_name(this, then.bot_id());
                         (
-                            format!("Open {name}'s mini app?"),
+                            tr_with(keys::Q_MEDIA_OPEN_S_MINI_APP, &[("name", &name.to_string())]),
                             vec![
-                                "By launching this mini app, you agree to the Terms of Service for Mini Apps.".into(),
-                                "It will connect to the bot's website, which will see your IP address and basic device information.".into(),
+                                tr(keys::Q_MEDIA_BY_LAUNCHING_THIS_MINI_APP).into(),
+                                tr(keys::Q_MEDIA_IT_WILL_CONNECT_TO_THE).into(),
                             ],
-                            request_write.then(|| (*allow_write, format!("Allow {name} to send me messages"))),
-                            "Open",
+                            request_write.then(|| (*allow_write, tr_with(keys::URL_AUTH_ALLOW_MESSAGES, &[("bot", &name.to_string())]))),
+                            tr(keys::PROFILE_OPEN_APP_SHORT),
                         )
                     }
                     WebAppConfirm::AddToMenu {
@@ -782,25 +780,25 @@ impl QuillApp {
                         let mut lines = Vec::new();
                         if !trust::is_trusted(bot.bot_user_id) {
                             lines.push(
-                                "You are about to use a mini app operated by an independent party not affiliated with Telegram. By adding it, you agree to the Terms of Use for mini apps.".to_string(),
+                                tr(keys::Q_MEDIA_YOU_ARE_ABOUT_TO_USE).to_string(),
                             );
                         }
                         lines.push(format!(
                             "{name} asks your permission to be added as an option to your attachment menu so you can access it from any chat."
                         ));
                         (
-                            format!("Add {name} to the attachment menu?"),
+                            tr_with(keys::Q_MEDIA_ADD_TO_THE_ATTACHMENT_MENU, &[("name", &name.to_string())]),
                             lines,
                             bot.request_write_access
-                                .then(|| (*allow_write, format!("Allow {name} to send me messages"))),
-                            "Add",
+                                .then(|| (*allow_write, tr_with(keys::URL_AUTH_ALLOW_MESSAGES, &[("bot", &name.to_string())]))),
+                            tr(keys::Q_MEDIA_ADD),
                         )
                     }
                     WebAppConfirm::RemoveFromMenu { name, .. } => (
-                        "Remove from menu".to_string(),
-                        vec![format!("Remove {name} from the attachment menu?")],
+                        tr(keys::Q_MEDIA_REMOVE_FROM_MENU).to_string(),
+                        vec![tr_with(keys::BOT_REMOVE_FROM_MENU_SURE, &[("bot", &name.to_string())])],
                         None,
-                        "Remove",
+                        tr(keys::BOX_REMOVE),
                     ),
                 };
             let mut body = div().flex().flex_col().gap_3();
@@ -813,7 +811,7 @@ impl QuillApp {
             ) {
                 body = body.child(
                     Button::new("web-app-terms")
-                        .label("Terms of Service for Mini Apps")
+                        .label(tr(keys::PROFILE_OPEN_APP_TERMS))
                         .icon(IconName::ExternalLink)
                         .ghost()
                         .small()
@@ -840,7 +838,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("web-app-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.cancel_web_app_confirm(cx);

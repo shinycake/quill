@@ -5,6 +5,7 @@ use super::story_albums::StoryPrivacyEdit;
 use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::story_composer::StoryComposer;
 use quill::story_viewer::{StoryPlayback, StoryViewer};
 use std::time::Instant;
@@ -89,7 +90,7 @@ impl StoryUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let story_reply_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Reply to story")
+                .placeholder(tr(keys::Q_MEDIA_REPLY_TO_STORY))
                 .auto_grow(1, 3)
                 .submit_on_enter(true)
         });
@@ -97,7 +98,7 @@ impl StoryUi {
         // `reportStoryResultTextRequired`.
         let story_report_text_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Report details (optional)")
+                .placeholder(tr(keys::Q_MEDIA_REPORT_DETAILS_OPTIONAL))
                 .auto_grow(1, 3)
                 .submit_on_enter(true)
         });
@@ -112,13 +113,13 @@ impl StoryUi {
         });
         let story_composer_caption = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Caption… (**bold** markup supported)")
+                .placeholder(tr(keys::Q_MEDIA_CAPTION_BOLD_MARKUP_SUPPORTED))
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
         let story_composer_user_search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search contacts")
+                .placeholder(tr(keys::Q_MEDIA_SEARCH_CONTACTS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -132,7 +133,7 @@ impl StoryUi {
         });
         let story_composer_reaction = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("❤️ (optional, space-separated)")
+                .placeholder(tr(keys::Q_MEDIA_OPTIONAL_SPACE_SEPARATED))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -140,19 +141,19 @@ impl StoryUi {
         // the privacy editor's contact search.
         let story_more_search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search")
+                .placeholder(tr(keys::Q_MEDIA_SEARCH))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let story_cover_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Cover frame time in seconds, e.g. 1.5")
+                .placeholder(tr(keys::Q_MEDIA_COVER_FRAME_TIME_IN_SECONDS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let story_privacy_user_search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search contacts")
+                .placeholder(tr(keys::Q_MEDIA_SEARCH_CONTACTS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

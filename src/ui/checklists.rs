@@ -18,6 +18,7 @@ use quill::checklist::{
     validate_added_tasks,
 };
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::poll::validate_new_option;
 use quill::telegram::envelope::{MessageContent, MessageSender};
 
@@ -129,20 +130,23 @@ impl QuillApp {
                 match result {
                     Ok(_) => {
                         self.composer_ui.checklist_dialog = None;
-                        self.connection.status_note = "adding tasks…".into();
+                        self.connection.status_note = tr(keys::Q_MEDIA_ADDING_TASKS).into();
                     }
-                    Err(_) => self.connection.status_note = "could not add the tasks".into(),
+                    Err(_) => {
+                        self.connection.status_note =
+                            tr(keys::Q_MEDIA_COULD_NOT_ADD_THE_TASKS).into()
+                    }
                 }
             } else {
                 self.apply_demo_checklist_tasks(chat_id, message_id, &draft.tasks);
                 self.composer_ui.checklist_dialog = None;
-                self.connection.status_note = "tasks added (demo)".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_TASKS_ADDED_DEMO).into();
             }
             cx.notify();
             return;
         }
         let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
-            self.connection.status_note = "select a chat to send".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND).into();
             cx.notify();
             return;
         };
@@ -159,13 +163,17 @@ impl QuillApp {
                 Ok(_) => {
                     self.composer_ui.checklist_dialog = None;
                     self.composer_ui.pending_reply = None;
-                    self.connection.status_note = "sending checklist…".into();
+                    self.connection.status_note = tr(keys::Q_MEDIA_SENDING_CHECKLIST).into();
                 }
-                Err(_) => self.connection.status_note = "could not send the checklist".into(),
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_CHECKLIST).into()
+                }
             }
         } else {
             self.composer_ui.checklist_dialog = None;
-            self.connection.status_note = "checklists need a live connection (demo)".into();
+            self.connection.status_note =
+                tr(keys::Q_MEDIA_CHECKLISTS_NEED_A_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -188,15 +196,15 @@ impl QuillApp {
                 .driver
                 .toggle_checklist_task(chat_id, message_id, task_id)
             {
-                Ok(_) => "updating checklist…".into(),
-                Err(_) => "could not update the checklist".into(),
+                Ok(_) => tr(keys::Q_MEDIA_UPDATING_CHECKLIST).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_UPDATE_THE_CHECKLIST).into(),
             };
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
             self.apply_demo_checklist_toggle(chat_id, message_id, task_id);
-            self.connection.status_note = "checklist updated (demo)".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_CHECKLIST_UPDATED_DEMO).into();
             cx.notify();
         }
     }
@@ -296,21 +304,21 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .child(div().text_sm().font_semibold().child(if adding {
-                "Add Tasks"
+                tr(keys::Q_MEDIA_ADD_TASKS)
             } else {
-                "New Checklist"
+                tr(keys::Q_MEDIA_NEW_CHECKLIST)
             }));
         if !adding {
             panel = panel.child(
                 Textarea::new(&dialog.title_input)
-                    .aria_label("Checklist title")
+                    .aria_label(tr(keys::Q_MEDIA_CHECKLIST_TITLE))
                     .h(px(40.)),
             );
         }
         panel = panel.child(div().text_xs().text_color(text_muted()).child(if adding {
-            "Tasks"
+            tr(keys::Q_MEDIA_TASKS)
         } else {
-            "Tasks List"
+            tr(keys::Q_MEDIA_TASKS_LIST)
         }));
         for (index, input) in dialog.task_inputs.iter().enumerate() {
             let mut row = div()
@@ -319,16 +327,18 @@ impl QuillApp {
                 .items_center()
                 .gap_2()
                 .child(
-                    div()
-                        .flex_1()
-                        .child(Textarea::new(input).aria_label("Checklist task").h(px(40.))),
+                    div().flex_1().child(
+                        Textarea::new(input)
+                            .aria_label(tr(keys::Q_MEDIA_CHECKLIST_TASK))
+                            .h(px(40.)),
+                    ),
                 );
             if dialog.task_inputs.len() > 1 {
                 row = row.child(
                     Button::new(format!("checklist-remove-task-{index}"))
                         .label("\u{2715}")
                         .ghost()
-                        .tooltip("Remove task")
+                        .tooltip(tr(keys::Q_MEDIA_REMOVE_TASK))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut()
                                 && index < dialog.task_inputs.len()
@@ -346,7 +356,7 @@ impl QuillApp {
             panel = panel
                 .child(
                     Button::new("checklist-add-task-row")
-                        .label("Add a task...")
+                        .label(tr(keys::Q_MEDIA_ADD_A_TASK))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
@@ -360,9 +370,12 @@ impl QuillApp {
                         .text_xs()
                         .text_color(text_muted())
                         .child(if left == 1 {
-                            "You can add 1 more task.".to_string()
+                            tr(keys::Q_MEDIA_YOU_CAN_ADD_1_MORE).to_string()
                         } else {
-                            format!("You can add {left} more tasks.")
+                            tr_with(
+                                keys::Q_MEDIA_YOU_CAN_ADD_MORE_TASKS,
+                                &[("left", &left.to_string())],
+                            )
                         }),
                 );
         } else {
@@ -370,7 +383,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(text_muted())
-                    .child("You have added the maximum number of tasks."),
+                    .child(tr(keys::TODO_CREATE_MAXIMUM)),
             );
         }
         if !adding {
@@ -378,7 +391,7 @@ impl QuillApp {
                 .child(
                     Checkbox::new("checklist-others-add")
                         .checked(dialog.others_can_add_tasks)
-                        .label("Allow Others to Add Tasks")
+                        .label(tr(keys::TODO_CREATE_ALLOW_ADD))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
                                 dialog.others_can_add_tasks = on;
@@ -389,7 +402,7 @@ impl QuillApp {
                 .child(
                     Checkbox::new("checklist-others-mark")
                         .checked(dialog.others_can_mark_tasks_as_done)
-                        .label("Allow Others to Mark As Done")
+                        .label(tr(keys::TODO_CREATE_ALLOW_MARK))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.composer_ui.checklist_dialog.as_mut() {
                                 dialog.others_can_mark_tasks_as_done = on;
@@ -415,14 +428,18 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("checklist-create")
-                                .label(if adding { "Add" } else { "Create" })
+                                .label(if adding {
+                                    tr(keys::Q_MEDIA_ADD)
+                                } else {
+                                    tr(keys::Q_MEDIA_CREATE)
+                                })
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit_checklist_dialog(cx);
                                 })),
                         )
                         .child(
                             Button::new("checklist-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.close_checklist_dialog(cx);
@@ -447,7 +464,7 @@ impl QuillApp {
     ) {
         let input: Entity<TextareaState> = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Option text...")
+                .placeholder(tr(keys::Q_MEDIA_OPTION_TEXT))
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
         });
@@ -503,7 +520,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|panel| matches!(panel.attach.media, OptionMediaSlot::Preparing(_)))
         {
-            self.connection.status_note = "wait for the video to be ready".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO).into();
             cx.notify();
             return;
         }
@@ -519,11 +536,10 @@ impl QuillApp {
             {
                 Ok(_) => {
                     self.message_ui.poll_add_option = None;
-                    self.connection.status_note = "adding option…".into();
+                    self.connection.status_note = tr(keys::Q_MEDIA_ADDING_OPTION).into();
                 }
                 Err(_) => {
-                    self.connection.status_note =
-                        "Could not add the option. Please try again.".into();
+                    self.connection.status_note = tr(keys::POLLS_ADD_OPTION_ERROR).into();
                 }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -542,7 +558,7 @@ impl QuillApp {
                     ));
             }
             self.message_ui.poll_add_option = None;
-            self.connection.status_note = "option added (demo)".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_OPTION_ADDED_DEMO).into();
         }
         cx.notify();
     }
@@ -559,7 +575,12 @@ impl QuillApp {
             .border_1()
             .border_color(accent())
             .bg(bg_canvas())
-            .child(div().text_sm().font_semibold().child("Add an Option"))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(tr(keys::Q_MEDIA_ADD_AN_OPTION)),
+            )
             .child(
                 div()
                     .flex()
@@ -568,7 +589,7 @@ impl QuillApp {
                     .child(
                         div().flex_1().child(
                             Textarea::new(&panel.input)
-                                .aria_label("New poll option")
+                                .aria_label(tr(keys::Q_MEDIA_NEW_POLL_OPTION))
                                 .token(self.field_token_renderer(&panel.input, cx))
                                 .h(px(40.)),
                         ),
@@ -593,14 +614,14 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("poll-add-option-save")
-                            .label("Save")
+                            .label(tr(keys::SETTINGS_SAVE))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.submit_poll_add_option(cx);
                             })),
                     )
                     .child(
                         Button::new("poll-add-option-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_poll_add_option(cx);

@@ -17,6 +17,7 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::{AttachmentKind, media_kind_for};
+use quill::lang::{keys, tr, tr_with};
 use quill::poll::PollOptionInput;
 use std::path::PathBuf;
 
@@ -105,7 +106,7 @@ impl QuillApp {
         Button::new(format!("poll-emoji-option-{}", target.key()))
             .icon(IconName::FaceSlightlySmiling)
             .ghost()
-            .tooltip("Emoji")
+            .tooltip(tr(keys::Q_MEDIA_EMOJI))
             .on_click(cx.listener(move |this, _, _, cx| this.choose_poll_option_emoji(target, cx)))
             .into_any_element()
     }
@@ -119,7 +120,7 @@ impl QuillApp {
         Button::new(format!("poll-attach-option-{}", target.key()))
             .icon(IconName::Image)
             .ghost()
-            .tooltip("Attach a picture, sticker or link")
+            .tooltip(tr(keys::Q_MEDIA_ATTACH_A_PICTURE_STICKER_OR))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(attach) = this.attach_mut(target) {
                     attach.menu_open = !attach.menu_open;
@@ -152,20 +153,20 @@ impl QuillApp {
                 .child(
                     div().flex_1().child(
                         Textarea::new(input)
-                            .aria_label("Link for this option")
+                            .aria_label(tr(keys::Q_MEDIA_LINK_FOR_THIS_OPTION))
                             .h(px(36.)),
                     ),
                 )
                 .child(
                     Button::new(format!("poll-option-link-done-{key}"))
-                        .label("Done")
+                        .label(tr(keys::BOX_DONE))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.finish_poll_option_link(target, cx)
                         })),
                 )
                 .child(
                     Button::new(format!("poll-option-link-cancel-{key}"))
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(attach) = this.attach_mut(target) {
@@ -181,11 +182,11 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Choose emoji in the emoji panel"),
+                        .child(tr(keys::Q_MEDIA_CHOOSE_EMOJI_IN_THE_EMOJI)),
                 )
                 .child(
                     Button::new(format!("poll-option-emoji-done-{key}"))
-                        .label("Done")
+                        .label(tr(keys::BOX_DONE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(attach) = this.attach_mut(target) {
@@ -201,11 +202,11 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Choose a sticker in the sticker panel"),
+                        .child(tr(keys::Q_MEDIA_CHOOSE_A_STICKER_IN_THE)),
                 )
                 .child(
                     Button::new(format!("poll-option-sticker-cancel-{key}"))
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(attach) = this.attach_mut(target) {
@@ -222,26 +223,35 @@ impl QuillApp {
                     .ghost()
             };
             area = area
-                .child(entry("photo-video", "Photo or video").on_click(
-                    cx.listener(move |this, _, _, cx| this.pick_poll_option_file(target, cx)),
-                ))
-                .child(entry("sticker", "Sticker").on_click(
+                .child(
+                    entry("photo-video", tr(keys::ATTACH_PHOTO_OR_VIDEO)).on_click(
+                        cx.listener(move |this, _, _, cx| this.pick_poll_option_file(target, cx)),
+                    ),
+                )
+                .child(entry("sticker", tr(keys::Q_MEDIA_STICKER)).on_click(
                     cx.listener(move |this, _, _, cx| this.choose_poll_option_sticker(target, cx)),
                 ))
                 .child(
-                    entry("link", "Link").on_click(cx.listener(move |this, _, window, cx| {
-                        this.start_poll_option_link(target, window, cx)
-                    })),
+                    entry("link", tr(keys::POLLS_CREATE_OPTION_LINK)).on_click(cx.listener(
+                        move |this, _, window, cx| this.start_poll_option_link(target, window, cx),
+                    )),
                 );
         }
         if attach.media != OptionMediaSlot::None {
             shown = true;
             let (label, thumb): (String, Option<PathBuf>) = match &attach.media {
-                OptionMediaSlot::Preparing(path) => {
-                    (format!("Preparing {}…", file_name(path)), None)
-                }
+                OptionMediaSlot::Preparing(path) => (
+                    tr_with(
+                        keys::Q_MEDIA_PREPARING,
+                        &[("file_name", &(file_name(path)).to_string())],
+                    ),
+                    None,
+                ),
                 OptionMediaSlot::Ready(PollOptionInput::Photo { path }) => (
-                    format!("Photo {}", file_name(path)),
+                    tr_with(
+                        keys::Q_MEDIA_PHOTO,
+                        &[("file_name", &(file_name(path)).to_string())],
+                    ),
                     Some(PathBuf::from(path)),
                 ),
                 OptionMediaSlot::Ready(PollOptionInput::Video { path, duration, .. }) => (
@@ -252,12 +262,14 @@ impl QuillApp {
                     ),
                     attach.preview.clone(),
                 ),
-                OptionMediaSlot::Ready(PollOptionInput::Sticker { emoji, .. }) => {
-                    (format!("Sticker {emoji}"), None)
-                }
-                OptionMediaSlot::Ready(PollOptionInput::Link { url }) => {
-                    (format!("Link {url}"), None)
-                }
+                OptionMediaSlot::Ready(PollOptionInput::Sticker { emoji, .. }) => (
+                    tr_with(keys::Q_MEDIA_STICKER_2, &[("emoji", &emoji.to_string())]),
+                    None,
+                ),
+                OptionMediaSlot::Ready(PollOptionInput::Link { url }) => (
+                    tr_with(keys::Q_MEDIA_LINK, &[("url", &url.to_string())]),
+                    None,
+                ),
                 OptionMediaSlot::None => (String::new(), None),
             };
             area = area
@@ -278,7 +290,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new(format!("poll-option-media-remove-{key}"))
-                        .label("Remove")
+                        .label(tr(keys::BOX_REMOVE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.clear_poll_option_media(target, cx)
@@ -310,7 +322,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Attach".into()),
+            prompt: Some(tr(keys::Q_MEDIA_ATTACH).into()),
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picker.await else {
@@ -332,7 +344,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(kind) = media_kind_for(&path) else {
-            self.connection.status_note = "choose a photo or a video".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_A).into();
             cx.notify();
             return;
         };
@@ -359,7 +371,7 @@ impl QuillApp {
                     }),
                     _ => match std::fs::metadata(&path) {
                         Ok(meta) if meta.len() > PHOTO_MAX_BYTES => {
-                            Err("the photo is over 10 MB".to_string())
+                            Err(tr(keys::Q_MEDIA_THE_PHOTO_IS_OVER_10).to_string())
                         }
                         Ok(_) => Ok((
                             PollOptionInput::Photo {
@@ -367,7 +379,7 @@ impl QuillApp {
                             },
                             None,
                         )),
-                        Err(_) => Err("could not read the file".to_string()),
+                        Err(_) => Err(tr(keys::Q_MEDIA_COULD_NOT_READ_THE_FILE).to_string()),
                     },
                 }
             }
@@ -604,7 +616,7 @@ impl QuillApp {
             return;
         };
         if url.is_empty() {
-            self.connection.status_note = "enter the link's address".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_ENTER_THE_LINKS_ADDRESS).into();
             cx.notify();
             return;
         }

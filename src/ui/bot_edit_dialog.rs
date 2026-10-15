@@ -13,6 +13,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::owned_bots::{self, ABOUT_MAX, ManagerScreen, NAME_MAX};
 use quill::state::DeepLinkAction;
 use std::cell::RefCell;
@@ -49,7 +50,7 @@ impl QuillApp {
             action_row(
                 "info-panel-edit-bot",
                 Some(IconName::Pencil),
-                "Edit bot",
+                tr(keys::EDIT_BOT_TITLE),
                 false,
                 cx,
             )
@@ -62,12 +63,12 @@ impl QuillApp {
 
     fn open_bot_edit(&mut self, bot_id: i64, window: &mut Window, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: editing a bot needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_EDITING_A_BOT).into();
             cx.notify();
             return;
         };
         if live.driver.begin_bot_edit(bot_id).is_err() {
-            self.connection.status_note = "Could not load the bot.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOT).into();
             cx.notify();
             return;
         }
@@ -78,12 +79,12 @@ impl QuillApp {
             .fetch_earn_balances(quill::earn::EarnPeer::User(bot_id), true, true);
         let name = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Bot name")
+                .placeholder(tr(keys::DLG_NEW_BOT_NAME))
                 .submit_on_enter(false)
         });
         let about = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("About")
+                .placeholder(tr(keys::Q_MEDIA_ABOUT))
                 .auto_grow(2, 5)
                 .submit_on_enter(false)
         });
@@ -180,7 +181,7 @@ impl QuillApp {
             && !changes.is_empty()
             && live.driver.save_bot_edit(bot_id, &changes).is_err()
         {
-            self.connection.status_note = "Could not send the changes.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_CHANGES).into();
         }
         cx.notify();
     }
@@ -190,7 +191,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose Photo".into()),
+            prompt: Some(tr(keys::Q_MEDIA_CHOOSE_PHOTO).into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -204,7 +205,7 @@ impl QuillApp {
 
     fn set_bot_photo_from(&mut self, bot_id: i64, path: &Path, cx: &mut Context<Self>) {
         if !is_photo_file(path) {
-            self.connection.status_note = "Choose a JPEG, PNG or WebP image.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_CHOOSE_A_JPEG_PNG_OR).into();
             cx.notify();
             return;
         }
@@ -214,7 +215,7 @@ impl QuillApp {
                 .set_bot_photo(bot_id, &path.to_string_lossy())
                 .is_err()
         {
-            self.connection.status_note = "Could not send the photo.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_PHOTO).into();
         }
         cx.notify();
     }
@@ -274,17 +275,17 @@ impl QuillApp {
             let about_len = about.read(cx).value().chars().count();
 
             let status = if load_failed {
-                Some(("Could not load the bot's details.".to_string(), true))
+                Some((tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOTS).to_string(), true))
             } else if let Some(problem) = local_error {
                 Some((problem.to_string(), true))
             } else if let Some(error) = server_error {
                 Some((error, true))
             } else if saving {
-                Some(("Saving…".to_string(), false))
+                Some((tr(keys::Q_MEDIA_SAVING).to_string(), false))
             } else if saved {
-                Some(("Saved.".to_string(), false))
+                Some((tr(keys::Q_MEDIA_SAVED).to_string(), false))
             } else if !loaded {
-                Some(("Loading…".to_string(), false))
+                Some((tr(keys::Q_MEDIA_LOADING).to_string(), false))
             } else {
                 None
             };
@@ -298,8 +299,13 @@ impl QuillApp {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(div().text_sm().font_semibold().child("Name"))
-                        .child(Input::new(&name).aria_label("Bot name"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::Q_MEDIA_NAME)),
+                        )
+                        .child(Input::new(&name).aria_label(tr(keys::DLG_NEW_BOT_NAME)))
                         .child(
                             div()
                                 .text_xs()
@@ -312,8 +318,13 @@ impl QuillApp {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(div().text_sm().font_semibold().child("About"))
-                        .child(Textarea::new(&about).aria_label("Bot about text"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::Q_MEDIA_ABOUT)),
+                        )
+                        .child(Textarea::new(&about).aria_label(tr(keys::Q_MEDIA_BOT_ABOUT_TEXT)))
                         .child(
                             div()
                                 .text_xs()
@@ -327,7 +338,7 @@ impl QuillApp {
                     action_row(
                         "bot-edit-photo",
                         Some(IconName::Image),
-                        "Change profile photo",
+                        tr(keys::Q_MEDIA_CHANGE_PROFILE_PHOTO),
                         false,
                         cx,
                     )
@@ -371,7 +382,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("These open @BotFather with this bot selected."),
+                        .child(tr(keys::Q_MEDIA_THESE_OPEN_BOTFATHER_WITH_THIS)),
                 );
             }
             let footer = div()
@@ -380,7 +391,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("bot-edit-close")
-                        .label("Close")
+                        .label(tr(keys::CLOSE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_bot_edit(cx);
@@ -389,7 +400,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("bot-edit-save")
-                        .label("Save")
+                        .label(tr(keys::SETTINGS_SAVE))
                         .primary()
                         .disabled(!loaded || saving || name_len > NAME_MAX || about_len > ABOUT_MAX)
                         .on_click(cx.listener(|this, _, _, cx| this.save_bot_edit(cx))),
@@ -404,7 +415,7 @@ impl QuillApp {
             let content = Rc::new(RefCell::new(Some(content)));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Edit bot"))
+                .title(crate::ui::shell::dialog_title(tr(keys::EDIT_BOT_TITLE)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
                         let body = content

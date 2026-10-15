@@ -16,6 +16,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::stories_strip as metrics;
 use quill::stories_strip::{Axis, AxisLock};
@@ -72,7 +73,12 @@ impl QuillApp {
                             .chats
                             .get(&entry.chat_id)
                             .map(|chat| chat.title.clone())
-                            .unwrap_or_else(|| format!("Chat {}", entry.chat_id)),
+                            .unwrap_or_else(|| {
+                                tr_with(
+                                    keys::Q_MEDIA_CHAT_2,
+                                    &[("chat_id", &entry.chat_id.to_string())],
+                                )
+                            }),
                         photo: s
                             .chat_photo_path(ChatId(entry.chat_id))
                             .and_then(|path| sandboxed_display_path(path, &roots)),
@@ -156,7 +162,7 @@ impl QuillApp {
                 cell(0)
                     .id("story-tray-add")
                     .role(gpui_kit::Role::Button)
-                    .aria_label("Create story")
+                    .aria_label(tr(keys::Q_MEDIA_CREATE_STORY))
                     .tab_index(0)
                     .pressable(cx.theme())
                     .child(
@@ -172,7 +178,7 @@ impl QuillApp {
                             .text_color(primary)
                             .child("+"),
                     )
-                    .child(name("New story".to_string()))
+                    .child(name(tr(keys::Q_MEDIA_NEW_STORY).to_string()))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_story_composer(window, cx);
                     })),
@@ -200,7 +206,10 @@ impl QuillApp {
                 cell(index)
                     .id(("story-tray-item", chat_id as u64))
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Open stories for {title}"))
+                    .aria_label(tr_with(
+                        keys::Q_MEDIA_OPEN_STORIES_FOR,
+                        &[("title", &title.to_string())],
+                    ))
                     .tab_index(0)
                     .pressable(cx.theme())
                     .child(avatar)
@@ -290,7 +299,7 @@ impl QuillApp {
             div()
                 .id("story-compact")
                 .role(gpui_kit::Role::Button)
-                .aria_label("Show stories")
+                .aria_label(tr(keys::Q_MEDIA_SHOW_STORIES))
                 .tab_index(0)
                 .cursor_pointer()
                 .flex_none()

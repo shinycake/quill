@@ -18,6 +18,7 @@ use super::QuillApp;
 use gpui_kit::gpui::{AnyElement, Context, Window};
 use quill::composer::inline_query_trigger;
 use quill::inline_grid::layout_results;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{InlineBotResolve, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::time::Duration;
@@ -53,7 +54,7 @@ pub(super) fn inline_view(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Inli
     let session = app.session()?;
     let view = match &session.bots.inline_bot_resolve {
         None | Some(InlineBotResolve::Resolving { .. }) => {
-            InlineView::Status(format!("Resolving @{username}…"))
+            InlineView::Status(tr_with(keys::Q_MEDIA_RESOLVING, &[("username", username)]))
         }
         Some(InlineBotResolve::Failed { reason, .. }) => InlineView::Status(reason.clone()),
         Some(InlineBotResolve::Resolved {
@@ -70,7 +71,7 @@ pub(super) fn inline_view(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Inli
             });
             match slot.map(|slot| &slot.fetch) {
                 None | Some(InlineQueryFetch::Loading) => {
-                    InlineView::Status("Loading results…".to_string())
+                    InlineView::Status(tr(keys::Q_MEDIA_LOADING_RESULTS).to_string())
                 }
                 Some(InlineQueryFetch::Failed(reason)) => InlineView::Status(reason.clone()),
                 Some(InlineQueryFetch::Loaded {
@@ -81,7 +82,7 @@ pub(super) fn inline_view(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Inli
                         .clone()
                         .filter(|button| quill::inline_grid::button_action(button).is_some());
                     if results.is_empty() && button.is_none() {
-                        InlineView::Status("No results".to_string())
+                        InlineView::Status(tr(keys::Q_MEDIA_NO_RESULTS).to_string())
                     } else {
                         InlineView::Results {
                             results: results.clone(),
@@ -232,7 +233,7 @@ impl QuillApp {
                 if live.driver.resolve_inline_bot(username).is_err() {
                     live.driver.session.bots.inline_bot_resolve = Some(InlineBotResolve::Failed {
                         username: username.to_string(),
-                        reason: "could not look up the bot".to_string(),
+                        reason: tr(keys::Q_MEDIA_COULD_NOT_LOOK_UP_THE).to_string(),
                     });
                 }
             }
@@ -416,7 +417,7 @@ impl QuillApp {
                 .send_inline_query_result(chat_id, query_id, &result_id)
                 .is_err()
         {
-            self.connection.status_note = "could not send the inline result".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_INLINE).into();
         }
         cx.notify();
     }

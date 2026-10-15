@@ -1,6 +1,7 @@
 //! Methods moved out of `story_viewer.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Trigger `downloadFile` for the current story when no display
@@ -117,10 +118,15 @@ impl QuillApp {
                     .session()
                     .and_then(|s| s.chats.get(chat_id))
                     .map(|chat| chat.title.clone())
-                    .unwrap_or_else(|| format!("Chat {chat_id}")),
+                    .unwrap_or_else(|| {
+                        tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])
+                    }),
                 StoryOriginView::HiddenUser { poster_name } => poster_name.clone(),
             };
-            parts.push(format!("Reposted from {origin}"));
+            parts.push(tr_with(
+                keys::Q_MEDIA_REPOSTED_FROM,
+                &[("origin", &origin.to_string())],
+            ));
         }
         if story.is_edited {
             parts.push("edited".into());
@@ -159,7 +165,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("Loading reactions…"),
+                    .child(tr(keys::Q_MEDIA_LOADING_REACTIONS)),
             );
         }
         for (index, reaction) in reactions.iter().enumerate() {
@@ -170,7 +176,10 @@ impl QuillApp {
                         div()
                             .id(("story-reaction-option", index))
                             .role(gpui_kit::Role::Button)
-                            .aria_label(format!("React with {emoji}"))
+                            .aria_label(tr_with(
+                                keys::Q_MEDIA_REACT_WITH,
+                                &[("emoji", &emoji.to_string())],
+                            ))
                             .tab_index(0)
                             .cursor_pointer()
                             .pressable(cx.theme())
@@ -188,7 +197,10 @@ impl QuillApp {
                     let mut cell = div()
                         .id(("story-custom-emoji-option", index))
                         .role(gpui_kit::Role::Button)
-                        .aria_label(format!("React with custom emoji {id}"))
+                        .aria_label(tr_with(
+                            keys::Q_MEDIA_REACT_WITH_CUSTOM_EMOJI,
+                            &[("id", &id.to_string())],
+                        ))
                         .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
@@ -221,7 +233,7 @@ impl QuillApp {
                                 .text_xs()
                                 .whitespace_nowrap()
                                 .text_color(text_muted())
-                                .child("Premium"),
+                                .child(tr(keys::Q_MEDIA_PREMIUM)),
                         );
                     }
                     picker = picker.child(cell.on_click(cx.listener(move |this, _, _, cx| {
@@ -313,7 +325,7 @@ impl QuillApp {
         // stories, archive) for the current story's chat.
         row = row.child(
             Button::new("story-open-page")
-                .label("Stories")
+                .label(tr(keys::Q_MEDIA_STORIES))
                 .ghost()
                 .text_color(rgb(0xffffff))
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -326,7 +338,7 @@ impl QuillApp {
         );
         row = row.child(
             Button::new("story-react-picker")
-                .label("React…")
+                .label(tr(keys::Q_MEDIA_REACT))
                 .ghost()
                 .text_color(text_bright())
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -336,7 +348,7 @@ impl QuillApp {
         if can_reply {
             row = row.child(
                 Button::new("story-reply")
-                    .label("Reply")
+                    .label(tr(keys::Q_MEDIA_REPLY))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -347,7 +359,7 @@ impl QuillApp {
         if can_delete {
             row = row.child(
                 Button::new("story-delete")
-                    .label("Delete")
+                    .label(tr(keys::BOX_DELETE))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -364,7 +376,7 @@ impl QuillApp {
         if can_get_interactions {
             row = row.child(
                 Button::new("story-viewers")
-                    .label("Viewers")
+                    .label(tr(keys::Q_MEDIA_VIEWERS))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -375,7 +387,7 @@ impl QuillApp {
         if story.as_ref().is_some_and(|story| story.can_get_statistics) {
             row = row.child(
                 Button::new("story-statistics")
-                    .label("Statistics")
+                    .label(tr(keys::Q_MEDIA_STATISTICS))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -386,7 +398,7 @@ impl QuillApp {
         if let Some(query) = self.viewer_story_search_query() {
             row = row.child(
                 Button::new("story-search-here")
-                    .label("Stories here")
+                    .label(tr(keys::Q_MEDIA_STORIES_HERE))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -397,7 +409,7 @@ impl QuillApp {
         if !can_delete {
             row = row.child(
                 Button::new("story-report")
-                    .label("Report")
+                    .label(tr(keys::Q_MEDIA_REPORT))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -424,7 +436,7 @@ impl QuillApp {
         if can_edit {
             row = row.child(
                 Button::new("story-edit")
-                    .label("Edit")
+                    .label(tr(keys::Q_MEDIA_EDIT))
                     .ghost()
                     .text_color(text_bright())
                     .disabled(manage_busy)
@@ -438,7 +450,7 @@ impl QuillApp {
             if is_video {
                 row = row.child(
                     Button::new("story-cover")
-                        .label("Cover")
+                        .label(tr(keys::Q_MEDIA_COVER))
                         .ghost()
                         .text_color(text_bright())
                         .disabled(manage_busy)
@@ -454,7 +466,7 @@ impl QuillApp {
         if can_set_privacy {
             row = row.child(
                 Button::new("story-privacy")
-                    .label("Privacy")
+                    .label(tr(keys::Q_MEDIA_PRIVACY))
                     .ghost()
                     .text_color(text_bright())
                     .disabled(manage_busy)
@@ -466,7 +478,7 @@ impl QuillApp {
         if can_forward {
             row = row.child(
                 Button::new("story-repost")
-                    .label("Repost")
+                    .label(tr(keys::Q_MEDIA_REPOST))
                     .ghost()
                     .text_color(text_bright())
                     .disabled(manage_busy)
@@ -539,7 +551,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("No viewers yet"),
+                        .child(tr(keys::Q_MEDIA_NO_VIEWERS_YET)),
                 )
                 .into_any_element();
         };
@@ -592,12 +604,12 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("Loading viewers…"),
+                    .child(tr(keys::Q_MEDIA_LOADING_VIEWERS)),
             );
         } else if !state.next_offset.is_empty() {
             panel = panel.child(
                 Button::new("story-viewers-load-more")
-                    .label("Load more")
+                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.load_more_story_viewers(cx);
                     })),
@@ -607,7 +619,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("No one has viewed this story yet"),
+                    .child(tr(keys::Q_MEDIA_NO_ONE_HAS_VIEWED_THIS)),
             );
         }
         panel.into_any_element()
@@ -631,7 +643,12 @@ impl QuillApp {
             .border_color(border());
         let Some(flow) = flow else {
             return panel
-                .child(div().text_sm().text_color(text_muted()).child("Starting…"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(text_muted())
+                        .child(tr(keys::BOT_DOWNLOAD_STARTING)),
+                )
                 .into_any_element();
         };
         match flow.stage {
@@ -640,7 +657,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Reporting story…"),
+                        .child(tr(keys::Q_MEDIA_REPORTING_STORY)),
                 );
             }
             StoryReportStage::PickOption {
@@ -672,9 +689,9 @@ impl QuillApp {
                 let option_id = option_id.clone();
                 panel = panel.child(div().text_sm().text_color(text_muted()).child(
                     if is_optional {
-                        "Add details (optional)".to_string()
+                        tr(keys::Q_MEDIA_ADD_DETAILS_OPTIONAL).to_string()
                     } else {
-                        "Add details".to_string()
+                        tr(keys::Q_MEDIA_ADD_DETAILS).to_string()
                     },
                 ));
                 panel = panel.child(
@@ -685,25 +702,29 @@ impl QuillApp {
                         .child(
                             div().flex_1().child(
                                 Textarea::new(&self.stories.report_text_input)
-                                    .aria_label("Story report explanation")
+                                    .aria_label(tr(keys::Q_MEDIA_STORY_REPORT_EXPLANATION))
                                     .h(px(40.)),
                             ),
                         )
-                        .child(Button::new("story-report-send").label("Send").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.send_story_report_text(window, cx);
-                            }),
-                        )),
+                        .child(
+                            Button::new("story-report-send")
+                                .label(tr(keys::Q_MEDIA_SEND))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.send_story_report_text(window, cx);
+                                })),
+                        ),
                 );
                 if is_optional {
-                    panel = panel.child(Button::new("story-report-skip").label("Skip").on_click(
-                        cx.listener(move |this, _, _, cx| {
-                            let Some(item) = this.stories.viewer.current().cloned() else {
-                                return;
-                            };
-                            this.send_story_report_step(&item, &option_id, "", cx);
-                        }),
-                    ));
+                    panel = panel.child(
+                        Button::new("story-report-skip")
+                            .label(tr(keys::Q_MEDIA_SKIP))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let Some(item) = this.stories.viewer.current().cloned() else {
+                                    return;
+                                };
+                                this.send_story_report_step(&item, &option_id, "", cx);
+                            })),
+                    );
                 }
             }
             StoryReportStage::Reported => {
@@ -711,7 +732,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(success())
-                        .child("Story reported"),
+                        .child(tr(keys::Q_MEDIA_STORY_REPORTED)),
                 );
             }
             StoryReportStage::Failed(ref error) => {

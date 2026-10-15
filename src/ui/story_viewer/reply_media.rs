@@ -14,6 +14,7 @@ use crate::ui::media_panel::PanelTab;
 use crate::ui::recording::RecordMode;
 use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::requests::{AnimationSend, StickerSend};
 use quill::video::VideoNoteCapture;
 use quill::voice::VoiceCapture;
@@ -92,7 +93,7 @@ impl QuillApp {
         let panel = self.story_reply_panel_active();
         let action = if has_text {
             Button::new("story-reply-send")
-                .label("Send")
+                .label(tr(keys::Q_MEDIA_SEND))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.send_story_reply(window, cx);
                 }))
@@ -100,9 +101,9 @@ impl QuillApp {
         } else {
             let video = self.record_mode() == RecordMode::Video;
             let label = if video {
-                "Record a video message"
+                tr(keys::Q_MEDIA_RECORD_A_VIDEO_MESSAGE)
             } else {
-                "Record a voice message"
+                tr(keys::Q_MEDIA_RECORD_A_VOICE_MESSAGE)
             };
             // Right-click flips voice / video, as on the composer's mic.
             div()
@@ -137,8 +138,8 @@ impl QuillApp {
                     .icon(IconName::FaceSlightlySmiling)
                     .ghost()
                     .selected(panel)
-                    .tooltip("Emoji, stickers and GIFs")
-                    .accessibility_label("Emoji, stickers and GIFs")
+                    .tooltip(tr(keys::Q_MEDIA_EMOJI_STICKERS_AND_GIFS))
+                    .accessibility_label(tr(keys::Q_MEDIA_EMOJI_STICKERS_AND_GIFS))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_reply_panel(PanelTab::Emoji, cx);
                     })),
@@ -146,7 +147,7 @@ impl QuillApp {
             .child(
                 div().flex_1().min_w_0().child(
                     Textarea::new(&self.stories.reply_input)
-                        .aria_label("Reply to story")
+                        .aria_label(tr(keys::Q_MEDIA_REPLY_TO_STORY))
                         .token(self.field_token_renderer(&self.stories.reply_input, cx))
                         .h(px(40.)),
                 ),
@@ -320,14 +321,18 @@ impl QuillApp {
     fn finish_story_reply_media(&mut self, sent: Option<bool>, what: &str, cx: &mut Context<Self>) {
         match sent {
             Some(true) => {
-                self.connection.status_note = format!("Story reply sent ({what})");
+                self.connection.status_note =
+                    tr_with(keys::Q_MEDIA_STORY_REPLY_SENT_2, &[("what", what)]);
                 self.end_story_reply(cx);
             }
             Some(false) => {
-                self.connection.status_note = format!("could not send story reply {what}");
+                self.connection.status_note = tr_with(
+                    keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY_2,
+                    &[("what", what)],
+                );
             }
             None => {
-                self.connection.status_note = "demo — story replies run with live TDLib".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH).into();
             }
         }
         cx.notify();
@@ -366,7 +371,7 @@ impl QuillApp {
                 self.recording.video_note_capture = Some(capture);
                 self.stories.reply_recording = true;
                 self.spawn_voice_tick(cx);
-                self.connection.status_note = "recording video reply".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_RECORDING_VIDEO_REPLY).into();
             }
             Err(err) => {
                 self.connection.status_note = err;
@@ -415,7 +420,7 @@ impl QuillApp {
                         return;
                     }
                 };
-                this.finish_story_reply_media(sent, "video message", cx);
+                this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VIDEO_MESSAGE), cx);
             });
         })
         .detach();
@@ -431,7 +436,7 @@ impl QuillApp {
                 self.recording.voice_capture = Some(capture);
                 self.stories.reply_recording = true;
                 self.spawn_voice_tick(cx);
-                self.connection.status_note = "recording voice reply".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_RECORDING_VOICE_REPLY).into();
             }
             Err(err) => {
                 self.connection.status_note = err;
@@ -479,7 +484,7 @@ impl QuillApp {
                     .is_ok()
             })
             .or_else(|| self.demo_session.is_none().then_some(false));
-        self.finish_story_reply_media(sent, "voice message", cx);
+        self.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VOICE_MESSAGE), cx);
         true
     }
 }

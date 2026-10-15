@@ -1,6 +1,7 @@
 //! Methods moved out of `polls.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Slice B3: the poll dialog's toggle row. Quiz mode forces
@@ -57,7 +58,7 @@ impl QuillApp {
                     .gap_2()
                     .child(checkbox(
                         "poll-toggle-quiz",
-                        "Quiz mode",
+                        tr(keys::POLLS_CREATE_QUIZ_MODE),
                         is_quiz,
                         |dialog, on| {
                             dialog.is_quiz = on;
@@ -69,13 +70,13 @@ impl QuillApp {
                     ))
                     .child(checkbox(
                         "poll-toggle-anonymous",
-                        "Anonymous voting",
+                        tr(keys::POLLS_CREATE_ANONYMOUS),
                         anonymous,
                         |dialog, on| dialog.is_anonymous = on,
                     ))
                     .child(checkbox(
                         "poll-toggle-multiple",
-                        "Multiple answers",
+                        tr(keys::POLLS_CREATE_MULTIPLE_CHOICE),
                         multiple,
                         |dialog, on| {
                             // Quizzes are single-answer; the toggle is inert in quiz mode.
@@ -91,7 +92,7 @@ impl QuillApp {
                     .gap_2()
                     .child(checkbox(
                         "poll-toggle-revoting",
-                        "Allow revoting",
+                        tr(keys::POLLS_CREATE_ALLOW_REVOTING),
                         revoting,
                         |dialog, on| {
                             // Quizzes force revoting off; the toggle is inert in quiz mode.
@@ -102,7 +103,7 @@ impl QuillApp {
                     ))
                     .child(checkbox(
                         "poll-toggle-shuffle",
-                        "Shuffle options",
+                        tr(keys::POLLS_CREATE_SHUFFLE_OPTIONS),
                         shuffle,
                         |dialog, on| dialog.shuffle_options = on,
                     )),
@@ -114,7 +115,7 @@ impl QuillApp {
                     .gap_2()
                     .child(checkbox(
                         "poll-toggle-add-options",
-                        "Allow adding options",
+                        tr(keys::POLLS_CREATE_ALLOW_ADDING_OPTIONS),
                         add_options && !is_quiz,
                         |dialog, on| {
                             // Quizzes have fixed options.
@@ -125,14 +126,14 @@ impl QuillApp {
                     ))
                     .child(checkbox(
                         "poll-toggle-hide-results",
-                        "Hide results until closed",
+                        tr(keys::Q_MEDIA_HIDE_RESULTS_UNTIL_CLOSED),
                         hide_results,
                         |dialog, on| dialog.hide_results_until_closes = on,
                     ))
                     .when(in_channel, |this| {
                         this.child(checkbox(
                             "poll-toggle-subscribers",
-                            "Subscribers only",
+                            tr(keys::Q_MEDIA_SUBSCRIBERS_ONLY),
                             subscribers,
                             |dialog, on| dialog.members_only = on,
                         ))
@@ -141,7 +142,7 @@ impl QuillApp {
             .child(
                 Checkbox::new("poll-toggle-deadline")
                     .checked(has_deadline)
-                    .label("Close at a set date and time")
+                    .label(tr(keys::Q_MEDIA_CLOSE_AT_A_SET_DATE))
                     .on_click(cx.listener(|this, &on: &bool, window, cx| {
                         if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
                             dialog.deadline = on.then(|| poll_deadline_picker(window, cx));

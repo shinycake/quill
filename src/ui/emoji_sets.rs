@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::emoji::EmojiSetTab;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
 use std::cell::RefCell;
@@ -20,7 +21,7 @@ impl QuillApp {
     pub(super) fn open_emoji_sets(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_emoji_sets().is_err() {
-                self.connection.status_note = "could not load emoji packs".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.emoji.open = true;
@@ -38,7 +39,7 @@ impl QuillApp {
     fn select_emoji_sets_tab(&mut self, tab: EmojiSetTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_emoji_set_tab(tab).is_err() {
-                self.connection.status_note = "could not load emoji packs".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACKS).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.emoji.tab = tab;
@@ -49,16 +50,16 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.preview_emoji_pack(id).is_err()
         {
-            self.connection.status_note = "could not load emoji pack".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_PACK).into();
         }
         cx.notify();
     }
     fn install_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.set_emoji_pack_installed(id, true) {
-                Ok(Some(_)) => "installing emoji pack…".into(),
-                Ok(None) => "an emoji pack is already updating".into(),
-                Err(_) => "could not install emoji pack".into(),
+                Ok(Some(_)) => tr(keys::Q_MEDIA_INSTALLING_EMOJI_PACK).into(),
+                Ok(None) => tr(keys::Q_MEDIA_AN_EMOJI_PACK_IS_ALREADY).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_INSTALL_EMOJI_PACK).into(),
             };
         }
         cx.notify();
@@ -73,7 +74,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.search_emoji_packs(&query).is_err()
         {
-            self.connection.status_note = "could not search emoji packs".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEARCH_EMOJI_PACKS).into();
         }
         cx.notify();
     }
@@ -81,9 +82,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let duration = live.driver.session.stickers.emoji.status_duration_secs;
             self.connection.status_note = match live.driver.change_emoji_status(id, duration) {
-                Ok(Some(_)) => "Updating emoji status…".into(),
-                Ok(None) => "An emoji status is already updating.".into(),
-                Err(_) => "Could not update emoji status. Retry the action.".into(),
+                Ok(Some(_)) => tr(keys::Q_MEDIA_UPDATING_EMOJI_STATUS).into(),
+                Ok(None) => tr(keys::Q_MEDIA_AN_EMOJI_STATUS_IS_ALREADY).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_STATUS).into(),
             };
         }
         cx.notify();
@@ -108,16 +109,20 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().font_semibold().child("Emoji status"))
+            .child(
+                div()
+                    .font_semibold()
+                    .child(tr(keys::PROFILE_BOT_EMOJI_STATUS_ACCESS)),
+            )
             .child(
                 Button::new("load-emoji-statuses")
-                    .label("Load or refresh statuses")
+                    .label(tr(keys::Q_MEDIA_LOAD_OR_REFRESH_STATUSES))
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.load_emoji_status_choices().is_err()
                         {
                             this.connection.status_note =
-                                "Could not load emoji statuses. Retry the action.".into();
+                                tr(keys::Q_MEDIA_COULD_NOT_LOAD_EMOJI_STATUSES).into();
                         }
                         cx.notify();
                     })),
@@ -126,7 +131,7 @@ impl QuillApp {
             section = section.child(
                 div()
                     .text_xs()
-                    .child("Setting an emoji status requires Telegram Premium."),
+                    .child(tr(keys::Q_MEDIA_SETTING_AN_EMOJI_STATUS_REQUIRES)),
             );
         }
         if !panel.status_open {
@@ -134,11 +139,11 @@ impl QuillApp {
         }
         let mut durations = div().flex().flex_wrap().gap_2();
         for (title, secs) in [
-            ("Forever", 0),
-            ("1 hour", 3600),
-            ("2 hours", 7200),
-            ("8 hours", 28800),
-            ("2 days", 172800),
+            (tr(keys::Q_MEDIA_FOREVER), 0),
+            (tr(keys::Q_MEDIA_1_HOUR), 3600),
+            (tr(keys::Q_MEDIA_2_HOURS), 7200),
+            (tr(keys::Q_MEDIA_8_HOURS), 28800),
+            (tr(keys::Q_MEDIA_2_DAYS), 172800),
         ] {
             durations = durations.child(
                 Button::new(format!("status-duration-{secs}"))
@@ -157,11 +162,11 @@ impl QuillApp {
             .child(durations)
             .child(
                 Textarea::new(&self.pickers.emoji_status_hours_input)
-                    .aria_label("Emoji status duration in hours"),
+                    .aria_label(tr(keys::Q_MEDIA_EMOJI_STATUS_DURATION_IN_HOURS)),
             )
             .child(
                 Button::new("status-custom-duration")
-                    .label("Use custom duration")
+                    .label(tr(keys::Q_MEDIA_USE_CUSTOM_DURATION))
                     .on_click(cx.listener(|this, _, _, cx| {
                         let hours = this
                             .pickers
@@ -186,31 +191,36 @@ impl QuillApp {
                             }
                         } else {
                             this.connection.status_note =
-                                "Enter positive whole hours within the supported date range."
-                                    .into();
+                                tr(keys::Q_MEDIA_ENTER_POSITIVE_WHOLE_HOURS_WITHIN).into();
                         }
                         cx.notify();
                     })),
             )
             .child(div().text_xs().child(if panel.status_duration_secs == 0 {
-                "Selected duration: forever".into()
+                tr(keys::Q_MEDIA_SELECTED_DURATION_FOREVER).into()
             } else {
-                format!(
-                    "Selected duration: {} hours",
-                    panel.status_duration_secs / 3600
+                tr_with(
+                    keys::Q_MEDIA_SELECTED_DURATION_HOURS,
+                    &[(
+                        "status_duration_secs_3600",
+                        &(panel.status_duration_secs / 3600).to_string(),
+                    )],
                 )
             }));
         for (title, ids) in [
             (
-                "Recent",
+                tr(keys::Q_MEDIA_RECENT),
                 panel
                     .recent_statuses
                     .iter()
                     .map(|s| s.custom_emoji_id)
                     .collect::<Vec<_>>(),
             ),
-            ("Trending", panel.themed_status_ids.clone()),
-            ("Default", panel.default_status_ids.clone()),
+            (
+                tr(keys::STICKERS_FEATURED_TAB),
+                panel.themed_status_ids.clone(),
+            ),
+            (tr(keys::Q_MEDIA_DEFAULT), panel.default_status_ids.clone()),
         ] {
             let mut choices = div().flex().flex_wrap().gap_2();
             let mut seen = std::collections::HashSet::new();
@@ -255,9 +265,9 @@ impl QuillApp {
                     .child(
                         Button::new(format!("status-{title}-{id}"))
                             .label(if sticker.emoji.is_empty() {
-                                "Set status".into()
+                                tr(keys::EMOJI_STATUS_FOR_SUBMIT).into()
                             } else {
-                                format!("Set {}", sticker.emoji)
+                                tr_with(keys::Q_MEDIA_SET, &[("emoji", &sticker.emoji.to_string())])
                             })
                             .disabled(!premium || busy)
                             .ghost()
@@ -273,31 +283,31 @@ impl QuillApp {
         section
             .child(
                 Button::new("remove-emoji-status")
-                    .label("Remove status")
+                    .label(tr(keys::EMOJI_STATUS_REMOVE))
                     .disabled(!premium || busy)
                     .on_click(cx.listener(|this, _, _, cx| this.change_emoji_status(None, cx))),
             )
             .child(
                 Button::new("clear-recent-statuses")
-                    .label("Clear recent statuses")
+                    .label(tr(keys::Q_MEDIA_CLEAR_RECENT_STATUSES))
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
-                            this.connection.status_note =
-                                match live.driver.clear_recent_emoji_statuses() {
-                                    Ok(Some(_)) => "Clearing recent statuses…".into(),
-                                    Ok(None) => "An emoji status is already updating.".into(),
-                                    Err(_) => {
-                                        "Could not clear recent statuses. Retry the action.".into()
-                                    }
-                                };
+                            this.connection.status_note = match live
+                                .driver
+                                .clear_recent_emoji_statuses()
+                            {
+                                Ok(Some(_)) => tr(keys::Q_MEDIA_CLEARING_RECENT_STATUSES).into(),
+                                Ok(None) => tr(keys::Q_MEDIA_AN_EMOJI_STATUS_IS_ALREADY).into(),
+                                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_CLEAR_RECENT_STATUSES).into(),
+                            };
                         }
                         cx.notify();
                     })),
             )
             .child(div().text_xs().child(panel.status_note.unwrap_or_else(|| {
                 if busy {
-                    "Updating emoji status…".into()
+                    tr(keys::Q_MEDIA_UPDATING_EMOJI_STATUS).into()
                 } else if session.is_some_and(|s| {
                     [
                         RequestPurpose::GetRecentEmojiStatuses,
@@ -308,9 +318,9 @@ impl QuillApp {
                     .iter()
                     .any(|p| s.requests.has_purpose(*p))
                 }) {
-                    "Loading emoji statuses…".into()
+                    tr(keys::Q_MEDIA_LOADING_EMOJI_STATUSES).into()
                 } else {
-                    "Choose a duration, then a status. Refresh to retry missing choices.".into()
+                    tr(keys::Q_MEDIA_CHOOSE_A_DURATION_THEN_A).into()
                 }
             })))
             .into_any_element()
@@ -333,9 +343,9 @@ impl QuillApp {
         });
         let mut tabs = div().flex().gap_2();
         for (title, tab) in [
-            ("Installed", EmojiSetTab::Installed),
-            ("Trending", EmojiSetTab::Trending),
-            ("Search", EmojiSetTab::Search),
+            (tr(keys::Q_MEDIA_INSTALLED), EmojiSetTab::Installed),
+            (tr(keys::STICKERS_FEATURED_TAB), EmojiSetTab::Trending),
+            (tr(keys::Q_MEDIA_SEARCH), EmojiSetTab::Search),
         ] {
             tabs = tabs.child(
                 Button::new(format!("emoji-sets-tab-{title}"))
@@ -358,7 +368,7 @@ impl QuillApp {
             let installed = set.is_installed;
             let state = session
                 .map(|s| s.emoji_pack_download_state(id))
-                .unwrap_or("Not downloaded");
+                .unwrap_or(tr(keys::Q_MEDIA_NOT_DOWNLOADED));
             rows = rows.child(
                 div()
                     .flex()
@@ -383,7 +393,11 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("emoji-pack-manage-{id}"))
-                            .label(if installed { "Remove" } else { "Install" })
+                            .label(if installed {
+                                tr(keys::BOX_REMOVE)
+                            } else {
+                                tr(keys::Q_MEDIA_INSTALL)
+                            })
                             .disabled(mutating)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if installed {
@@ -402,14 +416,15 @@ impl QuillApp {
         if panel.tab == EmojiSetTab::Trending && panel.trending_has_more {
             rows = rows.child(
                 Button::new("emoji-packs-more")
-                    .label("More packs")
+                    .label(tr(keys::Q_MEDIA_MORE_PACKS))
                     .disabled(loading)
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.more_trending_emoji_packs().is_err()
                         {
-                            this.connection.status_note = "could not load more emoji packs".into();
+                            this.connection.status_note =
+                                tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_EMOJI).into();
                         }
                         cx.notify();
                     })),
@@ -451,7 +466,7 @@ impl QuillApp {
             preview = preview.child(grid);
             preview = preview.child(
                 Button::new("download-emoji-pack")
-                    .label("Download or retry pack")
+                    .label(tr(keys::Q_MEDIA_DOWNLOAD_OR_RETRY_PACK))
                     .disabled(
                         loading || panel.outdated_packs.contains(&id) || panel.preview.is_empty(),
                     )
@@ -459,11 +474,8 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut() {
                             this.connection.status_note = match live.driver.download_emoji_pack(id)
                             {
-                                Ok(()) => "Emoji pack download requested.".into(),
-                                Err(_) => {
-                                    "Could not download emoji pack. Refresh the preview and retry."
-                                        .into()
-                                }
+                                Ok(()) => tr(keys::Q_MEDIA_EMOJI_PACK_DOWNLOAD_REQUESTED).into(),
+                                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_DOWNLOAD_EMOJI_PACK).into(),
                             };
                         }
                         cx.notify();
@@ -471,15 +483,15 @@ impl QuillApp {
             );
         }
         let status = if panel.failed || panel.mutation_failed {
-            "Could not update emoji packs. Retry the action."
+            tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS)
         } else if mutating {
-            "Updating emoji pack…"
+            tr(keys::Q_MEDIA_UPDATING_EMOJI_PACK)
         } else if loading {
-            "Loading emoji packs…"
+            tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS)
         } else if sets.is_empty() {
-            "No emoji packs found."
+            tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND)
         } else {
-            "Open a pack to preview its emoji."
+            tr(keys::Q_MEDIA_OPEN_A_PACK_TO_PREVIEW)
         };
         div()
             .id("emoji-sets-settings")
@@ -501,21 +513,21 @@ impl QuillApp {
                                     s.settings.media_prefs.dynamic_emoji_pack_order
                                 }),
                             )
-                            .accessibility_label("Dynamic emoji pack order")
+                            .accessibility_label(tr(keys::Q_MEDIA_DYNAMIC_EMOJI_PACK_ORDER))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.dynamic_emoji_pack_order = on, cx)
                             })),
                     )
-                    .child(div().child("Dynamic emoji pack order")),
+                    .child(div().child(tr(keys::Q_MEDIA_DYNAMIC_EMOJI_PACK_ORDER))),
             )
             .child(tabs)
             .child(
                 Textarea::new(&self.pickers.emoji_set_search_input)
-                    .aria_label("Search emoji packs"),
+                    .aria_label(tr(keys::Q_MEDIA_SEARCH_EMOJI_PACKS)),
             )
             .child(
                 Button::new("emoji-pack-search")
-                    .label("Search packs")
+                    .label(tr(keys::Q_MEDIA_SEARCH_PACKS))
                     .on_click(cx.listener(|this, _, _, cx| this.search_emoji_sets(cx))),
             )
             .child(div().text_xs().child(status))
@@ -536,7 +548,9 @@ impl QuillApp {
             let body = Rc::new(RefCell::new(Some(this.emoji_sets_panel(cx))));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Emoji Packs and Status"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_MEDIA_EMOJI_PACKS_AND_STATUS,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         content.child(

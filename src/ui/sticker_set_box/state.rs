@@ -2,6 +2,7 @@
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use quill::ids::FileId;
+use quill::lang::{keys, tr};
 use quill::sticker_set_box::SetKind;
 use quill::sticker_video::VideoStickerJob;
 use quill::telegram::envelope::{StickerFormat, StickerItem};
@@ -112,13 +113,15 @@ impl StickerSetBoxUi {
         Self {
             reordering: false,
             rename_open: false,
-            rename_input: cx.new(|cx| InputState::new(window, cx).placeholder("Set name")),
+            rename_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SET_NAME))),
             delete_sticker: None,
             delete_set_open: false,
             remove_set_open: false,
             create: None,
             encoding: None,
-            emoji_search: cx.new(|cx| InputState::new(window, cx).placeholder("Search emoji")),
+            emoji_search: cx
+                .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SEARCH_EMOJI))),
             pick: None,
             pending_video: None,
         }

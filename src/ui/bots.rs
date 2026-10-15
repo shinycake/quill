@@ -12,6 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session, SimilarBotsFetch};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{BotInfo, CallbackQueryAnswer, ChatKind};
@@ -124,22 +125,18 @@ impl QuillApp {
                             .text_xs()
                             .font_medium()
                             .text_color(warning_bright())
-                            .child("Quill"),
+                            .child(tr(keys::Q_MEDIA_QUILL)),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(text_primary())
-                            .child(
-                                "Please note that inline bots are provided by third-party developers. \
-                                 For the bot to work, the symbols you type after the bot's username \
-                                 are sent to the respective developer.",
-                            ),
+                            .child(tr(keys::Q_MEDIA_PLEASE_NOTE_THAT_INLINE_BOTS)),
                     ),
             )
             .child(
                 Button::new("confirm-inline-bot-alert")
-                    .label("Confirm")
+                    .label(tr(keys::Q_MEDIA_CONFIRM))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.confirm_inline_bot_alert(window, cx);
                     })),
@@ -157,15 +154,15 @@ impl QuillApp {
     ) {
         if answer.url.is_empty() {
             self.connection.status_note = if answer.text.is_empty() {
-                "bot answered".into()
+                tr(keys::Q_MEDIA_BOT_ANSWERED).into()
             } else {
                 answer.text
             };
         } else {
             self.connection.status_note = if quill::platform::open_external_url(&answer.url) {
-                "opened link".into()
+                tr(keys::Q_MEDIA_OPENED_LINK).into()
             } else {
-                "could not open link".into()
+                tr(keys::Q_MEDIA_COULD_NOT_OPEN_LINK).into()
             };
         }
         cx.notify();
@@ -249,7 +246,7 @@ impl QuillApp {
         // use; speculative zeroization was removed (DECISIONS.md).
         drop(password);
         if !matches!(sent, Some(Ok(_))) {
-            self.set_status_note("Couldn't reach Telegram; try again.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
         }
         cx.notify();
     }
@@ -267,7 +264,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(game_short_name) = game_short_name.filter(|name| !name.is_empty()) else {
-            self.set_status_note("Game data missing; can't launch.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_GAME_DATA_MISSING_CANT_LAUNCH), cx);
             return;
         };
         let sent = self.live.as_mut().map(|live| {
@@ -275,7 +272,7 @@ impl QuillApp {
                 .send_game_callback_query(chat_id, message_id, &game_short_name)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.set_status_note("Couldn't reach Telegram; try again.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
         }
     }
 
@@ -310,7 +307,7 @@ impl QuillApp {
             .map(|live| live.driver.create_private_chat_for(user_id));
         match sent {
             Some(Ok(Some(_))) => {}
-            _ => self.set_status_note("Couldn't open the user's chat.", cx),
+            _ => self.set_status_note(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_USERS_CHAT), cx),
         }
     }
 
@@ -330,7 +327,9 @@ impl QuillApp {
             let Some(dialog_state) = this.links.callback_password_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Enter 2-step password"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::Q_MEDIA_ENTER_2_STEP_PASSWORD,
+                    )))
                     .on_close(on_close.clone());
             };
             let body = div()
@@ -341,11 +340,11 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("This button is protected by your two-step verification password."),
+                        .child(tr(keys::Q_MEDIA_THIS_BUTTON_IS_PROTECTED_BY)),
                 )
                 .child(
                     Input::new(&dialog_state.password_input)
-                        .aria_label("Two-step verification password")
+                        .aria_label(tr(keys::Q_MEDIA_TWO_STEP_VERIFICATION_PASSWORD))
                         .content_type(InputContentType::Password),
                 )
                 .into_any_element();
@@ -355,7 +354,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("b1-password-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_callback_password_dialog(cx);
@@ -364,7 +363,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("b1-password-submit")
-                        .label("Send")
+                        .label(tr(keys::Q_MEDIA_SEND))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_callback_password_dialog(cx);
@@ -373,7 +372,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Enter 2-step password"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_MEDIA_ENTER_2_STEP_PASSWORD,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -413,8 +414,9 @@ impl QuillApp {
                 .map(|confirm| confirm.request_write_access)
                 .unwrap_or(false);
             let mut body = div().flex().flex_col().gap_3().child(
-                div().text_sm().text_color(text_muted()).child(format!(
-                    "The bot wants to open a login URL for {domain}. Open it in your browser?"
+                div().text_sm().text_color(text_muted()).child(tr_with(
+                    keys::Q_MEDIA_THE_BOT_WANTS_TO_OPEN,
+                    &[("domain", &domain.to_string())],
                 )),
             );
             if request_write_access {
@@ -422,7 +424,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("The bot also asks for permission to send you messages."),
+                        .child(tr(keys::Q_MEDIA_THE_BOT_ALSO_ASKS_FOR)),
                 );
             }
             let body = body.into_any_element();
@@ -432,7 +434,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("b1-login-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.links.login_url_confirm = None;
@@ -442,7 +444,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("b1-login-open")
-                        .label("Open")
+                        .label(tr(keys::Q_MEDIA_OPEN))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_login_url(cx);
@@ -451,7 +453,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Open login URL?"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_MEDIA_OPEN_LOGIN_URL,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -519,7 +523,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Bot"),
+                    .child(tr(keys::Q_MEDIA_BOT)),
             );
         // The Start button lives in the bar that replaces the composer
         // (`bottom_action`), as in Telegram Desktop.
@@ -557,7 +561,7 @@ impl QuillApp {
             && !menu.url.is_empty()
         {
             let text = if menu.text.is_empty() {
-                "Menu".to_string()
+                tr(keys::Q_MEDIA_MENU).to_string()
             } else {
                 menu.text.clone()
             };
@@ -581,7 +585,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Games"),
+                    .child(tr(keys::Q_MEDIA_GAMES)),
             );
             for game in games {
                 let title = if game.title.is_empty() {
@@ -599,7 +603,7 @@ impl QuillApp {
                         .child(div().text_sm().flex_1().child(title))
                         .child(
                             Button::new(format!("bot-send-game-{short_name}"))
-                                .label("Send")
+                                .label(tr(keys::Q_MEDIA_SEND))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.press_send_game(open, bot_id, &short_name, cx);
@@ -613,7 +617,7 @@ impl QuillApp {
         let mut actions = div().id("bot-actions").flex().flex_wrap().gap_1();
         actions = actions.child(
             Button::new("bot-restart")
-                .label("Restart bot")
+                .label(tr(keys::Q_MEDIA_RESTART_BOT))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
@@ -621,16 +625,23 @@ impl QuillApp {
         );
         if !username.is_empty() {
             let link = format!("https://t.me/{username}");
-            actions = actions.child(Button::new("bot-share").label("Share").ghost().on_click(
-                cx.listener(move |this, _, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                    this.set_status_note("bot link copied", cx);
-                }),
-            ));
+            actions = actions.child(
+                Button::new("bot-share")
+                    .label(tr(keys::Q_MEDIA_SHARE))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+                        this.set_status_note(tr(keys::Q_MEDIA_BOT_LINK_COPIED), cx);
+                    })),
+            );
         }
         actions = actions.child(
             Button::new("bot-block")
-                .label(if blocked { "Unblock bot" } else { "Block bot" })
+                .label(if blocked {
+                    tr(keys::Q_MEDIA_UNBLOCK_BOT)
+                } else {
+                    tr(keys::Q_MEDIA_BLOCK_BOT)
+                })
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_group_confirm(
@@ -649,7 +660,7 @@ impl QuillApp {
             let url = info.privacy_policy_url.clone();
             panel = panel.child(
                 Button::new("bot-privacy-policy")
-                    .label("Privacy policy")
+                    .label(tr(keys::Q_MEDIA_PRIVACY_POLICY))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_message_url(&url, cx);
@@ -658,7 +669,7 @@ impl QuillApp {
         } else if info.commands.iter().any(|c| c.command == "privacy") {
             panel = panel.child(
                 Button::new("bot-privacy-command")
-                    .label("Privacy (/privacy)")
+                    .label(tr(keys::Q_MEDIA_PRIVACY_PRIVACY))
                     .ghost()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.insert_bot_command("privacy", window, cx);
@@ -669,7 +680,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Privacy: telegram.org/privacy-tpa"),
+                    .child(tr(keys::Q_MEDIA_PRIVACY_TELEGRAM_ORG_PRIVACY_TPA)),
             );
         }
         // Slice B2: similar bots (`getBotSimilarBots`, schema line 11640;
@@ -682,7 +693,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Similar bots"),
+                        .child(tr(keys::SIMILAR_BOTS_TITLE)),
                 );
                 for id in ids {
                     let id = *id;
@@ -690,7 +701,9 @@ impl QuillApp {
                         .users
                         .get(&id)
                         .map(|user| user.display_name())
-                        .unwrap_or_else(|| format!("Bot {id}"));
+                        .unwrap_or_else(|| {
+                            tr_with(keys::Q_MEDIA_BOT_2, &[("id", &id.to_string())])
+                        });
                     row = row.child(
                         Button::new(format!("bot-similar-{id}"))
                             .label(name)
@@ -705,7 +718,7 @@ impl QuillApp {
             _ => {
                 panel = panel.child(
                     Button::new("bot-similar-fetch")
-                        .label("Similar bots")
+                        .label(tr(keys::SIMILAR_BOTS_TITLE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.fetch_similar_bots(bot_id, cx);
@@ -733,15 +746,15 @@ impl QuillApp {
             {
                 Ok(Some(_)) => {
                     live.driver.session.bots.bot_start_params.remove(&chat_id.0);
-                    "starting bot…".to_string()
+                    tr(keys::Q_MEDIA_STARTING_BOT).to_string()
                 }
-                Ok(None) => "request already in flight".to_string(),
-                Err(_) => "Couldn't reach Telegram; try again.".to_string(),
+                Ok(None) => tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT).to_string(),
+                Err(_) => tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string(),
             }
         });
         self.set_status_note(
             note.as_deref()
-                .unwrap_or("Couldn't reach Telegram; try again."),
+                .unwrap_or(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             cx,
         );
     }
@@ -760,14 +773,14 @@ impl QuillApp {
                         .similar_bots
                         .entry(bot_id)
                         .or_insert(SimilarBotsFetch::Loading);
-                    "loading similar bots…".to_string()
+                    tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS).to_string()
                 }
-                Ok(None) => "already loading".to_string(),
-                Err(_) => "Couldn't reach Telegram; try again.".to_string(),
+                Ok(None) => tr(keys::Q_MEDIA_ALREADY_LOADING).to_string(),
+                Err(_) => tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string(),
             });
         self.set_status_note(
             note.as_deref()
-                .unwrap_or("Couldn't reach Telegram; try again."),
+                .unwrap_or(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             cx,
         );
     }
@@ -793,7 +806,7 @@ impl QuillApp {
             .as_ref()
             .map(|(text, _)| text.clone())
             .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| "Menu".to_string());
+            .unwrap_or_else(|| tr(keys::Q_MEDIA_MENU).to_string());
         Some(
             Button::new("bot-menu")
                 .icon(IconName::Menu)
@@ -801,7 +814,7 @@ impl QuillApp {
                 .small()
                 .primary()
                 .rounded_full()
-                .tooltip("Bot menu")
+                .tooltip(tr(keys::Q_MEDIA_BOT_MENU))
                 .on_click(cx.listener(move |this, _, window, cx| match &url {
                     Some((_, url)) => this.open_bot_menu_web_app(url, cx),
                     None => {

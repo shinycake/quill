@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::state::CustomEmojiPreview;
 use quill::sticker_set_box::custom_emoji_preview_label;
 use std::time::Duration;
@@ -115,7 +116,7 @@ impl QuillApp {
                         .child(div().flex_1().min_w_0().text_sm().child(label))
                         .child(
                             Button::new("custom-emoji-card-view")
-                                .label("View")
+                                .label(tr(keys::Q_MEDIA_VIEW))
                                 .primary()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -128,8 +129,8 @@ impl QuillApp {
                                 .icon(gpui_kit::assets::IconName::X)
                                 .ghost()
                                 .small()
-                                .tooltip("Close")
-                                .accessibility_label("Close")
+                                .tooltip(tr(keys::CLOSE))
+                                .accessibility_label(tr(keys::CLOSE))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.clear_custom_emoji_preview(cx);
                                 })),

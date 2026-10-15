@@ -29,6 +29,7 @@ use gpui_kit::*;
 use quill::emoji_sets_style::catalog::{EmojiSetId, SetState, load_current, save_current, set_dir};
 use quill::emoji_sets_style::download::Progress;
 use quill::emoji_sets_style::pack::{SpritePack, is_ready};
+use quill::lang::{keys, tr, tr_with};
 
 /// The four faces of tdesktop's set previews (`setN_preview.webp`).
 const PREVIEW: [&str; 4] = ["\u{1f603}", "\u{1f609}", "\u{1f614}", "\u{1f630}"];
@@ -274,7 +275,7 @@ impl QuillApp {
     fn install_emoji_set_file(&mut self, cx: &mut Context<Self>) {
         let Some(root) = app_root() else {
             self.settings.emoji_style.file_error =
-                Some("Couldn't open Quill's data folder.".into());
+                Some(tr(keys::Q_MEDIA_COULDNT_OPEN_QUILLS_DATA_FOLDER).into());
             cx.notify();
             return;
         };
@@ -283,7 +284,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Install".into()),
+            prompt: Some(tr(keys::Q_MEDIA_INSTALL).into()),
         });
         self.settings.emoji_style.file_task = Some(cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picker.await else {
@@ -332,7 +333,7 @@ impl QuillApp {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_sm().child("Emoji set"))
+                    .child(div().text_sm().child(tr(keys::Q_MEDIA_EMOJI_SET)))
                     .child(
                         div()
                             .text_xs()
@@ -342,7 +343,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("appearance-emoji-sets")
-                    .label("Choose emoji set")
+                    .label(tr(keys::EMOJI_MANAGE_SETS))
                     .outline()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| this.open_emoji_set_style(cx))),
@@ -363,7 +364,7 @@ impl QuillApp {
         let trailing = match state.progress() {
             Some(fraction) => ProgressCircle::new(("emoji-set-progress", id as usize))
                 .value(fraction * 100.)
-                .accessibility_label(format!("Downloading {}", id.name()))
+                .accessibility_label(tr_with(keys::Q_MEDIA_DOWNLOADING, &[("name", (id.name()))]))
                 .small()
                 .into_any_element(),
             None => Radio::new(("emoji-set-radio", id as usize))
@@ -442,12 +443,12 @@ impl QuillApp {
                     },
                 );
             let install = Button::new("emoji-sets-install-file")
-                .label("Install from file\u{2026}")
+                .label(tr(keys::Q_MEDIA_INSTALL_FROM_FILE))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| this.install_emoji_set_file(cx)));
             let footer = div().flex().justify_between().gap_2().child(install).child(
                 Button::new("emoji-sets-close")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.settings.emoji_style.open = false;
                         cx.notify();
@@ -456,7 +457,7 @@ impl QuillApp {
             );
             finish_dialog(
                 dialog,
-                "Choose emoji set".to_string(),
+                tr(keys::EMOJI_MANAGE_SETS).to_string(),
                 body.into_any_element(),
                 Some(footer.into_any_element()),
                 on_close,

@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use super::chat_theme::{danger, text_bright, text_muted};
+use quill::lang::{keys, tr, tr_with};
 
 /// How long a video story waits for its clip to start downloading before
 /// the viewer falls back to the thumbnail and the duration clock.
@@ -297,10 +298,10 @@ impl QuillApp {
                 .set_chat_active_stories_list(item.chat_id, archive)
         });
         self.stories.notice = Some(match sent {
-            Some(Ok(_)) if archive => "Hiding stories…".into(),
-            Some(Ok(_)) => "Showing stories…".into(),
-            Some(Err(_)) => "Could not change the stories list".into(),
-            None => "demo — setChatActiveStoriesList runs with live TDLib".into(),
+            Some(Ok(_)) if archive => tr(keys::Q_MEDIA_HIDING_STORIES).into(),
+            Some(Ok(_)) => tr(keys::Q_MEDIA_SHOWING_STORIES).into(),
+            Some(Err(_)) => tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STORIES).into(),
+            None => tr(keys::Q_MEDIA_DEMO_SETCHATACTIVESTORIESLIST_RUNS_WITH_LIVE).into(),
         });
         cx.notify();
     }
@@ -319,10 +320,10 @@ impl QuillApp {
                 .toggle_story_is_posted_to_chat_page(item.chat_id, item.story_id, !posted)
         });
         self.stories.notice = Some(match sent {
-            Some(Ok(_)) if posted => "Removing from profile…".into(),
-            Some(Ok(_)) => "Posting to profile…".into(),
-            Some(Err(_)) => "Could not change the profile post".into(),
-            None => "demo — toggleStoryIsPostedToChatPage runs with live TDLib".into(),
+            Some(Ok(_)) if posted => tr(keys::Q_MEDIA_REMOVING_FROM_PROFILE).into(),
+            Some(Ok(_)) => tr(keys::Q_MEDIA_POSTING_TO_PROFILE).into(),
+            Some(Err(_)) => tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_PROFILE).into(),
+            None => tr(keys::Q_MEDIA_DEMO_TOGGLESTORYISPOSTEDTOCHATPAGE_RUNS_WITH_LIVE).into(),
         });
         cx.notify();
     }
@@ -349,9 +350,9 @@ impl QuillApp {
         match username.and_then(|name| story_link(&name, item.story_id)) {
             Some(link) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(link));
-                self.stories.notice = Some("Story link copied".into());
+                self.stories.notice = Some(tr(keys::Q_MEDIA_STORY_LINK_COPIED).into());
             }
-            None => self.stories.notice = Some("This story has no public link".into()),
+            None => self.stories.notice = Some(tr(keys::Q_MEDIA_THIS_STORY_HAS_NO_PUBLIC).into()),
         }
         cx.notify();
     }
@@ -366,7 +367,7 @@ impl QuillApp {
             .and_then(|s| s.stories.stories.get(&(item.chat_id.0, item.story_id)))
             .is_some_and(can_save_story);
         if !allowed {
-            self.stories.notice = Some("Saving is not allowed for this story".into());
+            self.stories.notice = Some(tr(keys::Q_MEDIA_SAVING_IS_NOT_ALLOWED_FOR).into());
             cx.notify();
             return;
         }
@@ -390,10 +391,13 @@ impl QuillApp {
         };
         self.stories.notice = Some(match source {
             Some(path) => match quill::media_viewer::save_media_to_downloads(&path) {
-                Ok(saved) => format!("Saved to {}", saved.display()),
-                Err(err) => format!("Could not save: {err}"),
+                Ok(saved) => tr_with(
+                    keys::Q_MEDIA_SAVED_TO,
+                    &[("display", &(saved.display()).to_string())],
+                ),
+                Err(err) => tr_with(keys::Q_MEDIA_COULD_NOT_SAVE, &[("err", &err.to_string())]),
             },
-            None => "The story is not downloaded yet".into(),
+            None => tr(keys::Q_MEDIA_THE_STORY_IS_NOT_DOWNLOADED).into(),
         });
         cx.notify();
     }
@@ -423,10 +427,10 @@ impl QuillApp {
         self.stories.notice = Some(match sent {
             Some(Ok(_)) => {
                 self.stories.share_open = false;
-                "Story sent".into()
+                tr(keys::Q_MEDIA_STORY_SENT).into()
             }
-            Some(Err(_)) => "Could not share the story here".into(),
-            None => "demo — sharing runs with live TDLib".into(),
+            Some(Err(_)) => tr(keys::Q_MEDIA_COULD_NOT_SHARE_THE_STORY).into(),
+            None => tr(keys::Q_MEDIA_DEMO_SHARING_RUNS_WITH_LIVE).into(),
         });
         self.refresh_story_pause(cx);
     }
@@ -475,10 +479,14 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => match live.driver.set_close_friends(&ids) {
                 Ok(_) => self.stories.close_friends_saving = true,
-                Err(_) => self.stories.notice = Some("Could not save close friends".into()),
+                Err(_) => {
+                    self.stories.notice =
+                        Some(tr(keys::Q_MEDIA_COULD_NOT_SAVE_CLOSE_FRIENDS).into())
+                }
             },
             None => {
-                self.stories.notice = Some("demo — setCloseFriends runs with live TDLib".into())
+                self.stories.notice =
+                    Some(tr(keys::Q_MEDIA_DEMO_SETCLOSEFRIENDS_RUNS_WITH_LIVE).into())
             }
         }
         cx.notify();
@@ -498,7 +506,7 @@ impl QuillApp {
             if CloseFriendsEdit::new(&loaded).ids() == edit.ids() {
                 self.stories.close_friends_saving = false;
                 self.stories.close_friends_edit = None;
-                self.stories.notice = Some("Close friends updated".into());
+                self.stories.notice = Some(tr(keys::Q_MEDIA_CLOSE_FRIENDS_UPDATED).into());
                 self.refresh_story_pause(cx);
             } else if self
                 .session()
@@ -541,9 +549,9 @@ impl QuillApp {
             .justify_center();
         if is_video {
             let label = if self.stories.muted {
-                "Sound off"
+                tr(keys::Q_MEDIA_SOUND_OFF)
             } else {
-                "Sound on"
+                tr(keys::Q_MEDIA_SOUND_ON)
             };
             row = row.child(
                 Button::new("story-mute")
@@ -556,9 +564,9 @@ impl QuillApp {
         row = row.child(
             Button::new("story-pause")
                 .label(if self.stories.pause.is_paused() {
-                    "Resume"
+                    tr(keys::Q_MEDIA_RESUME)
                 } else {
-                    "Pause"
+                    tr(keys::Q_MEDIA_PAUSE)
                 })
                 .ghost()
                 .text_color(text_bright())
@@ -567,7 +575,7 @@ impl QuillApp {
         if can_share {
             row = row.child(
                 Button::new("story-share")
-                    .label("Share")
+                    .label(tr(keys::Q_MEDIA_SHARE))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -577,7 +585,7 @@ impl QuillApp {
         }
         row = row.child(
             Button::new("story-copy-link")
-                .label("Copy link")
+                .label(tr(keys::CONTEXT_COPY_LINK))
                 .ghost()
                 .text_color(text_bright())
                 .on_click(cx.listener(|this, _, _, cx| this.copy_story_link(cx))),
@@ -585,7 +593,7 @@ impl QuillApp {
         if can_save {
             row = row.child(
                 Button::new("story-save-media")
-                    .label("Save")
+                    .label(tr(keys::SETTINGS_SAVE))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, _, cx| this.save_story_media(cx))),
@@ -603,7 +611,7 @@ impl QuillApp {
         if own {
             row = row.child(
                 Button::new("story-close-friends")
-                    .label("Close friends…")
+                    .label(tr(keys::Q_MEDIA_CLOSE_FRIENDS))
                     .ghost()
                     .text_color(text_bright())
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -674,7 +682,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("No chats found"),
+                    .child(tr(keys::Q_MEDIA_NO_CHATS_FOUND)),
             );
         }
         for (chat_id, title) in rows {
@@ -693,7 +701,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(("story-share-send", chat_id.0 as u64))
-                            .label("Send")
+                            .label(tr(keys::Q_MEDIA_SEND))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.share_story_to(chat_id, cx);
                             })),
@@ -710,11 +718,11 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .text_color(text_bright())
-                    .child("Share story to…"),
+                    .child(tr(keys::Q_MEDIA_SHARE_STORY_TO)),
             )
             .child(
                 Textarea::new(&self.stories.more_search)
-                    .aria_label("Search chats")
+                    .aria_label(tr(keys::Q_MEDIA_SEARCH_CHATS))
                     .h(px(32.)),
             )
             .child(list)
@@ -740,7 +748,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("No contacts found"),
+                    .child(tr(keys::Q_MEDIA_NO_CONTACTS_FOUND)),
             );
         }
         for row in rows.iter().take(80) {
@@ -763,11 +771,14 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .text_color(text_bright())
-                    .child(format!("Close friends · {} selected", edit.count())),
+                    .child(tr_with(
+                        keys::Q_MEDIA_CLOSE_FRIENDS_SELECTED,
+                        &[("count", &(edit.count()).to_string())],
+                    )),
             )
             .child(
                 Textarea::new(&self.stories.more_search)
-                    .aria_label("Search contacts")
+                    .aria_label(tr(keys::Q_MEDIA_SEARCH_CONTACTS))
                     .h(px(32.)),
             )
             .child(list)
@@ -777,13 +788,17 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("story-close-friends-save")
-                            .label(if saving { "Saving…" } else { "Save" })
+                            .label(if saving {
+                                tr(keys::Q_MEDIA_SAVING)
+                            } else {
+                                tr(keys::SETTINGS_SAVE)
+                            })
                             .disabled(saving)
                             .on_click(cx.listener(|this, _, _, cx| this.save_close_friends(cx))),
                     )
                     .child(
                         Button::new("story-close-friends-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .text_color(text_bright())
                             .on_click(cx.listener(|this, _, _, cx| {
