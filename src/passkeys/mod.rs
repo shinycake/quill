@@ -12,6 +12,7 @@
 //! [`webauthn_supported`] says whether this build has one.
 #![deny(clippy::indexing_slicing)]
 
+pub mod login;
 #[cfg(test)]
 mod tests;
 
@@ -120,6 +121,15 @@ pub enum PasskeysPurpose {
     Parameters,
     /// `addLoginPasskey`; the answer is the new `passkey`.
     Add,
+    /// `getApplicationConfig` while signed out, for
+    /// `settings_display_passkeys` on the QR sign-in screen.
+    LoginConfig,
+    /// `getAuthenticationPasskeyParameters`; the answer is `text` with the
+    /// WebAuthn request options.
+    LoginParameters,
+    /// `checkAuthenticationPasskey`; the answer is `ok`, and the
+    /// authorization state moves on.
+    CheckLogin,
 }
 
 /// The answers this module parses.
@@ -230,6 +240,8 @@ pub struct PasskeysState {
     pub adding: bool,
     /// A passkey was just added; the UI takes it and closes the box.
     pub added: bool,
+    /// Signing in with a passkey (`login`).
+    pub login: login::LoginState,
 }
 
 impl PasskeysState {
@@ -277,6 +289,12 @@ impl PasskeysState {
     /// account already has some.
     pub fn row_shown(&self) -> bool {
         self.display_allowed && (webauthn_supported() || !self.list.is_empty())
+    }
+
+    /// Whether the QR sign-in screen shows "Log in using passkey" (tdesktop
+    /// `setupPasskeyLink`: `settingsDisplayPasskeys` and WebAuthn).
+    pub fn login_link_shown(&self) -> bool {
+        self.display_allowed && webauthn_supported()
     }
 
     /// The value on the right of the row.

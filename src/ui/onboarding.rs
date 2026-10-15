@@ -165,6 +165,11 @@ impl QuillApp {
                             .child(tr(keys::Q_MISC_TELEGRAM_SETTINGS_DEVICES_LINK_DESKTOP)),
                     ),
             );
+            // tdesktop puts "Log in using passkey" under the QR steps
+            // (`intro_qr.cpp` `setupPasskeyLink`).
+            if let Some(link) = self.passkey_login_link(cx) {
+                form = form.child(link);
+            }
         }
         if can_qr && !show_qr {
             form = form.child(

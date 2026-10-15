@@ -61,6 +61,7 @@ mod moderation;
 mod paid_messages;
 mod paid_reaction;
 mod passkeys;
+mod passkeys_login;
 mod payments;
 mod peer_color;
 mod polls;

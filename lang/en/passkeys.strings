@@ -1,5 +1,6 @@
-// Passkeys: creating one on a security key (tdesktop webauthn/webauthn_common.cpp,
-// webauthn/cable_box.cpp, settings/sections/settings_passkeys.cpp).
+// Passkeys: creating one on a security key and signing in with it (tdesktop
+// webauthn/webauthn_common.cpp, webauthn/cable_box.cpp,
+// settings/sections/settings_passkeys.cpp, intro/intro_qr.cpp).
 "lng_cancel" = "Cancel";
 "lng_close" = "Close";
 "lng_settings_passkeys_none_button" = "Create Passkey";
@@ -15,3 +16,6 @@
 "lng_passkey_error_no_device" = "No security key found. Insert one and try again.";
 "lng_passkey_error_register" = "Couldn't add a passkey with the security key.";
 "lng_passkey_cable_error_title" = "Something went wrong";
+"lng_intro_qr_passkey" = "Log in using passkey";
+"lng_passkey_error_no_credentials" = "This security key has no passkey for your account.";
+"lng_passkey_error_login" = "Couldn't sign in with the security key.";

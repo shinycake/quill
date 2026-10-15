@@ -960,5 +960,6 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod passkey_ceremony;
+mod passkey_login;
 pub(in crate::ui) mod passkeys;
 mod twofa_status_body;

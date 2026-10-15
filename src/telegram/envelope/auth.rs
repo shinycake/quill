@@ -24,6 +24,11 @@ pub struct TdError {
     /// screen reacts to (`PASSWORD_MISSING`, `AMOUNT_TOO_SMALL`, ...).
     /// Only this classification survives, never the text.
     pub earn_hint: Option<crate::earn::EarnErrorHint>,
+    /// The server's error type when the message is one: an upper-case
+    /// constant such as `PASSKEY_CREDENTIAL_NOT_FOUND`. Screens that show
+    /// it as Telegram Desktop does (the passkey sign-in) read it. Free text,
+    /// which can carry secrets, never lands here.
+    pub server_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +102,7 @@ impl TdError {
             limit_hint: None,
             premium_limit: None,
             earn_hint: None,
+            server_type: None,
         }
     }
 
@@ -449,6 +455,17 @@ pub(crate) fn parse_flood_wait_secs(message: &str) -> Option<u64> {
         .and_then(|n| n.trim().parse::<u64>().ok())
 }
 
+/// `message` when it is a server error type: `[A-Z][A-Z0-9_]*`, at most 64
+/// bytes. Phone numbers, codes and free text never match.
+fn server_error_type(message: &str) -> Option<String> {
+    let mut bytes = message.bytes();
+    let first = bytes.next()?;
+    (first.is_ascii_uppercase()
+        && message.len() <= 64
+        && bytes.all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'))
+    .then(|| message.to_string())
+}
+
 pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     let code = value
         .and_then(|v| v.get("code"))
@@ -470,6 +487,10 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
         .and_then(crate::earn::error_hint);
+    let server_type = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(server_error_type);
     if let Some(class) = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
@@ -485,6 +506,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             limit_hint: None,
             premium_limit: None,
             earn_hint,
+            server_type,
         };
     }
     // Slice msg-richtext-ai-tools: the documented AI flood error
@@ -502,6 +524,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             limit_hint: None,
             premium_limit: None,
             earn_hint,
+            server_type,
         };
     }
     if value
@@ -516,6 +539,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             limit_hint: None,
             premium_limit: None,
             earn_hint,
+            server_type,
         };
     }
     let permission = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
@@ -537,6 +561,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     }
     err.flood_wait_secs = flood_wait_secs;
     err.earn_hint = earn_hint;
+    err.server_type = server_type;
     err.limit_hint = value
         .and_then(|v| v.get("message"))
         .and_then(Value::as_str)
@@ -568,6 +593,24 @@ mod tests {
             err.flood_line("too many requests — wait and try again"),
             "try again in 30 seconds"
         );
+    }
+
+    #[test]
+    fn parse_error_keeps_only_server_error_types() {
+        let parse = |message: &str| {
+            let value = serde_json::json!({"@type": "error", "code": 400, "message": message});
+            parse_error(Some(&value)).server_type
+        };
+        assert_eq!(
+            parse("PASSKEY_CREDENTIAL_NOT_FOUND").as_deref(),
+            Some("PASSKEY_CREDENTIAL_NOT_FOUND")
+        );
+        assert_eq!(parse("FLOOD_WAIT_30").as_deref(), Some("FLOOD_WAIT_30"));
+        assert_eq!(parse("+15551234567"), None);
+        assert_eq!(parse("123456"), None);
+        assert_eq!(parse("Invalid code 12345"), None);
+        assert_eq!(parse(""), None);
+        assert_eq!(parse(&"A".repeat(65)), None);
     }
 
     #[test]

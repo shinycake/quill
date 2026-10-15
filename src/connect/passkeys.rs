@@ -118,9 +118,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         sent
     }
 
-    /// After each ingest: fetch the list again once a removal marked it
-    /// stale, and ask for the software icons nobody has resolved yet.
+    /// After each ingest: on the sign-in screens ask for the app config
+    /// once (the passkey link), fetch the list again once a removal marked
+    /// it stale, and ask for the software icons nobody has resolved yet.
     pub(crate) fn after_passkeys_ingest(&mut self) {
+        self.maybe_request_login_config();
         if self.session.settings.passkeys.stale {
             let _ = self.request_passkeys();
         }
