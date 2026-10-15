@@ -891,7 +891,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
 - [x] Hide ads (Premium) <!-- parity:premium-disable-sponsored -->
 - [x] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
-- [ ] Fragment and TON wallet flows (blocked: external web services, link-out only) <!-- parity:premium-fragment-ton -->
+- [ ] Fragment and TON wallet flows (partial: sign-in codes, collectible username/number info, phone and username Fragment links and low-TON top-up match tdesktop (#799); missing the Grams balance screen with top-up/withdraw via Fragment, the gift value box and gift transfer to blockchain via Fragment) <!-- parity:premium-fragment-ton -->
 
 ### TON wallet (low priority)
 
@@ -1035,7 +1035,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Bots and websites: mini-app permissions (Telegram Desktop has no "delete cloud drafts") <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
-- [ ] Passkeys (partial: listing and deleting passkeys in progress; creating one and signing in need WebAuthn, which tdesktop does on Linux and Windows without Telegram's signature: quill-tools/designs/passkeys.md, queued) <!-- parity:settings-passkeys -->
+- [ ] Passkeys (partial: listing and deleting passkeys shipped (#800); creating one and signing in need WebAuthn, which tdesktop does on Linux and Windows without Telegram's signature: quill-tools/designs/passkeys.md, queued) <!-- parity:settings-passkeys -->
 - [x] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
 
 ### Settings: notifications
