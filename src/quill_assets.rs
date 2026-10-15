@@ -69,6 +69,8 @@ gpui_kit::assets::icon_assets!(
         Shuffle,
         ArrowDownUp,
         PictureInPicture2,
+        // Picture-in-Picture's back-to-viewer button (tdesktop `pipEnlargeIcon`).
+        Maximize2,
         Bookmark,
         Bot,
         Quote,

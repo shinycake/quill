@@ -755,8 +755,13 @@ impl VideoPip {
             return;
         };
         if self.seek_preview.is_none() {
+            // The drawn line reads the transport itself; the slider's value
+            // (where a drag starts, what a screen reader says) follows in
+            // 1 % steps, so a playing clip does not redraw the window on
+            // every display frame through the slider's notify.
             let value = position_fraction(transport.position, transport.total());
-            if self.seek.read(cx).value() != SliderValue::Single(value) {
+            let current = self.seek.read(cx).value().end();
+            if (current - value).abs() >= SEEK_SYNC_STEP || (value == 0.0 && current != 0.0) {
                 self.seek
                     .update(cx, |state, cx| state.set_value(value, window, cx));
             }
@@ -770,6 +775,10 @@ impl VideoPip {
         }
     }
 }
+
+/// How far the progress slider's value may lag the transport (a fraction
+/// of the clip).
+const SEEK_SYNC_STEP: f32 = 0.01;
 
 /// Close and enlarge sit where the window title controls are: on the left
 /// on macOS, else on the side the system puts its close button.
