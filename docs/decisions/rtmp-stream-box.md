@@ -93,9 +93,10 @@ tdesktop references are to `Telegram/SourceFiles` at `b16daff`.
   direct messages chat.
 - Being in a call (`Session::current_call_for_create`) counts a join still
   in flight, a pending `joinVideoChat` or the window's own join, as tdesktop's
-  `inGroupCall()` does; the call you leave for the new one always goes
-  through `leave_active_group_call` (`leaveGroupCall` and the transport torn
-  down); only a scheduled call you never joined is dropped locally.
+  `inGroupCall()` does; a call you are in or joining is left through
+  `leave_active_group_call` (`leaveGroupCall` and the transport torn down);
+  a tracked call you only looked at (its pre-join window, a scheduled one)
+  is dropped locally with no request, as tdesktop has no current call then.
 - `src/ui/dialogs/group_call_create.rs` (registered as `GroupCallStart`,
   replacing Quill's old title + presets start dialog): the leave-current
   confirmation; Start asks for the "join as" list, then shows the create

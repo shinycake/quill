@@ -401,6 +401,32 @@ fn a_join_still_in_flight_counts_as_being_in_that_call(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn a_call_only_looked_at_is_dropped_without_leaving_it(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    // Another chat's call window is open, but nobody joined it.
+    app.update(&mut main, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.active_group_call = Some(ActiveGroupCall::fresh(OTHER_CALL));
+        }
+        // Its own window is not part of this test.
+        app.group_call.window_closed_by_user = Some(OTHER_CALL);
+    });
+    begin(&app, &mut main, CreateKind::Now);
+    assert!(
+        main.debug_bounds("group-call-create-leave").is_none(),
+        "not in that call: no leave question"
+    );
+    click(&mut main, "group-call-create-confirm");
+    assert!(!other_call_tracked(&app, &mut main));
+    // Dropped locally: no `leaveGroupCall` for a call that was never
+    // joined (TDLib would refuse it and its error would land on the new
+    // call).
+    let note = app.read_with(&main, |app, _| app.connection.status_note.clone());
+    assert!(!note.contains("left the voice chat"), "{note}");
+}
+
+#[gpui_kit::test]
 fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
     manager(&app, &mut main);

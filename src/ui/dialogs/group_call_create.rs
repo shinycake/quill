@@ -390,9 +390,12 @@ impl QuillApp {
     }
 
     /// tdesktop `destroyCurrentCall` right before a new call is created:
-    /// hang up a one-to-one call and leave the tracked video chat
-    /// (`leaveGroupCall` and the transport torn down), unless it is a
-    /// scheduled one you never joined, which is only dropped.
+    /// hang up a one-to-one call and leave the tracked video chat you are
+    /// in or joining (`leaveGroupCall` and the transport torn down). A
+    /// tracked call you only looked at (its pre-join window, a scheduled
+    /// one) is only dropped: tdesktop has no current call then and sends
+    /// nothing, and TDLib would refuse the leave with an error that lands
+    /// on the new call.
     pub(in crate::ui) fn end_current_call_for_create(&mut self, cx: &mut Context<Self>) {
         let joining = self.group_call.stream.joining;
         let Some(session) = self.session() else {
@@ -400,16 +403,14 @@ impl QuillApp {
         };
         let one_to_one = session.current_call_for_create(joining) == CurrentCall::OneToOne;
         let in_call = session.group_call_joined_or_joining(joining);
-        let tracked = session.calls.active_group_call.as_ref();
-        let scheduled = tracked.is_some_and(|call| call.scheduled_start_date > 0);
-        let tracked = tracked.is_some();
+        let tracked = session.calls.active_group_call.is_some();
         if one_to_one {
             self.hang_up_call(cx);
         }
         if !tracked {
             return;
         }
-        if scheduled && !in_call {
+        if !in_call {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.leave_group_call_local();
             } else if let Some(session) = self.demo_session.as_mut() {
