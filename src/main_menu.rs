@@ -34,7 +34,7 @@ pub fn night_mode_on(applied_dark: Option<bool>, choice: ThemeChoice) -> bool {
 /// The label of the emoji status entry: tdesktop shows "Set Emoji Status"
 /// until the account has a status, then "Change Emoji Status"
 /// (`lng_menu_set_status` / `lng_menu_change_status`).
-pub fn emoji_status_label(has_status: bool) -> crate::lang::SharedString {
+pub fn emoji_status_label(has_status: bool) -> &'static str {
     crate::lang::tr(if has_status {
         crate::lang::keys::MENU_CHANGE_STATUS
     } else {

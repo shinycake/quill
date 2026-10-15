@@ -13,6 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::folder_picker::PickerMode;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::telegram::envelope::ChatList;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -36,8 +37,8 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let title = match this.folders.editor.as_ref().and_then(|d| d.folder_id) {
-                Some(_) => "Edit folder",
-                None => "New folder",
+                Some(_) => tr(keys::FILTERS_EDIT),
+                None => tr(keys::FILTERS_NEW),
             };
             let body = this.folder_editor_panel(cx);
             let footer = div()
@@ -46,7 +47,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("folder-editor-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.folders.editor = None;
@@ -56,7 +57,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("folder-editor-save")
-                        .label("Save")
+                        .label(tr(keys::SETTINGS_SAVE))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_folder_editor(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
@@ -98,7 +99,9 @@ impl QuillApp {
             let Some(confirm) = this.folders.delete_confirm.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Delete folder"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::Q_CHATLIST_DELETE_FOLDER,
+                    )))
                     .on_close(on_close.clone());
             };
             let muted = cx.theme().muted_foreground;
@@ -116,9 +119,9 @@ impl QuillApp {
                 .count();
             // tdesktop `lng_filters_delete_sure` / `lng_filters_remove_sure`.
             let intro = if confirm.has_links {
-                "Are you sure you want to delete this folder? This will also deactivate all the invite links created to share this folder."
+                tr(keys::FILTERS_DELETE_SURE)
             } else {
-                "This will remove the folder, your chats will not be deleted."
+                tr(keys::FILTERS_REMOVE_SURE)
             };
             let mut body = div()
                 .flex()
@@ -143,18 +146,20 @@ impl QuillApp {
                                     .text_xs()
                                     .font_semibold()
                                     .text_color(muted)
-                                    .child(match leaving {
-                                        1 => "1 chat to quit".to_string(),
-                                        n => format!("{n} chats to quit"),
-                                    }),
+                                    .child(trn(keys::FILTERS_BY_LINK_QUIT, leaving)),
                             )
                             .child(
                                 Button::new("folder-delete-select-all")
-                                    .label(if all_ticked { "Deselect all" } else { "Select all" })
+                                    .label(if all_ticked {
+                                        tr(keys::FILTERS_BY_LINK_DESELECT)
+                                    } else {
+                                        tr(keys::FILTERS_BY_LINK_SELECT)
+                                    })
                                     .ghost()
                                     .small()
                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                        if let Some(confirm) = this.folders.delete_confirm.as_mut() {
+                                        if let Some(confirm) = this.folders.delete_confirm.as_mut()
+                                        {
                                             if all_ticked {
                                                 confirm.keep = select_ids.iter().copied().collect();
                                             } else {
@@ -194,21 +199,20 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("You can deselect the chats you don’t want to quit."),
+                        .child(tr(keys::FILTERS_BY_LINK_ABOUT_QUIT)),
                 );
             }
             let body = body.into_any_element();
             // tdesktop: "Remove Folder and Keep Chats" until a chat is ticked.
             let confirm_label = if !suggested.is_empty() {
                 match leaving {
-                    0 => "Remove folder and keep chats".to_string(),
-                    1 => "Remove folder and chat".to_string(),
-                    _ => "Remove folder and chats".to_string(),
+                    0 => tr(keys::FILTERS_BY_LINK_REMOVE_BUTTON).to_string(),
+                    n => trn(keys::FILTERS_BY_LINK_AND_QUIT_BUTTON, n),
                 }
             } else if confirm.has_links {
-                "Delete".to_string()
+                tr(keys::BOX_DELETE).to_string()
             } else {
-                "Remove".to_string()
+                tr(keys::FILTERS_REMOVE_YES).to_string()
             };
             let footer = div()
                 .flex()
@@ -216,7 +220,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("folder-delete-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.folders.delete_confirm = None;
@@ -234,7 +238,7 @@ impl QuillApp {
                         })),
                 );
             let title = if confirm.shared && !suggested.is_empty() {
-                "Remove Folder".to_string()
+                tr(keys::FILTERS_BY_LINK_REMOVE).to_string()
             } else {
                 format!("Delete “{}”?", confirm.name)
             };
@@ -326,7 +330,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No folders yet. Create one to organize your chats."),
+                        .child(tr(keys::Q_CHATLIST_NO_FOLDERS_YET_CREATE_ONE)),
                 );
             }
             for (index, (folder_id, name, count, icon)) in folders.iter().enumerate() {
@@ -392,7 +396,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new(format!("folder-edit-{folder_id}"))
-                                        .label("Edit")
+                                        .label(tr(keys::FILTERS_SETUP))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.open_folder_edit(folder_id, window, cx);
@@ -407,8 +411,8 @@ impl QuillApp {
                                     Button::new(format!("folder-share-{folder_id}"))
                                         .icon(gpui_kit::assets::IconName::Link)
                                         .ghost()
-                                        .tooltip("Share folder")
-                                        .accessibility_label("Share folder")
+                                        .tooltip(tr(keys::FILTERS_LINK))
+                                        .accessibility_label(tr(keys::FILTERS_LINK))
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.open_folder_share(folder_id, window, cx);
                                             this.close_kit_dialog_if_done(
@@ -420,7 +424,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new(format!("folder-delete-{folder_id}"))
-                                        .label("Delete")
+                                        .label(tr(keys::BOX_DELETE))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             this.open_folder_delete(folder_id, cx);
@@ -442,7 +446,7 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Recommended folders"),
+                        .child(tr(keys::FILTERS_RECOMMENDED)),
                 );
             }
             for (ix, name, description, icon) in recommended {
@@ -483,7 +487,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new(("folder-recommended-add", ix))
-                                .label("Add")
+                                .label(tr(keys::FILTERS_RECOMMENDED_ADD))
                                 .small()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.add_recommended_folder(ix, cx);
@@ -507,7 +511,7 @@ impl QuillApp {
                         // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                         Checkbox::new("folder-tags-toggle")
                             .checked(tags_enabled)
-                            .label("Show folder tags")
+                            .label(tr(keys::FILTERS_ENABLE_TAGS))
                             .on_click(cx.listener(move |this, &on, window, cx| {
                                 if on != tags_enabled {
                                     this.toggle_folder_tags_ui(cx);
@@ -518,7 +522,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("folder-create")
-                        .label("New folder")
+                        .label(tr(keys::FILTERS_NEW))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_folder_create(window, cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderManage, window, cx);
@@ -528,7 +532,9 @@ impl QuillApp {
                 .into_any_element();
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Folders"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SETTINGS_SECTION_FILTERS,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -552,7 +558,9 @@ impl QuillApp {
         // kit Phase 2 (redo): plain form content — the kit `Dialog`
         // provides the title, padding, and chrome via `.title()`.
         let mut panel = div().flex().flex_col().gap_2();
-        panel = panel.child(Textarea::new(&dialog.name_input).aria_label("Chat folder name"));
+        panel = panel.child(
+            Textarea::new(&dialog.name_input).aria_label(tr(keys::Q_CHATLIST_CHAT_FOLDER_NAME)),
+        );
         if let Some(error) = dialog.error.clone() {
             panel = panel.child(
                 div()
@@ -568,7 +576,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading folder…"),
+                        .child(tr(keys::Q_CHATLIST_LOADING_FOLDER)),
                 )
                 .into_any_element();
         }
@@ -584,14 +592,17 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
-                .child("Choose an icon"),
+                .child(tr(keys::FILTERS_ICON_HEADER)),
         );
         if chosen.is_none() {
             icon_header = icon_header.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("Default: {default_icon}")),
+                    .child(tr_with(
+                        keys::Q_CHATLIST_DEFAULT,
+                        &[("default_icon", default_icon)],
+                    )),
             );
         }
         let mut icon_grid = div().id("folder-editor-icons").flex().flex_col().gap_1();
@@ -633,29 +644,37 @@ impl QuillApp {
         // Include-type filters.
         let include_filters = [
             (
-                "Contacts",
+                tr(keys::FILTERS_TYPE_CONTACTS),
                 dialog.editor.include_contacts,
                 "include-contacts",
             ),
             (
-                "Non-contacts",
+                tr(keys::FILTERS_TYPE_NON_CONTACTS),
                 dialog.editor.include_non_contacts,
                 "include-non-contacts",
             ),
-            ("Groups", dialog.editor.include_groups, "include-groups"),
             (
-                "Channels",
+                tr(keys::FILTERS_TYPE_GROUPS),
+                dialog.editor.include_groups,
+                "include-groups",
+            ),
+            (
+                tr(keys::FILTERS_TYPE_CHANNELS),
                 dialog.editor.include_channels,
                 "include-channels",
             ),
-            ("Bots", dialog.editor.include_bots, "include-bots"),
+            (
+                tr(keys::FILTERS_TYPE_BOTS),
+                dialog.editor.include_bots,
+                "include-bots",
+            ),
         ];
         let mut filters_row = div().flex().flex_row().flex_wrap().gap_1().child(
             div()
                 .text_xs()
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
-                .child("Include types:"),
+                .child(tr(keys::Q_CHATLIST_INCLUDE_TYPES)),
         );
         for (label, checked, key) in include_filters {
             // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
@@ -695,10 +714,18 @@ impl QuillApp {
             .child(self.folder_chat_section(PickerMode::Exclude, cx));
         // Exclude flags.
         let exclude_flags = [
-            ("Muted", dialog.editor.exclude_muted, "exclude-muted"),
-            ("Read", dialog.editor.exclude_read, "exclude-read"),
             (
-                "Archived",
+                tr(keys::FILTERS_TYPE_NO_MUTED),
+                dialog.editor.exclude_muted,
+                "exclude-muted",
+            ),
+            (
+                tr(keys::FILTERS_TYPE_NO_READ),
+                dialog.editor.exclude_read,
+                "exclude-read",
+            ),
+            (
+                tr(keys::FILTERS_TYPE_NO_ARCHIVED),
                 dialog.editor.exclude_archived,
                 "exclude-archived",
             ),
@@ -708,7 +735,7 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
-                .child("Exclude:"),
+                .child(tr(keys::Q_CHATLIST_EXCLUDE)),
         );
         for (label, checked, key) in exclude_flags {
             // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).

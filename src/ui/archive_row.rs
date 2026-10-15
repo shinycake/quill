@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::chatlist_archive::{ArchiveRowSummary, COLLAPSED_BAR_HEIGHT};
+use quill::lang::{keys, tr, tr_with};
 
 /// `lng_archived_name`.
 const TITLE: &str = "Archived chats";
@@ -37,7 +38,10 @@ fn muted_badge(text: String, cx: &App) -> AnyElement {
         .text_color(text_on_fill())
         .text_xs()
         .font_semibold()
-        .aria_label(format!("{text} unread chats"))
+        .aria_label(tr_with(
+            keys::Q_CHATLIST_UNREAD_CHATS,
+            &[("text", &text.to_string())],
+        ))
         .child(text)
         .into_any_element()
 }
@@ -121,9 +125,7 @@ impl QuillApp {
         if moved {
             // Quill's menu is a dropdown (no right click on its entries),
             // so the toast names the way back instead.
-            self.connection.status_note =
-                "Archive moved to the main menu. Open Menu > Move archive to chat list to return it."
-                    .into();
+            self.connection.status_note = tr(keys::Q_CHATLIST_ARCHIVE_MOVED_TO_THE_MAIN).into();
         }
         // Leaving the folder view when the row it came from is gone would
         // strand nobody: the Archived tab stays available.
@@ -272,7 +274,11 @@ impl QuillApp {
             rows.push(item(
                 "archive-menu-collapse",
                 IconName::ChevronsUpDown,
-                if collapsed { "Expand" } else { "Collapse" },
+                if collapsed {
+                    tr(keys::CONTEXT_ARCHIVE_EXPAND)
+                } else {
+                    tr(keys::CONTEXT_ARCHIVE_COLLAPSE)
+                },
                 Box::new(|this, cx| this.toggle_archive_collapsed(cx)),
                 cx,
             ));
@@ -281,9 +287,9 @@ impl QuillApp {
             "archive-menu-main-menu",
             IconName::Menu,
             if in_menu {
-                "Move to chat list"
+                tr(keys::CONTEXT_ARCHIVE_TO_LIST)
             } else {
-                "Move to main menu"
+                tr(keys::CONTEXT_ARCHIVE_TO_MENU)
             },
             Box::new(|this, cx| this.toggle_archive_in_main_menu(cx)),
             cx,
@@ -292,7 +298,7 @@ impl QuillApp {
             rows.push(item(
                 "archive-menu-read",
                 IconName::CircleCheck,
-                "Mark all as read",
+                tr(keys::Q_CHATLIST_MARK_ALL_AS_READ),
                 Box::new(|this, cx| this.mark_all_chats_as_read(true, cx)),
                 cx,
             ));
@@ -300,14 +306,14 @@ impl QuillApp {
         rows.push(item(
             "archive-menu-how",
             IconName::Info,
-            "How does it work?",
+            tr(keys::CONTEXT_ARCHIVE_HOW_DOES_IT_WORK),
             Box::new(|this, cx| this.open_archive_hint(cx)),
             cx,
         ));
         rows.push(item(
             "archive-menu-settings",
             IconName::Settings,
-            "Archive settings",
+            tr(keys::SETTINGS_ARCHIVE_TITLE),
             Box::new(|this, cx| this.open_archive_settings(cx)),
             cx,
         ));

@@ -21,6 +21,7 @@ use quill::folder_limits::{
     FolderLimitKind, TAG_COLOR_COUNT, limit_box_text, new_chats_bar_text, tag_choice_allowed,
     tag_picker_visible, tag_shown_choice,
 };
+use quill::lang::{keys, tr, tr_with, trn};
 use std::collections::HashSet;
 
 /// The right-click menu of a folder tab: which folder (`None` = the All
@@ -164,7 +165,7 @@ impl QuillApp {
                 rows.push(item(
                     "folder-menu-edit",
                     IconName::Pencil,
-                    "Edit folder",
+                    tr(keys::FILTERS_EDIT),
                     false,
                     Box::new(move |this, window, cx| this.open_folder_edit(folder_id, window, cx)),
                     cx,
@@ -172,7 +173,7 @@ impl QuillApp {
                 rows.push(item(
                     "folder-menu-share",
                     IconName::Link,
-                    "Share folder",
+                    tr(keys::FILTERS_LINK),
                     false,
                     Box::new(move |this, window, cx| this.open_folder_share(folder_id, window, cx)),
                     cx,
@@ -181,7 +182,7 @@ impl QuillApp {
                     rows.push(item(
                         "folder-menu-read",
                         IconName::CircleCheck,
-                        "Mark as read",
+                        tr(keys::CONTEXT_MARK_READ),
                         false,
                         Box::new(move |this, _, cx| this.mark_folder_read(Some(folder_id), cx)),
                         cx,
@@ -190,7 +191,7 @@ impl QuillApp {
                 rows.push(item(
                     "folder-menu-remove",
                     IconName::Trash,
-                    "Remove",
+                    tr(keys::FILTERS_REMOVE_YES),
                     true,
                     Box::new(move |this, _, cx| this.open_folder_delete(folder_id, cx)),
                     cx,
@@ -201,7 +202,7 @@ impl QuillApp {
                     rows.push(item(
                         "folder-menu-read-all",
                         IconName::CircleCheck,
-                        "Mark all as read",
+                        tr(keys::Q_CHATLIST_MARK_ALL_AS_READ),
                         false,
                         Box::new(|this, _, cx| this.mark_folder_read(None, cx)),
                         cx,
@@ -210,7 +211,7 @@ impl QuillApp {
                 rows.push(item(
                     "folder-menu-setup",
                     IconName::Settings,
-                    "Edit folders",
+                    tr(keys::FILTERS_SETUP_MENU),
                     false,
                     Box::new(|this, _, cx| this.open_folder_manage(cx)),
                     cx,
@@ -345,8 +346,8 @@ impl QuillApp {
                         .icon(IconName::X)
                         .small()
                         .ghost()
-                        .tooltip("Hide")
-                        .accessibility_label("Hide new chats")
+                        .tooltip(tr(keys::Q_CHATLIST_HIDE))
+                        .accessibility_label(tr(keys::Q_CHATLIST_HIDE_NEW_CHATS))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.dismiss_folder_new_chats(folder_id, cx);
                         })),
@@ -399,9 +400,9 @@ impl QuillApp {
             Some(live) => match live.driver.process_folder_new_chats(dialog.folder_id, &ids) {
                 Ok(_) => {
                     self.connection.status_note = match ids.len() {
-                        0 => "new chats hidden".into(),
-                        1 => "joining 1 chat…".into(),
-                        n => format!("joining {n} chats…"),
+                        0 => tr(keys::Q_CHATLIST_NEW_CHATS_HIDDEN).into(),
+                        1 => tr(keys::Q_CHATLIST_JOINING_1_CHAT).into(),
+                        n => tr_with(keys::Q_CHATLIST_JOINING_CHATS, &[("n", &n.to_string())]),
                     }
                 }
                 Err(err) => {
@@ -431,7 +432,9 @@ impl QuillApp {
             let Some(state) = this.folders.new_chats_dialog.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Add chats to folder"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::FILTERS_BY_LINK_MORE,
+                    )))
                     .on_close(on_close.clone());
             };
             let muted = cx.theme().muted_foreground;
@@ -452,26 +455,28 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_sm().child(format!(
-                    "Do you want to join chats and add them to the folder {folder_name}?"
+                .child(div().text_sm().child(tr_with(
+                    keys::FILTERS_BY_LINK_MORE_SURE,
+                    &[("folder", &folder_name.to_string())],
                 )));
             body = body.child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_xs().font_semibold().text_color(muted).child(
-                        match chats.len() {
-                            1 => "1 chat to join".to_string(),
-                            n => format!("{n} chats to join"),
-                        },
-                    ))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(muted)
+                            .child(trn(keys::FILTERS_BY_LINK_JOIN, chats.len())),
+                    )
                     .child(
                         Button::new("folder-new-chats-select-all")
                             .label(if all_selected {
-                                "Deselect all"
+                                tr(keys::FILTERS_BY_LINK_DESELECT)
                             } else {
-                                "Select all"
+                                tr(keys::FILTERS_BY_LINK_SELECT)
                             })
                             .ghost()
                             .small()
@@ -516,7 +521,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("You can deselect the chats you don’t want to join."),
+                    .child(tr(keys::FILTERS_BY_LINK_ABOUT)),
             );
             let selected = state.selected.len();
             let footer = div()
@@ -525,7 +530,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("folder-new-chats-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_folder_new_chats(cx);
@@ -534,11 +539,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("folder-new-chats-join")
-                        .label(if selected == 1 {
-                            "Join chat"
-                        } else {
-                            "Join chats"
-                        })
+                        .label(trn(keys::FILTERS_BY_LINK_AND_JOIN_BUTTON, selected))
                         .disabled(selected == 0)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_folder_new_chats(cx);
@@ -548,7 +549,7 @@ impl QuillApp {
                 .into_any_element();
             finish_dialog(
                 dialog,
-                "Add chats to folder".into(),
+                tr(keys::FILTERS_BY_LINK_MORE).into(),
                 body.into_any_element(),
                 Some(footer),
                 on_close,
@@ -608,7 +609,9 @@ impl QuillApp {
             let Some(kind) = this.folders.limit_box else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Limit Reached"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::FILTERS_LIMIT_TITLE,
+                    )))
                     .on_close(on_close.clone());
             };
             let premium = this.is_premium();
@@ -656,13 +659,17 @@ impl QuillApp {
                     div()
                         .flex()
                         .gap_2()
-                        .child(pill("Free", free, !premium, cx))
-                        .child(pill("Premium", plus, premium, cx)),
+                        .child(pill(tr(keys::Q_CHATLIST_FREE), free, !premium, cx))
+                        .child(pill(tr(keys::Q_CHATLIST_PREMIUM), plus, premium, cx)),
                 );
             }
             let mut footer = div().flex().justify_end().gap_2().child(
                 Button::new("folder-limit-close")
-                    .label(if premium { "OK" } else { "Not now" })
+                    .label(if premium {
+                        "OK"
+                    } else {
+                        tr(keys::Q_CHATLIST_NOT_NOW)
+                    })
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.folders.limit_box = None;
@@ -674,9 +681,9 @@ impl QuillApp {
                 footer = footer.child(
                     Button::new("folder-limit-premium")
                         .label(if kind == FolderLimitKind::Tags {
-                            "Get Premium"
+                            tr(keys::Q_CHATLIST_GET_PREMIUM)
                         } else {
-                            "Increase Limit"
+                            tr(keys::Q_CHATLIST_INCREASE_LIMIT)
                         })
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.folders.limit_box = None;
@@ -743,7 +750,7 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(muted)
-                .child("No Tag")
+                .child(tr(keys::FILTERS_TAG_COLOR_NO))
                 .into_any_element()
         } else {
             tag_chip(
@@ -783,7 +790,7 @@ impl QuillApp {
                     .role(Role::RadioButton)
                     .aria_selected(selected)
                     .aria_label(if color_id < 0 {
-                        "No tag".to_string()
+                        tr(keys::FILTERS_TAG_COLOR_NO).to_string()
                     } else {
                         format!("Tag color {}", color_id + 1)
                     })
@@ -825,7 +832,7 @@ impl QuillApp {
                                 .text_xs()
                                 .font_semibold()
                                 .text_color(muted)
-                                .child("Folder color in chat list"),
+                                .child(tr(keys::FILTERS_TAG_COLOR_SUBTITLE)),
                         )
                         .child(preview),
                 )
@@ -834,7 +841,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Choose a color for the tag of this folder."),
+                        .child(tr(keys::FILTERS_TAG_COLOR_ABOUT)),
                 )
                 .into_any_element(),
         )

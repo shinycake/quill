@@ -13,6 +13,7 @@ use gpui_kit::*;
 use quill::contacts_index::{
     self as index, BAR_APPROACH, BAR_WIDTH, ListItem, SortMode, fisheye_scale, section_stops,
 };
+use quill::lang::{keys, tr};
 
 /// State of the contacts tab and the other chat-list additions of the
 /// "chatlist-global" work.
@@ -35,7 +36,7 @@ impl ChatlistGlobal {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let contacts_search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search contacts")
+                .placeholder(tr(keys::Q_CHATLIST_SEARCH_CONTACTS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -90,7 +91,7 @@ impl QuillApp {
                     .child(
                         div().flex_1().child(
                             Textarea::new(&self.chat_list.global.contacts_search)
-                                .aria_label("Search contacts")
+                                .aria_label(tr(keys::Q_CHATLIST_SEARCH_CONTACTS))
                                 .h(px(40.)),
                         ),
                     )
@@ -118,7 +119,7 @@ impl QuillApp {
             .child(
                 Button::new("contacts-invite")
                     .icon(IconName::UserPlus)
-                    .label("Invite friends")
+                    .label(tr(keys::Q_CHATLIST_INVITE_FRIENDS))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.copy_invitation(cx))),
             );
@@ -161,7 +162,8 @@ impl QuillApp {
 
     fn copy_invitation(&mut self, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(index::INVITE_TEXT.to_string()));
-        self.connection.status_note = "Invitation copied to the clipboard".into();
+        self.connection.status_note =
+            tr(keys::Q_CHATLIST_INVITATION_COPIED_TO_THE_CLIPBOARD).into();
         cx.notify();
     }
 
@@ -197,7 +199,7 @@ impl QuillApp {
             .w(px(width))
             .cursor_pointer()
             .role(gpui_kit::Role::Group)
-            .aria_label("Alphabet index");
+            .aria_label(tr(keys::Q_CHATLIST_ALPHABET_INDEX));
         for (i, slot) in layout.slots.iter().enumerate() {
             let (Some(&center), Some(&scale)) = (centers.get(i), scales.get(i)) else {
                 continue;

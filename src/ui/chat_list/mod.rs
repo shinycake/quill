@@ -21,6 +21,7 @@ use quill::auth::AuthView;
 use quill::community_mode;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::{ChatSummary, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{
@@ -225,7 +226,7 @@ impl QuillApp {
             };
             self.connection.status_note = match result {
                 Ok(_) => "".into(),
-                Err(_) => "could not open chat".into(),
+                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_OPEN_CHAT).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
@@ -309,7 +310,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.groups.communities.get(&community_id))
             .map(|c| c.name.clone())
-            .unwrap_or_else(|| "Community".to_string());
+            .unwrap_or_else(|| tr(keys::Q_CHATLIST_COMMUNITY).to_string());
         div()
             .id("community-mode-banner")
             .flex()
@@ -331,7 +332,7 @@ impl QuillApp {
                 Button::new("community-mode-clear")
                     .label("✕")
                     .ghost()
-                    .tooltip("Show all chats")
+                    .tooltip(tr(keys::Q_CHATLIST_SHOW_ALL_CHATS))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.exit_community_chat_list_mode(cx);
                     })),
@@ -542,7 +543,10 @@ impl QuillApp {
     /// `TabBar` — same three tabs and handlers as before.
     pub(super) fn list_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         if self.pane_mode() != PaneMode::Ready {
-            return div().font_semibold().child("Chats").into_any_element();
+            return div()
+                .font_semibold()
+                .child(tr(keys::RECENT_CHATS))
+                .into_any_element();
         }
         let selected = if self.chat_list.contacts_tab_open {
             1
@@ -555,11 +559,11 @@ impl QuillApp {
         TabBar::new("list-tabs")
             .segmented()
             .selected_index(selected)
-            .child(Tab::new().label("Chats"))
-            .child(Tab::new().label("Contacts"))
+            .child(Tab::new().label(tr(keys::RECENT_CHATS)))
+            .child(Tab::new().label(tr(keys::MENU_CONTACTS)))
             // Phase C2i: Recent-calls tab (server-side `searchCallMessages`
             // history + call settings).
-            .child(Tab::new().label("Calls"))
+            .child(Tab::new().label(tr(keys::MENU_CALLS)))
             .on_click(move |ix, _window, cx| {
                 let _ = weak.update(cx, |this, cx| match ix {
                     0 => this.open_chats_tab(cx),
@@ -757,7 +761,8 @@ impl QuillApp {
             match live.driver.create_private_chat_with_self() {
                 Ok(Some(_)) => {}
                 Ok(None) if live.driver.session.my_user_id.is_none() => {
-                    self.connection.status_note = "account info not loaded yet".into();
+                    self.connection.status_note =
+                        tr(keys::Q_CHATLIST_ACCOUNT_INFO_NOT_LOADED_YET).into();
                 }
                 Ok(None) => {}
                 Err(err) => self.connection.status_note = format!("saved messages failed: {err:?}"),
@@ -780,9 +785,9 @@ impl QuillApp {
                 live.driver.archive_chat(chat_id)
             };
             self.connection.status_note = match result {
-                Ok(_) if archived => "unarchiving…".into(),
-                Ok(_) => "archiving…".into(),
-                Err(_) => "could not change archive".into(),
+                Ok(_) if archived => tr(keys::Q_CHATLIST_UNARCHIVING).into(),
+                Ok(_) => tr(keys::Q_CHATLIST_ARCHIVING).into(),
+                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_ARCHIVE).into(),
             };
             cx.notify();
             return;

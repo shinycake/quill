@@ -114,6 +114,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 }
 
+impl<S: JsonSender> ConnectDriver<S> {
+    /// After a failed switch: point TDLib back at the pack the interface
+    /// still uses.
+    pub fn restore_language_option(&mut self) -> Result<(), ConnectSendError> {
+        let id = self
+            .session
+            .settings
+            .language
+            .current
+            .as_ref()
+            .map_or_else(|| "en".to_string(), |info| info.id.clone());
+        self.send_language_option("language_pack_id", &id)
+    }
+}
+
 /// The pack info a saved choice describes (TDLib's list may not be loaded).
 pub(crate) fn info_of(choice: &LanguageChoice) -> LanguagePackInfoData {
     LanguagePackInfoData {

@@ -6,6 +6,7 @@
 
 use super::app::QuillApp;
 use super::language_state::LanguageBox;
+use super::language_state::LanguageFile;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -126,7 +127,11 @@ impl QuillApp {
     }
 
     fn close_language_settings(&mut self, cx: &mut Context<Self>) {
-        self.language.open = None;
+        if let Some(open) = self.language.open.take() {
+            self.language
+                .recent
+                .retain(|choice| !open.removed.contains(&choice.pack_id));
+        }
         cx.notify();
     }
 
@@ -138,9 +143,22 @@ impl QuillApp {
         }
     }
 
-    /// A row was picked: switch to its pack (nothing when it is current).
+    /// A row was picked: switch to its pack. Nothing happens when it is
+    /// already the target: the pack in use with no switch in flight, or the
+    /// pack being fetched. Picking the pack in use during a switch cancels
+    /// that switch.
     pub(super) fn choose_language(&mut self, info: LanguagePackInfoData, cx: &mut Context<Self>) {
-        if info.id == current_id() {
+        let in_flight = self.live.as_ref().and_then(|live| {
+            live.driver
+                .session
+                .settings
+                .language
+                .switching
+                .as_ref()
+                .map(|switch| switch.info.id.clone())
+        });
+        let target = in_flight.unwrap_or_else(current_id);
+        if info.id == target {
             return;
         }
         match self.live.as_mut() {
@@ -178,17 +196,27 @@ impl QuillApp {
         }
         if !patch.is_empty()
             && let Some(snapshot) = quill::lang::current()
+            && current
+                .as_ref()
+                .is_some_and(|info| info.id == snapshot.pack_id())
         {
             let next = snapshot.patched(patch.iter().map(|(k, v)| (k.as_str(), v)));
             self.save_language_cache(&next, cx);
             quill::lang::install(Some(next));
             cx.refresh_windows();
         }
-        if reload && let (Some(info), Some(live)) = (current, self.live.as_mut()) {
+        // A switch the person started wins over a reload of the old pack:
+        // its strings are newer anyway.
+        if reload
+            && let (Some(info), Some(live)) = (current, self.live.as_mut())
+            && live.driver.session.settings.language.switching.is_none()
+        {
             let _ = live.driver.switch_language(info);
         }
         if let Some(error) = error {
-            self.language.applying_link = None;
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.restore_language_option();
+            }
             self.connection.status_note = error;
         }
         progressed
@@ -206,7 +234,6 @@ impl QuillApp {
         if !ready.info.is_official && !choice.is_builtin() {
             self.language.recent = prefs::with_recent(&self.language.recent, &choice);
         }
-        self.language.applying_link = None;
         self.sync_language_tag(&choice.pack_id);
         quill::lang::install(snapshot);
         if let Some(root) = self.language_root() {
@@ -216,11 +243,17 @@ impl QuillApp {
             } else {
                 choice
             };
-            cx.background_spawn(async move {
-                let _ = prefs::save_choice(&root, &choice);
-                let _ = prefs::save_recent(&root, &recent);
-            })
-            .detach();
+            let recent_root = root.clone();
+            self.language
+                .writes
+                .spawn(LanguageFile::Choice, cx, move || {
+                    let _ = prefs::save_choice(&root, &choice);
+                });
+            self.language
+                .writes
+                .spawn(LanguageFile::Recent, cx, move || {
+                    let _ = prefs::save_recent(&recent_root, &recent);
+                });
         }
         cx.refresh_windows();
     }
@@ -256,16 +289,17 @@ impl QuillApp {
         }
     }
 
-    fn save_language_cache(&self, snapshot: &quill::lang::Snapshot, cx: &mut Context<Self>) {
+    fn save_language_cache(&mut self, snapshot: &quill::lang::Snapshot, cx: &mut Context<Self>) {
         let Some(root) = self.language_root() else {
             return;
         };
         let entries = snapshot.entries();
         let pack_id = snapshot.pack_id().to_string();
-        cx.background_spawn(async move {
-            let _ = prefs::save_cache_entries(&root, &pack_id, entries);
-        })
-        .detach();
+        self.language
+            .writes
+            .spawn(LanguageFile::Cache, cx, move || {
+                let _ = prefs::save_cache_entries(&root, &pack_id, entries);
+            });
     }
 
     /// Where the choice is saved; demos never write it.
@@ -292,10 +326,11 @@ impl QuillApp {
             .cloned()
             .collect();
         if let Some(root) = self.language_root() {
-            cx.background_spawn(async move {
-                let _ = prefs::save_recent(&root, &kept);
-            })
-            .detach();
+            self.language
+                .writes
+                .spawn(LanguageFile::Recent, cx, move || {
+                    let _ = prefs::save_recent(&root, &kept);
+                });
         }
         cx.notify();
     }
@@ -349,8 +384,10 @@ impl QuillApp {
                         )
                     }),
             );
-        if row.recent && !(checked && id.starts_with('#')) {
-            let can_share = !id.starts_with('#');
+        // TDLib's local packs (ids starting with `X`) have no link.
+        let local = id.starts_with('X');
+        if row.recent && !(checked && local) {
+            let can_share = !local;
             let can_remove = !checked;
             let owner = cx.entity().downgrade();
             line = line.child(
@@ -369,7 +406,7 @@ impl QuillApp {
                                         let _ = owner.update(cx, |this, cx| {
                                             this.copy_profile_text(
                                                 &link,
-                                                &tr(keys::USERNAME_COPIED),
+                                                tr(keys::USERNAME_COPIED),
                                                 cx,
                                             )
                                         });

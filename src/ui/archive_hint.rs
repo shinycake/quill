@@ -14,6 +14,7 @@ use gpui_kit::*;
 use quill::chatlist_archive::{
     ARCHIVE_HINT_SECTIONS, ARCHIVE_HINT_TITLE, archive_hint_about, unarchive_on_new_message,
 };
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn open_archive_hint(&mut self, cx: &mut Context<Self>) {
@@ -60,7 +61,7 @@ impl QuillApp {
                     .child(div().id("archive-hint-about").text_sm().child(about))
                     .child(
                         Button::new("archive-hint-change")
-                            .label("Tap to change")
+                            .label(tr(keys::Q_CHATLIST_TAP_TO_CHANGE))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.chat_list.archive_hint_open = false;
@@ -94,7 +95,7 @@ impl QuillApp {
             }
             let footer = div().flex().justify_end().child(
                 Button::new("archive-hint-got-it")
-                    .label("Got it")
+                    .label(tr(keys::ARCHIVE_HINT_BUTTON))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.chat_list.archive_hint_open = false;
                         cx.notify();

@@ -27,7 +27,7 @@ struct MyChatRow {
 
 impl QuillApp {
     /// The menu's emoji status entry text, from the account's current status.
-    pub(super) fn emoji_status_menu_label(&self) -> SharedString {
+    pub(super) fn emoji_status_menu_label(&self) -> &'static str {
         let has_status = self
             .session()
             .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))

@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwapOption;
-use gpui_shared_string::SharedString;
 
+use super::intern::intern;
 use super::key_table::{self, KEY_COUNT};
 use super::parse::{Form, split_plural};
 use super::plural::PluralRules;
@@ -24,8 +24,8 @@ pub enum PackValue {
 /// One interface string of a snapshot.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Value {
-    Text(SharedString),
-    Plural(Box<[Option<SharedString>; 6]>),
+    Text(&'static str),
+    Plural(Box<[Option<&'static str>; 6]>),
 }
 
 /// The strings Quill renders with: the chosen pack layered over its base
@@ -95,7 +95,7 @@ impl Snapshot {
             let Some(slot) = self.values.get_mut(index) else {
                 continue;
             };
-            let text = SharedString::from(entry.value.clone());
+            let text = intern(&entry.value);
             match form {
                 None => *slot = Some(Value::Text(text)),
                 Some(form) => {
@@ -120,12 +120,12 @@ impl Snapshot {
             return;
         };
         match value {
-            PackValue::Ordinary(text) => *slot = Some(Value::Text(text.clone().into())),
+            PackValue::Ordinary(text) => *slot = Some(Value::Text(intern(text))),
             PackValue::Pluralized(forms) => {
-                let mut out: [Option<SharedString>; 6] = Default::default();
+                let mut out: [Option<&'static str>; 6] = Default::default();
                 for (dst, src) in out.iter_mut().zip(forms) {
                     if !src.is_empty() {
-                        *dst = Some(src.clone().into());
+                        *dst = Some(intern(src));
                     }
                 }
                 *slot = Some(Value::Plural(Box::new(out)));
@@ -151,9 +151,7 @@ impl Snapshot {
             let value = match value {
                 Some(Value::Text(text)) => PackValue::Ordinary(text.to_string()),
                 Some(Value::Plural(forms)) => PackValue::Pluralized(
-                    (**forms)
-                        .clone()
-                        .map(|form| form.map(|f| f.to_string()).unwrap_or_default()),
+                    (**forms).map(|form| form.map(str::to_string).unwrap_or_default()),
                 ),
                 None => continue,
             };

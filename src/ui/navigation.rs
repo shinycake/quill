@@ -280,7 +280,7 @@ impl QuillApp {
     }
     fn settings_link(
         &self,
-        label: SharedString,
+        label: &'static str,
         action: NavigationAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -367,7 +367,7 @@ impl QuillApp {
                 for (label, action) in [
                     (tr(keys::MENU_MY_PROFILE), NavigationAction::MyProfile),
                     (tr(keys::MENU_MY_STORIES), NavigationAction::MyStories),
-                    (status_label.clone(), NavigationAction::EmojiStatus),
+                    (status_label, NavigationAction::EmojiStatus),
                     (tr(keys::MENU_MY_GROUPS), NavigationAction::MyGroups),
                     (tr(keys::MENU_MY_CHANNELS), NavigationAction::MyChannels),
                     (tr(keys::MENU_CONTACTS), NavigationAction::Contacts),
@@ -526,7 +526,7 @@ impl QuillApp {
                         ),
                         (tr(keys::Q_NAVIGATION_DEVICES), NavigationAction::Sessions),
                         (tr(keys::SETTINGS_DATA_STORAGE), NavigationAction::Storage),
-                        (connection_type.clone().into(), NavigationAction::Proxy),
+                        (connection_type.as_str(), NavigationAction::Proxy),
                         (tr(keys::Q_NAVIGATION_STARS), NavigationAction::Stars),
                         (tr(keys::GIFT_STARS_TABS_MY), NavigationAction::MyGifts),
                         (tr(keys::PREMIUM_SUMMARY_TITLE), NavigationAction::Premium),
@@ -593,7 +593,7 @@ impl QuillApp {
 
 /// The heading of a Settings page; pages are identified by their English
 /// title so deep links and demos keep working in any language.
-fn settings_page_title(page: &'static str) -> SharedString {
+fn settings_page_title(page: &'static str) -> &'static str {
     let key = match page {
         "Chat settings" => keys::SETTINGS_SECTION_CHAT_SETTINGS,
         "Contacts" => keys::MENU_CONTACTS,
@@ -602,7 +602,7 @@ fn settings_page_title(page: &'static str) -> SharedString {
         super::advanced_ui::ADVANCED_PAGE => keys::SETTINGS_ADVANCED,
         super::advanced_ui::EXPERIMENTAL_PAGE => keys::SETTINGS_EXPERIMENTAL,
         super::settings_account_ui::ASK_QUESTION_PAGE => keys::SETTINGS_ASK_QUESTION,
-        _ => return SharedString::new_static(page),
+        _ => return page,
     };
     tr(key)
 }

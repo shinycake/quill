@@ -367,7 +367,7 @@ impl QuillApp {
         let premium = self.session().is_some_and(Session::is_premium);
         let ui = self.translate_ui_language();
         let skip = prefs.skip(&ui);
-        let skip_label: SharedString = if skip.len() > 1 {
+        let skip_label: String = if skip.len() > 1 {
             trn(
                 keys::LANGUAGES_COUNT,
                 i64::try_from(skip.len()).unwrap_or(i64::MAX),
@@ -376,9 +376,8 @@ impl QuillApp {
             skip.first()
                 .map(|code| language_name(code))
                 .unwrap_or_default()
-                .into()
         };
-        let switch_row = |title: SharedString, hint: SharedString, control: AnyElement| {
+        let switch_row = |title: &'static str, hint: &'static str, control: AnyElement| {
             div()
                 .flex()
                 .items_center()

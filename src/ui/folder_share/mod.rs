@@ -13,6 +13,7 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::state::Session;
 use quill::telegram::envelope::ChatFolderInviteLink;
 use std::cell::RefCell;
@@ -45,9 +46,8 @@ fn short_link(link: &str) -> &str {
 
 fn chats_count_label(count: usize) -> String {
     match count {
-        0 => "No chats selected".to_string(),
-        1 => "1 chat selected".to_string(),
-        n => format!("{n} chats selected"),
+        0 => tr(keys::FILTERS_LINK_CHATS_NONE).to_string(),
+        n => trn(keys::FILTERS_LINK_CHATS, n),
     }
 }
 
@@ -85,7 +85,7 @@ pub(super) fn chat_title(session: Option<&Session>, chat_id: i64) -> String {
         .and_then(|s| s.chats.get(&chat_id))
         .map(|c| c.title.clone())
         .filter(|t| !t.is_empty())
-        .unwrap_or_else(|| "Chat".to_string())
+        .unwrap_or_else(|| tr(keys::Q_CHATLIST_CHAT_2).to_string())
 }
 
 impl QuillApp {
@@ -203,12 +203,12 @@ impl QuillApp {
             }
         };
         if name.chars().count() > LINK_NAME_MAX {
-            fail(self, "Link names are at most 32 characters.");
+            fail(self, tr(keys::Q_CHATLIST_LINK_NAMES_ARE_AT_MOST));
             cx.notify();
             return;
         }
         if chat_ids.is_empty() {
-            fail(self, "Please choose at least one chat for this folder.");
+            fail(self, tr(keys::FILTERS_EMPTY));
             cx.notify();
             return;
         }
@@ -321,7 +321,7 @@ impl QuillApp {
         if let Some(dialog) = self.folders.share.as_mut() {
             dialog.copied = Some(link.to_string());
         }
-        self.connection.status_note = "Link copied to clipboard".into();
+        self.connection.status_note = tr(keys::STAR_REF_LINK_COPIED_TITLE).into();
         cx.notify();
     }
 
@@ -373,7 +373,7 @@ impl QuillApp {
             let Some(state) = this.folders.share.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Share folder"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::FILTERS_LINK)))
                     .on_close(on_close.clone());
             };
             let folder_id = state.folder_id;
@@ -384,9 +384,13 @@ impl QuillApp {
                 .unwrap_or_default();
             let editing = matches!(state.view, FolderShareView::Edit { .. });
             let title = match &state.view {
-                FolderShareView::List => "Share folder".to_string(),
-                FolderShareView::Edit { link: None } => "New invite link".to_string(),
-                FolderShareView::Edit { link: Some(_) } => "Edit invite link".to_string(),
+                FolderShareView::List => tr(keys::FILTERS_LINK).to_string(),
+                FolderShareView::Edit { link: None } => {
+                    tr(keys::Q_CHATLIST_NEW_INVITE_LINK).to_string()
+                }
+                FolderShareView::Edit { link: Some(_) } => {
+                    tr(keys::Q_CHATLIST_EDIT_INVITE_LINK).to_string()
+                }
             };
             let (body, footer) = if editing {
                 (this.folder_link_form(cx), this.folder_link_form_footer(cx))
@@ -396,12 +400,18 @@ impl QuillApp {
                     div()
                         .flex()
                         .justify_end()
-                        .child(Button::new("folder-share-done").label("Done").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.close_folder_share(cx);
-                                this.close_kit_dialog_if_done(DialogKind::FolderShare, window, cx);
-                            }),
-                        ))
+                        .child(
+                            Button::new("folder-share-done")
+                                .label(tr(keys::BOX_DONE))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_folder_share(cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::FolderShare,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        )
                         .into_any_element(),
                 )
             };
@@ -433,41 +443,45 @@ impl QuillApp {
         }
         let Some(spec) = spec else {
             return body
-                .child(div().text_xs().text_color(muted).child("Loading folder…"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_CHATLIST_LOADING_FOLDER)),
+                )
                 .into_any_element();
         };
         if !folder_can_be_shared(&spec) {
             return body
-                .child(div().text_sm().child(
-                    "You can’t share folders which include or exclude specific chat \
-                     types like ‘Groups’, ‘Contacts’, etc.",
-                ))
+                .child(div().text_sm().child(tr(keys::FILTERS_LINK_CANT)))
                 .into_any_element();
         }
-        body = body.child(div().text_xs().text_color(muted).child(format!(
-            "Share access to some of this folder’s groups and channels with others. \
-             Anyone with a link can add the {folder_name} folder and the chats selected."
+        body = body.child(div().text_xs().text_color(muted).child(tr_with(
+            keys::Q_CHATLIST_SHARE_ACCESS_TO_SOME_OF,
+            &[("folder_name", folder_name)],
         )));
         let Some(links) = links else {
             return body
-                .child(div().text_xs().text_color(muted).child("Loading links…"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_CHATLIST_LOADING_LINKS)),
+                )
                 .into_any_element();
         };
         let mut list = div().id("folder-share-links").flex().flex_col().gap_1();
         for link in links {
             let url = link.invite_link.clone();
             let label = if link.name.is_empty() {
-                "Invite link".to_string()
+                tr(keys::FILTERS_LINK_SUBTITLE).to_string()
             } else {
                 link.name.clone()
             };
             let subtitle = format!(
                 "{} · {}",
                 short_link(&link.invite_link),
-                match link.chat_ids.len() {
-                    1 => "1 chat".to_string(),
-                    n => format!("{n} chats"),
-                }
+                trn(keys::FILTERS_CHATS_COUNT, link.chat_ids.len())
             );
             let confirming = state.confirm_delete.as_deref() == Some(url.as_str());
             let copied = state.copied.as_deref() == Some(url.as_str());
@@ -509,8 +523,8 @@ impl QuillApp {
                                 })
                                 .ghost()
                                 .small()
-                                .tooltip("Copy link")
-                                .accessibility_label("Copy invite link")
+                                .tooltip(tr(keys::CONTEXT_COPY_LINK))
+                                .accessibility_label(tr(keys::Q_CHATLIST_COPY_INVITE_LINK))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.copy_folder_link(&copy_url, cx);
                                 })),
@@ -520,8 +534,8 @@ impl QuillApp {
                                 .icon(gpui_kit::assets::IconName::Pencil)
                                 .ghost()
                                 .small()
-                                .tooltip("Edit link")
-                                .accessibility_label("Edit invite link")
+                                .tooltip(tr(keys::Q_CHATLIST_EDIT_LINK))
+                                .accessibility_label(tr(keys::Q_CHATLIST_EDIT_INVITE_LINK))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.start_folder_link_form(
                                         Some(edit_link.clone()),
@@ -535,8 +549,8 @@ impl QuillApp {
                                 .icon(gpui_kit::assets::IconName::Trash)
                                 .ghost()
                                 .small()
-                                .tooltip("Delete link")
-                                .accessibility_label("Delete invite link")
+                                .tooltip(tr(keys::Q_CHATLIST_DELETE_LINK))
+                                .accessibility_label(tr(keys::Q_CHATLIST_DELETE_INVITE_LINK))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(dialog) = this.folders.share.as_mut() {
                                         dialog.confirm_delete = Some(ask_url.clone());
@@ -552,18 +566,14 @@ impl QuillApp {
                         .items_center()
                         .justify_between()
                         .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .child("Are you sure you want to delete this link?"),
-                        )
+                        .child(div().text_xs().child(tr(keys::FILTERS_LINK_DELETE_SURE)))
                         .child(
                             div()
                                 .flex()
                                 .gap_1()
                                 .child(
                                     Button::new(format!("folder-link-delete-no-{url}"))
-                                        .label("Cancel")
+                                        .label(tr(keys::CANCEL))
                                         .ghost()
                                         .small()
                                         .on_click(cx.listener(|this, _, _, cx| {
@@ -575,7 +585,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new(format!("folder-link-delete-yes-{url}"))
-                                        .label("Delete")
+                                        .label(tr(keys::BOX_DELETE))
                                         .small()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.delete_folder_link(&delete_url, cx);
@@ -596,13 +606,13 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("There are no chats in this folder that you can share with others."),
+                    .child(tr(keys::FILTERS_LINK_NO_ABOUT)),
             );
         } else {
             body = body.child(
                 Button::new("folder-link-create")
                     .icon(gpui_kit::assets::IconName::Link)
-                    .label("Create an invite link")
+                    .label(tr(keys::FILTERS_LINK_CREATE))
                     .disabled(!loaded)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.start_folder_link_form(None, window, cx);
@@ -632,7 +642,9 @@ impl QuillApp {
             );
         }
         body = body
-            .child(Textarea::new(&state.name_input).aria_label("Invite link name"))
+            .child(
+                Textarea::new(&state.name_input).aria_label(tr(keys::Q_CHATLIST_INVITE_LINK_NAME)),
+            )
             .child(
                 div()
                     .flex()
@@ -648,9 +660,9 @@ impl QuillApp {
                     .child(
                         Button::new("folder-link-select-all")
                             .label(if all_selected {
-                                "Deselect all"
+                                tr(keys::FILTERS_BY_LINK_DESELECT)
                             } else {
-                                "Select all"
+                                tr(keys::FILTERS_BY_LINK_SELECT)
                             })
                             .ghost()
                             .small()
@@ -672,10 +684,12 @@ impl QuillApp {
                             })),
                     ),
             )
-            .child(div().text_xs().text_color(muted).child(
-                "Select groups and channels that you want everyone who adds the folder \
-                 via invite link to join.",
-            ));
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::FILTERS_LINK_CHATS_ABOUT)),
+            );
         let mut list = div()
             .id("folder-link-chats")
             .flex()
@@ -716,7 +730,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("folder-link-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(dialog) = this.folders.share.as_mut() {
@@ -729,7 +743,11 @@ impl QuillApp {
             )
             .child(
                 Button::new("folder-link-save")
-                    .label(if creating { "Create" } else { "Save" })
+                    .label(if creating {
+                        tr(keys::FILTERS_CREATE_BUTTON)
+                    } else {
+                        tr(keys::SETTINGS_SAVE)
+                    })
                     .loading(busy)
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.save_folder_link(cx))),
@@ -788,9 +806,15 @@ impl QuillApp {
                 .unwrap_or(0);
             self.close_folder_invite(cx);
             self.connection.status_note = match (name, joined) {
-                (Some(name), 0) => format!("Folder {name} added"),
-                (Some(name), n) => format!("Folder {name} added · you also joined {n} chat(s)"),
-                (None, _) => "Folder added".into(),
+                (Some(name), 0) => {
+                    tr_with(keys::FILTERS_ADDED_TITLE, &[("folder", &name.to_string())])
+                }
+                (Some(name), n) => format!(
+                    "{} {}",
+                    tr_with(keys::FILTERS_ADDED_TITLE, &[("folder", &name.to_string())]),
+                    trn(keys::FILTERS_ADDED_ALSO, n)
+                ),
+                (None, _) => tr(keys::Q_CHATLIST_FOLDER_ADDED).into(),
             };
             return true;
         }

@@ -1,6 +1,7 @@
 //! Methods moved out of `folder_share.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     pub(in crate::ui) fn build_folder_invite_dialog(
@@ -17,7 +18,9 @@ impl QuillApp {
             let Some(state) = this.folders.invite.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Add folder"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::FILTERS_BY_LINK_TITLE,
+                    )))
                     .on_close(on_close.clone());
             };
             let muted = cx.theme().muted_foreground;
@@ -46,16 +49,21 @@ impl QuillApp {
                             )),
                     );
                 } else {
-                    body = body.child(div().text_xs().text_color(muted).child("Checking link…"));
+                    body = body.child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_CHATLIST_CHECKING_LINK)),
+                    );
                 }
                 let footer = div()
                     .flex()
                     .justify_end()
-                    .child(close_btn("Close", cx))
+                    .child(close_btn(tr(keys::CLOSE), cx))
                     .into_any_element();
                 return finish_dialog(
                     dialog,
-                    "Add folder".into(),
+                    tr(keys::FILTERS_BY_LINK_TITLE).into(),
                     body.into_any_element(),
                     Some(footer),
                     on_close,
@@ -65,19 +73,26 @@ impl QuillApp {
             let exists = info.folder.id != 0;
             let nothing_new = info.missing_chat_ids.is_empty();
             let title = if exists && nothing_new {
-                "Folder already added".to_string()
+                tr(keys::FILTERS_BY_LINK_ALREADY).to_string()
             } else if exists {
-                "Add chats to folder".to_string()
+                tr(keys::FILTERS_BY_LINK_MORE).to_string()
             } else {
-                "Add folder".to_string()
+                tr(keys::FILTERS_BY_LINK_TITLE).to_string()
             };
             let intro = if exists && nothing_new {
-                format!("You have already added the folder {folder_name} and all its chats.")
+                tr_with(
+                    keys::FILTERS_BY_LINK_ALREADY_ABOUT,
+                    &[("folder", &folder_name.to_string())],
+                )
             } else if exists {
-                format!("Do you want to join chats and add them to the folder {folder_name}?")
+                tr_with(
+                    keys::FILTERS_BY_LINK_MORE_SURE,
+                    &[("folder", &folder_name.to_string())],
+                )
             } else {
-                format!(
-                    "Do you want to add the chat folder {folder_name} and join its groups and channels?"
+                tr_with(
+                    keys::FILTERS_BY_LINK_SURE,
+                    &[("folder", &folder_name.to_string())],
                 )
             };
             if let Some(error) = error.clone() {
@@ -86,7 +101,10 @@ impl QuillApp {
                         .id("folder-invite-error")
                         .text_sm()
                         .text_color(danger_dark())
-                        .child(format!("Couldn’t add the folder: {error}")),
+                        .child(tr_with(
+                            keys::Q_CHATLIST_COULDN_T_ADD_THE_FOLDER,
+                            &[("error", &error.to_string())],
+                        )),
                 );
             }
             body = body.child(div().text_sm().child(intro));
@@ -99,24 +117,26 @@ impl QuillApp {
                         .flex()
                         .items_center()
                         .justify_between()
-                        .child(div().text_xs().font_semibold().text_color(muted).child(
-                            match missing.len() {
-                                1 => "1 chat to join".to_string(),
-                                n => format!("{n} chats to join"),
-                            },
-                        ))
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(muted)
+                                .child(trn(keys::FILTERS_BY_LINK_JOIN, missing.len())),
+                        )
                         .child(
                             Button::new("folder-invite-select-all")
                                 .label(if all_selected {
-                                    "Deselect all"
+                                    tr(keys::FILTERS_BY_LINK_DESELECT)
                                 } else {
-                                    "Select all"
+                                    tr(keys::FILTERS_BY_LINK_SELECT)
                                 })
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(dialog) = this.folders.invite.as_mut() {
-                                        if select_ids.iter().all(|id| dialog.selected.contains(id)) {
+                                        if select_ids.iter().all(|id| dialog.selected.contains(id))
+                                        {
                                             dialog.selected.clear();
                                         } else {
                                             dialog.selected = select_ids.iter().copied().collect();
@@ -151,32 +171,30 @@ impl QuillApp {
                             })),
                     );
                 }
-                body = body
-                    .child(list)
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child("You can deselect the chats you don’t want to join."),
-                    );
+                body = body.child(list).child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::FILTERS_BY_LINK_ABOUT)),
+                );
             }
             if !info.added_chat_ids.is_empty() {
-                body = body.child(div().text_xs().text_color(muted).child(
-                    match info.added_chat_ids.len() {
-                        1 => "1 chat in this folder".to_string(),
-                        n => format!("{n} chats in this folder"),
-                    },
-                ));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(trn(keys::FILTERS_BY_LINK_IN, info.added_chat_ids.len())),
+                );
             }
             let selected = state.selected.len();
             let adding = state.adding;
             let action_label = if exists {
-                match selected {
-                    1 => "Join chat".to_string(),
-                    _ => "Join chats".to_string(),
-                }
+                trn(keys::FILTERS_BY_LINK_AND_JOIN_BUTTON, selected)
             } else {
-                format!("Add {folder_name}")
+                tr_with(
+                    keys::FILTERS_BY_LINK_ADD_BUTTON,
+                    &[("folder", &folder_name.to_string())],
+                )
             };
             let can_confirm = !(exists && (nothing_new || selected == 0));
             let footer = div()
@@ -184,7 +202,11 @@ impl QuillApp {
                 .justify_end()
                 .gap_2()
                 .child(close_btn(
-                    if exists && nothing_new { "Close" } else { "Cancel" },
+                    if exists && nothing_new {
+                        tr(keys::CLOSE)
+                    } else {
+                        tr(keys::CANCEL)
+                    },
                     cx,
                 ))
                 .when(can_confirm, |footer| {
@@ -197,7 +219,13 @@ impl QuillApp {
                     )
                 })
                 .into_any_element();
-            finish_dialog(dialog, title, body.into_any_element(), Some(footer), on_close)
+            finish_dialog(
+                dialog,
+                title,
+                body.into_any_element(),
+                Some(footer),
+                on_close,
+            )
         })
     }
 }
