@@ -104,6 +104,7 @@ mod start_files_ui;
 pub(crate) mod startup_failure;
 mod stories_state;
 mod synthetic;
+pub(crate) mod tooltip_timing;
 mod twofa_state;
 mod updates;
 mod updates_sync_ui;
