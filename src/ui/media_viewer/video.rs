@@ -246,7 +246,12 @@ impl QuillApp {
             return;
         }
         let hint = (duration > 0.0).then_some(duration);
-        let player = match VideoPlayer::open(path, Purpose::Viewer, hint, cx) {
+        let purpose = if looping {
+            Purpose::ViewerLoop
+        } else {
+            Purpose::Viewer
+        };
+        let player = match VideoPlayer::open(path, purpose, hint, cx) {
             Ok(player) => player,
             Err(err) => {
                 self.stop_viewer_video();

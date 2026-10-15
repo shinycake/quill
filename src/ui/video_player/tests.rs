@@ -5,8 +5,8 @@
 
 use super::transport::BackendStatus;
 use super::{
-    Backend, Picture, PlayState, PlayerError, Present, Pulled, VideoPlayer, WATCH_INTERVAL,
-    trace_line,
+    Backend, ErrorKind, Picture, PlayState, PlayerError, Present, Pulled, VideoPlayer,
+    WATCH_INTERVAL, trace_line,
 };
 use gpui_kit::{EntityId, RenderImage};
 use std::cell::RefCell;
@@ -36,6 +36,10 @@ struct Script {
     /// A picture to hand out on the next pull.
     picture: bool,
     next_due: Option<Instant>,
+    /// The buffer ran dry while playing.
+    stalled: bool,
+    /// The decoder failed.
+    error: Option<PlayerError>,
     dropped: bool,
 }
 
@@ -62,9 +66,10 @@ impl Backend for Scripted {
             position: script.position,
             duration: Some(10.0),
             at_end: script.at_end,
+            stalled: script.stalled,
+            failed: script.error.is_some(),
             buffered: vec![0.0..10.0],
             has_sound: true,
-            ..BackendStatus::default()
         }
     }
     fn play(&mut self, rate: f64) {
@@ -105,7 +110,7 @@ impl Backend for Scripted {
         self.0.borrow().next_due
     }
     fn error(&self) -> Option<PlayerError> {
-        None
+        self.0.borrow().error.clone()
     }
 }
 
@@ -229,7 +234,43 @@ fn watchers_redraw_on_changes_and_at_most_every_100_ms_while_playing() {
     assert_eq!(player.due_watchers(t0), [watcher]);
     assert!(player.due_watchers(t0 + WATCH_INTERVAL / 2).is_empty());
     assert_eq!(player.due_watchers(t0 + WATCH_INTERVAL), [watcher]);
-    drop(script);
+    assert_eq!(calls(&script), ["play 1"]);
+}
+
+#[test]
+fn a_stall_buffers_and_playback_resumes_when_the_buffer_catches_up() {
+    let (player, script) = scripted(true);
+    player.play();
+    player.pull(Instant::now(), None);
+    assert_eq!(player.state(), PlayState::Playing);
+    script.borrow_mut().stalled = true;
+    player.pull(Instant::now(), None);
+    assert_eq!(player.state(), PlayState::Buffering);
+    // Buffering still draws (the spinner, the picture once it comes).
+    assert!(player.frame_demand(Instant::now()).animates);
+    script.borrow_mut().stalled = false;
+    player.pull(Instant::now(), None);
+    assert_eq!(player.state(), PlayState::Playing);
+}
+
+#[test]
+fn a_failing_backend_fails_the_transport_and_keeps_the_last_picture() {
+    let (player, script) = scripted(true);
+    player.play();
+    script.borrow_mut().picture = true;
+    let shown = player.pull(Instant::now(), None);
+    assert!(shown.is_some());
+    script.borrow_mut().error = Some(PlayerError::new(ErrorKind::Decode, "broken"));
+    let kept = player.pull(Instant::now(), None);
+    assert_eq!(player.state(), PlayState::Failed);
+    assert!(kept.is_some(), "the last picture stays on screen");
+    let error = player.take_error();
+    assert_eq!(error.map(|err| err.kind), Some(ErrorKind::Decode));
+    assert!(player.take_error().is_none(), "reported once");
+    assert!(!player.frame_demand(Instant::now()).animates);
+    // Still failed (and quiet) on the next draw.
+    assert!(player.pull(Instant::now(), None).is_some());
+    assert!(player.take_error().is_none());
 }
 
 #[test]

@@ -67,7 +67,7 @@ impl RenderOnce for VideoFrame {
         self.player.set_refresh_period(period);
         let picture = self.player.pull(now, hint);
         let target = window.current_view();
-        let surface = picture_is_surface(picture.as_ref());
+        let surface = picture.as_ref().is_some_and(Picture::is_surface);
         let picture = picture.map(|picture| picture_element(picture, self.fit, self.radii));
         let player = self.player;
         let keep_alive = self.keep_alive;
@@ -132,30 +132,36 @@ fn has_radius(radii: Corners<Pixels>) -> bool {
     .any(|radius| *radius > px(0.0))
 }
 
-fn picture_is_surface(picture: Option<&Picture>) -> bool {
-    match picture {
-        #[cfg(target_os = "macos")]
-        Some(Picture::Surface(_)) => true,
-        _ => false,
-    }
-}
-
+#[cfg(target_os = "macos")]
 fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> AnyElement {
     match picture {
-        #[cfg(target_os = "macos")]
         Picture::Surface(buffer) => gpui_kit::surface(buffer)
             .size_full()
             .object_fit(fit)
             .into_any_element(),
-        Picture::Image(image) => img(ImageSource::Render(image))
-            .size_full()
-            .object_fit(fit)
-            .rounded_tl(radii.top_left)
-            .rounded_tr(radii.top_right)
-            .rounded_br(radii.bottom_right)
-            .rounded_bl(radii.bottom_left)
-            .into_any_element(),
+        Picture::Image(image) => image_element(image, fit, radii),
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> AnyElement {
+    let Picture::Image(image) = picture;
+    image_element(image, fit, radii)
+}
+
+fn image_element(
+    image: std::sync::Arc<RenderImage>,
+    fit: ObjectFit,
+    radii: Corners<Pixels>,
+) -> AnyElement {
+    img(ImageSource::Render(image))
+        .size_full()
+        .object_fit(fit)
+        .rounded_tl(radii.top_left)
+        .rounded_tr(radii.top_right)
+        .rounded_br(radii.bottom_right)
+        .rounded_bl(radii.bottom_left)
+        .into_any_element()
 }
 
 /// Paint `color` over the outsides of the rounded corners.
@@ -197,11 +203,7 @@ fn present_hint(window: &Window, cx: &App) -> (Option<(Instant, u64)>, Option<Du
     let Some(display) = window.display(cx) else {
         return (None, None);
     };
-    let id = u64::from(display.id());
-    (
-        gpui_macos::next_present_time(id),
-        gpui_macos::refresh_period(id),
-    )
+    gpui_macos::present_timing(u64::from(display.id()))
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -14,14 +14,17 @@
 use super::transport::BackendStatus;
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
 use core_video::pixel_buffer::CVPixelBuffer as GpuiPixelBuffer;
+#[cfg(feature = "demo-capture")]
 use gpui_kit::RenderImage;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AnyThread, MainThreadMarker};
+#[cfg(feature = "demo-capture")]
+use objc2_av_foundation::{AVAssetImageGenerator, AVURLAsset};
 use objc2_av_foundation::{
-    AVAssetImageGenerator, AVAudioTimePitchAlgorithm, AVAudioTimePitchAlgorithmTimeDomain,
-    AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus, AVPlayerItemVideoOutput,
-    AVURLAsset, NSValueAVFoundationExtensions,
+    AVAudioTimePitchAlgorithm, AVAudioTimePitchAlgorithmTimeDomain, AVPlayer,
+    AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus, AVPlayerItemVideoOutput,
+    NSValueAVFoundationExtensions,
 };
 use objc2_core_media::CMTime;
 use objc2_core_video::{
@@ -30,6 +33,7 @@ use objc2_core_video::{
 use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
 use std::ops::Range;
 use std::path::Path;
+#[cfg(feature = "demo-capture")]
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -41,6 +45,9 @@ const BUFFER_AHEAD_SECS: f64 = 3.0;
 const END_SLACK: f64 = 0.05;
 /// How many display frames ahead the next picture is looked for.
 const PROBE_FRAMES: u32 = 8;
+/// The buffer state (`loadedTimeRanges`, buffer empty, likely to keep up)
+/// is read this often; position and rate every draw.
+const BUFFER_POLL: Duration = Duration::from_millis(100);
 
 pub(super) struct AvPlayerBackend {
     player: Retained<AVPlayer>,
@@ -53,6 +60,23 @@ pub(super) struct AvPlayerBackend {
     rate: f64,
     /// The present time of the last pull.
     last_present: Option<Instant>,
+    /// The buffer state as last read, and when.
+    buffer: BufferState,
+    buffer_read: Option<Instant>,
+}
+
+#[derive(Clone, Default)]
+struct BufferState {
+    empty: bool,
+    keeps_up: bool,
+    ranges: Vec<Range<f64>>,
+}
+
+/// AVPlayer drops its rate to 0 on a stall and, not waiting to minimize
+/// stalls, never raises it again: once the buffer keeps up while play is
+/// still wanted (and the clip is not at its end), it must be told again.
+fn resumes_after_stall(wants_play: bool, rate: f32, at_end: bool, keeps_up: bool) -> bool {
+    wants_play && rate == 0.0 && !at_end && keeps_up
 }
 
 impl AvPlayerBackend {
@@ -100,6 +124,8 @@ impl AvPlayerBackend {
                 playing: false,
                 rate: 1.0,
                 last_present: None,
+                buffer: BufferState::default(),
+                buffer_read: None,
             })
         }
     }
@@ -162,28 +188,45 @@ impl AvPlayerBackend {
 
 impl Backend for AvPlayerBackend {
     fn status(&mut self) -> BackendStatus {
-        // SAFETY: reading the status and buffer state of a live item on
+        let now = Instant::now();
+        if self
+            .buffer_read
+            .is_none_or(|at| now.saturating_duration_since(at) >= BUFFER_POLL)
+        {
+            // SAFETY: reading the buffer state of a live item on the main
+            // thread.
+            let (empty, keeps_up) = unsafe {
+                (
+                    self.item.isPlaybackBufferEmpty(),
+                    self.item.isPlaybackLikelyToKeepUp(),
+                )
+            };
+            self.buffer = BufferState {
+                empty,
+                keeps_up,
+                ranges: self.buffered(),
+            };
+            self.buffer_read = Some(now);
+        }
+        // SAFETY: reading the status and rate of a live item and player on
         // the main thread.
-        let (status, buffer_empty, keeps_up, rate) = unsafe {
-            (
-                self.item.status(),
-                self.item.isPlaybackBufferEmpty(),
-                self.item.isPlaybackLikelyToKeepUp(),
-                self.player.rate(),
-            )
-        };
+        let (status, rate) = unsafe { (self.item.status(), self.player.rate()) };
+        let ready = status == AVPlayerItemStatus::ReadyToPlay;
         let position = self.position();
         let duration = self.duration();
+        let at_end_position = duration.is_some_and(|total| position >= total - END_SLACK);
+        if ready && resumes_after_stall(self.playing, rate, at_end_position, self.buffer.keeps_up) {
+            // SAFETY: messaging a live AVPlayer on the main thread.
+            unsafe { self.player.setRate(self.rate as f32) };
+        }
         BackendStatus {
-            ready: status == AVPlayerItemStatus::ReadyToPlay,
+            ready,
             failed: status == AVPlayerItemStatus::Failed,
             position,
             duration,
-            stalled: self.playing && buffer_empty && !keeps_up,
-            at_end: self.playing
-                && rate == 0.0
-                && duration.is_some_and(|total| position >= total - END_SLACK),
-            buffered: self.buffered(),
+            stalled: self.playing && self.buffer.empty && !self.buffer.keeps_up,
+            at_end: self.playing && rate == 0.0 && at_end_position,
+            buffered: self.buffer.ranges.clone(),
             // AVPlayer mixes the soundtrack itself; a silent clip just
             // plays nothing.
             has_sound: true,
@@ -336,6 +379,7 @@ unsafe fn core_foundation_wrap(raw: *mut std::ffi::c_void) -> GpuiPixelBuffer {
 /// The picture at `at` seconds (upright) and the clip's duration, decoded
 /// synchronously by AVFoundation's image generator: the still a
 /// screenshot capture shows when the FFmpeg shim is not installed.
+#[cfg(feature = "demo-capture")]
 pub(super) fn still_picture(path: &Path, at: f64) -> Option<(Arc<RenderImage>, Option<f64>)> {
     MainThreadMarker::new()?;
     let path = path.to_str()?;
@@ -364,4 +408,21 @@ pub(super) fn still_picture(path: &Path, at: f64) -> Option<(Arc<RenderImage>, O
     }
     let image = RenderImage::new(smallvec::SmallVec::from_buf([image::Frame::new(rgba)]));
     Some((Arc::new(image), duration))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resumes_after_stall;
+
+    #[test]
+    fn a_stalled_clip_is_told_to_play_again_once_the_buffer_keeps_up() {
+        // Play wanted, rate dropped by a stall, buffer caught up.
+        assert!(resumes_after_stall(true, 0.0, false, true));
+        // Still starved: wait.
+        assert!(!resumes_after_stall(true, 0.0, false, false));
+        // Paused on purpose, already playing, or ended: leave it.
+        assert!(!resumes_after_stall(false, 0.0, false, true));
+        assert!(!resumes_after_stall(true, 1.0, false, true));
+        assert!(!resumes_after_stall(true, 0.0, true, true));
+    }
 }

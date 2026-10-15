@@ -235,24 +235,19 @@ fn refresh_period_of(timestamp: Option<&sys::CVTimeStamp>) -> Option<Duration> {
     Duration::try_from_secs_f64(secs).ok()
 }
 
-/// Quill: the refresh period of `display_id`'s link (`None` before it
-/// first ran). Draw spacing can't tell it apart from a player that skips
-/// frames on purpose.
-pub fn refresh_period(display_id: CGDirectDisplayID) -> Option<Duration> {
-    lock_registry()
-        .displays
-        .get(&display_id)
-        .and_then(|entry| entry.period)
-}
-
 /// Quill: when the latest frame paced by `display_id`'s link is shown, as
-/// an `Instant` and in Mach host ticks (`None` before its link first ran).
-/// Video players pull the picture due then.
-pub fn next_present_time(display_id: CGDirectDisplayID) -> Option<(Instant, u64)> {
+/// an `Instant` and in Mach host ticks, and the display's refresh period,
+/// read under one lock so they belong together (`None` before its link
+/// first ran). Video players pull the picture due then; draw spacing can't
+/// tell the refresh period apart from a player that skips frames on
+/// purpose.
+pub fn present_timing(
+    display_id: CGDirectDisplayID,
+) -> (Option<(Instant, u64)>, Option<Duration>) {
     lock_registry()
         .displays
         .get(&display_id)
-        .and_then(|entry| entry.present)
+        .map_or((None, None), |entry| (entry.present, entry.period))
 }
 
 fn subscribe(

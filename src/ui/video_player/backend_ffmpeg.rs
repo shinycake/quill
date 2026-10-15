@@ -40,6 +40,10 @@ pub(super) fn preferred_on_macos() -> bool {
 fn options(purpose: Purpose) -> OpenOptions {
     match purpose {
         Purpose::Viewer => OpenOptions::viewer(),
+        Purpose::ViewerLoop => OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        },
     }
 }
 
@@ -224,6 +228,7 @@ pub(super) fn render_image(frame: VideoFrame) -> Option<Arc<RenderImage>> {
 
 /// Open `path`, seek to `at`, and wait (at most two seconds) for the first
 /// picture there: the still a screenshot capture shows.
+#[cfg(feature = "demo-capture")]
 pub(super) fn first_picture(path: &Path, at: f64) -> Option<(VideoFrame, Option<f64>)> {
     let mut player = Player::open(path, OpenOptions::viewer()).ok()?;
     let deadline = Instant::now() + std::time::Duration::from_secs(2);

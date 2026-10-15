@@ -41,6 +41,7 @@ mod macos;
 /// A Core Graphics image drawn into straight-alpha sRGB RGBA (the video
 /// player's still frame for screenshot captures on macOS).
 #[cfg(target_os = "macos")]
+#[cfg(feature = "demo-capture")]
 pub(crate) use macos::draw_srgb;
 #[cfg(windows)]
 mod wic;

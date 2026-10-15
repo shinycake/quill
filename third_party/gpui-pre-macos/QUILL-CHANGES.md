@@ -74,14 +74,13 @@ display's real present time (`docs/decisions/video-player-core.md`):
 - `src/display_link.rs`: the output callback converts its `output_time`
   (the vsync the frame being requested is shown at) to an `Instant`, sampled
   against the current host time like `frame_request_instant`, and keeps it
-  with its host ticks on the display's registry entry.
-  `next_present_time(display_id)` reads it.
-- `src/gpui_macos.rs`: `pub fn next_present_time(display_id: u64)`, taking a
+  with its host ticks on the display's registry entry, together with the
+  output time's refresh period (`videoRefreshPeriod / videoTimeScale`).
+  `present_timing(display_id)` reads both under one registry lock.
+- `src/gpui_macos.rs`: `pub fn present_timing(display_id: u64)`, taking a
   `DisplayId` as `u64`. Quill's video player passes the host ticks to
-  `AVPlayerItemVideoOutput::itemTimeForMachAbsoluteTime`.
-- `src/display_link.rs` also keeps the output time's refresh period
-  (`videoRefreshPeriod / videoTimeScale`) per display, and
-  `src/gpui_macos.rs` exposes it as `pub fn refresh_period(display_id: u64)`.
-  The player paces from it: a player that sleeps between pictures draws at
-  its own rate, so draw spacing alone would mistake that rate for the
-  display's.
+  `AVPlayerItemVideoOutput::itemTimeForMachAbsoluteTime` and paces from the
+  refresh period: a player that sleeps between pictures draws at its own
+  rate, so draw spacing alone would mistake that rate for the display's.
+  The time is per display (the link is shared by the windows on it), not
+  per window.

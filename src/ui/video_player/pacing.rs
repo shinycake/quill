@@ -115,14 +115,17 @@ impl PresentEstimator {
     /// stopped) and ignored.
     pub(crate) fn predict(&self, now: Instant) -> Instant {
         let interval = self.interval();
+        // Intervals are at most 50 ms, so these sums can't overflow.
         if let Some(hint) = self.hint
-            && hint + interval * 2 >= now
+            && now.saturating_duration_since(hint) <= interval * 2
         {
             return step_past(hint, now, interval);
         }
         match self.starts.back() {
-            Some(last) if *last + interval * 4 >= now => step_past(*last + interval, now, interval),
-            _ => now + interval,
+            Some(last) if now.saturating_duration_since(*last) <= interval * 4 => {
+                step_past(last.checked_add(interval).unwrap_or(*last), now, interval)
+            }
+            _ => now.checked_add(interval).unwrap_or(now),
         }
     }
 }
@@ -134,7 +137,10 @@ fn step_past(at: Instant, now: Instant, interval: Duration) -> Instant {
     }
     let behind = now.saturating_duration_since(at).as_secs_f64();
     let steps = (behind / interval.as_secs_f64()).ceil();
-    at + interval.mul_f64(steps)
+    Duration::try_from_secs_f64(interval.as_secs_f64() * steps)
+        .ok()
+        .and_then(|ahead| at.checked_add(ahead))
+        .unwrap_or(now)
 }
 
 /// How the next frame is asked for.
@@ -161,8 +167,10 @@ pub(crate) fn request_policy(
     let Some(due) = next_due else {
         return FrameRequest::NextFrame;
     };
-    match due.checked_sub(lead + interval / 2) {
-        Some(wake) if wake > now + MIN_SLEEP => FrameRequest::SleepUntil(wake),
+    match due.checked_sub(lead.saturating_add(interval / 2)) {
+        Some(wake) if wake.saturating_duration_since(now) > MIN_SLEEP => {
+            FrameRequest::SleepUntil(wake)
+        }
         _ => FrameRequest::NextFrame,
     }
 }

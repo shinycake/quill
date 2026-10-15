@@ -11,10 +11,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::video_player::FrameRequested;
 use super::video_player::pacing::{FrameRequest, request_policy};
 use gpui_kit::*;
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 impl QuillApp {
@@ -131,14 +130,35 @@ pub(crate) struct VideoFrameAsk {
     /// Keep drawing while the window is inactive (a Picture-in-Picture
     /// window rarely has focus).
     pub(crate) keep_alive: bool,
-    /// Shared per player: a request is in flight since then, so several
-    /// draws in one frame ask once.
-    pub(crate) requested: Rc<Cell<Option<Instant>>>,
+    /// Shared per player: the request in flight (the view it redraws and
+    /// when it counts as lost), so several draws in one frame ask once.
+    pub(crate) requested: FrameRequested,
 }
 
-/// A request older than this is treated as lost (the window closed or the
-/// frame never came) and asked again.
+/// A request not answered this long after its frame was due is treated as
+/// lost (the window closed or the frame never came) and asked again.
 const VIDEO_REQUEST_LOST: Duration = Duration::from_millis(250);
+/// A sleeping request counts as lost this long after its wake.
+const VIDEO_WAKE_SLACK: Duration = Duration::from_millis(50);
+
+/// Whether a request for `target` is already in flight at `now`. One left
+/// by another view (a closed Picture-in-Picture window) does not hold this
+/// one back.
+fn video_request_in_flight(
+    requested: Option<(EntityId, Instant)>,
+    target: EntityId,
+    now: Instant,
+) -> bool {
+    requested.is_some_and(|(view, lost_at)| view == target && now < lost_at)
+}
+
+/// The request for `target` was answered: forget it, unless another view's
+/// replaced it meanwhile.
+fn video_request_done(requested: &FrameRequested, target: EntityId) {
+    if requested.get().is_some_and(|(view, _)| view == target) {
+        requested.set(None);
+    }
+}
 
 /// Ask for the frame that shows the next video picture, redrawing only
 /// `target` (the view holding the picture). A frame shows the picture it
@@ -146,11 +166,13 @@ const VIDEO_REQUEST_LOST: Duration = Duration::from_millis(250);
 /// `next_due` starts at `next_due - lead`: a one-shot timer wakes half an
 /// interval before that and asks for the next display frame. When that is
 /// already now, or the due time is unknown, the next display frame is
-/// asked for at once (`pacing::request_policy`). Unlike
-/// [`QuillApp::request_animation_tick`] it runs at the display's own rate,
-/// so the picture lands on the vsync it is due for (GPUI still caps an
-/// unfocused window at 30 frames a second unless its
-/// `inactive_frame_interval` is `None`, as Picture-in-Picture's is). Nothing is asked behind another app unless the clip has sound (or
+/// asked for at once (`pacing::request_policy`).
+///
+/// Unlike [`QuillApp::request_animation_tick`] it runs at the display's own
+/// rate, so the picture lands on the vsync it is due for. GPUI still caps
+/// an unfocused window at 30 frames a second unless its
+/// `inactive_frame_interval` is `None`, as Picture-in-Picture's is.
+/// Nothing is asked behind another app unless the clip has sound (or
 /// `keep_alive`), like the animation clock.
 pub(crate) fn request_video_frame(
     target: EntityId,
@@ -163,36 +185,39 @@ pub(crate) fn request_video_frame(
         return;
     }
     let now = Instant::now();
-    if ask
-        .requested
-        .get()
-        .is_some_and(|at| now.saturating_duration_since(at) < VIDEO_REQUEST_LOST)
-    {
+    if video_request_in_flight(ask.requested.get(), target, now) {
         return;
     }
-    ask.requested.set(Some(now));
     let requested = ask.requested;
     match request_policy(now, ask.next_due, ask.interval, ask.lead) {
         FrameRequest::NextFrame => {
+            requested.set(Some((
+                target,
+                now.checked_add(VIDEO_REQUEST_LOST).unwrap_or(now),
+            )));
             window.on_next_frame(move |_, cx| {
-                requested.set(None);
+                video_request_done(&requested, target);
                 cx.notify(target);
             });
         }
         FrameRequest::SleepUntil(wake) => {
-            let handle = window.window_handle();
             let sleep = wake.saturating_duration_since(now);
+            // A long sleep (a low-rate clip) must not look lost before it
+            // wakes, or a second timer would stack on it.
+            let lost_after = VIDEO_REQUEST_LOST.max(sleep.saturating_add(VIDEO_WAKE_SLACK));
+            requested.set(Some((target, now.checked_add(lost_after).unwrap_or(now))));
+            let handle = window.window_handle();
             cx.spawn(async move |cx| {
                 cx.background_executor().timer(sleep).await;
                 let asked = handle.update(cx, |_, window, _| {
                     let requested = requested.clone();
                     window.on_next_frame(move |_, cx| {
-                        requested.set(None);
+                        video_request_done(&requested, target);
                         cx.notify(target);
                     });
                 });
                 if asked.is_err() {
-                    requested.set(None);
+                    video_request_done(&requested, target);
                 }
             })
             .detach();
@@ -369,5 +394,75 @@ mod tests {
     #[test]
     fn media_with_sound_keeps_playing_in_the_background() {
         assert!(tick_wanted(false, true));
+    }
+
+    #[test]
+    fn a_video_request_is_in_flight_for_its_own_view_until_it_is_lost() {
+        use super::video_request_in_flight;
+        use gpui_kit::EntityId;
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        let view = EntityId::from(1u64);
+        let other = EntityId::from(2u64);
+        let lost_at = now + Duration::from_millis(250);
+        assert!(!video_request_in_flight(None, view, now));
+        assert!(video_request_in_flight(Some((view, lost_at)), view, now));
+        // Left by a closed window: not this view's.
+        assert!(!video_request_in_flight(Some((other, lost_at)), view, now));
+        // Past its deadline: lost, ask again.
+        assert!(!video_request_in_flight(
+            Some((view, lost_at)),
+            view,
+            lost_at + Duration::from_millis(1)
+        ));
+    }
+
+    /// With the test platform: the request is recorded, held while in
+    /// flight, and cleared when its frame comes.
+    #[cfg(feature = "demo-capture")]
+    #[gpui_kit::test]
+    fn a_video_request_clears_when_its_frame_comes(cx: &mut gpui_kit::TestAppContext) {
+        use super::{VideoFrameAsk, request_video_frame};
+        use crate::ui::video_player::FrameRequested;
+        use gpui_kit::{Context, EntityId, IntoElement, ParentElement, Render, Window, div};
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use std::time::Duration;
+
+        struct Blank;
+        impl Render for Blank {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().child("")
+            }
+        }
+
+        let ask = |requested: &FrameRequested| VideoFrameAsk {
+            next_due: None,
+            interval: Duration::from_millis(8),
+            lead: Duration::from_millis(8),
+            plays_sound: true,
+            keep_alive: false,
+            requested: requested.clone(),
+        };
+        let (view, vcx) = cx.add_window_view(|_, _| Blank);
+        let target = view.entity_id();
+        let requested: FrameRequested = Rc::new(Cell::new(None));
+        vcx.update(|window, cx| request_video_frame(target, ask(&requested), window, cx));
+        let first = requested.get();
+        assert!(first.is_some_and(|(view, _)| view == target));
+        // A second draw in the same frame asks nothing more.
+        vcx.update(|window, cx| request_video_frame(target, ask(&requested), window, cx));
+        assert_eq!(requested.get(), first);
+        let ran = vcx.update(|window, cx| window.simulate_next_frame(cx));
+        assert_eq!(ran, 1, "one frame callback for both draws");
+        assert_eq!(requested.get(), None);
+        // Another view's request in flight does not hold this one back.
+        let other = EntityId::from(u64::MAX);
+        requested.set(Some((
+            other,
+            std::time::Instant::now() + Duration::from_secs(1),
+        )));
+        vcx.update(|window, cx| request_video_frame(target, ask(&requested), window, cx));
+        assert!(requested.get().is_some_and(|(view, _)| view == target));
     }
 }

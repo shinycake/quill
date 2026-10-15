@@ -154,7 +154,7 @@ above:
   frame interval from the spacing of its own draws. A player that sleeps
   between pictures draws at its own rate, so the estimate locked onto the
   content rate. The vendored macOS display link now also reports the
-  refresh period (`gpui_macos::refresh_period`), and the estimator uses it
+  refresh period (`gpui_macos::present_timing`), and the estimator uses it
   when the platform has one. Without a platform period, only the closest
   draw spacings count.
 - **GPUI's inactive-window cap.** GPUI caps an unfocused window's
@@ -169,9 +169,9 @@ above:
 
 - `display_link.rs` keeps the latest output time per display, as an
   `Instant` and in host ticks, together with the refresh period.
-- `gpui_macos::next_present_time(display_id)` and
-  `gpui_macos::refresh_period(display_id)` read them.
-- Both changes are listed in `QUILL-CHANGES.md`.
+- `gpui_macos::present_timing(display_id)` reads both under one registry
+  lock, so the hint and the period always come from the same callback.
+- The change is listed in `QUILL-CHANGES.md`.
 - Surfaces stay `kCVPixelFormatType_420YpCbCr8BiPlanarFullRange` with
   hardware decode. Rounded corners over a surface still use the
   corner-mask technique.
@@ -237,7 +237,9 @@ animated `img`.
 - **Screen-capture backend.**
   - Demo captures use `backend_still.rs`. On macOS it is a single
     `AVAssetImageGenerator` still; elsewhere it is the shim's first
-    picture.
+    picture. It exists only in `demo-capture` builds (the only ones that
+    capture), so `QUILL_DEMO_CAPTURE` never makes a production build block
+    on a decode.
   - The design said "the FFmpeg backend's synchronous first frame", but
     the shim is not installed on development Macs, and captures must work
     there.
@@ -257,7 +259,38 @@ animated `img`.
     is the last predicted present time minus its draw start.
 - **`automaticallyWaitsToMinimizeStalling` is `false` for every file.**
   The viewer only plays downloaded files today. The remote-file case comes
-  with streaming.
+  with streaming. With it off, AVPlayer drops its rate to 0 on a stall and
+  does not raise it again, so the backend re-issues the rate once the
+  buffer keeps up while play is still wanted (`resumes_after_stall`). The
+  buffer state (`loadedTimeRanges`, buffer empty, likely to keep up) is
+  read at most every 100 ms; position and rate are read every draw.
+- **The macOS present hint is per display, not per window.** The vendored
+  display link is shared by the windows on one display, so
+  `present_timing(display_id)` reports that display's latest output time.
+  A window on that display draws for the same vsync, so the result is the
+  same as the design's per-window hint.
+- **No Windows present hint yet.** The design had the vendored
+  `gpui-pre-windows` expose its vsync thread's `signal_at`. That moves to
+  PR 6 with the other Windows work; until then Windows uses the draw-start
+  estimator like Linux.
+- **The backend switch is `QUILL_VIDEO_BACKEND=ffmpeg`** (the existing
+  variable), not the design's `QUILL_FFMPEG_VIDEO=1`.
+- **API differences.**
+  - `PlayerError` has no `Audio` kind, because no backend reports an
+    audio failure on its own yet; one is added with the first that does.
+  - There is no `toggle()` or `seek_fraction()`; the viewer toggles and
+    converts fractions itself, and PR 2's controller decides whether they
+    belong in the player.
+  - The design's `picture(present_at)` and `next_due()` are folded into
+    `pull` (the element's draw) and `frame_demand` (after paint), because
+    only the element calls them, and only in that order.
+- **No 3 s FFmpeg audio buffer.** The shim's audio queue is unchanged in
+  this PR. The 4-picture video queue is in.
+- **`ViewerVideoStart::ExtractFrames` stays as a dead variant.** The viewer
+  treats it like `PlayNow`. It goes with the rest of the legacy extraction
+  code in PR 5.
+- **Muted loops decode no sound.** GIF-style loops in the viewer open the
+  FFmpeg backend with `want_audio = false` (`Purpose::ViewerLoop`).
 - **Frame step has no key binding yet.** It is in the player
   (`VideoPlayer::step_frame`: AVPlayer `stepByCount`, FFmpeg pops the next
   picture or seeks back 1.5 frames). The key arrives with the controller in
@@ -272,8 +305,9 @@ animated `img`.
 
 ## How verified
 
-- **Unit tests:** `cargo test --features demo-capture video_player` runs
-  24 tests, all passing.
+- **Unit tests:** `cargo test --features demo-capture video` runs the
+  player, pacing, transport, AVPlayer helper and frame-request tests, all
+  passing.
   - `transport.rs`: opening, buffering, the end, loops, seeks while paused,
     playing and ended, rate changes, buffered-range merging.
   - `pacing.rs`:
@@ -292,12 +326,21 @@ animated `img`.
     - watcher cadence
     - drop releases the backend
     - trace columns
+    - a stall buffering and resuming
+    - a failing backend: `Failed`, the error reported once, the last
+      picture kept, no more frames asked for
+  - `backend_avplayer.rs`: when a stalled AVPlayer is told to play again.
+  - `frame_clock.rs`: a frame request is in flight only for its own view
+    and until its deadline. With the test platform, two draws in one frame
+    ask once, the frame clears the request, and another view's leftover
+    request does not hold a new one back.
 - **GPUI UI test:** the viewer opens a clip in `Opening` with the layer
   present, then closes while opening, and the backend is dropped.
 - **`src/video_decode/tests.rs`:** three more tests for taking the picture
   due at present time, the next due time, and frame step. All 28 pass.
-- **Trace measurements:** the table above, with release builds and raw
-  logs in `/Volumes/Idan1TB/quill-work/scratch/video-player-core/`.
+- **Trace measurements:** the table above, from release builds. The raw
+  logs were scratch files and are not kept; rerun the commands under
+  Measurements to regenerate them.
 - **Captures:** `QUILL_DEMO_CAPTURE` captures of `ready-video`,
   `ready-video-note` and `ready-video-pip`, each run twice, are
   byte-identical (`cmp`). The PNGs were reviewed but not committed. The

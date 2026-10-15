@@ -15,6 +15,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod backend_ffmpeg;
+#[cfg(feature = "demo-capture")]
 mod backend_still;
 mod element;
 pub(super) mod pacing;
@@ -44,6 +45,9 @@ pub(crate) enum Purpose {
     /// The media viewer (and its Picture-in-Picture): full size, with
     /// sound.
     Viewer,
+    /// A muted loop in the media viewer (GIFs): full size, no soundtrack
+    /// decoded.
+    ViewerLoop,
 }
 
 /// A picture to draw.
@@ -56,14 +60,34 @@ pub(crate) enum Picture {
     Image(Arc<RenderImage>),
 }
 
+// `Picture` has one variant off macOS, so its matches are split by
+// platform instead of carrying a cfg'd arm.
 impl Picture {
     /// The decoded image, when the picture is one (not a GPU surface).
+    #[cfg(target_os = "macos")]
     pub(crate) fn image(&self) -> Option<Arc<RenderImage>> {
         match self {
             Picture::Image(image) => Some(image.clone()),
-            #[cfg(target_os = "macos")]
             Picture::Surface(_) => None,
         }
+    }
+
+    /// The decoded image (every picture is one off macOS).
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn image(&self) -> Option<Arc<RenderImage>> {
+        let Picture::Image(image) = self;
+        Some(image.clone())
+    }
+
+    /// A GPU surface, which GPUI can't clip (corners are masked instead).
+    #[cfg(target_os = "macos")]
+    pub(crate) fn is_surface(&self) -> bool {
+        matches!(self, Picture::Surface(_))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn is_surface(&self) -> bool {
+        false
     }
 }
 
@@ -104,7 +128,8 @@ impl std::fmt::Display for PlayerError {
 pub(super) struct Present {
     pub(super) at: Instant,
     /// The same moment in Mach host ticks, when the display link said so
-    /// (macOS).
+    /// (only AVPlayer reads it).
+    #[cfg(target_os = "macos")]
     pub(super) host_time: Option<u64>,
 }
 
@@ -156,20 +181,29 @@ impl WeakVideoPlayer {
 
 struct PlayerCell {
     inner: RefCell<Inner>,
-    /// A frame request is in flight since then (`request_video_frame`).
-    requested: Rc<Cell<Option<Instant>>>,
+    /// Beside `inner`, not in it: a backend call takes it out and puts it
+    /// back without touching `inner`'s borrow, so no borrow is held across
+    /// a native call and a busy `inner` never loses the backend.
+    backend: Cell<Option<Box<dyn Backend>>>,
+    /// The frame request in flight: the view it redraws and when it counts
+    /// as lost (`request_video_frame`).
+    requested: FrameRequested,
 }
+
+/// Shared with `frame_clock::request_video_frame`.
+pub(crate) type FrameRequested = Rc<Cell<Option<(EntityId, Instant)>>>;
 
 struct Inner {
     id: u64,
-    /// Taken out while a backend call runs, so no borrow is held across a
-    /// native call.
-    backend: Option<Box<dyn Backend>>,
     machine: TransportMachine,
     estimator: PresentEstimator,
     /// The last picture as decoded, and turned for the orientation.
     raw: Option<Picture>,
     shown: Option<Picture>,
+    /// The image `turn` made for `shown` (FFmpeg pictures turned), retired
+    /// from the GPU atlas when replaced; `raw`'s own image is the
+    /// backend's to retire.
+    turned_image: Option<Arc<RenderImage>>,
     turns: u8,
     mirrored: bool,
     error: Option<PlayerError>,
@@ -218,11 +252,11 @@ impl VideoPlayer {
         Self(Rc::new(PlayerCell {
             inner: RefCell::new(Inner {
                 id: next_player_id(),
-                backend: Some(backend),
                 machine: TransportMachine::new(duration_hint, Instant::now()),
                 estimator: PresentEstimator::default(),
                 raw: None,
                 shown: None,
+                turned_image: None,
                 turns: 0,
                 mirrored: false,
                 error: None,
@@ -231,6 +265,7 @@ impl VideoPlayer {
                 watched: None,
                 _poll: None,
             }),
+            backend: Cell::new(Some(backend)),
             requested: Rc::new(Cell::new(None)),
         }))
     }
@@ -265,13 +300,12 @@ impl VideoPlayer {
         WeakVideoPlayer(Rc::downgrade(&self.0))
     }
 
-    /// Run `f` on the backend with no borrow of the player held.
+    /// Run `f` on the backend with no borrow of the player held. A call
+    /// made from inside `f` (none is) would find no backend and do nothing.
     fn with_backend<R>(&self, f: impl FnOnce(&mut dyn Backend) -> R) -> Option<R> {
-        let mut backend = self.0.inner.try_borrow_mut().ok()?.backend.take()?;
+        let mut backend = self.0.backend.take()?;
         let result = f(backend.as_mut());
-        if let Ok(mut inner) = self.0.inner.try_borrow_mut() {
-            inner.backend = Some(backend);
-        }
+        self.0.backend.set(Some(backend));
         Some(result)
     }
 
@@ -369,14 +403,21 @@ impl VideoPlayer {
     /// Show the picture turned by `turns` clockwise quarter turns, then
     /// mirrored left to right when `mirrored`.
     pub(crate) fn set_orientation(&self, turns: u8, mirrored: bool) {
-        self.with_inner(|inner| {
-            let turns = turns % 4;
-            if (inner.turns, inner.mirrored) != (turns, mirrored) {
-                inner.turns = turns;
-                inner.mirrored = mirrored;
-                inner.shown = inner.raw.clone().map(|raw| turn(raw, turns, mirrored));
+        let turns = turns % 4;
+        let raw = self.with_inner(|inner| {
+            if (inner.turns, inner.mirrored) == (turns, mirrored) {
+                return None;
             }
+            inner.turns = turns;
+            inner.mirrored = mirrored;
+            inner.raw.clone()
         });
+        let Some(raw) = raw.flatten() else {
+            return;
+        };
+        // Turning copies the picture: no borrow held meanwhile.
+        let turned = turn(&raw, turns, mirrored);
+        self.with_inner(|inner| inner.show(raw, turned));
     }
 
     /// Add one view to the watchers (the viewer panel, a PiP window).
@@ -467,11 +508,16 @@ impl VideoPlayer {
             inner.estimator.note_present(at);
             Present {
                 at,
+                #[cfg(target_os = "macos")]
                 host_time: hint
                     .filter(|(hinted, _)| *hinted == at)
                     .map(|(_, host)| host),
             }
-        })?;
+        });
+        let Some(present) = present else {
+            // Busy (never expected): repaint what is on screen.
+            return self.current_picture();
+        };
         self.update_status(now);
         let state = self.state();
         let pulled = if matches!(state, PlayState::Opening | PlayState::Failed) {
@@ -480,31 +526,42 @@ impl VideoPlayer {
             self.with_backend(|backend| backend.take_picture(&present))
                 .unwrap_or_default()
         };
-        self.with_inner(|inner| {
-            let fresh = pulled.picture.is_some();
-            if trace_video() {
-                trace_pull(inner, now, &pulled, fresh);
-            }
-            if let Some(picture) = pulled.picture {
+        if trace_video()
+            && let Some((id, rate)) = self.read_inner(|inner| (inner.id, trace_rate(inner)))
+        {
+            eprintln!(
+                "{}",
+                trace_line(
+                    id,
+                    now,
+                    pulled.item_secs,
+                    pulled.picture.is_some(),
+                    pulled.display_secs,
+                    rate
+                )
+            );
+        }
+        if let Some(picture) = pulled.picture {
+            let (turns, mirrored) = self
+                .read_inner(|inner| (inner.turns, inner.mirrored))
+                .unwrap_or((0, false));
+            // Turning copies the picture: no borrow held meanwhile.
+            let turned = turn(&picture, turns, mirrored);
+            self.with_inner(|inner| {
                 inner.awaiting = None;
-                inner.shown = Some(turn(picture.clone(), inner.turns, inner.mirrored));
-                inner.raw = Some(picture);
-            }
-            inner.shown.clone()
-        })
-        .flatten()
+                inner.show(picture, turned);
+            });
+        }
+        self.current_picture()
     }
 
     /// After the picture was painted: what the next frame request needs.
     pub(super) fn frame_demand(&self, now: Instant) -> FrameDemand {
+        let interval = self
+            .read_inner(|inner| inner.estimator.interval())
+            .unwrap_or(Duration::from_millis(16));
         let next_due = self
-            .read_inner(|inner| {
-                let interval = inner.estimator.interval();
-                inner
-                    .backend
-                    .as_ref()
-                    .and_then(|backend| backend.next_due(now, interval))
-            })
+            .with_backend(|backend| backend.next_due(now, interval))
             .flatten();
         self.read_inner(|inner| {
             let transport = inner.machine.snapshot(now);
@@ -562,30 +619,54 @@ pub(super) struct FrameDemand {
     pub(super) interval: Duration,
     /// How far ahead of its draw start a frame is shown.
     pub(super) lead: Duration,
-    pub(super) requested: Rc<Cell<Option<Instant>>>,
+    pub(super) requested: FrameRequested,
 }
 
-/// Turn a picture for the orientation (the picture as it is when turning
-/// fails).
-fn turn(picture: Picture, turns: u8, mirrored: bool) -> Picture {
+impl Inner {
+    /// Put `raw` on screen, as `turned` when it was turned.
+    fn show(&mut self, raw: Picture, turned: Option<Picture>) {
+        let image = turned.as_ref().and_then(Picture::image);
+        if let Some(old) = std::mem::replace(&mut self.turned_image, image) {
+            super::image_budget::retire_all([old]);
+        }
+        self.shown = Some(turned.unwrap_or_else(|| raw.clone()));
+        self.raw = Some(raw);
+    }
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        if let Some(old) = self.turned_image.take() {
+            super::image_budget::retire_all([old]);
+        }
+    }
+}
+
+/// The picture turned for the orientation; `None` when it needs no turn
+/// or turning failed (the picture is shown as it is).
+#[cfg(target_os = "macos")]
+fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
     if turns == 0 && !mirrored {
-        return picture;
+        return None;
     }
     match picture {
         Picture::Image(image) => {
-            match super::native_video_rotate::turn_render_image(&image, turns, mirrored) {
-                Some(turned) => Picture::Image(turned),
-                None => Picture::Image(image),
-            }
+            super::native_video_rotate::turn_render_image(image, turns, mirrored)
+                .map(Picture::Image)
         }
-        #[cfg(target_os = "macos")]
         Picture::Surface(buffer) => {
-            match super::native_video_rotate::turn_surface(&buffer, turns, mirrored) {
-                Some(turned) => Picture::Surface(turned),
-                None => Picture::Surface(buffer),
-            }
+            super::native_video_rotate::turn_surface(buffer, turns, mirrored).map(Picture::Surface)
         }
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
+    if turns == 0 && !mirrored {
+        return None;
+    }
+    let Picture::Image(image) = picture;
+    super::native_video_rotate::turn_render_image(image, turns, mirrored).map(Picture::Image)
 }
 
 /// The backend for this file: a still first picture in screenshot
@@ -596,6 +677,9 @@ fn open_backend(path: &Path, purpose: Purpose) -> Result<Box<dyn Backend>, Playe
     if let Some(backend) = tests::take_scripted_backend() {
         return Ok(backend);
     }
+    // Only capture builds render a still (a blocking decode of up to two
+    // seconds); the variable means nothing to other builds.
+    #[cfg(feature = "demo-capture")]
     if std::env::var_os("QUILL_DEMO_CAPTURE").is_some() {
         return backend_still::StillBackend::open(path).map(|b| Box::new(b) as Box<dyn Backend>);
     }
@@ -637,23 +721,13 @@ pub(crate) fn trace_video() -> bool {
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_VIDEO").is_some())
 }
 
-fn trace_pull(inner: &Inner, now: Instant, pulled: &Pulled, fresh: bool) {
-    let rate = if inner.machine.state().animates() {
+/// The trace's rate column: the rate while playing, else 0.
+fn trace_rate(inner: &Inner) -> f64 {
+    if inner.machine.state().animates() {
         inner.machine.rate()
     } else {
         0.0
-    };
-    eprintln!(
-        "{}",
-        trace_line(
-            inner.id,
-            now,
-            pulled.item_secs,
-            fresh,
-            pulled.display_secs,
-            rate
-        )
-    );
+    }
 }
 
 /// One `QUILL_TRACE_VIDEO` line (shared with the legacy inline player).

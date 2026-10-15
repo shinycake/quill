@@ -55,6 +55,14 @@ fn still_picture(path: &Path, at: f64) -> Option<(Arc<RenderImage>, Option<f64>)
     }
 }
 
+impl Drop for StillBackend {
+    fn drop(&mut self) {
+        if let Some(old) = self.picture.take() {
+            super::super::image_budget::retire_all([old]);
+        }
+    }
+}
+
 impl Backend for StillBackend {
     fn status(&mut self) -> BackendStatus {
         BackendStatus {
@@ -85,7 +93,9 @@ impl Backend for StillBackend {
         if let Some(at) = self.pending.take()
             && let Some((picture, _)) = still_picture(&self.path, at)
         {
-            self.picture = Some(picture);
+            if let Some(old) = self.picture.replace(picture) {
+                super::super::image_budget::retire_all([old]);
+            }
             self.fresh = true;
         }
         let picture = if std::mem::take(&mut self.fresh) {
