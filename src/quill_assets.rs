@@ -137,7 +137,10 @@ gpui_kit::assets::icon_assets!(
         RotateCwSquare,
         FlipHorizontal2,
         // Suggested posts (`ui::suggested_posts_*`).
-        CircleDollarSign
+        CircleDollarSign,
+        // Passkeys (`ui::security::passkeys`).
+        UserKey,
+        ScanFace
     ]
 );
 

@@ -855,4 +855,5 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
+pub(in crate::ui) mod passkeys;
 mod twofa_status_body;

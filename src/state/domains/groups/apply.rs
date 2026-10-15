@@ -168,9 +168,11 @@ impl Session {
                 ton_usd_rate,
                 starref_join,
                 starref_setup,
+                display_passkeys,
                 premium_purchase,
                 fragment,
             } => {
+                self.settings.passkeys.display_allowed = display_passkeys;
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
                     self.groups.boosts_per_gift = Some(boosts_per_gift);
                 }

@@ -291,13 +291,16 @@ pub enum GroupsPayload {
     /// `boosts_per_sent_gift` (0 when the key is missing),
     /// `ton_blockchain_explorer_url`, `ton_usd_rate`, the affiliate
     /// switches `starref_connect_allowed` / `starref_program_allowed`, the
-    /// Premium purchase keys and the Fragment keys are kept.
+    /// Premium purchase keys, the Fragment keys and
+    /// `settings_display_passkeys` are kept.
     ApplicationConfig {
         boosts_per_gift: i32,
         ton_explorer_url: Option<String>,
         ton_usd_rate: Option<f64>,
         starref_join: bool,
         starref_setup: bool,
+        /// `settings_display_passkeys` (`crate::passkeys`).
+        display_passkeys: bool,
         premium_purchase: crate::premium_hub::purchase::PremiumPurchase,
         fragment: crate::premium_hub::fragment::FragmentConfig,
     },

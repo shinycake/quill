@@ -11,6 +11,11 @@ pub(crate) fn parse_settings_payload(
     type_name: &str,
     value: &Value,
 ) -> Result<Option<EnvelopePayload>, ParseError> {
+    if let Some(payload) = crate::passkeys::parse_payload(type_name, value) {
+        return Ok(Some(EnvelopePayload::Settings(SettingsPayload::Passkeys(
+            payload,
+        ))));
+    }
     let payload = match type_name {
         "updateNotificationGroup" => Ok(EnvelopePayload::Settings(
             SettingsPayload::UpdateNotificationGroup {
