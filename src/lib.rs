@@ -80,6 +80,7 @@ pub mod inline_grid;
 pub mod inline_members;
 pub mod json_access;
 pub mod key_fingerprint;
+pub mod lang;
 pub mod layout;
 pub mod lifecycle;
 pub mod link_handler;

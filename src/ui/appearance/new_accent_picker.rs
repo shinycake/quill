@@ -591,39 +591,4 @@ impl QuillApp {
         let control = div().flex().flex_col().gap_2().child(large).child(control);
         self.appearance_section(cx, "Emoji", "", control.into_any_element())
     }
-
-    /// Slice parity:settings-language: the app language picker (the IETF
-    /// tag TDLib gets in `setTdlibParameters`; it was hardcoded "en"
-    /// before this slice). TDLib reads parameters once at startup, so
-    /// the chosen language applies after restart — no runtime
-    /// application is attempted (see `settings::LanguagePrefs` for why
-    /// `setOption("language_pack_id")` can't do it). The app's own
-    /// strings stay English; this only changes the tag reported to
-    /// Telegram.
-    pub(super) fn appearance_language_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self
-            .session()
-            .map(|s| s.settings.language_prefs.system_language_code.as_str())
-            .unwrap_or(DEFAULT_LANGUAGE_CODE);
-        let control = RadioGroup::vertical("appearance-language")
-            .selected_index(
-                SUPPORTED_LANGUAGES
-                    .iter()
-                    .position(|(code, _)| *code == current),
-            )
-            .children(SUPPORTED_LANGUAGES.iter().map(|(code, name)| {
-                Radio::new(format!("appearance-language-{code}")).label(format!("{name} ({code})"))
-            }))
-            .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                if let Some(language) = SUPPORTED_LANGUAGES.get(*ix) {
-                    this.set_language_pref(language.0, cx);
-                }
-            }));
-        self.appearance_section(
-            cx,
-            "Language",
-            "The language reported to Telegram. Applies after restart — the app's own text stays English for now.",
-            control.into_any_element(),
-        )
-    }
 }

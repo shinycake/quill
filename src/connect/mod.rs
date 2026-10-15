@@ -34,6 +34,7 @@ mod group_admin;
 mod group_calls;
 mod groups;
 mod invite_admin;
+mod language;
 mod link_info;
 mod links_boosts;
 mod live;

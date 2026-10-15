@@ -206,6 +206,8 @@ pub struct SettingsState {
     pub chat_export: Option<crate::export::ChatExport>,
     /// The `setlanguage` link whose box is open.
     pub language_link: Option<LanguageLinkLookup>,
+    /// Settings → Language: packs, the switch in flight, strings to install.
+    pub language: LanguageState,
     /// Quick reply shortcuts and their messages.
     pub quick_replies: QuickRepliesState,
     /// Telegram Business settings: time zones and saves in flight.
@@ -285,6 +287,7 @@ impl SettingsState {
             account_export: None,
             chat_export: None,
             language_link: None,
+            language: LanguageState::default(),
         }
     }
 }

@@ -42,6 +42,7 @@ mod inline_gif_downloads;
 mod inline_members;
 mod invite_admin;
 mod invoice_checkout;
+mod language;
 mod link_info;
 mod links_boosts;
 mod live_location;

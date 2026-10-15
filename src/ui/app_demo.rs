@@ -280,6 +280,7 @@ impl QuillApp {
             sticker_box: super::sticker_set_box::state::StickerSetBoxUi::new(window, cx),
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),
+            language: super::language_state::LanguageUi::new(demo.is_some(), cx),
             auth_ui: super::auth_state::AuthUi::new(
                 window,
                 cx,

@@ -458,6 +458,11 @@ pub(crate) fn parse_settings_payload(
                 settings: parse_reaction_notification_settings(value.get("notification_settings")),
             },
         )),
+        "localizationTargetInfo" | "languagePackStrings" | "updateLanguagePackStrings" => {
+            LanguagePayload::parse(type_name, value)
+                .map(|payload| EnvelopePayload::Settings(SettingsPayload::Language(payload)))
+                .ok_or(ParseError::MissingField)
+        }
         "languagePackInfo" => Ok(EnvelopePayload::Settings(
             SettingsPayload::LanguagePackInfo(LanguagePackInfoData::parse(value)),
         )),
