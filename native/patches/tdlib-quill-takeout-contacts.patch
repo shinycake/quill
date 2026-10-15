@@ -1,5 +1,5 @@
 diff --git a/td/generate/scheme/td_api.tl b/td/generate/scheme/td_api.tl
-index 2779f2ddf..c0fc5bb98 100644
+index 2caaf9d12..63a7ef0e6 100644
 --- a/td/generate/scheme/td_api.tl
 +++ b/td/generate/scheme/td_api.tl
 @@ -11660,7 +11660,28 @@ testVectorString value:vector<string> = TestVectorString;
@@ -44,7 +44,7 @@ index 5e82cca7f..c2f21a63c 100644
  invokeWithGooglePlayIntegrityPrefix#1df92984 nonce:string token:string = Error;
  invokeWithApnsSecretPrefix#0dae54f8 nonce:string secret:string = Error;
 diff --git a/td/telegram/Requests.cpp b/td/telegram/Requests.cpp
-index d69474e0d..57040ca5f 100644
+index 4ae9127a3..dfaff6c3a 100644
 --- a/td/telegram/Requests.cpp
 +++ b/td/telegram/Requests.cpp
 @@ -6671,6 +6671,18 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
@@ -67,7 +67,7 @@ index d69474e0d..57040ca5f 100644
    CHECK_IS_USER();
    CREATE_COUNT_REQUEST_PROMISE();
 diff --git a/td/telegram/Requests.h b/td/telegram/Requests.h
-index 4f3420df7..1dca7646f 100644
+index f62bd8569..671210226 100644
 --- a/td/telegram/Requests.h
 +++ b/td/telegram/Requests.h
 @@ -1320,6 +1320,10 @@ class Requests {
@@ -82,7 +82,7 @@ index 4f3420df7..1dca7646f 100644
  
    void on_request(uint64 id, td_api::changeImportedContacts &request);
 diff --git a/td/telegram/UserManager.cpp b/td/telegram/UserManager.cpp
-index 9efa0cf3d..888aa9611 100644
+index e15eee697..830c8e278 100644
 --- a/td/telegram/UserManager.cpp
 +++ b/td/telegram/UserManager.cpp
 @@ -114,6 +114,154 @@
@@ -240,7 +240,7 @@ index 9efa0cf3d..888aa9611 100644
  class GetContactsQuery final : public Td::ResultHandler {
   public:
    void send(int64 hash) {
-@@ -8539,6 +8687,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
+@@ -8511,6 +8659,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
    }
  }
  

@@ -4,9 +4,11 @@
 //! TDLib hands over the WebAuthn options as JSON (`getPasskeyParameters`,
 //! `getAuthenticationPasskeyParameters`); Quill parses them the way Telegram
 //! Desktop does (`options`), builds `clientDataJSON` itself, runs the
-//! ceremony with a USB security key over CTAP2 (`ctap2`, `ceremony`), or
-//! on Windows through the system's `webauthn.dll` (`windows`,
-//! `windows_plan`; docs/decisions/passkeys-windows.md), and
+//! ceremony with a USB security key over CTAP2 (`ctap2`, `ceremony`), with
+//! a phone over a QR code and Bluetooth on macOS and Linux (`hybrid`,
+//! caBLE v2; docs/decisions/passkeys-hybrid.md), or on Windows through
+//! the system's `webauthn.dll` (`windows`, `windows_plan`;
+//! docs/decisions/passkeys-windows.md), and
 //! returns the result to TDLib (`addLoginPasskey`,
 //! `checkAuthenticationPasskey`). UI-independent: the dialog is
 //! `ui::security::passkey_ceremony`.
@@ -14,12 +16,13 @@
 
 pub mod ceremony;
 pub mod ctap2;
+pub mod hybrid;
 pub mod options;
 #[cfg(windows)]
 mod windows;
 pub mod windows_plan;
 
-pub use ceremony::{Ceremony, CeremonyEvent, DeviceSource};
+pub use ceremony::{Ceremony, CeremonyCommand, CeremonyEvent, DeviceSource, HybridQr};
 pub use options::{CreationOptions, RequestOptions, UserVerification};
 
 /// What a finished registration hands to `addLoginPasskey`.
@@ -70,6 +73,10 @@ pub enum CeremonyError {
     NoCredentials,
     /// The key's PIN is blocked.
     PinBlocked,
+    /// The phone could not be reached, the tunnel broke, or the phone
+    /// answered with an error (tdesktop `Cable::Outcome::Failed`: "Couldn't
+    /// connect to your phone. Please try again.").
+    Phone,
     /// Anything else; the text is for the log only.
     Other(String),
 }
@@ -99,14 +106,25 @@ pub fn system_dialog() -> bool {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ParentWindow(pub isize);
 
-/// Start creating a passkey: in the system dialog on Windows, else with a
-/// USB security key.
+/// Whether a new ceremony starts with the phone's QR sheet (macOS and
+/// Linux, tdesktop `RegisterViaCable` / `LoginViaCable`), which offers a
+/// security key from there.
+pub fn starts_with_phone() -> bool {
+    !system_dialog() && hybrid::ble::supported()
+}
+
+/// Start creating a passkey: in the system dialog on Windows; on macOS
+/// and Linux with a phone over QR and Bluetooth, or a USB security key
+/// chosen from there.
 pub fn start_register(options: CreationOptions, parent: ParentWindow) -> Ceremony {
     #[cfg(windows)]
     if windows::available() {
         return windows::register(options, parent);
     }
     let _ = parent;
+    if starts_with_phone() {
+        return hybrid::register(options, hybrid::Environment::platform());
+    }
     Ceremony::register(options, Box::new(ceremony::UsbKeys))
 }
 
@@ -117,6 +135,9 @@ pub fn start_login(options: RequestOptions, parent: ParentWindow) -> Ceremony {
         return windows::login(options, parent);
     }
     let _ = parent;
+    if starts_with_phone() {
+        return hybrid::login(options, hybrid::Environment::platform());
+    }
     Ceremony::login(options, Box::new(ceremony::UsbKeys))
 }
 

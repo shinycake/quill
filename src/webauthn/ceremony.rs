@@ -39,6 +39,17 @@ impl DeviceSource for UsbKeys {
     }
 }
 
+/// The text of the hybrid QR code (`FIDO:/…`). It carries the
+/// ceremony's secret, so it is shown, never logged.
+#[derive(Clone, PartialEq, Eq)]
+pub struct HybridQr(pub String);
+
+impl std::fmt::Debug for HybridQr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HybridQr(..)")
+    }
+}
+
 /// What the worker tells the dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CeremonyEvent {
@@ -47,9 +58,32 @@ pub enum CeremonyEvent {
     NeedPin {
         invalid: bool,
     },
+    /// Show the first sheet of a phone ceremony (tdesktop `ShowCableBox`):
+    /// the QR code, or `None` when Bluetooth is unavailable.
+    Hybrid {
+        qr: Option<HybridQr>,
+    },
+    /// The phone's advertisement arrived; the tunnel opens ("Connecting to
+    /// your phone…").
+    PhoneConnecting,
+    /// The request went to the phone ("Continue on your phone").
+    PhoneContinue,
+    /// "Use a security key" was chosen with a key plugged in: the
+    /// ceremony continues on the key (the Key sheet).
+    UseKey,
+    /// "Use a security key" was chosen with no key plugged in; the QR
+    /// stays (tdesktop toasts "No security key found…").
+    NoKey,
     Registered(Registration),
     SignedIn(Assertion),
     Failed(CeremonyError),
+}
+
+/// What the dialog asks of a running ceremony besides a PIN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CeremonyCommand {
+    /// "Use a security key" on the QR sheet.
+    UseSecurityKey,
 }
 
 /// What a backend runs when the dialog cancels, besides raising the
@@ -60,20 +94,22 @@ pub(super) type OnCancel = Arc<dyn Fn() + Send + Sync>;
 pub struct Ceremony {
     events: Receiver<CeremonyEvent>,
     pins: Sender<Zeroizing<String>>,
+    commands: Sender<CeremonyCommand>,
     cancel: Arc<AtomicBool>,
     on_cancel: Option<OnCancel>,
     finished: bool,
 }
 
 /// The worker's side of the channels.
-struct Link {
-    events: Sender<CeremonyEvent>,
+pub(super) struct Link {
+    pub(super) events: Sender<CeremonyEvent>,
     pins: Receiver<Zeroizing<String>>,
-    cancel: Arc<AtomicBool>,
+    pub(super) commands: Receiver<CeremonyCommand>,
+    pub(super) cancel: Arc<AtomicBool>,
 }
 
 impl Ceremony {
-    fn spawn(work: impl FnOnce(&Link) -> CeremonyEvent + Send + 'static) -> Self {
+    pub(super) fn spawn(work: impl FnOnce(&Link) -> CeremonyEvent + Send + 'static) -> Self {
         Self::spawn_with(work, None)
     }
 
@@ -94,10 +130,12 @@ impl Ceremony {
     ) -> Self {
         let (event_tx, events) = channel();
         let (pins, pin_rx) = channel();
+        let (commands, command_rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let link = Link {
             events: event_tx.clone(),
             pins: pin_rx,
+            commands: command_rx,
             cancel: cancel.clone(),
         };
         let spawned = crate::thread_guard::spawn_guarded("quill-passkey", move || {
@@ -112,10 +150,16 @@ impl Ceremony {
         Self {
             events,
             pins,
+            commands,
             cancel,
             on_cancel,
             finished: false,
         }
+    }
+
+    /// "Use a security key" on the QR sheet.
+    pub fn use_security_key(&self) {
+        let _ = self.commands.send(CeremonyCommand::UseSecurityKey);
     }
 
     /// Create a passkey on a security key.
@@ -218,7 +262,7 @@ fn map_error<T>(error: CtapError) -> Attempt<T> {
 }
 
 impl Link {
-    fn cancelled(&self) -> bool {
+    pub(super) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
 
@@ -299,7 +343,7 @@ fn token_for(
 
 /// tdesktop `RunRegisterCeremony`: the first key that opens gets
 /// makeCredential.
-fn run_register(
+pub(super) fn run_register(
     options: &CreationOptions,
     source: &mut dyn DeviceSource,
     link: &Link,
@@ -359,7 +403,7 @@ fn run_register(
 
 /// tdesktop `RunLoginCeremony`: every key in turn until one signs; a PIN
 /// question or a blocked PIN ends the round at once.
-fn run_login(
+pub(super) fn run_login(
     options: &RequestOptions,
     source: &mut dyn DeviceSource,
     link: &Link,

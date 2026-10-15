@@ -46,6 +46,7 @@
 "lng_filters_chats_count#other" = "{count} chats";
 "lng_hours#one" = "{count} hour";
 "lng_hours#other" = "{count} hours";
+"lng_intro_qr_passkey" = "Log in using passkey";
 "lng_launch_dont_ask" = "Remember for this file type";
 "lng_launch_exe_dont_ask" = "Don't ask me again";
 "lng_launch_svg_warning" = "Opening this file can potentially expose your IP address to its creator. Continue?";
@@ -71,6 +72,7 @@
 "lng_passcode_logout" = "Log out";
 "lng_passcode_ph" = "Your passcode";
 "lng_passcode_submit" = "Submit";
+"lng_passkey_error_no_credentials" = "This security key has no passkey for your account.";
 "lng_proxy_about" = "Proxy servers may be helpful in accessing Telegram if there is no connection in a specific region.";
 "lng_proxy_add" = "Add proxy";
 "lng_proxy_add_from_clipboard" = "Add proxy from clipboard";
@@ -169,6 +171,18 @@
 "lng_settings_notifications_position" = "Location on the screen";
 "lng_settings_passcode_title" = "Local passcode";
 "lng_settings_passkeys_about" = "Manage your passkey, stored safely in the cloud service you choose.";
+"lng_settings_passkeys_button" = "Add Passkey";
+"lng_settings_passkeys_delete_sure_title" = "Delete Passkey";
+"lng_settings_passkeys_none_about" = "Log in safely and keep your account secure.";
+"lng_settings_passkeys_none_button" = "Create Passkey";
+"lng_settings_passkeys_none_button_unsupported" = "Unsupported";
+"lng_settings_passkeys_none_info1_about" = "Make a passkey to sign in easily and safely.";
+"lng_settings_passkeys_none_info1_title" = "Create a Passkey";
+"lng_settings_passkeys_none_info2_about" = "Use your face, fingerprint, or screen lock to sign in.";
+"lng_settings_passkeys_none_info2_title" = "Log in with face recognition";
+"lng_settings_passkeys_none_info3_about" = "Your passkey is stored safely in the cloud service you choose.";
+"lng_settings_passkeys_none_info3_title" = "Store Passkey securely";
+"lng_settings_passkeys_none_title" = "Protect your account";
 "lng_settings_passkeys_title" = "Passkeys";
 "lng_settings_privacy_title" = "Privacy";
 "lng_settings_quick_dialog_action_delete" = "Delete";
@@ -438,6 +452,7 @@
 "qll_prefs_hour_2" = "+ hour";
 "qll_prefs_how_loud_quill_plays_message" = "How loud Quill plays message and call alert sounds";
 "qll_prefs_http_proxies_cant_be_shared" = "HTTP proxies can't be shared as a link.";
+"qll_prefs_icloud_keychain" = "iCloud Keychain";
 "qll_prefs_if_inactive_for" = "If inactive for...";
 "qll_prefs_if_you_do_not_come" = "If you do not come online at least once within this period, your account will be deleted along with all messages and contacts.";
 "qll_prefs_import" = "Import";
@@ -596,6 +611,7 @@
 "qll_prefs_previous_item" = "Previous item";
 "qll_prefs_previous_media" = "Previous media";
 "qll_prefs_previous_search_result" = "Previous search result";
+"qll_prefs_privacy_and_security" = "Privacy and security";
 "qll_prefs_privacy_policy" = "Privacy Policy";
 "qll_prefs_private" = "Private";
 "qll_prefs_proxy_enabled" = "Proxy enabled";
@@ -654,6 +670,7 @@
 "qll_prefs_scales_the_whole_interface_applied" = "Scales the whole interface, applied right away.";
 "qll_prefs_schedule" = "Schedule";
 "qll_prefs_scheduled_messages" = "Scheduled messages";
+"qll_prefs_screenshot_demo_qr_sign_in" = "screenshot demo — QR sign-in with the passkey link (injected auth, no live Telegram)";
 "qll_prefs_scroll_down_a_page" = "Scroll down a page";
 "qll_prefs_scroll_to_the_first_message" = "Scroll to the first message";
 "qll_prefs_scroll_to_the_latest_message" = "Scroll to the latest message";
@@ -788,6 +805,7 @@
 "qll_prefs_your_password" = "Your password";
 "qll_prefs_your_recovery_email_is_confirmed" = "Your recovery email is confirmed.";
 "qll_prefs_your_two_step_verification_password" = "Your two-step verification password";
+"qll_prefs_yubikey_5c" = "YubiKey 5C";
 "qll_prefs_zoom" = "Zoom";
 "qll_prefs_zoom_in" = "Zoom in";
 "qll_prefs_zoom_out" = "Zoom out";
