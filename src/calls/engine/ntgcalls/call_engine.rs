@@ -733,16 +733,19 @@ impl CallEngine for NtgcallsEngine {
         self.callback.forget_group(media.chat_id);
         if let Some(instance) = self.instance {
             // Privacy: tear a live presentation down FIRST so screen
-            // capture stops before the call itself.
+            // capture stops before the call itself. A failure here must
+            // not skip `ntg_stop`: the chat's connection would stay, and
+            // the next offer for it (a rejoin) would fail as "already
+            // made". ntgcalls' `GroupCall::stop` stops the presentation
+            // as well.
             if media.screen_sharing || media.presentation_initialized {
                 // SAFETY: instance is live; `media.chat_id` is this group's chat.
                 let rc =
                     unsafe { (self.api.ntg_stop_presentation)(instance.as_ptr(), media.chat_id) };
                 if rc != NTG_OK {
-                    return Err(EngineError::Engine {
-                        op: "ntg_stop_presentation",
-                        code: rc,
-                    });
+                    eprintln!(
+                        "quill: ntg_stop_presentation for group call {group_call_id} failed ({rc}); stopping the call anyway"
+                    );
                 }
             }
             // SAFETY: instance is live; `media.chat_id` is this group's chat.
