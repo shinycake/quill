@@ -179,8 +179,7 @@ impl QuillApp {
                 .trigger(
                     Button::new(("media-viewer-quality-button", row_id as usize))
                         .label(button_label)
-                        .ghost()
-                        .text_color(gpui_kit::white())
+                        .custom(crate::ui::video_player::controls::overlay_button(cx))
                         .tooltip("Video quality")
                         .accessibility_label("Video quality"),
                 )

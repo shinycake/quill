@@ -384,7 +384,8 @@ impl QuillApp {
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
         let muted = self.playback.volume < 0.01;
-        let speed_dial = self.speed_dial("player-bar-speed", cx);
+        let speed_trigger = self.speed_label_trigger("player-bar-speed");
+        let speed_dial = self.speed_dial("player-bar-speed", speed_trigger, cx);
 
         let icon_button = |id: &'static str, icon: IconName, label: &'static str| {
             Button::new(id)

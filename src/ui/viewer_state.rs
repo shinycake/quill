@@ -1,7 +1,6 @@
 //! Media viewer: zoom, video, controls and the photo editor.
 #![deny(clippy::indexing_slicing)]
 
-use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::ids::FileId;
 use quill::ids::MessageId;
@@ -71,18 +70,9 @@ pub(crate) struct ViewerUi {
     pub(super) over_controls: bool,
     /// A hide-timer task is already waiting.
     pub(super) hide_timer: bool,
-    /// MED1: seek slider for the viewer video transport (created in
-    /// `begin_viewer_video`, cleared in `stop_viewer_video`).
-    pub(super) seek_slider: Option<Entity<SliderState>>,
-    /// MED1: true while the viewer seek thumb is being dragged (the tick
-    /// must not fight the drag).
-    pub(super) seek_scrubbing: bool,
-    /// MED1: drag preview position for the viewer seek slider.
-    pub(super) seek_preview_secs: Option<f64>,
-    /// MED1: volume slider for the viewer video transport (0–100%).
-    pub(super) volume_slider: Option<Entity<SliderState>>,
-    /// MED1: true while the viewer volume thumb is being dragged.
-    pub(super) volume_scrubbing: bool,
+    /// The video controller's sliders, drag previews, scrubber hover and
+    /// the Space-hold boost (`video_player::controls`).
+    pub(super) controls: super::video_player::controls::VideoControlsState,
 }
 
 impl ViewerUi {
@@ -112,11 +102,7 @@ impl ViewerUi {
             controls_gen: 0,
             over_controls: false,
             hide_timer: false,
-            seek_slider: None,
-            seek_scrubbing: false,
-            seek_preview_secs: None,
-            volume_slider: None,
-            volume_scrubbing: false,
+            controls: Default::default(),
         }
     }
 }

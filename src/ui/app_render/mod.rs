@@ -41,6 +41,7 @@ impl Render for QuillApp {
         self.set_window_scope(None);
         self.windows.main = Some(window.window_handle());
         self.slices.a11y_active.set(self.screen_reader_on(window));
+        self.release_viewer_key_probe(window, cx);
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();
@@ -147,6 +148,13 @@ impl Render for QuillApp {
             .child(super::chat_window::scope_probe(cx.weak_entity(), None))
             // Batch 4: input clock for the online/idle presence.
             .child(super::presence::input_probe())
+            // The viewer's Space hold ends on the key-up (key-downs reach it
+            // through the keystroke interceptor).
+            .capture_key_up(cx.listener(|this, event: &KeyUpEvent, _, cx| {
+                if this.viewer_key_up(&event.keystroke.key, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             // Capture phase: with message text selected, ⌘C copies it even
             // while the composer has focus.
             .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {

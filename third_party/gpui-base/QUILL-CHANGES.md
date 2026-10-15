@@ -71,3 +71,11 @@ instead of after the 300 ms grace period, which left it on screen after the
 pointer moved off (or a scroll carried the trigger away). The grace period
 still keeps the "recently shown" state, so a neighbouring trigger shows its
 tooltip without the show delay.
+
+## Slider labels
+
+`src/slider.rs`: `SliderState::label` stores an accessible name, and `Slider`
+sets it as the root's `aria_label`. The kit `Slider` and composed sliders
+both render through the base `Slider` from the same state, so a label set
+where the state is built names either one. Quill uses it for the video
+player's "Seek" and "Volume" sliders (`docs/decisions/video-player-controls.md`).

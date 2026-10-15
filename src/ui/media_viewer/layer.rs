@@ -13,7 +13,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use crate::ui::video_player::{WeakVideoPlayer, video_frame};
+use crate::ui::video_player::controls::{PictureOverlay, PictureState, WaitingCheck, WaitingGate};
+use crate::ui::video_player::{PlayState, WeakVideoPlayer, video_frame};
 
 /// Where the media sits in the window, and its zoomed box inside that.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -47,20 +48,50 @@ pub(in crate::ui) struct ViewerVideoLayer {
     content: LayerContent,
     geometry: Option<ViewerGeometry>,
     open_gen: u64,
+    /// The waiting spinner's delay (`kWaitingShowDelay`).
+    waiting: WaitingGate,
+}
+
+impl ViewerVideoLayer {
+    /// Whether the clip has waited long enough for the spinner; arms a
+    /// redraw for when it will have (an opening clip asks for no frames).
+    fn waiting_shown(&mut self, waiting: bool, cx: &mut Context<Self>) -> bool {
+        let now = cx.background_executor().now();
+        match self.waiting.observe(waiting, now) {
+            WaitingCheck::Settled { shown } => shown,
+            WaitingCheck::Pending(wait) => {
+                let timer = cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(wait).await;
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                });
+                self.waiting.arm(timer);
+                false
+            }
+        }
+    }
 }
 
 impl Render for ViewerVideoLayer {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(geometry) = self.geometry else {
             return Empty.into_any_element();
         };
         let (zoom_w, zoom_h) = geometry.zoomed;
+        let mut waiting = false;
         let picture = match &self.content {
             LayerContent::Nothing => return Empty.into_any_element(),
             LayerContent::Player(player) => match player.upgrade() {
-                Some(player) => video_frame(&player)
-                    .object_fit(ObjectFit::Contain)
-                    .into_any_element(),
+                // A failed clip leaves the thumbnail and the panel's
+                // "can't be played" plate in view.
+                Some(player) if player.state() == PlayState::Failed => {
+                    return Empty.into_any_element();
+                }
+                Some(player) => {
+                    waiting = matches!(player.state(), PlayState::Opening | PlayState::Buffering);
+                    video_frame(&player)
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element()
+                }
                 None => return Empty.into_any_element(),
             },
             LayerContent::Gif(path) => img(path.clone())
@@ -68,6 +99,9 @@ impl Render for ViewerVideoLayer {
                 .object_fit(ObjectFit::Contain)
                 .into_any_element(),
         };
+        let spinner = self
+            .waiting_shown(waiting, cx)
+            .then(|| PictureOverlay::new(self.open_gen, PictureState::Waiting));
         div()
             .absolute()
             .left(px(geometry.origin.0))
@@ -84,6 +118,7 @@ impl Render for ViewerVideoLayer {
                     .h(px(zoom_h))
                     .child(picture),
             )
+            .children(spinner)
             .with_animation(
                 ("viewer-video-fade-in", self.open_gen as usize),
                 Animation::new(Duration::from_millis(VIEWER_SHOW_MS)),
@@ -102,7 +137,18 @@ impl QuillApp {
         item: &MediaViewerItem,
         viewport: gpui_kit::Size<Pixels>,
     ) -> ViewerGeometry {
-        let bottom_space = if item.caption.is_empty() { 72.0 } else { 104.0 };
+        // A video keeps room for its 72 px controller (and the bar's
+        // 16 px padding) under the picture.
+        let controls = if item.kind == MediaViewerKind::Video {
+            96.0
+        } else {
+            72.0
+        };
+        let bottom_space = if item.caption.is_empty() {
+            controls
+        } else {
+            controls + 32.0
+        };
         let fit = (
             (f32::from(viewport.width) - 2.0 * VIEWER_SIDE_LANE).max(240.0),
             (f32::from(viewport.height) - VIEWER_TOP_BAR - bottom_space).max(200.0),
@@ -233,6 +279,7 @@ impl QuillApp {
                     content: LayerContent::Nothing,
                     geometry: None,
                     open_gen,
+                    waiting: WaitingGate::default(),
                 })
             })
             .clone();

@@ -129,7 +129,10 @@ impl Render for ChatWindowView {
             shell.sync_kit_dialogs_in(Some(chat_id), window, cx)
         });
         let dialog_open = self.shell.read(cx).dialog_open();
-        let body = app.update(cx, |app, cx| app.chat_window_body(chat_id, window, cx));
+        let body = app.update(cx, |app, cx| {
+            app.release_viewer_key_probe(window, cx);
+            app.chat_window_body(chat_id, window, cx)
+        });
         app.update(cx, |app, _| app.set_window_scope(outer));
         let view = cx.weak_entity();
         super::super::window_frame::sync(window, app.read(cx).appearance.native_window_frame);
@@ -160,6 +163,22 @@ impl Render for ChatWindowView {
                 }
             })
             .chat_window_command_actions(self.owner.clone(), chat_id)
+            // The viewer's Space release (a tap or the end of a hold), as on
+            // the main root; key-downs reach it through the interceptor.
+            .capture_key_up({
+                let app = self.owner.clone();
+                move |event: &KeyUpEvent, _, cx| {
+                    let handled = app
+                        .update(cx, |app, cx| {
+                            app.note_window_input(Some(chat_id));
+                            app.viewer_key_up(&event.keystroke.key, cx)
+                        })
+                        .unwrap_or(false);
+                    if handled {
+                        cx.stop_propagation();
+                    }
+                }
+            })
             // Window-wide text selection, as in the main window.
             .child(gpui_kit::base::TextSelectionLayer)
             .child(scope_probe(self.owner.clone(), Some(chat_id)))

@@ -78,6 +78,8 @@ impl Render for VideoPip {
 }
 impl QuillApp {
     pub(super) fn open_video_pip(&mut self, cx: &mut Context<Self>) {
+        // PiP takes the key window: a Space hold's release never comes.
+        self.cancel_viewer_boost(cx);
         if !cfg!(target_os = "macos") {
             self.connection.status_note =
                 "Picture-in-Picture requires native floating-window support.".into();

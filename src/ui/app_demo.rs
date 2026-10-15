@@ -554,6 +554,7 @@ impl QuillApp {
         cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active() || super::frame_clock::assume_active();
             this.frame.window_active.set(active);
+            this.viewer_window_activation(window, cx);
             this.playback
                 .inline_videos
                 .borrow_mut()

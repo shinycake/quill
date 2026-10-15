@@ -27,6 +27,8 @@ pub(super) fn take_scripted_backend() -> Option<Box<dyn Backend>> {
 #[derive(Default)]
 struct Script {
     ready: bool,
+    /// The clip length (10 s when unset).
+    duration: Option<f64>,
     position: f64,
     at_end: bool,
     /// Every call, in order.
@@ -64,7 +66,7 @@ impl Backend for Scripted {
         BackendStatus {
             ready: script.ready,
             position: script.position,
-            duration: Some(10.0),
+            duration: Some(script.duration.unwrap_or(10.0)),
             at_end: script.at_end,
             stalled: script.stalled,
             failed: script.error.is_some(),
@@ -380,5 +382,212 @@ mod viewer {
             assert!(app.viewer.player.is_none());
         });
         assert!(script.borrow().dropped, "closing released the backend");
+    }
+
+    /// Space through the whole window: the key-down reaches the viewer's
+    /// key handler and the key-up `QuillApp`'s root capture listener, so a
+    /// tap toggles pause and a hold plays at 2x until release.
+    #[gpui_kit::test]
+    fn space_taps_toggle_and_holds_boost(cx: &mut TestAppContext) {
+        let script = Rc::new(RefCell::new(Script {
+            ready: true,
+            ..Script::default()
+        }));
+        let (app, mut vcx) = open_scripted(cx, &script);
+        let vcx = &mut vcx;
+        let state = |vcx: &mut VisualTestContext| {
+            app.read_with(vcx, |app, _| {
+                (
+                    app.viewer_video_playing(),
+                    app.viewer.controls.boost.is_active(),
+                )
+            })
+        };
+        assert_eq!(state(vcx), (true, false), "the clip autoplays");
+        script.borrow_mut().calls.clear();
+
+        // A tap: nothing on the press, pause on the release.
+        vcx.simulate_keystrokes("space");
+        assert_eq!(state(vcx), (true, false));
+        space_up(vcx);
+        assert_eq!(state(vcx), (false, false));
+        assert!(script.borrow().calls.contains(&"pause".to_string()));
+        script.borrow_mut().calls.clear();
+
+        // A hold: 2x after the delay (even while paused, like tdesktop),
+        // back to the chosen rate on release, and no toggle.
+        hold_space(vcx);
+        assert_eq!(state(vcx), (false, true));
+        space_up(vcx);
+        assert_eq!(state(vcx), (false, false));
+        let calls = std::mem::take(&mut script.borrow_mut().calls);
+        assert!(
+            calls.iter().any(|c| c.starts_with("rate 2 ")),
+            "boosted: {calls:?}"
+        );
+        assert!(
+            calls.last().is_some_and(|c| c.starts_with("rate 1 ")),
+            "restored: {calls:?}"
+        );
+        assert!(!calls.iter().any(|c| c.starts_with("play")), "{calls:?}");
+
+        // Paused: `.` and `,` step one frame.
+        vcx.simulate_keystrokes(". ,");
+        let calls = std::mem::take(&mut script.borrow_mut().calls);
+        assert_eq!(calls, ["step true", "step false"]);
+    }
+
+    /// The window goes to the background mid-hold: the key-up will go
+    /// elsewhere, so the rate comes back without it.
+    #[gpui_kit::test]
+    fn a_hold_ends_when_the_window_deactivates(cx: &mut TestAppContext) {
+        let script = Rc::new(RefCell::new(Script {
+            ready: true,
+            ..Script::default()
+        }));
+        let (app, mut vcx) = open_scripted(cx, &script);
+        let vcx = &mut vcx;
+        hold_space(vcx);
+        assert!(app.read_with(vcx, |app, _| app.viewer.controls.boost.is_active()));
+        script.borrow_mut().calls.clear();
+        vcx.deactivate_window();
+        settle(vcx);
+        assert!(!app.read_with(vcx, |app, _| app.viewer.controls.boost.is_active()));
+        let calls = std::mem::take(&mut script.borrow_mut().calls);
+        assert!(
+            calls.iter().any(|c| c.starts_with("rate 1 ")),
+            "restored: {calls:?}"
+        );
+    }
+
+    /// Layered mode (the picture on its own layer): the slice root takes
+    /// the viewport, so the controller sits inside the window. (The root
+    /// once measured zero high and pushed the bottom bar above the top.)
+    #[gpui_kit::test]
+    fn the_controller_sits_inside_the_window(cx: &mut TestAppContext) {
+        use gpui_kit::test::TestWindowExt as _;
+        let script = Rc::new(RefCell::new(Script {
+            ready: true,
+            ..Script::default()
+        }));
+        let (app, mut vcx) = open_scripted(cx, &script);
+        let vcx = &mut vcx;
+        assert!(app.read_with(vcx, |app, _| app.viewer.video_layer.is_some()));
+        let (panel, viewport) = vcx.update(|window, cx| {
+            window.render_frame(cx);
+            (
+                window.try_find(("media-viewer-player", 204u64)),
+                window.viewport_size(),
+            )
+        });
+        let panel = panel.expect("the controller is drawn").bounds();
+        assert!(panel.top() >= px(0.), "{panel:?}");
+        assert!(
+            panel.bottom() <= viewport.height,
+            "{panel:?} in {viewport:?}"
+        );
+        assert!(
+            panel.bottom() > viewport.height / 2.,
+            "at the bottom: {panel:?}"
+        );
+    }
+
+    /// Space with nothing focused focuses the viewer's key probe (so the
+    /// release has a path); closing the viewer lets that focus go.
+    #[gpui_kit::test]
+    fn the_key_probe_lets_go_when_the_viewer_closes(cx: &mut TestAppContext) {
+        let script = Rc::new(RefCell::new(Script {
+            ready: true,
+            ..Script::default()
+        }));
+        let (app, mut vcx) = open_scripted(cx, &script);
+        let vcx = &mut vcx;
+        vcx.update(|window, cx| window.blur(cx));
+        vcx.simulate_keystrokes("space");
+        let probe = app.read_with(vcx, |app, _| app.viewer.controls.focus.clone());
+        let focused = vcx.update(|window, cx| window.focused(cx));
+        assert!(probe.is_some() && focused == probe, "the probe took focus");
+        drop(probe);
+        space_up(vcx);
+        app.update_in(vcx, |app, _, cx| app.close_media_viewer(cx));
+        settle(vcx);
+        assert!(app.read_with(vcx, |app, _| app.viewer.controls.focus.is_none()));
+        assert_eq!(vcx.update(|window, cx| window.focused(cx)), None);
+    }
+
+    /// A clip under a second: the slider's range is one second, which must
+    /// not read as stale on every tick (a new slider and subscription per
+    /// render).
+    #[gpui_kit::test]
+    fn a_short_clip_keeps_one_seek_slider(cx: &mut TestAppContext) {
+        let script = Rc::new(RefCell::new(Script {
+            ready: true,
+            duration: Some(0.3),
+            ..Script::default()
+        }));
+        let (app, mut vcx) = open_scripted(cx, &script);
+        let vcx = &mut vcx;
+        let slider = |vcx: &mut VisualTestContext| {
+            app.read_with(vcx, |app, _| {
+                app.viewer.controls.seek.as_ref().map(|s| s.entity_id())
+            })
+        };
+        let first = slider(vcx);
+        assert!(first.is_some(), "a seek slider");
+        for _ in 0..5 {
+            vcx.executor()
+                .advance_clock(std::time::Duration::from_millis(50));
+            settle(vcx);
+        }
+        assert_eq!(slider(vcx), first);
+    }
+
+    /// Hold Space past the boost delay (no release).
+    fn hold_space(vcx: &mut VisualTestContext) {
+        vcx.simulate_keystrokes("space");
+        vcx.executor()
+            .advance_clock(std::time::Duration::from_millis(
+                quill::media_viewer::SPEED_BOOST_HOLD_MS + 50,
+            ));
+        settle(vcx);
+    }
+
+    fn space_up(vcx: &mut VisualTestContext) {
+        vcx.simulate_event(gpui_kit::KeyUpEvent {
+            keystroke: gpui_kit::Keystroke::parse("space").unwrap(),
+        });
+        settle(vcx);
+    }
+
+    /// The app in an active, focused window with the viewer open on the
+    /// demo clip, played by `script`.
+    fn open_scripted(
+        cx: &mut TestAppContext,
+        script: &Rc<RefCell<Script>>,
+    ) -> (Entity<QuillApp>, VisualTestContext) {
+        use gpui_kit::Focusable as _;
+        let (app, mut vcx) = new_app(cx);
+        let vcx_ref = &mut vcx;
+        // A background window ends holds (its key-up goes elsewhere).
+        vcx_ref.update(|window, _| window.activate_window());
+        app.update_in(vcx_ref, |app, window, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                app.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+                crate::ui::inline_playback::apply_ready_video_viewer(
+                    session,
+                    &app.demo_ui.sink,
+                    &app.demo_ui.seq,
+                );
+            }
+            let focus = app.focus_handle(cx);
+            window.focus(&focus, cx);
+            cx.notify();
+        });
+        NEXT_BACKEND.with(|next| *next.borrow_mut() = Some(Box::new(Scripted(script.clone()))));
+        app.update_in(vcx_ref, |app, _, cx| {
+            app.open_media_viewer(ChatId(11), MessageId(204), cx);
+        });
+        settle(vcx_ref);
+        (app, vcx)
     }
 }
