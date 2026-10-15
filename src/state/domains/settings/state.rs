@@ -128,6 +128,8 @@ pub struct SettingsState {
     /// `SettingsWebsitesController` style); drives the Connected Websites
     /// overlay.
     pub connected_websites: Option<Vec<ParsedWebsite>>,
+    /// The account's login passkeys (`crate::passkeys`).
+    pub passkeys: crate::passkeys::PasskeysState,
     /// Slice A4: a `getConnectedWebsites` round trip is in flight.
     pub connected_websites_loading: bool,
     /// Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` round trip
@@ -261,6 +263,7 @@ impl SettingsState {
             account_mutating: false,
             account_error: None,
             connected_websites: None,
+            passkeys: Default::default(),
             connected_websites_loading: false,
             websites_mutating: false,
             websites_error: None,

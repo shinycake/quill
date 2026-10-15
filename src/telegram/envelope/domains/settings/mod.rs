@@ -20,6 +20,8 @@ pub enum SettingsPayload {
         added_count: usize,
         removed_count: usize,
     },
+    /// Login passkey answers (`crate::passkeys`).
+    Passkeys(crate::passkeys::PasskeysPayload),
     /// `languagePackInfo` — the `getLanguagePackInfo` answer.
     LanguagePackInfo(LanguagePackInfoData),
     /// `updateActiveNotifications` (schema 1.8.67, line 10688): chats that

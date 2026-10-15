@@ -242,7 +242,11 @@ impl QuillApp {
                 self.settings.appearance_open = true;
                 cx.notify();
             }
-            NavigationAction::Privacy => self.settings.page = Some("Privacy and security"),
+            NavigationAction::Privacy => {
+                self.settings.page = Some("Privacy and security");
+                // tdesktop asks for the passkeys whenever the screen opens.
+                self.request_passkeys();
+            }
             NavigationAction::TwoFa => {
                 self.open_twofa(cx);
             }
@@ -306,6 +310,7 @@ impl QuillApp {
                     })),
             )
             .child(self.settings_link("Local passcode", NavigationAction::Passcode, cx))
+            .children(self.passkeys_settings_row(cx))
             .child(self.settings_link("Two-step verification", NavigationAction::TwoFa, cx))
             .child(self.settings_link("Connected websites", NavigationAction::Websites, cx))
             .child(self.settings_link(

@@ -661,6 +661,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` `ok`
         // marks the websites list stale in the reducer; same pattern.
         let _ = self.refresh_connected_websites_if_stale();
+        // Passkeys: refetch after a removal, resolve the software icons.
+        self.after_passkeys_ingest();
         // `parity:proxy-settings`: a proxy mutation marks the list stale.
         let _ = self.refresh_proxies_if_stale();
         // Slice `parity:bots-payment-recurring`: an

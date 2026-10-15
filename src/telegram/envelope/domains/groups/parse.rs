@@ -458,6 +458,7 @@ pub(crate) fn parse_groups_payload(
                 ton_usd_rate: crate::ton_wallet::fiat::ton_usd_rate_from_config(value),
                 starref_join,
                 starref_setup,
+                display_passkeys: crate::passkeys::display_allowed_from_config(value),
             }))
         }
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {

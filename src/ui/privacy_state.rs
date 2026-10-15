@@ -35,6 +35,8 @@ pub(crate) struct PrivacyState {
     /// Slice A4: pending disconnect confirmation on the websites overlay
     /// (TGX `TerminateWebSessionQuestion` / `DisconnectAllWebsitesHint`).
     pub(super) websites_confirm: Option<WebsitesConfirm>,
+    /// Passkeys: the list, its delete confirmation and the about box.
+    pub(super) passkeys: super::security::passkeys::PasskeysUi,
 }
 
 impl PrivacyState {
@@ -55,6 +57,7 @@ impl PrivacyState {
             sessions_confirm: None,
             websites_open: false,
             websites_confirm: None,
+            passkeys: Default::default(),
         }
     }
 }

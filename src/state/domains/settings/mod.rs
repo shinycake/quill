@@ -4,6 +4,7 @@ mod business;
 mod business_extra;
 mod error;
 mod language_link;
+mod passkeys;
 mod purpose;
 mod quick_replies;
 mod state;

@@ -276,6 +276,8 @@ pub enum SettingsPurpose {
     /// `getChat` of a channel's direct messages group that is not loaded
     /// yet; its price arrives with the `updateSupergroup` before the chat.
     LoadDirectMessagesChat,
+    /// Login passkeys (`crate::passkeys`).
+    Passkeys(crate::passkeys::PasskeysPurpose),
 }
 
 flat_purposes!(Settings(SettingsPurpose) {
