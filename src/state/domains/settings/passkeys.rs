@@ -1,8 +1,10 @@
-//! Login passkeys (`crate::passkeys`): the list answer, a removal's `ok`
-//! and failures. Nothing is optimistic: a passkey leaves the list only
-//! after the server confirmed the removal, and the list is fetched again.
+//! Login passkeys (`crate::passkeys`): the list answer, a removal's `ok`,
+//! the creation options, the added passkey and failures. Nothing is
+//! optimistic: a passkey leaves the list only after the server confirmed
+//! the removal, and joins it only with the server's `passkey`.
 use crate::passkeys::{PasskeysPayload, PasskeysPurpose};
 use crate::state::*;
+use std::time::Instant;
 
 fn passkeys_purpose(purpose: Option<RequestPurpose>) -> Option<PasskeysPurpose> {
     match purpose {
@@ -17,14 +19,29 @@ impl Session {
         payload: PasskeysPayload,
         pending: Option<&PendingRequest>,
     ) {
+        let purpose = passkeys_purpose(pending.map(|p| p.purpose));
         match payload {
             PasskeysPayload::List(list) => {
                 // Only our own `getLoginPasskeys` answer replaces the list.
-                if passkeys_purpose(pending.map(|p| p.purpose)) == Some(PasskeysPurpose::List) {
+                if purpose == Some(PasskeysPurpose::List) {
                     self.settings.passkeys.accept_list(list);
                     self.settings.passkeys.error = None;
                 }
             }
+            PasskeysPayload::Added(passkey) => {
+                if purpose == Some(PasskeysPurpose::Add) {
+                    self.settings.passkeys.accept_added(passkey);
+                }
+            }
+        }
+    }
+
+    /// `getPasskeyParameters` answered: the ceremony can start. Options
+    /// that cannot be read end the attempt with an error line.
+    pub(crate) fn apply_passkey_parameters(&mut self, json: &str) {
+        let passkeys = &mut self.settings.passkeys;
+        if !passkeys.accept_parameters(json, Instant::now()) {
+            passkeys.error = Some("Could not add the passkey: unreadable parameters".into());
         }
     }
 
@@ -55,6 +72,17 @@ impl Session {
             Some(PasskeysPurpose::Remove) => {
                 passkeys.removing = None;
                 passkeys.error = Some(sessions_error_line("delete the passkey", err));
+                true
+            }
+            Some(PasskeysPurpose::Parameters) => {
+                passkeys.error = Some(sessions_error_line("add the passkey", err));
+                true
+            }
+            Some(PasskeysPurpose::Add) => {
+                // tdesktop drops the options after a failed registration.
+                passkeys.adding = false;
+                passkeys.registration = None;
+                passkeys.error = Some(sessions_error_line("add the passkey", err));
                 true
             }
             None => false,

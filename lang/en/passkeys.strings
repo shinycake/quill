@@ -1,0 +1,17 @@
+// Passkeys: creating one on a security key (tdesktop webauthn/webauthn_common.cpp,
+// webauthn/cable_box.cpp, settings/sections/settings_passkeys.cpp).
+"lng_cancel" = "Cancel";
+"lng_close" = "Close";
+"lng_settings_passkeys_none_button" = "Create Passkey";
+"lng_settings_passkeys_none_button_unsupported" = "Unsupported";
+"lng_passkey_touch" = "Touch your security key";
+"lng_passkey_insert" = "Insert your security key, then touch it to continue.";
+"lng_passkey_pin_title" = "Security key PIN";
+"lng_passkey_pin_about" = "Enter the PIN of your security key.";
+"lng_passkey_pin_invalid" = "Incorrect PIN. Please try again.";
+"lng_passkey_pin_placeholder" = "PIN";
+"lng_passkey_pin_blocked" = "The security key PIN is blocked. Reconnect the key or reset it.";
+"lng_passkey_confirm" = "Confirm";
+"lng_passkey_error_no_device" = "No security key found. Insert one and try again.";
+"lng_passkey_error_register" = "Couldn't add a passkey with the security key.";
+"lng_passkey_cable_error_title" = "Something went wrong";

@@ -1,9 +1,14 @@
 //! Connect driver: the account's login passkeys (`crate::passkeys`).
-//! Lists them and removes one; creating one waits for WebAuthn.
+//! Lists them, removes one, and creates one: the creation options for the
+//! ceremony (`crate::webauthn`) and its result to the server.
 use super::*;
 use crate::ids::RequestId;
-use crate::passkeys::{PasskeysPurpose, get_login_passkeys, remove_login_passkey};
+use crate::passkeys::{
+    PasskeysPurpose, add_login_passkey, get_login_passkeys, get_passkey_parameters,
+    remove_login_passkey,
+};
 use crate::state::{RequestPurpose, SettingsPurpose};
+use crate::webauthn::Registration;
 use std::time::Instant;
 
 fn purpose(purpose: PasskeysPurpose) -> RequestPurpose {
@@ -54,6 +59,61 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &remove_login_passkey(extra, passkey_id));
         if sent.is_err() {
             self.session.settings.passkeys.removing = None;
+        }
+        sent
+    }
+
+    /// "Create Passkey" (tdesktop `Passkeys::initRegistration`): the
+    /// creation options, reused while still within their timeout, else
+    /// `getPasskeyParameters`. Once they are known the state holds them
+    /// in `ceremony` for the dialog to start. `Ok(None)` when no request
+    /// was needed.
+    pub fn begin_register(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let state = &self.session.settings.passkeys;
+        if !self.chats_path_active() || !state.can_register() || state.adding {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if let Some(pending) = &state.registration
+            && pending.fresh(Instant::now())
+        {
+            let options = pending.options.clone();
+            self.session.settings.passkeys.ceremony = Some(options);
+            return Ok(None);
+        }
+        if self.passkeys_in_flight(PasskeysPurpose::Parameters) {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(purpose(PasskeysPurpose::Parameters), None);
+        let state = &mut self.session.settings.passkeys;
+        state.registration = None;
+        state.error = None;
+        self.send_json_request(extra, &get_passkey_parameters(extra))
+            .map(Some)
+    }
+
+    /// Whether "Create Passkey" is waiting for the server's options.
+    pub fn passkey_parameters_pending(&self) -> bool {
+        self.passkeys_in_flight(PasskeysPurpose::Parameters)
+    }
+
+    /// The ceremony finished: `addLoginPasskey` with its client data and
+    /// attestation object (tdesktop `Passkeys::registerPasskey`).
+    pub fn finish_register(
+        &mut self,
+        registration: &Registration,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || self.session.settings.passkeys.adding {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(purpose(PasskeysPurpose::Add), None);
+        let state = &mut self.session.settings.passkeys;
+        state.adding = true;
+        state.error = None;
+        let sent = self.send_json_request(extra, &add_login_passkey(extra, registration));
+        if sent.is_err() {
+            self.session.settings.passkeys.adding = false;
         }
         sent
     }

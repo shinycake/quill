@@ -51,6 +51,7 @@ pub mod credentials;
 pub mod data_settings;
 pub mod deep_link_inbox;
 pub mod deep_link_types;
+pub mod dev_cli;
 pub mod diagnostics;
 pub mod drop_modes;
 pub mod earn;
@@ -224,6 +225,7 @@ pub mod voice_input;
 pub mod voice_opus;
 pub mod wallpaper_raster;
 pub mod web_app;
+pub mod webauthn;
 pub mod window_title;
 #[cfg(windows)]
 pub mod winreg;
