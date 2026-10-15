@@ -38,6 +38,10 @@ pub(crate) use rust_codecs::to_srgb;
 mod libheif;
 #[cfg(target_os = "macos")]
 mod macos;
+/// A Core Graphics image drawn into straight-alpha sRGB RGBA (the video
+/// player's still frame for screenshot captures on macOS).
+#[cfg(target_os = "macos")]
+pub(crate) use macos::draw_srgb;
 #[cfg(windows)]
 mod wic;
 

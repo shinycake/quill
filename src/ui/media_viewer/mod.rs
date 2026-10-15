@@ -26,7 +26,6 @@ use quill::media_viewer::{
     controls_should_hide, decide_viewer_video_start, orient_rgba, save_media_to_downloads,
     seek_target_secs, viewer_delete_gate, viewer_key_action, wheel_zoom_factor,
 };
-use quill::playback::PlaybackClock;
 use quill::settings::MediaPrefs;
 use quill::state::HistoryMessage;
 use quill::state::SharedMediaTab;
@@ -35,16 +34,14 @@ use quill::voice::format_voice_duration;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::process::Child;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 mod actions;
 mod caption;
 mod files;
 mod files_demo;
+mod layer;
 mod navigation;
 mod overlay;
 mod overlay_controls;
@@ -52,6 +49,8 @@ mod playback;
 mod ttl_ui;
 mod video;
 mod video_extras;
+
+pub(in crate::ui) use layer::ViewerVideoLayer;
 
 /// Viewer state that is not part of the item list: Shared Media paging,
 /// video full screen, and the inactive-window pause of looping clips.
@@ -83,8 +82,6 @@ pub(super) struct ViewerExtra {
     pub speed_preview: Option<f64>,
     /// Screenshot demo: open the speed dial on the first frame.
     pub demo_speed_dial_open: bool,
-    /// The decoded frame turned for Rotate, kept for the frame it came from.
-    pub(in crate::ui) oriented_frame: Option<video_extras::OrientedFrame>,
     /// "Share at": the message and second the forward picker was opened at.
     pub share_at: Option<(ChatId, MessageId, i32)>,
     /// Turns of videos rotated in this run, by `(chat, message)`.

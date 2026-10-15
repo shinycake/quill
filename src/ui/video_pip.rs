@@ -1,10 +1,12 @@
-//! Picture-in-Picture shares the viewer's decoded frames and playback clock.
+//! Picture-in-Picture draws the viewer's player in a floating window: the
+//! same `video_frame` element (a GPU surface on macOS), pacing itself on
+//! this window's frames, and the same transport.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use super::video_player::video_frame;
 use gpui_kit::component::Root;
 use gpui_kit::component::button::*;
 use gpui_kit::*;
-use std::sync::Arc;
 
 struct VideoPip {
     owner: WeakEntity<QuillApp>,
@@ -14,15 +16,14 @@ impl Render for VideoPip {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let snapshot = self.owner.upgrade().map(|owner| {
             let app = owner.read(cx);
-            (
-                app.viewer_render_frame(),
-                app.viewer.clock.as_ref().is_some_and(|c| c.is_playing()),
-            )
+            (app.viewer.player.clone(), app.viewer_video_playing())
         });
-        let Some((Some(frame), playing)) = snapshot else {
+        let Some((Some(player), playing)) = snapshot else {
             window.remove_window();
             return div().into_any_element();
         };
+        // The play button follows the transport (an ended clip).
+        player.watch(cx.entity_id());
         let owner = self.owner.clone();
         let return_owner = self.owner.clone();
         div()
@@ -35,7 +36,12 @@ impl Render for VideoPip {
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .child(img(frame).size_full().object_fit(ObjectFit::Contain)),
+                    // A floating window rarely has focus: keep drawing.
+                    .child(
+                        video_frame(&player)
+                            .object_fit(ObjectFit::Contain)
+                            .keep_alive(true),
+                    ),
             )
             .child(
                 div()
@@ -71,22 +77,6 @@ impl Render for VideoPip {
     }
 }
 impl QuillApp {
-    pub(super) fn viewer_render_frame(&self) -> Option<Arc<RenderImage>> {
-        let elapsed = self
-            .viewer
-            .clock
-            .as_ref()
-            .map(|c| c.elapsed_secs())
-            .unwrap_or(0.0);
-        let at = (elapsed * self.viewer.video_fps) as usize;
-        // A looping animation wraps; a video holds its last frame.
-        let index = if self.viewer_loops() {
-            at % self.viewer.video_frames.len().max(1)
-        } else {
-            at.min(self.viewer.video_frames.len().saturating_sub(1))
-        };
-        self.viewer.video_frames.get(index).cloned()
-    }
     pub(super) fn open_video_pip(&mut self, cx: &mut Context<Self>) {
         if !cfg!(target_os = "macos") {
             self.connection.status_note =
@@ -94,7 +84,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if self.viewer_render_frame().is_none() {
+        if self.viewer.player.is_none() {
             return;
         }
         if let Some(handle) = self.viewer.pip_window {
@@ -112,7 +102,7 @@ impl QuillApp {
             let Some(owner) = weak_owner.upgrade() else {
                 return;
             };
-            if owner.read(cx).viewer_render_frame().is_none() {
+            if owner.read(cx).viewer.player.is_none() {
                 return;
             }
             if let Some(handle) = owner.read(cx).viewer.pip_window {
@@ -129,6 +119,10 @@ impl QuillApp {
                         size: size(px(420.), px(290.)),
                     })),
                     window_min_size: Some(size(px(280.), px(210.))),
+                    // GPUI caps an unfocused window's animation frames at
+                    // 30 a second; Picture-in-Picture is unfocused by design
+                    // and plays at the clip's own rate.
+                    inactive_frame_interval: None,
                     titlebar: Some(TitlebarOptions {
                         title: Some("Quill — Picture-in-Picture".into()),
                         ..Default::default()

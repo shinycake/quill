@@ -4,10 +4,9 @@
 use super::*;
 
 impl QuillApp {
-    /// Parity slice 5: video transport under the visual. the audio engine runs
-    /// `-nodisp` for audio only (no GPUI video element in this stack);
-    /// the decoded video frames render in-viewer above. The overlay
-    /// shows Play/Pause plus elapsed/total, or a download CTA while the
+    /// Parity slice 5: the video transport under the visual, read from the
+    /// player at render time: Play/Pause, seek, volume, speed,
+    /// Picture-in-Picture and full screen, or a download CTA while the
     /// clip is not local.
     pub(super) fn viewer_video_controls(
         &mut self,
@@ -19,28 +18,32 @@ impl QuillApp {
     ) -> AnyElement {
         let clip_path = self.viewer_clip_path(item);
         if let Some(_clip) = clip_path {
-            let playing = self
-                .viewer
-                .clock
-                .as_ref()
-                .is_some_and(|clock| clock.is_playing())
-                && self.viewer.video == Some(item.message_id);
+            let transport = self
+                .viewer_transport()
+                .filter(|_| self.viewer.video == Some(item.message_id));
+            let playing = transport.as_ref().is_some_and(|t| t.is_playing());
             // MED1: while scrubbing, the label previews the drag
             // position (the history-row seek pattern).
             let elapsed = self
                 .viewer
                 .seek_preview_secs
-                .or_else(|| self.viewer.clock.as_ref().map(|clock| clock.elapsed_secs()))
+                .or_else(|| transport.as_ref().map(|t| t.position))
                 .unwrap_or(0.0);
-            let total = item.duration_secs.unwrap_or(0) as f64;
+            let total = transport
+                .as_ref()
+                .map(|t| t.total())
+                .filter(|total| *total > 0.0)
+                .unwrap_or(item.duration_secs.unwrap_or(0) as f64);
             let label = format!(
                 "{} / {}",
                 format_voice_duration(elapsed as i32),
                 format_voice_duration(total as i32)
             );
-            // While ffmpeg extracts frames the thumbnail stays up;
-            // the Play button appears once frames are ready.
-            let extracting = self.viewer.extracting;
+            // While the clip opens the thumbnail stays up; the Play
+            // button appears once it can play.
+            let opening = transport
+                .as_ref()
+                .is_some_and(|t| t.state == crate::ui::video_player::PlayState::Opening);
             let speed_dial = self.speed_dial("media-viewer-speed", cx);
             let muted = self.playback.volume < 0.01;
             let volume_pct = (self.playback.volume * 100.0).round() as i32;
@@ -88,7 +91,7 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .gap_1()
-                .child(if extracting {
+                .child(if opening {
                     div()
                         .text_sm()
                         .text_color(gpui_kit::white())
@@ -138,7 +141,7 @@ impl QuillApp {
                     |this, picker| this.child(picker),
                 )
                 .when(
-                    cfg!(target_os = "macos") && !self.viewer.video_frames.is_empty(),
+                    cfg!(target_os = "macos") && self.viewer.player.is_some(),
                     |this| {
                         this.child(
                             icon_button(

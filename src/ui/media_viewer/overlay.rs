@@ -1,67 +1,38 @@
-//! The fullscreen viewer overlay (render).
+//! The fullscreen viewer's panel (render); `layer` stacks it with the
+//! backdrop and the playing picture.
 
 use super::*;
 
 impl QuillApp {
-    /// Phase 4.5: fullscreen media viewer overlay. The backdrop is a
-    /// separate sibling painted behind the panel (not an ancestor), so a
-    /// click on the panel never bubbles into the backdrop's close handler —
-    /// "click outside" works regardless of click-bubbling semantics. Esc
-    /// closes through `cancel_search`; the header close button is the third
-    /// path. Videos show their thumbnail (no in-viewer playback — the
-    /// history row's Play path is unchanged); secret/spoiler media never
-    /// reach the viewer (filtered in `collect_media_items`).
-    /// MED1: fullscreen photo/video viewer overlay. Takes `&mut self` +
-    /// `window` so the viewer seek/volume sliders can sync to the clocks
-    /// during render.
-    pub(in crate::ui) fn media_viewer_overlay(
+    /// Phase 4.5 / MED1: the viewer panel: top bar, the media box (its
+    /// thumbnail or picture, zoom, pan and context menu), arrows, the
+    /// player controls and caption. Click-outside closes through the
+    /// backdrop; Esc through `cancel_search`; the header close button is
+    /// the third path. Secret/spoiler media never reach the viewer
+    /// (filtered in `collect_media_items`).
+    ///
+    /// `layered`: the main window's cached viewer slice (`layer`), where
+    /// the backdrop and the playing picture are drawn by `QuillApp` around
+    /// it; otherwise (chat windows) the whole viewer inline. Takes
+    /// `&mut self` + `window` so the seek/volume sliders sync during
+    /// render.
+    pub(in crate::ui) fn media_viewer_panel(
         &mut self,
+        layered: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         // A deleted item leaves the viewer (next item, or closed).
         self.prune_deleted_viewer_items(cx);
         self.sync_shared_media_viewer(cx);
         self.sync_viewer_window_activity(window.is_window_active(), cx);
-        // MED1: keep the viewer seek/volume thumbs on the clocks (the
-        // tick has no `&mut Window`, which `SliderState::set_value`
-        // needs).
+        // MED1: keep the viewer seek/volume thumbs on the transport.
         self.sync_viewer_seek_slider(window, cx);
         self.sync_viewer_volume_slider(window, cx);
-        // Native playback draws a new frame every display refresh; a GIF
-        // loop only needs the shared frame clock.
-        let loops = self.viewer_loops();
-        if self
-            .viewer
-            .native
-            .as_mut()
-            .is_some_and(|video| video.is_playing())
-        {
-            if loops {
-                self.request_animation_tick(30, cx);
-            } else {
-                // Through the frame clock, not `request_animation_frame`
-                // (which redraws at the display refresh, 120 Hz on
-                // ProMotion, even behind other apps). The sound keeps
-                // playing in the background like tdesktop's, but the picture
-                // only needs a trickle there.
-                let fps = if self.frame.window_active.get() {
-                    60
-                } else {
-                    10
-                };
-                self.request_media_tick(fps, cx);
-            }
-        } else if loops
-            && !self.viewer.video_frames.is_empty()
-            && self
-                .viewer
-                .clock
-                .as_ref()
-                .is_some_and(|clock| clock.is_playing())
-        {
-            let fps = self.viewer.video_fps.round().clamp(1.0, 30.0) as u32;
-            self.request_animation_tick(fps, cx);
+        // The controls redraw when the transport changes (the player
+        // notifies the views drawing them, at most every 100 ms).
+        if let Some(player) = &self.viewer.player {
+            player.watch(window.current_view());
         }
         let item = self
             .viewer
@@ -96,18 +67,6 @@ impl QuillApp {
             .unwrap_or_default();
         let roots = self.media_display_roots();
         let thumb_path = viewer_display_path(&item, &files, &roots);
-        // Parity slice 5: when the clip's frames are extracted and decoded,
-        // the viewer shows the pre-loaded frame matching the playback clock
-        // — real in-viewer video (`ImageSource::Render` resolves
-        // synchronously, so the 125 ms tick animates without a per-frame
-        // async load). Otherwise it falls back to the thumbnail (or the
-        // loading status).
-        let frame: Option<Arc<RenderImage>> =
-            if item.kind.is_playable() && !self.viewer.video_frames.is_empty() {
-                self.viewer_oriented_frame()
-            } else {
-                None
-            };
         // Timed media can't be saved, copied or forwarded (tdesktop hides
         // Save and Share for `ttlSeconds`); its countdown shows in the
         // header and as a ring.
@@ -202,47 +161,24 @@ impl QuillApp {
         // inside it (object-fit contain). Scroll zooms (1×–8×, frame-center
         // kept) and drag pans when zoomed.
         let viewport = window.viewport_size();
-        let bottom_space = if item.caption.is_empty() { 72.0 } else { 104.0 };
-        let fit = (
-            (f32::from(viewport.width) - 2.0 * VIEWER_SIDE_LANE).max(240.0),
-            (f32::from(viewport.height) - VIEWER_TOP_BAR - bottom_space).max(200.0),
-        );
+        let geometry = self.viewer_geometry(&item, viewport);
+        let fit = geometry.fit;
         let frame_h = fit.1;
-        // The media's own box inside the frame: sized from its natural
-        // dimensions (axes swapped for a quarter turn) rather than trusting
-        // object-fit, so it can never spill out of the frame.
-        let natural = item.natural_size.map(|(w, h)| {
-            if self.viewer.orientation.swaps_axes() {
-                (h as f32, w as f32)
-            } else {
-                (w as f32, h as f32)
-            }
-        });
-        let (media_w, media_h) = natural
-            .map(|natural| quill::media_viewer::fit_within(natural, fit))
-            .unwrap_or(fit);
-        // Zoom and pan work in the media's own box.
-        if (media_w, media_h) != self.viewer.frame {
-            // A resized window (or another item) refits the media.
-            self.viewer.frame = (media_w, media_h);
-            self.viewer.zoom.reset();
-        }
+        let (media_w, media_h) = geometry.media;
         let zoom = self.viewer.zoom;
-        let (zoom_w, zoom_h) = (media_w * zoom.zoom, media_h * zoom.zoom);
-        let (pan_x, pan_y) = zoom.pan;
-        // The player's current frame (an AVPlayer GPU buffer on macOS, a
-        // decoded FFmpeg image on Linux and Windows).
-        let native_frame = item
-            .kind
-            .is_playable()
-            .then(|| {
-                let turns = self.viewer.orientation.turns;
-                self.viewer.native.as_mut().and_then(|video| {
-                    video.set_rotation(turns);
-                    video.frame()
+        let (zoom_w, zoom_h) = geometry.zoomed;
+        let (pan_x, pan_y) = geometry.pan;
+        // Chat windows draw the playing picture over the thumbnail here;
+        // the main window's video layer draws it above the panel.
+        let inline_video =
+            (!layered && item.kind.is_playable() && self.viewer.video == Some(item.message_id))
+                .then(|| {
+                    if let Some(player) = &self.viewer.player {
+                        player.set_orientation(self.viewer.orientation.turns, false);
+                    }
+                    self.viewer_inline_video()
                 })
-            })
-            .flatten();
+                .flatten();
         // A file that is not a picture (or too large to show as one) is a
         // card; a picture file decodes through `image_decode` (HEIC, AVIF,
         // JPEG XL, colour profiles), falling back to the card.
@@ -267,17 +203,9 @@ impl QuillApp {
                 .into_any_element()
         } else if let Some(hdr_frame) = hdr_frame {
             hdr_frame
-        } else if let Some(frame) = native_frame {
-            frame.element(
-                px(zoom_w),
-                px(zoom_h),
-                ObjectFit::Contain,
-                Corners::default(),
-            )
         } else {
-            // Pre-decoded video frame and thumbnail both render through
-            // `img`; the frame is an `ImageSource::Render` (synchronous),
-            // the thumbnail a path (async-loaded once, then cached). MED1:
+            // The thumbnail (under the playing picture) renders through
+            // `img` from its path (async-loaded once, then cached). MED1:
             // a rotated photo renders from the eagerly-decoded
             // `viewer_rotated` cache (90°/180°/270° clockwise).
             let rotated: Option<ImageSource> = item
@@ -290,16 +218,15 @@ impl QuillApp {
                         && Some(path.as_path()) == thumb_path.as_deref()
                 })
                 .map(|(_, _, image)| ImageSource::from(image.clone()));
-            let source: Option<ImageSource> =
-                frame.map(ImageSource::from).or(rotated).or_else(|| {
-                    thumb_path.as_deref().map(|path| {
-                        if item.kind == MediaViewerKind::ImageFile {
-                            crate::ui::image_budget::full_picture(path)
-                        } else {
-                            ImageSource::from(path.to_path_buf())
-                        }
-                    })
-                });
+            let source: Option<ImageSource> = rotated.or_else(|| {
+                thumb_path.as_deref().map(|path| {
+                    if item.kind == MediaViewerKind::ImageFile {
+                        crate::ui::image_budget::full_picture(path)
+                    } else {
+                        ImageSource::from(path.to_path_buf())
+                    }
+                })
+            });
             if let Some(source) = source {
                 img(source)
                     .id(("media-viewer-img", row_id))
@@ -367,6 +294,16 @@ impl QuillApp {
                     .into_any_element()
             }
         };
+        let content = match inline_video {
+            Some(video) => div()
+                .relative()
+                .w(px(zoom_w))
+                .h(px(zoom_h))
+                .child(content)
+                .child(div().absolute().inset_0().child(video))
+                .into_any_element(),
+            None => content,
+        };
         let visual = {
             let view = cx.entity().downgrade();
             let scroll_view = view.clone();
@@ -375,10 +312,7 @@ impl QuillApp {
             let up_view = view.clone();
             // Window position of the visual's top-left (it is centered in
             // the frame): wheel zoom keeps the point under the pointer.
-            let origin = (
-                (f32::from(viewport.width) - media_w) / 2.0,
-                VIEWER_TOP_BAR + (frame_h - media_h) / 2.0,
-            );
+            let origin = geometry.origin;
             let menu_view = view;
             let is_photo = item.kind.is_picture();
             let menu_protected = protected;
@@ -835,16 +769,12 @@ impl QuillApp {
         });
         let open_gen = self.viewer.open_gen as usize;
         let arrow_top = px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0);
-        div()
-            .id("media-viewer-overlay")
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            // Clicking anywhere outside the media and controls closes.
-            .child(
+        // Layered, the panel takes no clicks itself: the backdrop under it
+        // closes the viewer.
+        let root = if layered {
+            div().absolute().inset_0()
+        } else {
+            div().absolute().inset_0().child(
                 div()
                     .id("media-viewer-backdrop")
                     .occlude()
@@ -858,6 +788,8 @@ impl QuillApp {
                         this.close_media_viewer(cx);
                     })),
             )
+        };
+        let panel = root
             .child(fade_controls(top_bar, "viewer-top-fade", fade_gen, hidden))
             .child(
                 div()
@@ -947,13 +879,27 @@ impl QuillApp {
             ))
             .children(ttl_badge)
             .children(saved_toast)
-            // Fade the whole overlay in over 200 ms when it opens
-            // (tdesktop `mediaviewShowDuration`). Closing is instant: a
-            // fade-out would have to keep the closed viewer's state alive.
+            // Fade in over 200 ms when it opens (tdesktop
+            // `mediaviewShowDuration`). Closing is instant: a fade-out
+            // would have to keep the closed viewer's state alive.
             .with_animation(
-                ("media-viewer-fade-in", open_gen),
+                ("media-viewer-panel-fade-in", open_gen),
                 Animation::new(Duration::from_millis(VIEWER_SHOW_MS)),
-                |overlay, t| overlay.opacity(if still_frame() { 1.0 } else { t }),
-            )
+                |panel, t| panel.opacity(if still_frame() { 1.0 } else { t }),
+            );
+        if layered {
+            panel.into_any_element()
+        } else {
+            div()
+                .id("media-viewer-overlay")
+                .occlude()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .child(panel)
+                .into_any_element()
+        }
     }
 }

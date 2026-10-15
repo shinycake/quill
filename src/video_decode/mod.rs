@@ -18,6 +18,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod ffi;
+mod present;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -779,34 +780,6 @@ impl Player {
             self.clock.pause(now);
             self.ended = true;
         }
-    }
-
-    /// The picture to show now, when it changed since the last call.
-    pub fn take_frame(&mut self) -> Option<VideoFrame> {
-        let now = Instant::now();
-        // With sound, pull the wall clock back to it when they drifted
-        // apart (the sound is the master; the wall clock only smooths it).
-        if !self.clock.held && self.clock.is_playing() {
-            let wall = self.clock.position(now);
-            let synced = synced_position(wall, self.heard());
-            if synced != wall {
-                self.clock.follow(synced, now);
-            }
-        }
-        let position = self.position_at(now);
-        let picked = {
-            let mut state = lock(&self.shared.state);
-            take_due(&mut state.video, position, self.first)
-        };
-        if let Some(frame) = &picked {
-            self.shared.wake.notify_all();
-            if self.first {
-                self.first = false;
-                self.clock.release(now);
-            }
-            self.last_pts = Some(frame.pts);
-        }
-        picked
     }
 }
 

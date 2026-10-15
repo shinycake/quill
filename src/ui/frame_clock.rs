@@ -11,8 +11,11 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::video_player::pacing::{FrameRequest, request_policy};
 use gpui_kit::*;
-use std::time::Duration;
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 impl QuillApp {
     /// Ask for another frame within `1 / fps` seconds. Animated content
@@ -112,6 +115,88 @@ impl QuillApp {
             let _ = this.update(cx, |this, _| this.frame.frame_clock_running.set(false));
         })
         .detach();
+    }
+}
+
+/// What [`request_video_frame`] needs from the playing clip.
+pub(crate) struct VideoFrameAsk {
+    /// When the next picture becomes due (`None`: unknown, ask every frame).
+    pub(crate) next_due: Option<Instant>,
+    /// The display's frame interval as measured by the element.
+    pub(crate) interval: Duration,
+    /// How long before it is shown a frame starts drawing.
+    pub(crate) lead: Duration,
+    /// The clip plays with sound (keeps drawing behind another app).
+    pub(crate) plays_sound: bool,
+    /// Keep drawing while the window is inactive (a Picture-in-Picture
+    /// window rarely has focus).
+    pub(crate) keep_alive: bool,
+    /// Shared per player: a request is in flight since then, so several
+    /// draws in one frame ask once.
+    pub(crate) requested: Rc<Cell<Option<Instant>>>,
+}
+
+/// A request older than this is treated as lost (the window closed or the
+/// frame never came) and asked again.
+const VIDEO_REQUEST_LOST: Duration = Duration::from_millis(250);
+
+/// Ask for the frame that shows the next video picture, redrawing only
+/// `target` (the view holding the picture). A frame shows the picture it
+/// pulls `lead` after it starts drawing, so the frame for a picture due at
+/// `next_due` starts at `next_due - lead`: a one-shot timer wakes half an
+/// interval before that and asks for the next display frame. When that is
+/// already now, or the due time is unknown, the next display frame is
+/// asked for at once (`pacing::request_policy`). Unlike
+/// [`QuillApp::request_animation_tick`] it runs at the display's own rate,
+/// so the picture lands on the vsync it is due for (GPUI still caps an
+/// unfocused window at 30 frames a second unless its
+/// `inactive_frame_interval` is `None`, as Picture-in-Picture's is). Nothing is asked behind another app unless the clip has sound (or
+/// `keep_alive`), like the animation clock.
+pub(crate) fn request_video_frame(
+    target: EntityId,
+    ask: VideoFrameAsk,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let active = window.is_window_active() || assume_active();
+    if !tick_wanted(active, ask.plays_sound || ask.keep_alive) {
+        return;
+    }
+    let now = Instant::now();
+    if ask
+        .requested
+        .get()
+        .is_some_and(|at| now.saturating_duration_since(at) < VIDEO_REQUEST_LOST)
+    {
+        return;
+    }
+    ask.requested.set(Some(now));
+    let requested = ask.requested;
+    match request_policy(now, ask.next_due, ask.interval, ask.lead) {
+        FrameRequest::NextFrame => {
+            window.on_next_frame(move |_, cx| {
+                requested.set(None);
+                cx.notify(target);
+            });
+        }
+        FrameRequest::SleepUntil(wake) => {
+            let handle = window.window_handle();
+            let sleep = wake.saturating_duration_since(now);
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(sleep).await;
+                let asked = handle.update(cx, |_, window, _| {
+                    let requested = requested.clone();
+                    window.on_next_frame(move |_, cx| {
+                        requested.set(None);
+                        cx.notify(target);
+                    });
+                });
+                if asked.is_err() {
+                    requested.set(None);
+                }
+            })
+            .detach();
+        }
     }
 }
 

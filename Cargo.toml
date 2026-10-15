@@ -186,9 +186,9 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAl
 # Native video playback (AVPlayer → CVPixelBuffer → GPUI surface).
 objc2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSProcessInfo", "NSString", "NSURL", "NSDictionary", "NSValue", "NSObject", "NSError", "NSArray", "NSData", "NSGeometry", "NSAttributedString", "NSRange", "NSLocale", "NSTimer", "NSDate", "NSSet", "NSIndexSet", "NSEnumerator", "block2"] }
-objc2-av-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2-core-media", "objc2-core-video", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "AVTime", "AVMediaFormat", "AVCaptureDevice", "block2"] }
+objc2-av-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2-core-media", "objc2-core-video", "objc2-core-graphics", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "AVAssetImageGenerator", "AVAudioProcessingSettings", "AVTime", "AVMediaFormat", "AVCaptureDevice", "block2"] }
 block2 = { version = "0.6", optional = true }
-objc2-core-media = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CMTime"] }
+objc2-core-media = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CMTime", "CMTimeRange"] }
 objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn"] }
 core-video = { version = "0.5.2", optional = true }
 core-foundation = { version = "0.10.1", optional = true }

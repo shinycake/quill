@@ -610,3 +610,71 @@ fn pictures_pace_on_the_wall_clock_until_the_sound_drifts_away() {
     assert_eq!(synced_position(1.0, Some(0.9)), 0.9);
     assert_eq!(synced_position(1.0, Some(1.2)), 1.2);
 }
+
+#[test]
+fn a_picture_is_taken_for_the_moment_it_reaches_the_screen() {
+    let (mut player, _) = scripted_player(None, false, 4);
+    assert!(wait_until(|| player.take_frame().is_some()));
+    player.play();
+    // The queue holds 0.04, 0.08 and 0.12. Asked for a frame that shows
+    // 100 ms from now, the picture due then comes, not the one due now.
+    assert!(wait_until(|| player.next_due(Instant::now()).is_some()));
+    let present = Instant::now() + Duration::from_millis(100);
+    let picked = player.take_frame_at(present).map(|frame| frame.pts);
+    assert!(
+        picked.is_some_and(|pts| pts >= 0.08 - 1e-9),
+        "picked {picked:?}"
+    );
+}
+
+#[test]
+fn the_next_picture_is_due_one_frame_later_and_never_while_paused() {
+    let (mut player, _) = scripted_player(None, false, 4);
+    assert!(wait_until(|| player.take_frame().is_some()));
+    // Paused: no due time.
+    assert!(player.next_due(Instant::now()).is_none());
+    player.play();
+    let mut due = None;
+    assert!(wait_until(|| {
+        due = player.next_due(Instant::now());
+        due.is_some()
+    }));
+    let now = Instant::now();
+    let ahead = due.map(|due| due.saturating_duration_since(now));
+    // The 0.04 picture, minus the decoder's slack: at most one 25 fps
+    // frame away (and never past the 250 ms cap).
+    assert!(
+        ahead.is_some_and(|ahead| ahead <= Duration::from_millis(40)),
+        "{ahead:?}"
+    );
+    player.pause();
+    assert!(player.next_due(Instant::now()).is_none());
+}
+
+#[test]
+fn frame_steps_move_one_picture_while_paused() {
+    let (mut player, _) = scripted_player(Some(250), false, 4);
+    assert!(wait_until(|| player.take_frame().is_some()));
+    let mut stepped = None;
+    assert!(wait_until(|| {
+        stepped = player.step_forward();
+        stepped.is_some()
+    }));
+    assert_eq!(stepped.map(|frame| frame.pts), Some(0.04));
+    assert!(
+        (player.position() - 0.04).abs() < 1e-9,
+        "{}",
+        player.position()
+    );
+    // Back from 0.04: a seek to just before it, so 0.0 shows next.
+    player.step_back();
+    let mut back = None;
+    assert!(wait_until(|| {
+        back = player.take_frame();
+        back.is_some()
+    }));
+    assert_eq!(back.map(|frame| frame.pts), Some(0.0));
+    // Playing: steps do nothing.
+    player.play();
+    assert!(player.step_forward().is_none());
+}

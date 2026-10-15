@@ -1,31 +1,20 @@
-//! In-viewer video: autoplay, frame extraction and decoding, native
-//! playback, the audio track and the system media session.
+//! In-viewer video: autoplay on the video player core
+//! (`video_player`), the system media session, and the decoded-frame
+//! helpers shared with inline playback and calls.
 
 use super::*;
-use quill::locks::LockExt;
 
 impl QuillApp {
     /// Start viewer playback when the current item is a video whose clip is
     /// local; otherwise trigger `downloadFile` for the clip and park the
     /// request in `viewer_pending_play` (resumed from the poll loop).
-    ///
-    /// Parity slice 5: the clip's frames are extracted (async — ffmpeg takes
-    /// ~2 s for a 12 s clip), decoded into pre-loaded image handles, and
-    /// rendered in-viewer; the audio engine plays the sound. If frames
-    /// are already cached for this file (e.g. the screenshot demo decoded
-    /// them synchronously), playback starts at once. Every start path
-    /// routes through `decide_viewer_video_start` so a local clip without
-    /// cached frames always goes through extraction — never straight to
-    /// playback with an empty frame cache.
     pub(in crate::ui) fn maybe_autoplay_viewer_video(&mut self, cx: &mut Context<Self>) {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
         let path = self.viewer_clip_path(&item);
-        let frames_ready =
-            self.viewer.frame_cache_file == Some(file_id) && !self.viewer.video_frames.is_empty();
-        match decide_viewer_video_start(&item, path.is_some(), frames_ready) {
+        // The player opens the file itself: there are no frames to wait for.
+        match decide_viewer_video_start(&item, path.is_some(), true) {
             ViewerVideoStart::Nothing => {}
             ViewerVideoStart::ParkDownload => {
                 if let Some(play_id) = item.play_file_id {
@@ -33,52 +22,38 @@ impl QuillApp {
                     self.request_media_download(play_id, None, cx);
                 }
             }
-            ViewerVideoStart::PlayNow | ViewerVideoStart::ExtractFrames
-                if Self::viewer_uses_native(&item, path.as_deref())
-                    && !self.viewer.demo_sync_frames =>
-            {
+            ViewerVideoStart::PlayNow | ViewerVideoStart::ExtractFrames => {
                 self.viewer.pending_play = None;
-                // `decide_viewer_video_start` only plays or extracts a local clip.
-                let Some(path) = path else {
-                    return;
-                };
-                self.play_native_viewer_video(&item, &path, cx);
-            }
-            ViewerVideoStart::PlayNow => {
-                self.viewer.pending_play = None;
-                // `decide_viewer_video_start` only plays or extracts a local clip.
+                // `decide_viewer_video_start` only plays a local clip.
                 let Some(path) = path else {
                     return;
                 };
                 self.play_viewer_video(&item, &path, cx);
             }
-            ViewerVideoStart::ExtractFrames => {
-                self.viewer.pending_play = None;
-                // The screenshot demo extracts + decodes frames synchronously
-                // itself; don't start a redundant background extraction.
-                if self.viewer.demo_sync_frames {
-                    return;
-                }
-                // `decide_viewer_video_start` only plays or extracts a local clip.
-                let Some(path) = path else {
-                    return;
-                };
-                self.extract_viewer_frames(&item, &path, cx);
-            }
         }
     }
 
-    /// Whether the native player (macOS AVPlayer) takes this clip. `.gif`
-    /// files are not a video format for it, so they use the ffmpeg frames.
-    fn viewer_uses_native(item: &MediaViewerItem, path: Option<&std::path::Path>) -> bool {
-        let is_gif_file = item
-            .mime_type
+    /// A `.gif` file (not a GIF animation sent as MP4).
+    fn viewer_is_gif_file(item: &MediaViewerItem, path: &std::path::Path) -> bool {
+        item.mime_type
             .as_deref()
             .is_some_and(|mime| mime.eq_ignore_ascii_case("image/gif"))
             || path
-                .and_then(|path| path.extension())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
-        crate::ui::native_video::supported() && !(item.kind.loops() && is_gif_file)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"))
+    }
+
+    /// The viewer clip's transport, while one is open.
+    pub(in crate::ui) fn viewer_transport(&self) -> Option<crate::ui::video_player::Transport> {
+        self.viewer.player.as_ref().map(|player| player.transport())
+    }
+
+    /// The viewer clip plays (or is about to): a GIF image always does.
+    pub(in crate::ui) fn viewer_video_playing(&self) -> bool {
+        self.viewer.gif.is_some()
+            || self
+                .viewer_transport()
+                .is_some_and(|transport| transport.is_playing())
     }
 
     /// The current item is a GIF: loops, no sound, no transport.
@@ -203,171 +178,6 @@ impl QuillApp {
         crate::ui::image_budget::retire_all(images);
     }
 
-    /// Kill a running viewer frame extraction (ffmpeg child), if any, and
-    /// invalidate its completion. Called on viewer close/step and before a
-    /// fresh extraction starts, so an abandoned extraction can't run to
-    /// completion on a discarded cache dir.
-    pub(in crate::ui) fn kill_viewer_extraction(&mut self) {
-        // Signal cancellation first: the worker checks this before spawning
-        // and right after publishing the child, so a kill that lands before
-        // ffmpeg publishes still aborts the run instead of orphaning it.
-        if let Some(cancel) = self.viewer.extract_cancel.take() {
-            cancel.store(true, Ordering::SeqCst);
-        }
-        if let Some(slot) = self.viewer.extract_child.take() {
-            // Take the child out of the lock before kill/wait: the worker
-            // only holds the lock briefly around `try_wait`.
-            let child = slot.lock_or_recover().take();
-            drop(slot);
-            if let Some(mut child) = child {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-        self.viewer.extract_epoch = self.viewer.extract_epoch.wrapping_add(1);
-    }
-
-    /// Extract the clip's frames on a background thread, decode them into
-    /// pre-loaded image handles, then start playback if the viewer is still
-    /// on the same item. The thumbnail stays visible with a loading hint
-    /// meanwhile. The ffmpeg child is published so close/step can kill it;
-    /// a completion from a killed or superseded run is dropped by epoch.
-    pub(in crate::ui) fn extract_viewer_frames(
-        &mut self,
-        item: &MediaViewerItem,
-        path: &std::path::Path,
-        cx: &mut Context<Self>,
-    ) {
-        let file_id = item.play_file_id.map(|id| id.0).unwrap_or(0);
-        if self
-            .viewer
-            .frame_cache_file
-            .is_some_and(|cached| cached != file_id)
-            && let Some(old) = self.viewer.frame_cache_file.take()
-        {
-            quill::video::discard_viewer_frame_cache(old);
-        }
-        self.viewer.frame_cache_file = Some(file_id);
-        crate::ui::image_budget::retire_all(self.viewer.video_frames.drain(..));
-        self.viewer.extracting = true;
-        // A step between two videos goes through `stop_viewer_video` first,
-        // but cancel explicitly anyway: a fresh run must not share the
-        // previous run's slot or epoch.
-        self.kill_viewer_extraction();
-        let epoch = self.viewer.extract_epoch;
-        let slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
-        self.viewer.extract_child = Some(slot.clone());
-        let cancel: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-        self.viewer.extract_cancel = Some(cancel.clone());
-        cx.notify();
-
-        let cache = quill::video::viewer_frame_cache_dir(file_id);
-        let mime = item.mime_type.clone().unwrap_or_default();
-        let duration = item.duration_secs.unwrap_or(0);
-        let start_timestamp = item.start_timestamp.unwrap_or(0);
-        let message_id = item.message_id;
-        let looping = item.kind.loops();
-        let path = path.to_path_buf();
-        let item = item.clone();
-        let extract_path = path.clone();
-        let task_slot = slot.clone();
-        let task_cancel = cancel.clone();
-        #[allow(clippy::let_underscore_future)]
-        let _ = cx.spawn(async move |this, cx| {
-            let extracted = cx
-                .background_executor()
-                .spawn(async move {
-                    let frames = if looping {
-                        quill::animation::viewer_loop_frames_cancelable(
-                            &extract_path,
-                            &mime,
-                            &cache,
-                            &task_slot,
-                            &task_cancel,
-                        )?
-                    } else {
-                        quill::video::viewer_playback_frames_cancelable(
-                            &extract_path,
-                            &mime,
-                            &cache,
-                            start_timestamp,
-                            duration,
-                            &task_slot,
-                            &task_cancel,
-                        )?
-                    };
-                    // Decode on the background thread: the render path needs
-                    // pre-loaded handles, and decoding up to 600 PNGs must
-                    // not block the UI thread.
-                    let decoded = Self::decode_viewer_frames(&frames.frames)?;
-                    Ok::<_, String>((decoded, frames.fps))
-                })
-                .await;
-            this.update(cx, |this, cx| {
-                // Stale completion (viewer closed/stepped, or a newer
-                // extraction started): drop silently — no error note, no
-                // playback, and crucially don't clear a newer run's
-                // loading state.
-                if this.viewer.extract_epoch != epoch {
-                    return;
-                }
-                this.viewer.extracting = false;
-                // Drop the slot only if it's still ours (`stop_viewer_video`
-                // may have taken it to kill the child).
-                if this
-                    .viewer
-                    .extract_child
-                    .as_ref()
-                    .is_some_and(|current| Arc::ptr_eq(current, &slot))
-                {
-                    this.viewer.extract_child = None;
-                }
-                let still_current = this
-                    .viewer
-                    .state
-                    .current()
-                    .is_some_and(|current| current.message_id == message_id);
-                if !still_current {
-                    return;
-                }
-                match extracted {
-                    Ok((decoded, fps)) => {
-                        // The screenshot demo extracts + decodes synchronously
-                        // and starts playback itself; don't restart it when the
-                        // background extraction lands.
-                        let already_playing = this.viewer.video == Some(message_id)
-                            && !this.viewer.video_frames.is_empty();
-                        if !already_playing {
-                            this.viewer.video_frames = decoded;
-                            this.viewer.video_fps = fps;
-                            this.play_viewer_video(&item, &path, cx);
-                        }
-                    }
-                    Err(err) => {
-                        this.viewer.video_frames.clear();
-                        // MED1: TGX distinguishes unsupported formats
-                        // (`VideoPlaybackUnsupported`) from generic
-                        // playback failures (`VideoPlaybackError`).
-                        let noun = if item.kind.loops() {
-                            "animation"
-                        } else {
-                            "video"
-                        };
-                        let message = if err.starts_with("unsupported") {
-                            format!("{noun} format not supported")
-                        } else {
-                            format!("couldn't play this {noun}")
-                        };
-                        this.connection.status_note = message.clone();
-                        this.playback.error = Some(message);
-                    }
-                }
-                cx.notify();
-            })
-            .ok();
-        });
-    }
-
     /// Resume a parked viewer play once `downloadFile` lands the clip.
     /// Routes through `maybe_autoplay_viewer_video`: it re-derives the
     /// current item, clears the pending flag, and either reuses cached
@@ -400,51 +210,72 @@ impl QuillApp {
         self.maybe_autoplay_viewer_video(cx);
     }
 
-    /// Begin (or restart) viewer playback of `item`'s clip from offset 0.
-    /// Stops every other player first — one thing plays at a time.
-    /// Frames must already be in `viewer_video_frames` (extracted async by
-    /// `extract_viewer_frames`, or synchronously by the screenshot demo).
-    /// State only: the caller starts the audio (the screenshot demo skips the
-    /// subprocess, like the audio slice's demo).
-    pub(in crate::ui) fn begin_viewer_video(
+    /// Play `item`'s clip in the viewer from its start (or the second a
+    /// media-timestamp link asked for). Stops every other player first —
+    /// one thing plays at a time. GIFs loop silently with no transport.
+    pub(in crate::ui) fn play_viewer_video(
         &mut self,
         item: &MediaViewerItem,
         path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
+        use crate::ui::video_player::{Purpose, VideoPlayer};
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_video_playback();
         self.stop_animation_playback();
+        self.viewer.player = None;
+        self.viewer.gif = None;
         let looping = item.kind.loops();
-        let mut duration = item.duration_secs.unwrap_or(0).max(0) as f64;
-        // A loop wraps at the end of its frames, not at TDLib's rounded
-        // duration.
-        if looping && !self.viewer.video_frames.is_empty() && self.viewer.video_fps > 0.0 {
-            duration = self.viewer.video_frames.len() as f64 / self.viewer.video_fps;
-        }
-        let mut clock = PlaybackClock::new(duration);
-        if !looping {
-            clock.set_rate(self.playback.speed);
-        }
+        let duration = item.duration_secs.unwrap_or(0).max(0) as f64;
         // A media-timestamp link opened this clip at a given second.
         let start = self
             .viewer
             .pending_seek
             .take_if(|(id, _)| *id == item.message_id)
-            .map_or(0.0, |(_, secs)| secs.clamp(0.0, duration));
-        clock.seek(start);
-        clock.resume();
-        self.viewer.clock = Some(clock);
+            .map_or(0.0, |(_, secs)| secs.max(0.0));
         self.viewer.video = Some(item.message_id);
         self.viewer.video_path = Some(path.to_path_buf());
         self.playback.error = None;
-        if looping {
-            // No transport, no sound: nothing to scrub or mute.
-            self.spawn_viewer_tick(cx);
+        if looping
+            && Self::viewer_is_gif_file(item, path)
+            && !crate::ui::video_player::plays_gif_files()
+        {
+            self.viewer.gif = Some(path.to_path_buf());
             cx.notify();
             return;
         }
+        let hint = (duration > 0.0).then_some(duration);
+        let player = match VideoPlayer::open(path, Purpose::Viewer, hint, cx) {
+            Ok(player) => player,
+            Err(err) => {
+                self.stop_viewer_video();
+                self.playback.error = Some(viewer_error_message(item, &err));
+                cx.notify();
+                return;
+            }
+        };
+        if looping {
+            player.set_looping(true);
+            player.set_volume(0.0);
+        } else {
+            player.set_volume(self.playback.volume);
+            player.set_rate(self.playback.speed);
+        }
+        if start > 0.0 {
+            player.seek(start);
+        }
+        player.play();
+        self.viewer.player = Some(player);
+        if !looping {
+            self.create_viewer_sliders(duration, cx);
+        }
+        self.spawn_viewer_session_tick(cx);
+        cx.notify();
+    }
+
+    /// MED1: the seek and volume sliders of the player panel.
+    fn create_viewer_sliders(&mut self, duration: f64, cx: &mut Context<Self>) {
         // MED1: viewer seek slider (the history-row seek bar pattern).
         let slider = cx.new(|_| {
             SliderState::new()
@@ -457,8 +288,7 @@ impl QuillApp {
         })
         .detach();
         self.viewer.seek_slider = Some(slider);
-        // MED1: volume slider (0–100%); applies on release so a drag
-        // doesn't restart the sound per tick.
+        // MED1: volume slider (0–100%); applies on release.
         let volume = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -470,148 +300,31 @@ impl QuillApp {
         })
         .detach();
         self.viewer.volume_slider = Some(volume);
-        self.spawn_viewer_tick(cx);
-        cx.notify();
     }
 
-    /// Begin viewer playback *and* start the audio — unless this
-    /// is a screenshot demo, which skips the subprocess (same posture as
-    /// `request_media_download`'s demo branch).
-    pub(in crate::ui) fn play_viewer_video(
-        &mut self,
-        item: &MediaViewerItem,
-        path: &std::path::Path,
-        cx: &mut Context<Self>,
-    ) {
-        self.begin_viewer_video(item, path, cx);
-        // GIFs are silent: no audio player.
-        if self.demo_session.is_none() && !item.kind.loops() {
-            let start = self.viewer.clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
-            self.start_viewer_audio(path, start);
-        }
-    }
-
-    /// Play the viewer clip with the native player: real-time hardware
-    /// decode with its own audio, drawn frame by frame (no extraction).
-    pub(in crate::ui) fn play_native_viewer_video(
-        &mut self,
-        item: &MediaViewerItem,
-        path: &std::path::Path,
-        cx: &mut Context<Self>,
-    ) {
-        self.begin_viewer_video(item, path, cx);
-        match crate::ui::native_video::NativeVideo::open(
-            path,
-            crate::ui::native_video::Purpose::Viewer,
-        ) {
-            Ok(mut video) => {
-                if item.kind.loops() {
-                    video.set_volume(0.0);
-                    video.play();
-                } else {
-                    video.set_volume(self.playback.volume);
-                    video.play();
-                    video.set_rate(self.playback.speed as f32);
-                }
-                let start = self.viewer.clock.as_ref().map_or(0.0, |c| c.elapsed_secs());
-                if start > 0.0 {
-                    video.seek(start);
-                }
-                self.viewer.native = Some(video);
-            }
-            Err(err) => {
-                self.stop_viewer_video();
-                self.playback.error = Some(err);
-            }
-        }
-        cx.notify();
-    }
-
-    /// Play the viewer clip's soundtrack in-process (MP4/AAC and friends
-    /// decode in the same engine as voice notes). The video frames render
-    /// in-viewer from `viewer_video_frames`; this only supplies the sound.
-    /// A clip with no decodable audio just plays silently, with the error
-    /// shown on the transport.
-    pub(in crate::ui) fn start_viewer_audio(
-        &mut self,
-        path: &std::path::Path,
-        offset_secs: f64,
-    ) -> bool {
-        match self
-            .viewer
-            .audio
-            .start(path, offset_secs, self.playback.volume, self.playback.speed)
-        {
-            Ok(()) => {
-                self.playback.error = None;
-                true
-            }
-            Err(err) => {
-                self.playback.error = Some(err.to_string());
-                false
-            }
-        }
-    }
-
-    pub(in crate::ui) fn kill_viewer_player(&mut self) {
-        self.viewer.audio.stop();
-    }
-
-    /// Pause: freeze the clock, stop the sound, keep the item active so the
-    /// controls stay and Play resumes from the frozen offset.
+    /// Pause, keeping the item active so the controls stay and Play
+    /// resumes where it stopped.
     pub(in crate::ui) fn pause_viewer_video(&mut self, cx: &mut Context<Self>) {
-        if let Some(clock) = self.viewer.clock.as_mut() {
-            clock.pause();
+        if let Some(player) = &self.viewer.player {
+            player.pause();
         }
-        if let Some(video) = self.viewer.native.as_mut() {
-            video.pause();
-        }
-        self.kill_viewer_player();
         cx.notify();
     }
 
-    /// Resume from the frozen clock position.
+    /// Resume where it paused (from the start once it ended).
     pub(in crate::ui) fn resume_viewer_video(&mut self, cx: &mut Context<Self>) {
-        let loops = self.viewer_loops();
-        if let Some(video) = self.viewer.native.as_mut() {
-            video.play();
-            if !loops {
-                video.set_rate(self.playback.speed as f32);
-            }
-            if let Some(clock) = self.viewer.clock.as_mut() {
-                clock.seek(video.position_secs());
-                clock.resume();
-            }
-            cx.notify();
-            return;
-        }
-        let offset = self.viewer.clock.as_ref().map(|c| c.elapsed_secs());
-        let path = self.viewer.video_path.clone();
-        match (offset, path) {
-            (Some(offset), Some(path)) => {
-                if !loops {
-                    self.start_viewer_audio(&path, offset);
-                }
-                if let Some(clock) = self.viewer.clock.as_mut() {
-                    clock.resume();
-                }
-            }
-            _ => self.stop_viewer_video(),
+        match &self.viewer.player {
+            Some(player) => player.play(),
+            None if self.viewer.gif.is_some() => {}
+            None => self.stop_viewer_video(),
         }
         cx.notify();
     }
 
     /// The viewer Play/Pause button: playing → pause, paused → resume,
-    /// never-started → begin from 0 (the clip is local here). The
-    /// never-started path routes through `maybe_autoplay_viewer_video` so a
-    /// local clip without extracted frames goes through async extraction
-    /// instead of playing with an empty frame cache.
+    /// never-started → begin from 0 (through `maybe_autoplay_viewer_video`).
     pub(in crate::ui) fn toggle_viewer_video(&mut self, cx: &mut Context<Self>) {
-        let playing = self
-            .viewer
-            .clock
-            .as_ref()
-            .is_some_and(|clock| clock.is_playing());
+        let playing = self.viewer_video_playing();
         if self.viewer.video.is_none() {
             self.maybe_autoplay_viewer_video(cx);
             return;
@@ -636,12 +349,10 @@ impl QuillApp {
         if item.kind != MediaViewerKind::Video {
             return;
         }
-        let (playing, duration) = self
-            .viewer
-            .clock
-            .as_ref()
-            .map(|clock| (clock.is_playing(), clock.duration_secs()))
-            .unwrap_or((false, 0.0));
+        let Some(transport) = self.viewer_transport() else {
+            return;
+        };
+        let (playing, duration) = (transport.is_playing(), transport.total());
         for command in quill::media_session::take_commands() {
             match viewer_media_action(command, playing, duration) {
                 Some(ViewerMediaAction::Toggle) => self.toggle_viewer_video(cx),
@@ -655,7 +366,7 @@ impl QuillApp {
                 None => {}
             }
         }
-        let Some(clock) = self.viewer.clock.as_ref() else {
+        let Some(transport) = self.viewer_transport() else {
             return;
         };
         let (sender, chat) = self.viewer_sender_line(&item).map_or_else(
@@ -672,36 +383,46 @@ impl QuillApp {
         let info = viewer_now_playing(
             &sender,
             &chat,
-            clock.duration_secs(),
-            clock.elapsed_secs(),
-            clock.is_playing(),
+            transport.total(),
+            transport.position,
+            transport.is_playing(),
             self.playback.speed,
         );
         quill::media_session::publish(Some(&info));
     }
 
-    /// Full stop: stop the sound and any running frame extraction, and clear
-    /// all viewer-video state. Called on viewer close/step and when any
-    /// other player starts.
+    /// Full stop: drop the player and clear all viewer-video state.
+    /// Called on viewer close/step and when any other player starts.
     pub(in crate::ui) fn stop_viewer_video(&mut self) {
         self.viewer.pip_window = None;
-        self.viewer.native = None;
-        self.kill_viewer_player();
-        self.kill_viewer_extraction();
+        self.viewer.player = None;
+        self.viewer.gif = None;
         self.viewer.video = None;
         self.viewer.video_path = None;
-        self.viewer.clock = None;
         self.viewer.pending_play = None;
-        crate::ui::image_budget::retire_all(self.viewer.video_frames.drain(..));
-        self.viewer.extracting = false;
         self.viewer.seek_slider = None;
         self.viewer.seek_scrubbing = false;
         self.viewer.seek_preview_secs = None;
         self.viewer.volume_slider = None;
         self.viewer.volume_scrubbing = false;
-        if let Some(cached) = self.viewer.frame_cache_file.take() {
-            quill::video::discard_viewer_frame_cache(cached);
-        }
+    }
+}
+
+/// What the viewer says when a clip can't play (TGX distinguishes an
+/// unsupported format from other failures).
+pub(super) fn viewer_error_message(
+    item: &MediaViewerItem,
+    error: &crate::ui::video_player::PlayerError,
+) -> String {
+    use crate::ui::video_player::ErrorKind;
+    let noun = if item.kind.loops() {
+        "animation"
+    } else {
+        "video"
+    };
+    match error.kind {
+        ErrorKind::Unsupported => format!("{noun} format not supported"),
+        ErrorKind::Open | ErrorKind::Decode => format!("couldn't play this {noun}"),
     }
 }
 

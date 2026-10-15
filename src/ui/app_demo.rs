@@ -324,7 +324,7 @@ impl QuillApp {
             gift_market: super::gift_market_state::GiftMarketUi::new(),
             paid_reaction: super::paid_reaction_state::PaidReactionUi::new(),
             pending_deep_link: None,
-            viewer: super::viewer_state::ViewerUi::new(&audio_output),
+            viewer: super::viewer_state::ViewerUi::new(),
             mini_apps: Default::default(),
             folders: super::folders_state::FolderUi::new(),
             windows: super::chat_window::ChatWindows::new(cx),

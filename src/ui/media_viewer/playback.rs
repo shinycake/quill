@@ -1,5 +1,5 @@
 //! MED1: viewer seek, keyboard, full screen, speed and volume, media
-//! preferences, the viewer tick, and zoom/pan.
+//! preferences, the media-session tick, and zoom/pan.
 
 use super::*;
 
@@ -26,48 +26,30 @@ impl QuillApp {
         }
     }
 
-    /// MED1: apply a finished viewer seek. Seeking while paused just moves
-    /// the frozen clock; while playing, the sound restarts at the offset.
+    /// MED1: apply a finished viewer seek (paused or playing; the player
+    /// keeps its sound in step).
     pub(in crate::ui) fn seek_viewer_to(&mut self, secs: f64, cx: &mut Context<Self>) {
-        let Some(clock) = self.viewer.clock.as_mut() else {
+        let Some(player) = &self.viewer.player else {
             return;
         };
-        clock.seek(secs);
-        let offset = clock.elapsed_secs();
-        if let Some(video) = self.viewer.native.as_mut() {
-            video.seek(offset);
-            cx.notify();
-            return;
-        }
-        if clock.is_playing()
-            && !self.viewer_loops()
-            && let Some(path) = self.viewer.video_path.clone()
-        {
-            self.start_viewer_audio(&path, offset);
-        }
+        player.seek(secs);
         cx.notify();
     }
 
     /// `J` / `L` and the full-screen arrows: seek `delta_secs` from the
     /// playhead, inside the clip.
     pub(in crate::ui) fn seek_viewer_by(&mut self, delta_secs: f64, cx: &mut Context<Self>) {
-        let Some(clock) = self.viewer.clock.as_ref() else {
+        let Some(transport) = self.viewer_transport() else {
             return;
         };
-        let position = self
-            .viewer
-            .native
-            .as_ref()
-            .map(|video| video.position_secs())
-            .unwrap_or_else(|| clock.elapsed_secs());
-        let target = seek_target_secs(position, clock.duration_secs(), delta_secs);
+        let target = seek_target_secs(transport.position, transport.total(), delta_secs);
         self.seek_viewer_to(target, cx);
     }
 
     /// Full-screen digits: jump to `fraction` of the clip.
     fn seek_viewer_to_fraction(&mut self, fraction: f64, cx: &mut Context<Self>) {
-        if let Some(clock) = self.viewer.clock.as_ref() {
-            let target = clock.duration_secs() * fraction.clamp(0.0, 1.0);
+        if let Some(transport) = self.viewer_transport() {
+            let target = transport.total() * fraction.clamp(0.0, 1.0);
             self.seek_viewer_to(target, cx);
         }
     }
@@ -143,14 +125,10 @@ impl QuillApp {
     /// Looping clips play only while the window is active (tdesktop pauses
     /// them in the background): pause on deactivation, resume on return.
     pub(super) fn sync_viewer_window_activity(&mut self, active: bool, cx: &mut Context<Self>) {
-        if !self.viewer_loops() || self.viewer.video.is_none() {
+        if !self.viewer_loops() || self.viewer.player.is_none() {
             return;
         }
-        let playing = self
-            .viewer
-            .clock
-            .as_ref()
-            .is_some_and(|clock| clock.is_playing());
+        let playing = self.viewer_video_playing();
         if !active && playing {
             self.viewer.extra.inactive_paused = true;
             self.pause_viewer_video(cx);
@@ -189,10 +167,10 @@ impl QuillApp {
         if self.viewer.seek_scrubbing {
             return;
         }
-        if let (Some(slider), Some(clock)) =
-            (self.viewer.seek_slider.as_ref(), self.viewer.clock.as_ref())
+        if let (Some(slider), Some(transport)) =
+            (self.viewer.seek_slider.as_ref(), self.viewer_transport())
         {
-            let value = clock.elapsed_secs().clamp(0.0, clock.duration_secs()) as f32;
+            let value = transport.position.clamp(0.0, transport.total()) as f32;
             let changed = slider.read(cx).value() != SliderValue::Single(value);
             if changed {
                 slider.update(cx, |state, cx| {
@@ -271,20 +249,9 @@ impl QuillApp {
             self.playback.audio.set_speed(next);
             restarted = was_playing;
         }
-        if let Some(video) = self.viewer.native.as_mut() {
-            video.set_rate(next as f32);
-            if let Some(clock) = self.viewer.clock.as_mut() {
-                clock.set_rate(next);
-            }
+        if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
+            player.set_rate(next);
             restarted = true;
-        } else if let Some(clock) = self.viewer.clock.as_mut() {
-            let offset = clock.elapsed_secs();
-            let was_playing = clock.is_playing();
-            clock.set_rate(next);
-            if was_playing && let Some(path) = self.viewer.video_path.clone() {
-                self.start_viewer_audio(&path, offset);
-                restarted = true;
-            }
         }
         if !restarted {
             // Nothing playing: the speed applies to the next play.
@@ -417,18 +384,8 @@ impl QuillApp {
     pub(in crate::ui) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         self.playback.volume = volume.clamp(0.0, 1.0);
         self.playback.audio.set_volume(self.playback.volume);
-        if let Some(video) = self.viewer.native.as_mut() {
-            video.set_volume(self.playback.volume);
-        } else if self.viewer.clock.as_ref().is_some_and(|c| c.is_playing())
-            && let Some(path) = self.viewer.video_path.clone()
-        {
-            let offset = self
-                .viewer
-                .clock
-                .as_ref()
-                .map(|c| c.elapsed_secs())
-                .unwrap_or(0.0);
-            self.start_viewer_audio(&path, offset);
+        if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
+            player.set_volume(self.playback.volume);
         }
         cx.notify();
     }
@@ -500,84 +457,41 @@ impl QuillApp {
         );
     }
 
-    /// 125 ms tick while a viewer clip is active: re-renders so the
-    /// elapsed/total label advances and the in-viewer frame animates
-    /// (8 fps frames need a sub-250 ms refresh); auto-stops when the clock
-    /// reaches the duration (the sound ends on its own).
-    pub(in crate::ui) fn spawn_viewer_tick(&mut self, cx: &mut Context<Self>) {
-        if self.viewer.tick {
+    /// While a viewer clip is open: media keys and the OS Now Playing
+    /// widget, and the player's error once it fails. The picture and the
+    /// controls redraw themselves (`video_player`), so this never redraws
+    /// the window on its own.
+    pub(in crate::ui) fn spawn_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
+        if self.viewer.session_tick {
             return;
         }
-        self.viewer.tick = true;
+        self.viewer.session_tick = true;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(125))
+                    .timer(Duration::from_millis(250))
                     .await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        let active = this.viewer.video.is_some();
-                        if !active {
+                        if this.viewer.player.is_none() {
                             if this.active_playback_id().is_none() {
                                 quill::media_session::publish(None);
                             }
                             return false;
                         }
                         this.drive_viewer_media_session(cx);
-                        if this.viewer.video.is_none() {
-                            return false;
-                        }
-                        // The native player owns time: the clock mirrors
-                        // its position, and its end pauses (the last frame
-                        // stays; Play starts over).
-                        if let Some(video) = this.viewer.native.as_mut() {
-                            let playing = video.is_playing();
-                            let position = video.position_secs();
-                            if let Some(error) = video.error() {
-                                this.playback.error = Some(error);
-                            }
-                            let looping = this.viewer_loops();
-                            if let Some(clock) = this.viewer.clock.as_mut() {
-                                clock.seek(position);
-                                if !playing && clock.is_playing() {
-                                    if looping {
-                                        // The clip ended: start over.
-                                        clock.seek(0.0);
-                                    } else {
-                                        clock.pause();
-                                    }
-                                }
-                            }
-                            if looping
-                                && !playing
-                                && this.viewer.clock.as_ref().is_some_and(|c| c.is_playing())
-                                && let Some(video) = this.viewer.native.as_mut()
-                            {
-                                video.seek(0.0);
-                                video.play();
-                            }
-                            cx.notify();
-                            return true;
-                        }
-                        let finished = this
+                        let failed = this
                             .viewer
-                            .clock
+                            .player
                             .as_ref()
-                            .is_some_and(|clock| clock.is_playing() && clock.finished());
-                        if finished && this.viewer_loops() {
-                            if let Some(clock) = this.viewer.clock.as_mut() {
-                                clock.seek(0.0);
-                            }
+                            .and_then(|player| player.take_error());
+                        if let Some(error) = failed
+                            && let Some(item) = this.viewer.state.current()
+                        {
+                            this.playback.error = Some(video::viewer_error_message(item, &error));
                             cx.notify();
-                            return true;
                         }
-                        if finished {
-                            this.stop_viewer_video();
-                            cx.notify();
-                            return false;
-                        }
-                        cx.notify();
-                        true
+                        this.viewer.player.is_some()
                     })
                     .unwrap_or(false);
                 if !cont {
@@ -585,7 +499,7 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.viewer.tick = false;
+                this.viewer.session_tick = false;
             });
         })
         .detach();

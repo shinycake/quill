@@ -77,12 +77,12 @@ impl QuillApp {
         Some(match item.kind {
             MediaViewerKind::Photo => ViewerBar::Photo,
             kind if kind.is_playable() => {
-                let clock = self.viewer.clock.as_ref();
+                let transport = self.viewer_transport();
                 ViewerBar::Video {
-                    playing: clock.is_some_and(|clock| clock.is_playing()),
+                    playing: self.viewer_video_playing(),
                     fullscreen: self.viewer.extra.video_fullscreen,
-                    position: clock.map_or(0., |clock| clock.elapsed_secs()),
-                    duration: clock.map_or(0., |clock| clock.duration_secs()),
+                    position: transport.as_ref().map_or(0., |t| t.position),
+                    duration: transport.as_ref().map_or(0., |t| t.total()),
                 }
             }
             _ => ViewerBar::Other,
@@ -295,8 +295,8 @@ impl QuillApp {
             // (`playbackControlsSeekProgress`), and the player only once
             // it is let go.
             Command::ViewerSeek { fraction, .. } => {
-                if let Some(clock) = self.viewer.clock.as_ref() {
-                    let secs = fraction.clamp(0., 1.) * clock.duration_secs();
+                if let Some(transport) = self.viewer_transport() {
+                    let secs = fraction.clamp(0., 1.) * transport.total();
                     self.seek_viewer_to(secs, cx);
                 }
             }

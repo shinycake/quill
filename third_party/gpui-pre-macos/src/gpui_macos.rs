@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre-macos 0.3.8 (Apache-2.0):
-// adds the notification_extras module. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
+// adds the notification_extras module and `next_present_time`. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 #![cfg(target_os = "macos")]
 //! macOS platform implementation for GPUI.
 //!
@@ -58,6 +58,18 @@ pub(crate) use window::*;
 pub(crate) use text_system::*;
 
 pub use platform::MacPlatform;
+
+/// Quill: when the next frame drawn on display `display_id` (a
+/// `DisplayId` as `u64`) is shown, as an `Instant` and in Mach host ticks.
+pub fn next_present_time(display_id: u64) -> Option<(scheduler::Instant, u64)> {
+    display_link::next_present_time(u32::try_from(display_id).ok()?)
+}
+
+/// Quill: the refresh period of display `display_id` as its display link
+/// reports it.
+pub fn refresh_period(display_id: u64) -> Option<std::time::Duration> {
+    display_link::refresh_period(u32::try_from(display_id).ok()?)
+}
 
 trait BoolExt {
     fn to_objc(self) -> BOOL;
