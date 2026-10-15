@@ -55,8 +55,8 @@ impl EmojiSetId {
     pub fn bytes(self) -> u64 {
         match self {
             Self::System => 0,
-            Self::Noto => 4_464_013,
-            Self::Twemoji => 3_107_720,
+            Self::Noto => 4_477_582,
+            Self::Twemoji => 3_126_471,
         }
     }
 
@@ -65,8 +65,8 @@ impl EmojiSetId {
     pub fn sha256(self) -> &'static str {
         match self {
             Self::System => "",
-            Self::Noto => "47416bd07bf8480ce912d711ec211ad3cf41e2825929f5f9da56c24828b8269b",
-            Self::Twemoji => "1ea7d7708179af53cbb480e5cd10d93e5632d8d5237c00925a07ffc32150fedd",
+            Self::Noto => "5901f09e92fac8ebf905f9ff15de51e823bd590b26a9646605ee2a824a03ef92",
+            Self::Twemoji => "f767bf24fb1c3dc8fb1d1a4cf884599ae2e2b4b838397d27db4ea0ade0ea9b6f",
         }
     }
 
@@ -87,8 +87,10 @@ impl EmojiSetId {
     pub fn credit(self) -> Option<&'static str> {
         match self {
             Self::System => None,
-            Self::Noto => Some("Noto Emoji by Google, Apache License 2.0"),
-            Self::Twemoji => Some("Twemoji by Twitter, Inc. and contributors, CC-BY 4.0"),
+            Self::Noto => Some("Noto Emoji by Google, Apache License 2.0, resized by Quill"),
+            Self::Twemoji => {
+                Some("Twemoji by Twitter, Inc. and contributors, CC-BY 4.0, resized by Quill")
+            }
         }
     }
 }

@@ -31,8 +31,11 @@ branch; fill in "How verified".
    emoji-sets/` from openly licensed art and published as release assets of
    `shinycake/quill` (`emoji-set-<name>-<version>.zip`): "Noto" (Google Noto
    Color Emoji, Apache-2.0; tdesktop calls it "Android") and "Twemoji"
-   (CC-BY 4.0, attribution in `THIRD_PARTY_LICENSES.md` and in the box's
-   footnote). JoyPixels is not free for redistribution and is left out
+   (CC-BY 4.0, attribution in `THIRD_PARTY.md` and in the box's
+   footnote). Each zip's `LICENSE.txt` carries the full license text
+   (Apache-2.0 plus the region-flags notice, or CC-BY 4.0) and says what
+   Quill changed (resized, recompressed, packed into sheets), as Apache-2.0
+   §4 and CC-BY 4.0 §3 require. JoyPixels is not free for redistribution and is left out
    (documented deviation). The system set stays the default and is named
    after the platform: "Apple" on macOS, "Segoe" on Windows, "System" on
    Linux. Fetching tdesktop's blobs from `@tdhbcfiles` is not used: the post
