@@ -271,13 +271,15 @@ impl QuillApp {
                     .dropdown_menu(move |menu, _, _| {
                         let owner = owner.clone();
                         let id = id.clone();
-                        menu.item(PopupMenuItem::new("Delete").icon(IconName::Trash).on_click(
-                            move |_, _, cx| {
-                                let id = id.clone();
-                                let _ =
-                                    owner.update(cx, |this, cx| this.ask_delete_passkey(id, cx));
-                            },
-                        ))
+                        menu.item(
+                            PopupMenuItem::new(tr(keys::BOX_DELETE))
+                                .icon(IconName::Trash)
+                                .on_click(move |_, _, cx| {
+                                    let id = id.clone();
+                                    let _ = owner
+                                        .update(cx, |this, cx| this.ask_delete_passkey(id, cx));
+                                }),
+                        )
                     }),
             )
             .into_any_element()
@@ -337,7 +339,7 @@ impl QuillApp {
             body = body.child(list).when(state.can_register(), |body| {
                 body.child(
                     Button::new("passkeys-add")
-                        .label("Add Passkey")
+                        .label(tr(keys::SETTINGS_PASSKEYS_BUTTON))
                         .icon(IconName::Plus)
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| this.open_passkeys_about(cx))),
@@ -354,7 +356,7 @@ impl QuillApp {
                     .child(tr(BUTTON_ABOUT))
                     .child(
                         Button::new("passkeys-learn-more")
-                            .label("Learn more")
+                            .label(tr(keys::Q_PREFS_LEARN_MORE))
                             .link()
                             .xsmall()
                             .on_click(cx.listener(|this, _, _, cx| this.open_passkeys_about(cx))),
@@ -410,7 +412,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("passkey-delete-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.dismiss_delete_passkey(cx);
@@ -419,14 +421,16 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("passkey-delete-confirm")
-                        .label("Delete")
+                        .label(tr(keys::BOX_DELETE))
                         .danger()
                         .loading(busy)
                         .disabled(busy || passkey.is_none())
                         .on_click(cx.listener(|this, _, _, cx| this.confirm_delete_passkey(cx))),
                 );
             dialog
-                .title(crate::ui::shell::dialog_title("Delete Passkey"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SETTINGS_PASSKEYS_DELETE_SURE_TITLE,
+                )))
                 .width(px(400.))
                 .content(crate::ui::shell::scrollable_dialog_content(once(
                     body.into_any_element(),
@@ -487,30 +491,30 @@ impl QuillApp {
                                 .role(Role::Heading)
                                 .text_lg()
                                 .font_semibold()
-                                .child("Protect your account"),
+                                .child(tr(keys::SETTINGS_PASSKEYS_NONE_TITLE)),
                         )
                         .child(
                             div()
                                 .text_sm()
                                 .text_center()
                                 .text_color(muted)
-                                .child("Log in safely and keep your account secure."),
+                                .child(tr(keys::SETTINGS_PASSKEYS_NONE_ABOUT)),
                         ),
                 )
                 .child(entry(
                     IconName::UserKey,
-                    "Create a Passkey",
-                    "Make a passkey to sign in easily and safely.",
+                    tr(keys::SETTINGS_PASSKEYS_NONE_INFO1_TITLE),
+                    tr(keys::SETTINGS_PASSKEYS_NONE_INFO1_ABOUT),
                 ))
                 .child(entry(
                     IconName::ScanFace,
-                    "Log in with face recognition",
-                    "Use your face, fingerprint, or screen lock to sign in.",
+                    tr(keys::SETTINGS_PASSKEYS_NONE_INFO2_TITLE),
+                    tr(keys::SETTINGS_PASSKEYS_NONE_INFO2_ABOUT),
                 ))
                 .child(entry(
                     IconName::Lock,
-                    "Store Passkey securely",
-                    "Your passkey is stored safely in the cloud service you choose.",
+                    tr(keys::SETTINGS_PASSKEYS_NONE_INFO3_TITLE),
+                    tr(keys::SETTINGS_PASSKEYS_NONE_INFO3_ABOUT),
                 ))
                 .when_some(error, |body, error| {
                     body.child(
@@ -662,14 +666,14 @@ pub(in crate::ui) fn demo_passkeys_list() -> Vec<Passkey> {
     vec![
         Passkey {
             id: "demo-passkey-icloud".into(),
-            name: "iCloud Keychain".into(),
+            name: tr(keys::Q_PREFS_ICLOUD_KEYCHAIN).into(),
             addition_date: now.saturating_sub(40 * 86_400),
             last_usage_date: now.saturating_sub(86_400),
             software_icon_custom_emoji_id: 5_368_324_170_671_202_286,
         },
         Passkey {
             id: "demo-passkey-yubikey".into(),
-            name: "YubiKey 5C".into(),
+            name: tr(keys::Q_PREFS_YUBIKEY_5C).into(),
             addition_date: now.saturating_sub(12 * 86_400),
             last_usage_date: 0,
             software_icon_custom_emoji_id: 0,
@@ -698,7 +702,7 @@ impl QuillApp {
         {
             "privacy" => {
                 self.settings.open = true;
-                self.settings.page = Some("Privacy and security");
+                self.settings.page = Some(tr(keys::Q_PREFS_PRIVACY_AND_SECURITY));
             }
             "about" => {
                 self.open_passkeys(cx);
