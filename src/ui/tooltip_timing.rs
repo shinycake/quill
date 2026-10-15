@@ -28,15 +28,10 @@ pub(crate) fn defaults() -> TooltipDefaults {
         .with_grace_period(GRACE_PERIOD)
 }
 
-/// Installs the app-wide tooltip timing.
+/// Installs the app-wide tooltip timing. `QuillApp::new_with_demo` calls it,
+/// so the app and the screenshot demos both get it before any tooltip shows.
 pub(crate) fn install(cx: &mut App) {
     defaults().install(cx);
-}
-
-/// Initializes the kit and installs the tooltip timing; the app's one kit init.
-pub(crate) fn init_kit(cx: &mut App) {
-    gpui_kit::init(cx);
-    install(cx);
 }
 
 /// The installed show delay (for tooltips the kit does not draw).

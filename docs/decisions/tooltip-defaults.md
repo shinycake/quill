@@ -12,8 +12,9 @@
 
 ## What changed
 
-- `src/ui/tooltip_timing.rs` installs `TooltipDefaults` (GPUI Kit 0.7.3) once after
-  `gpui_kit::init`, in both app entry points: show delay 1000 ms, grace period 0
+- `src/ui/tooltip_timing.rs` installs `TooltipDefaults` (GPUI Kit 0.7.3) from
+  `QuillApp::new_with_demo`, which both the app and the screenshot demos go through, so
+  `src/main.rs` (a hotspot) stays untouched: show delay 1000 ms, grace period 0
   (Quill's kit patch hides at once; a zero grace period also drops the delay skip).
 - The hand-drawn link tooltip in `src/ui/entity_links.rs` (not a kit tooltip: it is anchored
   to the pointer) had its own 450 ms constant. It now reads the installed
