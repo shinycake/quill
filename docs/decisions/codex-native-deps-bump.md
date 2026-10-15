@@ -40,3 +40,11 @@ moves them by hand. Quill's pins are the equivalent, so no behavior is copied.
   shim, and the 24 `video_decode` tests passed, including the ones that decode the real H.264/AAC, rotated MP4
   and VP9 WebM fixtures and the seek and player tests.
 - Not verified here: the Linux and Windows (MSYS2) builds of n9.0.2. CI runs them.
+
+## ntgcalls v3.0.2 to v3.0.3
+
+Closes the deps-watch issue #745. Upstream changed only `ntgcalls/src/instances/p2p_call.cpp` (early ICE
+candidates were dropped in 1:1 calls, pytgcalls/ntgcalls#78) and the version in `CMakeLists.txt`. The C
+header and the statically linked components are unchanged, so `crates/ntgcalls-sys` only changes its doc
+strings. New SHA256 pins come from the release's asset digests; the macOS download was checked by running
+`scripts/vendor-ntgcalls.sh`, and `cargo test -p ntgcalls-sys` loads the new dylib.

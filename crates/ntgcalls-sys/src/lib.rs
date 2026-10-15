@@ -1,10 +1,10 @@
-//! Raw FFI bindings for ntgcalls v3.0.2 — Quill's vendored call media engine.
+//! Raw FFI bindings for ntgcalls v3.0.3 — Quill's vendored call media engine.
 //!
 //! Quill's call UI keeps its honest "no audio yet" stance until Phase C2b
 //! wires this engine up; this crate is the un-wired seam.
 //!
 //! **License (LGPLv3 sidecar).** The native library `libntgcalls.so`
-//! (pytgcalls/ntgcalls v3.0.2, LGPL-3.0) is **never linked into the Quill
+//! (pytgcalls/ntgcalls v3.0.3, LGPL-3.0) is **never linked into the Quill
 //! binary** — it is procured unmodified by `scripts/vendor-ntgcalls.sh`
 //! (checksum-pinned, git-ignored) and loaded at runtime via `dlopen` by
 //! [`Loader`]. See `THIRD_PARTY.md` for attribution and the LGPL source
