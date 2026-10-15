@@ -437,7 +437,8 @@ impl QuillApp {
     }
 
     /// Tests: show a sheet without a worker.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(in crate::ui) fn show_passkey_sheet(
         &mut self,
         sheet: CeremonySheet,
@@ -452,7 +453,8 @@ impl QuillApp {
     }
 
     /// Tests: feed a worker event as if the ceremony sent it.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(in crate::ui) fn feed_ceremony_event(
         &mut self,
         event: CeremonyEvent,
