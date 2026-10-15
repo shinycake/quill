@@ -36,7 +36,7 @@ pub(crate) struct GroupCallStreams {
     /// One slot per chat with a live feeder. The engine hook only fills
     /// an existing slot, so a picture that arrives between the drain and
     /// the native stop is dropped instead of bringing the slot back.
-    frames: Arc<Mutex<HashMap<i64, Option<VideoFrame>>>>,
+    frames: Arc<Mutex<HashMap<i64, Option<Arc<VideoFrame>>>>>,
 }
 
 impl Default for GroupCallStreams {
@@ -140,13 +140,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let frames = self.group_call_streams.frames.clone();
         engine.set_stream_frame_callback(Arc::new(move |chat_id, frame| {
             if let Some(slot) = frames.lock_or_recover().get_mut(&chat_id) {
-                *slot = Some(frame);
+                // Shared, not copied: the window converts it off the UI
+                // thread while the next picture replaces it here.
+                *slot = Some(Arc::new(frame));
             }
         }));
     }
 
     /// The newest picture of the stream-mode call in `chat_id`.
-    pub fn latest_stream_frame(&self, chat_id: i64) -> Option<VideoFrame> {
+    pub fn latest_stream_frame(&self, chat_id: i64) -> Option<Arc<VideoFrame>> {
         self.group_call_streams
             .frames
             .lock_or_recover()

@@ -33,6 +33,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             selected_camera: None,
             call_devices_cache: Vec::new(),
             selected_devices: (None, None),
+            group_playback_muted: None,
             call_connect_params: None,
             reconnect_attempts: 0,
             credentials,

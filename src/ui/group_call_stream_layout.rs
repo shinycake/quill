@@ -10,23 +10,32 @@
 //!   6 px except full screen. No members list, no camera, screen or
 //!   microphone buttons.
 //! - Title row: the call's title (or the chat's name), a bullet and
-//!   "{count} viewers" (`lng_group_call_rtmp_viewers`, at least 1). Full
-//!   screen it slides with the controls on a rounded backdrop.
+//!   "{count} viewers" (`lng_group_call_rtmp_viewers`, at least 1), placed
+//!   by [`title_layout`]. Full screen it slides with the controls on a
+//!   rounded backdrop.
 //! - Bottom bar (`updateButtonsGeometry`, wide RTMP branch): the "…" menu
-//!   for managers, the round button that toggles full screen, Leave, on a
-//!   rounded `groupCallBg` backdrop at 80 %.
+//!   for managers or Settings for viewers, the round button that toggles
+//!   full screen, Leave, on a rounded `groupCallBg` backdrop at 80 %.
 //! - Before the first picture the tile shows the chat's photo blurred
 //!   (radius 15). Nobody broadcasting: a rounded label a third of the way
 //!   down (`setupEmptyRtmp`), with the admin text when the call knows its
 //!   RTMP server URL.
 //! - When the controls show: see [`StreamControls`].
+//! - Not joined (Quill only: tdesktop never shows the panel unjoined):
+//!   the label holds a Join button, with the reason once a join failed.
+//!   The window joins by itself only for a stream you asked to watch
+//!   ([`StreamJoinIntent`]).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::calls::stream_controls::StreamControls;
+use super::calls::stream_picture::{StreamPicture, frame_image};
 use super::calls::stream_tile::{StreamTile, StreamTileState, WidthReport, blurred_photo};
+use super::calls::stream_title::{SEPARATOR_GAP, title_layout, title_rect};
 use super::group_call_panel::{BG, LEAVE_BG, MEMBER_NOT_JOINED, MEMBERS_BG};
+use super::group_call_stream_boxes::StreamOverlay;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -42,8 +51,6 @@ use std::time::Instant;
 /// `groupCallMuted1` / `groupCallMuted2`: the round button's gradient.
 const BUTTON_FROM: u32 = 0x0992ef;
 const BUTTON_TO: u32 = 0x16ccfb;
-/// `callIconBg`.
-const ICON_BG: u32 = 0xffffff1f;
 /// `groupCallBg` at `kControlsBackgroundOpacity` (0.8).
 const CONTROLS_BG: u32 = 0x1a2026cc;
 /// `groupCallNarrowSkip`, `groupCallWideVideoTop`.
@@ -53,16 +60,39 @@ const VIDEO_TOP: f32 = 24.;
 const BAR_BOTTOM: f32 = 108.;
 const BAR_HEIGHT: f32 = 68.;
 /// `st::groupCallWidth / 30` and `st::groupCallWidth`: the label's
-/// padding and widest text.
+/// padding and widest text; the text keeps 24 px from each side.
 const LABEL_PADDING: f32 = 12.;
 const LABEL_WIDTH: f32 = 380.;
+const LABEL_SIDES: f32 = 48.;
+/// `groupCallTitleLabel` (semibold 14 px) and the backdrop's radius.
+const TITLE_SIZE: f32 = 14.;
+const TITLE_RADIUS: f32 = 6.;
+/// The pin button's width with its margin (`groupCallPinOnTop`).
+const PIN_WIDTH: f32 = 40.;
+
+/// You asked to watch a stream: the window joins it once it is tracked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StreamJoinIntent {
+    /// The chat's video chat button or a stream link: this call.
+    Call(i32),
+    /// A stream started here: the chat's new call.
+    Chat(i64),
+}
+
+impl StreamJoinIntent {
+    fn matches(self, call: i32, chat: Option<i64>) -> bool {
+        match self {
+            Self::Call(id) => id == call,
+            Self::Chat(id) => chat == Some(id),
+        }
+    }
+}
 
 /// The stream window's state, kept between renders.
 #[derive(Default)]
 pub(crate) struct StreamWindow {
     pub(super) tile: StreamTileState,
-    /// The stream picture as an image, by chat and frame sequence.
-    image: Option<(i64, u64, Arc<RenderImage>)>,
+    pub(super) picture: StreamPicture,
     /// The blurred chat photo for a photo path (`None` while it blurs).
     photo: Option<(String, Option<Arc<RenderImage>>)>,
     photo_task: Option<Task<()>>,
@@ -71,25 +101,56 @@ pub(crate) struct StreamWindow {
     hide_armed: bool,
     /// The open window was sized for this layout.
     pub(super) window_is_stream: bool,
-    /// The unjoined stream this window joined on opening.
-    pub(super) auto_joined: Option<i32>,
-    /// Screenshot fixtures: the stream picture without a live driver.
-    pub(super) demo_frame: Option<VideoFrame>,
+    /// The stream you asked to watch, until it is tracked.
+    pub(super) pending_join: Option<StreamJoinIntent>,
+    /// The call whose join was sent (the Join button waits).
+    pub(super) joining: Option<i32>,
+    pub(super) overlay: Option<StreamOverlay>,
+    /// The Stream Key was revealed after its warning.
+    pub(super) key_shown: bool,
+    /// The title band was pressed: a move drags the window (Linux).
+    title_pressed: bool,
+    /// Screenshot fixtures and tests: the stream picture without a driver.
+    pub(super) demo_frame: Option<Arc<VideoFrame>>,
 }
 
 impl StreamWindow {
-    /// Drop the pictures (the call ended or another took its place).
-    pub(super) fn clear(&mut self) {
+    /// The call ended or another took its place: drop the pictures from
+    /// every window and forget what the window showed.
+    pub(super) fn clear(&mut self, cx: &mut App) {
         let images = self
-            .image
-            .take()
-            .map(|(_, _, image)| image)
+            .picture
+            .clear()
             .into_iter()
             .chain(self.photo.take().and_then(|(_, image)| image));
-        super::image_budget::retire_all(images);
+        for image in images {
+            cx.drop_image(image, None);
+        }
         self.photo_task = None;
         self.demo_frame = None;
+        self.overlay = None;
+        self.key_shown = false;
+        self.joining = None;
     }
+}
+
+/// What the stream window shows, read once per draw without copying the
+/// call's participants or messages.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct StreamFacts {
+    pub(crate) id: i32,
+    /// The chat's id and name.
+    pub(crate) chat: Option<(i64, String)>,
+    /// The call's title, or the chat's name.
+    pub(crate) title: String,
+    pub(crate) stream: StreamState,
+    pub(crate) joined: bool,
+    pub(crate) manager: bool,
+    pub(crate) viewers: u32,
+    /// The call knows its RTMP server URL (the admin's empty label).
+    pub(crate) server_known: bool,
+    pub(crate) recording: bool,
+    pub(crate) share_link: bool,
 }
 
 /// Whether `call` shows in the live stream layout: a running RTMP stream
@@ -127,12 +188,91 @@ pub(super) struct StreamBody {
 }
 
 impl QuillApp {
+    /// The tracked call's facts when it shows as a live stream.
+    pub(super) fn group_call_stream_facts(&self) -> Option<StreamFacts> {
+        let call = self.session()?.calls.active_group_call.as_ref()?;
+        if !uses_stream_layout(call) {
+            return None;
+        }
+        let chat = self
+            .group_call_chat(call)
+            .map(|chat| (chat.id.0, chat.title.clone()));
+        let title = if call.title.is_empty() {
+            chat.as_ref()
+                .map(|(_, name)| name.clone())
+                .unwrap_or_default()
+        } else {
+            call.title.clone()
+        };
+        Some(StreamFacts {
+            id: call.id,
+            chat,
+            title,
+            stream: call.stream,
+            joined: call.is_joined,
+            manager: call.can_be_managed,
+            viewers: call.viewer_count,
+            server_known: call.rtmp_url.as_deref().is_some_and(|url| !url.is_empty()),
+            recording: call.record_duration > 0,
+            share_link: self.group_call_can_share_link(call),
+        })
+    }
+
+    /// You asked to watch a stream (or a call that may turn out to be
+    /// one): the window joins it once it is tracked.
+    pub(super) fn note_stream_join_intent(&mut self, intent: StreamJoinIntent) {
+        self.group_call.stream.pending_join = Some(intent);
+        // Asking again brings a window you closed back.
+        self.group_call.window_closed_by_user = None;
+    }
+
+    /// Join the tracked stream from its window: the Join button, or the
+    /// join you asked for.
+    pub(super) fn join_stream(&mut self, id: i32, cx: &mut Context<Self>) {
+        self.dismiss_group_call_error(cx);
+        if self.send_group_call_join() {
+            self.group_call.stream.joining = Some(id);
+        } else {
+            let reason = tr(keys::Q_OPS_STREAM_JOIN_FAILED).to_string();
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.calls.group_call_error = Some(reason);
+            } else if let Some(session) = self.demo_session.as_mut() {
+                session.calls.group_call_error = Some(reason);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Run the join you asked for once its call is tracked. Any other
+    /// unjoined stream waits for its Join button.
+    pub(super) fn consume_stream_join_intent(&mut self, cx: &mut Context<Self>) {
+        let Some(intent) = self.group_call.stream.pending_join else {
+            return;
+        };
+        let Some(call) = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+        else {
+            return;
+        };
+        let chat = self.group_call_chat(call).map(|chat| chat.id.0);
+        if !intent.matches(call.id, chat) {
+            return;
+        }
+        let (id, stream, joined) = (call.id, uses_stream_layout(call), call.is_joined);
+        self.group_call.stream.pending_join = None;
+        if stream && !joined {
+            self.join_stream(id, cx);
+        }
+    }
+
     /// The window's content for a live stream. `full`: full screen or
     /// maximized.
     pub(super) fn group_call_stream_body(
         &mut self,
-        call: &ActiveGroupCall,
+        facts: &StreamFacts,
         full: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> StreamBody {
         let now = Instant::now();
@@ -141,15 +281,20 @@ impl QuillApp {
         self.arm_stream_hide_timer(cx);
         let shown = self.group_call.stream.controls.value(now);
         let animating = self.group_call.stream.controls.sliding(now);
+        if facts.joined {
+            self.group_call.stream.joining = None;
+        }
 
-        let chat = self
-            .group_call_chat(call)
-            .map(|chat| (chat.id.0, chat.title.clone()));
-        let chat_id = chat.as_ref().map(|(id, _)| *id);
-        let chat_title = chat.map(|(_, title)| title).unwrap_or_default();
-        let picture = chat_id.and_then(|id| self.group_call_stream_picture(id));
+        let chat_id = facts.chat.as_ref().map(|(id, _)| *id);
+        let chat_name = facts
+            .chat
+            .as_ref()
+            .map(|(_, name)| name.as_str())
+            .unwrap_or_default();
+        let picture = chat_id.and_then(|id| self.group_call_stream_picture(id, cx));
         let placeholder = chat_id.and_then(|id| self.group_call_stream_photo(id, cx));
-        let playing = call.is_joined && call.stream != StreamState::Unsupported;
+        // Redraws at the stream's rate only while pictures come.
+        let playing = facts.joined && facts.stream == StreamState::Live;
 
         let owner = cx.entity().downgrade();
         let report: Option<WidthReport> = chat_id.map(|chat_id| {
@@ -202,18 +347,33 @@ impl QuillApp {
             }))
             .child(tile);
 
-        let label = stream_label(call, &chat_title);
-        let title = if call.title.is_empty() {
-            chat_title
+        let width = f32::from(window.viewport_size().width);
+        let label = if facts.joined {
+            stream_label(facts, chat_name).map(|text| label_view(text, width, None))
         } else {
-            call.title.clone()
+            Some(self.stream_join_label(facts, width, cx))
         };
-        let viewers = i64::from(call.viewer_count.max(1));
+        let viewers = i64::from(facts.viewers.max(1));
         let viewers = trn_with(
             keys::GROUP_CALL_RTMP_VIEWERS,
             viewers,
             &[("count", &quill::premium_hub::group_digits(viewers))],
         );
+        let title = title_row(&facts.title, &viewers, full, shown, window);
+        let bar = self
+            .group_call_stream_bar(facts, full, shown, cx)
+            .into_any_element();
+        let band = (!full).then(|| self.stream_title_band(cx));
+        let share = if self.group_call.share_open {
+            self.session()
+                .and_then(|s| s.calls.active_group_call.as_ref())
+                .and_then(|call| self.group_call_share_overlay(call, cx))
+        } else {
+            None
+        };
+        let rename =
+            self.group_call_rename_overlay(tr(keys::GROUP_CALL_EDIT_TITLE_CHANNEL).into(), cx);
+        let overlay = self.group_call_stream_overlay(facts, cx);
 
         let element = div()
             .id("group-call-stream")
@@ -223,93 +383,96 @@ impl QuillApp {
             .bg(if full { black() } else { rgb(BG).into() })
             .text_color(white())
             .child(viewport)
-            // The title band: a double-click toggles full screen (the
-            // window's maximize request, which an RTMP panel turns into
-            // full screen).
-            .when(!full, |this| {
-                this.child(
-                    div()
-                        .id("group-call-stream-title-band")
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .h(px(VIDEO_TOP))
-                        .on_click(cx.listener(|_, event: &ClickEvent, window, cx| {
-                            if event.click_count() == 2 {
-                                toggle_stream_full(window);
-                                cx.notify();
-                            }
-                        })),
-                )
-            })
-            .children(label.map(label_view))
-            .child(title_row(title, viewers, full, shown))
-            .when(shown > 0., |this| {
-                this.child(self.group_call_stream_bar(call, full, shown, cx))
-            })
+            .children(band)
+            .children(label)
+            .child(title)
+            .child(bar)
+            .children(share)
+            .children(rename)
+            .children(overlay)
             .into_any_element();
         StreamBody { element, animating }
     }
 
-    /// The bottom bar: the "…" menu for managers, the full screen button,
-    /// Leave. Slides in from below with `shown`.
+    /// The 24 px band over the picture moves the window, and a
+    /// double-click toggles full screen (the window's maximize request,
+    /// which an RTMP panel turns into full screen). Windows treats it as
+    /// the caption; Linux starts the move from a press and a move, as the
+    /// kit title bar does; macOS drags its transparent title bar.
+    fn stream_title_band(&self, cx: &mut Context<Self>) -> AnyElement {
+        let band = div()
+            .id("group-call-stream-title-band")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(VIDEO_TOP))
+            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                this.group_call.stream.title_pressed = false;
+                if event.click_count() == 2 {
+                    toggle_stream_full(window);
+                    cx.notify();
+                }
+            }));
+        let band = if cfg!(target_os = "windows") {
+            band.window_control_area(WindowControlArea::Drag)
+        } else {
+            band
+        };
+        if !cfg!(target_os = "linux") {
+            return band.into_any_element();
+        }
+        band.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, _, _| this.group_call.stream.title_pressed = true),
+        )
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, _, _, _| this.group_call.stream.title_pressed = false),
+        )
+        .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, window, _| {
+            if std::mem::take(&mut this.group_call.stream.title_pressed) {
+                window.start_window_move();
+            }
+        }))
+        .into_any_element()
+    }
+
+    /// The bottom bar. It stays in the tree while hidden (slid below the
+    /// window), so leaving it is always seen and no hover goes stale.
     fn group_call_stream_bar(
         &self,
-        call: &ActiveGroupCall,
+        facts: &StreamFacts,
         full: bool,
         shown: f32,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let round = |id: &'static str, label: SharedString, size: f32, bg: Background| {
+        let slot = |width: f32| {
             div()
-                .id(id)
-                .size(px(size))
+                .w(px(width))
+                .h(px(BAR_HEIGHT))
+                .flex()
+                .items_center()
+                .justify_center()
+        };
+        // A gradient disc: the kit's custom button takes one solid color.
+        let expand = slot(68.).child(
+            div()
+                .id("group-call-stream-fullscreen")
+                .size(px(42.))
                 .rounded_full()
-                .bg(bg)
+                .bg(linear_gradient(
+                    135.,
+                    linear_color_stop(rgb(BUTTON_FROM), 0.),
+                    linear_color_stop(rgb(BUTTON_TO), 1.),
+                ))
                 .flex()
                 .items_center()
                 .justify_center()
                 .cursor_pointer()
                 .role(Role::Button)
-                .aria_label(label)
+                .aria_label(SharedString::from(tr(keys::Q_MISC_TOGGLE_FULL_SCREEN)))
                 .hover(|style| style.opacity(0.85))
-        };
-        let menu = call.can_be_managed.then(|| {
-            div()
-                .w(px(60.))
-                .h(px(BAR_HEIGHT))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .size(px(44.))
-                        .rounded_full()
-                        .bg(rgba(ICON_BG))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(self.group_call_menu(call, cx)),
-                )
-        });
-        let expand = div()
-            .w(px(68.))
-            .h(px(BAR_HEIGHT))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                round(
-                    "group-call-stream-fullscreen",
-                    SharedString::from(tr(keys::Q_MISC_TOGGLE_FULL_SCREEN)),
-                    42.,
-                    linear_gradient(
-                        135.,
-                        linear_color_stop(rgb(BUTTON_FROM), 0.),
-                        linear_color_stop(rgb(BUTTON_TO), 1.),
-                    ),
-                )
                 .on_click(cx.listener(|_, _, window, cx| {
                     toggle_stream_full(window);
                     cx.notify();
@@ -323,30 +486,25 @@ impl QuillApp {
                     .with_size(px(20.))
                     .text_color(white()),
                 ),
-            );
-        let leave = div()
-            .w(px(60.))
-            .h(px(BAR_HEIGHT))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                round(
-                    "group-call-stream-leave",
-                    SharedString::from(tr(keys::Q_PEOPLE_LEAVE)),
-                    44.,
-                    rgba(LEAVE_BG).into(),
+        );
+        let leave_facts = facts.clone();
+        let leave = slot(60.).child(
+            Button::new("group-call-stream-leave")
+                .custom(
+                    ButtonCustomVariant::new(cx)
+                        .color(rgba(LEAVE_BG).into())
+                        .hover(rgba(0xf75c5cb3).into())
+                        .active(rgba(0xf75c5cd9).into())
+                        .foreground(white()),
                 )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    leave_stream_full(window);
-                    this.leave_active_group_call(cx);
-                }))
-                .child(
-                    Icon::new(IconName::Close)
-                        .with_size(px(22.))
-                        .text_color(white()),
-                ),
-            );
+                .icon(Icon::new(IconName::Close).with_size(px(22.)))
+                .rounded(px(22.))
+                .size(px(44.))
+                .tooltip(tr(keys::GROUP_CALL_LEAVE))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.stream_leave_clicked(&leave_facts, window, cx)
+                })),
+        );
         div()
             .absolute()
             .left_0()
@@ -373,39 +531,90 @@ impl QuillApp {
                         this.arm_stream_hide_timer(cx);
                         cx.notify();
                     }))
-                    .children(menu)
+                    .child(slot(60.).child(self.group_call_stream_menu(facts, cx)))
                     .child(expand)
                     .child(leave),
             )
     }
 
-    /// The newest stream picture of `chat_id` as an image, made once per
-    /// frame sequence.
-    fn group_call_stream_picture(&mut self, chat_id: i64) -> Option<Arc<RenderImage>> {
+    /// Not joined: the label with a Join button, and the reason when a
+    /// join failed. The button spins while the join is on its way.
+    fn stream_join_label(
+        &self,
+        facts: &StreamFacts,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let error = self
+            .session()
+            .and_then(|s| s.calls.group_call_error.clone());
+        let joining = self.group_call.stream.joining == Some(facts.id) && error.is_none();
+        let id = facts.id;
+        let button = Button::new("group-call-stream-join")
+            .label(tr(keys::GROUP_CALL_JOIN))
+            .primary()
+            .loading(joining)
+            .on_click(cx.listener(move |this, _, _, cx| this.join_stream(id, cx)));
+        label_view(
+            error.unwrap_or_default(),
+            width,
+            Some(button.into_any_element()),
+        )
+    }
+
+    /// The newest stream picture of `chat_id`. A new frame is converted
+    /// off the UI thread, and the image from two frames back leaves every
+    /// window's atlas at once ([`StreamPicture`]).
+    fn group_call_stream_picture(
+        &mut self,
+        chat_id: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<Arc<RenderImage>> {
         let seq = match self.live.as_ref() {
-            Some(live) => live.driver.latest_stream_frame_seq(chat_id)?,
-            None => self.group_call.stream.demo_frame.as_ref()?.seq,
-        };
-        if let Some((cached_chat, cached_seq, image)) = self.group_call.stream.image.as_ref()
-            && *cached_chat == chat_id
-            && *cached_seq == seq
-        {
-            return Some(image.clone());
-        }
-        let frame = match self.live.as_ref() {
-            Some(live) => live.driver.latest_stream_frame(chat_id)?,
-            None => self.group_call.stream.demo_frame.clone()?,
-        };
-        let image = Self::video_render_image(&frame)?;
-        if let Some((_, _, old)) =
-            self.group_call
+            Some(live) => live.driver.latest_stream_frame_seq(chat_id),
+            None => self
+                .group_call
                 .stream
-                .image
-                .replace((chat_id, frame.seq, image.clone()))
+                .demo_frame
+                .as_ref()
+                .map(|frame| frame.seq),
+        };
+        if let Some(seq) = seq
+            && self.group_call.stream.picture.wants(chat_id, seq)
         {
-            super::image_budget::retire_all([old]);
+            let frame = match self.live.as_ref() {
+                Some(live) => live.driver.latest_stream_frame(chat_id),
+                None => self.group_call.stream.demo_frame.clone(),
+            };
+            // A screenshot fixture's still picture is converted at once so
+            // the capture's first frame shows it; tests keep the
+            // background path the live stream takes.
+            let inline = self.live.is_none() && !cfg!(test);
+            if let Some(frame) = frame.as_ref().filter(|_| inline) {
+                let image = frame_image(frame);
+                let picture = &mut self.group_call.stream.picture;
+                picture.start(chat_id, frame.seq, Task::ready(()));
+                if let Some(old) = picture.finish(chat_id, frame.seq, image) {
+                    cx.drop_image(old, None);
+                }
+            } else if let Some(frame) = frame {
+                let seq = frame.seq;
+                let task = cx.spawn(async move |this, cx| {
+                    let image = cx
+                        .background_spawn(async move { frame_image(&frame) })
+                        .await;
+                    let _ = this.update(cx, |app, cx| {
+                        let picture = &mut app.group_call.stream.picture;
+                        if let Some(old) = picture.finish(chat_id, seq, image) {
+                            cx.drop_image(old, None);
+                        }
+                        cx.notify();
+                    });
+                });
+                self.group_call.stream.picture.start(chat_id, seq, task);
+            }
         }
-        Some(image)
+        self.group_call.stream.picture.current(chat_id)
     }
 
     /// The chat's photo, blurred once per photo off the UI thread.
@@ -424,7 +633,7 @@ impl QuillApp {
             return image.clone();
         }
         if let Some((_, Some(old))) = self.group_call.stream.photo.take() {
-            super::image_budget::retire_all([old]);
+            cx.drop_image(old, None);
         }
         self.group_call.stream.photo = Some((path.clone(), None));
         let task = cx.spawn(async move |this, cx| {
@@ -482,25 +691,23 @@ impl QuillApp {
 /// The label over the picture: nobody is broadcasting (the admin text
 /// when the call knows its RTMP server URL, as tdesktop's
 /// `rtmpInfo().url`), or this build cannot play the stream.
-fn stream_label(call: &ActiveGroupCall, chat_title: &str) -> Option<String> {
-    match call.stream {
-        StreamState::NoStream if call.rtmp_url.as_deref().is_some_and(|url| !url.is_empty()) => {
+fn stream_label(facts: &StreamFacts, chat_name: &str) -> Option<String> {
+    match facts.stream {
+        StreamState::NoStream if facts.server_known => {
             Some(tr(keys::GROUP_CALL_NO_STREAM_ADMIN).to_string())
         }
-        StreamState::NoStream => Some(tr_with(
-            keys::GROUP_CALL_NO_STREAM,
-            &[("group", chat_title)],
-        )),
+        StreamState::NoStream => Some(tr_with(keys::GROUP_CALL_NO_STREAM, &[("group", chat_name)])),
         StreamState::Unsupported => Some(tr(keys::Q_OPS_STREAM_UNSUPPORTED).to_string()),
         StreamState::Connecting | StreamState::Live | StreamState::Ended => None,
     }
 }
 
-/// tdesktop's empty-stream label: semibold `groupCallMemberNotJoinedStatus`
-/// text centered in a rounded box, as wide as the text allows (at most
-/// 380 px plus padding, 12 px from the window's sides), a third of the
-/// way down.
-fn label_view(text: String) -> AnyElement {
+/// tdesktop's empty-stream label (`setupEmptyRtmp`): semibold
+/// `groupCallMemberNotJoinedStatus` text centered in a rounded box
+/// `min(width - 48, 380) + 24` wide, a third of the way down. `action`
+/// goes under the text.
+fn label_view(text: String, window_width: f32, action: Option<AnyElement>) -> AnyElement {
+    let inner = (window_width - LABEL_SIDES).clamp(0., LABEL_WIDTH);
     div()
         .absolute()
         .inset_0()
@@ -512,9 +719,7 @@ fn label_view(text: String) -> AnyElement {
             div()
                 .id("group-call-stream-label")
                 .debug_selector(|| "group-call-stream-label".into())
-                .mx(px(LABEL_PADDING))
-                .max_w(px(LABEL_WIDTH + 2. * LABEL_PADDING))
-                .min_w(px(96. + 2. * LABEL_PADDING))
+                .w(px(inner + 2. * LABEL_PADDING))
                 .p(px(LABEL_PADDING))
                 .rounded(px(12.))
                 .bg(rgba(CONTROLS_BG))
@@ -522,43 +727,88 @@ fn label_view(text: String) -> AnyElement {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(MEMBER_NOT_JOINED))
                 .text_center()
-                .child(text),
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(10.))
+                .when(!text.is_empty(), |this| this.child(text))
+                .children(action),
         )
         .child(div().flex_grow(2.))
         .into_any_element()
 }
 
-/// The title, a bullet and the viewer count, centered in the title band.
+/// The natural width of `text` in the title's font.
+fn title_text_width(text: &str, window: &mut Window) -> f32 {
+    let mut font = window.text_style().font();
+    font.weight = FontWeight::SEMIBOLD;
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: white(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window.text_system().shape_line(
+        SharedString::from(text.to_string()),
+        px(TITLE_SIZE),
+        &[run],
+        None,
+    );
+    f32::from(line.width).ceil()
+}
+
+/// The title, a bullet and the viewer count (`refreshTitleGeometry`).
 /// Full screen it slides up with the controls on a backdrop rounded at
 /// the bottom (`refreshTitleBackground`).
-fn title_row(title: String, viewers: String, full: bool, shown: f32) -> impl IntoElement {
+fn title_row(
+    title: &str,
+    viewers: &str,
+    full: bool,
+    shown: f32,
+    window: &mut Window,
+) -> impl IntoElement {
+    let width = f32::from(window.viewport_size().width);
+    let title_width = title_text_width(title, window);
+    let bullet_width = title_text_width("\u{2022}", window);
+    let viewers_width = title_text_width(viewers, window);
+    // Full screen the pin button is gone and its room goes to the line.
+    let pin = if full { 0. } else { PIN_WIDTH };
+    let rect = title_rect(width, pin, cfg!(target_os = "macos") && !full);
+    let layout = title_layout(width, rect, title_width, bullet_width, viewers_width);
     // The text sits 3 px down the 24 px band; full screen the backdrop
     // reaches the top edge and slides out by its own height.
     let offset = if full { -25. * (1. - shown) } else { 0. };
     div()
+        .id("group-call-stream-title")
+        .debug_selector(|| "group-call-stream-title".into())
         .absolute()
         .top(px(offset))
-        .left(px(48.))
-        .right(px(48.))
+        .left(px(layout.left - TITLE_RADIUS))
+        .pt(px(3.))
+        .pb(px(4.))
+        .px(px(TITLE_RADIUS))
+        .when(full, |this| {
+            this.rounded_b(px(TITLE_RADIUS)).bg(rgba(CONTROLS_BG))
+        })
         .flex()
-        .justify_center()
+        .items_center()
+        .gap(px(SEPARATOR_GAP))
+        .text_size(px(TITLE_SIZE))
+        .font_weight(FontWeight::SEMIBOLD)
         .child(
             div()
-                .id("group-call-stream-title")
-                .debug_selector(|| "group-call-stream-title".into())
-                .min_w_0()
-                .pt(px(3.))
-                .pb(px(4.))
-                .px(px(8.))
-                .when(full, |this| this.rounded_b(px(6.)).bg(rgba(CONTROLS_BG)))
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .text_size(px(14.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(div().min_w_0().truncate().child(title))
-                .child(div().flex_none().child("\u{2022}"))
-                .child(div().flex_none().child(viewers)),
+                .w(px(layout.title))
+                .truncate()
+                .child(title.to_string()),
+        )
+        .child(div().flex_none().child("\u{2022}"))
+        .child(
+            div()
+                .w(px(layout.viewers))
+                .truncate()
+                .child(viewers.to_string()),
         )
 }
 

@@ -149,6 +149,20 @@ pub trait CallEngine {
         Ok(())
     }
 
+    /// app -> engine; the output device for a group call's sound (`None`
+    /// is the system default) and whether you muted it for yourself
+    /// (tdesktop's local mute of a stream). Stored for the next connect;
+    /// a connected call re-issues only its playback sources.
+    fn set_group_playback(
+        &mut self,
+        group_call_id: i32,
+        speaker: Option<&str>,
+        muted: bool,
+    ) -> Result<(), EngineError> {
+        let _ = (group_call_id, speaker, muted);
+        Ok(())
+    }
+
     /// Stream mode: engine -> app; register the hook receiving ntgcalls'
     /// broadcast timestamp and part requests. The hook runs on an ntgcalls
     /// thread and must only queue the event.

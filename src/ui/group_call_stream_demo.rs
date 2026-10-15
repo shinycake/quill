@@ -46,7 +46,7 @@ impl QuillApp {
     }
 
     fn demo_rtmp_live(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.group_call.stream.demo_frame = demo_stream_frame();
+        self.group_call.stream.demo_frame = demo_stream_frame().map(Arc::new);
         self.demo_rtmp(StreamState::Live, cx);
     }
 

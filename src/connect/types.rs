@@ -279,6 +279,9 @@ pub struct ConnectDriver<S: JsonSender> {
     /// devices are fabricated, so this can legitimately be empty.
     pub(crate) call_devices_cache: Vec<MediaDevice>,
     pub(crate) selected_devices: (Option<String>, Option<String>),
+    /// The group call whose sound you muted for yourself (the live
+    /// stream's settings box); other calls play.
+    pub(crate) group_playback_muted: Option<i32>,
     pub(crate) call_connect_params: Option<ConnectParams>,
     pub(crate) reconnect_attempts: usize,
     pub(crate) credentials: TelegramCredentials,

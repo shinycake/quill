@@ -29,6 +29,7 @@ impl QuillApp {
         {
             self.group_call.window_closed_by_user = Some(id);
         }
+        self.group_call.stream.pending_join = None;
         cx.notify();
     }
 
@@ -46,32 +47,32 @@ impl QuillApp {
                     call.is_joined,
                 )
             });
-        // The stream ended: close the window, as tdesktop closes the panel
-        // with the call, and stop listening.
-        if let Some((id, true, true, joined)) = call
-            && self.group_call.window_closed_by_user != Some(id)
-        {
-            self.group_call.window_closed_by_user = Some(id);
+        // The stream ended: stop listening and close the window, as
+        // tdesktop closes the panel with the call. Full screen is left
+        // first so the window does not close into an empty space.
+        if let Some((id, true, true, joined)) = call {
+            if self.group_call.window_closed_by_user != Some(id) {
+                self.group_call.window_closed_by_user = Some(id);
+                if let Some(handle) = self.group_call.window {
+                    let _ = handle.update(cx, |_, window, _| leave_stream_full(window));
+                }
+            }
             if joined {
                 self.leave_active_group_call(cx);
             }
+            self.group_call.stream.pending_join = None;
         }
-        // A stream opens joined: tdesktop joins from the chat's bar
-        // straight into the stream window. Once per call, so leaving
-        // does not join again.
-        if let Some((id, true, false, false)) = call
-            && self.group_call.window_closed_by_user != Some(id)
-            && self.group_call.stream.auto_joined != Some(id)
-        {
-            self.group_call.stream.auto_joined = Some(id);
-            self.join_active_group_call(cx);
-        }
-        let wanted = call
-            .map(|(id, stream, _, _)| (id, stream))
-            .filter(|(id, _)| self.group_call.window_closed_by_user != Some(*id));
+        // The stream you asked for is tracked: join it. Nothing else joins
+        // by itself; an unjoined window offers its Join button.
+        self.consume_stream_join_intent(cx);
+        let call = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| (call.id, uses_stream_layout(call)));
+        let wanted = call.filter(|(id, _)| self.group_call.window_closed_by_user != Some(*id));
         self.prune_group_video_images(wanted.map(|(id, _)| id));
         if wanted.is_none_or(|(_, stream)| !stream) {
-            self.group_call.stream.clear();
+            self.group_call.stream.clear(cx);
         }
         match (wanted, self.group_call.window) {
             (Some((_, stream)), None) => self.open_group_call_window(stream, cx),
@@ -138,6 +139,8 @@ impl QuillApp {
                                 .session()
                                 .and_then(|s| s.calls.active_group_call.as_ref())
                                 .map(|c| c.id);
+                            app.group_call.stream.pending_join = None;
+                            app.group_call.stream.overlay = None;
                             cx.notify();
                         });
                         true
@@ -161,6 +164,7 @@ impl QuillApp {
                                 },
                             ),
                             pinned_on_top: false,
+                            title: None,
                         }
                     });
                     cx.new(|cx| Root::new(view, window, cx))
@@ -207,6 +211,8 @@ pub(super) struct GroupCallPanel {
     _activation: Subscription,
     /// The window stays above the others (tdesktop "pin on top").
     pinned_on_top: bool,
+    /// The title the window was given (a stream's follows its chat).
+    title: Option<String>,
 }
 
 impl Render for GroupCallPanel {
@@ -221,26 +227,34 @@ impl Render for GroupCallPanel {
         let fullscreen = window.is_fullscreen();
         // tdesktop treats a maximized stream window as full screen too.
         let stream_full = fullscreen || window.is_maximized();
-        let (body, animating, stream) = owner.update(cx, |app, cx| {
-            let call = app
-                .session()
-                .and_then(|s| s.calls.active_group_call.clone());
-            if let Some(call) = call.as_ref().filter(|call| uses_stream_layout(call)) {
-                let body = app.group_call_stream_body(call, stream_full, cx);
-                return (body.element, body.animating, true);
+        let (body, animating, stream_title) = owner.update(cx, |app, cx| {
+            if let Some(facts) = app.group_call_stream_facts() {
+                let body = app.group_call_stream_body(&facts, stream_full, window, cx);
+                let title = facts.chat.map(|(_, name)| name).unwrap_or_default();
+                return (body.element, body.animating, Some(title));
             }
             let wants_stage = fullscreen || app.demo_ui.group_stage;
-            let stage = call
-                .filter(|_| wants_stage)
-                .and_then(|call| app.group_call_stage(&call, cx));
+            let call = app
+                .session()
+                .and_then(|s| s.calls.active_group_call.clone())
+                .filter(|_| wants_stage);
+            let stage = call.and_then(|call| app.group_call_stage(&call, cx));
             let body = match stage {
                 Some(stage) => stage,
                 None => app.group_call_panel_body(cx),
             };
-            (body, false, false)
+            (body, false, None)
         });
         if animating {
             window.request_animation_frame();
+        }
+        let stream = stream_title.is_some();
+        // The stream window is named after its chat, which can be renamed.
+        if let Some(title) = stream_title
+            && self.title.as_ref() != Some(&title)
+        {
+            window.set_window_title(&title);
+            self.title = Some(title);
         }
         let full = if stream { stream_full } else { fullscreen };
         div()
@@ -253,8 +267,12 @@ impl Render for GroupCallPanel {
                 let key = event.keystroke.key.clone();
                 let exits = quill::calls::tile_pin::exits_fullscreen(&key);
                 if exits && owner.read(cx).group_call_is_stream() {
-                    // Esc leaves full screen or the maximized window.
-                    if window.is_fullscreen() || window.is_maximized() {
+                    // Esc closes an open box first, then leaves full
+                    // screen or the maximized window.
+                    if owner.read(cx).group_call.stream.overlay.is_some() {
+                        owner.update(cx, |app, cx| app.close_stream_overlay(cx));
+                        cx.stop_propagation();
+                    } else if window.is_fullscreen() || window.is_maximized() {
                         leave_stream_full(window);
                         cx.stop_propagation();
                         cx.notify();

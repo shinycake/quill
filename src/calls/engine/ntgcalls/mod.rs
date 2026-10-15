@@ -254,10 +254,10 @@ impl NtgcallsEngine {
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
         let camera = native_input(media.camera.as_deref())?;
-        // The system's default microphone and output, as for 1:1 calls:
-        // without them a voice chat is silent both ways.
+        // The system's default microphone, as for 1:1 calls: without it
+        // a voice chat is silent for the others. The output is issued
+        // with the playback (`issue_group_playback`).
         let mic = self.capture_microphone_input(None)?;
-        let speaker = self.device_input(None, MediaDeviceKind::Speaker)?;
         let mut mic_audio =
             external::capture_microphone_description(external_capture_enabled(), mic.as_ref());
         let mut camera_video = ntg_video_description {
@@ -305,6 +305,24 @@ impl NtgcallsEngine {
                 });
             }
         }
+        self.issue_group_playback(group_call_id)
+    }
+
+    /// The playback half of [`Self::issue_group_sources`], also re-issued
+    /// alone when the output device or the local mute changes. ntgcalls
+    /// rebuilds the audio writer for a changed device and drops it for a
+    /// missing description (`StreamManager::maybe_reconfigure_device`):
+    /// with no writer the call's sound is not played, which is the local
+    /// mute (ntgcalls' own mute only covers capture).
+    fn issue_group_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let media = self
+            .group_calls
+            .get(&group_call_id)
+            .cloned()
+            .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        let instance = self.ensure_instance()?;
+        // The chosen output, or the system default as for 1:1 calls.
+        let speaker = self.device_input(media.speaker.as_deref(), MediaDeviceKind::Speaker)?;
         // Everyone else's voices: the call mixes them into its playback
         // "microphone" receiver, which names the output device.
         let mut speaker_audio = audio_description(speaker.as_ref());
@@ -317,12 +335,17 @@ impl NtgcallsEngine {
         // all incoming video, so RTC calls pass them too.
         let (mut playback_camera, mut playback_screen) = Self::external_playback_video();
         let playback = ntg_media_description {
-            microphone: &mut speaker_audio,
+            microphone: if media.playback_muted {
+                null_mut()
+            } else {
+                &mut speaker_audio
+            },
             speaker: null_mut(),
             camera: &mut playback_camera,
             screen: &mut playback_screen,
         };
-        // SAFETY: as above.
+        // SAFETY: `instance` is live and the descriptions are stack-local
+        // for the duration of this synchronous C call.
         let rc = unsafe {
             (self.api.ntg_set_stream_sources)(
                 instance.as_ptr(),

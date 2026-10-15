@@ -575,3 +575,37 @@ fn an_rtmp_join_answer_for_the_admin_keeps_the_server_url() {
     assert_eq!(call.rtmp_stream_key.as_deref(), Some("1:abc"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_chosen_speaker_plays_the_stream_and_follows_a_change() {
+    let (dir, mut driver, _recorder, handle, ..) = ready_group_call_driver();
+    driver
+        .select_call_devices(None, Some("usb-headset".into()))
+        .expect("select before the call");
+    handle.set_group_call_mode(51, GroupCallMode::Rtmp);
+    driver.join_video_chat(555).expect("join tracked call");
+    assert_eq!(
+        handle.group_playbacks(),
+        vec![(555, Some("usb-headset".to_string()), false)],
+        "the join creates the call with the chosen output"
+    );
+    if let Some(call) = driver.session.calls.active_group_call.as_mut() {
+        call.is_joined = true;
+    }
+    driver
+        .select_call_devices(None, Some("speakers".into()))
+        .expect("switch output");
+    driver
+        .set_group_call_playback_muted(true)
+        .expect("mute for me");
+    assert!(driver.group_call_playback_muted());
+    assert_eq!(
+        handle.group_playbacks().get(1..).map(<[_]>::to_vec),
+        Some(vec![
+            (555, Some("speakers".to_string()), false),
+            (555, Some("speakers".to_string()), true),
+        ]),
+        "a change and the local mute reach the joined call"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

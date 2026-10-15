@@ -266,6 +266,7 @@ mod group_call_panel;
 mod group_call_paused;
 mod group_call_settings;
 mod group_call_share;
+mod group_call_stream_boxes;
 mod group_call_stream_layout;
 mod group_call_tiles;
 mod group_call_ui;

@@ -339,52 +339,7 @@ impl QuillApp {
         });
 
         // Rename (`setVideoChatTitle`).
-        let rename = self.group_call.title_dialog.as_ref().map(|dialog| {
-            div()
-                .absolute()
-                .inset_0()
-                .bg(hsla(0., 0., 0., 0.5))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(320.))
-                        .rounded(px(12.))
-                        .bg(cx.theme().background)
-                        .text_color(cx.theme().foreground)
-                        .p(px(16.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.))
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child("Edit Title"))
-                        .child(gpui_kit::component::input::Textarea::new(
-                            &dialog.title_input,
-                        ))
-                        .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .gap(px(8.))
-                                .child(
-                                    Button::new("group-call-title-cancel")
-                                        .label("Cancel")
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.close_group_call_title_dialog(cx)
-                                        })),
-                                )
-                                .child(
-                                    Button::new("group-call-title-save")
-                                        .label("Save")
-                                        .primary()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.save_group_call_title(cx)
-                                        })),
-                                ),
-                        ),
-                )
-        });
+        let rename = self.group_call_rename_overlay("Edit Title".into(), cx);
         // Streaming with an external app: the server URL and key.
         let stream = call.rtmp_url.clone().map(|url| {
             let key = call.rtmp_stream_key.clone().unwrap_or_default();
@@ -458,6 +413,63 @@ impl QuillApp {
             .children(self.group_call_settings_overlay(cx))
             .children(self.screen_privacy_overlay(true, cx))
             .into_any_element()
+    }
+
+    /// The rename box (`setVideoChatTitle`) over the call window, with
+    /// `heading` on top ("Edit live stream title" for a channel).
+    pub(super) fn group_call_rename_overlay(
+        &self,
+        heading: SharedString,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let dialog = self.group_call.title_dialog.as_ref()?;
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .bg(hsla(0., 0., 0., 0.5))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .w(px(320.))
+                        .rounded(px(12.))
+                        .bg(cx.theme().background)
+                        .text_color(cx.theme().foreground)
+                        .p(px(16.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.))
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(heading))
+                        .child(gpui_kit::component::input::Textarea::new(
+                            &dialog.title_input,
+                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap(px(8.))
+                                .child(
+                                    Button::new("group-call-title-cancel")
+                                        .label("Cancel")
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.close_group_call_title_dialog(cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new("group-call-title-save")
+                                        .label("Save")
+                                        .primary()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.save_group_call_title(cx)
+                                        })),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Video · the big mute button · Leave.
@@ -657,6 +669,20 @@ impl QuillApp {
             call.title.clone()
         };
         let muted = call.is_muted_self;
+        // A live stream's viewer has no microphone (tdesktop's top bar
+        // hides the mute button for RTMP); a spacer keeps the title
+        // centered.
+        let stream = super::group_call_stream_layout::uses_stream_layout(call);
+        let count = if stream {
+            let viewers = i64::from(call.viewer_count.max(1));
+            quill::lang::trn_with(
+                quill::lang::keys::GROUP_CALL_RTMP_VIEWERS,
+                viewers,
+                &[("count", &quill::premium_hub::group_digits(viewers))],
+            )
+        } else {
+            format!("{} participants", call.participant_count)
+        };
         Some(
             div()
                 .id("group-call-bar")
@@ -672,28 +698,31 @@ impl QuillApp {
                 ))
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| this.show_group_call_window(cx)))
-                .child(
-                    div()
-                        .id("group-call-bar-mute")
-                        .w(px(41.))
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
-                        .swallow_press()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.toggle_group_call_self_mute(cx);
-                        }))
-                        .child(
-                            Icon::new(if muted {
-                                IconName::MicOff
-                            } else {
-                                IconName::Mic
-                            })
-                            .with_size(px(18.)),
-                        ),
-                )
+                .when(stream, |this| this.child(div().w(px(41.)).flex_none()))
+                .when(!stream, |this| {
+                    this.child(
+                        div()
+                            .id("group-call-bar-mute")
+                            .w(px(41.))
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|style| style.bg(hsla(0., 0., 1., 0.12)))
+                            .swallow_press()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_group_call_self_mute(cx);
+                            }))
+                            .child(
+                                Icon::new(if muted {
+                                    IconName::MicOff
+                                } else {
+                                    IconName::Mic
+                                })
+                                .with_size(px(18.)),
+                            ),
+                    )
+                })
                 .child(
                     div()
                         .flex_1()
@@ -708,11 +737,7 @@ impl QuillApp {
                                 .truncate()
                                 .child(title),
                         )
-                        .child(
-                            div()
-                                .opacity(0.85)
-                                .child(format!("{} participants", call.participant_count)),
-                        ),
+                        .child(div().opacity(0.85).child(count)),
                 )
                 .child(
                     div()

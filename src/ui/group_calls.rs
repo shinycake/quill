@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::group_call_stream_layout::StreamJoinIntent;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
@@ -122,6 +123,8 @@ impl QuillApp {
             .and_then(|c| c.video_chat.clone())
             .map(|vc| vc.group_call_id);
         if let Some(group_call_id) = group_call_id {
+            // A live stream joins in its window once it is tracked.
+            self.note_stream_join_intent(StreamJoinIntent::Call(group_call_id));
             if let Some(live) = self.live.as_mut() {
                 self.connection.status_note = match live.driver.fetch_group_call(group_call_id) {
                     Ok(_) => "Joining voice chat…".into(),
@@ -145,14 +148,20 @@ impl QuillApp {
 
     /// Phase C3a: join the tracked voice chat.
     pub(super) fn join_active_group_call(&mut self, cx: &mut Context<Self>) {
+        self.send_group_call_join();
+        cx.notify();
+    }
+
+    /// Send the join for the tracked call. False when it could not be
+    /// sent (no call, a 1:1 call is on, the connection refused it).
+    pub(super) fn send_group_call_join(&mut self) -> bool {
         let id = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.id);
         let Some(id) = id else {
             self.connection.status_note = "No voice chat to join.".into();
-            cx.notify();
-            return;
+            return false;
         };
         // Push-to-talk joins with the microphone closed.
         let ptt_on = self
@@ -166,17 +175,22 @@ impl QuillApp {
             }
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.join_video_chat(id) {
-                Ok(_) => "Joining voice chat…".into(),
-                Err(_) => "Couldn't join the voice chat.".into(),
+            let sent = live.driver.join_video_chat(id).is_ok();
+            self.connection.status_note = if sent {
+                "Joining voice chat…".into()
+            } else {
+                "Couldn't join the voice chat.".into()
             };
+            sent
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(call) = session.calls.active_group_call.as_mut() {
                 call.is_joined = true;
             }
             self.connection.status_note = "screenshot demo — voice chat (no audio yet)".into();
+            true
+        } else {
+            false
         }
-        cx.notify();
     }
 
     /// Phase C3a: leave the tracked voice chat.
@@ -651,6 +665,9 @@ impl QuillApp {
                 .map(|d| d.as_secs() as i64 + offset)
                 .unwrap_or(0)
         };
+        if offset == 0 {
+            self.note_stream_join_intent(StreamJoinIntent::Chat(chat_id.0));
+        }
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note =
                 match live.driver.start_video_chat(chat_id.0, title, start_date) {

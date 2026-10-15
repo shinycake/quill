@@ -2,6 +2,7 @@
 //! (`parity:deeplink-voice-chat`, see `quill::call_link`).
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use super::group_call_stream_layout::StreamJoinIntent;
 use super::link_info_boxes::finish;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
@@ -31,6 +32,10 @@ impl QuillApp {
             .offer_call_link(chat_id, invite_hash, live_stream)
         {
             Ok(step) => {
+                // A stream opened from its link joins in its window.
+                if let CallLinkStep::Offer { group_call_id } = step {
+                    self.note_stream_join_intent(StreamJoinIntent::Call(group_call_id));
+                }
                 self.connection.status_note = match step_note(step, live_stream) {
                     Some(note) => note,
                     None if matches!(step, CallLinkStep::Offer { .. }) => {

@@ -422,7 +422,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|chat| chat.id.0);
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {
-                Some(engine.create_group_call(group_call_id, chat_id))
+                let offer = engine.create_group_call(group_call_id, chat_id);
+                // The output device chosen in settings, kept for connect.
+                if offer.is_ok()
+                    && let Err(err) = engine.set_group_playback(
+                        group_call_id,
+                        self.selected_devices.1.as_deref(),
+                        self.group_playback_muted == Some(group_call_id),
+                    )
+                {
+                    eprintln!("quill: group call output device not set: {err}");
+                }
+                Some(offer)
             }
             _ => None,
         };
