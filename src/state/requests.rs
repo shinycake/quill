@@ -191,6 +191,7 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
         ErrorClass::AiComposeFloodPremium
         | ErrorClass::StickersForbidden
         | ErrorClass::GifsForbidden
+        | ErrorClass::CollectibleNotFound
         | ErrorClass::Other => {
             return format!("Could not {action} (error {})", err.code);
         }
@@ -203,7 +204,7 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
 /// `TdError`).
 pub(crate) fn error_reason(err: &TdError) -> String {
     match err.class {
-        ErrorClass::NotFound => "not found".to_string(),
+        ErrorClass::NotFound | ErrorClass::CollectibleNotFound => "not found".to_string(),
         ErrorClass::Unauthorized => "not authorized".to_string(),
         ErrorClass::Flood => err.flood_line("too many requests — try again later"),
         ErrorClass::Invalid

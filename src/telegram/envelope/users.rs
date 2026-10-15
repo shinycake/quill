@@ -83,6 +83,9 @@ pub struct ParsedUser {
     /// A5: `usernames.editable_username` — the username `setUsername`
     /// changes (schema 1.8.67, line 2372).
     pub editable_username: String,
+    /// `usernames.collectible_usernames`: usernames bought on Fragment
+    /// (tdesktop shows their collectible box).
+    pub collectible_usernames: Vec<String>,
     pub phone_number: String,
     pub is_contact: bool,
     pub is_bot: bool,
@@ -279,6 +282,18 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     let (active_usernames, disabled_usernames, editable_username) =
         parse_username_lists(value.get("usernames"));
     let username = active_usernames.first().cloned().unwrap_or_default();
+    let collectible_usernames = value
+        .get("usernames")
+        .and_then(|u| u.get("collectible_usernames"))
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
     let phone_number = value
         .get("phone_number")
         .and_then(Value::as_str)
@@ -380,6 +395,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         active_usernames,
         disabled_usernames,
         editable_username,
+        collectible_usernames,
         phone_number,
         is_contact,
         is_bot,

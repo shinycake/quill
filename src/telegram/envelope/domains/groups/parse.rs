@@ -459,6 +459,8 @@ pub(crate) fn parse_groups_payload(
                 starref_join,
                 starref_setup,
                 display_passkeys: crate::passkeys::display_allowed_from_config(value),
+                premium_purchase: crate::premium_hub::purchase::purchase_from_config(value),
+                fragment: crate::premium_hub::fragment::fragment_from_config(value),
             }))
         }
         "chatBoostSlots" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatBoostSlots {

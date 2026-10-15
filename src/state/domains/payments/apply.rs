@@ -22,6 +22,14 @@ impl Session {
                     lookup.info = Some(info);
                 }
             }
+            PaymentsPayload::CollectibleInfo(info) => {
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCollectibleInfo)
+                    && let Some(lookup) = self.payments.hub.collectible.as_mut()
+                {
+                    lookup.loading = false;
+                    lookup.info = Some(info);
+                }
+            }
             PaymentsPayload::PaymentForm(form) => {
                 // Slice P1: `getPaymentForm` answer to our own Buy press
                 // (matched by `@extra`). Opens the checkout dialog.

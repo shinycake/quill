@@ -55,6 +55,9 @@ pub enum ErrorClass {
     PhoneFlood,
     /// `TASK_ALREADY_EXISTS`: a login-email reset is already pending.
     TaskAlreadyExists,
+    /// `COLLECTIBLE_NOT_FOUND`: the tapped username is not a collectible
+    /// one (tdesktop then copies its link instead).
+    CollectibleNotFound,
     Other,
 }
 
@@ -487,6 +490,20 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
         return TdError {
             code,
             class: ErrorClass::AiComposeFloodPremium,
+            flood_wait_secs,
+            limit_hint: None,
+            premium_limit: None,
+            earn_hint,
+        };
+    }
+    if value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .is_some_and(|message| message == "COLLECTIBLE_NOT_FOUND")
+    {
+        return TdError {
+            code,
+            class: ErrorClass::CollectibleNotFound,
             flood_wait_secs,
             limit_hint: None,
             premium_limit: None,

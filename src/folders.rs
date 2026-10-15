@@ -315,6 +315,7 @@ mod tests {
             active_usernames: Vec::new(),
             disabled_usernames: Vec::new(),
             editable_username: String::new(),
+            collectible_usernames: Vec::new(),
             phone_number: String::new(),
             is_contact,
             is_bot,

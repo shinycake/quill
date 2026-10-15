@@ -890,7 +890,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Paid messages: price setting, unpaid exceptions, revenue <!-- parity:premium-paid-messages -->
 - [x] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
 - [x] Hide ads (Premium) <!-- parity:premium-disable-sponsored -->
-- [ ] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
+- [x] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
 - [ ] Fragment and TON wallet flows (blocked: external web services, link-out only) <!-- parity:premium-fragment-ton -->
 
 ### TON wallet (low priority)

@@ -192,7 +192,8 @@ impl QuillApp {
         // The inline results button's start goes out right away (the user
         // pressed it); a link's `start=` only prefills `/start <param>`,
         // the user confirms.
-        let started = self.take_inline_start(chat_id, cx);
+        let started = self.take_inline_start(chat_id, cx)
+            || self.take_premium_auto_start(chat_id, action, cx);
         if !started
             && let DeepLinkAction::OpenUsername {
                 start_param: Some(param),

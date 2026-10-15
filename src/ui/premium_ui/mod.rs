@@ -4,8 +4,8 @@
 //!
 //! Showing, hiding and converting the user's own gifts are confirmed in the
 //! dialog; pin, upgrade, transfer, resale and collections are in
-//! `ui/gift_manage_ui.rs`. Buying Stars and subscribing to Premium are
-//! never offered here.
+//! `ui/gift_manage_ui.rs`. Buying Stars is not offered here; subscribing to
+//! Premium follows the app config (`purchase.rs`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -18,9 +18,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::local_path::sandboxed_display_path;
-use quill::premium_hub::{
-    PREMIUM_BOT_URL, PremiumHub, ReceivedGift, StarTx, TxFilter, group_digits,
-};
+use quill::premium_hub::{PremiumHub, ReceivedGift, StarTx, TxFilter, group_digits};
 use quill::state::Session;
 use quill::telegram::envelope::{
     GiftCard, GiftCardKind, MessageSender, ParsedFile, ServiceAction, StickerContent,
@@ -960,4 +958,5 @@ crate::ui::shell::register_dialogs! {
 mod limit_box;
 mod open_premium;
 mod promo;
+mod purchase;
 mod star_packs;

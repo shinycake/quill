@@ -47,6 +47,9 @@ enum RowAction {
     OpenChat(ChatId),
     /// Open the edit-contact box focused on the note.
     EditNote(i64),
+    /// A collectible username or phone number: the box with where and for
+    /// how much it was bought (tdesktop `internal:collectible_*` links).
+    Collectible { entity: String, copy_text: String },
 }
 
 /// A copy action: the text for the clipboard, the context-menu label and
@@ -134,6 +137,13 @@ impl QuillApp {
                 extra_copy: None,
             });
         }
+        // tdesktop `PhoneOrHiddenValue`: a collectible number is a link to
+        // its box; so is a username that cannot be edited.
+        let collectible_phone = session
+            .payments
+            .hub
+            .fragment
+            .is_collectible_phone(&user.phone_number);
         if !user.phone_number.is_empty() {
             rows.push(DetailRow {
                 id: "info-phone",
@@ -144,7 +154,14 @@ impl QuillApp {
                     menu: "Copy Phone Number",
                     toast: "Phone number copied to clipboard",
                 }),
-                action: RowAction::None,
+                action: if collectible_phone {
+                    RowAction::Collectible {
+                        entity: copyable_phone(&user.phone_number),
+                        copy_text: String::new(),
+                    }
+                } else {
+                    RowAction::None
+                },
                 hint: false,
                 extra_copy: None,
             });
@@ -159,7 +176,14 @@ impl QuillApp {
                     menu: "Copy Username",
                     toast: "Username copied to clipboard",
                 }),
-                action: RowAction::None,
+                action: if user.collectible_usernames.contains(&user.username) {
+                    RowAction::Collectible {
+                        entity: user.username.clone(),
+                        copy_text: profile_link(&user.username),
+                    }
+                } else {
+                    RowAction::None
+                },
                 hint: false,
                 extra_copy: Some(CopyAction {
                     text: profile_link(&user.username),
@@ -281,8 +305,12 @@ impl QuillApp {
         if rows.is_empty() && business_rows.is_empty() {
             return None;
         }
-        let fragment_phone =
-            !is_self && quill::business_info::is_fragment_number(&user.phone_number);
+        // tdesktop `AddPhoneMenu`: the note needs the Fragment address from
+        // the app config.
+        let fragment = &session.payments.hub.fragment;
+        let fragment_url = (!is_self && fragment.is_collectible_phone(&user.phone_number))
+            .then(|| fragment.link.clone())
+            .flatten();
         let mut card = div()
             .flex()
             .flex_col()
@@ -296,6 +324,7 @@ impl QuillApp {
             let interactive = row.copy.is_some() || !matches!(row.action, RowAction::None);
             let copy = row.copy.clone();
             let action = row.action.clone();
+            let owner_name = user.display_name();
             let base = div()
                 .id(row.id)
                 .flex()
@@ -332,9 +361,16 @@ impl QuillApp {
                     this.select_listed_chat(*chat_id, window, cx);
                 }
                 RowAction::EditNote(user_id) => this.open_edit_contact_dialog(*user_id, window, cx),
+                RowAction::Collectible { entity, copy_text } => this.open_collectible_info(
+                    entity,
+                    &owner_name,
+                    Some(ChatId(user_id)),
+                    copy_text.clone(),
+                    cx,
+                ),
             }));
             let extra_copy = row.extra_copy.clone();
-            let fragment_note = fragment_phone && row.id == "info-phone";
+            let fragment_note = fragment_url.clone().filter(|_| row.id == "info-phone");
             let element = match row.copy {
                 Some(copy) => {
                     let owner = cx.entity().downgrade();
@@ -342,10 +378,11 @@ impl QuillApp {
                         .context_menu(move |menu, _, _| {
                             let menu =
                                 copy_menu(menu, &owner, std::iter::once(&copy).chain(&extra_copy));
-                            if fragment_note {
-                                super::profile_business::fragment_note_menu(menu, muted)
-                            } else {
-                                menu
+                            match fragment_note.clone() {
+                                Some(url) => {
+                                    super::profile_business::fragment_note_menu(menu, muted, url)
+                                }
+                                None => menu,
                             }
                         })
                         .into_any_element()

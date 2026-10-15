@@ -169,6 +169,8 @@ impl Session {
                 starref_join,
                 starref_setup,
                 display_passkeys,
+                premium_purchase,
+                fragment,
             } => {
                 self.settings.passkeys.display_allowed = display_passkeys;
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
@@ -186,6 +188,8 @@ impl Session {
                 limits.starref_join_allowed = starref_join;
                 limits.starref_setup_allowed = starref_setup;
                 limits.app_config_loaded = true;
+                self.payments.hub.purchase = premium_purchase;
+                self.payments.hub.fragment = fragment;
             }
             // `getChatBoostFeatures` answer, kept for the chat it was
             // asked for.

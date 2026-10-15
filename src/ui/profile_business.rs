@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::fragment_link::text_with_link;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -23,20 +24,24 @@ pub(crate) struct BusinessHoursUi {
     pub(super) business_time: bool,
 }
 
-/// The note under the phone row menu for an anonymous Fragment number.
-pub(super) fn fragment_note_menu(menu: PopupMenu, muted: Hsla) -> PopupMenu {
-    menu.separator()
-        .item(
-            PopupMenuItem::element(move |_, _| {
-                div()
-                    .w(px(220.))
-                    .text_xs()
-                    .text_color(muted)
-                    .child("This number is not tied to a SIM card and was acquired on Fragment.")
-            })
-            .disabled(true),
-        )
-        .link("Open Fragment", business_info::FRAGMENT_URL)
+/// The note under the phone row menu for an anonymous Fragment number
+/// (`lng_info_mobile_context_menu_fragment_about`): the sentence with
+/// "Fragment" as the link to the address from the app config.
+pub(super) fn fragment_note_menu(menu: PopupMenu, muted: Hsla, url: String) -> PopupMenu {
+    menu.separator().item(PopupMenuItem::element(move |_, cx| {
+        div()
+            .w(px(220.))
+            .text_xs()
+            .text_color(muted)
+            .child(text_with_link(
+                "fragment-phone-note",
+                "This number is not tied to a SIM card and was acquired on ",
+                "Fragment",
+                ".",
+                url.clone(),
+                cx,
+            ))
+    }))
 }
 
 fn now_week_minute() -> u32 {
