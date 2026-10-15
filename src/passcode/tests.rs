@@ -323,10 +323,10 @@ fn fixed_vector_kek_is_stable() {
 fn fixed_vector_sealed_blob_is_byte_identical() {
     let key = fixed_master();
     let nonce = [0x42u8; NONCE_LEN];
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
+    let cipher = XChaCha20Poly1305::new(<&Key>::from(key.as_bytes()));
     let body = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            <&XNonce>::from(&nonce),
             Payload {
                 msg: &[0xa5u8; 32],
                 aad: b"fixed-account",
@@ -341,8 +341,10 @@ fn fixed_vector_sealed_blob_is_byte_identical() {
 
 #[test]
 fn fixed_vector_sealed_blob_opens() {
-    let sealed: Vec<u8> = (0..FIXED_SEALED_HEX.len() / 2)
-        .map(|i| u8::from_str_radix(&FIXED_SEALED_HEX[i * 2..i * 2 + 2], 16).unwrap())
+    let sealed: Vec<u8> = FIXED_SEALED_HEX
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect();
     let plain = open(&fixed_master(), b"fixed-account", &sealed).unwrap();
     assert_eq!(plain, vec![0xa5u8; 32]);

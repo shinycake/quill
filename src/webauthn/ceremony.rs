@@ -15,7 +15,7 @@ use super::ctap2::pin::{
 };
 use super::ctap2::{Authenticator, Control, CtapError, HidDevice, HidError, status};
 use super::{Assertion, CeremonyError, CreationOptions, Registration, RequestOptions};
-use sha2_next::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};

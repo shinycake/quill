@@ -97,7 +97,11 @@ fn digest_file(path: &Path) -> std::io::Result<String> {
         }
         digest.update(buffer.get(..count).unwrap_or_default());
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 fn valid_release(release: &ReleaseInfo) -> bool {

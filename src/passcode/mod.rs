@@ -216,11 +216,11 @@ fn derive_kek(passcode: &str, salt: &[u8], iterations: u32) -> MasterKey {
 }
 
 fn seal(key: &MasterKey, aad: &[u8], plain: &[u8]) -> Result<Vec<u8>, PasscodeError> {
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
+    let cipher = XChaCha20Poly1305::new(<&Key>::from(key.as_bytes()));
     let mut nonce = [0u8; NONCE_LEN];
     rand::thread_rng().fill_bytes(&mut nonce);
     let body = cipher
-        .encrypt(XNonce::from_slice(&nonce), Payload { msg: plain, aad })
+        .encrypt(<&XNonce>::from(&nonce), Payload { msg: plain, aad })
         .map_err(|_| PasscodeError::Corrupt)?;
     let mut out = Vec::with_capacity(WRAP_MAGIC.len() + NONCE_LEN + body.len());
     out.extend_from_slice(WRAP_MAGIC);
@@ -241,9 +241,10 @@ fn open(key: &MasterKey, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>, PasscodeE
     if sealed.len() <= header || magic != WRAP_MAGIC {
         return Err(PasscodeError::Corrupt);
     }
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
+    let nonce = <&XNonce>::try_from(nonce).map_err(|_| PasscodeError::Corrupt)?;
+    let cipher = XChaCha20Poly1305::new(<&Key>::from(key.as_bytes()));
     cipher
-        .decrypt(XNonce::from_slice(nonce), Payload { msg, aad })
+        .decrypt(nonce, Payload { msg, aad })
         .map_err(|_| PasscodeError::Wrong)
 }
 
