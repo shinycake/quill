@@ -127,6 +127,9 @@ pub enum PaymentsPurpose {
     UpgradeGift,
     /// `transferGift`, sent only after the confirmation. Response is `ok`.
     TransferGift,
+    /// `getUpgradedGiftWithdrawalUrl` from the password box of "Send via
+    /// Blockchain". Response is `httpUrl`.
+    GiftExportUrl,
     /// `setGiftResalePrice`. Response is `ok`.
     SetGiftResalePrice,
     /// `getGiftCollections`. Response is `giftCollections`.
@@ -166,6 +169,7 @@ impl PaymentsPurpose {
                 | Self::SetPinnedGifts
                 | Self::UpgradeGift
                 | Self::TransferGift
+                | Self::GiftExportUrl
                 | Self::SetGiftResalePrice
                 | Self::GetGiftCollections
                 | Self::ChangeGiftCollection
@@ -208,6 +212,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     SetPinnedGifts,
     UpgradeGift,
     TransferGift,
+    GiftExportUrl,
     SetGiftResalePrice,
     GetGiftCollections,
     ChangeGiftCollection,

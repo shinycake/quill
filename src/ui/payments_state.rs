@@ -32,6 +32,10 @@ pub(crate) struct PaymentUi {
     /// Stars, members to award, countries (`stars_gift_ui`,
     /// `giveaway_pick_ui`).
     pub(super) pick_search: Entity<InputState>,
+    /// The 2-step verification password of "Send via Blockchain"
+    /// (`gift_transfer_ui`); emptied when it is sent and when the box
+    /// closes.
+    pub(super) gift_export_password: Entity<InputState>,
 }
 
 impl PaymentUi {
@@ -84,6 +88,12 @@ impl PaymentUi {
             gift_pay_upgrade: false,
             gift_premium_by_stars: false,
             pick_search,
+            gift_export_password: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(tr(keys::Q_MONEY_ENTER_CURRENT_PASSWORD))
+                    .masked(true)
+                    .submit_on_enter(false)
+            }),
         }
     }
 }

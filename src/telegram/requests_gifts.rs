@@ -98,6 +98,24 @@ pub fn transfer_gift(
     .to_string()
 }
 
+/// `getUpgradedGiftWithdrawalUrl`: Fragment's page for moving the
+/// collectible to the TON blockchain. `password` is the 2-step
+/// verification password as typed; the caller never keeps it. This only
+/// returns a URL; nothing moves until the user acts on Fragment.
+pub fn get_upgraded_gift_withdrawal_url(
+    extra: RequestId,
+    received_gift_id: &str,
+    password: &str,
+) -> String {
+    json!({
+        "@type": "getUpgradedGiftWithdrawalUrl",
+        "@extra": extra.as_extra(),
+        "received_gift_id": received_gift_id,
+        "password": password,
+    })
+    .to_string()
+}
+
 /// `setGiftResalePrice`: `Some(stars)` lists the collectible for that
 /// price, `None` takes it off sale (`price` null).
 pub fn set_gift_resale_price(

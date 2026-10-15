@@ -212,6 +212,83 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
+    /// The Transfer button of the transfer picker's confirmation:
+    /// `transferGift` to the contact the confirmation names. Refused unless
+    /// that confirmation is the one on screen.
+    pub fn transfer_picked_gift(&mut self) -> Result<RequestId, ConnectSendError> {
+        let Some(TransferPicker {
+            id,
+            stage: TransferStage::ConfirmPeer { user_id, .. },
+            ..
+        }) = self.session.payments.gifts_manage.transfer().cloned()
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let TransferGate::Ready { star_count } =
+            self.own_gift(&id)?.transfer_gate(true, now_unix())
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        let person = self
+            .session
+            .users
+            .get(&user_id)
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        if Some(user_id) == self.session.my_user_id || person.is_bot || !self.can_pay(star_count) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let to = MessageSender::User { user_id };
+        self.mutate_own_gifts(PaymentsPurpose::TransferGift, |extra, _| {
+            rq::transfer_gift(extra, &id, to, star_count)
+        })
+    }
+
+    /// Submit the password box of "Send via Blockchain":
+    /// `getUpgradedGiftWithdrawalUrl`. Only from the password stage (after
+    /// "Open Fragment"), with a typed password, for a gift whose export
+    /// is unlocked. The answer is a Fragment URL; nothing moves here. The
+    /// password goes into this one request and is not kept.
+    pub fn export_picked_gift(&mut self, password: &str) -> Result<RequestId, ConnectSendError> {
+        let Some(TransferPicker {
+            id,
+            stage: TransferStage::Password { sending: false, .. },
+            ..
+        }) = self.session.payments.gifts_manage.transfer().cloned()
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if password.is_empty()
+            || !self.chats_path_active()
+            || self.own_gift(&id)?.export_state(now_unix()) != ExportState::Ready
+            || !self
+                .session
+                .payments
+                .hub
+                .gifts_are_mine(self.session.my_user_id)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl),
+            None,
+        );
+        let set_stage = |driver: &mut Self, sending: bool| {
+            if let Some(picker) = driver.session.payments.gifts_manage.transfer_mut() {
+                picker.stage = TransferStage::Password {
+                    sending,
+                    error: None,
+                };
+            }
+        };
+        set_stage(self, true);
+        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id, password);
+        if let Err(err) = self.send_json_request(extra, &json) {
+            set_stage(self, false);
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
     /// `setGiftResalePrice`: `Some(stars)` lists the collectible, `None`
     /// takes it off sale.
     pub fn set_received_gift_resale_price(

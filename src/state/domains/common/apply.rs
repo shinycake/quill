@@ -207,6 +207,11 @@ impl Session {
                 if self.is_earn_request(pending) {
                     // Revenue: a Fragment withdrawal page or the ads account.
                     self.apply_earn_url(url, pending);
+                } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl))
+                {
+                    // "Send via Blockchain": Fragment's export page.
+                    self.apply_gift_export_url(url);
                 } else if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
                     group_call_id,
                     can_self_unmute,

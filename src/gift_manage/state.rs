@@ -2,7 +2,9 @@
 //! `PaymentsState::gifts_manage`, so the poll loop and reducer own every
 //! transition.
 
-use super::{AvailableGift, GiftCollection, GiftLimits, GiftRecipient, PremiumGiftOption};
+use super::{
+    AvailableGift, GiftCollection, GiftLimits, GiftRecipient, PremiumGiftOption, TransferPicker,
+};
 
 /// The inline form or confirmation that is open for the selected gift.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,10 +14,8 @@ pub enum GiftFlow {
         id: String,
         keep_details: bool,
     },
-    /// Confirm `transferGift` to the open chat.
-    Transfer {
-        id: String,
-    },
+    /// The transfer picker: a contact, or the export through Fragment.
+    Transfer(TransferPicker),
     /// Edit the resale price.
     Resale {
         id: String,
@@ -61,9 +61,38 @@ pub struct GiftManageState {
     /// A one-line result of the last action ("Pinned", "Upgraded to ...").
     pub note: Option<String>,
     pub send: SendGiftState,
+    /// A finished transfer, for the toast and the recipient's chat.
+    pub transferred: Option<GiftTransferred>,
+    /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, waiting
+    /// for the UI to open it.
+    pub export_url: Option<String>,
+}
+
+/// tdesktop `ShowGiftTransferredToast` and `showPeerHistory` after
+/// `transferGift`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GiftTransferred {
+    pub gift_name: String,
+    pub recipient: String,
+    pub user_id: i64,
 }
 
 impl GiftManageState {
+    /// The open transfer picker.
+    pub fn transfer(&self) -> Option<&TransferPicker> {
+        match &self.flow {
+            Some(GiftFlow::Transfer(picker)) => Some(picker),
+            _ => None,
+        }
+    }
+
+    pub fn transfer_mut(&mut self) -> Option<&mut TransferPicker> {
+        match &mut self.flow {
+            Some(GiftFlow::Transfer(picker)) => Some(picker),
+            _ => None,
+        }
+    }
+
     pub fn collection(&self, id: i32) -> Option<&GiftCollection> {
         self.collections.iter().find(|c| c.id == id)
     }

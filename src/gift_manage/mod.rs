@@ -12,6 +12,9 @@ mod send;
 mod state;
 #[cfg(test)]
 mod tests;
+mod transfer;
+#[cfg(test)]
+mod transfer_tests;
 
 use crate::premium_hub::ReceivedGift;
 use crate::telegram::envelope::{ParsedFile, StickerContent};
@@ -19,6 +22,7 @@ use serde_json::Value;
 
 pub use send::*;
 pub use state::*;
+pub use transfer::*;
 
 fn int(value: Option<&Value>) -> i64 {
     value
@@ -57,6 +61,9 @@ pub struct GiftManageInfo {
     pub listed: bool,
     /// Not usable for crafting before this Unix time (`craft_date`).
     pub craft_date: i32,
+    /// When the collectible may leave for the TON blockchain
+    /// (`export_date`); 0 when it never can.
+    pub export_date: i32,
 }
 
 impl GiftManageInfo {
@@ -80,6 +87,7 @@ impl GiftManageInfo {
             resale_gram_only: resale.is_some_and(|r| flag(r, "gram_only")),
             listed: resale.is_some_and(|r| !r.is_null()),
             craft_date: int(received.get("craft_date")) as i32,
+            export_date: i32::try_from(int(received.get("export_date"))).unwrap_or(0),
         }
     }
 }
@@ -182,6 +190,20 @@ impl ReceivedGift {
         } else {
             ResaleGate::Ready
         }
+    }
+
+    /// The "Send via Blockchain" row of the transfer picker.
+    pub fn export_state(&self, now: i64) -> ExportState {
+        ExportState::of(i64::from(self.manage.export_date), now)
+    }
+
+    /// The collectible lives in a TON wallet: Telegram can't move it until
+    /// it is brought back on Fragment (tdesktop: no `ownerId`).
+    pub fn held_outside_telegram(&self) -> bool {
+        self.gift
+            .collectible
+            .as_ref()
+            .is_some_and(|c| c.owner.is_none())
     }
 
     pub fn in_collection(&self, collection_id: i32) -> bool {
