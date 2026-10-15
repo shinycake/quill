@@ -1,2 +1,0 @@
-# Passkeys from a phone over QR + Bluetooth (caBLE v2) on macOS and Linux; with #800, #821, #825 and #831 every step of quill-tools/designs/passkeys.md is in (docs/decisions/passkeys-hybrid.md)
-parity:settings-passkeys

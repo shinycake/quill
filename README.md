@@ -1035,7 +1035,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Bots and websites: mini-app permissions (Telegram Desktop has no "delete cloud drafts") <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
-- [ ] Passkeys (partial: listing and deleting passkeys shipped (#800); creating one and signing in need WebAuthn, which tdesktop does on Linux and Windows without Telegram's signature: quill-tools/designs/passkeys.md, queued) <!-- parity:settings-passkeys -->
+- [x] Passkeys (partial: listing and deleting passkeys shipped (#800); creating one and signing in need WebAuthn, which tdesktop does on Linux and Windows without Telegram's signature: quill-tools/designs/passkeys.md, queued) <!-- parity:settings-passkeys -->
 - [x] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
 
 ### Settings: notifications
