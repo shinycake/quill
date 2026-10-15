@@ -162,6 +162,20 @@ fn scroll(vcx: &mut VisualTestContext, dy: f32) {
     settle(vcx);
 }
 
+/// Scroll by `dy` until the round video plays in view.
+fn scroll_until_playing(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, dy: f32) {
+    let mut steps = 0;
+    while round_state(app, vcx) != Some((false, true)) {
+        steps += 1;
+        assert!(
+            steps < 150,
+            "never played in view: {:?}",
+            round_state(app, vcx)
+        );
+        scroll(vcx, dy);
+    }
+}
+
 /// The round video's player: whether there is one, whether it is held
 /// off screen, and whether play is asked of it.
 fn round_state(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(bool, bool)> {
@@ -175,7 +189,9 @@ fn round_state(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(b
 
 #[gpui_kit::test]
 fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAppContext) {
-    let scripts: Vec<_> = (0..6).map(|_| ready_script()).collect();
+    // Rows rendered in the list's overdraw open and drop players while it
+    // scrolls, each taking the next backend.
+    let scripts: Vec<_> = (0..16).map(|_| ready_script()).collect();
     for script in &scripts {
         queue_backend(script);
     }
@@ -183,12 +199,10 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
     let vcx = &mut vcx;
     vcx.update(|window, _| window.activate_window());
     settle(vcx);
+    // From the top of the history down to the round video: where it lands
+    // depends on the platform's text metrics, so step until it plays.
     scroll(vcx, 3000.);
-    assert_eq!(
-        round_state(&app, vcx),
-        Some((false, true)),
-        "in view: playing"
-    );
+    scroll_until_playing(&app, vcx, -40.);
     // Scroll in small steps until the round video's row still renders (the
     // list's first row) but its picture is above the visible area.
     let mut steps = 0;
@@ -232,8 +246,7 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
         round_state(&app, vcx)
     );
     // Back in view: a new player opens and plays.
-    scroll(vcx, 3000.);
-    assert_eq!(round_state(&app, vcx), Some((false, true)), "back in view");
+    scroll_until_playing(&app, vcx, 40.);
 }
 
 #[gpui_kit::test]
