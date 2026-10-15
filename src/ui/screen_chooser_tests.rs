@@ -297,3 +297,131 @@ fn the_privacy_text_bolds_its_marked_words() {
     assert_eq!(bold, vec![std::ops::Range { start: 13, end: 29 }]);
     assert_eq!(split_bold("plain"), ("plain".to_string(), Vec::new()));
 }
+
+/// The Wayland backend's shape: the portal picks, so one unique source.
+struct PortalScreens;
+
+impl quill::calls::capture::screen::ScreenBackend for PortalScreens {
+    fn access(&self) -> ScreenAccess {
+        ScreenAccess::Granted
+    }
+
+    fn open_privacy_settings(&self) {}
+
+    fn unique_source(&self) -> Option<SourceId> {
+        Some(SourceId("portal".into()))
+    }
+
+    fn sources(&self) -> Result<Vec<ScreenSource>, quill::calls::capture::CaptureError> {
+        panic!("the chooser never lists with a unique source");
+    }
+
+    fn thumbnail(
+        &self,
+        _source: &ScreenSource,
+        _max: (u32, u32),
+    ) -> Option<quill::calls::capture::screen::Thumbnail> {
+        None
+    }
+
+    fn start(
+        &self,
+        _source: &SourceId,
+        _options: quill::calls::capture::screen::ScreenOptions,
+        _sink: quill::calls::capture::FrameSink<quill::calls::capture::VideoFrame>,
+        _preview: Arc<quill::calls::capture::screen::PreviewSlot>,
+    ) -> Result<
+        Box<dyn quill::calls::capture::screen::ScreenCapture>,
+        quill::calls::capture::CaptureError,
+    > {
+        Err(quill::calls::capture::CaptureError::Unsupported(
+            "demo".into(),
+        ))
+    }
+}
+
+#[gpui_kit::test]
+fn with_a_unique_source_the_button_shares_and_stops_without_the_chooser(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.screen_share.backend = Some(Arc::new(PortalScreens));
+        app.toggle_group_call_screen_share(cx);
+    });
+    vcx.run_until_parked();
+    assert!(group_sharing(&app, vcx), "shared at once");
+    app.read_with(vcx, |app, _| {
+        assert!(app.screen_share.window.is_none(), "no chooser window");
+        assert!(app.screen_share.sources.is_empty());
+        assert_eq!(
+            app.screen_share.demo_active,
+            Some(SourceId("portal".into()))
+        );
+        assert!(!app.screen_share.demo_active_audio);
+    });
+    // Pressed again while sharing (the 1:1 button always comes here):
+    // tdesktop stops the share.
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.open_screen_chooser(ScreenFor::Group, cx));
+    });
+    vcx.run_until_parked();
+    assert!(!group_sharing(&app, vcx));
+    app.read_with(vcx, |app, _| {
+        assert!(app.screen_share.window.is_none());
+        assert!(app.screen_share.demo_active.is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn a_one_to_one_call_toggles_the_unique_source_too(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
+    let vcx = &mut vcx;
+    let sharing = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.demo_session
+                .as_ref()
+                .unwrap()
+                .calls
+                .active_call
+                .as_ref()
+                .unwrap()
+                .screen_sharing
+        })
+    };
+    app.update_in(vcx, |app, _, cx| {
+        app.screen_share.backend = Some(Arc::new(PortalScreens));
+        let session = app.demo_session.as_mut().unwrap();
+        session.calls.active_group_call = None;
+        session.calls.active_call = Some(quill::state::ActiveCall {
+            id: 5,
+            user_id: 1,
+            is_outgoing: true,
+            is_video: false,
+            state: quill::telegram::envelope::CallState::Pending {
+                is_created: true,
+                is_received: true,
+            },
+            started_at: std::time::Instant::now(),
+            ready_at: None,
+            ready: None,
+            transport: None,
+            transport_error: None,
+            signaling_queue: Vec::new(),
+            signaling_dropped: 0,
+            muted: false,
+            camera_on: false,
+            screen_sharing: false,
+            remote_video: quill::calls::engine::RemoteVideoState::Inactive,
+            remote_screen: quill::calls::engine::RemoteVideoState::Inactive,
+            remote_audio_muted: false,
+        });
+        assert!(app.open_screen_chooser(ScreenFor::Private(5), cx));
+    });
+    vcx.run_until_parked();
+    assert!(sharing(&app, vcx));
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.open_screen_chooser(ScreenFor::Private(5), cx));
+    });
+    vcx.run_until_parked();
+    assert!(!sharing(&app, vcx));
+}

@@ -113,6 +113,7 @@
 "lng_group_call_context_unmute_for_me" = "Unmute for me";
 "lng_group_call_edit_title_channel" = "Edit live stream title";
 "lng_group_call_end_channel" = "End Live Stream";
+"lng_group_call_failed_screen" = "An error occurred. Screencast has stopped.";
 "lng_group_call_join" = "Join";
 "lng_group_call_leave" = "Leave";
 "lng_group_call_leave_sure_channel" = "Are you sure you want to leave this live stream?";

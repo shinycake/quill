@@ -21,7 +21,7 @@
 //! computer plays and the call microphone (`call_capture`) mixes it into
 //! its frames. It stops with the share, or when the box is cleared.
 //!
-//! Builds without a screen backend (Linux until its slice) never start
+//! Builds without a screen backend (no `ui` feature) never start
 //! this: ntgcalls' desktop capture runs as before.
 
 use super::*;

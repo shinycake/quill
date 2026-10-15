@@ -7015,6 +7015,7 @@ dependencies = [
  "aes 0.9.3",
  "aes-gcm",
  "arc-swap",
+ "ashpd",
  "async-io",
  "base64 0.22.1",
  "block2 0.6.2",

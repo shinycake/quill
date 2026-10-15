@@ -475,3 +475,48 @@ fn without_loopback_the_box_is_ignored() {
     assert!(!driver.call_screen().sharing_audio());
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// The Wayland portal share (`screen_portal.rs`): paused from the start
+/// until the user picks in the portal dialog and the first picture comes,
+/// as tgcalls reports a capture without frames.
+#[test]
+fn a_portal_share_is_paused_until_its_first_picture() {
+    let (dir, mut driver, engine, screens) = group_driver();
+    driver.session.calls.active_group_call = Some(sharing_group_call());
+    driver.choose_call_screen_source(SourceId("portal".into()), false);
+    driver.pump_call_screen();
+    let sink = sink_of(&screens);
+    // What the portal capture reports as it starts.
+    sink.push_event(CaptureEvent::Paused);
+    driver.pump_call_screen();
+    let toggles = sent_of(&driver, "toggleGroupCallScreenSharingIsPaused");
+    assert_eq!(toggles.len(), 1);
+    assert_eq!(toggles[0]["is_paused"], true);
+    // The user picked: the first picture and its Resumed.
+    sink.push_event(CaptureEvent::Resumed);
+    driver.pump_call_screen();
+    sink.push(frame(9));
+    wait_for(|| engine.external_frames().len() == 1);
+    let toggles = sent_of(&driver, "toggleGroupCallScreenSharingIsPaused");
+    assert_eq!(toggles.len(), 2);
+    assert_eq!(toggles[1]["is_paused"], false);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// Cancelling the portal dialog fails the capture with tdesktop's text;
+/// the share stops and keeps it for the call window.
+#[test]
+fn a_cancelled_portal_dialog_stops_the_share() {
+    let (dir, mut driver, _engine, screens) = group_driver();
+    driver.session.calls.active_group_call = Some(sharing_group_call());
+    driver.choose_call_screen_source(SourceId("portal".into()), false);
+    driver.pump_call_screen();
+    let text = "An error occurred. Screencast has stopped.";
+    sink_of(&screens).push_event(CaptureEvent::Failed(CaptureError::Device(text.into())));
+    driver.pump_call_screen();
+    assert!(screens.stopped.load(Ordering::SeqCst));
+    assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
+    assert_eq!(driver.call_screen().error.as_deref(), Some(text));
+    assert!(driver.call_screen().chosen().is_none());
+    std::fs::remove_dir_all(dir).ok();
+}

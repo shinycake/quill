@@ -73,6 +73,7 @@ ui = [
     "dep:objc2-core-bluetooth",
     "dep:async-io",
     "dep:futures-lite",
+    "dep:ashpd",
 ]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
 # when QUILL_DEMO_CAPTURE=<file.png> is set (no screen-recording permission).
@@ -207,7 +208,14 @@ async-io = { version = "2", optional = true }
 futures-lite = { version = "2", optional = true }
 # System-wide push-to-talk (docs/decisions/codex-ptt-global.md): the X11 RECORD
 # extension. Same x11rb 0.13 GPUI already links; only the `record` feature is new.
-x11rb = { version = "0.13", default-features = false, features = ["record"] }
+# Screen sharing on X11 (src/calls/capture/screen_x11.rs): RandR monitors,
+# Composite window pixmaps and the XFixes cursor (features only, no new crate).
+x11rb = { version = "0.13", default-features = false, features = ["record", "randr", "composite", "xfixes"] }
+# Screen sharing on Wayland (src/calls/capture/screen_portal.rs): the
+# xdg-desktop-portal ScreenCast interface. Same ashpd 0.13 GPUI already links
+# (async-io, as GPUI uses it); `screencast` only adds serde_repr, already in the
+# tree. libpipewire itself is loaded at run time (src/calls/capture/pipewire.rs).
+ashpd = { version = "0.13.13", optional = true, default-features = false, features = ["async-io", "screencast"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Security keys over IOKit HID (src/webauthn/ctap2/hid_macos.rs).

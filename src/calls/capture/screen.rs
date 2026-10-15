@@ -3,9 +3,11 @@
 //! window into I420 frames for the call's external screen source.
 //!
 //! [`ScreenBackend`] is the per-OS part: ScreenCaptureKit on macOS
-//! (`screen_mac.rs`). Windows and Linux get theirs in later slices; until
-//! then [`native_backend`] returns `None` there and calls keep ntgcalls'
-//! own desktop capture. The conversions here are plain Rust and shared.
+//! (`screen_mac.rs`), Windows.Graphics.Capture on Windows (`screen_win.rs`),
+//! the xdg-desktop-portal or the X server on Linux (`screen_linux.rs`).
+//! Builds without the UI have none ([`native_backend`] returns `None`) and
+//! keep ntgcalls' own desktop capture. The conversions here are plain Rust
+//! and shared.
 //!
 //! Design: `docs/decisions/call-capture.md`.
 #![deny(clippy::indexing_slicing)]
@@ -83,6 +85,12 @@ pub trait ScreenBackend: Send + Sync {
     fn sources(&self) -> Result<Vec<ScreenSource>, CaptureError>;
     /// One picture of `source`, fitted into `max` pixels.
     fn thumbnail(&self, source: &ScreenSource, max: (u32, u32)) -> Option<Thumbnail>;
+    /// The one source sharing always uses, when the system picks what to
+    /// share itself (tdesktop `uniqueDesktopCaptureSource`: the portal on
+    /// Wayland). The share button then skips the chooser.
+    fn unique_source(&self) -> Option<SourceId> {
+        None
+    }
     /// Start capturing `source` into `sink`. Pause, resume, the source
     /// closing and failures arrive as sink events.
     fn start(
@@ -110,7 +118,11 @@ pub fn native_backend() -> Option<Arc<dyn ScreenBackend>> {
     {
         Some(Arc::new(super::screen_win::WinScreen))
     }
-    #[cfg(not(all(feature = "ui", any(target_os = "macos", windows))))]
+    #[cfg(all(feature = "ui", target_os = "linux"))]
+    {
+        Some(Arc::new(super::screen_linux::LinuxScreen))
+    }
+    #[cfg(not(all(feature = "ui", any(target_os = "macos", windows, target_os = "linux"))))]
     {
         None
     }

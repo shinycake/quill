@@ -13,6 +13,10 @@
 //!   it and opens the OS privacy settings (tdesktop
 //!   `ScreenSharingPrivacyRequestBox`).
 //!
+//! - Where the system picks the source itself (the portal on Wayland,
+//!   tdesktop `uniqueDesktopCaptureSource`), the share button skips the
+//!   chooser: it shares that source, or stops the running share.
+//!
 //! Only builds with a screen backend (`calls::capture::screen`) show it.
 //! Elsewhere the share buttons keep ntgcalls' own desktop capture.
 #![deny(clippy::indexing_slicing)]
@@ -205,6 +209,13 @@ impl QuillApp {
             cx.notify();
             return true;
         }
+        if let Some(source) = backend.unique_source() {
+            // tdesktop `chooseShareScreenSource`: with one source (the
+            // Wayland portal, which shows its own picker) the button
+            // stops a running share or shares that source at once.
+            self.toggle_unique_screen_source(for_call, source, cx);
+            return true;
+        }
         self.screen_share.for_call = Some(for_call);
         if let Some(handle) = self.screen_share.window {
             // tdesktop `activate()`: one chooser per call, brought forward.
@@ -386,6 +397,40 @@ impl QuillApp {
         self.close_screen_chooser(cx);
     }
 
+    /// The share button where the system picks the source: stop if
+    /// sharing, otherwise share `source` without the chooser.
+    fn toggle_unique_screen_source(
+        &mut self,
+        for_call: ScreenFor,
+        source: SourceId,
+        cx: &mut Context<Self>,
+    ) {
+        self.screen_share.for_call = Some(for_call);
+        if self.screen_sharing_in(for_call) {
+            self.stop_screen_source(cx);
+        } else {
+            self.screen_share.selected = Some(source);
+            self.screen_share.with_audio = false;
+            self.accept_screen_source(cx);
+        }
+    }
+
+    /// Whether `for_call` is sharing the screen, live or in the demo.
+    fn screen_sharing_in(&self, for_call: ScreenFor) -> bool {
+        self.session().is_some_and(|session| match for_call {
+            ScreenFor::Group => session
+                .calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.screen_sharing || call.screen_share_pending),
+            ScreenFor::Private(_) => session
+                .calls
+                .active_call
+                .as_ref()
+                .is_some_and(|call| call.screen_sharing),
+        })
+    }
+
     /// Stop Sharing (tdesktop `chooseSourceStop`).
     pub(super) fn stop_screen_source(&mut self, cx: &mut Context<Self>) {
         let Some(for_call) = self.screen_share.for_call else {
@@ -409,19 +454,7 @@ impl QuillApp {
     }
 
     fn stop_screen_share(&mut self, for_call: ScreenFor, cx: &mut Context<Self>) {
-        let sharing = self.session().is_some_and(|session| match for_call {
-            ScreenFor::Group => session
-                .calls
-                .active_group_call
-                .as_ref()
-                .is_some_and(|call| call.screen_sharing || call.screen_share_pending),
-            ScreenFor::Private(_) => session
-                .calls
-                .active_call
-                .as_ref()
-                .is_some_and(|call| call.screen_sharing),
-        });
-        if !sharing {
+        if !self.screen_sharing_in(for_call) {
             return;
         }
         match for_call {
