@@ -50,13 +50,34 @@ run):
     inside the visible content mask (`VideoPlayer::shown_count`, counted by
     the `video_frame` pump). A deferred sweep after the paint compares the
     two (`off_screen_step`):
-    - a player painted this pass: shown
+    - a player painted this pass: shown (played)
     - not painted: paused at once (`Hide`), so no more decoding and no frame
       requests
     - hidden for 2 s (`RELEASE_AFTER`): released by a timer (`Release`)
-    - a row rendering again: resumed
-  - The GIF panel's players (`PANEL_CHAT`) are exempt, since the panel is
-    not the history.
+  - Only the sweep clears the hold. A row that keeps rendering while its
+    picture is outside the view (the list's first row scrolled half away)
+    stays paused with no play/pause churn; a paused player still paints its
+    last picture, so scrolling back shows it and the next sweep resumes it.
+  - A history clip opens held and plays at the sweep after its first
+    picture was painted in view. A row rendered only in the list's overdraw
+    never plays. After a release, the next pass that still renders the row
+    opens a new held player (one decoder open per release, while passes
+    happen).
+  - The GIF panel's players (`PANEL_CHAT`) are exempt: the panel renders in
+    its own slice. They live by the panel's own passes
+    (`begin_panel_render`, at the top of `inline_results_panel`: cells that
+    leave the panel stop) and stop when the panel closes (`clear_panel`,
+    checked each root render). History passes and `frame_start` leave them
+    alone.
+  - Play and pause decisions use the player's play intent
+    (`VideoPlayer::wants_play`), so an opening player is played or paused
+    too (window activation included); a round video going back to its loop
+    plays only when its slot wants to (on screen, window active).
+  - A viewer or story viewer over the chat clears the players each root
+    render (`app_render`). The conversation slice can replay from its cache
+    while a viewer is open without running its prepaint, so the animation
+    layer could otherwise keep drawing (and pulling) tiles behind the
+    viewer; with the players gone their tiles have nothing to draw.
   - tdesktop does the same in two steps: a streamed clip decodes only ahead
     of frames it shows, and `HistoryInner::visibleAreaUpdated` unloads heavy
     parts far from the view (`Session::unloadHeavyViewParts`).
@@ -93,13 +114,19 @@ run):
     viewer open options)
   - `supported()` and `decodes_in_process()`
   - the `shown_count` counter
-  - pacing: two draw starts less than 3.125 ms apart count as one frame
+  - `wants_play()`
+  - pacing: two draw starts less than 2 ms apart count as one frame
     (`SAME_FRAME`). A tile drawn twice in one frame (layer copy and slice)
-    no longer halves the learned interval on Linux and Windows.
+    no longer halves the learned interval on Linux and Windows. GPUI exposes
+    no frame counter to tell draws apart by identity; 2 ms is under half a
+    240 Hz frame, so a late frame followed by an early one still counts as
+    two.
   - transport: a looping player starts over 50 ms before the end
     (`LOOP_LEAD`), as the old inline player did, instead of waiting for the
-    backend to stop there. It sends one loop and waits until the backend's
-    seek lands.
+    backend to stop there. Only the backend's own duration counts, never the
+    message's whole-second label. It sends one loop (an `at_end` before the
+    seek lands sends no second one) and keeps the position at the start
+    until the seek lands.
 - **Removed:** the `NativeVideo` / `ffmpeg_video` consumers in
   `inline_video.rs`, `message_media/*`, `inline_grid.rs`, `round_seek.rs`
   and `story_more.rs`, and the methods that became dead
@@ -223,30 +250,48 @@ after.
   PR keeps the current behaviour.
 - **A GIF panel cell with no player** keeps its still; panel players are not
   paused off screen, since the panel draws only visible rows.
+- **Story pause** checks the play intent instead of pausing on every
+  100 ms tick: a player already paused is left alone, and one paused while
+  it opens stays paused once open.
 
 ## How verified
 
 - **Unit tests** (`cargo test --features demo-capture`):
   - `inline_players.rs`: the off-screen steps (shown, hidden at once,
-    staying hidden, released after 2 s), the decoded-memory budget, and the
-    queue the in-process decoder keeps counting toward it.
-  - `pacing.rs`: two draws in one frame count once.
+    staying hidden, released after 2 s); history and panel passes each reap
+    only their own players; the decoded-memory budget, and the queue the
+    in-process decoder keeps counting toward it.
+  - `pacing.rs`: two draws in one frame count once; jittered 240 Hz frames
+    (gaps down to 2.97 ms) are not merged.
   - `transport.rs`: a looping player starts over just before the end, once
-    until the seek lands; a clip that does not loop plays to the end.
-- **GPUI UI test** (`video_player/tests/inline.rs`): the
-  `ready-video-inline` chat on two scripted backends. Both players open but
-  wait while the window is inactive. Once it is active, both play muted
-  (`volume 0`, `play 1`). Their frame requests go to the conversation's
-  animation layer and never to the conversation slice. Neither is hidden
-  while painted. Switching to another chat drops both players and releases
-  their backends. The scripted backend queue (`NEXT_BACKEND`) is now a
-  `VecDeque`, so a test can install several.
+    until the seek lands; an `at_end` after an early loop sends no second
+    loop and the position stays at the start; the message's duration never
+    loops early; a clip that does not loop plays to the end.
+- **GPUI UI tests** (`video_player/tests/inline.rs`), on the
+  `ready-video-inline` chat with scripted backends (the queue,
+  `NEXT_BACKEND`, is now a `VecDeque`, and a test that queues one counts
+  clips as playable without the FFmpeg shim, for Linux CI):
+  - Both players open but wait while the window is inactive. Once it is
+    active, both play muted (`volume 0`, `play 1`). Their frame requests go
+    to the conversation's animation layer and never to the conversation
+    slice. Neither is hidden while painted. Switching to another chat drops
+    both players and releases their backends.
+  - Scroll the round video's picture out of view (in 10 px wheel steps)
+    while its row still renders: it is held (paused, `wants_play` false);
+    four more history passes make no play or pause call; advancing the
+    executor clock by `RELEASE_AFTER` releases its backend, and a later pass
+    reopens it held, not playing; scrolling back plays it.
+  - A story player paused (`apply_story_native_pause`) while its clip is
+    still opening does not start once the backend is ready.
 - **Captures** of `ready-video-inline` in light and dark (in-process
   `QUILL_DEMO_CAPTURE`, not committed): the video tile with its first
   picture, rounded corners and the `0:12` mute pill; the round video
   clipped to a circle with its `0:08` pill; the pending outgoing round
   video with its play disc.
-- **Measurements** above (macOS, AVPlayer).
+- **Measurements** above (macOS, AVPlayer). They were taken before the
+  review fixes (held opening, panel lifetime, the 2 ms same-frame threshold,
+  the loop guards) and were not repeated; those change no steady-state
+  playback path on screen.
 
 Not verified:
 
@@ -254,7 +299,9 @@ Not verified:
   CI. The off-screen pause was not measured on FFmpeg (where it saves
   decoding CPU; on AVPlayer it saves frame requests).
 - The GIF panel and the story viewer were not captured or measured: there
-  is no demo with a playing panel clip or a video story. Both compile on the
+  is no demo with a playing panel clip or a video story. The story still is
+  always the poster: a video story's `display_file_ids` hold only its
+  thumbnail. Both compile on the
   same calls as the tiles, and stories keep their progress, pause and mute
   code paths.
 - The live account was not used.
