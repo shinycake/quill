@@ -229,6 +229,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
+        // A second click while the first transfer is out sends nothing.
+        if self.session.payments.hub.gift_mutating {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let person = self
             .session
             .users
@@ -243,11 +247,66 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
+    /// Whether the export of gift `id` may be asked for now: an unlocked
+    /// gift of the user's own list, with nothing else in flight.
+    fn export_allowed(&self, id: &str) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active()
+            || self.session.payments.hub.gift_mutating
+            || self.own_gift(id)?.export_state(now_unix()) != ExportState::Ready
+            || !self
+                .session
+                .payments
+                .hub
+                .gifts_are_mine(self.session.my_user_id)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        Ok(())
+    }
+
+    /// "Open Fragment" in "Manage with Fragment": tdesktop's password-less
+    /// try of `getUpgradedGiftWithdrawalUrl` (`inputCheckPasswordEmpty`),
+    /// with a reload of the password state. Its error picks the security
+    /// check or the password box; a URL it returned would be dropped.
+    /// Only from that confirmation, for an unlocked gift.
+    pub fn probe_gift_export(&mut self) -> Result<RequestId, ConnectSendError> {
+        let Some(TransferPicker {
+            id,
+            stage: TransferStage::ConfirmExport,
+            ..
+        }) = self.session.payments.gifts_manage.transfer().cloned()
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        self.export_allowed(&id)?;
+        // tdesktop `cloudPassword().reload()`: TDLib answers the empty
+        // password itself, so the fresh state tells "no password" apart.
+        if !self.session.auth_state.password_state_loading {
+            let _ = self.refresh_password_state();
+        }
+        let extra = self.session.request(
+            RequestPurpose::Payments(PaymentsPurpose::GiftExportProbe),
+            None,
+        );
+        if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
+            picker.open_fragment();
+        }
+        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id, "");
+        if let Err(err) = self.send_json_request(extra, &json) {
+            if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
+                picker.stage = TransferStage::ConfirmExport;
+            }
+            return Err(err);
+        }
+        Ok(extra)
+    }
+
     /// Submit the password box of "Send via Blockchain":
-    /// `getUpgradedGiftWithdrawalUrl`. Only from the password stage (after
-    /// "Open Fragment"), with a typed password, for a gift whose export
-    /// is unlocked. The answer is a Fragment URL; nothing moves here. The
-    /// password goes into this one request and is not kept.
+    /// `getUpgradedGiftWithdrawalUrl`. Only from the idle password stage
+    /// (after "Open Fragment" and its probe), with a typed password, for a
+    /// gift whose export is unlocked. The answer is a Fragment URL;
+    /// nothing moves here. The password goes into this one request and is
+    /// not kept.
     pub fn export_picked_gift(&mut self, password: &str) -> Result<RequestId, ConnectSendError> {
         let Some(TransferPicker {
             id,
@@ -257,17 +316,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if password.is_empty()
-            || !self.chats_path_active()
-            || self.own_gift(&id)?.export_state(now_unix()) != ExportState::Ready
-            || !self
-                .session
-                .payments
-                .hub
-                .gifts_are_mine(self.session.my_user_id)
-        {
+        if password.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        self.export_allowed(&id)?;
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl),
             None,

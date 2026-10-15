@@ -5,11 +5,13 @@
 //! "Two-step verification" / "Security check", plus "Action Locked" for a
 //! gift held in a TON wallet. One dialog shows the current step.
 //!
-//! Only two buttons send anything: Transfer in the confirmation
-//! (`transferGift`) and Submit in the password box
-//! (`getUpgradedGiftWithdrawalUrl`, which only returns Fragment's page).
-//! The password is read from the masked field once, handed to that one
-//! request and the field is emptied at once; it is never stored.
+//! Only three buttons send anything: Transfer in the confirmation
+//! (`transferGift`), "Open Fragment" (the password-less probe of
+//! `getUpgradedGiftWithdrawalUrl`, whose answer is never opened) and
+//! Submit in the password box (`getUpgradedGiftWithdrawalUrl`, which only
+//! returns Fragment's page). The password is read from the masked field
+//! once, handed to that one request and the field is emptied at once
+//! (`set_value` also drops the field's undo history); it is never stored.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -20,7 +22,9 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::gift_manage::{TransferPicker, TransferStage, fragment_gift_url};
+use quill::gift_manage::{
+    ExportError, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
+};
 use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::local_time::now_unix;
@@ -116,18 +120,31 @@ impl QuillApp {
         }
     }
 
-    /// "Open Fragment" in "Manage with Fragment": the password box. The
-    /// password state gives the hint (tdesktop `cloudPassword().reload()`).
+    /// "Open Fragment" in "Manage with Fragment": tdesktop's password-less
+    /// probe, which picks the security check or the password box. The
+    /// password state reloaded with it gives the hint.
     pub(super) fn confirm_transfer_fragment(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_password_state();
-        }
         self.clear_export_password(window, cx);
-        self.edit_transfer(cx, TransferPicker::open_fragment);
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.probe_gift_export());
+        match sent {
+            Some(Ok(_)) => cx.notify(),
+            Some(Err(_)) => {
+                self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_OPEN_FRAGMENT));
+                cx.notify();
+            }
+            // The demo has no connection: straight to the password box.
+            None => self.edit_transfer(cx, |picker| {
+                picker.open_fragment();
+                picker.probe_failed(ProbeOutcome::Other, None);
+            }),
+        }
     }
 
     /// Transfer in the confirmation.
@@ -152,6 +169,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let input = self.payments.gift_export_password.clone();
+        // An empty field does nothing (tdesktop focuses it again).
+        if input.read(cx).value().is_empty() {
+            return;
+        }
         let password = input.read(cx).value().to_string();
         let sent = self
             .live
@@ -161,7 +182,17 @@ impl QuillApp {
         input.update(cx, |input, cx| input.set_value("", window, cx));
         match sent {
             Some(Ok(_)) => {}
-            Some(Err(_)) => self.note_gift_refused(tr(keys::Q_MONEY_COULD_NOT_OPEN_FRAGMENT)),
+            // Refused before sending: say so under the field, where it is
+            // seen (a note would sit behind the picker).
+            Some(Err(_)) => self.edit_transfer(cx, |picker| {
+                if let TransferStage::Password {
+                    sending: false,
+                    error,
+                } = &mut picker.stage
+                {
+                    *error = Some(ExportError::Other(String::new()));
+                }
+            }),
             None => self.note_gift_refused(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)),
         }
         cx.notify();
@@ -235,17 +266,30 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (url, done, in_password) = match self.gift_manage_mut() {
-            Some(manage) => (
-                manage.export_url.take(),
-                manage.transferred.take(),
-                matches!(
-                    manage.transfer().map(|p| &p.stage),
-                    Some(TransferStage::Password { .. })
-                ),
-            ),
-            None => (None, None, false),
+        let (url, done, in_password, idle_password) = match self.gift_manage_mut() {
+            Some(manage) => {
+                let stage = manage.transfer().map(|p| &p.stage);
+                let in_password = matches!(stage, Some(TransferStage::Password { .. }));
+                let idle = matches!(stage, Some(TransferStage::Password { sending: false, .. }));
+                (
+                    manage.export_url.take(),
+                    manage.transferred.take(),
+                    in_password,
+                    idle,
+                )
+            }
+            None => (None, None, false, false),
         };
+        // The password box takes the keyboard when it opens and after each
+        // answer (tdesktop `PasscodeBox` focuses and selects the field).
+        if idle_password && !self.payments.gift_export_password_focused {
+            self.payments.gift_export_password_focused = true;
+            self.payments
+                .gift_export_password
+                .update(cx, |input, cx| input.focus(window, cx));
+        } else if !idle_password {
+            self.payments.gift_export_password_focused = false;
+        }
         if !in_password
             && !self
                 .payments

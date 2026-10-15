@@ -14,16 +14,19 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputContentType};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_manage::{
     ExportError, ExportState, TransferCandidate, TransferGate, TransferPicker, TransferStage,
     UnlockIn, transfer_candidates,
 };
+use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::now_unix;
 use quill::premium_hub::ReceivedGift;
 use quill::state::Session;
 use quill::telegram::envelope::ChatKind;
+use std::rc::Rc;
 
 /// Rows drawn at once; the search narrows the rest.
 const ROWS_MAX: usize = 150;
@@ -70,7 +73,8 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
             confirm_peer_view(app, session, gift, &name, *user_id, to, cx)
         }
         TransferStage::Locked { hours } => locked_view(*hours, cx),
-        TransferStage::ConfirmExport => confirm_export_view(&name, cx),
+        TransferStage::ConfirmExport => confirm_export_view(&name, false, cx),
+        TransferStage::Probing => confirm_export_view(&name, true, cx),
         TransferStage::Password { sending, error } => {
             password_view(app, session, *sending, error.as_ref(), cx)
         }
@@ -79,22 +83,69 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
     })
 }
 
-/// The people the list shows for `query`: the contacts, and once a search
-/// starts the other people the user has a private chat with.
-fn candidates(session: &Session, query: &str) -> Vec<TransferCandidate> {
+/// The people of the list, built once per query and session revision
+/// rather than on every frame.
+pub(super) struct CandidateCache {
+    revision: u64,
+    query: String,
+    open_chat: Option<ChatId>,
+    people: Rc<Vec<TransferCandidate>>,
+}
+
+fn cached_candidates(app: &QuillApp, session: &Session, query: &str) -> Rc<Vec<TransferCandidate>> {
+    // Never panics: a busy cache (it cannot be, render is not re-entrant)
+    // just rebuilds.
+    let Ok(mut cache) = app.payments.transfer_people.try_borrow_mut() else {
+        return Rc::new(candidates(session, query));
+    };
+    if let Some(hit) = cache.as_ref().filter(|c| {
+        c.revision == session.revision && c.query == query && c.open_chat == session.open_chat
+    }) {
+        return hit.people.clone();
+    }
+    let people = Rc::new(candidates(session, query));
+    *cache = Some(CandidateCache {
+        revision: session.revision,
+        query: query.to_string(),
+        open_chat: session.open_chat,
+        people: people.clone(),
+    });
+    people
+}
+
+/// The people the list shows for `query`: the user of the open private
+/// chat first (the design's preselected row: one click reaches the
+/// confirmation), the contacts, and once a search starts the other
+/// people the user has a private chat with.
+pub(super) fn candidates(session: &Session, query: &str) -> Vec<TransferCandidate> {
     let is_bot = |id: i64| session.users.get(&id).is_some_and(|u| u.is_bot);
     let contacts = session.contact_rows();
-    let mut rows: Vec<(i64, String, String, bool)> = contacts
-        .iter()
-        .map(|r| {
+    let open_user = session
+        .open_chat
+        .and_then(|id| session.chats.get(&id.0))
+        .and_then(|chat| match chat.kind {
+            ChatKind::Private { user_id } => session.users.get(&user_id.0),
+            _ => None,
+        });
+    let mut rows: Vec<(i64, String, String, bool)> = open_user
+        .map(|user| {
             (
-                r.user_id,
-                r.name.clone(),
-                r.status_text.clone(),
-                is_bot(r.user_id),
+                user.id,
+                user.display_name(),
+                user.status.display(),
+                user.is_bot,
             )
         })
+        .into_iter()
         .collect();
+    rows.extend(contacts.iter().map(|r| {
+        (
+            r.user_id,
+            r.name.clone(),
+            r.status_text.clone(),
+            is_bot(r.user_id),
+        )
+    }));
     if !query.trim().is_empty() {
         let mut others: Vec<(i64, String, String, bool)> = session
             .chats
@@ -148,7 +199,7 @@ fn pick_view(
             .text_color(muted)
             .child(tr(keys::CONTACTS_HEADER)),
     );
-    let people = candidates(session, &query);
+    let people = cached_candidates(app, session, &query);
     let roots = app.media_display_roots();
     if people.is_empty() {
         let empty = if session.contacts_settled() {
@@ -159,7 +210,7 @@ fn pick_view(
         body = body.child(div().py_2().text_sm().text_color(muted).child(empty));
     }
     let mut list = v_flex();
-    for person in people.into_iter().take(ROWS_MAX) {
+    for person in people.iter().take(ROWS_MAX).cloned() {
         let photo = session
             .user_photo_path(person.user_id)
             .and_then(|path| quill::local_path::sandboxed_display_path(path, &roots));
@@ -394,8 +445,9 @@ fn locked_view(hours: i64, cx: &mut Context<QuillApp>) -> StageView {
     }
 }
 
-/// tdesktop `ConfirmExportBox`.
-fn confirm_export_view(gift_name: &str, cx: &mut Context<QuillApp>) -> StageView {
+/// tdesktop `ConfirmExportBox`; `probing` while the password-less try
+/// after "Open Fragment" is out.
+fn confirm_export_view(gift_name: &str, probing: bool, cx: &mut Context<QuillApp>) -> StageView {
     StageView {
         title: Some(tr(keys::GIFT_TRANSFER_CONFIRM_TITLE).to_string()),
         body: text_block(tr_with(
@@ -404,11 +456,13 @@ fn confirm_export_view(gift_name: &str, cx: &mut Context<QuillApp>) -> StageView
         ))
         .into_any_element(),
         footer: footer()
-            .child(cancel_button("gift-transfer-export-cancel", cx))
+            .child(cancel_button("gift-transfer-export-cancel", cx).disabled(probing))
             .child(
                 Button::new("gift-transfer-export-open")
                     .label(tr(keys::GIFT_TRANSFER_CONFIRM_BUTTON))
                     .primary()
+                    .loading(probing)
+                    .disabled(probing)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.confirm_transfer_fragment(window, cx)
                     })),
@@ -428,19 +482,20 @@ fn password_view(
     cx: &mut Context<QuillApp>,
 ) -> StageView {
     let muted = cx.theme().muted_foreground;
-    let hint = session
-        .auth_state
-        .password_state
-        .as_ref()
+    let state = session.auth_state.password_state.as_ref();
+    let hint = state
         .map(|state| state.password_hint.clone())
         .filter(|hint| !hint.is_empty());
+    // tdesktop `_showRecoverLink`: a recovery email, or no reset pending.
+    let show_forgot =
+        state.is_none_or(|state| state.has_recovery_email_address || state.pending_reset_date == 0);
     let under = match (error, hint) {
-        (Some(error), _) => Some(div().text_xs().text_color(cx.theme().danger).child(
-            match error {
-                ExportError::WrongPassword => tr(keys::CLOUD_PASSWORD_WRONG),
-                ExportError::Flood => tr(keys::FLOOD_ERROR),
-            },
-        )),
+        (Some(error), _) => Some(
+            div()
+                .text_xs()
+                .text_color(cx.theme().danger)
+                .child(export_error_text(error)),
+        ),
         (None, Some(hint)) => Some(
             div()
                 .text_xs()
@@ -459,17 +514,20 @@ fn password_view(
                 .disabled(sending),
         )
         .children(under)
-        .child(
-            div().child(
-                Button::new("gift-transfer-password-forgot")
-                    .label(tr(keys::Q_MONEY_FORGOT_PASSWORD))
-                    .ghost()
-                    .small()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.forgot_gift_export_password(window, cx)
-                    })),
-            ),
-        )
+        .when(show_forgot, |body| {
+            body.child(
+                div().child(
+                    Button::new("gift-transfer-password-forgot")
+                        .label(tr(keys::Q_MONEY_FORGOT_PASSWORD))
+                        .ghost()
+                        .small()
+                        .disabled(sending)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.forgot_gift_export_password(window, cx)
+                        })),
+                ),
+            )
+        })
         .child(
             div()
                 .text_sm()
@@ -492,6 +550,23 @@ fn password_view(
                     })),
             )
             .into_any_element(),
+    }
+}
+
+/// The line under the password field for a failed try.
+pub(super) fn export_error_text(error: &ExportError) -> SharedString {
+    match error {
+        ExportError::WrongPassword => tr(keys::CLOUD_PASSWORD_WRONG).into(),
+        ExportError::Flood => tr(keys::FLOOD_ERROR).into(),
+        ExportError::ServerError => tr(keys::Q_MONEY_SERVER_ERROR).into(),
+        ExportError::Other(reason) if reason.is_empty() => {
+            tr(keys::Q_MONEY_COULDNT_OPEN_FRAGMENT).into()
+        }
+        ExportError::Other(reason) => tr_with(
+            keys::Q_MONEY_COULDNT_OPEN_FRAGMENT_REASON,
+            &[("reason", reason)],
+        )
+        .into(),
     }
 }
 

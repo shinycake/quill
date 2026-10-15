@@ -155,6 +155,12 @@ pub enum EarnErrorHint {
     TooFresh,
     /// `PASSWORD_HASH_INVALID`: the password is wrong (or was empty).
     PasswordInvalid,
+    /// `SRP_PASSWORD_CHANGED`: the password changed since the check began;
+    /// tdesktop treats it as a wrong password (`badOldPasscode`).
+    SrpPasswordChanged,
+    /// `SRP_ID_INVALID`: the password check expired; tdesktop reloads the
+    /// password state, then shows a server error.
+    SrpIdInvalid,
     /// `BROADCAST_REQUIRED`: a group has no TON ad revenue.
     BroadcastRequired,
     /// `BALANCE_TOO_LOW`: not enough Stars or Grams to pay for a suggested
@@ -168,6 +174,8 @@ pub fn error_hint(message: &str) -> Option<EarnErrorHint> {
         "AMOUNT_TOO_SMALL" => EarnErrorHint::AmountTooSmall,
         "PASSWORD_MISSING" => EarnErrorHint::PasswordMissing,
         "PASSWORD_HASH_INVALID" => EarnErrorHint::PasswordInvalid,
+        "SRP_PASSWORD_CHANGED" => EarnErrorHint::SrpPasswordChanged,
+        "SRP_ID_INVALID" => EarnErrorHint::SrpIdInvalid,
         "BROADCAST_REQUIRED" => EarnErrorHint::BroadcastRequired,
         "BALANCE_TOO_LOW" => EarnErrorHint::BalanceTooLow,
         m if m.starts_with("PASSWORD_TOO_FRESH_") || m.starts_with("SESSION_TOO_FRESH_") => {

@@ -1,8 +1,8 @@
 //! The transfer picker's core: the unlock countdown against tdesktop's
 //! formula, the stages and the people it lists.
 use crate::gift_manage::{
-    ExportState, TransferPicker, TransferStage, UnlockIn, fragment_gift_url, transfer_candidates,
-    unlock_hours,
+    ExportState, ProbeOutcome, TransferPicker, TransferStage, UnlockIn, fragment_gift_url,
+    transfer_candidates, unlock_hours,
 };
 use crate::premium_hub::parse_received_gift;
 use serde_json::{Value, json};
@@ -105,12 +105,28 @@ fn the_picker_walks_its_stages() {
     picker.back();
     assert_eq!(picker.stage, TransferStage::Pick);
 
-    // Unlocked: confirm, then the password box.
+    // Unlocked: confirm, the probe, then the password box.
     picker.tap_export(gift.export_state(NOW + 7_200));
     assert_eq!(picker.stage, TransferStage::ConfirmExport);
     picker.choose(5, "Maya");
     assert_eq!(picker.stage, TransferStage::ConfirmExport);
     picker.open_fragment();
+    assert_eq!(picker.stage, TransferStage::Probing);
+    assert!(picker.export_busy());
+    // Nothing goes back while the probe is out.
+    picker.back();
+    assert_eq!(picker.stage, TransferStage::Probing);
+    picker.probe_failed(ProbeOutcome::Other, Some(true));
+    assert_eq!(
+        picker.stage,
+        TransferStage::Password {
+            sending: false,
+            error: None
+        }
+    );
+    // A later answer to an old probe changes nothing.
+    picker.probe_failed(ProbeOutcome::NoPassword, None);
+    picker.probe_answered();
     assert_eq!(
         picker.stage,
         TransferStage::Password {
@@ -142,6 +158,68 @@ fn the_picker_walks_its_stages() {
     // No export date: the row is not there and tapping does nothing.
     picker.tap_export(ExportState::Unavailable);
     assert_eq!(picker.stage, TransferStage::Pick);
+}
+
+#[test]
+fn the_probe_routes_like_pre_password_error_box() {
+    let probing = || {
+        let mut picker = TransferPicker::new("g", "Plush Pepe #1", "PlushPepe-1");
+        picker.stage = TransferStage::ConfirmExport;
+        picker.open_fragment();
+        picker
+    };
+    let route = |outcome, has_password| {
+        let mut picker = probing();
+        picker.probe_failed(outcome, has_password);
+        picker.stage
+    };
+    let password = TransferStage::Password {
+        sending: false,
+        error: None,
+    };
+    assert_eq!(
+        route(ProbeOutcome::NoPassword, Some(true)),
+        TransferStage::SecurityCheck { later: false }
+    );
+    assert_eq!(
+        route(ProbeOutcome::TooFresh, None),
+        TransferStage::SecurityCheck { later: true }
+    );
+    assert_eq!(route(ProbeOutcome::Other, None), password);
+    assert_eq!(
+        route(ProbeOutcome::Other, Some(false)),
+        TransferStage::SecurityCheck { later: false }
+    );
+    // A URL answer only opens the password box.
+    let mut picker = probing();
+    picker.probe_answered();
+    assert_eq!(picker.stage, password);
+    // The fresh password state lands after the probe's local answer.
+    picker.password_state_known(true);
+    assert_eq!(picker.stage, password);
+    picker.password_state_known(false);
+    assert_eq!(picker.stage, TransferStage::SecurityCheck { later: false });
+    // Never while the password is being sent.
+    picker.stage = TransferStage::Password {
+        sending: true,
+        error: None,
+    };
+    picker.password_state_known(false);
+    assert!(picker.exporting());
+}
+
+#[test]
+fn the_open_chat_comes_first_and_once() {
+    let rows = [
+        (12, "Ben Ito", "last seen yesterday", false),
+        (5, "Maya Chen", "last seen recently", false),
+        (12, "Ben Ito", "last seen yesterday", false),
+    ];
+    let ids: Vec<i64> = transfer_candidates(rows, Some(7), "")
+        .iter()
+        .map(|c| c.user_id)
+        .collect();
+    assert_eq!(ids, vec![12, 5]);
 }
 
 #[test]

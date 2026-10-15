@@ -245,9 +245,153 @@ fn password_errors_land_in_the_password_box() {
             error: Some(ExportError::Flood)
         })
     );
-    // Anything else: the box stays, ready for another try.
+    // tdesktop `setPasswordFail`: a changed password reads as a wrong
+    // one; an expired check as a server error.
     assert_eq!(
-        fail_export("STARGIFT_EXPORT_IN_PROGRESS", 400),
+        fail_export("SRP_PASSWORD_CHANGED", 400),
+        Some(TransferStage::Password {
+            sending: false,
+            error: Some(ExportError::WrongPassword)
+        })
+    );
+    assert_eq!(
+        fail_export("SRP_ID_INVALID", 400),
+        Some(TransferStage::Password {
+            sending: false,
+            error: Some(ExportError::ServerError)
+        })
+    );
+    // Anything else: the box stays, ready for another try, and says why
+    // under the field (a note would hide behind the picker).
+    let other = fail_export("STARGIFT_EXPORT_IN_PROGRESS", 400);
+    assert!(
+        matches!(
+            &other,
+            Some(TransferStage::Password {
+                sending: false,
+                error: Some(ExportError::Other(reason)),
+            }) if !reason.is_empty()
+        ),
+        "{other:?}"
+    );
+}
+
+fn password_state(p: &mut Parts, has_password: bool) {
+    // The reload sent with the probe.
+    let extra = sent_request(&p.1, "getPasswordState")["@extra"].clone();
+    feed(
+        p,
+        json!({"@type": "passwordState", "@extra": extra,
+            "has_password": has_password, "password_hint": "", "has_recovery_email_address": false,
+            "has_passport_data": false, "recovery_email_address_code_info": null,
+            "login_email_address_pattern": "", "pending_reset_date": 0}),
+    );
+}
+
+/// "Open Fragment" on the unlocked gift: the probe is out.
+fn probe(p: &mut Parts) -> crate::ids::RequestId {
+    set_stage(p, "open", TransferStage::ConfirmExport);
+    p.0.probe_gift_export().unwrap()
+}
+
+#[test]
+fn open_fragment_sends_the_password_less_probe_only_from_its_confirmation() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    for early in [TransferStage::Pick, password_stage()] {
+        set_stage(&mut p, "open", early);
+        assert!(p.0.probe_gift_export().is_err());
+    }
+    // Not for a gift still locked.
+    set_stage(&mut p, "later", TransferStage::ConfirmExport);
+    assert!(p.0.probe_gift_export().is_err());
+    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+
+    probe(&mut p);
+    let sent = sent_request(&p.1, "getUpgradedGiftWithdrawalUrl");
+    assert_eq!(sent["received_gift_id"], "open");
+    assert_eq!(sent["password"], "");
+    assert_eq!(count(&p.1, "getPasswordState"), 1);
+    assert_eq!(stage(&p), Some(TransferStage::Probing));
+    // A second click while it is out sends nothing.
+    assert!(p.0.probe_gift_export().is_err());
+    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
+}
+
+#[test]
+fn a_url_answer_to_the_probe_is_never_opened() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    let extra = probe(&mut p);
+    feed(
+        &mut p,
+        json!({"@type": "httpUrl", "@extra": extra.as_extra(),
+            "url": "https://fragment.com/gift/PlushPepe-4?export=1"}),
+    );
+    let manage = &p.0.session.payments.gifts_manage;
+    assert!(manage.export_url.is_none());
+    assert_eq!(stage(&p), Some(password_stage()));
+}
+
+fn fail_probe(message: &str, has_password: Option<bool>) -> Option<TransferStage> {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    let extra = probe(&mut p);
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": extra.as_extra(), "code": 400, "message": message}),
+    );
+    if let Some(has_password) = has_password {
+        password_state(&mut p, has_password);
+    }
+    assert!(p.0.session.payments.gifts_manage.export_url.is_none());
+    stage(&p)
+}
+
+#[test]
+fn the_probe_picks_the_security_check_or_the_password_box() {
+    // tdesktop `PrePasswordErrorBox`, as the server would answer.
+    assert_eq!(
+        fail_probe("PASSWORD_MISSING", None),
+        Some(TransferStage::SecurityCheck { later: false })
+    );
+    assert_eq!(
+        fail_probe("PASSWORD_TOO_FRESH_86400", None),
+        Some(TransferStage::SecurityCheck { later: true })
+    );
+    // TDLib answers the empty password itself with PASSWORD_HASH_INVALID:
+    // the password box, unless the reloaded state says there is none.
+    assert_eq!(
+        fail_probe("PASSWORD_HASH_INVALID", None),
         Some(password_stage())
     );
+    assert_eq!(
+        fail_probe("PASSWORD_HASH_INVALID", Some(true)),
+        Some(password_stage())
+    );
+    assert_eq!(
+        fail_probe("PASSWORD_HASH_INVALID", Some(false)),
+        Some(TransferStage::SecurityCheck { later: false })
+    );
+}
+
+#[test]
+fn a_second_transfer_click_sends_nothing() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    set_stage(
+        &mut p,
+        "open",
+        TransferStage::ConfirmPeer {
+            user_id: 21,
+            name: "Maya".into(),
+        },
+    );
+    p.0.transfer_picked_gift().unwrap();
+    assert!(p.0.transfer_picked_gift().is_err());
+    assert_eq!(count(&p.1, "transferGift"), 1);
+    // Nor an export while the transfer is out.
+    set_stage(&mut p, "open", TransferStage::ConfirmExport);
+    assert!(p.0.probe_gift_export().is_err());
+    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
 }

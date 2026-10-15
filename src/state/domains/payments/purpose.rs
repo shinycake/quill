@@ -130,6 +130,10 @@ pub enum PaymentsPurpose {
     /// `getUpgradedGiftWithdrawalUrl` from the password box of "Send via
     /// Blockchain". Response is `httpUrl`.
     GiftExportUrl,
+    /// The password-less `getUpgradedGiftWithdrawalUrl` sent on "Open
+    /// Fragment" (tdesktop `inputCheckPasswordEmpty`): its error picks the
+    /// next step; an `httpUrl` answer is dropped, never opened.
+    GiftExportProbe,
     /// `setGiftResalePrice`. Response is `ok`.
     SetGiftResalePrice,
     /// `getGiftCollections`. Response is `giftCollections`.
@@ -170,6 +174,7 @@ impl PaymentsPurpose {
                 | Self::UpgradeGift
                 | Self::TransferGift
                 | Self::GiftExportUrl
+                | Self::GiftExportProbe
                 | Self::SetGiftResalePrice
                 | Self::GetGiftCollections
                 | Self::ChangeGiftCollection
@@ -213,6 +218,7 @@ flat_purposes!(Payments(PaymentsPurpose) {
     UpgradeGift,
     TransferGift,
     GiftExportUrl,
+    GiftExportProbe,
     SetGiftResalePrice,
     GetGiftCollections,
     ChangeGiftCollection,

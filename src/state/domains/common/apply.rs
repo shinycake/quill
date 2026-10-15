@@ -212,6 +212,12 @@ impl Session {
                 {
                     // "Send via Blockchain": Fragment's export page.
                     self.apply_gift_export_url(url);
+                } else if pending.map(|p| p.purpose)
+                    == Some(RequestPurpose::Payments(PaymentsPurpose::GiftExportProbe))
+                {
+                    // The password-less probe: the URL is dropped unread.
+                    drop(url);
+                    self.apply_gift_export_probe_answer();
                 } else if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
                     group_call_id,
                     can_self_unmute,

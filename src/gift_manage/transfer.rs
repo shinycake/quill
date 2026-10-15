@@ -70,13 +70,20 @@ impl UnlockIn {
     }
 }
 
-/// A wrong or refused password in the password box.
+/// What the password box shows under the field after a failed try
+/// (tdesktop `PasscodeBox::setPasswordFail` and the toast of
+/// `ExportOnBlockchain`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportError {
-    /// `PASSWORD_HASH_INVALID`: "Wrong cloud password".
+    /// `PASSWORD_HASH_INVALID` or `SRP_PASSWORD_CHANGED`: "Wrong cloud
+    /// password".
     WrongPassword,
     /// A flood wait: "Too many tries. Please try again later."
     Flood,
+    /// `SRP_ID_INVALID`: the check expired; tdesktop shows a server error.
+    ServerError,
+    /// Any other failure, with its reason ("not found", ...).
+    Other(String),
 }
 
 /// Where the picker is. The picker is one dialog; each later step replaces
@@ -92,6 +99,11 @@ pub enum TransferStage {
     Locked { hours: i64 },
     /// "Manage with Fragment" with "Open Fragment".
     ConfirmExport,
+    /// "Open Fragment" was pressed: the password-less try of
+    /// `getUpgradedGiftWithdrawalUrl` is out (tdesktop `ExportOnBlockchain`
+    /// sends `inputCheckPasswordEmpty` first). It only tells whether a
+    /// password exists and is old enough; a URL it might return is dropped.
+    Probing,
     /// "Two-step verification": the password box. `sending` while the
     /// request is out; the password itself is never kept here.
     Password {
@@ -145,9 +157,15 @@ impl TransferPicker {
         picker
     }
 
-    /// Whether the export request is out (the buttons wait).
+    /// Whether the export request with the password is out (the buttons
+    /// wait).
     pub fn exporting(&self) -> bool {
         matches!(self.stage, TransferStage::Password { sending: true, .. })
+    }
+
+    /// Whether either export request (the probe or the real one) is out.
+    pub fn export_busy(&self) -> bool {
+        self.exporting() || self.stage == TransferStage::Probing
     }
 
     /// A contact was picked: ask before giving the gift away.
@@ -173,9 +191,40 @@ impl TransferPicker {
         }
     }
 
-    /// "Open Fragment" in the confirmation: the password box.
+    /// "Open Fragment" in the confirmation: the password-less probe goes
+    /// out.
     pub fn open_fragment(&mut self) {
         if self.stage == TransferStage::ConfirmExport {
+            self.stage = TransferStage::Probing;
+        }
+    }
+
+    /// The probe failed. tdesktop `PrePasswordErrorBox`: no password or a
+    /// too fresh one opens the security check; anything else (TDLib
+    /// answers an empty password itself with `PASSWORD_HASH_INVALID`)
+    /// opens the password box. `has_password` is the password state when
+    /// it is known and fresh: `Some(false)` also means the security check,
+    /// since TDLib never lets the probe reach the server.
+    pub fn probe_failed(&mut self, outcome: ProbeOutcome, has_password: Option<bool>) {
+        if self.stage != TransferStage::Probing {
+            return;
+        }
+        self.stage = match (outcome, has_password) {
+            (ProbeOutcome::NoPassword, _) | (ProbeOutcome::Other, Some(false)) => {
+                TransferStage::SecurityCheck { later: false }
+            }
+            (ProbeOutcome::TooFresh, _) => TransferStage::SecurityCheck { later: true },
+            (ProbeOutcome::Other, _) => TransferStage::Password {
+                sending: false,
+                error: None,
+            },
+        };
+    }
+
+    /// The probe returned a URL (it should not without a password): the
+    /// URL is dropped and the password box opens, as after any answer.
+    pub fn probe_answered(&mut self) {
+        if self.stage == TransferStage::Probing {
             self.stage = TransferStage::Password {
                 sending: false,
                 error: None,
@@ -183,13 +232,32 @@ impl TransferPicker {
         }
     }
 
-    /// Cancel or OK on a step: back to the list. Not while the export
+    /// A fresh password state arrived: with no password set, the idle
+    /// password box becomes the security check.
+    pub fn password_state_known(&mut self, has_password: bool) {
+        if !has_password && matches!(self.stage, TransferStage::Password { sending: false, .. }) {
+            self.stage = TransferStage::SecurityCheck { later: false };
+        }
+    }
+
+    /// Cancel or OK on a step: back to the list. Not while an export
     /// request is out.
     pub fn back(&mut self) {
-        if !self.exporting() {
+        if !self.export_busy() {
             self.stage = TransferStage::Pick;
         }
     }
+}
+
+/// How the password-less probe failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// `PASSWORD_MISSING`.
+    NoPassword,
+    /// `PASSWORD_TOO_FRESH_*` / `SESSION_TOO_FRESH_*`.
+    TooFresh,
+    /// Anything else.
+    Other,
 }
 
 /// tdesktop `ShowActionLocked`: Fragment's page of the gift in the
@@ -208,14 +276,17 @@ pub struct TransferCandidate {
 
 /// tdesktop `Controller::createRow`: contacts, without the user, bots,
 /// the service account and deleted accounts (no name), filtered by the
-/// search words, in the order given (the contacts list is by name).
+/// search words, in the order given (the open chat's user first, then the
+/// contacts by name); a person listed twice keeps the first row.
 pub fn transfer_candidates<'a>(
     rows: impl IntoIterator<Item = (i64, &'a str, &'a str, bool)>,
     me: Option<i64>,
     query: &str,
 ) -> Vec<TransferCandidate> {
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let mut seen = std::collections::HashSet::new();
     rows.into_iter()
+        .filter(|(user_id, _, _, _)| seen.insert(*user_id))
         .filter(|(user_id, name, _, is_bot)| {
             *user_id > 0
                 && Some(*user_id) != me

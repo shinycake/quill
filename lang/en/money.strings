@@ -388,6 +388,8 @@
 "qll_money_couldnt_load_the_page" = "Couldn't load the page";
 "qll_money_couldnt_load_the_programs" = "Couldn't load the programs";
 "qll_money_couldnt_load_this_setting" = "Couldn't load this setting.";
+"qll_money_couldnt_open_fragment" = "Couldn't open Fragment. Try again.";
+"qll_money_couldnt_open_fragment_reason" = "Couldn't open Fragment: {reason}";
 "qll_money_couldnt_open_the_affiliate_program" = "Couldn't open the affiliate program";
 "qll_money_couldnt_open_the_program" = "Couldn't open the program";
 "qll_money_couldnt_pay_for_the_post" = "Couldn't pay for the post: balance too low.";
@@ -639,6 +641,7 @@
 "qll_money_sending_2" = "sending…";
 "qll_money_sending_the_offer" = "sending the offer…";
 "qll_money_sent" = "Sent";
+"qll_money_server_error" = "Internal server error. Please try again later.";
 "qll_money_set_password" = "Set password";
 "qll_money_share_this_link_with_your" = "Share this link with your {audience} to earn a {commission_per_mille} commission on their spending in {app_name} {month_count}.";
 "qll_money_shares_per_post" = "Shares per post";

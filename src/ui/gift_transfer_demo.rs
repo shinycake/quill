@@ -2,7 +2,8 @@
 //! collectibles over the ready chat list (injected, no live Telegram;
 //! nothing can be transferred or exported). `QUILL_DEMO_GIFT_TRANSFER`
 //! picks the step: `picker` (default, export still locked), `locked`,
-//! `confirm`, `password`, `peer` or `action-locked`. The GPUI tests in
+//! `confirm`, `probing`, `password`, `peer`, `open-chat` (the open chat's
+//! user listed first) or `action-locked`. The GPUI tests in
 //! `gift_transfer_tests.rs` drive the same demo.
 #![deny(clippy::indexing_slicing)]
 
@@ -11,7 +12,7 @@ use super::gift_market_demo::{ME, listing, seed_gift_market_session};
 use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::MemorySink;
-use quill::gift_manage::{ExportState, GiftFlow, TransferPicker};
+use quill::gift_manage::{ExportState, GiftFlow, ProbeOutcome, TransferPicker};
 use quill::local_time::now_unix;
 use quill::premium_hub::parse_received_gift;
 use quill::state::Session;
@@ -43,7 +44,7 @@ fn demo_mode() -> String {
 /// The export opens now for the steps after "Send via Blockchain".
 fn export_date(mode: &str, now: i64) -> i64 {
     match mode {
-        "confirm" | "password" => now - 60,
+        "confirm" | "password" | "probing" => now - 60,
         _ => now + LOCKED_FOR,
     }
 }
@@ -91,6 +92,10 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     hub.gifts_total = 1;
     hub.gifts_loaded = true;
     hub.gift_selected = Some(DEMO_GIFT.into());
+    // The chat with Maya is open: her row comes first.
+    if mode == "open-chat" {
+        session.open_chat(quill::ids::ChatId(502));
+    }
     session
 }
 
@@ -105,6 +110,12 @@ impl QuillApp {
         let edit = |picker: &mut TransferPicker| match mode.as_str() {
             "locked" | "confirm" => picker.tap_export(export),
             "password" => {
+                picker.tap_export(export);
+                picker.open_fragment();
+                picker.probe_failed(ProbeOutcome::Other, Some(true));
+            }
+            // The password-less probe after "Open Fragment" is out.
+            "probing" => {
                 picker.tap_export(export);
                 picker.open_fragment();
             }
