@@ -314,15 +314,40 @@ impl NtgcallsEngine {
     /// missing description (`StreamManager::maybe_reconfigure_device`):
     /// with no writer the call's sound is not played, which is the local
     /// mute (ntgcalls' own mute only covers capture).
+    ///
+    /// A chosen output that ntgcalls refuses (a device unplugged since it
+    /// was picked) falls back to the system default once, so a stale
+    /// choice never fails a connect or a camera toggle.
     fn issue_group_playback(&mut self, group_call_id: i32) -> Result<(), EngineError> {
+        let chosen = self
+            .group_calls
+            .get(&group_call_id)
+            .ok_or(EngineError::NoSuchCall(group_call_id))?
+            .speaker
+            .clone();
+        let fell_back = playback_with_fallback(chosen.as_deref(), |speaker| {
+            self.issue_group_playback_on(group_call_id, speaker)
+        })?;
+        if fell_back && let Some(media) = self.group_calls.get_mut(&group_call_id) {
+            media.speaker = None;
+        }
+        self.apply_group_mute(group_call_id)
+    }
+
+    /// One `ntg_set_stream_sources(PLAYBACK)` on `speaker` (`None`: the
+    /// system default).
+    fn issue_group_playback_on(
+        &mut self,
+        group_call_id: i32,
+        speaker: Option<&str>,
+    ) -> Result<(), EngineError> {
         let media = self
             .group_calls
             .get(&group_call_id)
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
-        // The chosen output, or the system default as for 1:1 calls.
-        let speaker = self.device_input(media.speaker.as_deref(), MediaDeviceKind::Speaker)?;
+        let speaker = self.device_input(speaker, MediaDeviceKind::Speaker)?;
         // Everyone else's voices: the call mixes them into its playback
         // "microphone" receiver, which names the output device.
         let mut speaker_audio = audio_description(speaker.as_ref());
@@ -360,7 +385,7 @@ impl NtgcallsEngine {
                 code: rc,
             });
         }
-        self.apply_group_mute(group_call_id)
+        Ok(())
     }
 
     /// External playback descriptions (camera, screen) that make ntgcalls
@@ -637,6 +662,66 @@ impl Drop for NtgcallsEngine {
         // SAFETY: callback registration is gone and this is the matching
         // destroy for the constructor used by `ensure_instance`.
         unsafe { (self.api.ntg_instance_destroy)(instance.as_ptr()) };
+    }
+}
+
+/// Run `issue` on the chosen output; when that fails, log it and try the
+/// system default once. Returns whether the default was used instead.
+fn playback_with_fallback(
+    chosen: Option<&str>,
+    mut issue: impl FnMut(Option<&str>) -> Result<(), EngineError>,
+) -> Result<bool, EngineError> {
+    match issue(chosen) {
+        Ok(()) => Ok(false),
+        Err(err) if chosen.is_some() => {
+            eprintln!("quill: group call output {chosen:?} refused ({err}); using the default");
+            issue(None).map(|()| true)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod playback_tests {
+    use super::{EngineError, playback_with_fallback};
+
+    #[test]
+    fn a_refused_output_falls_back_to_the_default_once() {
+        let mut tried = Vec::new();
+        let used_default = playback_with_fallback(Some("gone"), |speaker| {
+            tried.push(speaker.map(str::to_owned));
+            match speaker {
+                Some(_) => Err(EngineError::Engine {
+                    op: "ntg_set_stream_sources",
+                    code: -1,
+                }),
+                None => Ok(()),
+            }
+        });
+        assert!(matches!(used_default, Ok(true)));
+        assert_eq!(tried, vec![Some("gone".to_owned()), None]);
+    }
+
+    #[test]
+    fn the_default_failing_is_reported_without_a_retry() {
+        let mut calls = 0;
+        let result = playback_with_fallback(None, |_| {
+            calls += 1;
+            Err(EngineError::Engine {
+                op: "ntg_set_stream_sources",
+                code: -1,
+            })
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn a_working_output_is_kept() {
+        assert!(matches!(
+            playback_with_fallback(Some("usb"), |_| Ok(())),
+            Ok(false)
+        ));
     }
 }
 

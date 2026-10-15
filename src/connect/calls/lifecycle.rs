@@ -221,10 +221,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             engine.select_devices(call.id, selection.0.as_deref(), selection.1.as_deref())?;
         }
-        // A joined group call (a live stream's Speakers row) plays on the
-        // new output right away.
+        // A group call (a live stream's Speakers row) plays on the new
+        // output right away, also while its join is on the way.
         if let Some(call) = self.session.calls.active_group_call.as_ref()
-            && call.is_joined
             && let Some(engine) = self.call_engine.as_deref_mut()
         {
             match engine.set_group_playback(

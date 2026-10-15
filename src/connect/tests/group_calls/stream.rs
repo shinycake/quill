@@ -584,9 +584,11 @@ fn the_chosen_speaker_plays_the_stream_and_follows_a_change() {
         .expect("select before the call");
     handle.set_group_call_mode(51, GroupCallMode::Rtmp);
     driver.join_video_chat(555).expect("join tracked call");
+    // The pick reaches the tracked call before the join (a change while
+    // a join is on its way), and the join creates the call with it.
     assert_eq!(
         handle.group_playbacks(),
-        vec![(555, Some("usb-headset".to_string()), false)],
+        vec![(555, Some("usb-headset".to_string()), false); 2],
         "the join creates the call with the chosen output"
     );
     if let Some(call) = driver.session.calls.active_group_call.as_mut() {
@@ -600,7 +602,7 @@ fn the_chosen_speaker_plays_the_stream_and_follows_a_change() {
         .expect("mute for me");
     assert!(driver.group_call_playback_muted());
     assert_eq!(
-        handle.group_playbacks().get(1..).map(<[_]>::to_vec),
+        handle.group_playbacks().get(2..).map(<[_]>::to_vec),
         Some(vec![
             (555, Some("speakers".to_string()), false),
             (555, Some("speakers".to_string()), true),

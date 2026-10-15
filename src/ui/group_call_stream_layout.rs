@@ -46,7 +46,7 @@ use quill::state::ActiveGroupCall;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// `groupCallMuted1` / `groupCallMuted2`: the round button's gradient.
 const BUTTON_FROM: u32 = 0x0992ef;
@@ -69,6 +69,11 @@ const TITLE_SIZE: f32 = 14.;
 const TITLE_RADIUS: f32 = 6.;
 /// The pin button's width with its margin (`groupCallPinOnTop`).
 const PIN_WIDTH: f32 = 40.;
+/// How far a press on the title band moves before it drags the window,
+/// so a double-click still toggles full screen.
+const DRAG_THRESHOLD: f32 = 4.;
+/// A join that neither lands nor reports an error gives up after this.
+const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// You asked to watch a stream: the window joins it once it is tracked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,15 +106,19 @@ pub(crate) struct StreamWindow {
     hide_armed: bool,
     /// The open window was sized for this layout.
     pub(super) window_is_stream: bool,
-    /// The stream you asked to watch, until it is tracked.
-    pub(super) pending_join: Option<StreamJoinIntent>,
+    /// The stream you asked to watch, until it is tracked, with the call
+    /// tracked when you asked (another call taking its place drops it).
+    pub(super) pending_join: Option<(StreamJoinIntent, Option<i32>)>,
     /// The call whose join was sent (the Join button waits).
     pub(super) joining: Option<i32>,
+    /// Gives up on a join that neither lands nor fails.
+    join_timeout: Option<Task<()>>,
     pub(super) overlay: Option<StreamOverlay>,
     /// The Stream Key was revealed after its warning.
     pub(super) key_shown: bool,
-    /// The title band was pressed: a move drags the window (Linux).
-    title_pressed: bool,
+    /// Where the title band was pressed: a move past a few pixels drags
+    /// the window (Linux).
+    title_pressed: Option<Point<Pixels>>,
     /// Screenshot fixtures and tests: the stream picture without a driver.
     pub(super) demo_frame: Option<Arc<VideoFrame>>,
 }
@@ -131,6 +140,7 @@ impl StreamWindow {
         self.overlay = None;
         self.key_shown = false;
         self.joining = None;
+        self.join_timeout = None;
     }
 }
 
@@ -151,6 +161,8 @@ pub(crate) struct StreamFacts {
     pub(crate) server_known: bool,
     pub(crate) recording: bool,
     pub(crate) share_link: bool,
+    /// The native connect reported an error.
+    pub(crate) transport_error: bool,
 }
 
 /// Whether `call` shows in the live stream layout: a running RTMP stream
@@ -215,13 +227,18 @@ impl QuillApp {
             server_known: call.rtmp_url.as_deref().is_some_and(|url| !url.is_empty()),
             recording: call.record_duration > 0,
             share_link: self.group_call_can_share_link(call),
+            transport_error: call.transport_error.is_some(),
         })
     }
 
     /// You asked to watch a stream (or a call that may turn out to be
     /// one): the window joins it once it is tracked.
     pub(super) fn note_stream_join_intent(&mut self, intent: StreamJoinIntent) {
-        self.group_call.stream.pending_join = Some(intent);
+        let tracked = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| call.id);
+        self.group_call.stream.pending_join = Some((intent, tracked));
         // Asking again brings a window you closed back.
         self.group_call.window_closed_by_user = None;
     }
@@ -232,13 +249,43 @@ impl QuillApp {
         self.dismiss_group_call_error(cx);
         if self.send_group_call_join() {
             self.group_call.stream.joining = Some(id);
+            self.group_call.stream.join_timeout = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(JOIN_TIMEOUT).await;
+                let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
+            }));
         } else {
-            let reason = tr(keys::Q_OPS_STREAM_JOIN_FAILED).to_string();
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.calls.group_call_error = Some(reason);
-            } else if let Some(session) = self.demo_session.as_mut() {
-                session.calls.group_call_error = Some(reason);
-            }
+            self.stream_join_failed();
+        }
+        cx.notify();
+    }
+
+    /// The join was not sent or did not land: stop waiting and say so.
+    fn stream_join_failed(&mut self) {
+        self.group_call.stream.joining = None;
+        self.group_call.stream.join_timeout = None;
+        let reason = tr(keys::Q_OPS_STREAM_JOIN_FAILED).to_string();
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.calls.group_call_error = Some(reason);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.calls.group_call_error = Some(reason);
+        }
+    }
+
+    /// The join of `id` timed out, or the window saw it end: unless it
+    /// landed, the Join button comes back with the failure.
+    pub(super) fn stream_join_ended(&mut self, id: i32, cx: &mut Context<Self>) {
+        if self.group_call.stream.joining != Some(id) {
+            return;
+        }
+        let joined = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .is_some_and(|call| call.id == id && call.is_joined);
+        if joined {
+            self.group_call.stream.joining = None;
+            self.group_call.stream.join_timeout = None;
+        } else {
+            self.stream_join_failed();
         }
         cx.notify();
     }
@@ -246,7 +293,7 @@ impl QuillApp {
     /// Run the join you asked for once its call is tracked. Any other
     /// unjoined stream waits for its Join button.
     pub(super) fn consume_stream_join_intent(&mut self, cx: &mut Context<Self>) {
-        let Some(intent) = self.group_call.stream.pending_join else {
+        let Some((intent, tracked_then)) = self.group_call.stream.pending_join else {
             return;
         };
         let Some(call) = self
@@ -257,6 +304,11 @@ impl QuillApp {
         };
         let chat = self.group_call_chat(call).map(|chat| chat.id.0);
         if !intent.matches(call.id, chat) {
+            // Another call took the place of the one tracked when you
+            // asked: the wish is stale and must not join much later.
+            if tracked_then != Some(call.id) {
+                self.group_call.stream.pending_join = None;
+            }
             return;
         }
         let (id, stream, joined) = (call.id, uses_stream_layout(call), call.is_joined);
@@ -281,8 +333,23 @@ impl QuillApp {
         self.arm_stream_hide_timer(cx);
         let shown = self.group_call.stream.controls.value(now);
         let animating = self.group_call.stream.controls.sliding(now);
-        if facts.joined {
-            self.group_call.stream.joining = None;
+        match self.group_call.stream.joining {
+            Some(id) if id != facts.id => self.stream_join_failed(),
+            Some(_) if facts.joined => {
+                self.group_call.stream.joining = None;
+                self.group_call.stream.join_timeout = None;
+            }
+            // The connect failed without a join error: stop waiting.
+            Some(_) if facts.transport_error => self.stream_join_failed(),
+            Some(_)
+                if self
+                    .session()
+                    .is_some_and(|s| s.calls.group_call_error.is_some()) =>
+            {
+                self.group_call.stream.joining = None;
+                self.group_call.stream.join_timeout = None;
+            }
+            _ => {}
         }
 
         let chat_id = facts.chat.as_ref().map(|(id, _)| *id);
@@ -291,8 +358,8 @@ impl QuillApp {
             .as_ref()
             .map(|(_, name)| name.as_str())
             .unwrap_or_default();
-        let picture = chat_id.and_then(|id| self.group_call_stream_picture(id, cx));
-        let placeholder = chat_id.and_then(|id| self.group_call_stream_photo(id, cx));
+        let picture = chat_id.and_then(|id| self.group_call_stream_picture(id, window, cx));
+        let placeholder = chat_id.and_then(|id| self.group_call_stream_photo(id, window, cx));
         // Redraws at the stream's rate only while pictures come.
         let playing = facts.joined && facts.stream == StreamState::Live;
 
@@ -408,7 +475,7 @@ impl QuillApp {
             .right_0()
             .h(px(VIDEO_TOP))
             .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                this.group_call.stream.title_pressed = false;
+                this.group_call.stream.title_pressed = None;
                 if event.click_count() == 2 {
                     toggle_stream_full(window);
                     cx.notify();
@@ -424,14 +491,26 @@ impl QuillApp {
         }
         band.on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, _, _, _| this.group_call.stream.title_pressed = true),
+            cx.listener(|this, event: &MouseDownEvent, _, _| {
+                this.group_call.stream.title_pressed = Some(event.position)
+            }),
         )
         .on_mouse_up(
             MouseButton::Left,
-            cx.listener(|this, _, _, _| this.group_call.stream.title_pressed = false),
+            cx.listener(|this, _, _, _| this.group_call.stream.title_pressed = None),
         )
-        .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, window, _| {
-            if std::mem::take(&mut this.group_call.stream.title_pressed) {
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, _| {
+            let stream = &mut this.group_call.stream;
+            if event.pressed_button != Some(MouseButton::Left) {
+                stream.title_pressed = None;
+                return;
+            }
+            let Some(from) = stream.title_pressed else {
+                return;
+            };
+            let moved = event.position - from;
+            if f32::from(moved.x).hypot(f32::from(moved.y)) >= DRAG_THRESHOLD {
+                stream.title_pressed = None;
                 window.start_window_move();
             }
         }))
@@ -548,7 +627,7 @@ impl QuillApp {
         let error = self
             .session()
             .and_then(|s| s.calls.group_call_error.clone());
-        let joining = self.group_call.stream.joining == Some(facts.id) && error.is_none();
+        let joining = self.group_call.stream.joining == Some(facts.id);
         let id = facts.id;
         let button = Button::new("group-call-stream-join")
             .label(tr(keys::GROUP_CALL_JOIN))
@@ -568,6 +647,7 @@ impl QuillApp {
     fn group_call_stream_picture(
         &mut self,
         chat_id: i64,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Arc<RenderImage>> {
         let seq = match self.live.as_ref() {
@@ -594,8 +674,10 @@ impl QuillApp {
                 let image = frame_image(frame);
                 let picture = &mut self.group_call.stream.picture;
                 picture.start(chat_id, frame.seq, Task::ready(()));
+                // Inside this window's draw: name it, or its atlas keeps
+                // the image.
                 if let Some(old) = picture.finish(chat_id, frame.seq, image) {
-                    cx.drop_image(old, None);
+                    cx.drop_image(old, Some(window));
                 }
             } else if let Some(frame) = frame {
                 let seq = frame.seq;
@@ -621,6 +703,7 @@ impl QuillApp {
     fn group_call_stream_photo(
         &mut self,
         chat_id: i64,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Arc<RenderImage>> {
         let path = self
@@ -633,7 +716,7 @@ impl QuillApp {
             return image.clone();
         }
         if let Some((_, Some(old))) = self.group_call.stream.photo.take() {
-            cx.drop_image(old, None);
+            cx.drop_image(old, Some(window));
         }
         self.group_call.stream.photo = Some((path.clone(), None));
         let task = cx.spawn(async move |this, cx| {

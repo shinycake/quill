@@ -89,13 +89,20 @@ Branch `call-stream-window`, on top of PR 1 (`call-streams.md`). Parity
   other unjoined stream (for example the `updateGroupCall` with
   `is_joined: false` right after Leave) shows a Join button instead.
   Closing the window or leaving drops the intent; asking again opens the
-  window again. Leave, then reopen, joins again.
+  window again. Leave, then reopen, joins again. A wish is dropped when
+  another call takes the place of the one tracked when you asked. The
+  Join button stops spinning when the join lands, reports an error, the
+  native connect fails, or 20 s pass, and then shows the failure.
 - An ended stream: the window leaves full screen, closes, and the call is
   left whenever it was joined (also when the window was already closed).
 - Audio: `GroupCallMedia` carries the chosen speaker. The group call's
   playback is issued with `ntg_set_stream_sources(PLAYBACK)` on that
   device, and a device change while a group call is joined re-issues it
-  (`select_call_devices` now covers group calls). "Mute for me" sets the
+  (`select_call_devices` now covers the tracked group call, also while
+  its join is on the way). A chosen output that ntgcalls refuses (a
+  device unplugged since) is logged and the default output is used
+  once, so a stale choice never fails a connect or a camera toggle in a
+  normal video chat. "Mute for me" sets the
   playback description to none, which ntgcalls answers by dropping its
   audio writer (stream_manager.cpp, 3.0.3); unmuting restores it.
 - The main window's call bar shows no microphone for a stream viewer and
@@ -174,6 +181,9 @@ the cursor and the letter-avatar placeholder still differ.
   joining after a failure; Settings opening and Esc closing it; the
   bounded pictures above.
 - Screenshots of the three demos on macOS (in the PR, not committed).
+- Needs a live check: Unmute for me restoring the sound in the middle
+  of a stream (ntgcalls rebuilding its writer), and changing speakers
+  during a normal video chat.
 - Not run: a real stream (no call is joined from this work), Linux and
   Windows. The drag band uses `start_window_move` (Linux) and
   `WindowControlArea::Drag` (Windows), as the kit title bar does.

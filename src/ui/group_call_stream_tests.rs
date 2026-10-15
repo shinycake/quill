@@ -327,3 +327,63 @@ fn stream_pictures_stay_bounded_with_the_main_window_idle(cx: &mut TestAppContex
         "only the shown image and the one before: {alive}"
     );
 }
+
+#[gpui_kit::test]
+fn a_wish_for_a_call_that_another_call_replaced_is_dropped(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    let main = &mut main;
+    // Asked for call 999 while the stream is tracked: kept while the
+    // same call is tracked.
+    app.update(main, |app, cx| {
+        app.note_stream_join_intent(StreamJoinIntent::Call(999));
+        app.sync_group_call_window(cx);
+    });
+    assert!(app.read_with(main, |app, _| app.group_call.stream.pending_join.is_some()));
+    // Another call takes its place: the wish goes.
+    app.update(main, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        session.calls.active_group_call = Some(ActiveGroupCall::fresh(777));
+        app.sync_group_call_window(cx);
+    });
+    assert!(app.read_with(main, |app, _| app.group_call.stream.pending_join.is_none()));
+}
+
+#[gpui_kit::test]
+fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    let window = app
+        .read_with(&main, |app, _| app.group_call.window)
+        .expect("the unjoined stream's window");
+    let mut call = VisualTestContext::from_window(window, cx);
+    let error = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session().and_then(|s| s.calls.group_call_error.clone())
+        })
+    };
+    // The timer runs out with the call still unjoined.
+    app.update(&mut call, |app, cx| {
+        app.group_call.stream.joining = Some(CALL);
+        app.stream_join_ended(CALL, cx);
+    });
+    assert!(app.read_with(&call, |app, _| app.group_call.stream.joining.is_none()));
+    assert!(error(&app, &mut call).is_some(), "the failure shows");
+    // The native connect fails without a join error: the next draw stops
+    // the spinner and says so.
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        session.calls.group_call_error = None;
+        if let Some(active) = session.calls.active_group_call.as_mut() {
+            active.transport_error = Some("connect failed".into());
+        }
+        app.group_call.stream.joining = Some(CALL);
+        cx.notify();
+    });
+    frames(&mut call);
+    assert!(app.read_with(&call, |app, _| app.group_call.stream.joining.is_none()));
+    assert!(error(&app, &mut call).is_some());
+}

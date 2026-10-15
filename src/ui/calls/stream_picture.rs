@@ -26,6 +26,8 @@ pub(crate) struct StreamPicture {
     previous: Option<Arc<RenderImage>>,
     /// The frame being converted.
     converting: Option<(i64, u64)>,
+    /// A frame that could not be converted: not copied again every draw.
+    failed: Option<(i64, u64)>,
     task: Option<Task<()>>,
     /// Every image made, to check that old ones are freed.
     #[cfg(test)]
@@ -44,6 +46,7 @@ impl StreamPicture {
     /// Whether frame `seq` of `chat` still needs converting.
     pub(crate) fn wants(&self, chat: i64, seq: u64) -> bool {
         self.converting.is_none()
+            && self.failed != Some((chat, seq))
             && self
                 .shown
                 .as_ref()
@@ -68,7 +71,10 @@ impl StreamPicture {
         }
         self.converting = None;
         self.task = None;
-        let image = image?;
+        let Some(image) = image else {
+            self.failed = Some((chat, seq));
+            return None;
+        };
         #[cfg(test)]
         self.made.push(Arc::downgrade(&image));
         let older = self
@@ -81,6 +87,7 @@ impl StreamPicture {
     /// Forget everything (the call ended). Returns the images to drop.
     pub(crate) fn clear(&mut self) -> Vec<Arc<RenderImage>> {
         self.converting = None;
+        self.failed = None;
         self.task = None;
         self.shown
             .take()
@@ -143,6 +150,17 @@ mod tests {
         let freed = picture.finish(7, 3, Some(image()));
         assert!(freed.is_some(), "the third image frees the first");
         assert_eq!(picture.clear().len(), 2);
+    }
+
+    #[test]
+    fn a_frame_that_cannot_be_converted_is_not_tried_again() {
+        let mut picture = StreamPicture {
+            converting: Some((7, 4)),
+            ..Default::default()
+        };
+        assert!(picture.finish(7, 4, None).is_none());
+        assert!(!picture.wants(7, 4), "the failed frame is skipped");
+        assert!(picture.wants(7, 5), "the next frame is converted");
     }
 
     #[test]
