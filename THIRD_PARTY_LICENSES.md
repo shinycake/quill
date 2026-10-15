@@ -1440,7 +1440,7 @@ Used by:
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
 - [gpui-kit-assets 0.7.1](https://github.com/longbridge/gpui-kit)
 - [gpui-kit 0.7.1](https://github.com/longbridge/gpui-kit)
-- [interprocess 2.4.4](https://github.com/kotauskas/interprocess)
+- [interprocess 2.4.5](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
 
@@ -3518,7 +3518,7 @@ endef
 ### MIT License
 
 Used by:
-- [schemars 1.2.2](https://github.com/GREsau/schemars)
+- [schemars 1.2.3](https://github.com/GREsau/schemars)
 
 ````text
 #![allow(clippy::all)]
@@ -5705,7 +5705,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [rustls 0.23.45](https://github.com/rustls/rustls)
+- [rustls 0.23.46](https://github.com/rustls/rustls)
 
 ````text
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
@@ -5873,7 +5873,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [equivalent 1.0.2](https://github.com/indexmap-rs/equivalent)
+- [equivalent 1.0.3](https://github.com/indexmap-rs/equivalent)
 
 ````text
 Copyright (c) 2016--2023
@@ -6043,7 +6043,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [sha2 0.11.0](https://github.com/RustCrypto/hashes)
+- [sha2 0.11.1](https://github.com/RustCrypto/hashes)
 
 ````text
 Copyright (c) 2016-2026 The RustCrypto Project Developers
@@ -6714,7 +6714,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [smallvec 1.16.2](https://github.com/servo/rust-smallvec)
+- [smallvec 1.16.3](https://github.com/servo/rust-smallvec)
 
 ````text
 Copyright (c) 2018 The Servo Project Developers
@@ -7380,7 +7380,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [font-types 0.12.6](https://github.com/googlefonts/fontations)
+- [font-types 0.12.7](https://github.com/googlefonts/fontations)
 - [read-fonts 0.41.0](https://github.com/googlefonts/fontations)
 - [skrifa 0.44.0](https://github.com/googlefonts/fontations)
 
@@ -7946,7 +7946,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [litrs 1.0.0](https://github.com/LukasKalbertodt/litrs)
+- [litrs 1.0.1](https://github.com/LukasKalbertodt/litrs)
 
 ````text
 Copyright (c) 2020 Project Developers
@@ -8791,7 +8791,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [deranged 0.5.8](https://github.com/jhpratt/deranged)
+- [deranged 0.5.9](https://github.com/jhpratt/deranged)
 
 ````text
 Copyright (c) 2024 Jacob Pratt et al.
@@ -9561,8 +9561,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ### MIT License
 
 Used by:
-- [zerocopy-derive 0.8.62](https://github.com/google/zerocopy)
-- [zerocopy 0.8.62](https://github.com/google/zerocopy)
+- [zerocopy-derive 0.8.63](https://github.com/google/zerocopy)
+- [zerocopy 0.8.63](https://github.com/google/zerocopy)
 
 ````text
 Copyright 2023 The Fuchsia Authors
@@ -10037,8 +10037,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ### MIT License
 
 Used by:
-- [schemars 1.2.2](https://github.com/GREsau/schemars)
-- [schemars_derive 1.2.2](https://github.com/GREsau/schemars)
+- [schemars 1.2.3](https://github.com/GREsau/schemars)
+- [schemars_derive 1.2.3](https://github.com/GREsau/schemars)
 
 ````text
 MIT License
@@ -10098,7 +10098,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [triomphe 0.1.16](https://github.com/Manishearth/triomphe)
+- [triomphe 0.1.17](https://github.com/Manishearth/triomphe)
 
 ````text
 MIT License
@@ -11536,19 +11536,19 @@ Used by:
 - [serde_core 1.0.229](https://github.com/serde-rs/serde)
 - [serde_derive 1.0.229](https://github.com/serde-rs/serde)
 - [serde_derive_internals 0.30.0](https://github.com/serde-rs/serde)
-- [serde_json 1.0.151](https://github.com/serde-rs/json)
+- [serde_json 1.0.154](https://github.com/serde-rs/json)
 - [serde_repr 0.1.21](https://github.com/dtolnay/serde-repr)
 - [smol 2.0.2](https://github.com/smol-rs/smol)
 - [smol_str 0.3.6](https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str)
 - [syn 2.0.119](https://github.com/dtolnay/syn)
-- [syn 3.0.6](https://github.com/dtolnay/syn)
+- [syn 3.0.9](https://github.com/dtolnay/syn)
 - [thiserror-impl 1.0.69](https://github.com/dtolnay/thiserror)
 - [thiserror-impl 2.0.21](https://github.com/dtolnay/thiserror)
 - [thiserror 1.0.69](https://github.com/dtolnay/thiserror)
 - [thiserror 2.0.21](https://github.com/dtolnay/thiserror)
 - [typed-path 0.12.3](https://github.com/chipsenkbeil/typed-path)
 - [typeid 1.0.3](https://github.com/dtolnay/typeid)
-- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 - [utf-8 0.7.6](https://github.com/SimonSapin/rust-utf8)
 - [utf8-zero 0.8.1](https://github.com/algesten/utf8-zero)
 - [waker-fn 1.2.0](https://github.com/smol-rs/waker-fn)
@@ -13793,7 +13793,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 ### Unicode License v3
 
 Used by:
-- [unicode-ident 1.0.26](https://github.com/dtolnay/unicode-ident)
+- [unicode-ident 1.0.27](https://github.com/dtolnay/unicode-ident)
 
 ````text
 UNICODE LICENSE V3
