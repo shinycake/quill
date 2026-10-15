@@ -78,6 +78,11 @@ pub struct CallsState {
     pub active_group_call: Option<ActiveGroupCall>,
     /// "Stream with...": the process for one chat (`calls::rtmp_start`).
     pub rtmp_start: Option<crate::calls::rtmp_start::RtmpStart>,
+    /// Starting a video chat: the "join as" list asked for first.
+    pub create_join_as: Option<crate::calls::group_call_create::CreateJoinAs>,
+    /// `createVideoChat` requests the server refused, until the UI shows
+    /// them (matched by request id).
+    pub failed_creates: Vec<RequestId>,
     /// Phase C3a: group-call ids whose full `groupCall` still needs a
     /// `getGroupCall` fetch (queued from the `createVideoChat`
     /// `groupCallId` answer). Drained by the driver.
@@ -120,6 +125,8 @@ impl CallsState {
             recent_calls_clearing: false,
             active_group_call: None,
             rtmp_start: None,
+            create_join_as: None,
+            failed_creates: Vec::new(),
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
             call_link: None,

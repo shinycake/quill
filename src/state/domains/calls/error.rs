@@ -93,11 +93,19 @@ impl Session {
             // UI). A failed `joinVideoChat` leaves any tracked
             // call in place — `updateGroupCall` is the source
             // of truth for join state.
+            // Starting a video chat: there is no call panel yet, so the
+            // UI shows the failure for its own request and drops the join.
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChat { .. })) => {
-                self.calls.group_call_error = Some(call_request_error_line(
-                    err,
-                    "Could not start the voice chat",
-                ));
+                if let Some(extra) = extra {
+                    self.calls.failed_creates.push(extra);
+                }
+            }
+            Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs { .. })) => {
+                if let Some(join_as) = self.calls.create_join_as.as_mut()
+                    && Some(join_as.request) == extra
+                {
+                    join_as.answer = Some(Err(()));
+                }
             }
             Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { .. })) => {
                 // Phase C2f: a failed rejoin re-arms

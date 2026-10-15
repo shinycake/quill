@@ -14,6 +14,8 @@ pub(crate) struct GroupCallUi {
     /// Starting a video chat: leave-current, create and schedule boxes
     /// (`dialogs/group_call_create.rs`).
     pub(super) start_dialog: Option<super::dialogs::group_call_create::GroupCallCreate>,
+    /// The last `createVideoChat` sent, to match a server failure.
+    pub(super) create_request: Option<quill::ids::RequestId>,
     /// The call window's Settings box (`group_call_settings.rs`).
     pub(super) settings_open: bool,
     /// Phase C2h: in-call chat composer (sendGroupCallMessage).
@@ -66,6 +68,7 @@ impl GroupCallUi {
             composer,
             title_dialog: None,
             start_dialog: None,
+            create_request: None,
             settings_open: false,
             invite_open: false,
             share_open: false,

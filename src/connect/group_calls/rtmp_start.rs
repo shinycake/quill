@@ -6,6 +6,7 @@
 //! `calls.rtmp_start`. "Start Streaming" is `createVideoChat` with
 //! `is_rtmp_stream = true`.
 use super::*;
+use crate::calls::group_call_create::CreateJoinAs;
 use crate::calls::rtmp_start::RtmpStart;
 use crate::ids::ChatId;
 
@@ -53,6 +54,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.create_video_chat_request(chat_id.0, String::new(), 0, true)?;
         self.session.calls.rtmp_start = None;
         Ok(sent)
+    }
+
+    /// "Start video chat": ask who the viewer may appear as before anything
+    /// is created (`ChooseJoinAsProcess::requestList`; TDLib's
+    /// `getVideoChatAvailableParticipants` is chat-bound, so it works with
+    /// no call yet). The answer lands in `calls.create_join_as`.
+    pub fn request_create_join_as(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs { chat_id: chat_id.0 }),
+            None,
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&get_video_chat_available_participants(extra, chat_id.0))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.calls.create_join_as = Some(CreateJoinAs {
+            chat_id: chat_id.0,
+            request: extra,
+            answer: None,
+        });
+        Ok(extra)
     }
 
     /// Cancel / close the box (`StartRtmpProcess::close`).

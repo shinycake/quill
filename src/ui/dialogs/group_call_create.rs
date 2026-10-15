@@ -5,8 +5,10 @@
 //! calls/group/calls_choose_join_as.cpp) and `ScheduleGroupCallBox` (same
 //! file) on the kit date and time picker.
 //!
-//! The steps share one registered dialog, each replacing the last as
-//! tdesktop's boxes replace each other. Nothing is created until "Create",
+//! "Start" first asks who you may appear as (`requestList`): with only
+//! yourself it is the confirmation, otherwise `ChooseJoinAsBox`
+//! (`group_call_join_as.rs`). The steps share one registered dialog, each
+//! replacing the last as tdesktop's boxes replace each other. Nothing is created until "Create",
 //! "Schedule" or "Start Streaming" goes through; the call you are in ends
 //! only then (`createGroupCall` → `destroyCurrentCall`).
 #![deny(clippy::indexing_slicing)]
@@ -23,12 +25,14 @@ use gpui_kit::component::{ActiveTheme, Sizable, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::group_call_create::{
-    BeforeCreate, COUNTDOWN_REFRESH_SECS, Countdown, CreateKind, CurrentCall, LeaveText,
-    before_create, check_schedule, countdown, default_schedule_at, schedule_max,
+    BeforeCreate, COUNTDOWN_REFRESH_SECS, Countdown, CreateKind, CurrentCall, JoinAsStep,
+    LeaveText, before_create, check_schedule, countdown, default_schedule_at, join_as_step,
+    schedule_max,
 };
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::{now_unix, utc_offset_at};
+use quill::telegram::envelope::MessageSender;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -38,11 +42,21 @@ pub(crate) struct GroupCallCreate {
     pub(crate) chat_id: ChatId,
     pub(crate) kind: CreateKind,
     pub(crate) step: CreateStep,
+    /// Who the new call is joined as (`JoinInfo::joinAs`); `None` is
+    /// yourself.
+    pub(crate) join_as: Option<MessageSender>,
 }
 
 pub(crate) enum CreateStep {
     /// "Leave your currently active video chat and join this video chat?"
     Leave(LeaveText),
+    /// The "join as" list is being asked for; no box shows meanwhile.
+    Waiting(RequestId),
+    /// `ChooseJoinAsBox`: who to start the call as.
+    ChooseJoinAs {
+        options: Vec<MessageSender>,
+        selected: MessageSender,
+    },
     /// "Start a video chat in this group?" with Create and the link.
     Confirm,
     /// `ScheduleGroupCallBox`.
@@ -75,7 +89,8 @@ impl QuillApp {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.kind.is_channel());
-        match before_create(session.current_call_for_create(), chat_id, to_channel) {
+        let current = session.current_call_for_create(self.group_call.stream.joining);
+        match before_create(current, chat_id, to_channel) {
             BeforeCreate::Proceed => self.continue_group_call_create(chat_id, kind, window, cx),
             BeforeCreate::ShowCurrent => {
                 self.group_call.start_dialog = None;
@@ -86,6 +101,7 @@ impl QuillApp {
                     chat_id,
                     kind,
                     step: CreateStep::Leave(text),
+                    join_as: None,
                 });
                 cx.notify();
             }
@@ -102,13 +118,31 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match kind {
-            CreateKind::Now => {
-                self.group_call.start_dialog = Some(GroupCallCreate {
-                    chat_id,
-                    kind,
-                    step: CreateStep::Confirm,
-                });
-            }
+            CreateKind::Now => match self.live.as_mut() {
+                Some(live) => match live.driver.request_create_join_as(chat_id) {
+                    Ok(request) => {
+                        self.group_call.start_dialog = Some(GroupCallCreate {
+                            chat_id,
+                            kind,
+                            step: CreateStep::Waiting(request),
+                            join_as: None,
+                        });
+                    }
+                    Err(_) => {
+                        self.group_call.start_dialog = None;
+                        server_error_toast(window, cx);
+                    }
+                },
+                // Screenshot demos and tests have no TDLib: yourself only.
+                None => {
+                    self.group_call.start_dialog = Some(GroupCallCreate {
+                        chat_id,
+                        kind,
+                        step: CreateStep::Confirm,
+                        join_as: None,
+                    });
+                }
+            },
             CreateKind::Schedule => self.open_group_call_schedule(chat_id, window, cx),
             CreateKind::Rtmp => {
                 self.group_call.start_dialog = None;
@@ -150,6 +184,11 @@ impl QuillApp {
                 }
             }
         });
+        let join_as = self
+            .group_call
+            .start_dialog
+            .as_ref()
+            .and_then(|flow| flow.join_as);
         self.group_call.start_dialog = Some(GroupCallCreate {
             chat_id,
             kind: CreateKind::Schedule,
@@ -158,6 +197,7 @@ impl QuillApp {
                 error: None,
                 _refresh: refresh,
             }),
+            join_as,
         });
         cx.notify();
     }
@@ -184,7 +224,7 @@ impl QuillApp {
             .ok_or(quill::schedule::ScheduleError::Invalid)
             .and_then(|date| check_schedule(date, now, schedule_max(now, &utc_offset_at)));
         match picked {
-            Ok(date) => self.send_group_call_create(chat_id, date, window, cx),
+            Ok(date) => self.send_group_call_create(chat_id, date, None, window, cx),
             Err(err) => {
                 if let Some(GroupCallCreate {
                     step: CreateStep::Schedule(step),
@@ -198,13 +238,118 @@ impl QuillApp {
         }
     }
 
-    /// `createVideoChat` (now when `start_date` is 0). The call you are in
-    /// ends first; the new one is joined once it is tracked, and only
+    /// The "join as" list arrived (`processList`): none is the server
+    /// error, only yourself the create confirmation, several the
+    /// `ChooseJoinAsBox`. A failed request creates the call as yourself
+    /// right away, as tdesktop's `requestList` failure does.
+    pub(in crate::ui) fn accept_create_join_as(
+        &mut self,
+        answer: Result<Vec<MessageSender>, ()>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat_id) = self.group_call.start_dialog.as_ref().map(|f| f.chat_id) else {
+            return;
+        };
+        let options = match answer {
+            Ok(options) => options,
+            Err(()) => {
+                self.send_group_call_create(chat_id, 0, None, window, cx);
+                return;
+            }
+        };
+        let me = self
+            .session()
+            .and_then(|s| s.my_user_id)
+            .map(|user_id| MessageSender::User { user_id });
+        let (step, join_as) = match join_as_step(options, me) {
+            JoinAsStep::Empty => {
+                self.group_call.start_dialog = None;
+                server_error_toast(window, cx);
+                cx.notify();
+                return;
+            }
+            JoinAsStep::OnlyMe(me) => (CreateStep::Confirm, Some(me)),
+            JoinAsStep::Choose { options, selected } => (
+                CreateStep::ChooseJoinAs { options, selected },
+                Some(selected),
+            ),
+        };
+        if let Some(flow) = self.group_call.start_dialog.as_mut() {
+            flow.step = step;
+            flow.join_as = join_as;
+        }
+        cx.notify();
+    }
+
+    /// `ChooseJoinAsBox`: a row was picked.
+    pub(in crate::ui) fn select_create_join_as(
+        &mut self,
+        sender: MessageSender,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(flow) = self.group_call.start_dialog.as_mut()
+            && let CreateStep::ChooseJoinAs { selected, .. } = &mut flow.step
+        {
+            *selected = sender;
+            flow.join_as = Some(sender);
+        }
+        cx.notify();
+    }
+
+    /// Per frame: the "join as" answer for the flow waiting on it, and a
+    /// `createVideoChat` the server refused (the toast, and no join).
+    pub(in crate::ui) fn group_call_create_frame_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let waiting = match self.group_call.start_dialog.as_ref().map(|f| &f.step) {
+            Some(CreateStep::Waiting(request)) => Some(*request),
+            _ => None,
+        };
+        let session = match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session),
+            None => self.demo_session.as_mut(),
+        };
+        let Some(session) = session else {
+            return;
+        };
+        let answer = match (waiting, session.calls.create_join_as.as_ref()) {
+            (Some(request), Some(join_as)) if join_as.request == request => join_as.answer.clone(),
+            _ => None,
+        };
+        if answer.is_some() {
+            session.calls.create_join_as = None;
+        }
+        let failed = std::mem::take(&mut session.calls.failed_creates);
+        if let Some(answer) = answer {
+            self.accept_create_join_as(answer, window, cx);
+        }
+        if let Some(request) = self.group_call.create_request
+            && failed.contains(&request)
+        {
+            self.group_call.create_request = None;
+            if matches!(
+                self.group_call.stream.pending_join,
+                Some((StreamJoinIntent::Created { .. }, _))
+            ) {
+                self.group_call.stream.pending_join = None;
+            }
+            server_error_toast(window, cx);
+            cx.notify();
+        }
+    }
+
+    /// `createVideoChat` (now when `start_date` is 0) as `join_as`. The
+    /// call you are in ends first; a call created to start now is joined
+    /// once it is tracked (tdesktop `createGroupCall` joins it), and only
     /// when the request went out.
     fn send_group_call_create(
         &mut self,
         chat_id: ChatId,
         start_date: i64,
+        join_as: Option<MessageSender>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -214,44 +359,66 @@ impl QuillApp {
             Some(live) => live
                 .driver
                 .start_video_chat(chat_id.0, String::new(), start_date)
-                .is_ok(),
+                .ok(),
             // Screenshot demos and tests have no TDLib: nothing to send.
-            None => self.demo_session.is_some(),
+            None => self.demo_session.is_some().then_some(RequestId(0)),
         };
-        if !sent {
-            window.push_notification(
-                Notification::new().message(tr(keys::Q_OPS_COULD_NOT_START_VOICE_CHAT)),
-                cx,
-            );
-        } else if start_date == 0 {
-            self.note_stream_join_intent(StreamJoinIntent::Chat(chat_id.0));
+        self.created_video_chat(chat_id, sent, start_date == 0, join_as, window, cx);
+    }
+
+    /// After a `createVideoChat` went out (`sent`) or was refused: remember
+    /// it to match a server failure, and join the call once it is tracked.
+    pub(in crate::ui) fn created_video_chat(
+        &mut self,
+        chat_id: ChatId,
+        sent: Option<RequestId>,
+        join: bool,
+        join_as: Option<MessageSender>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.group_call.create_request = sent;
+        match sent {
+            None => server_error_toast(window, cx),
+            Some(_) if join => self.note_stream_join_intent(StreamJoinIntent::Created {
+                chat: chat_id.0,
+                join_as,
+            }),
+            Some(_) => {}
         }
         cx.notify();
     }
 
     /// tdesktop `destroyCurrentCall` right before a new call is created:
-    /// hang up a one-to-one call, leave a joined video chat, and stop
-    /// tracking a call you were only looking at or that is scheduled.
+    /// hang up a one-to-one call and leave the tracked video chat
+    /// (`leaveGroupCall` and the transport torn down), unless it is a
+    /// scheduled one you never joined, which is only dropped.
     pub(in crate::ui) fn end_current_call_for_create(&mut self, cx: &mut Context<Self>) {
+        let joining = self.group_call.stream.joining;
         let Some(session) = self.session() else {
             return;
         };
-        let one_to_one = session.current_call_for_create() == CurrentCall::OneToOne;
+        let one_to_one = session.current_call_for_create(joining) == CurrentCall::OneToOne;
+        let in_call = session.group_call_joined_or_joining(joining);
         let tracked = session.calls.active_group_call.as_ref();
-        let joined = tracked.is_some_and(|call| call.is_joined);
+        let scheduled = tracked.is_some_and(|call| call.scheduled_start_date > 0);
         let tracked = tracked.is_some();
         if one_to_one {
             self.hang_up_call(cx);
         }
-        if joined {
-            self.leave_active_group_call(cx);
-        } else if tracked {
+        if !tracked {
+            return;
+        }
+        if scheduled && !in_call {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.leave_group_call_local();
             } else if let Some(session) = self.demo_session.as_mut() {
                 session.leave_group_call_local();
             }
+        } else {
+            self.leave_active_group_call(cx);
         }
+        self.group_call.stream.joining = None;
     }
 
     /// The registered dialog: the step on screen.
@@ -275,6 +442,33 @@ impl QuillApp {
                 .is_some_and(|chat| chat.kind.is_channel());
             let (title, body, confirm) = match &flow.step {
                 CreateStep::Leave(text) => (None, leave_body(*text, cx), leave_button(*text, cx)),
+                // Not shown (`is_open`); a placeholder until the answer.
+                CreateStep::Waiting(_) => {
+                    (None, div().into_any_element(), div().into_any_element())
+                }
+                CreateStep::ChooseJoinAs { options, selected } => (
+                    Some(if channel {
+                        tr(keys::GROUP_CALL_START_AS_HEADER_CHANNEL)
+                    } else {
+                        tr(keys::GROUP_CALL_START_AS_HEADER)
+                    }),
+                    this.join_as_body(flow.chat_id, channel, options, *selected, cx),
+                    footer_button(
+                        "group-call-join-as-continue",
+                        tr(keys::CONTINUE),
+                        cx,
+                        |this, window, cx| {
+                            if let Some((chat_id, join_as)) = this
+                                .group_call
+                                .start_dialog
+                                .as_ref()
+                                .map(|f| (f.chat_id, f.join_as))
+                            {
+                                this.send_group_call_create(chat_id, 0, join_as, window, cx);
+                            }
+                        },
+                    ),
+                ),
                 CreateStep::Confirm => (
                     None,
                     create_body(flow.chat_id, channel, cx),
@@ -283,10 +477,13 @@ impl QuillApp {
                         tr(keys::CREATE_GROUP_CREATE),
                         cx,
                         |this, window, cx| {
-                            if let Some(chat_id) =
-                                this.group_call.start_dialog.as_ref().map(|f| f.chat_id)
+                            if let Some((chat_id, join_as)) = this
+                                .group_call
+                                .start_dialog
+                                .as_ref()
+                                .map(|f| (f.chat_id, f.join_as))
                             {
-                                this.send_group_call_create(chat_id, 0, window, cx);
+                                this.send_group_call_create(chat_id, 0, join_as, window, cx);
                             }
                         },
                     ),
@@ -312,13 +509,21 @@ impl QuillApp {
                 .justify_end()
                 .gap_2()
                 .child(
-                    Button::new("group-call-create-cancel")
-                        .label(tr(keys::CANCEL))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_group_call_create(cx);
-                            this.close_kit_dialog_if_done(DialogKind::GroupCallStart, window, cx);
-                        })),
+                    div()
+                        .debug_selector(|| "group-call-create-cancel".into())
+                        .child(
+                            Button::new("group-call-create-cancel")
+                                .label(tr(keys::CANCEL))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_group_call_create(cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::GroupCallStart,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        ),
                 )
                 .child(confirm);
             dialog
@@ -344,6 +549,14 @@ impl QuillApp {
 }
 
 type StepAction = fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>);
+
+/// `Lang::Hard::ServerError`, tdesktop's toast for a failed request.
+pub(in crate::ui) fn server_error_toast(window: &mut Window, cx: &mut Context<QuillApp>) {
+    window.push_notification(
+        Notification::new().message(tr(keys::Q_OPS_SERVER_ERROR)),
+        cx,
+    );
+}
 
 /// The step's primary button; the dialog closes when the step cleared the
 /// flow.
@@ -428,15 +641,6 @@ fn create_body(chat_id: ChatId, channel: bool, cx: &mut Context<QuillApp>) -> An
     } else {
         tr(keys::GROUP_CALL_CREATE_SURE)
     };
-    let link = if channel {
-        tr(keys::GROUP_CALL_SCHEDULE_CHANNEL)
-    } else {
-        tr(keys::GROUP_CALL_SCHEDULE)
-    };
-    let or_schedule = tr(keys::GROUP_CALL_OR_SCHEDULE);
-    let (before, after) = or_schedule
-        .split_once("{link}")
-        .unwrap_or((or_schedule, ""));
     div()
         .flex()
         .flex_col()
@@ -451,26 +655,44 @@ fn create_body(chat_id: ChatId, channel: bool, cx: &mut Context<QuillApp>) -> An
                 .whitespace_normal()
                 .child(question),
         )
+        .child(or_schedule_link(chat_id, channel, cx))
+        .into_any_element()
+}
+
+/// "You can also {link}." (`lng_group_call_or_schedule`): the link opens
+/// the schedule box.
+pub(super) fn or_schedule_link(
+    chat_id: ChatId,
+    channel: bool,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let link = if channel {
+        tr(keys::GROUP_CALL_SCHEDULE_CHANNEL)
+    } else {
+        tr(keys::GROUP_CALL_SCHEDULE)
+    };
+    let or_schedule = tr(keys::GROUP_CALL_OR_SCHEDULE);
+    let (before, after) = or_schedule
+        .split_once("{link}")
+        .unwrap_or((or_schedule, ""));
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .child(before)
         .child(
             div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .child(before)
+                .debug_selector(|| "group-call-create-schedule".into())
                 .child(
-                    div()
-                        .debug_selector(|| "group-call-create-schedule".into())
-                        .child(
-                            Button::new("group-call-create-schedule")
-                                .label(link)
-                                .link()
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.open_group_call_schedule(chat_id, window, cx);
-                                })),
-                        ),
-                )
-                .child(after),
+                    Button::new("group-call-create-schedule")
+                        .label(link)
+                        .link()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_group_call_schedule(chat_id, window, cx);
+                        })),
+                ),
         )
+        .child(after)
         .into_any_element()
 }
 
@@ -525,7 +747,11 @@ fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>)
 crate::ui::shell::register_dialogs! {
     GroupCallStart => DialogSpec::new(
         400,
-        |app| app.group_call.start_dialog.is_some(),
+        |app| app
+            .group_call
+            .start_dialog
+            .as_ref()
+            .is_some_and(|flow| !matches!(flow.step, CreateStep::Waiting(_))),
         QuillApp::build_group_call_create_dialog,
     ),
 }

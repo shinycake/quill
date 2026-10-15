@@ -71,6 +71,10 @@
 "lng_chat_link_qr_title" = "Chat Link QR Code";
 "lng_chat_link_saved" = "Chat link saved.";
 "lng_chat_links_create_link" = "Create a Link to Chat";
+"lng_chat_status_members#one" = "{count} member";
+"lng_chat_status_members#other" = "{count} members";
+"lng_chat_status_subscribers#one" = "{count} subscriber";
+"lng_chat_status_subscribers#other" = "{count} subscribers";
 "lng_chatbots_access_title" = "Chats accessible for the bot";
 "lng_chatbots_all_except" = "All 1-to-1 Chats Except...";
 "lng_chatbots_exclude_about" = "Select chats or entire chat categories which the bot will not have access to.";
@@ -120,6 +124,8 @@
 "lng_group_call_create_sure_channel" = "Are you sure you want to start a live stream in this channel as your personal account?";
 "lng_group_call_end_channel" = "End Live Stream";
 "lng_group_call_join" = "Join";
+"lng_group_call_join_as_about" = "Choose whether you want to be displayed as your personal account or as your channel.";
+"lng_group_call_join_as_personal" = "personal account";
 "lng_group_call_leave" = "Leave";
 "lng_group_call_leave_channel_to_other_sure" = "Do you want to leave your active live stream and join a video chat in this group?";
 "lng_group_call_leave_channel_to_other_sure_channel" = "Do you want to leave your active live stream and join a live stream in this channel?";
@@ -163,6 +169,8 @@
 "lng_group_call_settings_title" = "Settings";
 "lng_group_call_share" = "Share Invite Link";
 "lng_group_call_speakers" = "Speakers";
+"lng_group_call_start_as_header" = "Start Video Chat as...";
+"lng_group_call_start_as_header_channel" = "Start Live Stream as...";
 "lng_group_call_tooltip_screen" = "Share screen";
 "lng_group_call_unpinned_on_top" = "Live stream is unpinned from top.";
 "lng_group_call_video_paused" = "Video is paused";
@@ -1068,7 +1076,4 @@
 "qll_ops_your_phone_number" = "Your phone number";
 "qll_ops_youre_already_in_a_call" = "You're already in a call. Telegram doesn't support putting a call on hold — answering ends the current one.";
 "qll_ops_youre_offline_cant_start_a" = "You're offline — can't start a call";
-"qll_ops_could_not_fetch_stream_key" = "Couldn't fetch the stream key.";
-"qll_ops_could_not_regenerate_stream_key" = "Couldn't regenerate the stream key.";
-"qll_ops_could_not_start_voice_chat" = "Couldn't start a voice chat here.";
 "qll_ops_server_error" = "Internal server error.";

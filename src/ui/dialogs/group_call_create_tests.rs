@@ -1,8 +1,10 @@
 //! UI tests for starting a video chat or live stream: the call button's
 //! visibility, the create confirmation with its "schedule" link, the
-//! schedule box (default time, live countdown, range check) and the
-//! leave-current confirmation. Nothing reaches Telegram: the app has no
-//! connection, so a confirmed create only records the join.
+//! "join as" box, the schedule box (default time, live countdown, range
+//! check), the leave-current confirmation (also for a join still in
+//! flight), joining the created call, and a refused create. Nothing
+//! reaches Telegram: the app has no connection, so a confirmed create only
+//! records the join, and the tests play the server's part.
 use super::{CreateStep, GroupCallCreate};
 use crate::ui::app::QuillApp;
 use crate::ui::group_call_stream_layout::StreamJoinIntent;
@@ -10,16 +12,22 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::scheduled::picked_unix;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
-use gpui_kit::component::Root;
+use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::calls::group_call_create::{CreateKind, default_schedule_at};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::local_time::{now_unix, utc_offset_at};
-use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
+use quill::state::{ActiveGroupCall, VideoChatInfo};
+use quill::telegram::envelope::{ChannelMemberStatus, ChatKind, MessageSender};
 
-/// A channel of the "ready-channels" demo.
+/// A channel of the "ready-channels" demo (the create demos use it too).
 const CHANNEL: i64 = 13;
+/// The id the tests give the created call.
+const NEW_CALL: i32 = 5;
+/// Another chat's call you are in.
+const OTHER_CALL: i32 = 77;
+const ME: MessageSender = MessageSender::User { user_id: 1 };
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -28,20 +36,14 @@ fn frames(vcx: &mut VisualTestContext) {
     }
 }
 
-fn open_main(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+fn open(cx: &mut TestAppContext, kind: &'static str) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(
-                window,
-                cx,
-                None,
-                Some(ScreenshotDemo::named("ready-channels")),
-            )
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(kind))));
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
         Root::new(shell, window, cx)
@@ -52,32 +54,37 @@ fn open_main(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, main)
 }
 
+fn open_main(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    open(cx, "ready-channels")
+}
+
 /// The viewer's own status in the channel, as `updateSupergroup` gives it.
-fn set_status(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, manager: bool) {
+fn set_status(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, status: ChannelMemberStatus) {
     app.update(vcx, |app, cx| {
         let Some(session) = app.demo_session.as_mut() else {
             return;
         };
+        session.my_user_id = Some(1);
         let Some(chat) = session.chats.get_mut(&CHANNEL) else {
             return;
         };
         chat.video_chat = None;
         if let ChatKind::Supergroup { supergroup_id, .. } = chat.kind {
-            session.groups.supergroup_member_status.insert(
-                supergroup_id,
-                if manager {
-                    ChannelMemberStatus::Administrator
-                } else {
-                    ChannelMemberStatus::Member
-                },
-            );
+            session
+                .groups
+                .supergroup_member_status
+                .insert(supergroup_id, status);
             session
                 .groups
                 .supergroup_manage_video_chats_right
-                .insert(supergroup_id, manager);
+                .insert(supergroup_id, status == ChannelMemberStatus::Administrator);
         }
         cx.notify();
     });
+}
+
+fn manager(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    set_status(app, vcx, ChannelMemberStatus::Administrator);
 }
 
 fn begin(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, kind: CreateKind) {
@@ -99,19 +106,83 @@ fn flow_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     app.read_with(vcx, |app, _| app.group_call.start_dialog.is_some())
 }
 
-fn join_noted(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+/// The join recorded for the channel's new call, and who it joins as.
+fn join_noted(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+) -> Option<Option<MessageSender>> {
+    app.read_with(vcx, |app, _| match app.group_call.stream.pending_join {
+        Some((StreamJoinIntent::Created { chat, join_as }, _)) if chat == CHANNEL => Some(join_as),
+        _ => None,
+    })
+}
+
+fn toasts(vcx: &mut VisualTestContext) -> usize {
+    vcx.update(|window, cx| window.notifications(cx).len())
+}
+
+/// The server answered the create: the channel's new call is tracked,
+/// unjoined, as `getGroupCall` leaves it.
+fn track_new_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            if let Some(chat) = session.chats.get_mut(&CHANNEL) {
+                chat.video_chat = Some(VideoChatInfo {
+                    group_call_id: NEW_CALL,
+                    has_participants: false,
+                    default_participant_id: None,
+                });
+            }
+            let mut call = ActiveGroupCall::fresh(NEW_CALL);
+            call.is_video_chat = true;
+            session.calls.active_group_call = Some(call);
+        }
+        app.sync_group_call_window(cx);
+    });
+    frames(vcx);
+}
+
+fn new_call_joined_as(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+) -> Option<Option<MessageSender>> {
     app.read_with(vcx, |app, _| {
-        matches!(
-            app.group_call.stream.pending_join,
-            Some((StreamJoinIntent::Chat(CHANNEL), _))
-        )
+        app.session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .filter(|call| call.id == NEW_CALL && call.is_joined)
+            .map(|call| call.join_as)
+    })
+}
+
+/// You are in (or joining) another chat's video chat; its window stays
+/// closed, the test is about this one.
+fn in_other_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, joined: bool) {
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let mut call = ActiveGroupCall::fresh(OTHER_CALL);
+            call.is_joined = joined;
+            session.calls.active_group_call = Some(call);
+        }
+        if !joined {
+            // The join went out and waits for its answer.
+            app.group_call.stream.joining = Some(OTHER_CALL);
+        }
+        app.group_call.window_closed_by_user = Some(OTHER_CALL);
+    });
+}
+
+fn other_call_tracked(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .is_some_and(|call| call.id == OTHER_CALL)
     })
 }
 
 #[gpui_kit::test]
 fn the_call_button_shows_for_managers_and_calls_nobody_is_in(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
-    set_status(&app, &mut main, false);
+    set_status(&app, &mut main, ChannelMemberStatus::Member);
     let visible = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| app.chat_call_button_visible(ChatId(CHANNEL)))
     };
@@ -123,8 +194,8 @@ fn the_call_button_shows_for_managers_and_calls_nobody_is_in(cx: &mut TestAppCon
                 .as_mut()
                 .and_then(|s| s.chats.get_mut(&CHANNEL))
             {
-                chat.video_chat = Some(quill::state::VideoChatInfo {
-                    group_call_id: 5,
+                chat.video_chat = Some(VideoChatInfo {
+                    group_call_id: NEW_CALL,
                     has_participants: people,
                     default_participant_id: None,
                 });
@@ -135,47 +206,105 @@ fn the_call_button_shows_for_managers_and_calls_nobody_is_in(cx: &mut TestAppCon
     assert!(visible(&app, &mut main), "a call nobody is in yet");
     set_call(&app, &mut main, true);
     assert!(!visible(&app, &mut main), "people are in it: the Join bar");
-    set_status(&app, &mut main, true);
+    manager(&app, &mut main);
     assert!(visible(&app, &mut main), "a manager");
 }
 
 #[gpui_kit::test]
-fn start_asks_first_and_create_starts_it(cx: &mut TestAppContext) {
-    let (app, mut main) = open_main(cx);
-    set_status(&app, &mut main, true);
-    begin(&app, &mut main, CreateKind::Now);
+fn the_create_demo_shows_the_question_and_create_joins_the_new_call(cx: &mut TestAppContext) {
+    // `ready-group-call-create`: a manager pressed Start; with no TDLib
+    // the only identity is yourself, so the question shows.
+    let (app, mut main) = open(cx, "ready-group-call-create");
     assert!(
         main.debug_bounds("group-call-create-sure").is_some(),
         "the create question"
     );
     assert!(main.debug_bounds("group-call-create-schedule").is_some());
-    assert!(!join_noted(&app, &mut main), "nothing created yet");
+    assert_eq!(join_noted(&app, &mut main), None, "nothing created yet");
     click(&mut main, "group-call-create-confirm");
     assert!(!flow_open(&app, &mut main), "the box closed");
-    assert!(join_noted(&app, &mut main), "the new call is joined");
+    assert!(
+        join_noted(&app, &mut main).is_some(),
+        "the join is recorded"
+    );
+    // The created call is tracked: it is joined right away, as tdesktop's
+    // `createGroupCall` does, though it is not a stream.
+    track_new_call(&app, &mut main);
+    assert!(
+        new_call_joined_as(&app, &mut main).is_some(),
+        "the new video chat is joined"
+    );
+    assert_eq!(join_noted(&app, &mut main), None, "the wish is used once");
 }
 
 #[gpui_kit::test]
 fn cancel_creates_nothing(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
-    set_status(&app, &mut main, true);
+    manager(&app, &mut main);
     begin(&app, &mut main, CreateKind::Now);
-    let bounds = main
-        .debug_bounds("group-call-create-sure")
-        .expect("the question");
-    assert!(bounds.size.width > px(0.));
-    app.update(&mut main, |app, cx| {
-        app.close_group_call_create(cx);
+    assert!(main.debug_bounds("group-call-create-sure").is_some());
+    click(&mut main, "group-call-create-cancel");
+    assert!(main.debug_bounds("group-call-create-sure").is_none());
+    assert!(!flow_open(&app, &mut main));
+    assert_eq!(join_noted(&app, &mut main), None);
+}
+
+#[gpui_kit::test]
+fn several_identities_show_the_join_as_box(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    begin(&app, &mut main, CreateKind::Now);
+    let channel = MessageSender::Chat { chat_id: CHANNEL };
+    // The "join as" list offers you and the channel (`processList`).
+    app.update_in(&mut main, |app, window, cx| {
+        app.accept_create_join_as(Ok(vec![ME, channel]), window, cx)
     });
     frames(&mut main);
-    assert!(main.debug_bounds("group-call-create-sure").is_none());
-    assert!(!join_noted(&app, &mut main));
+    assert!(main.debug_bounds("group-call-join-as-about").is_some());
+    assert!(
+        main.debug_bounds("group-call-create-sure").is_none(),
+        "no \"personal account\" question"
+    );
+    assert!(main.debug_bounds("group-call-join-as-u1").is_some());
+    assert!(
+        main.debug_bounds("group-call-create-schedule").is_some(),
+        "an administrator can schedule instead"
+    );
+    click(&mut main, "group-call-join-as-c13");
+    click(&mut main, "group-call-join-as-continue");
+    assert!(!flow_open(&app, &mut main));
+    assert_eq!(join_noted(&app, &mut main), Some(Some(channel)));
+    track_new_call(&app, &mut main);
+    assert_eq!(
+        new_call_joined_as(&app, &mut main),
+        Some(Some(channel)),
+        "joined as the channel"
+    );
+}
+
+#[gpui_kit::test]
+fn only_yourself_is_the_question_and_none_is_the_server_error(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    begin(&app, &mut main, CreateKind::Now);
+    app.update_in(&mut main, |app, window, cx| {
+        app.accept_create_join_as(Ok(vec![ME]), window, cx)
+    });
+    frames(&mut main);
+    assert!(main.debug_bounds("group-call-create-sure").is_some());
+    let before = toasts(&mut main);
+    app.update_in(&mut main, |app, window, cx| {
+        app.accept_create_join_as(Ok(Vec::new()), window, cx)
+    });
+    frames(&mut main);
+    assert!(!flow_open(&app, &mut main));
+    assert_eq!(toasts(&mut main), before + 1, "Internal server error.");
 }
 
 #[gpui_kit::test]
 fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
-    set_status(&app, &mut main, true);
+    manager(&app, &mut main);
     begin(&app, &mut main, CreateKind::Now);
     click(&mut main, "group-call-create-schedule");
     assert!(main.debug_bounds("group-call-schedule-picker").is_some());
@@ -203,17 +332,17 @@ fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppCon
     );
     click(&mut main, "group-call-schedule-confirm");
     assert!(!flow_open(&app, &mut main), "scheduled");
-    assert!(
-        !join_noted(&app, &mut main),
+    assert_eq!(
+        join_noted(&app, &mut main),
+        None,
         "a scheduled chat is not joined"
     );
 }
 
 #[gpui_kit::test]
-fn a_time_in_the_past_is_refused(cx: &mut TestAppContext) {
-    let (app, mut main) = open_main(cx);
-    set_status(&app, &mut main, true);
-    begin(&app, &mut main, CreateKind::Schedule);
+fn the_schedule_demo_refuses_a_time_in_the_past(cx: &mut TestAppContext) {
+    let (app, mut main) = open(cx, "ready-group-call-schedule");
+    assert!(main.debug_bounds("group-call-schedule-picker").is_some());
     app.update_in(&mut main, |app, window, cx| {
         if let Some(GroupCallCreate {
             step: CreateStep::Schedule(step),
@@ -229,35 +358,82 @@ fn a_time_in_the_past_is_refused(cx: &mut TestAppContext) {
     click(&mut main, "group-call-schedule-confirm");
     assert!(flow_open(&app, &mut main), "still open");
     assert!(main.debug_bounds("group-call-schedule-error").is_some());
-    assert!(main.debug_bounds("group-call-schedule-picker").is_some());
 }
 
 #[gpui_kit::test]
 fn starting_while_in_another_call_asks_to_leave_it(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
-    set_status(&app, &mut main, true);
-    app.update(&mut main, |app, _| {
-        if let Some(session) = app.demo_session.as_mut() {
-            let mut call = quill::state::ActiveGroupCall::fresh(77);
-            call.is_joined = true;
-            session.calls.active_group_call = Some(call);
-        }
-        // Its own window stays closed: the test is about this one.
-        app.group_call.window_closed_by_user = Some(77);
-    });
+    manager(&app, &mut main);
+    in_other_call(&app, &mut main, true);
     begin(&app, &mut main, CreateKind::Now);
     assert!(main.debug_bounds("group-call-create-leave").is_some());
     click(&mut main, "group-call-create-leave-confirm");
     // Then the usual question; the other call ends only on Create.
     assert!(main.debug_bounds("group-call-create-sure").is_some());
-    let in_call = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| {
-            app.session()
-                .is_some_and(|s| s.calls.active_group_call.is_some())
-        })
-    };
-    assert!(in_call(&app, &mut main), "still in the other call");
+    assert!(
+        other_call_tracked(&app, &mut main),
+        "still in the other call"
+    );
     click(&mut main, "group-call-create-confirm");
-    assert!(!in_call(&app, &mut main), "left for the new one");
-    assert!(join_noted(&app, &mut main));
+    assert!(!other_call_tracked(&app, &mut main), "left for the new one");
+    assert!(join_noted(&app, &mut main).is_some());
+}
+
+#[gpui_kit::test]
+fn a_join_still_in_flight_counts_as_being_in_that_call(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    in_other_call(&app, &mut main, false);
+    begin(&app, &mut main, CreateKind::Now);
+    assert!(
+        main.debug_bounds("group-call-create-leave").is_some(),
+        "the leave question, though the join has not landed"
+    );
+    click(&mut main, "group-call-create-leave-confirm");
+    click(&mut main, "group-call-create-confirm");
+    // Left through `leave_active_group_call` (in a live session that is
+    // `leaveGroupCall` and the transport teardown), not dropped quietly.
+    assert!(!other_call_tracked(&app, &mut main));
+    assert!(
+        app.read_with(&main, |app, _| app.group_call.stream.joining.is_none()),
+        "no join of the old call is awaited any more"
+    );
+}
+
+#[gpui_kit::test]
+fn a_refused_create_toasts_and_drops_the_join(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    begin(&app, &mut main, CreateKind::Now);
+    click(&mut main, "group-call-create-confirm");
+    assert!(join_noted(&app, &mut main).is_some());
+    let before = toasts(&mut main);
+    // The server refuses that `createVideoChat`.
+    app.update(&mut main, |app, cx| {
+        let request = app.group_call.create_request.expect("the create went out");
+        if let Some(session) = app.demo_session.as_mut() {
+            // Another request's failure is not this one.
+            session.calls.failed_creates.push(RequestId(request.0 + 1));
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    assert!(join_noted(&app, &mut main).is_some(), "not ours");
+    assert_eq!(toasts(&mut main), before);
+    app.update(&mut main, |app, cx| {
+        let request = app.group_call.create_request.expect("still waiting");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.failed_creates.push(request);
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    assert_eq!(toasts(&mut main), before + 1, "Internal server error.");
+    assert_eq!(join_noted(&app, &mut main), None, "nothing to join");
+    assert!(
+        app.read_with(&main, |app, _| app
+            .session()
+            .is_some_and(|s| s.calls.group_call_error.is_none())),
+        "no error left for the next call"
+    );
 }

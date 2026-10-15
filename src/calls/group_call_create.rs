@@ -10,9 +10,10 @@
 //! the end of the seventh day ahead, and says when members get notified.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ids::ChatId;
+use crate::ids::{ChatId, RequestId};
 use crate::local_time::civil_at;
 use crate::schedule::ScheduleError;
+use crate::telegram::envelope::MessageSender;
 
 /// What "Start", "Schedule" or "Start Streaming" is about to create.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +153,51 @@ pub fn countdown(date: i64, now: i64) -> Countdown {
 /// The description refreshes this often (`kLabelRefreshInterval`).
 pub const COUNTDOWN_REFRESH_SECS: u64 = 10;
 
+/// The "join as" list asked for before a video chat is created
+/// (`ChooseJoinAsProcess::requestList`, `getVideoChatAvailableParticipants`
+/// with the chat only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateJoinAs {
+    pub chat_id: i64,
+    pub request: RequestId,
+    /// `None` while in flight; `Err` when the request failed.
+    pub answer: Option<Result<Vec<MessageSender>, ()>>,
+}
+
+/// What `processList` does with the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JoinAsStep {
+    /// The server offered nothing: the server error toast.
+    Empty,
+    /// Only yourself: the create confirmation.
+    OnlyMe(MessageSender),
+    /// Several identities: `ChooseJoinAsBox`, with this one selected
+    /// (yourself when offered, else the first).
+    Choose {
+        options: Vec<MessageSender>,
+        selected: MessageSender,
+    },
+}
+
+pub fn join_as_step(options: Vec<MessageSender>, me: Option<MessageSender>) -> JoinAsStep {
+    let Some(first) = options.first().copied() else {
+        return JoinAsStep::Empty;
+    };
+    let selected = me.filter(|me| options.contains(me)).unwrap_or(first);
+    if options.len() == 1 && Some(selected) == me {
+        JoinAsStep::OnlyMe(selected)
+    } else {
+        JoinAsStep::Choose { options, selected }
+    }
+}
+
+/// Who a stream started with "Stream with other apps" joins as
+/// (`StartRtmpProcess::createBox`): the chat itself when you created it,
+/// otherwise yourself.
+pub fn rtmp_join_as(chat_id: i64, creator: bool) -> Option<MessageSender> {
+    creator.then_some(MessageSender::Chat { chat_id })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +271,49 @@ mod tests {
             check_schedule(max + 1, MORNING, max),
             Err(ScheduleError::TooFar)
         );
+    }
+
+    #[test]
+    fn the_range_follows_a_daylight_saving_change() {
+        // Clocks go forward one hour two days from now: midnight eight
+        // days ahead is an hour earlier in UTC.
+        let change = MORNING + 2 * 86_400;
+        let summer = move |at: i64| if at >= change { 3600 } else { 0 };
+        let max = schedule_max(MORNING, &summer);
+        let civil = civil_at(max, summer(max));
+        assert_eq!((civil.day, civil.hour, civil.minute), (22, 23, 59));
+        assert_eq!(max, schedule_max(MORNING, &UTC) - 3600);
+        // And back: an hour later.
+        let winter = move |at: i64| if at >= change { -3600 } else { 0 };
+        let max = schedule_max(MORNING, &winter);
+        let civil = civil_at(max, winter(max));
+        assert_eq!((civil.day, civil.hour, civil.minute), (22, 23, 59));
+        assert_eq!(max, schedule_max(MORNING, &UTC) + 3600);
+    }
+
+    #[test]
+    fn the_join_as_list_decides_the_next_box() {
+        let me = MessageSender::User { user_id: 1 };
+        let channel = MessageSender::Chat { chat_id: -100 };
+        assert_eq!(join_as_step(Vec::new(), Some(me)), JoinAsStep::Empty);
+        assert_eq!(join_as_step(vec![me], Some(me)), JoinAsStep::OnlyMe(me));
+        assert_eq!(
+            join_as_step(vec![channel, me], Some(me)),
+            JoinAsStep::Choose {
+                options: vec![channel, me],
+                selected: me
+            }
+        );
+        // Yourself not offered: the first one.
+        assert_eq!(
+            join_as_step(vec![channel], Some(me)),
+            JoinAsStep::Choose {
+                options: vec![channel],
+                selected: channel
+            }
+        );
+        assert_eq!(rtmp_join_as(-100, true), Some(channel));
+        assert_eq!(rtmp_join_as(-100, false), None);
     }
 
     #[test]

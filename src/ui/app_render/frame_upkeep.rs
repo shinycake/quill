@@ -34,6 +34,8 @@ impl QuillApp {
         self.gift_market_frame_upkeep(window, cx);
         // "Stream with...": the server error of a failed request.
         self.rtmp_start_frame_upkeep(window, cx);
+        // Starting a video chat: the "join as" list, a refused create.
+        self.group_call_create_frame_upkeep(window, cx);
         // Gift transfer: Fragment's export page, the transferred toast.
         self.gift_transfer_frame_upkeep(window, cx);
         // Grams: Fragment's withdrawal page, the password field.

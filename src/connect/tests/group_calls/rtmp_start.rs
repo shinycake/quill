@@ -281,3 +281,86 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         .expect("the ending call is out of the way");
     assert_eq!(last(&recorder)["@type"], "createVideoChat");
 }
+
+#[test]
+fn a_join_in_flight_counts_as_being_in_the_call_and_leaving_sends_leave() {
+    use crate::calls::group_call_create::CurrentCall;
+    let (recorder, mut driver) = driver_with_channel(true);
+    // You asked to join another chat's call (77); its answer has not come.
+    driver.session.calls.active_group_call = Some(crate::state::ActiveGroupCall::fresh(77));
+    assert_eq!(
+        driver.session.current_call_for_create(None),
+        CurrentCall::None,
+        "only looked at"
+    );
+    driver.join_video_chat(77).expect("the join goes out");
+    assert_eq!(last(&recorder)["@type"], "joinVideoChat");
+    assert!(matches!(
+        driver.session.current_call_for_create(None),
+        CurrentCall::Group {
+            scheduled: false,
+            ..
+        }
+    ));
+    // The UI's own join flag counts too.
+    driver.session.requests.pending.clear();
+    assert!(driver.session.group_call_joined_or_joining(Some(77)));
+    assert!(!driver.session.group_call_joined_or_joining(None));
+    // Leaving it before creating sends `leaveGroupCall` for that call.
+    driver.leave_group_call().expect("leaves");
+    let leave = last(&recorder);
+    assert_eq!(leave["@type"], "leaveGroupCall");
+    assert_eq!(leave["group_call_id"], 77);
+}
+
+#[test]
+fn a_refused_create_is_kept_for_the_ui_by_request() {
+    let (recorder, mut driver) = driver_with_channel(true);
+    let sent = driver
+        .start_video_chat(CHAT, String::new(), 0)
+        .expect("sends");
+    let request = last(&recorder);
+    assert_eq!(request["@type"], "createVideoChat");
+    reply(&mut driver, error_answer(&request));
+    assert_eq!(driver.session.calls.failed_creates, vec![sent]);
+    assert!(
+        driver.session.calls.group_call_error.is_none(),
+        "no error waits for the next call"
+    );
+}
+
+#[test]
+fn the_join_as_list_is_asked_for_before_creating() {
+    let (recorder, mut driver) = driver_with_channel(true);
+    let sent = driver.request_create_join_as(ChatId(CHAT)).expect("sends");
+    let request = last(&recorder);
+    assert_eq!(request["@type"], "getVideoChatAvailableParticipants");
+    assert_eq!(request["chat_id"], CHAT);
+    reply(
+        &mut driver,
+        serde_json::json!({
+            "@type": "messageSenders",
+            "@extra": request["@extra"],
+            "total_count": 2,
+            "senders": [
+                {"@type": "messageSenderUser", "user_id": 1},
+                {"@type": "messageSenderChat", "chat_id": CHAT},
+            ],
+        }),
+    );
+    let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
+    assert_eq!(join_as.request, sent);
+    assert_eq!(
+        join_as.answer,
+        Some(Ok(vec![
+            MessageSender::User { user_id: 1 },
+            MessageSender::Chat { chat_id: CHAT },
+        ]))
+    );
+    // A failed list: the UI creates as yourself.
+    driver.request_create_join_as(ChatId(CHAT)).expect("sends");
+    let request = last(&recorder);
+    reply(&mut driver, error_answer(&request));
+    let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
+    assert_eq!(join_as.answer, Some(Err(())));
+}

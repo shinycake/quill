@@ -9,7 +9,7 @@ impl Session {
         &mut self,
         payload: SettingsPayload,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match payload {
@@ -107,6 +107,15 @@ impl Session {
                 )) = pending.map(|p| p.purpose)
                 {
                     self.set_group_call_join_as_options(group_call_id, senders);
+                } else if let Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs {
+                    ..
+                })) = pending.map(|p| p.purpose)
+                {
+                    if let Some(join_as) = self.calls.create_join_as.as_mut()
+                        && Some(join_as.request) == extra
+                    {
+                        join_as.answer = Some(Ok(senders));
+                    }
                 } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                     offset,
                 })) = pending.map(|p| p.purpose)

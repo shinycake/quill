@@ -69,6 +69,9 @@ pub enum CallsPurpose {
     /// `getVideoChatAvailableParticipants`. Response is `messageSenders`;
     /// the "join as" choices of the tracked call.
     GetVideoChatAvailableParticipants { group_call_id: i32 },
+    /// `getVideoChatAvailableParticipants` before a video chat is created
+    /// (`calls.create_join_as`). Response is `messageSenders`.
+    CreateVideoChatJoinAs { chat_id: i64 },
     /// `setVideoChatDefaultParticipant`. Response is `ok`.
     SetVideoChatDefaultParticipant { group_call_id: i32 },
     /// `getVideoChatInviteLink`. Response is `httpUrl`: the speaker link

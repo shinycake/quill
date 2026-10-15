@@ -62,8 +62,9 @@ impl QuillApp {
             }
             self.group_call.stream.pending_join = None;
         }
-        // The stream you asked for is tracked: join it. Nothing else joins
-        // by itself; an unjoined window offers its Join button.
+        // The stream you asked for, or the call you created, is tracked:
+        // join it. Nothing else joins by itself; an unjoined window offers
+        // its Join button.
         self.consume_stream_join_intent(cx);
         let call = self
             .session()

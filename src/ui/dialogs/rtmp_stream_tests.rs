@@ -9,11 +9,12 @@ use crate::ui::group_call_stream_layout::StreamJoinIntent;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
-use gpui_kit::component::Root;
+use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::calls::rtmp_start::{StartEntry, start_entries};
 use quill::ids::ChatId;
+use quill::telegram::envelope::{ChannelMemberStatus, ChatKind, MessageSender};
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -62,6 +63,10 @@ fn click(vcx: &mut VisualTestContext, selector: &'static str) {
         .unwrap_or_else(|| panic!("{selector} is on screen"));
     vcx.simulate_click(bounds.center(), Modifiers::default());
     frames(vcx);
+}
+
+fn toasts(vcx: &mut VisualTestContext) -> usize {
+    vcx.update(|window, cx| window.notifications(cx).len())
 }
 
 fn start_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
@@ -147,6 +152,37 @@ fn the_key_stays_hidden_until_the_warning_is_confirmed(cx: &mut TestAppContext) 
     assert!(main.debug_bounds("rtmp-start-confirm-text").is_none());
 }
 
+/// The created stream is tracked (unjoined, as `getGroupCall` leaves it)
+/// and the window runs the join you asked for.
+fn track_new_stream(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            if let Some(chat) = session.chats.get_mut(&CHANNEL) {
+                chat.video_chat = Some(quill::state::VideoChatInfo {
+                    group_call_id: 5,
+                    has_participants: false,
+                    default_participant_id: None,
+                });
+            }
+            let mut call = quill::state::ActiveGroupCall::fresh(5);
+            call.is_video_chat = true;
+            call.is_rtmp_stream = true;
+            session.calls.active_group_call = Some(call);
+        }
+        app.sync_group_call_window(cx);
+    });
+    frames(vcx);
+}
+
+fn joined_as(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Option<MessageSender>> {
+    app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .filter(|call| call.is_joined)
+            .map(|call| call.join_as)
+    })
+}
+
 #[gpui_kit::test]
 fn start_streaming_ends_the_process_and_joins_the_new_call(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
@@ -157,9 +193,43 @@ fn start_streaming_ends_the_process_and_joins_the_new_call(cx: &mut TestAppConte
     assert!(
         app.read_with(&main, |app, _| matches!(
             app.group_call.stream.pending_join,
-            Some((StreamJoinIntent::Chat(CHANNEL), _))
+            Some((
+                StreamJoinIntent::Created {
+                    chat: CHANNEL,
+                    join_as: None
+                },
+                _
+            ))
         )),
-        "the window joins the stream once it is tracked"
+        "an administrator joins as themselves"
+    );
+    track_new_stream(&app, &mut main);
+    assert_eq!(joined_as(&app, &mut main), Some(None), "joined as yourself");
+}
+
+#[gpui_kit::test]
+fn the_creator_streams_as_the_channel(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    answer(&app, &mut main);
+    // You created the channel (`StartRtmpProcess::createBox`:
+    // `amCreator() ? peer : self`).
+    app.update(&mut main, |app, _| {
+        if let Some(session) = app.demo_session.as_mut()
+            && let Some(ChatKind::Supergroup { supergroup_id, .. }) =
+                session.chats.get(&CHANNEL).map(|chat| chat.kind.clone())
+        {
+            session
+                .groups
+                .supergroup_member_status
+                .insert(supergroup_id, ChannelMemberStatus::Creator);
+        }
+    });
+    click(&mut main, "rtmp-start-go");
+    track_new_stream(&app, &mut main);
+    assert_eq!(
+        joined_as(&app, &mut main),
+        Some(Some(MessageSender::Chat { chat_id: CHANNEL })),
+        "joined as the channel"
     );
 }
 
@@ -169,6 +239,7 @@ fn a_failed_request_is_a_toast_and_opens_no_box(cx: &mut TestAppContext) {
     app.update_in(&mut main, |app, window, cx| {
         app.open_rtmp_start(ChatId(CHANNEL), window, cx)
     });
+    let before = toasts(&mut main);
     app.update(&mut main, |app, cx| {
         if let Some(start) = app
             .demo_session
@@ -185,6 +256,7 @@ fn a_failed_request_is_a_toast_and_opens_no_box(cx: &mut TestAppContext) {
         !start_open(&app, &mut main),
         "a failed first request drops the process"
     );
+    assert_eq!(toasts(&mut main), before + 1, "Internal server error.");
     // A failure after the box showed keeps it.
     answer(&app, &mut main);
     app.update(&mut main, |app, _| {

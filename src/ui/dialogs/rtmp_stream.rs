@@ -14,8 +14,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
-use super::super::group_call_stream_layout::StreamJoinIntent;
 use super::super::shell::{DialogKind, QuillShell};
+use super::group_call_create::server_error_toast;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::Dialog;
@@ -24,11 +24,11 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme, Selectable, Sizable, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::calls::group_call_create::CreateKind;
+use quill::calls::group_call_create::{CreateKind, rtmp_join_as};
 use quill::calls::rtmp_start::{
     RtmpInfo, RtmpStart, StartEntry, StartFacts, call_button_visible, start_entries,
 };
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatKind;
 use std::cell::RefCell;
@@ -294,10 +294,7 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.begin_rtmp_start(chat_id).is_err() {
-                    window.push_notification(
-                        Notification::new().message(tr(keys::Q_OPS_COULD_NOT_FETCH_STREAM_KEY)),
-                        cx,
-                    );
+                    server_error_toast(window, cx);
                 }
             }
             // Screenshot demos and tests have no TDLib: the process opens
@@ -343,7 +340,9 @@ impl QuillApp {
     }
 
     /// Create the call as an RTMP stream and end the process; the window
-    /// joins it once it is tracked, and only when the request went out.
+    /// joins it once it is tracked, and only when the request went out,
+    /// as the chat itself when you created it (`StartRtmpProcess::
+    /// createBox`: `amCreator() ? peer : self`).
     pub(in crate::ui) fn start_rtmp_stream_now(
         &mut self,
         window: &mut Window,
@@ -356,28 +355,21 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
+        let join_as = rtmp_join_as(
+            chat_id.0,
+            self.session().is_some_and(|s| s.chat_am_creator(chat_id)),
+        );
         self.end_current_call_for_create(cx);
         self.group_call.rtmp_start = RtmpStartUi::default();
         let sent = match self.live.as_mut() {
-            Some(live) => live.driver.start_rtmp_stream().is_ok(),
+            Some(live) => live.driver.start_rtmp_stream().ok(),
             // Screenshot demos and tests have no TDLib: the process ends.
-            None => match self.demo_session.as_mut() {
-                Some(session) => {
-                    session.calls.rtmp_start = None;
-                    true
-                }
-                None => false,
-            },
+            None => self.demo_session.as_mut().map(|session| {
+                session.calls.rtmp_start = None;
+                RequestId(0)
+            }),
         };
-        if sent {
-            self.note_stream_join_intent(StreamJoinIntent::Chat(chat_id.0));
-        } else {
-            window.push_notification(
-                Notification::new().message(tr(keys::Q_OPS_COULD_NOT_START_VOICE_CHAT)),
-                cx,
-            );
-        }
-        cx.notify();
+        self.created_video_chat(chat_id, sent, true, join_as, window, cx);
     }
 
     /// The revoke confirmation was accepted: ask for a new URL and key.
@@ -387,10 +379,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.revoke_rtmp_start_key().is_err()
         {
-            window.push_notification(
-                Notification::new().message(tr(keys::Q_OPS_COULD_NOT_REGENERATE_STREAM_KEY)),
-                cx,
-            );
+            server_error_toast(window, cx);
         }
         cx.notify();
     }
@@ -559,7 +548,11 @@ fn confirm_view(which: RtmpConfirm, cx: &mut Context<QuillApp>) -> AnyElement {
                 .id("rtmp-start-confirm-text")
                 .debug_selector(|| "rtmp-start-confirm-text".into())
                 .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
+                // Only the key warning is bold (its `**` markup);
+                // `lng_group_call_rtmp_revoke_sure` is plain.
+                .when(which == RtmpConfirm::KeyWarning, |this| {
+                    this.font_weight(FontWeight::SEMIBOLD)
+                })
                 .child(text),
         )
         .child(
