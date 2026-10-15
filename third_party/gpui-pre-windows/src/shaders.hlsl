@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // scRGB output for HDR stills (`to_output`, the `hdr_surface` shaders). See
 // third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #include "alpha_correction.hlsl"

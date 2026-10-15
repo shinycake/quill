@@ -1,12 +1,13 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-windows 0.3.8 from crates.io (Apache-2.0,
+This directory is gpui-pre-windows 0.3.9 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Windows platform, used through `[patch.crates-io]`
-in Quill's `Cargo.toml`. Commit `d2e24766` added the unmodified registry copy
-(without the registry's `.cargo-ok`, `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff d2e24766 -- third_party/gpui-pre-windows` shows every change.
-(The patch was first made on 0.3.7 and carried to 0.3.8 in
-`docs/decisions/codex-gpui-kit-0.7.1.md`.)
+in Quill's `Cargo.toml`. Commit `be35a01b` added the unmodified registry copy
+(without the registry's `.cargo-ok`, `.cargo_vcs_info.json`,
+`Cargo.toml.orig` and `Cargo.lock`), so
+`git diff be35a01b -- third_party/gpui-pre-windows` shows every change.
+(The patch was first made on 0.3.7, carried to 0.3.8 in
+`docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`.)
 
 The Quill project changed it in 2026 so an idle window stops receiving a
 `WM_PAINT` and a GPUI frame request on every vblank:
@@ -65,7 +66,7 @@ unvendored `gpui` crate) has no fields for:
   `Activated` handler reads that input from `UserInput()` into the side
   channel when the send button fired.
 - `Cargo.toml`: adds the `Foundation_Collections` feature of `windows` for
-  `ValueSet` (`UserInput`).
+  `ValueSet` (`UserInput`) to 0.3.9's trimmed feature list.
 - `src/gpui_windows.rs`: declares the new module.
 
 Each changed source file starts with a comment saying so. The changes are
@@ -107,7 +108,8 @@ DirectX start no longer crashes the app (step 7 of
   `unimplemented!()`.
 - `src/events.rs`: a window whose renderer can't recover from a lost device
   retries after 0.2 s and 0.5 s, then logs and posts itself
-  `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` (new, `WM_USER + 10`) instead of
+  `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` (new, `WM_USER + 11`; 0.3.9 took
+  `WM_USER + 10` for `WM_GPUI_DISPLAYS_CHANGED`) instead of
   panicking; that message calls `DestroyWindow`, so the normal `WM_DESTROY`
   close path runs even if the app hides windows on `WM_CLOSE`.
 - `src/directx_renderer.rs`: `pre_draw` and `present` return an error
@@ -121,7 +123,7 @@ DirectX start no longer crashes the app (step 7 of
 - `src/directx_devices.rs`: `try_to_recover_from_device_lost` is a loop
   instead of `find_or_last(..).unwrap()`.
 - `src/platform.rs`, `src/events.rs`: after an unrecoverable device loss
-  the vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the
+  the vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 12`) to the
   platform window, which drops the dead devices (so `is_windowed()` is false
   and `open_window` returns the reason; `request_windowing(Windowed)` can
   attach new ones). `close_one_window` logs an untracked window instead of

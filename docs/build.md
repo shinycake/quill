@@ -1,7 +1,7 @@
 # Build
 
 Pinned toolchain: **Rust 1.99.0** (`rust-toolchain.toml`; MSRV 1.92 for `oo7` via GPUI Kit).  
-UI: **gpui-kit 0.7.1**.  
+UI: **gpui-kit 0.7.3**.  
 TDLib schema/runtime: **1.8.68** at `a94b83d67ab4c8397c6245e541b31a4131ea2f79`.
 
 ## Developer (synthetic UI, no Telegram login)

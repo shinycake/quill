@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
 // `SurfaceFrame` and the non-Apple `PaintSurface::frame`. See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
@@ -772,7 +772,7 @@ pub struct PaintSurface {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    pub image_buffer: core_video::pixel_buffer::CVPixelBuffer,
+    pub image_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
     /// QUILL: CPU pixels where CoreVideo doesn't exist.
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     pub frame: std::sync::Arc<SurfaceFrame>,

@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // adds `FrameGate`, which lets the vsync thread sleep while every window is idle.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{

@@ -1,10 +1,11 @@
 # Changes made by the Quill project
 
-This directory is gpui-base 0.7.1 from crates.io (Apache-2.0, `LICENSE-APACHE`),
-used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `73f33094`
-added the unmodified registry copy, so `git diff 73f33094 -- third_party/gpui-base`
+This directory is gpui-base 0.7.3 from crates.io (Apache-2.0, `LICENSE-APACHE`),
+used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `1fdaf93c`
+added the unmodified registry copy, so `git diff 1fdaf93c -- third_party/gpui-base`
 shows every change. (The patch was first made on 0.7.0, vendored in `eb465597`,
-and carried to 0.7.1 in `docs/decisions/codex-gpui-kit-0.7.1.md`.)
+carried to 0.7.1 in `docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.7.3 in
+`docs/decisions/gpui-kit-0-7-3.md`.)
 
 The Quill project changed it in 2026 to add bidirectional text support to the
 input engine:
@@ -67,10 +68,12 @@ Added in 2026 for the formatted composer field
 ## Tooltips hide when the pointer leaves
 
 `src/tooltip.rs`: `TooltipOverlay::request_hide` clears the tooltip at once
-instead of after the 300 ms grace period, which left it on screen after the
-pointer moved off (or a scroll carried the trigger away). The grace period
-still keeps the "recently shown" state, so a neighbouring trigger shows its
-tooltip without the show delay.
+instead of after the grace period (`TooltipDefaults::grace_period`, 300 ms by
+default since 0.7.3), which left it on screen after the pointer moved off (or
+a scroll carried the trigger away). The grace period still keeps the
+"recently shown" state, so a neighbouring trigger shows its tooltip without
+the show delay. The doc comments of `TooltipDefaults::with_grace_period` and
+`grace_period` say so.
 
 ## Slider labels
 

@@ -56,7 +56,7 @@ pub(crate) enum Purpose {
 pub(crate) enum Picture {
     /// A GPU pixel buffer (AVPlayer), drawn by GPUI's `surface`.
     #[cfg(target_os = "macos")]
-    Surface(core_video::pixel_buffer::CVPixelBuffer),
+    Surface(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>),
     /// A decoded BGRA image (FFmpeg, still frames), drawn by `img`.
     Image(Arc<RenderImage>),
 }

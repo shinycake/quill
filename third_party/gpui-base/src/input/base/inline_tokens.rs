@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
 // content carries formatting spans, and an insertion can carry several tokens.
 // See third_party/gpui-base/QUILL-CHANGES.md.
 //! Document annotations for atomic inline objects. Coordinates are always source bytes.

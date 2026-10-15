@@ -1,16 +1,15 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-apple 0.3.8 from crates.io (Apache-2.0,
-`LICENSE-APACHE`), GPUI's Metal renderer, used through `[patch.crates-io]` in
-Quill's `Cargo.toml`. Commit `088b96c3` added the unmodified registry copy
-(without the registry's `.cargo-ok`, `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff 088b96c3 -- third_party/gpui-pre-apple` shows every change. Changed
-code is marked `QUILL`.
-
-The registry copy's `vendor/gpui` (the GPUI sources `build.rs` reads to
-generate the shader header) was left out of that commit by the repository's
-`vendor/` ignore rule and added unmodified afterwards; `.gitignore` now keeps
-`third_party/*/vendor/`.
+This directory is gpui-pre-apple 0.3.9 from crates.io (Apache-2.0,
+`LICENSE-APACHE`), GPUI's Metal renderer and, since 0.3.9, its CoreText text
+system, used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit
+`09fbdce6` added the unmodified registry copy, including `vendor/gpui` (the
+GPUI sources `build.rs` reads to generate the shader header; `.gitignore`
+keeps `third_party/*/vendor/`), without the registry's `.cargo-ok`,
+`.cargo_vcs_info.json`, `Cargo.toml.orig` and `Cargo.lock`, so
+`git diff 09fbdce6 -- third_party/gpui-pre-apple` shows every change. Changed
+code is marked `QUILL`. (The patch was first made on 0.3.8, vendored in
+`088b96c3`, and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`.)
 
 The Quill project changed it in 2026 to show HDR photos in the media viewer
 (`docs/decisions/hdr-viewer-macos.md`):
@@ -23,8 +22,12 @@ The Quill project changed it in 2026 to show HDR photos in the media viewer
   - `draw_surfaces` picks the pipeline from the surface's pixel format.
     Upstream asserted the bi-planar video format, which crashed on any
     other buffer. The YUV path now also skips a surface whose textures
-    can't be made, instead of unwrapping.
-  - The headroom comes from the buffer's `QuillHdrHeadroom` attachment.
+    can't be made (CoreVideo returns an error, a null texture, or no Metal
+    texture), instead of 0.3.9's `assert_eq!`/`expect`. 0.3.9 moved the
+    renderer from the `core-video` crate to `objc2-core-video`; the HDR
+    path uses the same `CVMetalTextureCache::create_texture_from_image`.
+  - The headroom comes from the buffer's `QuillHdrHeadroom` attachment
+    (`CVBuffer::attachment`, a CFNumber read as `f32`).
   - The pipelines that draw into the drawable follow its pixel format
     (`match_drawable_format`), so a layer switched to `RGBA16Float` for EDR
     draws correctly. The `BGRA8Unorm` set is kept for the way back. Path
@@ -32,3 +35,12 @@ The Quill project changed it in 2026 to show HDR photos in the media viewer
   - Test-support readback (`read_texture_to_image`) reads an `RGBA16Float`
     drawable as clamped 8-bit sRGB, so screenshot captures of an HDR still
     work.
+
+The Quill project also changed it in 2026 to remove a panic a user can hit
+(step 7 of `docs/decisions/no-crash-audit.md`; first made in gpui-pre-macos,
+whose text system 0.3.9 moved here):
+
+- `src/text_system.rs`: `layout_line` skips a CoreText glyph run without
+  attributes or a font, and a glyph whose string index is negative, instead
+  of unwrapping; the font is read with `CFDictionary::find`, since `get`
+  panics on a missing key. See `docs/decisions/gpui-fork-panics.md`.
