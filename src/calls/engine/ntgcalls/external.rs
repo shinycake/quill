@@ -143,10 +143,11 @@ impl NtgcallsEngine {
                 self.call_media.get(&call_id)?;
                 self.call_to_user.get(&call_id).copied()?
             }
+            // A stream (RTMP or MTProto) is receive-only: no capture sources.
             CaptureTarget::Group(group_call_id) => {
                 self.group_calls
                     .get(&group_call_id)
-                    .filter(|media| media.connected)?
+                    .filter(|media| media.connected && !media.mode.is_stream())?
                     .chat_id
             }
         };
