@@ -559,7 +559,7 @@ impl QuillApp {
             this.viewer_window_activation(window, cx);
             this.playback
                 .inline_videos
-                .borrow_mut()
+                .as_ref()
                 .set_window_active(active);
             // The system accent may have changed while another app was in
             // front.

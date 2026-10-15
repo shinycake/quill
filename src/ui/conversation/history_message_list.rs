@@ -624,7 +624,8 @@ impl QuillApp {
         // reports exhaustion; the loader notifies only when a request was
         // actually sent, so this cannot notify-loop while pinned at top).
         // Inline players for rows that don't render this pass stop.
-        self.playback.inline_videos.borrow_mut().begin_render();
+        // Those not painted in view this pass pause once it has painted.
+        self.playback.inline_videos.begin_render(cx);
         let weak = cx.weak_entity();
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
         let palette = self.history_palette(&look, cx);

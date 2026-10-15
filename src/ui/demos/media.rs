@@ -8,7 +8,9 @@ use crate::ui::demo::demo_media_allowlist;
 use crate::ui::demo::{
     seed_ready_custom_emoji_session, seed_ready_downloads_session, seed_ready_media_session,
 };
-use crate::ui::inline_playback::{apply_ready_gifs, apply_ready_video, apply_ready_video_note};
+use crate::ui::inline_playback::{
+    apply_ready_gifs, apply_ready_video, apply_ready_video_note, apply_ready_video_viewer,
+};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -75,6 +77,14 @@ register_demos![
         "screenshot demo — round video note playback"
     )
     .setup(QuillApp::demo_ready_video_note),
+    // A chat with an autoplaying video tile (204, the 12 s clip) and a
+    // round video message (611) on the inline players: the video player
+    // measurements (`docs/decisions/video-player-inline.md`) and captures.
+    DemoSpec::chats(
+        "ready-video-inline",
+        "screenshot demo — inline video tile and round video autoplay"
+    )
+    .setup(QuillApp::demo_ready_video_inline),
     // Voice record bar + history playback (injected, no live Telegram).
     DemoSpec::chats(
         "ready-voice",
@@ -195,6 +205,15 @@ impl QuillApp {
         ];
         self.spawn_video_tick(cx);
         self.connection.status_note = "screenshot demo — video note · playing".into();
+    }
+
+    fn demo_ready_video_inline(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_video_viewer(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            apply_ready_video_note(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        }
+        self.connection.status_note = "screenshot demo — inline video autoplay".into();
     }
 
     fn demo_ready_voice(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

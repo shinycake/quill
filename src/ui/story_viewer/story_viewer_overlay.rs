@@ -73,7 +73,9 @@ impl QuillApp {
         } else {
             format!("{poster} · {kind_label}")
         };
-        let video_frame = self.story_video_element(cx);
+        // `path` is the poster: a video story's `display_file_ids` hold
+        // only its thumbnail (`quill::story_viewer`), never the clip.
+        let video_frame = self.story_video_element(path.clone());
         let visual: AnyElement = if let Some(frame) = video_frame {
             frame
         } else if let Some(path) = path {

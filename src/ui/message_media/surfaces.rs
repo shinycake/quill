@@ -4,110 +4,76 @@
 use super::*;
 use quill::lang::{keys, tr};
 
-/// An autoplaying clip's current frame, cropped to the media frame.
+/// An autoplaying clip's picture, cropped to the media frame. A decoded
+/// image rounds itself; a GPU surface (AVPlayer), which GPUI can't clip,
+/// gets its corners painted over in the colors behind them
+/// (`video_frame`'s corner mask).
 pub(super) fn inline_surface(
     inline: crate::ui::inline_video::InlineFrame,
     frame_w: Pixels,
     frame_h: Pixels,
     corners: MediaCorners,
 ) -> AnyElement {
-    // A decoded image (FFmpeg) rounds itself like any picture.
-    if inline.picture.clips() {
-        let radii = Corners {
-            top_left: corners.tl,
-            top_right: corners.tr,
-            bottom_right: corners.br,
-            bottom_left: corners.bl,
-        };
-        return inline
-            .picture
-            .element(frame_w, frame_h, ObjectFit::Cover, radii);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        // The native surface can't be clipped to rounded corners, so a mask
-        // in the color behind the tile (the bubble's) cuts them out.
-        let mask = crate::ui::inline_video::corner_mask(
-            f32::from(frame_w).round() as u32,
-            f32::from(frame_h).round() as u32,
-            corners.radii(),
-            corners.mask_colors(inline.backdrop),
-        );
-        div()
-            .relative()
-            .w(frame_w)
-            .h(frame_h)
-            .overflow_hidden()
-            .child(
-                inline
-                    .picture
-                    .element(frame_w, frame_h, ObjectFit::Cover, Corners::default()),
-            )
-            .child(
-                img(ImageSource::Render(mask))
-                    .absolute()
-                    .inset_0()
-                    .w(frame_w)
-                    .h(frame_h),
-            )
-            .into_any_element()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // Only images exist off macOS.
-        div().w(frame_w).h(frame_h).into_any_element()
-    }
-}
-
-/// A round video message's current frame: the square video cut to a
-/// circle — an image clips itself; a native surface gets a mask in the
-/// history's color that leaves only the circle.
-pub(super) fn round_inline_surface(inline: crate::ui::inline_video::InlineFrame) -> AnyElement {
-    let diameter = px(VIDEO_NOTE_DIAMETER);
-    if inline.picture.clips() {
-        let radius = diameter / 2.;
-        return inline
-            .picture
-            .element(diameter, diameter, ObjectFit::Cover, Corners::all(radius));
-    }
-    // Twice the size for Retina edges.
-    let mask =
-        crate::ui::inline_video::circle_mask(VIDEO_NOTE_DIAMETER as u32 * 2, inline.backdrop);
-    let video = inline
-        .picture
-        .element(diameter, diameter, ObjectFit::Cover, Corners::default());
+    let radii = Corners {
+        top_left: corners.tl,
+        top_right: corners.tr,
+        bottom_right: corners.br,
+        bottom_left: corners.bl,
+    };
     div()
-        .relative()
-        .size(diameter)
-        .child(video)
+        .w(frame_w)
+        .h(frame_h)
         .child(
-            img(ImageSource::Render(mask))
-                .absolute()
-                .inset_0()
-                .size(diameter),
+            crate::ui::video_player::video_frame(&inline.player)
+                .object_fit(ObjectFit::Cover)
+                .corner_radii_over(radii, corners.mask_colors(inline.backdrop)),
         )
         .into_any_element()
 }
 
-/// An autoplaying clip's tile, `visual` of its frame. When the clip is
-/// layered (`InlineFrame::live`), the conversation's animation layer
-/// redraws the tile from the player's current frame every tick, over the
-/// one the row rendered (`anim_layer::tile`).
+/// A round video message's picture: the square video cut to a circle (an
+/// image clips itself; a GPU surface gets the history's color painted
+/// over the outside of the circle).
+pub(super) fn round_inline_surface(inline: crate::ui::inline_video::InlineFrame) -> AnyElement {
+    let diameter = px(VIDEO_NOTE_DIAMETER);
+    div()
+        .size(diameter)
+        .child(
+            crate::ui::video_player::video_frame(&inline.player)
+                .object_fit(ObjectFit::Cover)
+                .corner_radii(Corners::all(diameter / 2.), inline.backdrop),
+        )
+        .into_any_element()
+}
+
+/// An autoplaying clip's tile, `visual` of its frame, over `still` (the
+/// thumbnail, shown until the player has its first picture). When the
+/// clip is layered (`InlineFrame::live`), the conversation's animation
+/// layer redraws the tile over the one the row rendered
+/// (`anim_layer::tile`); its `video_frame` asks for its own frames, so the
+/// tile carries no clock rate.
 pub(super) fn live_tile(
     inline: crate::ui::inline_video::InlineFrame,
+    still: Option<AnyElement>,
+    (w, h): (Pixels, Pixels),
     visual: impl Fn(crate::ui::inline_video::InlineFrame) -> AnyElement + 'static,
 ) -> AnyElement {
-    match inline.live.clone() {
+    let tile = match inline.live.clone() {
         Some(live) => {
             let visual = std::rc::Rc::new(visual);
             let rebuild = visual.clone();
-            crate::ui::anim_layer::tile(visual(inline), 30, move || {
-                live.frame().map(|f| rebuild(f))
-            })
-            .into_any_element()
+            crate::ui::anim_layer::tile(visual(inline), 0, move || live.frame().map(|f| rebuild(f)))
+                .into_any_element()
         }
         None => visual(inline),
-    }
+    };
+    div()
+        .relative()
+        .w(w)
+        .h(h)
+        .children(still.map(|still| div().absolute().inset_0().child(still)))
+        .child(tile)
+        .into_any_element()
 }
 
 /// The "GIF" badge in a GIF tile's top-left corner.

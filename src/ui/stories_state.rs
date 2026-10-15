@@ -65,10 +65,10 @@ pub(crate) struct StoryUi {
     pub(super) privacy_edit: Option<StoryPrivacyEdit>,
     pub(super) privacy_user_search: Entity<TextareaState>,
     pub(super) privacy_sent: bool,
-    /// B14: native player of the current video story (a `RefCell` because
-    /// the overlay renders from `&self` and pulling a frame needs `&mut`),
-    /// the story it belongs to, and the story whose clip could not play.
-    pub(super) native: std::cell::RefCell<Option<super::native_video::NativeVideo>>,
+    /// B14: the player of the current video story (`Purpose::Story`, drawn
+    /// by `video_frame` in the story frame), the story it belongs to, and
+    /// the story whose clip could not play.
+    pub(super) player: Option<super::video_player::VideoPlayer>,
     pub(super) native_key: Option<(i64, i32)>,
     pub(super) native_failed: Option<(i64, i32)>,
     pub(super) native_play_at: Instant,
@@ -176,7 +176,7 @@ impl StoryUi {
             cover_sent: false,
             privacy_edit: None,
             privacy_user_search: story_privacy_user_search,
-            native: std::cell::RefCell::new(None),
+            player: None,
             native_key: None,
             native_failed: None,
             native_play_at: std::time::Instant::now(),

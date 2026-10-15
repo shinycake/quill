@@ -44,6 +44,8 @@ fn options(purpose: Purpose) -> OpenOptions {
             want_audio: false,
             ..OpenOptions::viewer()
         },
+        Purpose::Inline { max_edge } => OpenOptions::inline(max_edge.max(16)),
+        Purpose::Story => OpenOptions::viewer(),
     }
 }
 

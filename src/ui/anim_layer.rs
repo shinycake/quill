@@ -47,6 +47,15 @@ thread_local! {
     static CURRENT: RefCell<Option<Layer>> = const { RefCell::new(None) };
     /// Paint order of layered items (see [`Item::seq`]).
     static PAINT_SEQ: Cell<u64> = const { Cell::new(0) };
+    /// The slice is painting a tile the layer draws again on top.
+    static UNDER_LAYER: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether what is painted now is a live tile's row copy, under the one
+/// the layer draws: a video in it must not ask the slice for frames (the
+/// layer's copy asks the layer).
+pub(super) fn painting_under_layer() -> bool {
+    UNDER_LAYER.with(Cell::get)
 }
 
 /// The layer that content built now belongs to, if any: only content of a
@@ -538,7 +547,10 @@ impl Element for Layered {
         if let Some(child) = self.child.as_mut()
             && !(drawn_by_layer && self.content.is_mirror())
         {
+            let under = drawn_by_layer && matches!(self.content, Content::Tile { .. });
+            let outer = UNDER_LAYER.with(|flag| flag.replace(under));
             child.paint(window, cx);
+            UNDER_LAYER.with(|flag| flag.set(outer));
         }
         if !drawn_by_layer {
             self.content.paint_inline(bounds, window);
@@ -635,6 +647,7 @@ impl AnimationLayer {
 
 impl Render for AnimationLayer {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        super::frame_clock::trace_slice_render("animation layer");
         LayerPainter {
             layer: self.layer.clone(),
             app: self.app.clone(),

@@ -312,7 +312,6 @@ impl QuillApp {
                 let sounding = self
                     .playback
                     .inline_videos
-                    .borrow_mut()
                     .toggle_sound(chat.0, message.id.0);
                 if sounding {
                     if !note.is_viewed {

@@ -25,14 +25,6 @@ impl QuillApp {
         self.request_animation_tick_for(self.slices.current(), fps, cx);
     }
 
-    /// [`Self::request_animation_tick`] for media playing with sound, which
-    /// keeps drawing while the window is in the background (tdesktop only
-    /// pauses muted GIFs, stickers and loops there).
-    #[track_caller]
-    pub(super) fn request_media_tick(&self, fps: u32, cx: &mut Context<Self>) {
-        self.request_tick(self.slices.current(), fps, true, cx);
-    }
-
     /// [`Self::request_animation_tick`] for an explicit target: a slice or
     /// the chat list's animation layer by entity id, `None` for the app.
     #[track_caller]
@@ -180,6 +172,8 @@ pub(crate) fn request_video_frame(
     window: &mut Window,
     cx: &mut App,
 ) {
+    #[cfg(test)]
+    VIDEO_TARGETS.with(|targets| targets.borrow_mut().push(target));
     let active = window.is_window_active() || assume_active();
     if !tick_wanted(active, ask.plays_sound || ask.keep_alive) {
         return;
@@ -237,6 +231,19 @@ fn tick_wanted(window_active: bool, plays_sound: bool) -> bool {
 pub(super) fn assume_active() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_ASSUME_ACTIVE").is_some())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every view a video frame was asked for on this thread, in order.
+    static VIDEO_TARGETS: std::cell::RefCell<Vec<EntityId>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The views video frames were asked for since the last call, for tests.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn take_video_targets() -> Vec<EntityId> {
+    VIDEO_TARGETS.with(|targets| std::mem::take(&mut *targets.borrow_mut()))
 }
 
 /// `QUILL_TRACE_TICKS=1` also counts slice renders (`app_slice`), logged

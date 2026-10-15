@@ -1,5 +1,6 @@
-//! B14 story viewer extras: native video playback (AVPlayer on macOS, the
-//! bundled FFmpeg on Linux and Windows, through `native_video`), mute,
+//! B14 story viewer extras: video playback on the shared player core
+//! (`video_player`, `Purpose::Story`: AVPlayer on macOS, the bundled FFmpeg
+//! on Linux and Windows), mute,
 //! press-and-hold / Space pause, the close-friends editor, hide / unhide a
 //! peer's stories, share to a chat, copy link, save media and post to
 //! profile. The pure parts live in `quill::story_extras`.
@@ -11,7 +12,7 @@
 
 use super::app::QuillApp;
 use super::message_media::file_is_downloading;
-use super::native_video::{NativeVideo, Purpose};
+use super::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -73,61 +74,60 @@ impl QuillApp {
         };
         item.kind == StoryViewerKind::Video
             && item.video_file_id.is_some()
-            && super::native_video::supported()
+            && super::video_player::supported()
             && self.stories.native_failed != self.story_key()
     }
 
     /// The clip is not local yet: the clock stays frozen, so the story does
     /// not run away while it downloads.
     fn story_video_waiting(&self) -> bool {
-        self.story_video_driven() && self.stories.native.borrow().is_none()
+        self.story_video_driven() && self.stories.player.is_none()
     }
 
-    /// Open, replace or drop the native player to match the current story.
-    pub(super) fn sync_story_video(&mut self) {
+    /// Open, replace or drop the player to match the current story.
+    pub(super) fn sync_story_video(&mut self, cx: &mut App) {
         let key = self.story_key();
         if self.stories.native_key != key {
-            *self.stories.native.borrow_mut() = None;
+            self.stories.player = None;
             self.stories.native_key = None;
             self.stories.video_wait_since = Some(Instant::now());
             self.stories.native_paused_by_us = false;
         }
         if !self.story_video_driven() {
-            *self.stories.native.borrow_mut() = None;
+            self.stories.player = None;
             self.stories.native_key = None;
             return;
         }
-        let failed_now = if let Some(video) = self.stories.native.borrow().as_ref() {
-            video.error().is_some()
-        } else {
-            false
-        };
+        let failed_now = self.stories.player.as_ref().is_some_and(|player| {
+            player.take_error().is_some() || player.state() == PlayState::Failed
+        });
         if failed_now {
-            *self.stories.native.borrow_mut() = None;
+            self.stories.player = None;
             self.stories.native_key = None;
             self.stories.native_failed = key;
             self.stories.playback.start(Instant::now());
             return;
         }
-        if self.stories.native.borrow().is_some() {
+        if self.stories.player.is_some() {
             return;
         }
         if let Some(path) = self.story_video_path() {
-            match NativeVideo::open(&path, Purpose::Viewer) {
-                Ok(mut video) => {
-                    let volume = if self.stories.muted {
-                        0.0
-                    } else {
-                        self.playback.volume
-                    };
-                    video.set_volume(volume);
+            let duration = self
+                .stories
+                .viewer
+                .current()
+                .and_then(|item| item.duration_secs)
+                .map(f64::from);
+            match VideoPlayer::open(&path, Purpose::Story, duration, cx) {
+                Ok(player) => {
+                    player.set_volume(self.story_volume());
                     if !self.story_playback_paused() {
-                        video.play();
+                        player.play();
                         self.stories.native_play_at = Instant::now();
                     } else {
                         self.stories.native_paused_by_us = true;
                     }
-                    *self.stories.native.borrow_mut() = Some(video);
+                    self.stories.player = Some(player);
                     self.stories.native_key = key;
                 }
                 Err(_) => {
@@ -157,28 +157,30 @@ impl QuillApp {
         }
     }
 
-    /// Runs `f` on the story's player, if there is one. The guard lasts for
-    /// `f` only, and a re-entrant borrow skips the call instead of aborting.
-    fn with_story_video<R>(&self, f: impl FnOnce(&mut NativeVideo) -> R) -> Option<R> {
-        self.stories.native.try_borrow_mut().ok()?.as_mut().map(f)
+    /// The story's sound level: silent while muted.
+    fn story_volume(&self) -> f32 {
+        if self.stories.muted {
+            0.0
+        } else {
+            self.playback.volume
+        }
     }
 
     /// Pause or resume the player to match `paused`.
     pub(super) fn apply_story_native_pause(&mut self, paused: bool) {
+        let Some(player) = self.stories.player.as_ref() else {
+            return;
+        };
         if paused {
-            let pause = |video: &mut NativeVideo| {
-                if video.is_playing() {
-                    video.pause();
-                }
-            };
-            if self.with_story_video(pause).is_none() {
-                return;
+            // `wants_play`, not the state: a story paused while still
+            // opening must not start once open. Runs every tick, so a
+            // player already paused is left alone.
+            if player.wants_play() {
+                player.pause();
             }
             self.stories.native_paused_by_us = true;
         } else if self.stories.native_paused_by_us {
-            if self.with_story_video(NativeVideo::play).is_none() {
-                return;
-            }
+            player.play();
             self.stories.native_play_at = Instant::now();
             self.stories.native_paused_by_us = false;
         }
@@ -187,9 +189,10 @@ impl QuillApp {
     /// Progress of the current segment: the player's position for video
     /// stories it drives, the duration clock otherwise.
     pub(super) fn story_segment_progress(&self, now: Instant) -> f32 {
-        if let Some(video) = self.stories.native.borrow().as_ref() {
-            let duration = video
-                .duration_secs()
+        if let Some(player) = self.stories.player.as_ref() {
+            let transport = player.transport();
+            let duration = transport
+                .duration
                 .or_else(|| {
                     self.stories
                         .viewer
@@ -198,7 +201,7 @@ impl QuillApp {
                         .map(f64::from)
                 })
                 .unwrap_or(0.0);
-            return video_progress(video.position_secs(), duration);
+            return video_progress(transport.position, duration);
         }
         if self.story_video_waiting() {
             return 0.0;
@@ -212,9 +215,10 @@ impl QuillApp {
 
     /// Whether the current story reached its end (player or clock).
     pub(super) fn story_segment_finished(&self, now: Instant) -> bool {
-        if let Some(video) = self.stories.native.borrow_mut().as_mut() {
-            let duration = video
-                .duration_secs()
+        if let Some(player) = self.stories.player.as_ref() {
+            let transport = player.transport();
+            let duration = transport
+                .duration
                 .or_else(|| {
                     self.stories
                         .viewer
@@ -225,9 +229,10 @@ impl QuillApp {
                 .unwrap_or(0.0);
             // A just-requested play() has not started yet.
             let playing = self.stories.native_play_at.elapsed() < Duration::from_secs(1)
-                || video.is_playing();
+                || transport.is_playing()
+                || transport.state == PlayState::Opening;
             return video_finished(
-                video.position_secs(),
+                transport.position,
                 duration,
                 playing,
                 self.story_playback_paused(),
@@ -245,13 +250,8 @@ impl QuillApp {
     /// Mute / unmute the video story's sound.
     pub(super) fn toggle_story_mute(&mut self, cx: &mut Context<Self>) {
         self.stories.muted = !self.stories.muted;
-        let volume = if self.stories.muted {
-            0.0
-        } else {
-            self.playback.volume
-        };
-        if let Some(video) = self.stories.native.borrow_mut().as_mut() {
-            video.set_volume(volume);
+        if let Some(player) = self.stories.player.as_ref() {
+            player.set_volume(self.story_volume());
         }
         cx.notify();
     }
@@ -810,22 +810,30 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The live video frame for the current story, as an element, or
-    /// `None` when no player has a picture yet (thumbnail shows instead).
-    /// Asks the frame clock for the next frame while the clip plays.
-    pub(super) fn story_video_element(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let picture = self.with_story_video(NativeVideo::frame).flatten()?;
-        if !self.story_playback_paused() {
-            self.request_media_tick(30, cx);
-        }
+    /// The current story's player as an element, with `still` (the
+    /// story's thumbnail) under it until the first picture arrives, or
+    /// `None` when there is no player. `video_frame` asks the frame clock
+    /// for its own frames while the clip plays, so no tick is needed.
+    pub(super) fn story_video_element(&self, still: Option<PathBuf>) -> Option<AnyElement> {
+        let player = self.stories.player.as_ref()?;
+        let (w, h) = (px(360.), px(640.));
         Some(
             div()
-                .w(px(360.))
-                .h(px(640.))
+                .relative()
+                .w(w)
+                .h(h)
                 .rounded_md()
                 .overflow_hidden()
                 .bg(super::chat_theme::bg_deep())
-                .child(picture.element(px(360.), px(640.), ObjectFit::Contain, Corners::default()))
+                .children(still.map(|path| {
+                    img(path)
+                        .absolute()
+                        .inset_0()
+                        .w(w)
+                        .h(h)
+                        .object_fit(ObjectFit::Contain)
+                }))
+                .child(video_frame(player).object_fit(ObjectFit::Contain))
                 .into_any_element(),
         )
     }
