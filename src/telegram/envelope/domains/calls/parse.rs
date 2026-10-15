@@ -178,6 +178,24 @@ pub(crate) fn parse_calls_payload(
         })),
         // Phase C2h: `rtmpUrl` (schema 1.8.67, line 7113) — the
         // `getVideoChatRtmpUrl` / `replaceVideoChatRtmpUrl` answer.
+        // Stream mode: the `getGroupCallStreams` answer.
+        "groupCallStreams" => Ok(EnvelopePayload::Calls(CallsPayload::GroupCallStreams {
+            streams: value
+                .get("streams")
+                .and_then(Value::as_array)
+                .map(|streams| streams.iter().filter_map(parse_group_call_stream).collect())
+                .unwrap_or_default(),
+        })),
+        // Stream mode: a `getGroupCallStreamSegment` answer. The bytes stay
+        // base64 until the stream feeder decodes them (a bad encoding is
+        // answered RESYNC_NEEDED there).
+        "data" => Ok(EnvelopePayload::Calls(CallsPayload::Data {
+            base64: value
+                .get("data")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })),
         "rtmpUrl" => Ok(EnvelopePayload::Calls(CallsPayload::RtmpUrl {
             url: value
                 .get("url")
@@ -220,4 +238,20 @@ pub(crate) fn parse_calls_payload(
         _ => return Ok(None),
     };
     payload.map(Some)
+}
+
+/// One `groupCallStream`; entries without a channel id are skipped.
+fn parse_group_call_stream(value: &Value) -> Option<crate::calls::engine::StreamChannel> {
+    Some(crate::calls::engine::StreamChannel {
+        channel_id: value.get("channel_id").and_then(Value::as_i64)?.sat_i32(),
+        scale: value
+            .get("scale")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
+        time_offset: value
+            .get("time_offset")
+            .and_then(|offset| offset.as_i64().or_else(|| offset.as_str()?.parse().ok()))
+            .unwrap_or(0),
+    })
 }

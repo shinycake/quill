@@ -28,6 +28,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn ingest(&mut self, owned: OwnedEnvelope) -> Result<(), ConnectSendError> {
         // Q1: a rate-limited read is re-sent later; the reducer never sees
         // the 429 and the request stays pending.
+        // Stream segments: the feeder answers ntgcalls before the reducer
+        // (and the flood retry, which would delay a live segment) sees it.
+        if self.absorb_stream_answer(&owned.envelope, std::time::Instant::now()) {
+            return Ok(());
+        }
         if self.absorb_flood(&owned.envelope, std::time::Instant::now()) {
             return Ok(());
         }

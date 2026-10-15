@@ -335,6 +335,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .call_engine
             .as_ref()
             .is_some_and(|engine| engine.presentation_active(group_call_id));
+        // A stream's pending parts are answered before the fresh native
+        // context replaces the old one; the new connect starts a new feeder.
+        self.drain_stream_feeder(group_call_id);
         let params = self.group_join_params(group_call_id, is_muted);
         if let Err(err) =
             self.sender
@@ -470,6 +473,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: drop the native transport and retained frames for one
     /// group call id. Unknown ids succeed (idempotent cleanup).
     fn teardown_group_call_transport(&mut self, group_call_id: i32) {
+        self.drain_stream_feeder(group_call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.leave_group_call(group_call_id);
         }

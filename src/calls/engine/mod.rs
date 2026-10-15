@@ -3,17 +3,22 @@ mod api;
 mod mock;
 mod native;
 mod ntgcalls;
+mod stream;
+mod stream_feeder;
 mod types;
 
 pub use api::*;
 pub use mock::*;
 pub use native::*;
 pub use ntgcalls::*;
+pub use stream::*;
+pub use stream_feeder::*;
 pub use types::*;
 
 pub(crate) use native::{
-    append_devices, audio_description, c_string_pointer_array, c_strings, connection_trampoline,
-    frames_trampoline, native_input, native_string, remote_source_trampoline, signaling_trampoline,
+    append_devices, audio_description, broadcast_part_trampoline, broadcast_timestamp_trampoline,
+    c_string_pointer_array, c_strings, connection_trampoline, frames_trampoline, native_input,
+    native_string, remote_source_trampoline, signaling_trampoline,
 };
 pub(crate) use types::{
     CallMediaConfig, CallbackShared, GroupCallMedia, NativeRtcServers, retained_call_media,

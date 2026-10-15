@@ -46,6 +46,17 @@ struct MockInner {
     presentations: Vec<i32>,
     group_leaves: Vec<i32>,
     group_mutes: Vec<(i32, bool)>,
+    /// Stream mode: the mode the next group connect reports, per chat.
+    group_modes: HashMap<i64, GroupCallMode>,
+    /// Chats whose group call connected (for `group_call_mode`).
+    connected_chats: Vec<i64>,
+    /// Test-only: the next `connect_group_call` fails with this code.
+    fail_group_connect: Option<i32>,
+    engine_event_hook: Option<EngineEventCallback>,
+    stream_frame_hook: Option<StreamFrameCallback>,
+    stream_qualities: Vec<(i64, StreamQuality)>,
+    broadcast_timestamps: Vec<(i64, i64)>,
+    broadcast_parts: Vec<(i64, BroadcastPartAnswer)>,
 }
 
 /// Phase C2b: deterministic in-memory engine used by driver tests.
@@ -164,6 +175,52 @@ impl MockEngine {
 
     pub fn group_leaves(&self) -> Vec<i32> {
         self.inner.lock_or_recover().group_leaves.clone()
+    }
+
+    /// Stream mode: the group call in `chat_id` connects in `mode`.
+    pub fn set_group_call_mode(&self, chat_id: i64, mode: GroupCallMode) {
+        self.inner
+            .lock_or_recover()
+            .group_modes
+            .insert(chat_id, mode);
+    }
+
+    /// Test-only: the next `connect_group_call` fails with `code`
+    /// (e.g. `NTG_ERR_RTMP_STREAMING_UNSUPPORTED`).
+    pub fn fail_next_group_connect(&self, code: i32) {
+        self.inner.lock_or_recover().fail_group_connect = Some(code);
+    }
+
+    pub fn stream_qualities(&self) -> Vec<(i64, StreamQuality)> {
+        self.inner.lock_or_recover().stream_qualities.clone()
+    }
+
+    pub fn broadcast_timestamps(&self) -> Vec<(i64, i64)> {
+        self.inner.lock_or_recover().broadcast_timestamps.clone()
+    }
+
+    pub fn broadcast_parts(&self) -> Vec<(i64, BroadcastPartAnswer)> {
+        self.inner.lock_or_recover().broadcast_parts.clone()
+    }
+
+    /// Deliver a synthetic broadcast request, as the native trampolines do.
+    pub fn emit_engine_event(&self, event: EngineEvent) {
+        let hook = self.inner.lock_or_recover().engine_event_hook.clone();
+        if let Some(hook) = hook {
+            hook(event);
+        }
+    }
+
+    /// Deliver a synthetic stream picture for `chat_id`.
+    pub fn emit_stream_frame(&self, chat_id: i64, mut frame: VideoFrame) {
+        let mut inner = self.inner.lock_or_recover();
+        frame.seq = inner.frame_seq;
+        inner.frame_seq += 1;
+        let hook = inner.stream_frame_hook.clone();
+        drop(inner);
+        if let Some(hook) = hook {
+            hook(chat_id, frame);
+        }
     }
 
     pub fn emit_transport_state(&self, call_id: i32, state: TransportState) {
@@ -423,9 +480,83 @@ impl CallEngine for MockEngine {
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
+        if let Some(code) = inner.fail_group_connect.take() {
+            return Err(EngineError::Engine {
+                op: "ntg_connect",
+                code,
+            });
+        }
         inner
             .group_connects
             .push((group_call_id, answer_payload.to_owned(), video_enabled));
+        let chat_id = inner
+            .group_offers
+            .iter()
+            .rev()
+            .find(|(id, _)| *id == group_call_id)
+            .map(|(_, chat_id)| *chat_id);
+        if let Some(chat_id) = chat_id
+            && !inner.connected_chats.contains(&chat_id)
+        {
+            inner.connected_chats.push(chat_id);
+        }
+        Ok(())
+    }
+
+    fn set_engine_event_callback(&mut self, callback: EngineEventCallback) {
+        self.inner.lock_or_recover().engine_event_hook = Some(callback);
+    }
+
+    fn set_stream_frame_callback(&mut self, callback: StreamFrameCallback) {
+        self.inner.lock_or_recover().stream_frame_hook = Some(callback);
+    }
+
+    fn group_call_mode(&self, chat_id: i64) -> Option<GroupCallMode> {
+        let inner = self.inner.lock_or_recover();
+        inner
+            .connected_chats
+            .contains(&chat_id)
+            .then(|| inner.group_modes.get(&chat_id).copied().unwrap_or_default())
+    }
+
+    fn set_stream_quality(&mut self, chat_id: i64, quality: StreamQuality) {
+        self.inner
+            .lock_or_recover()
+            .stream_qualities
+            .push((chat_id, quality));
+    }
+
+    fn stream_quality(&self, chat_id: i64) -> Option<StreamQuality> {
+        self.inner
+            .lock_or_recover()
+            .stream_qualities
+            .iter()
+            .rev()
+            .find(|(chat, _)| *chat == chat_id)
+            .map(|(_, quality)| *quality)
+    }
+
+    fn send_broadcast_timestamp(
+        &mut self,
+        chat_id: i64,
+        timestamp_ms: i64,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .lock_or_recover()
+            .broadcast_timestamps
+            .push((chat_id, timestamp_ms));
+        Ok(())
+    }
+
+    fn send_broadcast_part(
+        &mut self,
+        chat_id: i64,
+        answer: &BroadcastPartAnswer,
+    ) -> Result<(), EngineError> {
+        self.inner
+            .lock_or_recover()
+            .broadcast_parts
+            .push((chat_id, answer.clone()));
         Ok(())
     }
 
@@ -518,6 +649,13 @@ impl CallEngine for MockEngine {
             return Err(EngineError::Unavailable);
         }
         inner.group_leaves.push(group_call_id);
+        let chat_id = inner
+            .group_offers
+            .iter()
+            .rev()
+            .find(|(id, _)| *id == group_call_id)
+            .map(|(_, chat_id)| *chat_id);
+        inner.connected_chats.retain(|chat| Some(*chat) != chat_id);
         // Mirror the real engine: a live presentation is stopped first
         // (privacy — capture ends before the call).
         if inner.presentations.contains(&group_call_id) {

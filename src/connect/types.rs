@@ -264,6 +264,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Phase C2g: last camera-enabled value issued to the engine per
     /// group call id; the engine is only re-issued on change.
     pub(crate) group_camera_state: HashMap<i32, bool>,
+    /// Stream-mode group calls: broadcast requests, feeders, pictures.
+    pub(crate) group_call_streams: super::group_calls::stream::GroupCallStreams,
     /// Phase C2e: selected camera device id; `None` means the engine
     /// default. No devices are fabricated, so this can legitimately be
     /// unset.

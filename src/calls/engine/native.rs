@@ -9,7 +9,8 @@ use ntgcalls_sys::{
     NTG_STREAM_STATUS_ACTIVE, NTG_STREAM_STATUS_PAUSED, NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
     NTG_VIDEO_ROTATION_VIDEO_ROTATION_180, NTG_VIDEO_ROTATION_VIDEO_ROTATION_270,
     ntg_audio_description, ntg_connection_info, ntg_device_info, ntg_frame, ntg_instance,
-    ntg_remote_source, ntg_stream_device, ntg_stream_mode, ntg_stream_status, ntg_video_rotation,
+    ntg_remote_source, ntg_segment_part_request, ntg_stream_device, ntg_stream_mode,
+    ntg_stream_status, ntg_video_rotation,
 };
 use std::ffi::{CStr, CString, c_void};
 use std::ptr::null_mut;
@@ -141,12 +142,14 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
         let shared = unsafe { &*user_data.cast::<CallbackShared>() };
         // Phase C2g: group-chat routing is checked first; the native callback
         // key is the chat id for group calls and the user id for P2P.
+        let group_call = shared
+            .group_chat_to_call
+            .lock_or_recover()
+            .get(&user_id)
+            .copied();
+        let mut stream_chat = None;
         let (call_id, participant_user_id, is_local, is_screen) = if let Some(group_call_id) =
-            shared
-                .group_chat_to_call
-                .lock_or_recover()
-                .get(&user_id)
-                .copied()
+            group_call
         {
             // Screen frames arrive as PLAYBACK+SCREEN; camera as
             // PLAYBACK+CAMERA. Slice calls-group-self-tile: the local
@@ -154,29 +157,36 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             // (ntgcalls emits capture frames per connection — v3.0.0
             // ntgcalls.cpp:126 wires on_frames for group connections too,
             // and stream_manager emits device captures to the callback);
-            // it renders as the self tile instead of being dropped.
-            if mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA {
-                (group_call_id, None, true, false)
-            } else {
-                let is_screen = device == NTG_STREAM_DEVICE_SCREEN;
-                if mode != NTG_STREAM_MODE_PLAYBACK
-                    || (!is_screen && device != NTG_STREAM_DEVICE_CAMERA)
-                {
-                    // Screen-share capture preview has no tile yet; drop
-                    // rather than misattribute.
-                    return;
-                }
+            // it renders as the self tile instead of being dropped. A
+            // stream-mode chat has no ssrc map: its pictures go to the
+            // chat's stream slot.
+            let is_stream_chat = shared.stream_chats.lock_or_recover().contains(&user_id);
+            let target = group_video_target(user_id, is_stream_chat, mode, device, || {
                 // SAFETY: frames_len > 0 was checked above.
                 let ssrc = unsafe { &*frames.add(frames_len - 1) }.ssrc as u32;
-                let Some(participant) = shared
+                shared
                     .group_video_ssrc_to_user
                     .lock_or_recover()
                     .get(&(user_id, ssrc))
                     .copied()
-                else {
-                    return;
-                };
-                (group_call_id, Some(participant), false, is_screen)
+            });
+            match target {
+                Some(GroupVideoTarget::Local) => (group_call_id, None, true, false),
+                Some(GroupVideoTarget::Participant { user_id, screen }) => {
+                    (group_call_id, Some(user_id), false, screen)
+                }
+                Some(GroupVideoTarget::Stream { chat_id }) => {
+                    stream_chat = Some(chat_id);
+                    (
+                        group_call_id,
+                        None,
+                        false,
+                        device == NTG_STREAM_DEVICE_SCREEN,
+                    )
+                }
+                // Audio, the screen-share capture preview and unknown
+                // ssrcs have no tile: drop rather than misattribute.
+                None => return,
             }
         } else {
             let is_local = mode == NTG_STREAM_MODE_CAPTURE && device == NTG_STREAM_DEVICE_CAMERA;
@@ -215,23 +225,93 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             }
             _ => (frame.frame_data.width, frame.frame_data.height),
         };
+        let seq = shared.frame_seq.fetch_add(1, Ordering::Relaxed);
+        let frame = VideoFrame {
+            seq,
+            width,
+            height,
+            rgba,
+            is_local,
+            participant_user_id,
+            is_screen,
+        };
+        if let Some(chat_id) = stream_chat {
+            let hook = shared.stream_frame_hook.lock_or_recover().clone();
+            if let Some(hook) = hook {
+                hook(chat_id, frame);
+            }
+            return;
+        }
         let hook = shared.frame_hook.lock_or_recover().clone();
         if let Some(hook) = hook {
-            let seq = shared.frame_seq.fetch_add(1, Ordering::Relaxed);
-            hook(
-                call_id,
-                VideoFrame {
-                    seq,
-                    width,
-                    height,
-                    rgba,
-                    is_local,
-                    participant_user_id,
-                    is_screen,
-                },
-            );
+            hook(call_id, frame);
         }
     })
+}
+
+/// Stream mode (RTMP only): ntgcalls needs the stream's current time. The
+/// request is handed to the connect side and answered later with
+/// `ntg_send_broadcast_timestamp`; nothing blocks this ntgcalls thread.
+pub(crate) unsafe extern "C" fn broadcast_timestamp_trampoline(
+    _instance: *mut ntg_instance,
+    chat_id: i64,
+    user_data: *mut c_void,
+) {
+    crate::thread_guard::ffi_boundary((), || {
+        if user_data.is_null() {
+            return;
+        }
+        // SAFETY: registration passes an Arc-owned `CallbackShared` pointer and
+        // Drop unregisters the callback before releasing the Arc.
+        let shared = unsafe { &*user_data.cast::<CallbackShared>() };
+        emit_engine_event(shared, EngineEvent::BroadcastTimestampRequested { chat_id });
+    })
+}
+
+/// Stream mode: ntgcalls needs a segment part. The request struct is
+/// passed by value and owned by ntgcalls; it is copied into an owned
+/// `BroadcastPartRequest` and nothing is freed here.
+pub(crate) unsafe extern "C" fn broadcast_part_trampoline(
+    _instance: *mut ntg_instance,
+    chat_id: i64,
+    request: ntg_segment_part_request,
+    user_data: *mut c_void,
+) {
+    crate::thread_guard::ffi_boundary((), || {
+        if user_data.is_null() {
+            return;
+        }
+        // SAFETY: registration passes an Arc-owned `CallbackShared` pointer and
+        // Drop unregisters the callback before releasing the Arc.
+        let shared = unsafe { &*user_data.cast::<CallbackShared>() };
+        emit_engine_event(
+            shared,
+            EngineEvent::BroadcastPartRequested {
+                chat_id,
+                request: BroadcastPartRequest::from_native(&request),
+            },
+        );
+    })
+}
+
+/// Hands one engine event to the connect side's hook (which only queues
+/// it). Events for chats with no group call are dropped.
+fn emit_engine_event(shared: &CallbackShared, event: EngineEvent) {
+    let chat_id = match &event {
+        EngineEvent::BroadcastTimestampRequested { chat_id }
+        | EngineEvent::BroadcastPartRequested { chat_id, .. } => *chat_id,
+    };
+    if !shared
+        .group_chat_to_call
+        .lock_or_recover()
+        .contains_key(&chat_id)
+    {
+        return;
+    }
+    let hook = shared.engine_event_hook.lock_or_recover().clone();
+    if let Some(hook) = hook {
+        hook(event);
+    }
 }
 
 /// Phase C2e: peer camera on/off/paused state driven by the MediaState

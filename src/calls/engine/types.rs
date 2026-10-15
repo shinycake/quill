@@ -3,7 +3,7 @@ use super::*;
 use crate::locks::LockExt;
 use ntgcalls_sys::ntg_rtc_server;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -205,6 +205,21 @@ pub enum EngineError {
     NoScreenSource,
 }
 
+impl EngineError {
+    /// This build's ntgcalls cannot play the stream the call joined
+    /// (`NTG_ERR_RTMP_STREAMING_UNSUPPORTED`). A fatal join error: the
+    /// call shows the Unsupported state instead of a picture.
+    pub fn is_stream_unsupported(&self) -> bool {
+        matches!(
+            self,
+            EngineError::Engine {
+                code: ntgcalls_sys::NTG_ERR_RTMP_STREAMING_UNSUPPORTED,
+                ..
+            }
+        )
+    }
+}
+
 pub(crate) struct CallbackShared {
     pub(crate) user_to_call: Mutex<HashMap<i64, i32>>,
     pub(crate) hook: Mutex<Option<SignalingEmittedCallback>>,
@@ -221,6 +236,13 @@ pub(crate) struct CallbackShared {
     /// attributes incoming frames to participants.
     pub(crate) group_chat_to_call: Mutex<HashMap<i64, i32>>,
     pub(crate) group_video_ssrc_to_user: Mutex<HashMap<(i64, u32), i64>>,
+    /// Chats whose group call runs in stream mode: their frames go to the
+    /// stream slot instead of the ssrc lookup.
+    pub(crate) stream_chats: Mutex<HashSet<i64>>,
+    /// Broadcast timestamp and part requests (stream mode).
+    pub(crate) engine_event_hook: Mutex<Option<EngineEventCallback>>,
+    /// Stream-mode pictures, one slot per chat.
+    pub(crate) stream_frame_hook: Mutex<Option<StreamFrameCallback>>,
 }
 
 impl CallbackShared {
@@ -232,6 +254,26 @@ impl CallbackShared {
         self.group_video_ssrc_to_user
             .lock_or_recover()
             .retain(|(chat, _), _| *chat != chat_id);
+        self.stream_chats.lock_or_recover().remove(&chat_id);
+    }
+
+    /// Empty routing with no hooks installed.
+    pub(crate) fn new() -> Self {
+        Self {
+            user_to_call: Mutex::new(HashMap::new()),
+            hook: Mutex::new(None),
+            transport_hook: Mutex::new(None),
+            frame_hook: Mutex::new(None),
+            remote_video_hook: Mutex::new(None),
+            remote_screen_hook: Mutex::new(None),
+            remote_audio_hook: Mutex::new(None),
+            frame_seq: AtomicU64::new(0),
+            group_chat_to_call: Mutex::new(HashMap::new()),
+            group_video_ssrc_to_user: Mutex::new(HashMap::new()),
+            stream_chats: Mutex::new(HashSet::new()),
+            engine_event_hook: Mutex::new(None),
+            stream_frame_hook: Mutex::new(None),
+        }
     }
 }
 
@@ -289,6 +331,10 @@ pub(crate) struct GroupCallMedia {
     /// has not connected yet. Tracked so the driver can reconcile and
     /// stop a stray presentation after a failed handshake.
     pub(crate) presentation_initialized: bool,
+    /// How the connected call carries media (`ntg_get_connection_mode`).
+    pub(crate) mode: GroupCallMode,
+    /// Last quality the stream tile reported (stream mode only).
+    pub(crate) stream_quality: Option<StreamQuality>,
 }
 
 pub(crate) struct NativeRtcServers {
@@ -347,23 +393,9 @@ pub(crate) fn set_hook<T>(slot: &std::sync::Mutex<Option<T>>, hook: T) {
 #[cfg(test)]
 mod callback_tests {
     use super::CallbackShared;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    use std::sync::atomic::AtomicU64;
 
     fn shared() -> CallbackShared {
-        CallbackShared {
-            user_to_call: Mutex::new(HashMap::new()),
-            hook: Mutex::new(None),
-            transport_hook: Mutex::new(None),
-            frame_hook: Mutex::new(None),
-            remote_video_hook: Mutex::new(None),
-            remote_screen_hook: Mutex::new(None),
-            remote_audio_hook: Mutex::new(None),
-            frame_seq: AtomicU64::new(0),
-            group_chat_to_call: Mutex::new(HashMap::new()),
-            group_video_ssrc_to_user: Mutex::new(HashMap::new()),
-        }
+        CallbackShared::new()
     }
 
     #[test]
@@ -386,5 +418,15 @@ mod callback_tests {
         let ssrcs = shared.group_video_ssrc_to_user.lock().unwrap();
         assert_eq!(ssrcs.len(), 1);
         assert_eq!(ssrcs.get(&(2, 200)), Some(&7));
+    }
+
+    #[test]
+    fn forget_group_clears_the_stream_chat() {
+        let shared = shared();
+        shared.stream_chats.lock().unwrap().extend([1, 2]);
+        shared.forget_group(1);
+        let chats = shared.stream_chats.lock().unwrap();
+        assert!(!chats.contains(&1));
+        assert!(chats.contains(&2));
     }
 }

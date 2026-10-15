@@ -72,7 +72,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// never got an answer so their dedupe guards and spinners clear.
     /// Returns whether the UI should redraw.
     pub fn request_tick(&mut self, now: Instant) -> bool {
-        let mut changed = false;
+        // Stream-mode calls: answer what ntgcalls queued since the last poll.
+        let mut changed = self.pump_group_call_streams(now);
         if !self.flood_retries.is_empty() {
             let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.flood_retries)
                 .into_iter()

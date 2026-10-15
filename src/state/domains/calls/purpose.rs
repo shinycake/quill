@@ -148,6 +148,10 @@ pub enum CallsPurpose {
     JoinGroupCallInvitation,
     /// Phase C2f: `declineGroupCallInvitation`. Response is `ok`.
     DeclineGroupCallInvitation { chat_id: i64, message_id: i64 },
+    /// Stream mode: `getGroupCallStreams` or `getGroupCallStreamSegment`
+    /// for the stream feeder. The driver takes the answer (`groupCallStreams`,
+    /// `data` or an error) before the reducer sees it.
+    GroupCallStream { group_call_id: i32 },
 }
 
 flat_purposes!(Calls(CallsPurpose) {

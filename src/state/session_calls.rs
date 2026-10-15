@@ -233,6 +233,7 @@ impl Session {
         tracked.can_be_managed = group_call.can_be_managed;
         tracked.is_owned = group_call.is_owned;
         tracked.participant_count = group_call.participant_count;
+        tracked.viewer_count = u32::try_from(group_call.participant_count).unwrap_or(0);
         tracked.loaded_all_participants = group_call.loaded_all_participants;
         tracked.is_my_video_enabled = group_call.is_my_video_enabled;
         tracked.is_my_video_paused = group_call.is_my_video_paused;

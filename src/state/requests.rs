@@ -195,6 +195,10 @@ pub(crate) fn sessions_error_line(action: &str, err: &TdError) -> String {
         | ErrorClass::Other => {
             return format!("Could not {action} (error {})", err.code);
         }
+        // Group-call classes keep the line their plain code gave.
+        ErrorClass::GroupCallRejoin | ErrorClass::StreamTimeTooBig => {
+            return sessions_error_line(action, &TdError::from_code(err.code));
+        }
     };
     format!("Could not {action}: {detail}")
 }
@@ -221,6 +225,10 @@ pub(crate) fn error_reason(err: &TdError) -> String {
         // the AI arm in `apply_error` phrases this for the user; this
         // is the fallback for any generic path.
         ErrorClass::AiComposeFloodPremium => "AI request limit reached".to_string(),
+        // Group-call classes keep the text their plain code gave.
+        ErrorClass::GroupCallRejoin | ErrorClass::StreamTimeTooBig => {
+            error_reason(&TdError::from_code(err.code))
+        }
         ErrorClass::StickersForbidden | ErrorClass::GifsForbidden => err
             .send_permission_notice()
             .unwrap_or("You don't have permission to send this in this chat.")

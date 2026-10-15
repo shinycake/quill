@@ -212,6 +212,17 @@ pub struct ActiveGroupCall {
     pub join_as: Option<MessageSender>,
     /// The options request was sent (once per tracked call).
     pub join_as_requested: bool,
+    /// How the joined call carries media, from the engine after the
+    /// native connect (`ntg_get_connection_mode`). Stream modes get their
+    /// segments from TDLib (`calls::engine::StreamFeeder`).
+    pub stream_mode: crate::calls::engine::GroupCallMode,
+    /// What a stream-mode call shows: connecting, nobody broadcasting,
+    /// live, ended or not playable on this build. Meaningful only while
+    /// `stream_mode` is a stream mode.
+    pub stream: crate::calls::engine::StreamState,
+    /// `participant_count` as the stream's "{count} viewers" (tdesktop
+    /// shows no listener rows for RTMP streams).
+    pub viewer_count: u32,
 }
 
 /// stories-live-play: a pending "Join live" from the story viewer — the
@@ -271,6 +282,9 @@ impl ActiveGroupCall {
             join_as_options: Vec::new(),
             join_as: None,
             join_as_requested: false,
+            stream_mode: Default::default(),
+            stream: Default::default(),
+            viewer_count: 0,
         }
     }
 

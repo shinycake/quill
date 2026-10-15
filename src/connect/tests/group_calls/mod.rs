@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 mod link;
 mod share_links;
+mod stream;
 mod transport;
 
 /// Phase C2f: participant-management request shapes and gates

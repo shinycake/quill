@@ -26,6 +26,7 @@ mod admin;
 mod controls;
 mod join;
 mod link;
+pub(crate) mod stream;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: native group-call transport lifecycle, after every
@@ -48,7 +49,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             && let Some(before_id) = active_group_call_before
         {
             // The tracked call ended or was replaced: the native transport
-            // must not linger, and stale frames must not render.
+            // must not linger, and stale frames must not render. A stream's
+            // pending parts are answered first.
+            self.drain_stream_feeder(before_id);
             if let Some(engine) = self.call_engine.as_deref_mut() {
                 let _ = engine.leave_group_call(before_id);
             }
@@ -107,6 +110,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             let connected = result.is_ok();
+            let unsupported = result
+                .as_ref()
+                .err()
+                .is_some_and(|err| err.is_stream_unsupported());
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 match result {
                     Ok(()) => {
@@ -118,7 +125,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                 }
             }
+            if unsupported {
+                self.mark_stream_unsupported(group_call_id);
+            }
             if connected {
+                self.start_stream_feeder(group_call_id);
                 self.group_camera_state.insert(group_call_id, video_enabled);
                 // Refresh the device cache on connect so the screen-share
                 // availability gate sees the engine's real sources.
