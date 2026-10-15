@@ -199,13 +199,13 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let (title, (body, footer)) = match withdraw {
-                GramWithdraw::Password { sending, error } => (
+                GramWithdraw::Password { request, error } => (
                     tr(keys::BOT_EARN_BALANCE_PASSWORD_TITLE),
                     PasswordBox {
                         id: "grams-withdraw",
                         input: &this.payments.grams_withdraw_password,
                         description: tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION),
-                        sending,
+                        sending: request.is_some(),
                         error: error.as_ref(),
                         on_submit: QuillApp::submit_grams_withdraw_password,
                         on_cancel: QuillApp::cancel_grams_withdraw,

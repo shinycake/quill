@@ -1,8 +1,10 @@
 # Grams balance (Settings → My Grams)
 
 PR 1 of the Fragment/TON design (`quill-tools/designs/fragment-ton-flows.md`
-section 1). Part of parity item `premium-fragment-ton`; the gift value box
-and the gift export flow are still to come, so the item is not ticked.
+section 1). Part of parity item `premium-fragment-ton`. The withdrawal
+(Collect, below) came in a follow-up PR. With the gift export (#819) and
+the gift value box (#824), that PR completes the item and declares it in
+`parity-fragments/grams-withdraw.txt`.
 
 ## What tdesktop does
 
@@ -96,7 +98,10 @@ and the gift export flow are still to come, so the item is not ticked.
     password. It sends no withdrawal request.
   - `submit_gram_withdrawal` sends `getGramWithdrawalUrl` only from the
     idle password box, with a typed password, while the screen is open. A
-    second Submit while the first is out is refused.
+    second Submit while the first is out is refused. The box keeps the
+    request's `@extra` (never the password). Only the answer or error of
+    that request counts, so a late reply to a try that was cancelled is
+    not taken as the answer to a newer one.
   - `cancel_gram_withdrawal` closes the box; a URL that still arrives for
     it is dropped. Closing the screen closes the box too.
 - Reducer (`state/domains/payments/grams.rs`): the `httpUrl` answer closes
@@ -116,8 +121,11 @@ and the gift export flow are still to come, so the item is not ticked.
   element ids and text as before. `src/ui/premium_ui/grams_withdraw.rs`
   holds the button, the actions, the frame upkeep and the dialog (priority
   3804, shown over the Grams screen, which shows again when it closes).
-- The URL opens only when it is `https` and `link_policy` says `Open`;
-  otherwise the status line says the page could not load.
+- The URL must be `https`; anything else is refused with "couldn't load
+  the page" in the status line. When `link_policy` says `Open`, it opens
+  in the browser. When it says `Confirm` (a look-alike address), the
+  existing "Open this link?" box (`entity_links`) asks first. The gift
+  export's URL goes through the same path.
 - The password is read from the masked field once on Submit, handed to
   the one request and the field is emptied at once (Enter does the same).
   The field is also emptied whenever the box is not on screen. It is never
@@ -192,7 +200,9 @@ and the gift export flow are still to come, so the item is not ticked.
   - The request is refused before Collect, with an empty password, after
     the screen closed and while one is out. Its exact shape is
     `{"@type","@extra","password"}`.
-  - The URL answer is handed over, and dropped after Cancel.
+  - The URL answer is handed over, and dropped after Cancel. After
+    Cancel and a new Submit, the first try's error and URL are both
+    dropped, and only the second try's URL is handed over.
   - Every error lands as listed above, `AMOUNT_TOO_SMALL` included.
   - The password never appears in the Grams state's `Debug`.
 - Unit tests (`ton_tests.rs`): the routing of `GramWithdraw` and the
@@ -203,8 +213,9 @@ and the gift export flow are still to come, so the item is not ticked.
     screen. The field takes the keyboard, and Enter submits and empties it.
   - An error keeps the box open. Cancel closes it, empties the field and
     shows the screen again. The security check also shows over the screen.
-  - A non-https URL is not opened; Fragment's https URL is opened once
-    (the test platform's `opened_url`).
+  - A non-https URL is not opened. A look-alike https address opens the
+    "Open this link?" box instead of the browser. Fragment's https URL is
+    opened once (the test platform's `opened_url`).
 - Demo screenshots of the section with Collect, the password box and the
   security check (`QUILL_DEMO_GRAMS=overview|withdraw|withdraw-check`),
   checked by eye.

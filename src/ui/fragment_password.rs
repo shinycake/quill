@@ -12,6 +12,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::entity_links::OpenLinkConfirm;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputContentType, InputState};
 use gpui_kit::component::*;
@@ -251,17 +252,34 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Open a Fragment page in the browser, only when the link policy
-    /// opens it without asking (an https address with nothing suspicious).
+    /// Open a Fragment page in the browser through the link policy: an
+    /// https address with nothing suspicious opens at once; a look-alike
+    /// address goes to the "Open this link?" box (`entity_links`), which
+    /// opens it only if the user confirms. Anything but https is refused.
     pub(super) fn open_fragment_url(&mut self, url: &str, cx: &mut Context<Self>) {
+        if !url.starts_with("https://") {
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE).into();
+            return;
+        }
         let link = LinkTarget::Url {
             url: url.to_string(),
             label: None,
         };
-        if url.starts_with("https://") && open_decision(&link) == OpenDecision::Open {
-            cx.open_url(url);
-        } else {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE).into();
+        match open_decision(&link) {
+            OpenDecision::Open => cx.open_url(url),
+            OpenDecision::Confirm {
+                url,
+                shown,
+                suspicious,
+            } => {
+                self.message_ui.open_link_confirm = Some(OpenLinkConfirm {
+                    url,
+                    shown,
+                    suspicious,
+                    from_poll_option: false,
+                });
+                cx.notify();
+            }
         }
     }
 }

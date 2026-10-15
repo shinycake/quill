@@ -251,6 +251,22 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
     // Not https: never opened, the status line says so.
     hand_over(&app, vcx, "http://fragment.com/withdraw");
     assert_eq!(vcx.opened_url(), None);
+    // A look-alike address (Cyrillic "а") asks first: the link box opens,
+    // the browser does not.
+    let look_alike = "https://fr\u{0430}gment.com/withdraw";
+    hand_over(&app, vcx, look_alike);
+    assert_eq!(vcx.opened_url(), None);
+    let asked = app.read_with(vcx, |app, _| {
+        app.message_ui
+            .open_link_confirm
+            .as_ref()
+            .map(|confirm| confirm.url.clone())
+    });
+    assert_eq!(asked.as_deref(), Some(look_alike));
+    app.update_in(vcx, |app, _, cx| {
+        app.message_ui.open_link_confirm = None;
+        cx.notify();
+    });
     // Fragment's https page opens in the browser, once.
     hand_over(&app, vcx, "https://fragment.com/withdraw?token=1");
     assert_eq!(

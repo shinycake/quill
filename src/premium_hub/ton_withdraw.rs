@@ -16,10 +16,11 @@ use serde_json::json;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GramWithdraw {
     /// tdesktop `PasscodeBox` with "Two-step verification" and "Please
-    /// enter your password to collect."; `sending` while the request is
-    /// out. The password itself is never kept here.
+    /// enter your password to collect."; `request` is the `@extra` of the
+    /// request out with the password (only its answer counts). The password
+    /// itself is never kept here.
     Password {
-        sending: bool,
+        request: Option<RequestId>,
         error: Option<ExportError>,
     },
     /// tdesktop `PrePasswordErrorBox`: no password set (`later: false`) or
@@ -43,19 +44,32 @@ impl GramWithdraw {
     /// The password box waiting for a password, with the last error.
     pub fn idle(error: Option<ExportError>) -> Self {
         Self::Password {
-            sending: false,
+            request: None,
             error,
         }
     }
 
     /// The request with the password is out (the buttons wait).
     pub fn sending(&self) -> bool {
-        matches!(self, Self::Password { sending: true, .. })
+        self.pending().is_some()
+    }
+
+    /// The `@extra` of the request out with the password.
+    pub fn pending(&self) -> Option<RequestId> {
+        match self {
+            Self::Password { request, .. } => *request,
+            Self::SecurityCheck { .. } => None,
+        }
+    }
+
+    /// Whether `id` is the request this box is waiting for.
+    pub fn waits_for(&self, id: Option<RequestId>) -> bool {
+        id.is_some() && self.pending() == id
     }
 
     /// The password box is open and idle: Submit may send.
     pub fn can_submit(&self) -> bool {
-        matches!(self, Self::Password { sending: false, .. })
+        matches!(self, Self::Password { request: None, .. })
     }
 
     /// A fresh password state arrived: with no password set, the idle

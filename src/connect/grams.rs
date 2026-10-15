@@ -215,19 +215,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let set = |driver: &mut Self, sending: bool| {
-            driver.session.payments.hub.grams.withdraw = Some(GramWithdraw::Password {
-                sending,
-                error: None,
-            });
-        };
-        set(self, true);
         let sent = self.send_grams(GramsPurpose::WithdrawalUrl, |extra| {
             get_gram_withdrawal_url(extra, password)
         });
-        if sent.is_err() {
-            set(self, false);
-        }
+        // Only this request's answer counts: a late answer to an earlier
+        // try that was cancelled is dropped.
+        self.session.payments.hub.grams.withdraw = Some(GramWithdraw::Password {
+            request: sent.as_ref().ok().copied(),
+            error: None,
+        });
         sent
     }
 

@@ -346,11 +346,13 @@ fn collect_routes_on_the_password_state() {
     idle.password_state_known(false);
     assert_eq!(idle, GramWithdraw::SecurityCheck { later: false });
     let mut sending = GramWithdraw::Password {
-        sending: true,
+        request: Some(RequestId(9)),
         error: None,
     };
     sending.password_state_known(false);
     assert!(sending.sending() && !sending.can_submit());
+    assert!(sending.waits_for(Some(RequestId(9))));
+    assert!(!sending.waits_for(Some(RequestId(8))) && !sending.waits_for(None));
     let mut set = GramWithdraw::idle(None);
     set.password_state_known(true);
     assert!(set.can_submit());

@@ -65,16 +65,19 @@ impl Session {
                     grams.error = Some(error_reason(err));
                 }
             }
-            GramsPurpose::WithdrawalUrl => Self::apply_gram_withdrawal_error(grams, err),
+            GramsPurpose::WithdrawalUrl => {
+                Self::apply_gram_withdrawal_error(grams, err, pending.map(|p| p.id))
+            }
         }
     }
 
     /// The `httpUrl` of `getGramWithdrawalUrl`: tdesktop opens it and
     /// closes the password box. Only an answer to the box's own request
-    /// counts; after Cancel it is dropped.
-    pub(crate) fn apply_gram_withdrawal_url(&mut self, url: String) {
+    /// counts (matched by `@extra`); after Cancel, or for an earlier try,
+    /// it is dropped.
+    pub(crate) fn apply_gram_withdrawal_url(&mut self, url: String, id: Option<RequestId>) {
         let grams = &mut self.payments.hub.grams;
-        if !grams.withdraw.as_ref().is_some_and(GramWithdraw::sending) {
+        if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
             return;
         }
         grams.withdraw = None;
@@ -94,8 +97,12 @@ impl Session {
     /// tdesktop `HandleWithdrawalButton`'s `fail`: `AMOUNT_TOO_SMALL`
     /// closes the box with a toast; the rest go through the password box's
     /// shared mapping.
-    fn apply_gram_withdrawal_error(grams: &mut crate::premium_hub::ton::GramsHub, err: &TdError) {
-        if !grams.withdraw.as_ref().is_some_and(GramWithdraw::sending) {
+    fn apply_gram_withdrawal_error(
+        grams: &mut crate::premium_hub::ton::GramsHub,
+        err: &TdError,
+        id: Option<RequestId>,
+    ) {
+        if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
             return;
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {

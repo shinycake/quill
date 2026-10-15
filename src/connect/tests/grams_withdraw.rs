@@ -177,6 +177,47 @@ fn a_url_after_cancel_is_dropped() {
     assert!(p.0.session.payments.hub.grams.withdraw_url.is_none());
 }
 
+#[test]
+fn an_answer_to_a_cancelled_try_is_not_taken_for_the_next_one() {
+    let mut p = parts();
+    open_screen(&mut p, "15000000000");
+    p.0.start_gram_withdrawal().unwrap();
+    let first = p.0.submit_gram_withdrawal(PASSWORD).unwrap();
+    p.0.cancel_gram_withdrawal();
+    p.0.start_gram_withdrawal().unwrap();
+    let second = p.0.submit_gram_withdrawal(PASSWORD).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(withdraw(&p).and_then(|w| w.pending()), Some(second));
+    // The first try's error and URL land while the second is out: both
+    // are dropped, the box keeps waiting for the second.
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": first.as_extra(), "code": 400,
+               "message": "PASSWORD_HASH_INVALID"}),
+    );
+    assert_eq!(withdraw(&p).and_then(|w| w.pending()), Some(second));
+    let first_url = "https://fragment.com/ads/withdraw?token=old";
+    feed(
+        &mut p,
+        json!({"@type": "httpUrl", "@extra": first.as_extra(), "url": first_url}),
+    );
+    let grams = &p.0.session.payments.hub.grams;
+    assert!(grams.withdraw_url.is_none());
+    assert_eq!(
+        grams.withdraw.as_ref().and_then(|w| w.pending()),
+        Some(second)
+    );
+    // The second try's answer is the one opened.
+    feed(
+        &mut p,
+        json!({"@type": "httpUrl", "@extra": second.as_extra(), "url": URL}),
+    );
+    let grams = &p.0.session.payments.hub.grams;
+    assert!(grams.withdraw.is_none());
+    assert_eq!(grams.withdraw_url.as_deref(), Some(URL));
+    assert_no_password_kept(&p);
+}
+
 fn fail(message: &str, code: i32) -> Parts {
     let mut p = parts();
     open_screen(&mut p, "15000000000");
@@ -224,7 +265,7 @@ fn errors_land_in_the_password_box() {
         matches!(
             &other,
             Some(GramWithdraw::Password {
-                sending: false,
+                request: None,
                 error: Some(ExportError::Other(reason)),
             }) if !reason.is_empty()
         ),

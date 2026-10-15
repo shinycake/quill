@@ -224,7 +224,7 @@ impl Session {
                     )))
                 {
                     // Collect: Fragment's withdrawal page.
-                    self.apply_gram_withdrawal_url(url);
+                    self.apply_gram_withdrawal_url(url, pending.map(|p| p.id));
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::Payments(PaymentsPurpose::GiftExportProbe))
                 {
