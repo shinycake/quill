@@ -992,5 +992,6 @@ impl QuillApp {
     }
 }
 
+mod command_menu;
 mod copy_inline_text;
 mod toggle_composer_silent;
