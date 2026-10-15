@@ -23,6 +23,7 @@ impl QuillApp {
         credentials: Option<TelegramCredentials>,
         demo: Option<ScreenshotDemo>,
     ) -> Self {
+        super::tooltip_timing::install(cx);
         let chat = cx.new(SyntheticChat::new);
         // Send-key mode drives kit's newline-vs-submit behavior: plain
         // Enter submits only in Enter mode; in CtrlEnter mode it inserts
