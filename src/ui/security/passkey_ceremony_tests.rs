@@ -13,7 +13,9 @@ use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::lang::keys;
 use quill::webauthn::{CeremonyError, CeremonyEvent};
 
-fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
+pub(super) fn new_app(
+    cx: &mut TestAppContext,
+) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -36,14 +38,17 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, Vi
     (app, shell, vcx)
 }
 
-fn shown_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Option<DialogKind> {
+pub(super) fn shown_dialog(
+    shell: &Entity<QuillShell>,
+    vcx: &mut VisualTestContext,
+) -> Option<DialogKind> {
     vcx.run_until_parked();
     std::thread::sleep(std::time::Duration::from_millis(400));
     vcx.update(|window, cx| window.render_frame(cx));
     shell.read_with(vcx, |shell, _| shell.open_dialog)
 }
 
-fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
+pub(super) fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
     app.read_with(vcx, |app, _| {
         app.privacy.passkeys.ceremony.as_ref().map(|ui| ui.sheet)
     })

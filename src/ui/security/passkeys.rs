@@ -571,7 +571,7 @@ pub(super) fn once(
 
 /// The round icon at the top of the list and the box (tdesktop plays the
 /// `passkeys` Lottie there).
-fn header_icon(icon: IconName, cx: &App) -> impl IntoElement {
+pub(super) fn header_icon(icon: IconName, cx: &App) -> impl IntoElement {
     div().flex().justify_center().child(
         div()
             .size(px(72.))

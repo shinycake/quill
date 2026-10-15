@@ -21,6 +21,16 @@
 "lng_passkey_error_login" = "Couldn't sign in with the security key.";
 "lng_passkey_cable_register_title" = "Add a passkey";
 "lng_passkey_cable_login_title" = "Sign in with a passkey";
+"lng_passkey_method_key" = "Use a security key";
+"lng_passkey_cable_register_about" = "Scan this QR code with the camera on the phone or tablet where you want to save your passkey.";
+"lng_passkey_cable_login_about" = "Scan this QR code with the camera on the phone or tablet that has your passkey.";
+"lng_passkey_cable_bluetooth" = "Keep Bluetooth on — your phone connects to this device over Bluetooth.";
+"lng_passkey_cable_key_about" = "Insert and touch your security key.";
+"lng_passkey_cable_connecting" = "Connecting to your phone…";
+"lng_passkey_cable_continue" = "Continue on your phone";
+"lng_passkey_cable_follow" = "Follow the instructions on your phone.";
+"lng_passkey_cable_no_bluetooth" = "Bluetooth is unavailable. Turn on Bluetooth to sign in with a phone.";
+"lng_passkey_cable_error" = "Couldn't connect to your phone.\nPlease try again.";
 // Quill: the row Quill shows while the Windows Security dialog is open (tdesktop
 // blocks its window on the call instead).
 "qll_passkey_windows_waiting" = "Waiting for Windows Security…";
