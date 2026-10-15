@@ -108,13 +108,19 @@
 "lng_group_call_close" = "Close";
 "lng_group_call_connecting" = "Connecting...";
 "lng_group_call_mac_settings" = "Open Settings";
+"lng_group_call_no_stream" = "{group} is currently not broadcasting live stream data to Telegram.";
+"lng_group_call_no_stream_admin" = "Oops! Telegram doesn't see any stream coming from your streaming app. Please make sure you entered the right Server URL and Stream Key in your app.";
 "lng_group_call_noise_suppression" = "Enable Noise Suppression";
+"lng_group_call_pinned_on_top" = "Live stream is pinned on top.";
+"lng_group_call_rtmp_viewers#one" = "{count} viewer";
+"lng_group_call_rtmp_viewers#other" = "{count} viewers";
 "lng_group_call_screen_share_start" = "Share Screen";
 "lng_group_call_screen_share_stop" = "Stop Sharing";
 "lng_group_call_screen_title" = "Screen {index}";
 "lng_group_call_settings" = "Settings";
 "lng_group_call_settings_title" = "Settings";
 "lng_group_call_tooltip_screen" = "Share screen";
+"lng_group_call_unpinned_on_top" = "Live stream is unpinned from top.";
 "lng_group_call_video_paused" = "Video is paused";
 "lng_group_invite_context_copy" = "Copy";
 "lng_group_invite_context_delete" = "Delete";
@@ -902,6 +908,7 @@
 "qll_ops_stopped_the_quiz" = "stopped the quiz";
 "qll_ops_storage_by_chat" = "Storage by chat";
 "qll_ops_storage_usage" = "Storage usage";
+"qll_ops_stream_unsupported" = "Live stream playback is not available in this build.";
 "qll_ops_submit_an_appeal" = "Submit an Appeal";
 "qll_ops_submit_rating" = "Submit rating";
 "qll_ops_subscribe_to_telegram_premium_to" = "Subscribe to Telegram Premium to be able to comment on behalf of your channels in group chats.";

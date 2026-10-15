@@ -8,6 +8,8 @@
 //!   button is a gradient disc that breathes while you're live: green
 //!   when live, blue when muted, purple-red when an admin muted you.
 //!
+//! The window itself is `group_call_window.rs`; a live stream (RTMP) gets
+//! the wide layout of `group_call_stream_layout.rs` instead of this one.
 //! The window renders a body the app builds (elements are window-agnostic),
 //! so every existing action and helper works from here.
 #![deny(clippy::indexing_slicing)]
@@ -17,7 +19,7 @@ use super::format_helpers::format_starts_in;
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::state::ActiveGroupCall;
@@ -25,7 +27,7 @@ use quill::state::ActiveGroupCall;
 use std::time::Duration;
 
 /// lib_ui `colors.palette`.
-const BG: u32 = 0x1a2026;
+pub(super) const BG: u32 = 0x1a2026;
 pub(super) const MEMBERS_BG: u32 = 0x2c333d;
 pub(super) const MEMBERS_BG_OVER: u32 = 0x323a45;
 const ACTIVE_FG: u32 = 0x4db8ff;
@@ -34,7 +36,7 @@ pub(super) const MEMBER_INACTIVE_ICON: u32 = 0x84888f;
 pub(super) const MEMBER_INACTIVE_STATUS: u32 = 0x61c0ff;
 pub(super) const MEMBER_MUTED_ICON: u32 = 0xed7372;
 pub(super) const MEMBER_NOT_JOINED: u32 = 0x91979e;
-const LEAVE_BG: u32 = 0xf75c5c7f;
+pub(super) const LEAVE_BG: u32 = 0xf75c5c7f;
 
 /// A member menu entry's effect.
 pub(super) type MemberAction = Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)>;
@@ -640,119 +642,6 @@ impl QuillApp {
             .child(leave)
     }
 
-    /// Close the window of a call you haven't joined.
-    pub(super) fn close_group_call_window(&mut self, cx: &mut Context<Self>) {
-        if let Some(id) = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .map(|c| c.id)
-        {
-            self.group_call.window_closed_by_user = Some(id);
-        }
-        cx.notify();
-    }
-
-    /// Open or close the group call window with the tracked group call.
-    pub(super) fn sync_group_call_window(&mut self, cx: &mut Context<Self>) {
-        self.sync_global_ptt(cx);
-        let wanted = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .map(|call| call.id)
-            .filter(|id| self.group_call.window_closed_by_user != Some(*id));
-        self.prune_group_video_images(wanted);
-        match (wanted, self.group_call.window) {
-            (Some(_), None) => self.open_group_call_window(cx),
-            (None, Some(handle)) => {
-                self.group_call.window = None;
-                let _ = handle.update(cx, |_, window, _| window.remove_window());
-            }
-            _ => {}
-        }
-    }
-
-    fn open_group_call_window(&mut self, cx: &mut Context<Self>) {
-        if self.group_call.window_opening {
-            return;
-        }
-        self.group_call.window_opening = true;
-        let owner = cx.entity();
-        cx.defer(move |cx| {
-            let weak = owner.downgrade();
-            let render_owner = owner.clone();
-            let bounds = Bounds::centered(None, size(px(420.), px(640.)), cx);
-            let result = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(380.), px(520.))),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some("Video Chat".into()),
-                        appears_transparent: true,
-                        traffic_light_position: Some(point(px(12.), px(12.))),
-                    }),
-                    focus: true,
-                    show: true,
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    window.activate_window();
-                    window.on_window_should_close(cx, move |_, cx| {
-                        let _ = weak.update(cx, |app, cx| {
-                            app.group_call.window = None;
-                            app.group_call.window_closed_by_user = app
-                                .session()
-                                .and_then(|s| s.calls.active_group_call.as_ref())
-                                .map(|c| c.id);
-                            cx.notify();
-                        });
-                        true
-                    });
-                    let view = cx.new(|cx| {
-                        let activation_owner = render_owner.downgrade();
-                        GroupCallPanel {
-                            owner: render_owner.downgrade(),
-                            _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
-                            focus: cx.focus_handle(),
-                            // A key-up can't arrive once the window is in
-                            // the background: close the push-to-talk mic.
-                            _activation: cx.observe_window_activation(
-                                window,
-                                move |_, window, cx| {
-                                    if !window.is_window_active() {
-                                        let _ = activation_owner.update(cx, |app, cx| {
-                                            app.group_call_ptt_release_all(cx)
-                                        });
-                                    }
-                                },
-                            ),
-                            pinned_on_top: false,
-                        }
-                    });
-                    cx.new(|cx| Root::new(view, window, cx))
-                },
-            );
-            owner.update(cx, |app, cx| {
-                app.group_call.window_opening = false;
-                match result {
-                    Ok(handle) => app.group_call.window = Some(handle.into()),
-                    Err(_) => {
-                        app.connection.status_note = "Couldn't open the video chat window".into()
-                    }
-                }
-                cx.notify();
-            });
-        });
-    }
-
-    /// Bring the group call window back (the call bar).
-    pub(super) fn show_group_call_window(&mut self, cx: &mut Context<Self>) {
-        self.group_call.window_closed_by_user = None;
-        if let Some(handle) = self.group_call.window {
-            let _ = handle.update(cx, |_, window, _| window.activate_window());
-        }
-        cx.notify();
-    }
-
     /// The main window's bar for a joined voice chat: mute, the chat's
     /// title and count, leave; a click brings the window back.
     pub(super) fn group_call_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -842,86 +731,6 @@ impl QuillApp {
                 )
                 .into_any_element(),
         )
-    }
-}
-
-struct GroupCallPanel {
-    owner: WeakEntity<QuillApp>,
-    _observe: Subscription,
-    /// Takes keyboard focus so push-to-talk key events reach the window.
-    focus: FocusHandle,
-    _activation: Subscription,
-    /// The window stays above the others (tdesktop "pin on top").
-    pinned_on_top: bool,
-}
-
-impl Render for GroupCallPanel {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(owner) = self.owner.upgrade() else {
-            window.remove_window();
-            return div().into_any_element();
-        };
-        if self.focus.is_focused(window) || window.focused(cx).is_none() {
-            self.focus.focus(window, cx);
-        }
-        let fullscreen = window.is_fullscreen();
-        let body = owner.update(cx, |app, cx| {
-            let wants_stage = fullscreen || app.demo_ui.group_stage;
-            let call = app
-                .session()
-                .and_then(|s| s.calls.active_group_call.clone());
-            let stage = call
-                .filter(|_| wants_stage)
-                .and_then(|call| app.group_call_stage(&call, cx));
-            match stage {
-                Some(stage) => stage,
-                None => app.group_call_panel_body(cx),
-            }
-        });
-        div()
-            .size_full()
-            .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                let Some(owner) = this.owner.upgrade() else {
-                    return;
-                };
-                let key = event.keystroke.key.clone();
-                if quill::calls::tile_pin::exits_fullscreen(&key) && window.is_fullscreen() {
-                    owner.update(cx, |app, cx| app.leave_group_call_stage(window, cx));
-                    cx.stop_propagation();
-                    return;
-                }
-                if owner.update(cx, |app, cx| app.group_call_key_down(&key, cx)) {
-                    cx.stop_propagation();
-                }
-            }))
-            .on_key_up(cx.listener(|this, event: &KeyUpEvent, _, cx| {
-                let Some(owner) = this.owner.upgrade() else {
-                    return;
-                };
-                let key = event.keystroke.key.clone();
-                if owner.update(cx, |app, cx| app.group_call_key_up(&key, cx)) {
-                    cx.stop_propagation();
-                }
-            }))
-            .child(body)
-            // tdesktop's pin-on-top control; the full-screen stage has no
-            // window chrome to pin.
-            .when(!fullscreen, |this| {
-                this.relative().child(
-                    super::window_control::pin_on_top_button(
-                        "group-call-pin-on-top",
-                        self.pinned_on_top,
-                        cx,
-                        |this, pinned, _, cx| {
-                            this.pinned_on_top = pinned;
-                            cx.notify();
-                        },
-                    )
-                    .text_color(white()),
-                )
-            })
-            .into_any_element()
     }
 }
 

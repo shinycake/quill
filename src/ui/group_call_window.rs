@@ -1,0 +1,314 @@
+//! The group call's own window (tdesktop `Calls::Group::Panel`): opens and
+//! closes with the tracked call and draws either the voice / video chat
+//! panel (`group_call_panel.rs`) or, for a channel's RTMP live stream, the
+//! stream layout (`group_call_stream_layout.rs`).
+//!
+//! A live stream window is 720 × 580 (at least 240 × 160) and titled with
+//! the chat's name, as tdesktop sizes `_call->rtmp()` panels; the chat
+//! panel stays 420 × 640 (at least 380 × 520). When a call switches
+//! between the two the window reopens at the other size. A stream that
+//! ends closes the window (tdesktop closes the panel with the call).
+#![deny(clippy::indexing_slicing)]
+
+use super::app::QuillApp;
+use super::group_call_stream_layout::{leave_stream_full, uses_stream_layout};
+use gpui_kit::component::notification::Notification;
+use gpui_kit::component::{Root, WindowExt};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+use quill::calls::engine::StreamState;
+use quill::lang::{keys, tr};
+
+impl QuillApp {
+    /// Close the window of a call you haven't joined.
+    pub(super) fn close_group_call_window(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|c| c.id)
+        {
+            self.group_call.window_closed_by_user = Some(id);
+        }
+        cx.notify();
+    }
+
+    /// Open or close the group call window with the tracked group call.
+    pub(super) fn sync_group_call_window(&mut self, cx: &mut Context<Self>) {
+        self.sync_global_ptt(cx);
+        let call = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| {
+                (
+                    call.id,
+                    uses_stream_layout(call),
+                    call.stream == StreamState::Ended,
+                    call.is_joined,
+                )
+            });
+        // The stream ended: close the window, as tdesktop closes the panel
+        // with the call, and stop listening.
+        if let Some((id, true, true, joined)) = call
+            && self.group_call.window_closed_by_user != Some(id)
+        {
+            self.group_call.window_closed_by_user = Some(id);
+            if joined {
+                self.leave_active_group_call(cx);
+            }
+        }
+        // A stream opens joined: tdesktop joins from the chat's bar
+        // straight into the stream window. Once per call, so leaving
+        // does not join again.
+        if let Some((id, true, false, false)) = call
+            && self.group_call.window_closed_by_user != Some(id)
+            && self.group_call.stream.auto_joined != Some(id)
+        {
+            self.group_call.stream.auto_joined = Some(id);
+            self.join_active_group_call(cx);
+        }
+        let wanted = call
+            .map(|(id, stream, _, _)| (id, stream))
+            .filter(|(id, _)| self.group_call.window_closed_by_user != Some(*id));
+        self.prune_group_video_images(wanted.map(|(id, _)| id));
+        if wanted.is_none_or(|(_, stream)| !stream) {
+            self.group_call.stream.clear();
+        }
+        match (wanted, self.group_call.window) {
+            (Some((_, stream)), None) => self.open_group_call_window(stream, cx),
+            (None, Some(handle)) => {
+                self.group_call.window = None;
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            }
+            // Sized for the other layout: reopen.
+            (Some((_, stream)), Some(handle))
+                if stream != self.group_call.stream.window_is_stream =>
+            {
+                self.group_call.window = None;
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+                self.open_group_call_window(stream, cx);
+            }
+            _ => {}
+        }
+    }
+
+    fn open_group_call_window(&mut self, stream: bool, cx: &mut Context<Self>) {
+        if self.group_call.window_opening {
+            return;
+        }
+        self.group_call.window_opening = true;
+        let title: SharedString = if stream {
+            self.session()
+                .and_then(|s| s.calls.active_group_call.as_ref())
+                .and_then(|call| self.group_call_chat(call))
+                .map(|chat| chat.title.clone())
+                .unwrap_or_default()
+                .into()
+        } else {
+            "Video Chat".into()
+        };
+        let (window_size, min_size) = if stream {
+            (size(px(720.), px(580.)), size(px(240.), px(160.)))
+        } else {
+            (size(px(420.), px(640.)), size(px(380.), px(520.)))
+        };
+        let owner = cx.entity();
+        cx.defer(move |cx| {
+            let weak = owner.downgrade();
+            let render_owner = owner.clone();
+            let bounds = Bounds::centered(None, window_size, cx);
+            let result = cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    window_min_size: Some(min_size),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some(title),
+                        appears_transparent: true,
+                        traffic_light_position: Some(point(px(12.), px(12.))),
+                    }),
+                    focus: true,
+                    show: true,
+                    ..Default::default()
+                },
+                move |window, cx| {
+                    window.activate_window();
+                    window.on_window_should_close(cx, move |_, cx| {
+                        let _ = weak.update(cx, |app, cx| {
+                            app.group_call.window = None;
+                            app.group_call.window_closed_by_user = app
+                                .session()
+                                .and_then(|s| s.calls.active_group_call.as_ref())
+                                .map(|c| c.id);
+                            cx.notify();
+                        });
+                        true
+                    });
+                    let view = cx.new(|cx| {
+                        let activation_owner = render_owner.downgrade();
+                        GroupCallPanel {
+                            owner: render_owner.downgrade(),
+                            _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                            focus: cx.focus_handle(),
+                            // A key-up can't arrive once the window is in
+                            // the background: close the push-to-talk mic.
+                            _activation: cx.observe_window_activation(
+                                window,
+                                move |_, window, cx| {
+                                    if !window.is_window_active() {
+                                        let _ = activation_owner.update(cx, |app, cx| {
+                                            app.group_call_ptt_release_all(cx)
+                                        });
+                                    }
+                                },
+                            ),
+                            pinned_on_top: false,
+                        }
+                    });
+                    cx.new(|cx| Root::new(view, window, cx))
+                },
+            );
+            owner.update(cx, |app, cx| {
+                app.group_call.window_opening = false;
+                match result {
+                    Ok(handle) => {
+                        app.group_call.window = Some(handle.into());
+                        app.group_call.stream.window_is_stream = stream;
+                    }
+                    Err(_) => {
+                        app.connection.status_note = "Couldn't open the video chat window".into()
+                    }
+                }
+                cx.notify();
+            });
+        });
+    }
+
+    /// Bring the group call window back (the call bar).
+    pub(super) fn show_group_call_window(&mut self, cx: &mut Context<Self>) {
+        self.group_call.window_closed_by_user = None;
+        if let Some(handle) = self.group_call.window {
+            let _ = handle.update(cx, |_, window, _| window.activate_window());
+        }
+        cx.notify();
+    }
+
+    /// Whether the tracked call shows as a live stream.
+    pub(super) fn group_call_is_stream(&self) -> bool {
+        self.session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .is_some_and(uses_stream_layout)
+    }
+}
+
+pub(super) struct GroupCallPanel {
+    owner: WeakEntity<QuillApp>,
+    _observe: Subscription,
+    /// Takes keyboard focus so push-to-talk key events reach the window.
+    focus: FocusHandle,
+    _activation: Subscription,
+    /// The window stays above the others (tdesktop "pin on top").
+    pinned_on_top: bool,
+}
+
+impl Render for GroupCallPanel {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(owner) = self.owner.upgrade() else {
+            window.remove_window();
+            return div().into_any_element();
+        };
+        if self.focus.is_focused(window) || window.focused(cx).is_none() {
+            self.focus.focus(window, cx);
+        }
+        let fullscreen = window.is_fullscreen();
+        // tdesktop treats a maximized stream window as full screen too.
+        let stream_full = fullscreen || window.is_maximized();
+        let (body, animating, stream) = owner.update(cx, |app, cx| {
+            let call = app
+                .session()
+                .and_then(|s| s.calls.active_group_call.clone());
+            if let Some(call) = call.as_ref().filter(|call| uses_stream_layout(call)) {
+                let body = app.group_call_stream_body(call, stream_full, cx);
+                return (body.element, body.animating, true);
+            }
+            let wants_stage = fullscreen || app.demo_ui.group_stage;
+            let stage = call
+                .filter(|_| wants_stage)
+                .and_then(|call| app.group_call_stage(&call, cx));
+            let body = match stage {
+                Some(stage) => stage,
+                None => app.group_call_panel_body(cx),
+            };
+            (body, false, false)
+        });
+        if animating {
+            window.request_animation_frame();
+        }
+        let full = if stream { stream_full } else { fullscreen };
+        div()
+            .size_full()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                let key = event.keystroke.key.clone();
+                let exits = quill::calls::tile_pin::exits_fullscreen(&key);
+                if exits && owner.read(cx).group_call_is_stream() {
+                    // Esc leaves full screen or the maximized window.
+                    if window.is_fullscreen() || window.is_maximized() {
+                        leave_stream_full(window);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                    return;
+                }
+                if exits && window.is_fullscreen() {
+                    owner.update(cx, |app, cx| app.leave_group_call_stage(window, cx));
+                    cx.stop_propagation();
+                    return;
+                }
+                if owner.update(cx, |app, cx| app.group_call_key_down(&key, cx)) {
+                    cx.stop_propagation();
+                }
+            }))
+            .on_key_up(cx.listener(|this, event: &KeyUpEvent, _, cx| {
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                let key = event.keystroke.key.clone();
+                if owner.update(cx, |app, cx| app.group_call_key_up(&key, cx)) {
+                    cx.stop_propagation();
+                }
+            }))
+            .child(body)
+            // tdesktop's pin-on-top control; full screen there is no
+            // window chrome to pin.
+            .when(!full, |this| {
+                this.relative().child(
+                    super::window_control::pin_on_top_button(
+                        "group-call-pin-on-top",
+                        self.pinned_on_top,
+                        cx,
+                        move |this, pinned, window, cx| {
+                            this.pinned_on_top = pinned;
+                            // A live stream says so (tdesktop
+                            // `toggleWindowPinnedOnTop` for RTMP).
+                            if stream {
+                                let text = tr(if pinned {
+                                    keys::GROUP_CALL_PINNED_ON_TOP
+                                } else {
+                                    keys::GROUP_CALL_UNPINNED_ON_TOP
+                                });
+                                window.push_notification(
+                                    Notification::new().message(text.to_string()),
+                                    cx,
+                                );
+                            }
+                            cx.notify();
+                        },
+                    )
+                    .text_color(white()),
+                )
+            })
+            .into_any_element()
+    }
+}
