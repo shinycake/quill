@@ -27,6 +27,9 @@ jobs:
       # docs/contributing/structure.md: file size limit and shared files.
       - name: file size
         run: bash scripts/check-file-size.sh
+      # docs/decisions/language-packs.md: no new hard-coded English.
+      - name: interface strings
+        run: python3 scripts/check-lang.py
       - name: hotspots
         if: github.event_name == 'pull_request'
         run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}
