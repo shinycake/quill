@@ -19,3 +19,8 @@
 "lng_intro_qr_passkey" = "Log in using passkey";
 "lng_passkey_error_no_credentials" = "This security key has no passkey for your account.";
 "lng_passkey_error_login" = "Couldn't sign in with the security key.";
+"lng_passkey_cable_register_title" = "Add a passkey";
+"lng_passkey_cable_login_title" = "Sign in with a passkey";
+// Quill: the row Quill shows while the Windows Security dialog is open (tdesktop
+// blocks its window on the call instead).
+"qll_passkey_windows_waiting" = "Waiting for Windows Security…";

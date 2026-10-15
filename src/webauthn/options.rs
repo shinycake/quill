@@ -38,9 +38,12 @@ pub struct CreationOptions {
 pub enum UserVerification {
     Required,
     Discouraged,
-    /// `preferred`, or anything else (libfido2 `FIDO_OPT_OMIT`).
-    #[default]
     Preferred,
+    /// Missing or any other value. libfido2 omits `uv` for it as for
+    /// `preferred` (`FIDO_OPT_OMIT`); Windows asks for `DISCOURAGED`
+    /// (tdesktop `webauthn_win.cpp` `LoginViaNative`).
+    #[default]
+    Unspecified,
 }
 
 /// `PublicKeyCredentialRequestOptions` (`getAuthenticationPasskeyParameters`).
@@ -183,7 +186,8 @@ impl RequestOptions {
         let user_verification = match text(&key, "userVerification").as_str() {
             "required" => UserVerification::Required,
             "discouraged" => UserVerification::Discouraged,
-            _ => UserVerification::Preferred,
+            "preferred" => UserVerification::Preferred,
+            _ => UserVerification::Unspecified,
         };
         Some(Self {
             rp_id: text(&key, "rpId"),

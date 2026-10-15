@@ -75,7 +75,10 @@ fn parses_request_options_like_tdesktop() {
     assert_eq!(options.user_verification, UserVerification::Required);
     assert_eq!(options.timeout_ms, 60_000);
     let other = RequestOptions::parse(r#"{"publicKey":{"userVerification":"whatever"}}"#).unwrap();
-    assert_eq!(other.user_verification, UserVerification::Preferred);
+    assert_eq!(other.user_verification, UserVerification::Unspecified);
+    let preferred =
+        RequestOptions::parse(r#"{"publicKey":{"userVerification":"preferred"}}"#).unwrap();
+    assert_eq!(preferred.user_verification, UserVerification::Preferred);
     assert!(other.allow_credentials.is_empty());
     assert_eq!(RequestOptions::parse(r#"{"publicKey":[]}"#), None);
 }

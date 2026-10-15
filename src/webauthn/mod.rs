@@ -4,7 +4,9 @@
 //! TDLib hands over the WebAuthn options as JSON (`getPasskeyParameters`,
 //! `getAuthenticationPasskeyParameters`); Quill parses them the way Telegram
 //! Desktop does (`options`), builds `clientDataJSON` itself, runs the
-//! ceremony with a USB security key over CTAP2 (`ctap2`, `ceremony`) and
+//! ceremony with a USB security key over CTAP2 (`ctap2`, `ceremony`), or
+//! on Windows through the system's `webauthn.dll` (`windows`,
+//! `windows_plan`; docs/decisions/passkeys-windows.md), and
 //! returns the result to TDLib (`addLoginPasskey`,
 //! `checkAuthenticationPasskey`). UI-independent: the dialog is
 //! `ui::security::passkey_ceremony`.
@@ -13,6 +15,9 @@
 pub mod ceremony;
 pub mod ctap2;
 pub mod options;
+#[cfg(windows)]
+mod windows;
+pub mod windows_plan;
 
 pub use ceremony::{Ceremony, CeremonyEvent, DeviceSource};
 pub use options::{CreationOptions, RequestOptions, UserVerification};
@@ -70,9 +75,49 @@ pub enum CeremonyError {
 }
 
 /// Whether this build can run a ceremony: a USB security key over CTAP2
-/// on macOS and Linux. Windows goes through `webauthn.dll` (later work).
-pub const fn supported() -> bool {
-    cfg!(any(target_os = "macos", target_os = "linux"))
+/// on macOS and Linux; on Windows, `webauthn.dll` with an API version
+/// Quill can use (looked up once, never panics).
+pub fn supported() -> bool {
+    cfg!(any(target_os = "macos", target_os = "linux")) || system_dialog()
+}
+
+/// Whether ceremonies run in the system's own dialog (Windows Security
+/// through `webauthn.dll`) instead of Quill's sheets.
+pub fn system_dialog() -> bool {
+    #[cfg(windows)]
+    {
+        windows::available()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// The native handle of the Quill window a system dialog opens over (an
+/// `HWND` on Windows); 0 for none. Unused elsewhere.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ParentWindow(pub isize);
+
+/// Start creating a passkey: in the system dialog on Windows, else with a
+/// USB security key.
+pub fn start_register(options: CreationOptions, parent: ParentWindow) -> Ceremony {
+    #[cfg(windows)]
+    if windows::available() {
+        return windows::register(options, parent);
+    }
+    let _ = parent;
+    Ceremony::register(options, Box::new(ceremony::UsbKeys))
+}
+
+/// Start signing in with a passkey, the same way.
+pub fn start_login(options: RequestOptions, parent: ParentWindow) -> Ceremony {
+    #[cfg(windows)]
+    if windows::available() {
+        return windows::login(options, parent);
+    }
+    let _ = parent;
+    Ceremony::login(options, Box::new(ceremony::UsbKeys))
 }
 
 /// One line in the log for a failed step (tdesktop `LOG(("Passkey Error:

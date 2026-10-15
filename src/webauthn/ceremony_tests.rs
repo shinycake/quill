@@ -270,3 +270,46 @@ fn dropping_the_handle_cancels() {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+/// The Windows shape: one blocking call that only `on_cancel` ends
+/// (`WebAuthNCancelCurrentOperation`), its outcome the one event.
+#[test]
+fn a_system_ceremony_is_cancelled_through_its_hook() {
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    let stop_tx = Mutex::new(stop_tx);
+    let mut ceremony = Ceremony::spawn_system(
+        move || match stop_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(()) => CeremonyEvent::Failed(CeremonyError::Cancelled),
+            Err(_) => CeremonyEvent::Failed(CeremonyError::Other("never cancelled".into())),
+        },
+        Arc::new(move || {
+            if let Ok(tx) = stop_tx.lock() {
+                let _ = tx.send(());
+            }
+        }),
+    );
+    assert!(ceremony.poll().is_empty());
+    ceremony.cancel();
+    assert_eq!(
+        next(&mut ceremony),
+        CeremonyEvent::Failed(CeremonyError::Cancelled)
+    );
+}
+
+#[test]
+fn a_system_ceremony_reports_its_result() {
+    let mut ceremony = Ceremony::spawn_system(
+        || {
+            CeremonyEvent::Registered(Registration {
+                credential_id: vec![1],
+                attestation_object: vec![2],
+                client_data_json: "{}".into(),
+            })
+        },
+        Arc::new(|| {}),
+    );
+    assert!(matches!(next(&mut ceremony), CeremonyEvent::Registered(_)));
+    // Nothing more once it finished, and a late cancel is harmless.
+    ceremony.cancel();
+    assert!(ceremony.poll().is_empty());
+}

@@ -165,7 +165,7 @@ pub fn get_assertion(
         _ if token.is_some() => None,
         UserVerification::Required => Some(true),
         UserVerification::Discouraged => Some(false),
-        UserVerification::Preferred => None,
+        UserVerification::Preferred | UserVerification::Unspecified => None,
     };
     if let Some(uv) = uv {
         params.push(int_entry(

@@ -52,11 +52,16 @@ pub enum CeremonyEvent {
     Failed(CeremonyError),
 }
 
+/// What a backend runs when the dialog cancels, besides raising the
+/// cancel flag (Windows: `WebAuthNCancelCurrentOperation`).
+pub(super) type OnCancel = Arc<dyn Fn() + Send + Sync>;
+
 /// The dialog's handle on a running ceremony. Dropping it cancels.
 pub struct Ceremony {
     events: Receiver<CeremonyEvent>,
     pins: Sender<Zeroizing<String>>,
     cancel: Arc<AtomicBool>,
+    on_cancel: Option<OnCancel>,
     finished: bool,
 }
 
@@ -69,6 +74,24 @@ struct Link {
 
 impl Ceremony {
     fn spawn(work: impl FnOnce(&Link) -> CeremonyEvent + Send + 'static) -> Self {
+        Self::spawn_with(work, None)
+    }
+
+    /// A ceremony run by the system's own dialog (`webauthn.dll`): one
+    /// blocking call on the worker, no PIN round trips; `on_cancel` stops
+    /// the call.
+    #[cfg(any(windows, test))]
+    pub(super) fn spawn_system(
+        work: impl FnOnce() -> CeremonyEvent + Send + 'static,
+        on_cancel: OnCancel,
+    ) -> Self {
+        Self::spawn_with(move |_| work(), Some(on_cancel))
+    }
+
+    fn spawn_with(
+        work: impl FnOnce(&Link) -> CeremonyEvent + Send + 'static,
+        on_cancel: Option<OnCancel>,
+    ) -> Self {
         let (event_tx, events) = channel();
         let (pins, pin_rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -90,6 +113,7 @@ impl Ceremony {
             events,
             pins,
             cancel,
+            on_cancel,
             finished: false,
         }
     }
@@ -151,9 +175,13 @@ impl Ceremony {
         let _ = self.pins.send(pin);
     }
 
-    /// Stop: the key gets CTAPHID_CANCEL and the worker ends.
+    /// Stop: the key gets CTAPHID_CANCEL (Windows: the system dialog is
+    /// cancelled) and the worker ends.
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
+        if let Some(on_cancel) = &self.on_cancel {
+            on_cancel();
+        }
     }
 }
 

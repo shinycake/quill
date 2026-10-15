@@ -162,3 +162,36 @@ fn signing_in_or_cancelling_closes_the_dialog(cx: &mut TestAppContext) {
     assert_eq!(sheet(&app, vcx), None);
     assert_eq!(shown_dialog(&shell, vcx), None);
 }
+
+/// Windows: the sign-in waits on Windows Security; a failure toasts
+/// "Couldn't sign in with the security key." (tdesktop `ShowNativeError`).
+#[gpui_kit::test]
+fn a_windows_sign_in_waits_then_toasts_a_failure(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.show_login_passkey_sheet(CeremonySheet::System, cx)
+    });
+    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
+    vcx.update(|window, _| {
+        assert_eq!(
+            window.find("passkey-ceremony-about").label(),
+            Some("Waiting for Windows Security…")
+        );
+        assert!(window.find("passkey-ceremony-cancel").visible());
+    });
+    app.update_in(vcx, |app, _, cx| {
+        app.feed_ceremony_event(
+            CeremonyEvent::Failed(CeremonyError::Other("hr 0x80090011".into())),
+            cx,
+        );
+    });
+    assert_eq!(sheet(&app, vcx), None);
+    assert_eq!(shown_dialog(&shell, vcx), None);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.connection.status_note,
+            "Couldn't sign in with the security key."
+        );
+    });
+}
