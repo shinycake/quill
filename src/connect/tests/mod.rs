@@ -39,6 +39,7 @@ mod gift_value;
 mod giveaway_members;
 mod giveaways;
 mod grams;
+mod grams_withdraw;
 mod group_admin;
 mod group_calls;
 mod groups;

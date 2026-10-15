@@ -1,11 +1,14 @@
 //! Connect driver: Settings → My Grams (`crate::premium_hub::ton`). Sends
-//! only reads (`getTonTransactions`, `getGramRevenueStatistics`,
-//! `getUser`, `getChat`); nothing here moves Grams.
+//! reads (`getTonTransactions`, `getGramRevenueStatistics`, `getUser`,
+//! `getChat`, `getPasswordState`) and, only from Collect's password box
+//! with a typed password, `getGramWithdrawalUrl`, which returns Fragment's
+//! page. Nothing here moves Grams.
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::premium_hub::TxFilter;
 use crate::premium_hub::ton::{
-    GramsPurpose, PAGE, get_gram_revenue_statistics, get_ton_transactions, get_user,
+    GramWithdraw, GramsPurpose, PAGE, get_gram_revenue_statistics, get_gram_withdrawal_url,
+    get_ton_transactions, get_user,
 };
 use crate::state::{PaymentsPurpose, RequestPurpose};
 use crate::telegram::envelope::MessageSender;
@@ -167,5 +170,70 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// Collect in the withdrawal section (tdesktop `HandleWithdrawalButton`
+    /// for the user's Grams): reloads the password state and opens the
+    /// password box, or the security check when the known state has no
+    /// password. Sends no withdrawal request: that waits for the password.
+    /// Only while the screen is open with an available amount.
+    pub fn start_gram_withdrawal(&mut self) -> Result<(), ConnectSendError> {
+        let grams = &self.session.payments.hub.grams;
+        if !self.chats_path_active() || !grams.open || grams.withdrawable().is_none() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if grams.withdraw.is_some() {
+            return Ok(());
+        }
+        // tdesktop `cloudPassword().reload()`, then the state it has.
+        let auth = &self.session.auth_state;
+        let has_password = (!auth.password_state_loading)
+            .then(|| auth.password_state.as_ref().map(|s| s.has_password))
+            .flatten();
+        if !auth.password_state_loading {
+            let _ = self.refresh_password_state();
+        }
+        self.session.payments.hub.grams.withdraw = Some(GramWithdraw::open(has_password));
+        Ok(())
+    }
+
+    /// Submit in Collect's password box: `getGramWithdrawalUrl`. Only from
+    /// the idle box, with a typed password, while the screen is open. The
+    /// answer is a Fragment URL; nothing moves here. The password goes
+    /// into this one request and is not kept.
+    pub fn submit_gram_withdrawal(
+        &mut self,
+        password: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        let grams = &self.session.payments.hub.grams;
+        if password.is_empty()
+            || !grams.open
+            || !grams
+                .withdraw
+                .as_ref()
+                .is_some_and(GramWithdraw::can_submit)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let set = |driver: &mut Self, sending: bool| {
+            driver.session.payments.hub.grams.withdraw = Some(GramWithdraw::Password {
+                sending,
+                error: None,
+            });
+        };
+        set(self, true);
+        let sent = self.send_grams(GramsPurpose::WithdrawalUrl, |extra| {
+            get_gram_withdrawal_url(extra, password)
+        });
+        if sent.is_err() {
+            set(self, false);
+        }
+        sent
+    }
+
+    /// Cancel, Escape or a step's OK: close the box. A URL that still
+    /// arrives for it is dropped.
+    pub fn cancel_gram_withdrawal(&mut self) {
+        self.session.payments.hub.grams.withdraw = None;
     }
 }

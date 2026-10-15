@@ -1,7 +1,9 @@
 //! Reducer for Settings → My Grams (`crate::premium_hub::ton`). Answers
 //! land only when they match the request that asked for them; a stale
 //! page (the tab changed in flight) is dropped.
-use crate::premium_hub::ton::{GramsPayload, GramsPurpose};
+use super::gift_manage::{PasswordCheckFailure, password_check_failure};
+use crate::earn::EarnErrorHint;
+use crate::premium_hub::ton::{GramWithdraw, GramsPayload, GramsPurpose};
 use crate::state::*;
 
 impl Session {
@@ -63,6 +65,47 @@ impl Session {
                     grams.error = Some(error_reason(err));
                 }
             }
+            GramsPurpose::WithdrawalUrl => Self::apply_gram_withdrawal_error(grams, err),
         }
+    }
+
+    /// The `httpUrl` of `getGramWithdrawalUrl`: tdesktop opens it and
+    /// closes the password box. Only an answer to the box's own request
+    /// counts; after Cancel it is dropped.
+    pub(crate) fn apply_gram_withdrawal_url(&mut self, url: String) {
+        let grams = &mut self.payments.hub.grams;
+        if !grams.withdraw.as_ref().is_some_and(GramWithdraw::sending) {
+            return;
+        }
+        grams.withdraw = None;
+        if !url.is_empty() {
+            grams.withdraw_url = Some(url);
+        }
+    }
+
+    /// A fresh `passwordState` arrived: with no password, the idle
+    /// password box becomes the security check.
+    pub(crate) fn route_gram_withdrawal_on_password(&mut self, has_password: bool) {
+        if let Some(withdraw) = self.payments.hub.grams.withdraw.as_mut() {
+            withdraw.password_state_known(has_password);
+        }
+    }
+
+    /// tdesktop `HandleWithdrawalButton`'s `fail`: `AMOUNT_TOO_SMALL`
+    /// closes the box with a toast; the rest go through the password box's
+    /// shared mapping.
+    fn apply_gram_withdrawal_error(grams: &mut crate::premium_hub::ton::GramsHub, err: &TdError) {
+        if !grams.withdraw.as_ref().is_some_and(GramWithdraw::sending) {
+            return;
+        }
+        if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
+            grams.withdraw = None;
+            grams.withdraw_too_small = true;
+            return;
+        }
+        grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {
+            PasswordCheckFailure::Field(error) => GramWithdraw::idle(Some(error)),
+            PasswordCheckFailure::SecurityCheck { later } => GramWithdraw::SecurityCheck { later },
+        });
     }
 }

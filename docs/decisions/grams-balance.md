@@ -20,8 +20,28 @@ and the gift export flow are still to come, so the item is not ticked.
   "You can top-up your Grams balance via Fragment."
 - `BuildCurrencyWithdrawalSection`: only when the user's own Gram revenue
   (`EarnStatistics`) has an available balance: the amount, its `≈$` value,
-  a Withdraw button (`Api::HandleWithdrawalButton`: 2-step password, then
-  the Fragment URL) and "You can withdraw your Grams using Fragment."
+  the big balance button and "You can withdraw your Grams using Fragment."
+  The button's label is `lng_channel_earn_balance_button` ("Collect"), and
+  `withdrawalEnabled` is hard-coded to `true`: no minimum or disabled
+  state on the client.
+- `Api::HandleWithdrawalButton` (`api/api_earn.cpp`) with a
+  `currencyReceiver` (the user, not a channel):
+  - It reloads the cloud password state when the button is built. A click
+    sends `payments.getStarsRevenueWithdrawalUrl` (flag `ton`) with
+    `inputCheckPasswordEmpty`. `AMOUNT_TOO_SMALL` toasts "The amount is too
+    small to withdraw."; `PrePasswordErrorBox` opens the security check
+    ("You can withdraw only if you have:") for a missing or too fresh
+    password; anything else opens the password box.
+  - The password box (`PasscodeBox`) is titled
+    `lng_bot_earn_balance_password_title` ("Two-step verification") with
+    `lng_bot_earn_balance_password_description` ("Please enter your
+    password to collect.") and Submit. With the password the same request
+    returns a URL, which tdesktop opens (`UrlClickHandler::Open`) and closes
+    the box. `AMOUNT_TOO_SMALL` closes the box with the toast; the box's
+    own errors (wrong password, flood, ...) show under the field; anything
+    else is a toast.
+  - TDLib's version of the request is `getGramWithdrawalUrl password:string
+    = HttpUrl`.
 - History: nothing until there are rows; the All / Incoming / Outgoing
   tabs only when both directions exist, otherwise the "All Transactions"
   title. Rows (`CreditsRow`): refund / pending / failed as the second line
@@ -55,8 +75,56 @@ and the gift export flow are still to come, so the item is not ticked.
   text (`lng_credits_currency_summary_*`, `lng_credits_box_history_entry_*`,
   `lng_credits_summary_history_tab_*`, `lng_settings_currency`, …) and
   `qll_grams_*` for Stake, Payout, Transaction and the load error.
-- Demo `ready-grams` with `QUILL_DEMO_GRAMS=overview|receipt|settings`,
+- Demo `ready-grams` with
+  `QUILL_DEMO_GRAMS=overview|receipt|settings|withdraw|withdraw-check`,
   from the fixture `tests/fixtures/grams/ton_transactions.json`.
+
+### Collect (the withdrawal)
+
+- The withdrawal section has the Collect button (kit `Button`, primary,
+  full width) between the `≈$` line and the note, always enabled as in
+  tdesktop.
+- `src/premium_hub/ton_withdraw.rs`: `GramWithdraw` (the password box with
+  `sending` and the last error, or the security check) and the request
+  builder `get_gram_withdrawal_url`. `GramsHub` gains `withdraw`,
+  `withdraw_url` and `withdraw_too_small` (both one-shot, drained by the
+  UI).
+- Driver (`connect/grams.rs`):
+  - `start_gram_withdrawal` (Collect) only works while the screen is open
+    with an available amount. It reloads the password state and opens the
+    password box, or the security check when the known state has no
+    password. It sends no withdrawal request.
+  - `submit_gram_withdrawal` sends `getGramWithdrawalUrl` only from the
+    idle password box, with a typed password, while the screen is open. A
+    second Submit while the first is out is refused.
+  - `cancel_gram_withdrawal` closes the box; a URL that still arrives for
+    it is dropped. Closing the screen closes the box too.
+- Reducer (`state/domains/payments/grams.rs`): the `httpUrl` answer closes
+  the box and hands the URL to the UI. A fresh `passwordState` with no
+  password turns the idle box into the security check, as the gift export
+  does.
+- Errors: `AMOUNT_TOO_SMALL` closes the box and shows "The amount is too
+  small to withdraw." as a toast. Everything else goes through the mapping
+  the gift export already used, now shared as `password_check_failure`
+  (`state/domains/payments/gift_manage.rs`): wrong or changed password,
+  expired check and flood wait under the field; a missing or too fresh
+  password opens the security check; anything else shows under the field.
+- UI: the password box and the security check are now one shared piece,
+  `src/ui/fragment_password.rs` (`PasswordBox`, `SecurityCheck`,
+  `export_error_text`, `keep_password_field`, `recover_cloud_password`,
+  `open_fragment_url`). The gift export's views use it too, with the same
+  element ids and text as before. `src/ui/premium_ui/grams_withdraw.rs`
+  holds the button, the actions, the frame upkeep and the dialog (priority
+  3804, shown over the Grams screen, which shows again when it closes).
+- The URL opens only when it is `https` and `link_policy` says `Open`;
+  otherwise the status line says the page could not load.
+- The password is read from the masked field once on Submit, handed to
+  the one request and the field is emptied at once (Enter does the same).
+  The field is also emptied whenever the box is not on screen. It is never
+  kept in state or logged.
+- Strings: `lng_channel_earn_balance_button`,
+  `lng_bot_earn_balance_password_title` and
+  `lng_channel_earn_out_amount_too_small` with tdesktop's text.
 
 ## Deviations
 
@@ -66,10 +134,15 @@ and the gift export flow are still to come, so the item is not ticked.
   types: "Gram Top-Up" (`lng_credits_box_history_entry_currency_in`, which
   tdesktop defines) for a Fragment deposit, "Received Gift" for a gifted
   deposit, "Stake" / "Payout" / "Transaction" are Quill keys.
-- No Withdraw button in the withdrawal section yet: it needs the 2-step
-  password chain (`getGramWithdrawalUrl`), which the gift export PR builds
-  for `getUpgradedGiftWithdrawalUrl`; the section shows the amount, the
-  `≈$` value and the note. Withdrawal stays a follow-up of this item.
+- Collect sends no password-less first request. tdesktop's click sends
+  the withdrawal request with an empty password and routes on its error.
+  Quill sends nothing until the password is submitted (TDLib answers an
+  empty password locally anyway, see `gift-export.md`). The click routes
+  on the password state instead: no password set opens the security
+  check, otherwise the password box. A password that is too fresh is
+  only found once it is submitted, and then opens the security check.
+- Errors that tdesktop toasts while the box stays open show under the
+  field, as in the gift export, so they are not hidden behind the box.
 - Quill's Settings list is centered label buttons without icons, so the
   row shows "My Grams 💎 12.75" instead of an icon and a right-aligned
   label. The Gram sign is the 💎 glyph the Money page uses.
@@ -110,6 +183,33 @@ and the gift export flow are still to come, so the item is not ticked.
   "Deleted Account" once TDLib refuses it.
 - Screenshots of the screen, a receipt and Settings via `ready-grams`
   (the demo seeds the fixture's buyer, seller and channel names).
+- Collect, driver tests (`connect/tests/grams_withdraw.rs`, recording
+  sender, recorded JSON):
+  - Collect is refused before the screen has an available amount. It
+    sends only `getPasswordState`, never `getGramWithdrawalUrl`.
+  - A "no password" state, late or already known, opens the security
+    check.
+  - The request is refused before Collect, with an empty password, after
+    the screen closed and while one is out. Its exact shape is
+    `{"@type","@extra","password"}`.
+  - The URL answer is handed over, and dropped after Cancel.
+  - Every error lands as listed above, `AMOUNT_TOO_SMALL` included.
+  - The password never appears in the Grams state's `Debug`.
+- Unit tests (`ton_tests.rs`): the routing of `GramWithdraw` and the
+  request against `schema/td_api.tl`. The gift export's tests still pass
+  on the shared mapping and views.
+- UI tests (`premium_ui/grams_tests.rs`):
+  - The Collect button is in the section and opens the box over the
+    screen. The field takes the keyboard, and Enter submits and empties it.
+  - An error keeps the box open. Cancel closes it, empties the field and
+    shows the screen again. The security check also shows over the screen.
+  - A non-https URL is not opened; Fragment's https URL is opened once
+    (the test platform's `opened_url`).
+- Demo screenshots of the section with Collect, the password box and the
+  security check (`QUILL_DEMO_GRAMS=overview|withdraw|withdraw-check`),
+  checked by eye.
 
 Not verified: a live account's history (no Grams on the test account was
-used), Fragment opening in the browser (not clicked in tests).
+used), and the real `getGramWithdrawalUrl` answers and Fragment's
+withdrawal page. Nothing was run against a live account: no password was
+entered and no withdrawal URL was requested from Telegram.

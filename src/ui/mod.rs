@@ -233,6 +233,7 @@ mod folders;
 mod forum_extras;
 mod forward;
 mod fragment_link;
+mod fragment_password;
 mod gifs_ui;
 mod gift_auction_bid;
 mod gift_auction_ui;

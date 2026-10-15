@@ -33,6 +33,8 @@ impl QuillApp {
         self.gift_market_frame_upkeep(window, cx);
         // Gift transfer: Fragment's export page, the transferred toast.
         self.gift_transfer_frame_upkeep(window, cx);
+        // Grams: Fragment's withdrawal page, the password field.
+        self.grams_withdraw_frame_upkeep(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in

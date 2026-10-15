@@ -211,21 +211,12 @@ impl Session {
         if !manage.transfer().is_some_and(TransferPicker::exporting) {
             return;
         }
-        let failed = |error: ExportError| TransferStage::Password {
-            sending: false,
-            error: Some(error),
-        };
-        let stage = match (err.earn_hint, err.class) {
-            (Some(EarnErrorHint::PasswordInvalid | EarnErrorHint::SrpPasswordChanged), _) => {
-                failed(ExportError::WrongPassword)
-            }
-            (Some(EarnErrorHint::SrpIdInvalid), _) => failed(ExportError::ServerError),
-            (Some(EarnErrorHint::PasswordMissing), _) => {
-                TransferStage::SecurityCheck { later: false }
-            }
-            (Some(EarnErrorHint::TooFresh), _) => TransferStage::SecurityCheck { later: true },
-            (_, ErrorClass::Flood) => failed(ExportError::Flood),
-            _ => failed(ExportError::Other(reason.to_string())),
+        let stage = match password_check_failure(err, reason) {
+            PasswordCheckFailure::Field(error) => TransferStage::Password {
+                sending: false,
+                error: Some(error),
+            },
+            PasswordCheckFailure::SecurityCheck { later } => TransferStage::SecurityCheck { later },
         };
         if let Some(picker) = manage.transfer_mut() {
             picker.stage = stage;
@@ -258,5 +249,34 @@ impl Session {
                 self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
             }
         }
+    }
+}
+
+/// Where a failed request sent from a password box lands (gift export,
+/// Gram withdrawal).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PasswordCheckFailure {
+    /// Under the password field; the box stays open.
+    Field(ExportError),
+    /// tdesktop `PrePasswordErrorBox`: no password or a too fresh one.
+    SecurityCheck { later: bool },
+}
+
+/// tdesktop `PasscodeBox::handleCustomCheckError` and
+/// `PrePasswordErrorBox`: a wrong or changed password, an expired check or
+/// a flood wait show under the field; a missing or too fresh password
+/// opens the security check; anything else, which tdesktop toasts, also
+/// shows under the field so it is not hidden behind the box.
+pub(crate) fn password_check_failure(err: &TdError, reason: &str) -> PasswordCheckFailure {
+    use PasswordCheckFailure::{Field, SecurityCheck};
+    match (err.earn_hint, err.class) {
+        (Some(EarnErrorHint::PasswordInvalid | EarnErrorHint::SrpPasswordChanged), _) => {
+            Field(ExportError::WrongPassword)
+        }
+        (Some(EarnErrorHint::SrpIdInvalid), _) => Field(ExportError::ServerError),
+        (Some(EarnErrorHint::PasswordMissing), _) => SecurityCheck { later: false },
+        (Some(EarnErrorHint::TooFresh), _) => SecurityCheck { later: true },
+        (_, ErrorClass::Flood) => Field(ExportError::Flood),
+        _ => Field(ExportError::Other(reason.to_string())),
     }
 }

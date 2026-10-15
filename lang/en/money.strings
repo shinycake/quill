@@ -35,6 +35,7 @@
 "lng_bot_earn_balance_button_all" = "Withdraw all stars";
 "lng_bot_earn_balance_button_buy_ads" = "Buy Ads";
 "lng_bot_earn_balance_password_description" = "Please enter your password to collect.";
+"lng_bot_earn_balance_password_title" = "Two-step verification";
 "lng_bot_earn_chart_revenue" = "Revenue";
 "lng_bot_earn_out_ph" = "Enter amount to withdraw";
 "lng_bot_earn_out_ph_max" = "Enter amount to withdraw (max. {amount})";
@@ -48,6 +49,7 @@
 "lng_cancel" = "Cancel";
 "lng_caption_limit_title" = "Limit Reached";
 "lng_channel_earn_available" = "Rewards available for collection";
+"lng_channel_earn_balance_button" = "Collect";
 "lng_channel_earn_balance_title" = "Available reward";
 "lng_channel_earn_bot_learn_title" = "Earn From Your Bot";
 "lng_channel_earn_chart_revenue" = "Ad rewards";
@@ -72,6 +74,7 @@
 "lng_channel_earn_learn_title" = "Earn From Your Channel";
 "lng_channel_earn_off" = "Switch Off Ads";
 "lng_channel_earn_off_about" = "You will not be eligible for any rewards if you switch off ads.";
+"lng_channel_earn_out_amount_too_small" = "The amount is too small to withdraw.";
 "lng_channel_earn_out_check_password_about" = "You can withdraw only if you have:";
 "lng_channel_earn_overview_title" = "Rewards overview";
 "lng_channel_earn_reward" = "Rewards since last collection";

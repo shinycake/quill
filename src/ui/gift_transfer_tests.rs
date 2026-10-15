@@ -5,7 +5,8 @@
 //! connection, so neither Transfer nor Submit can send anything.
 use super::DEMO_GIFT;
 use crate::ui::app::QuillApp;
-use crate::ui::gift_transfer_view::{candidates, export_error_text, stage_view};
+use crate::ui::fragment_password::export_error_text;
+use crate::ui::gift_transfer_view::{candidates, stage_view};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
