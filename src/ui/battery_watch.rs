@@ -5,6 +5,10 @@
 //! The question can block (Linux runs `gdbus`), so it runs on the background
 //! executor. Only a change touches the UI: the flags and GPUI's reduced
 //! motion are updated and the windows redraw.
+//!
+//! Thermal pressure (macOS `NSProcessInfo.thermalState`; Linux and Windows
+//! always report Nominal) feeds the same force path. It is event-driven
+//! through `App::on_thermal_state_change`, with no polling.
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
@@ -20,6 +24,7 @@ pub(crate) fn watch(cx: &mut App) {
     if !first {
         return;
     }
+    watch_thermal(cx);
     cx.spawn(async move |cx| {
         loop {
             let answer = cx
@@ -32,6 +37,28 @@ pub(crate) fn watch(cx: &mut App) {
         }
     })
     .detach();
+}
+
+/// Follow the system thermal state: read it once, then on each change.
+fn watch_thermal(cx: &mut App) {
+    apply_thermal(cx);
+    cx.on_thermal_state_change(apply_thermal).detach();
+}
+
+fn apply_thermal(cx: &mut App) {
+    let thermal = match cx.thermal_state() {
+        ThermalState::Nominal => quill::battery_saving::Thermal::Nominal,
+        ThermalState::Fair => quill::battery_saving::Thermal::Fair,
+        ThermalState::Serious => quill::battery_saving::Thermal::Serious,
+        ThermalState::Critical => quill::battery_saving::Thermal::Critical,
+    };
+    let before = quill::battery_saving::forcing();
+    quill::battery_saving::set_thermal(thermal);
+    quill::battery_saving::apply();
+    if before != quill::battery_saving::forcing() {
+        cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+        cx.refresh_windows();
+    }
 }
 
 /// Take a probe answer in. Returns whether anything visible changed.

@@ -156,12 +156,13 @@ pub const fn reduce_motion(os_prefers: bool, bits: u32, force: bool) -> bool {
     os_prefers || is_on(bits, force, Flag::Animations)
 }
 
-const SLOTS: usize = 5;
+const SLOTS: usize = 6;
 pub(crate) const BITS: usize = 0;
 pub(crate) const FORCE_ALL: usize = 1;
 pub(crate) const OS_REDUCE_MOTION: usize = 2;
 pub(crate) const BATTERY_STATE: usize = 3;
 pub(crate) const BATTERY_IGNORE: usize = 4;
+pub(crate) const THERMAL_HOT: usize = 5;
 
 static GLOBAL: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
 static ISOLATED: AtomicBool = AtomicBool::new(false);
