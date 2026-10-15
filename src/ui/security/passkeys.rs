@@ -45,6 +45,10 @@ pub(in crate::ui) struct PasskeysUi {
     pub(in crate::ui) pin_input: Option<Entity<gpui_kit::component::input::InputState>>,
     /// Whether the ceremony ticker runs.
     pub(in crate::ui) ticking: bool,
+    /// Demos without a session: show "Log in using passkey".
+    pub(in crate::ui) demo_login_link: bool,
+    /// Demos without a session: the error line under the link.
+    pub(in crate::ui) demo_login_error: Option<String>,
 }
 
 impl QuillApp {

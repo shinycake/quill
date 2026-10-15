@@ -45,9 +45,30 @@ impl Session {
         }
     }
 
+    /// `getAuthenticationPasskeyParameters` answered: the sign-in ceremony
+    /// can start. tdesktop ignores options it cannot read; Quill says so
+    /// under the link.
+    pub(crate) fn apply_passkey_login_parameters(&mut self, json: &str) {
+        let login = &mut self.settings.passkeys.login;
+        if !login.accept_parameters(json, Instant::now()) {
+            crate::webauthn::log("unreadable sign-in options");
+            login.fail(crate::passkeys::login::UNREADABLE_OPTIONS.into());
+        }
+    }
+
     pub(crate) fn apply_passkeys_ok(&mut self, pending: Option<&PendingRequest>) {
-        if passkeys_purpose(pending.map(|p| p.purpose)) != Some(PasskeysPurpose::Remove) {
-            return;
+        match passkeys_purpose(pending.map(|p| p.purpose)) {
+            Some(PasskeysPurpose::Remove) => {}
+            Some(PasskeysPurpose::CheckLogin) => {
+                // The authorization state moves on by itself (to Ready, or
+                // to the password screen after SESSION_PASSWORD_NEEDED).
+                let login = &mut self.settings.passkeys.login;
+                login.checking = false;
+                login.pending = None;
+                login.error = None;
+                return;
+            }
+            _ => return,
         }
         let passkeys = &mut self.settings.passkeys;
         if let Some(id) = passkeys.removing.take() {
@@ -85,7 +106,24 @@ impl Session {
                 passkeys.error = Some(sessions_error_line("add the passkey", err));
                 true
             }
+            Some(PasskeysPurpose::LoginConfig) => true,
+            Some(PasskeysPurpose::LoginParameters | PasskeysPurpose::CheckLogin) => {
+                // tdesktop `FinishPasskeyLogin`'s fail: forget the options
+                // and show the server's error type.
+                crate::webauthn::log(&format!("sign-in step failed: {}", err.code));
+                passkeys.login.fail(login_error_text(err));
+                true
+            }
             None => false,
         }
     }
+}
+
+/// What the QR screen shows for a failed sign-in step: the server's error
+/// type, as tdesktop shows it, or the classified line when TDLib's message
+/// is not one.
+fn login_error_text(err: &TdError) -> String {
+    err.server_type
+        .clone()
+        .unwrap_or_else(|| sessions_error_line("sign in with the passkey", err))
 }
