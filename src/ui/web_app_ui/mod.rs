@@ -899,6 +899,11 @@ mod tests {
     use quill::web_app::theme::Rgb;
 
     #[test]
+    fn data_store_id_has_a_fixed_value() {
+        assert_eq!(data_store_id("acc", 42), "102fe38356554b7ac86a7cb24cb5087f");
+    }
+
+    #[test]
     fn data_store_ids_are_stable_per_account_and_bot() {
         assert_eq!(data_store_id("acc", 42), data_store_id("acc", 42));
         assert_ne!(data_store_id("acc", 42), data_store_id("acc", 43));

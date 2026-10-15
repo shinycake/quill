@@ -376,6 +376,18 @@ fn replace_and_launch(target: &Path, staged: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn digest_file_is_lowercase_hex_sha256() {
+        let path = std::env::temp_dir().join(format!("quill-digest-{}", std::process::id()));
+        fs::write(&path, b"abc").unwrap();
+        let digest = digest_file(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        assert_eq!(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
     fn update_verifies_version_and_rolls_back_when_launch_fails() {
         use std::os::unix::fs::PermissionsExt;
         let root = std::env::temp_dir().join(format!("quill-update-check-{}", std::process::id()));

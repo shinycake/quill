@@ -297,3 +297,54 @@ fn a_suspend_counts_as_idle_and_input_clears_it() {
     // Input resets idle (the in-window clock restarts from zero).
     assert_eq!(tracker.effective_idle(601_120, 0), 0);
 }
+
+// Fixed-input regression vectors: the on-disk format (`QPW1` + 24-byte nonce +
+// ciphertext||tag, account as AAD, PBKDF2-HMAC-SHA512 KEK) must never change
+// across RustCrypto upgrades. Values were computed with pbkdf2 0.12 and
+// chacha20poly1305 0.10.
+const FIXED_KEK_HEX: &str = "ec5fd8d6b9d65d7bab2c27c5bc09b28f25ed6c006183305304d726fffc259ef1";
+const FIXED_SEALED_HEX: &str = "515057314242424242424242424242424242424242424242424242425b3044e3188fd3d6e45dea7d2a498d6a3588c849ab6bd48673d49303db026a9e1612c75dfb212be24f43c5d8c5f7bf22";
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn fixed_master() -> MasterKey {
+    MasterKey(core::array::from_fn(|i| i as u8))
+}
+
+#[test]
+fn fixed_vector_kek_is_stable() {
+    let kek = derive_kek("correct horse battery", b"0123456789abcdef", 1000);
+    assert_eq!(hex(kek.as_bytes()), FIXED_KEK_HEX);
+}
+
+#[test]
+fn fixed_vector_sealed_blob_is_byte_identical() {
+    let key = fixed_master();
+    let nonce = [0x42u8; NONCE_LEN];
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
+    let body = cipher
+        .encrypt(
+            XNonce::from_slice(&nonce),
+            Payload {
+                msg: &[0xa5u8; 32],
+                aad: b"fixed-account",
+            },
+        )
+        .unwrap();
+    let mut sealed = WRAP_MAGIC.to_vec();
+    sealed.extend_from_slice(&nonce);
+    sealed.extend_from_slice(&body);
+    assert_eq!(hex(&sealed), FIXED_SEALED_HEX);
+}
+
+#[test]
+fn fixed_vector_sealed_blob_opens() {
+    let sealed: Vec<u8> = (0..FIXED_SEALED_HEX.len() / 2)
+        .map(|i| u8::from_str_radix(&FIXED_SEALED_HEX[i * 2..i * 2 + 2], 16).unwrap())
+        .collect();
+    let plain = open(&fixed_master(), b"fixed-account", &sealed).unwrap();
+    assert_eq!(plain, vec![0xa5u8; 32]);
+    assert!(open(&fixed_master(), b"other-account", &sealed).is_err());
+}

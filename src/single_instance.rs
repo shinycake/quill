@@ -284,7 +284,7 @@ pub fn acquire(
 
 #[cfg(test)]
 mod tests {
-    use super::{Acquired, Endpoint, acquire};
+    use super::{Acquired, Endpoint, acquire, root_digest};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -292,6 +292,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("quill-si-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn root_digest_is_stable() {
+        assert_eq!(root_digest(std::path::Path::new("abc")), "ba7816bf8f01cfea");
     }
 
     #[test]
