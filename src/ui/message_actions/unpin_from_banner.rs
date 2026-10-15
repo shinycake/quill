@@ -1,7 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
-use quill::lang::{keys, tr, trn};
+use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     pub(in crate::ui) fn unpin_from_banner(
@@ -67,7 +67,10 @@ impl QuillApp {
         } else if count == 2 {
             tr(keys::Q_CHAT_PREVIOUS_MESSAGE).to_string()
         } else {
-            format!("Pinned message #{}", count - index)
+            tr_with(
+                keys::Q_CHAT_PINNED_MESSAGE,
+                &[("count_index", &(count - index).to_string())],
+            )
         };
         let can_pin = session
             .chats

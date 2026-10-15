@@ -1,7 +1,7 @@
 //! Per-chat sound, preview and story settings, and the sound picker.
 
 use super::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Parity slice: current sound choice for a chat, for the notifications
@@ -267,7 +267,13 @@ impl QuillApp {
             None,
         ));
         for sound in saved_sounds {
-            let subtitle = format!("{} ({}s)", sound.title, sound.duration.max(0));
+            let subtitle = tr_with(
+                keys::Q_PREFS_S,
+                &[
+                    ("title", &sound.title.to_string()),
+                    ("max", &(sound.duration.max(0)).to_string()),
+                ],
+            );
             list = list.child(self.sound_picker_row(
                 cx,
                 target,

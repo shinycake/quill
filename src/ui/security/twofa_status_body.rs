@@ -1,7 +1,7 @@
 //! Methods moved out of `security.rs` to keep files under 1000 lines.
 
 use super::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Slice A2: the status screen — current state plus the pending
@@ -36,7 +36,10 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("Hint: {}", state.password_hint)),
+                    .child(tr_with(
+                        keys::Q_PREFS_HINT,
+                        &[("password_hint", &state.password_hint.to_string())],
+                    )),
             );
         }
         // B13: the server asked whether the user still remembers the
@@ -533,9 +536,12 @@ impl QuillApp {
         if !s.location.is_empty() {
             meta.push(s.location.clone());
         }
-        meta.push(format!(
-            "Last active: {}",
-            format_session_last_active(s.last_active_date)
+        meta.push(tr_with(
+            keys::Q_PREFS_LAST_ACTIVE,
+            &[(
+                "last_active_date",
+                &(format_session_last_active(s.last_active_date)).to_string(),
+            )],
         ));
         sub.push(meta.join(" · "));
         let title = if s.device_model.trim().is_empty() {
@@ -756,7 +762,10 @@ impl QuillApp {
                     if w.domain_name.trim().is_empty() {
                         tr(keys::Q_PREFS_DISCONNECT_THIS_WEBSITE).to_string()
                     } else {
-                        format!("Disconnect {}?", w.domain_name.trim())
+                        tr_with(
+                            keys::Q_PREFS_DISCONNECT,
+                            &[("trim", (w.domain_name.trim()))],
+                        )
                     }
                 })
                 .unwrap_or_else(|| tr(keys::Q_PREFS_DISCONNECT_THIS_WEBSITE).to_string()),
@@ -828,9 +837,12 @@ impl QuillApp {
         }
         let mut meta = Vec::new();
         if w.log_in_date > 0 {
-            meta.push(format!(
-                "Logged in: {}",
-                format_session_last_active(w.log_in_date)
+            meta.push(tr_with(
+                keys::Q_PREFS_LOGGED_IN_2,
+                &[(
+                    "log_in_date",
+                    &(format_session_last_active(w.log_in_date)).to_string(),
+                )],
             ));
         }
         if !w.ip_address.is_empty() {
@@ -839,9 +851,12 @@ impl QuillApp {
         if !w.location.is_empty() {
             meta.push(w.location.clone());
         }
-        meta.push(format!(
-            "Last active: {}",
-            format_session_last_active(w.last_active_date)
+        meta.push(tr_with(
+            keys::Q_PREFS_LAST_ACTIVE,
+            &[(
+                "last_active_date",
+                &(format_session_last_active(w.last_active_date)).to_string(),
+            )],
         ));
         sub.push(meta.join(" · "));
         let title = if w.domain_name.trim().is_empty() {

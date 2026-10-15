@@ -171,7 +171,7 @@ impl QuillApp {
                     ),
                     GroupConfirmAction::RemoveInstalledStickerSets => (
                         tr(keys::Q_PEOPLE_REMOVE_INSTALLED_STICKER_SETS).to_string(),
-                        format!("Remove all {} installed sticker sets? You can install them again later.",this.session().map(|s|s.stickers.stickers.sets.len()).unwrap_or(0)),
+                        tr_with(keys::Q_PEOPLE_REMOVE_ALL_INSTALLED_STICKER_SETS, &[("unwrap_or", &(this.session().map(|s|s.stickers.stickers.sets.len()).unwrap_or(0)).to_string())]),
                         tr(keys::Q_PEOPLE_REMOVE_ALL).to_string(),
                     ),
                     GroupConfirmAction::RemoveEmojiSet { .. } => (tr(keys::Q_PEOPLE_REMOVE_EMOJI_PACK).to_string(),tr(keys::Q_PEOPLE_REMOVE_THIS_EMOJI_PACK_YOU).to_string(),tr(keys::BOX_REMOVE).to_string()),
@@ -378,7 +378,10 @@ impl QuillApp {
             Some(ChannelMemberStatus::Administrator) => {
                 let can_post = chat.channel_admin_can_post();
                 let note = if can_post {
-                    format!("Posting as {}.", chat.title)
+                    tr_with(
+                        keys::Q_PEOPLE_POSTING_AS,
+                        &[("title", &chat.title.to_string())],
+                    )
                 } else {
                     tr(keys::Q_PEOPLE_YOU_ARE_AN_ADMIN_BUT).to_string()
                 };
@@ -407,7 +410,10 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("Posting as {}.", chat.title)),
+                            .child(tr_with(
+                                keys::Q_PEOPLE_POSTING_AS,
+                                &[("title", &chat.title.to_string())],
+                            )),
                     )
                     .into_any_element(),
             ),

@@ -17,7 +17,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
 use quill::telegram::envelope::ForumTopic;
@@ -423,7 +423,10 @@ impl QuillApp {
                     .aria_label(if sticker.emoji.is_empty() {
                         tr(keys::Q_PEOPLE_TOPIC_ICON).to_string()
                     } else {
-                        format!("Topic icon {}", sticker.emoji)
+                        tr_with(
+                            keys::Q_PEOPLE_TOPIC_ICON_2,
+                            &[("emoji", &sticker.emoji.to_string())],
+                        )
                     })
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {

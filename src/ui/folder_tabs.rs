@@ -14,7 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::folder_icons::{FolderTabsMode, FolderTabsView};
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::FolderBadge;
 
 /// Column width (tdesktop `windowFiltersWidth` is 72px; the topic column
@@ -115,7 +115,10 @@ fn folder_badge_pill(badge: FolderBadge, cx: &App) -> AnyElement {
         .text_color(text_on_fill())
         .text_size(px(10.))
         .font_semibold()
-        .aria_label(format!("{} unread chats", badge.count))
+        .aria_label(tr_with(
+            keys::Q_CHATLIST_UNREAD_CHATS_2,
+            &[("count", &badge.count.to_string())],
+        ))
         .child(label)
         .into_any_element()
 }

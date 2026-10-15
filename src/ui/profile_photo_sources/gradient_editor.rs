@@ -8,7 +8,7 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::profile_photo_gradient::{
     MAX_COLORS, format_hex, from_hsl, next_color, parse_hex, render_background, to_hsl,
 };
@@ -289,7 +289,10 @@ impl QuillApp {
                     .bg(rgb(*color))
                     .cursor_pointer()
                     .role(Role::Button)
-                    .aria_label(format!("Color {}", index + 1))
+                    .aria_label(tr_with(
+                        keys::Q_PEOPLE_COLOR,
+                        &[("index_1", &(index + 1).to_string())],
+                    ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.editor_select(index, window, cx);

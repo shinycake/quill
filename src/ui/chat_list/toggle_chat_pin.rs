@@ -200,12 +200,17 @@ impl QuillApp {
             PaneMode::Synthetic => {
                 list = list
                     .child(static_chat_row(
-                        "Ada Lovelace",
-                        "Mixed-height history",
+                        tr(keys::Q_CHATLIST_ADA_LOVELACE),
+                        tr(keys::Q_CHATLIST_MIXED_HEIGHT_HISTORY),
                         true,
                         cx,
                     ))
-                    .child(static_chat_row("RTL / emoji samples", "שלום 👨‍👩‍👧‍👦", false, cx));
+                    .child(static_chat_row(
+                        tr(keys::Q_CHATLIST_RTL_EMOJI_SAMPLES),
+                        "שלום 👨‍👩‍👧‍👦",
+                        false,
+                        cx,
+                    ));
             }
             PaneMode::Connecting => {
                 list = list.child(

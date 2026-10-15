@@ -49,13 +49,19 @@ impl QuillApp {
         Some(match notice {
             TwofaNotice::PasswordRemoved => tr(keys::CLOUD_PASSWORD_REMOVED).to_string(),
             TwofaNotice::PasswordRecovered => tr(keys::CLOUD_PASSWORD_UPDATED).to_string(),
-            TwofaNotice::ResetPending { reset_date } => format!(
-                "You can reset your password in {}.",
-                format_reset_duration(i64::from(reset_date) - now_secs())
+            TwofaNotice::ResetPending { reset_date } => tr_with(
+                keys::SETTINGS_CLOUD_PASSWORD_RESET_IN,
+                &[(
+                    "duration",
+                    &(format_reset_duration(i64::from(reset_date) - now_secs())).to_string(),
+                )],
             ),
-            TwofaNotice::ResetDeclined { retry_date } => format!(
-                "You recently requested a password reset that was canceled. Please wait {} before making a new request.",
-                format_reset_duration(i64::from(retry_date) - now_secs())
+            TwofaNotice::ResetDeclined { retry_date } => tr_with(
+                keys::CLOUD_PASSWORD_RESET_LATER,
+                &[(
+                    "duration",
+                    &(format_reset_duration(i64::from(retry_date) - now_secs())).to_string(),
+                )],
             ),
             TwofaNotice::ResetCancelled => tr(keys::Q_PREFS_PASSWORD_RESET_CANCELED).to_string(),
             TwofaNotice::LoginEmailChanged => {

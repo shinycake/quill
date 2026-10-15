@@ -356,7 +356,10 @@ impl QuillApp {
                     "archive".to_string(),
                 ),
                 ChatList::Folder(folder_id) => (
-                    format!("Add to {}", folder_name(*folder_id)),
+                    tr_with(
+                        keys::Q_CHATLIST_ADD_TO,
+                        &[("folder_name", &(folder_name(*folder_id)).to_string())],
+                    ),
                     format!("add-{folder_id}"),
                 ),
                 // Filtered above; kept for exhaustiveness.
@@ -401,7 +404,10 @@ impl QuillApp {
                 let folder_id = *folder_id;
                 panel = panel.child(
                     Button::new(format!("folder-menu-remove-{folder_id}"))
-                        .label(format!("Remove from {}", folder_name(folder_id)))
+                        .label(tr_with(
+                            keys::Q_CHATLIST_REMOVE_FROM,
+                            &[("folder_name", &(folder_name(folder_id)).to_string())],
+                        ))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.remove_open_chat_from_folder(chat_id, folder_id, cx);

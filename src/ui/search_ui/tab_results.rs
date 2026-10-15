@@ -4,7 +4,7 @@
 //! and the "Load more" row of a paged list.
 
 use super::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{SearchConfirm, SearchMediaRow, SharedMediaTab, media_month_starts};
 
 /// tdesktop `kCollapsedChannelsCount`.
@@ -329,7 +329,7 @@ impl QuillApp {
             let text = if query.trim().is_empty() {
                 tr(keys::Q_CHAT_NO_DOWNLOADS_YET).to_string()
             } else {
-                format!("No downloads match “{}”.", query.trim())
+                tr_with(keys::Q_CHAT_NO_DOWNLOADS_MATCH, &[("trim", (query.trim()))])
             };
             return block
                 .child(
@@ -376,7 +376,10 @@ impl QuillApp {
                 .gap_1()
                 .child(
                     Button::new("search-posts-paid-button")
-                        .label(format!("Search for \u{2605}{}", limits.star_count))
+                        .label(tr_with(
+                            keys::Q_CHAT_SEARCH_FOR_2,
+                            &[("star_count", &limits.star_count.to_string())],
+                        ))
                         .small()
                         .accessibility_label(tr(keys::Q_CHAT_SEARCH_PUBLIC_POSTS_WITH_STARS))
                         .on_click(cx.listener(|this, _, _, cx| {

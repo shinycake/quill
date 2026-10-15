@@ -768,7 +768,7 @@ impl QuillApp {
                 Err(err) => self.connection.status_note = format!("saved messages failed: {err:?}"),
             }
         } else {
-            self.connection.status_note = "no Saved Messages chat in this demo".into();
+            self.connection.status_note = tr(keys::Q_CHATLIST_NO_SAVED_MESSAGES_CHAT_IN).into();
         }
         cx.notify();
     }

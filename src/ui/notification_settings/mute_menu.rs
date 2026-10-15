@@ -88,19 +88,27 @@ impl QuillApp {
             .as_ref()
             .map(|s| s.settings.saved_notification_sounds.clone())
             .unwrap_or_default();
-        let status = format!(
-            "{} \u{b7} Sound: {} \u{b7} Previews: {}",
-            if muted {
-                if chat_settings.is_muted_forever() {
-                    tr(keys::Q_PREFS_MUTED_FOREVER)
-                } else {
-                    tr(keys::NOTIFICATION_EXCEPTIONS_MUTED)
-                }
-            } else {
-                tr(keys::NOTIFICATION_EXCEPTIONS_UNMUTED)
-            },
-            sound_label,
-            if preview_on { "on" } else { "off" },
+        let status = tr_with(
+            keys::Q_PREFS_SOUND_PREVIEWS,
+            &[
+                (
+                    "is_muted_forever",
+                    (if muted {
+                        if chat_settings.is_muted_forever() {
+                            tr(keys::Q_PREFS_MUTED_FOREVER)
+                        } else {
+                            tr(keys::NOTIFICATION_EXCEPTIONS_MUTED)
+                        }
+                    } else {
+                        tr(keys::NOTIFICATION_EXCEPTIONS_UNMUTED)
+                    }),
+                ),
+                ("sound_label", &sound_label.to_string()),
+                (
+                    "if_preview_on_on_else_off",
+                    (if preview_on { "on" } else { "off" }),
+                ),
+            ],
         );
 
         let presets = [
@@ -201,7 +209,10 @@ impl QuillApp {
                 .child(
                     Button::new("mute-custom-apply")
                         .small()
-                        .label(format!("Mute for {}", custom.label()))
+                        .label(tr_with(
+                            keys::Q_PREFS_MUTE_FOR_3,
+                            &[("label", &(custom.label()).to_string())],
+                        ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(chat_id) = open_chat {
                                 let mute_for = this.notify.mute_custom.mute_for();

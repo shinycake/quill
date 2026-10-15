@@ -399,6 +399,15 @@ the remaining message media labels are converted (`lang/en/misc.strings`).
 The Dock's playback items use tdesktop's `lng_mac_menu_player_*` keys.
 `main.rs`, audio playback and the HDR decoder are still English.
 
+## PR 10: text with positional arguments in the first areas
+
+The conversion tool had skipped every `format!` with positional `{}`
+arguments, so PRs 2 to 5 left those strings in English. Re-running the
+fixed tool converts them in the chat list, chat view, settings and people
+areas. Several strings still build English plurals by hand ("{n} files",
+"{len} messages"). Moving them to plural keys needs a change at each call
+site and is the next PR.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

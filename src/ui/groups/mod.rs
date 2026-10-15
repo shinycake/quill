@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, RequestId};
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::GroupsPurpose;
 use quill::state::{MemberListFilter, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
@@ -106,7 +106,13 @@ pub fn admin_rights_summary(rights: &ChatAdminRights) -> String {
     let enabled = (0..ADMIN_RIGHT_LABELS.len())
         .filter(|&i| admin_right_get(rights, i))
         .count();
-    format!("{enabled} of {} rights", ADMIN_RIGHT_LABELS.len())
+    tr_with(
+        keys::Q_PEOPLE_OF_RIGHTS,
+        &[
+            ("enabled", &enabled.to_string()),
+            ("len", &(ADMIN_RIGHT_LABELS.len()).to_string()),
+        ],
+    )
 }
 
 /// Slice G1: the 16 `chatPermissions` fields (schema 1.8.67, line 1070)
@@ -663,7 +669,10 @@ impl QuillApp {
                     Ok(()) => format!("{} created", kind.title()),
                     Err(_) => {
                         self.admin.create_chat_dialog = Some(dialog);
-                        format!("could not create {}", kind.title().to_lowercase())
+                        tr_with(
+                            keys::Q_PEOPLE_COULD_NOT_CREATE,
+                            &[("to_lowercase", &(kind.title().to_lowercase()).to_string())],
+                        )
                     }
                 }
             }

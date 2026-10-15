@@ -56,13 +56,19 @@ pub(super) fn shortcut_hint(shortcut: ComposerShortcut) -> String {
     if cfg!(target_os = "macos") {
         format!("{}⌘{key}", if spec.shift { "⇧" } else { "" })
     } else {
-        format!(
-            "Ctrl+{}{key}",
-            if spec.shift {
-                tr(keys::Q_CHAT_SHIFT)
-            } else {
-                ""
-            }
+        tr_with(
+            keys::Q_CHAT_CTRL,
+            &[
+                (
+                    "shift_tr",
+                    (if spec.shift {
+                        tr(keys::Q_CHAT_SHIFT)
+                    } else {
+                        ""
+                    }),
+                ),
+                ("key", &key.to_string()),
+            ],
         )
     }
 }
@@ -228,12 +234,10 @@ impl QuillApp {
                         .font_semibold()
                         .child(tr(keys::Q_CHAT_ADD_LINK)),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .opacity(0.7)
-                        .child(format!("Link for “{}”", dialog.selected)),
-                )
+                .child(div().text_xs().opacity(0.7).child(tr_with(
+                    keys::Q_CHAT_LINK_FOR,
+                    &[("selected", &dialog.selected.to_string())],
+                )))
                 .child(Textarea::new(&dialog.input).aria_label(tr(keys::Q_CHAT_LINK_ADDRESS)))
                 .child(
                     div()

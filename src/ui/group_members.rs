@@ -420,7 +420,10 @@ impl QuillApp {
                             .label(if add_selected.is_empty() {
                                 tr(keys::CHANNEL_ADD_MEMBERS).to_string()
                             } else {
-                                format!("Add {} member(s)", add_selected.len())
+                                tr_with(
+                                    keys::Q_PEOPLE_ADD_MEMBER_S,
+                                    &[("len", &(add_selected.len()).to_string())],
+                                )
                             })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_member_add(cx);

@@ -20,7 +20,7 @@ use gpui_kit::*;
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::poll::chat_allows_polls;
 use quill::state::{
@@ -204,7 +204,13 @@ impl QuillApp {
                 let mut line = format!("{} {noun}", compact_count(count));
                 // Groups: "N members, M online" (yourself alone isn't news).
                 if !ex.is_channel && ex.online_count > 1 {
-                    line.push_str(&format!(", {} online", compact_count(ex.online_count)));
+                    line.push_str(&tr_with(
+                        keys::Q_CHAT_ONLINE,
+                        &[(
+                            "online_count",
+                            &(compact_count(ex.online_count)).to_string(),
+                        )],
+                    ));
                 }
                 meta.push(line);
             }

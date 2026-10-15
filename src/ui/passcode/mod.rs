@@ -16,7 +16,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::AccountKey;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::passcode::{
     self, AUTOLOCK_PRESETS, IdleTracker, MasterKey, PasscodeError, global_unlock,
 };
@@ -195,12 +195,10 @@ fn account_keys(root: &std::path::Path) -> Vec<AccountKey> {
 
 fn error_text(err: &PasscodeError) -> String {
     match err {
-        PasscodeError::Flood { retry_in_ms } => {
-            format!(
-                "Too many tries. Try again in {} s.",
-                retry_in_ms.div_ceil(1000)
-            )
-        }
+        PasscodeError::Flood { retry_in_ms } => tr_with(
+            keys::Q_PREFS_TOO_MANY_TRIES_TRY_AGAIN,
+            &[("div_ceil", &(retry_in_ms.div_ceil(1000)).to_string())],
+        ),
         other => other.to_string(),
     }
 }

@@ -26,11 +26,13 @@
 "lng_filters_menu_add" = "Add to folder";
 "lng_formatting_code_language" = "Language for syntax highlighting.";
 "lng_formatting_date_title" = "Choose date and time";
+"lng_from_request_body" = "You received this message because you requested to join {name} on {date}.";
 "lng_from_request_title_group" = "Response to your join request";
 "lng_from_you" = "You";
 "lng_group_requests_none" = "There are no pending join requests.";
 "lng_group_requests_pending#one" = "{count} join request";
 "lng_group_requests_pending#other" = "{count} join requests";
+"lng_group_requests_status_date_time" = "requested to join {date} at {time}";
 "lng_group_requests_status_today" = "requested to join today at {time}";
 "lng_group_requests_status_yesterday" = "requested to join yesterday at {time}";
 "lng_in_dlg_video_message" = "Video message";
@@ -96,6 +98,7 @@
 "qll_chat_album_is_full" = "album is full ({before})";
 "qll_chat_all" = "All {total}";
 "qll_chat_all_chats" = "✓ All chats";
+"qll_chat_also_delete_for" = "Also delete for {first_name}";
 "qll_chat_archive" = "Archive";
 "qll_chat_attach" = "Attach";
 "qll_chat_attached_files_send_to_upload" = "Attached {count} files. Send to upload.";
@@ -195,6 +198,7 @@
 "qll_chat_create" = "✨ Create";
 "qll_chat_create_link" = "Create link";
 "qll_chat_create_poll" = "Create poll";
+"qll_chat_ctrl" = "Ctrl+{shift_tr}{key}";
 "qll_chat_ctrl_shift_v" = "Ctrl+Shift+V";
 "qll_chat_date" = "Date";
 "qll_chat_delete" = "Delete {count}";
@@ -223,6 +227,7 @@
 "qll_chat_divider" = "— Divider";
 "qll_chat_do_not_preview" = "Do Not Preview";
 "qll_chat_do_you_want_to_add" = "Do you want to add {count} requested people to the {place}?";
+"qll_chat_do_you_want_to_delete" = "Do you want to delete {len} messages?";
 "qll_chat_do_you_want_to_dismiss" = "Do you want to dismiss {count} join requests?";
 "qll_chat_download" = "Download";
 "qll_chat_download_selected" = "Download Selected";
@@ -268,6 +273,7 @@
 "qll_chat_insert_link" = "Insert link";
 "qll_chat_instant_view" = "Instant View";
 "qll_chat_is_an_admin_of_a" = "{name} is an admin of {title}, a {what} you requested to join.";
+"qll_chat_is_now_blocked" = "{user_id} is now blocked";
 "qll_chat_it_will_be_deleted_for" = "It will be deleted for everyone in this chat.";
 "qll_chat_it_will_be_deleted_for_2" = "It will be deleted for you only.";
 "qll_chat_italic" = "Italic";
@@ -280,6 +286,7 @@
 "qll_chat_jump_to_date" = "Jump to date";
 "qll_chat_keep_the_original_attachment" = "Keep the original attachment";
 "qll_chat_link_address" = "Link address";
+"qll_chat_link_for" = "Link for “{selected}”";
 "qll_chat_link_options" = "Link options";
 "qll_chat_link_preview" = "Link preview";
 "qll_chat_link_preview_settings" = "Link Preview Settings";
@@ -317,6 +324,7 @@
 "qll_chat_no_channels_match" = "No channels match “{query}”.";
 "qll_chat_no_chat_selected" = "No chat selected";
 "qll_chat_no_chats_or_messages_match" = "No chats or messages match “{query}”.";
+"qll_chat_no_downloads_match" = "No downloads match “{trim}”.";
 "qll_chat_no_downloads_yet" = "No downloads yet.";
 "qll_chat_no_link_preview" = "No link preview";
 "qll_chat_no_live_connection" = "no live connection";
@@ -333,6 +341,7 @@
 "qll_chat_nothing_matches" = "Nothing matches “{query}”.";
 "qll_chat_off" = "Off";
 "qll_chat_older_match" = "Older match";
+"qll_chat_online" = ", {online_count} online";
 "qll_chat_only_restrict_they_stay_and" = "Only restrict: they stay and can read, nothing else";
 "qll_chat_open_conversation_information" = "Open conversation information";
 "qll_chat_open_link" = "Open Link";
@@ -345,6 +354,7 @@
 "qll_chat_pick_a_date_and_time" = "pick a date and time";
 "qll_chat_pick_a_date_and_time_2" = "Pick a date and time";
 "qll_chat_pick_a_topic_from_the" = "Pick a topic from the list to read and write in it.";
+"qll_chat_pinned_message" = "Pinned message #{count_index}";
 "qll_chat_pinned_messages" = "Pinned messages";
 "qll_chat_poll_stats" = "Poll Stats";
 "qll_chat_polls_are_restricted_here" = "Polls are restricted here";
@@ -373,6 +383,7 @@
 "qll_chat_replace" = "Replace";
 "qll_chat_replace_attachment" = "Replace attachment";
 "qll_chat_replacement_cleared" = "replacement cleared";
+"qll_chat_replacing_attachment_with" = "Replacing attachment with {file_name}";
 "qll_chat_reply" = "Reply";
 "qll_chat_reply_cancelled" = "reply cancelled";
 "qll_chat_reply_with_timecode" = "Reply with timecode {timecode}";
@@ -393,6 +404,7 @@
 "qll_chat_rewrite_rich" = "✨ Rewrite rich";
 "qll_chat_rich_editor" = "⛶ Rich editor";
 "qll_chat_rich_editor_markup_becomes_blocks" = "rich editor — markup becomes blocks";
+"qll_chat_rich_message_too_long_max" = "rich message too long (max {quill_rich_rich_text_max_chars} characters)";
 "qll_chat_rich_messages_require_telegram_premium" = "Rich messages require Telegram Premium";
 "qll_chat_roll" = "Roll {emoji}";
 "qll_chat_save_selected" = "Save Selected";
@@ -410,6 +422,7 @@
 "qll_chat_search_closed" = "search closed";
 "qll_chat_search_failed" = "Search failed.";
 "qll_chat_search_for" = "Search for ★{paid_price}";
+"qll_chat_search_for_2" = "Search for ★{star_count}";
 "qll_chat_search_in_chat" = "search in chat";
 "qll_chat_search_in_chat_failed" = "Search in chat failed.";
 "qll_chat_search_join_requests" = "Search join requests";

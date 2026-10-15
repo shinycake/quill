@@ -3,7 +3,7 @@
 //! choices in a dialog next to the other profile settings rows.
 
 use super::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::profile_tab::ProfileTab;
 
 impl QuillApp {
@@ -20,7 +20,8 @@ impl QuillApp {
         };
         match live.driver.set_main_profile_tab(tab) {
             Ok(_) => {
-                self.connection.status_note = format!("Main tab: {}", tab.label());
+                self.connection.status_note =
+                    tr_with(keys::Q_PEOPLE_MAIN_TAB_2, &[("label", (tab.label()))]);
                 true
             }
             Err(_) => {

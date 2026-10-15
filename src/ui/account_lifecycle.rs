@@ -177,7 +177,13 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_AUTOMATICALLY_DELETE_NEW_MESSAGES_IN)),
             )
             .child(div().text_sm().child(match secs {
-                Some(secs) => format!("Currently: {}", quill::auto_delete::format_ttl(secs)),
+                Some(secs) => tr_with(
+                    keys::Q_PREFS_CURRENTLY,
+                    &[(
+                        "quill_auto_delete_format_ttl",
+                        &(quill::auto_delete::format_ttl(secs)).to_string(),
+                    )],
+                ),
                 None if busy => tr(keys::Q_PREFS_LOADING).to_string(),
                 None => tr(keys::Q_PREFS_NO_DATA_YET).to_string(),
             }));
@@ -371,7 +377,13 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_IF_YOU_DO_NOT_COME)),
             )
             .child(div().text_sm().child(match ttl_days {
-                Some(days) => format!("Currently: {}", format_account_ttl(days)),
+                Some(days) => tr_with(
+                    keys::Q_PREFS_CURRENTLY_2,
+                    &[(
+                        "format_account_ttl",
+                        &(format_account_ttl(days)).to_string(),
+                    )],
+                ),
                 None => {
                     if ttl_loading {
                         tr(keys::Q_PREFS_LOADING).to_string()
