@@ -400,6 +400,9 @@ impl Platform for ZoomPlatform {
     fn primary_display(&self) -> Option<Rc<dyn PlatformDisplay>> {
         self.inner.primary_display()
     }
+    fn on_displays_changed(&self, callback: Box<dyn FnMut()>) {
+        self.inner.on_displays_changed(callback)
+    }
     fn active_window(&self) -> Option<AnyWindowHandle> {
         self.inner.active_window()
     }
@@ -760,6 +763,9 @@ impl PlatformWindow for ZoomWindow {
     fn on_moved(&self, callback: Box<dyn FnMut()>) {
         self.inner.on_moved(callback)
     }
+    fn on_display_changed(&self, callback: Box<dyn FnMut()>) {
+        self.inner.on_display_changed(callback)
+    }
     fn on_should_close(&self, callback: Box<dyn FnMut() -> bool>) {
         self.inner.on_should_close(callback)
     }
@@ -1094,13 +1100,10 @@ mod tests {
     /// Every method of GPUI's `Platform` and `PlatformWindow` traits must be
     /// forwarded, defaulted ones included (a vendored platform may override
     /// a default, like `frame_waker`). After a GPUI upgrade, this compares
-    /// the trait source in the cargo registry with this file.
+    /// the vendored trait source with this file.
     #[test]
     fn forwards_every_trait_method() {
-        let Some(source) = gpui_platform_source() else {
-            eprintln!("gpui source not found in the cargo registry; skipping");
-            return;
-        };
+        let source = GPUI_PLATFORM_SOURCE;
         let this = include_str!("interface_zoom.rs");
         // Methods that only exist for GPUI's own tests, and the Wayland
         // layer-shell edge (behind a GPUI feature Quill doesn't enable).
@@ -1108,7 +1111,7 @@ mod tests {
         let mut missing = Vec::new();
         let names: Vec<String> = ["pub trait Platform: 'static", "pub trait PlatformWindow:"]
             .iter()
-            .flat_map(|t| trait_methods(&source, t))
+            .flat_map(|t| trait_methods(source, t))
             .collect();
         // Both traits together have well over a hundred methods; far fewer
         // means the parser lost track of the trait bodies.
@@ -1163,29 +1166,8 @@ mod tests {
             .collect()
     }
 
-    fn gpui_platform_source() -> Option<String> {
-        let lock = include_str!("../../Cargo.lock");
-        let version = lock
-            .split("[[package]]")
-            .find(|p| p.contains("name = \"gpui-pre\"\n"))?
-            .lines()
-            .find_map(|l| l.strip_prefix("version = \""))?
-            .trim_end_matches('"')
-            .to_string();
-        let home = std::env::var_os("CARGO_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")))?;
-        let registry = home.join("registry/src");
-        std::fs::read_dir(registry)
-            .ok()?
-            .flatten()
-            .find_map(|index| {
-                std::fs::read_to_string(
-                    index
-                        .path()
-                        .join(format!("gpui-pre-{version}/src/platform.rs")),
-                )
-                .ok()
-            })
-    }
+    /// GPUI's `platform.rs` as Quill builds it: gpui-pre is vendored
+    /// (`third_party/gpui-pre`, patched in through `[patch.crates-io]`), so
+    /// the cargo registry has no copy of it.
+    const GPUI_PLATFORM_SOURCE: &str = include_str!("../../third_party/gpui-pre/src/platform.rs");
 }

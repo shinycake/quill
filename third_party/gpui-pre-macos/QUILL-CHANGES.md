@@ -1,13 +1,14 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-macos 0.3.8 from crates.io (Apache-2.0,
+This directory is gpui-pre-macos 0.3.9 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's macOS platform, used through `[patch.crates-io]` in
-Quill's `Cargo.toml`. Commit `126460ec` added the unmodified registry copy
-(without the registry's `.cargo-ok`, `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff 126460ec -- third_party/gpui-pre-macos` shows every change. (The
-patch was first made on 0.3.7 and carried to 0.3.8 in
-`docs/decisions/codex-gpui-kit-0.7.1.md`; `step` keeps 0.3.8's frame
-signal timestamps.)
+Quill's `Cargo.toml`. Commit `d8857682` added the unmodified registry copy
+(without the registry's `.cargo-ok`, `.cargo_vcs_info.json`,
+`Cargo.toml.orig` and `Cargo.lock`), so
+`git diff d8857682 -- third_party/gpui-pre-macos` shows every change. (The
+patch was first made on 0.3.7, carried to 0.3.8 in
+`docs/decisions/codex-gpui-kit-0.7.1.md`, where `step` kept 0.3.8's frame
+signal timestamps, and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`.)
 
 The Quill project changed it in 2026 so an idle window stops costing CPU:
 
@@ -55,25 +56,22 @@ measurements: `docs/decisions/codex-idle-cpu.md`; notifications:
 The Quill project also changed it in 2026 to remove panics a user can hit
 (step 7 of `docs/decisions/no-crash-audit.md`):
 
-- `src/display.rs`: `MacDisplay::all` returns no displays, with an error in
-  the log, when `CGGetActiveDisplayList` fails (a display reconfiguration can
-  race it) instead of panicking.
-- `src/text_system.rs`: `layout_line` skips a CoreText glyph run without
-  attributes or a font, and a glyph whose string index is negative, instead
-  of unwrapping; the font is read with `CFDictionary::find`, since `get`
-  panics on a missing key.
 - `src/keyboard.rs`: the input source id and name are read with
   `to_string_lossy` (and as empty for a null pointer) instead of
   `to_str().unwrap()`.
 
-See `docs/decisions/gpui-fork-panics.md`.
+See `docs/decisions/gpui-fork-panics.md`. Two more fixes from that step
+are no longer here: 0.3.9 fixed `MacDisplay::all` upstream (it logs and
+returns no displays when `CGGetActiveDisplayList` fails), and it moved
+`text_system.rs` to gpui-pre-apple, which now carries the CoreText fix.
 
 The Quill project also changed it in 2026 so video can be paced on the
 display's real present time (`docs/decisions/video-player-core.md`):
 
 - `src/display_link.rs`: the output callback converts its `output_time`
   (the vsync the frame being requested is shown at) to an `Instant`, sampled
-  against the current host time like `frame_request_instant`, and keeps it
+  against the current host time like `frame_request_instant` (both through
+  `objc2_core_video::CVGetCurrentHostTime` since 0.3.9), and keeps it
   with its host ticks on the display's registry entry, together with the
   output time's refresh period (`videoRefreshPeriod / videoTimeScale`).
   `present_timing(display_id)` reads both under one registry lock.

@@ -152,8 +152,11 @@ impl QuillApp {
         let bits = self.appearance.power_saving;
         let muted = cx.theme().muted_foreground;
         let saver = quill::battery_saving::state();
-        let forced =
-            quill::battery_saving::forcing_for(saver, self.appearance.ignore_battery_saving);
+        let forced = quill::battery_saving::forcing_for(
+            saver,
+            quill::battery_saving::thermal_hot(),
+            self.appearance.ignore_battery_saving,
+        );
         let mut groups = div().flex().flex_col().gap_2();
         for group in &GROUPS {
             let mut block = div().flex().flex_col().gap_1();

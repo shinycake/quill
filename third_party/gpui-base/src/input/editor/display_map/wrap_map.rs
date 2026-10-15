@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
 // formatting spans in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 /// WrapMap: Soft-wrapping layer (Buffer → Wrap rows).
 ///

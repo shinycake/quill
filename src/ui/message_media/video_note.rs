@@ -68,9 +68,28 @@ pub(in crate::ui) fn video_note_attachment(
     // and the time ride with the video.
     let layered = inline.as_ref().is_some_and(|inline| inline.live.is_some());
     let ring_color = cx.theme().primary;
+    // The thumbnail, a circle of its own.
+    let still = move |path: PathBuf| {
+        img(path)
+            .id(("video-note-img", row_id))
+            .size_full()
+            .rounded_full()
+            .object_fit(ObjectFit::Cover)
+            .with_fallback(|| {
+                div()
+                    .size_full()
+                    .rounded_full()
+                    .bg(fill_muted())
+                    .into_any_element()
+            })
+            .into_any_element()
+    };
+    let diameter = px(VIDEO_NOTE_DIAMETER);
     let picture = if let Some(inline) = inline {
         let duration = duration.clone();
-        live_tile(inline, move |frame| {
+        // The thumbnail shows under the video until its first picture.
+        let under = visual.clone().filter(|_| !blocked).map(still);
+        live_tile(inline, under, (diameter, diameter), move |frame| {
             let video = round_inline_surface(frame);
             if !layered {
                 return video;
@@ -87,19 +106,7 @@ pub(in crate::ui) fn video_note_attachment(
         match visual.filter(|_| !blocked) {
             // GPUI clips overflow to rectangles: the image and the placeholder
             // round themselves.
-            Some(path) => img(path)
-                .id(("video-note-img", row_id))
-                .size_full()
-                .rounded_full()
-                .object_fit(ObjectFit::Cover)
-                .with_fallback(|| {
-                    div()
-                        .size_full()
-                        .rounded_full()
-                        .bg(fill_muted())
-                        .into_any_element()
-                })
-                .into_any_element(),
+            Some(path) => still(path),
             None => div()
                 .size_full()
                 .rounded_full()
@@ -135,7 +142,6 @@ pub(in crate::ui) fn video_note_attachment(
             if this
                 .playback
                 .inline_videos
-                .borrow_mut()
                 .toggle_sound(chat_id.0, message_id.0)
             {
                 if !viewed {
@@ -154,7 +160,6 @@ pub(in crate::ui) fn video_note_attachment(
             cx,
         );
     };
-    let diameter = px(VIDEO_NOTE_DIAMETER);
     div()
         .id(("video-note", row_id))
         .flex()

@@ -46,6 +46,7 @@ pub mod connect;
 pub mod connect_smoke;
 pub mod contacts_index;
 pub mod corner_buttons;
+pub mod cpal_stream;
 pub mod crash_log;
 pub mod credentials;
 pub mod data_settings;
@@ -276,13 +277,25 @@ pub enum SchemaError {
 fn hex_sha256(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn sha256_known_vector() {
+        assert_eq!(
+            hex_sha256(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn sha256_empty() {

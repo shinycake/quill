@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-macos 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
 // the display link stops while the window is idle, and the latest output (present) time per
 // display is kept for video pacing. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 //! Frame pacing for macOS windows, built on `CVDisplayLink`.
@@ -55,7 +55,6 @@
 
 use anyhow::Result;
 use core_graphics::display::CGDirectDisplayID;
-use core_video::host_time;
 use dispatch2::{
     _dispatch_source_type_data_add, DispatchObject, DispatchQueue, DispatchRetained, DispatchSource,
 };
@@ -144,9 +143,9 @@ unsafe extern "C" fn display_link_output_callback(
 ) -> i32 {
     let signal_at = PlatformFrameSignal::capture(|| {
         // Instant cannot be constructed from Mach ticks, so sample both clock domains.
-        let current_host_time = host_time::get_current_host_time();
+        let current_host_time = objc2_core_video::CVGetCurrentHostTime();
         let received_at = Instant::now();
-        let host_clock_frequency = host_time::get_host_clock_frequency();
+        let host_clock_frequency = objc2_core_video::CVGetHostClockFrequency();
         // SAFETY: CoreVideo owns this timestamp for the lifetime of the callback.
         let current_time = unsafe { current_time.as_ref() };
         frame_request_instant(
@@ -213,9 +212,9 @@ fn present_instant(timestamp: Option<&sys::CVTimeStamp>) -> Option<(Instant, u64
     let timestamp = timestamp.filter(|timestamp| {
         timestamp.version == 0 && timestamp.flags & sys::kCVTimeStampHostTimeValid != 0
     })?;
-    let now_host = host_time::get_current_host_time();
+    let now_host = objc2_core_video::CVGetCurrentHostTime();
     let now = Instant::now();
-    let frequency = host_time::get_host_clock_frequency();
+    let frequency = objc2_core_video::CVGetHostClockFrequency();
     if !frequency.is_finite() || frequency <= 0.0 {
         return None;
     }

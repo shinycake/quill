@@ -10,11 +10,14 @@ use super::{
     AudioFrame, CaptureError, CaptureEvent, FrameSink, MicCapture, MicControls, MicProcessor,
 };
 use crate::calls::engine::EXTERNAL_AUDIO_RATE;
+use crate::cpal_stream::{
+    RequestedInput, StreamErrors, device_name_matches, downmix_into, requested_input,
+};
 use crate::locks::LockExt;
 use crate::voice_opus::Resampler;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
-    FromSample, Sample, SampleFormat, SizedSample, Stream, StreamConfig, SupportedStreamConfig,
+    FromSample, I24, SampleFormat, SizedSample, Stream, StreamConfig, SupportedStreamConfig,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -23,7 +26,8 @@ use std::time::Instant;
 pub struct CpalMic {
     controls: Arc<MicControls>,
     stream: Option<Stream>,
-    /// Set by the stream's error callback (device unplugged, …).
+    /// Set by the stream's error callback when the stream ends (device
+    /// unplugged, …); dropouts and reroutes only go to the debug log.
     error: Arc<Mutex<Option<String>>>,
 }
 
@@ -64,22 +68,36 @@ impl MicCapture for CpalMic {
         };
         let on_error = {
             let error = self.error.clone();
-            move |err: cpal::StreamError| {
+            // An xrun or a reroute to the new default device leaves the
+            // stream running; failing the call microphone for one would
+            // stop it and reopen it seconds later.
+            let mut errors = StreamErrors::new("call microphone");
+            move |err: cpal::Error| {
+                let Some(err) = errors.check(err) else {
+                    return;
+                };
                 let text = format!("Microphone stopped: {err}");
                 error.lock_or_recover().get_or_insert_with(|| text.clone());
-                sink.push_event(CaptureEvent::Failed(CaptureError::Device(text)));
+                let failure = if crate::voice_input::is_permission_error(&err) {
+                    CaptureError::Permission(crate::voice_input::friendly_error(&err))
+                } else {
+                    CaptureError::Device(text)
+                };
+                sink.push_event(CaptureEvent::Failed(failure));
             }
         };
         let stream = match supported.sample_format() {
-            SampleFormat::F32 => build::<f32>(&device, &config, ctx, on_error),
-            SampleFormat::I16 => build::<i16>(&device, &config, ctx, on_error),
-            SampleFormat::U16 => build::<u16>(&device, &config, ctx, on_error),
-            SampleFormat::I32 => build::<i32>(&device, &config, ctx, on_error),
+            SampleFormat::F32 => build::<f32>(&device, config, ctx, on_error),
+            SampleFormat::F64 => build::<f64>(&device, config, ctx, on_error),
+            SampleFormat::I16 => build::<i16>(&device, config, ctx, on_error),
+            SampleFormat::U16 => build::<u16>(&device, config, ctx, on_error),
+            SampleFormat::I24 => build::<I24>(&device, config, ctx, on_error),
+            SampleFormat::I32 => build::<i32>(&device, config, ctx, on_error),
             other => Err(CaptureError::Unsupported(format!(
                 "Unsupported microphone format ({other:?})."
             ))),
         }?;
-        stream.play().map_err(|err| classify(&err.to_string()))?;
+        stream.play().map_err(|err| classify(&err))?;
         self.stream = Some(stream);
         Ok(())
     }
@@ -91,14 +109,16 @@ impl MicCapture for CpalMic {
 }
 
 /// The input device named `name` (as the engine lists it), or the system
-/// default when there is no name or no device by that name.
+/// default when there is no name, the name is the engine's default entry,
+/// or no device has that name. See [`requested_input`] for the names.
 fn find_input(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
     if let Some(name) = name
+        && let RequestedInput::Named(wanted) = requested_input(name, cfg!(windows))
         && let Ok(mut devices) = host.input_devices()
         && let Some(device) = devices.find(|device| {
             device
                 .description()
-                .is_ok_and(|description| description.name() == name)
+                .is_ok_and(|description| device_name_matches(wanted, description.name()))
         })
     {
         return Some(device);
@@ -111,7 +131,7 @@ fn find_input(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
 fn input_config(device: &cpal::Device) -> Result<SupportedStreamConfig, CaptureError> {
     let default = device
         .default_input_config()
-        .map_err(|err| classify(&err.to_string()))?;
+        .map_err(|err| classify(&err))?;
     if default.sample_rate() == EXTERNAL_AUDIO_RATE {
         return Ok(default);
     }
@@ -129,9 +149,9 @@ fn input_config(device: &cpal::Device) -> Result<SupportedStreamConfig, CaptureE
     Ok(at_48k.unwrap_or(default))
 }
 
-fn classify(raw: &str) -> CaptureError {
-    let text = crate::voice_input::friendly(raw);
-    if text.starts_with("Quill can't use the microphone") {
+fn classify(err: &cpal::Error) -> CaptureError {
+    let text = crate::voice_input::friendly_error(err);
+    if crate::voice_input::is_permission_error(err) {
         CaptureError::Permission(text)
     } else {
         CaptureError::Device(text)
@@ -147,9 +167,9 @@ struct Callback {
 
 fn build<T>(
     device: &cpal::Device,
-    config: &StreamConfig,
+    config: StreamConfig,
     ctx: Callback,
-    on_error: impl FnMut(cpal::StreamError) + Send + 'static,
+    on_error: impl FnMut(cpal::Error) + Send + 'static,
 ) -> Result<Stream, CaptureError>
 where
     T: SizedSample,
@@ -170,11 +190,7 @@ where
             config,
             move |data: &[T], _| {
                 let now = Instant::now();
-                mono.clear();
-                mono.extend(data.chunks(channels).map(|frame| {
-                    frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>()
-                        / frame.len().max(1) as f32
-                }));
+                downmix_into(data, channels, &mut mono);
                 resampled.clear();
                 resampler.process(&mono, &mut resampled);
                 processor.push(&resampled, &controls, now, |frame| sink.push(frame));
@@ -182,5 +198,5 @@ where
             on_error,
             None,
         )
-        .map_err(|err| classify(&err.to_string()))
+        .map_err(|err| classify(&err))
 }

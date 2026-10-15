@@ -13,7 +13,6 @@
 
 use super::transport::BackendStatus;
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
-use core_video::pixel_buffer::CVPixelBuffer as GpuiPixelBuffer;
 #[cfg(feature = "demo-capture")]
 use gpui_kit::RenderImage;
 use objc2::rc::Retained;
@@ -26,9 +25,11 @@ use objc2_av_foundation::{
     AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus, AVPlayerItemVideoOutput,
     NSValueAVFoundationExtensions,
 };
+use objc2_core_foundation::CFRetained;
 use objc2_core_media::CMTime;
 use objc2_core_video::{
-    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+    CVGetCurrentHostTime, CVGetHostClockFrequency, kCVPixelBufferPixelFormatTypeKey,
+    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
 use std::ops::Range;
@@ -178,8 +179,8 @@ impl AvPlayerBackend {
     /// The Mach host time at `at` (an `Instant` in the near future).
     fn host_ticks_at(at: Instant) -> i64 {
         let now = Instant::now();
-        let now_host = core_video::host_time::get_current_host_time();
-        let frequency = core_video::host_time::get_host_clock_frequency();
+        let now_host = CVGetCurrentHostTime();
+        let frequency = CVGetHostClockFrequency();
         let ahead = at.saturating_duration_since(now).as_secs_f64() * frequency;
         let ticks = now_host.saturating_add(if ahead.is_finite() { ahead as u64 } else { 0 });
         i64::try_from(ticks).unwrap_or(i64::MAX)
@@ -285,15 +286,15 @@ impl Backend for AvPlayerBackend {
             .unwrap_or_else(|| Self::host_ticks_at(present.at));
         // SAFETY: plain CMTime construction.
         let mut display_time = unsafe { CMTime::with_seconds(0.0, SEEK_TIMESCALE) };
-        // SAFETY: the copy returns a +1 CVPixelBuffer whose ownership moves
-        // into the core-video wrapper GPUI draws (`wrap_under_create_rule`);
-        // `display_time` outlives the call.
+        // SAFETY: plain queries of a live output on the main thread; the copy
+        // returns an owned (+1) CVPixelBuffer, and `display_time` outlives the
+        // call.
         let (item_time, buffer) = unsafe {
             let item_time = self.output.itemTimeForMachAbsoluteTime(ticks);
             let buffer = if self.output.hasNewPixelBufferForItemTime(item_time) {
                 self.output
                     .copyPixelBufferForItemTime_itemTimeForDisplay(item_time, &mut display_time)
-                    .map(|buffer| core_foundation_wrap(Retained::into_raw(buffer).cast()))
+                    .map(CFRetained::from)
             } else {
                 None
             };
@@ -364,16 +365,6 @@ impl Drop for AvPlayerBackend {
         // the player is dropped where it lives).
         unsafe { self.player.pause() };
     }
-}
-
-/// Take ownership of a +1 `CVPixelBufferRef` as GPUI's wrapper type.
-///
-/// # Safety
-/// `raw` must be an owned (+1) `CVPixelBufferRef`.
-unsafe fn core_foundation_wrap(raw: *mut std::ffi::c_void) -> GpuiPixelBuffer {
-    use core_foundation::base::TCFType;
-    // SAFETY: the caller passes an owned (+1) CVPixelBufferRef.
-    unsafe { GpuiPixelBuffer::wrap_under_create_rule(raw.cast()) }
 }
 
 /// The picture at `at` seconds (upright) and the clip's duration, decoded

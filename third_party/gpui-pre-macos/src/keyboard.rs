@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-macos 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
 // input source ids and names are read lossily instead of panicking.
 // See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 use collections::HashMap;

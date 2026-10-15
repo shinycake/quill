@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-linux 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-linux 0.3.9 (Apache-2.0):
 // the refresh timer parks while the window is idle, and a bad
 // GPUI_X11_SCALE_FACTOR is ignored with a warning instead of panicking.
 // See third_party/gpui-pre-linux/QUILL-CHANGES.md.

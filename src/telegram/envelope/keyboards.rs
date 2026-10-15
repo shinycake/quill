@@ -129,7 +129,9 @@ pub enum KeyboardButtonType {
     RequestUsers(RequestUsersSpec),
     /// `keyboardButtonTypeRequestChat` (schema 1.8.67, line 3751).
     RequestChat(RequestChatSpec),
-    RequestManagedBot,
+    /// `keyboardButtonTypeRequestManagedBot` (schema td_api.tl, TDLib
+    /// a94b83d): create a bot managed by the keyboard's bot.
+    RequestManagedBot(RequestManagedBotSpec),
     WebApp {
         url: String,
     },
@@ -146,6 +148,14 @@ pub struct RequestUsersSpec {
     pub user_is_bot: Option<bool>,
     pub user_is_premium: Option<bool>,
     pub max_quantity: i32,
+}
+
+/// `keyboardButtonTypeRequestManagedBot`: the prefill for the create dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestManagedBotSpec {
+    pub id: i32,
+    pub suggested_name: String,
+    pub suggested_username: String,
 }
 
 /// `keyboardButtonTypeRequestChat`: what chat the bot asks the user to share.
@@ -331,7 +341,24 @@ pub(crate) fn parse_keyboard_button(value: &Value) -> KeyboardButton {
                 bot_is_member: flag("bot_is_member").unwrap_or(false),
             })
         }
-        "keyboardButtonTypeRequestManagedBot" => KeyboardButtonType::RequestManagedBot,
+        "keyboardButtonTypeRequestManagedBot" => {
+            let t = value.get("type");
+            let text = |name: &str| {
+                t.and_then(|t| t.get(name))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            };
+            KeyboardButtonType::RequestManagedBot(RequestManagedBotSpec {
+                id: t
+                    .and_then(|t| t.get("id"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .sat_i32(),
+                suggested_name: text("suggested_name"),
+                suggested_username: text("suggested_username"),
+            })
+        }
         "keyboardButtonTypeWebApp" => KeyboardButtonType::WebApp {
             url: value
                 .get("type")

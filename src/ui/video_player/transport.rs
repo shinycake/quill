@@ -91,6 +91,12 @@ pub(crate) enum Command {
     Loop,
 }
 
+/// A looping player starts over this close to the end (seconds), without
+/// waiting for the backend to stop there: the seek back then overlaps the
+/// last picture instead of following it. The old inline player looped the
+/// same way (a 1 s round video loops with a 100 to 130 ms seam otherwise).
+const LOOP_LEAD: f64 = 0.05;
+
 /// The transport's state machine.
 #[derive(Clone, Debug)]
 pub(crate) struct TransportMachine {
@@ -98,6 +104,9 @@ pub(crate) struct TransportMachine {
     /// The user wants it playing (survives Opening and Buffering).
     wants_play: bool,
     looping: bool,
+    /// A loop was sent ahead of the end and the backend still reports a
+    /// position near it (its seek has not landed yet).
+    loop_sent: bool,
     position: f64,
     pulled_at: Instant,
     duration: Option<f64>,
@@ -115,6 +124,7 @@ impl TransportMachine {
             state: PlayState::Opening,
             wants_play: false,
             looping: false,
+            loop_sent: false,
             position: 0.0,
             pulled_at: now,
             duration: None,
@@ -278,15 +288,31 @@ impl TransportMachine {
             self.state = PlayState::Ready;
             return None;
         }
-        if status.position.is_finite() {
+        // Only the backend's own duration (`self.duration`), never the
+        // message's whole-second label: a 12.4 s file labelled 12 s would
+        // otherwise loop 0.45 s early.
+        let near_end = self.looping
+            && self
+                .duration
+                .is_some_and(|total| status.position >= total - LOOP_LEAD);
+        if !near_end {
+            self.loop_sent = false;
+        }
+        // While a loop's seek has not landed the backend still reports the
+        // end: keep the position at the start (no flash of the end in the
+        // remaining-time pill).
+        if status.position.is_finite() && !self.loop_sent {
             self.position = status.position.max(0.0);
             self.pulled_at = now;
         }
+        let loops_early = near_end && !self.loop_sent;
+        let ended = status.at_end && !self.loop_sent;
         match self.state {
-            PlayState::Playing | PlayState::Buffering if status.at_end => {
+            PlayState::Playing | PlayState::Buffering if ended || loops_early => {
                 if self.looping {
                     self.position = 0.0;
                     self.state = PlayState::Playing;
+                    self.loop_sent = true;
                     return Some(Command::Loop);
                 }
                 self.state = PlayState::Ended;
@@ -403,6 +429,69 @@ mod tests {
         assert_eq!(machine.observe(&end, t0), Some(Command::Loop));
         assert_eq!(machine.state(), PlayState::Playing);
         assert_eq!(machine.snapshot(t0).position, 0.0);
+    }
+
+    #[test]
+    fn a_looping_player_starts_over_just_before_the_end_once() {
+        let t0 = Instant::now();
+        let mut machine = TransportMachine::new(None, t0);
+        machine.set_looping(true);
+        machine.play(t0);
+        machine.observe(&ready(0.0), t0);
+        assert_eq!(machine.observe(&ready(9.9), t0), None);
+        assert_eq!(machine.observe(&ready(9.97), t0), Some(Command::Loop));
+        // The seek has not landed: no second loop while it is still there.
+        assert_eq!(machine.observe(&ready(9.98), t0), None);
+        assert_eq!(machine.observe(&ready(0.02), t0), None);
+        assert_eq!(machine.observe(&ready(9.96), t0), Some(Command::Loop));
+        // A clip that is not looping plays its last picture to the end.
+        let mut once = TransportMachine::new(None, t0);
+        once.play(t0);
+        once.observe(&ready(0.0), t0);
+        assert_eq!(once.observe(&ready(9.99), t0), None);
+        assert_eq!(once.state(), PlayState::Playing);
+    }
+
+    #[test]
+    fn an_early_loop_waits_for_its_seek_and_keeps_the_position_at_the_start() {
+        let t0 = Instant::now();
+        let mut machine = TransportMachine::new(None, t0);
+        machine.set_looping(true);
+        machine.play(t0);
+        machine.observe(&ready(0.0), t0);
+        assert_eq!(machine.observe(&ready(9.97), t0), Some(Command::Loop));
+        // The backend reaches the end before the seek lands: no second loop,
+        // and the position stays at the start.
+        let end = BackendStatus {
+            at_end: true,
+            ..ready(10.0)
+        };
+        assert_eq!(machine.observe(&end, t0), None);
+        assert_eq!(machine.snapshot(t0).position, 0.0);
+        assert_eq!(machine.state(), PlayState::Playing);
+        // Landed: the position follows the backend again.
+        assert_eq!(machine.observe(&ready(0.1), t0), None);
+        assert_eq!(machine.snapshot(t0).position, 0.1);
+    }
+
+    #[test]
+    fn the_message_duration_never_loops_early() {
+        let t0 = Instant::now();
+        // The message says 9 s; the backend has not reported its own yet.
+        let mut machine = TransportMachine::new(Some(9.0), t0);
+        machine.set_looping(true);
+        machine.play(t0);
+        let unknown = BackendStatus {
+            ready: true,
+            ..BackendStatus::default()
+        };
+        machine.observe(&unknown, t0);
+        let late = BackendStatus {
+            position: 8.97,
+            ..unknown.clone()
+        };
+        assert_eq!(machine.observe(&late, t0), None);
+        assert_eq!(machine.state(), PlayState::Playing);
     }
 
     #[test]

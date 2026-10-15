@@ -88,59 +88,53 @@ pub(super) fn turn_render_image(
 /// other format or when the new buffer can't be made.
 #[cfg(target_os = "macos")]
 pub(super) fn turn_surface(
-    src: &core_video::pixel_buffer::CVPixelBuffer,
+    src: &objc2_core_video::CVPixelBuffer,
     turns: u8,
     mirror: bool,
-) -> Option<core_video::pixel_buffer::CVPixelBuffer> {
-    use core_foundation::base::{CFType, TCFType};
-    use core_foundation::boolean::CFBoolean;
-    use core_foundation::dictionary::CFDictionary;
-    use core_foundation::string::CFString;
-    use core_video::pixel_buffer::{CVPixelBuffer, CVPixelBufferKeys, kCVPixelBufferLock_ReadOnly};
+) -> Option<objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>> {
+    use objc2_core_video::{
+        CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
+        CVPixelBufferGetHeight, CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType,
+        CVPixelBufferGetPlaneCount, CVPixelBufferGetWidth, CVPixelBufferGetWidthOfPlane,
+        CVPixelBufferLockFlags, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+    };
 
-    if src.get_pixel_format() != objc2_core_video::kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-        || src.get_plane_count() != 2
+    let format = CVPixelBufferGetPixelFormatType(src);
+    if format != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        || CVPixelBufferGetPlaneCount(src) != 2
     {
         return None;
     }
-    let (w, h) = (src.get_width(), src.get_height());
+    let (w, h) = (CVPixelBufferGetWidth(src), CVPixelBufferGetHeight(src));
     let (dw, dh) = turned_size(w, h, turns);
-    let surface_props = CFDictionary::<CFString, CFType>::from_CFType_pairs(&[]);
-    let options = CFDictionary::<CFString, CFType>::from_CFType_pairs(&[
-        (
-            CFString::from(CVPixelBufferKeys::IOSurfaceProperties),
-            surface_props.as_CFType(),
-        ),
-        (
-            CFString::from(CVPixelBufferKeys::MetalCompatibility),
-            CFBoolean::true_value().as_CFType(),
-        ),
-    ]);
-    let dst = CVPixelBuffer::new(src.get_pixel_format(), dw, dh, Some(&options)).ok()?;
-    if src.lock_base_address(kCVPixelBufferLock_ReadOnly) != 0 {
+    let dst = new_pixel_buffer(format, dw, dh)?;
+    if !lock(src, CVPixelBufferLockFlags::ReadOnly) {
         return None;
     }
-    if dst.lock_base_address(0) != 0 {
-        src.unlock_base_address(kCVPixelBufferLock_ReadOnly);
+    if !lock(&dst, CVPixelBufferLockFlags::empty()) {
+        unlock(src, CVPixelBufferLockFlags::ReadOnly);
         return None;
     }
-    // SAFETY: both buffers are locked, so each plane's base address is
-    // valid for `bytes_per_row * height` bytes, and the planes are not
-    // shared between the two buffers. Chroma is read as `[u8; 2]` pairs,
-    // which have no alignment need.
-    unsafe {
-        for plane in 0..2 {
-            let (pw, ph) = (
-                src.get_width_of_plane(plane),
-                src.get_height_of_plane(plane),
-            );
-            let (tw, th) = turned_size(pw, ph, turns);
-            let (src_stride, dst_stride) = (
-                src.get_bytes_per_row_of_plane(plane),
-                dst.get_bytes_per_row_of_plane(plane),
-            );
-            let src_base = src.get_base_address_of_plane(plane).cast::<u8>();
-            let dst_base = dst.get_base_address_of_plane(plane).cast::<u8>();
+    for plane in 0..2 {
+        let (pw, ph) = (
+            CVPixelBufferGetWidthOfPlane(src, plane),
+            CVPixelBufferGetHeightOfPlane(src, plane),
+        );
+        let (tw, th) = turned_size(pw, ph, turns);
+        let (src_stride, dst_stride) = (
+            CVPixelBufferGetBytesPerRowOfPlane(src, plane),
+            CVPixelBufferGetBytesPerRowOfPlane(&dst, plane),
+        );
+        let src_base = CVPixelBufferGetBaseAddressOfPlane(src, plane).cast::<u8>();
+        let dst_base = CVPixelBufferGetBaseAddressOfPlane(&dst, plane).cast::<u8>();
+        if src_base.is_null() || dst_base.is_null() {
+            continue;
+        }
+        // SAFETY: both buffers are locked, so each plane's base address is
+        // valid for `bytes_per_row * height` bytes, and the planes are not
+        // shared between the two buffers. Chroma is read as `[u8; 2]`
+        // pairs, which have no alignment need.
+        unsafe {
             if plane == 0 {
                 let from = std::slice::from_raw_parts(src_base, src_stride * ph);
                 let to = std::slice::from_raw_parts_mut(dst_base, dst_stride * th);
@@ -160,12 +154,79 @@ pub(super) fn turn_surface(
                     mirror,
                 );
             }
-            debug_assert!(tw <= dst_stride);
         }
+        debug_assert!(tw <= dst_stride);
     }
-    dst.unlock_base_address(0);
-    src.unlock_base_address(kCVPixelBufferLock_ReadOnly);
+    unlock(&dst, CVPixelBufferLockFlags::empty());
+    unlock(src, CVPixelBufferLockFlags::ReadOnly);
     Some(dst)
+}
+
+/// A new IOSurface-backed, Metal-compatible pixel buffer (what GPUI's
+/// surface path draws), or `None` when CoreVideo can't make one.
+#[cfg(target_os = "macos")]
+fn new_pixel_buffer(
+    format: u32,
+    width: usize,
+    height: usize,
+) -> Option<objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>> {
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType};
+    use objc2_core_video::{
+        CVPixelBufferCreate, kCVPixelBufferIOSurfacePropertiesKey,
+        kCVPixelBufferMetalCompatibilityKey, kCVReturnSuccess,
+    };
+
+    let surface_props = CFDictionary::<CFType, CFType>::empty();
+    // SAFETY: CoreVideo's attribute keys are constant CFStrings that live
+    // for the whole process.
+    let keys: [&CFString; 2] = unsafe {
+        [
+            kCVPixelBufferIOSurfacePropertiesKey,
+            kCVPixelBufferMetalCompatibilityKey,
+        ]
+    };
+    let values: [&CFType; 2] = [&surface_props, CFBoolean::new(true)];
+    let options = CFDictionary::from_slices(&keys, &values);
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: `options` maps CoreVideo's CFString keys to CF values of the
+    // types they take, and `raw` is a valid out pointer.
+    let status = unsafe {
+        CVPixelBufferCreate(
+            None,
+            width,
+            height,
+            format,
+            Some(options.as_opaque()),
+            std::ptr::NonNull::from(&mut raw),
+        )
+    };
+    if status != kCVReturnSuccess {
+        return None;
+    }
+    // SAFETY: on success `raw` holds an owned (+1) pixel buffer.
+    std::ptr::NonNull::new(raw).map(|raw| unsafe { CFRetained::from_raw(raw) })
+}
+
+/// Lock a pixel buffer's base address; `false` when CoreVideo refuses.
+#[cfg(target_os = "macos")]
+fn lock(
+    buffer: &objc2_core_video::CVPixelBuffer,
+    flags: objc2_core_video::CVPixelBufferLockFlags,
+) -> bool {
+    // SAFETY: locking a live buffer; the caller unlocks it with the same
+    // flags.
+    let status = unsafe { objc2_core_video::CVPixelBufferLockBaseAddress(buffer, flags) };
+    status == objc2_core_video::kCVReturnSuccess
+}
+
+/// Undo a successful [`lock`] with the same flags.
+#[cfg(target_os = "macos")]
+fn unlock(
+    buffer: &objc2_core_video::CVPixelBuffer,
+    flags: objc2_core_video::CVPixelBufferLockFlags,
+) {
+    // SAFETY: the buffer was locked with these flags by `lock`.
+    unsafe { objc2_core_video::CVPixelBufferUnlockBaseAddress(buffer, flags) };
 }
 
 #[cfg(test)]
@@ -240,18 +301,22 @@ mod tests {
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 mod surface_tests {
-    use super::turn_surface;
-    use core_video::pixel_buffer::{CVPixelBuffer, kCVPixelBufferLock_ReadOnly};
+    use super::{lock, new_pixel_buffer, turn_surface, unlock};
+    use objc2_core_video::{
+        CVPixelBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
+        CVPixelBufferGetHeight, CVPixelBufferGetHeightOfPlane, CVPixelBufferGetWidth,
+        CVPixelBufferGetWidthOfPlane, CVPixelBufferLockFlags,
+    };
 
     fn plane(buffer: &CVPixelBuffer, index: usize, pairs: bool) -> Vec<Vec<u8>> {
         let (w, h) = (
-            buffer.get_width_of_plane(index),
-            buffer.get_height_of_plane(index),
+            CVPixelBufferGetWidthOfPlane(buffer, index),
+            CVPixelBufferGetHeightOfPlane(buffer, index),
         );
-        let stride = buffer.get_bytes_per_row_of_plane(index);
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, index);
         let unit = if pairs { 2 } else { 1 };
-        // SAFETY: the caller has locked the buffer.
-        let base = unsafe { buffer.get_base_address_of_plane(index) }.cast::<u8>();
+        // The caller has locked the buffer.
+        let base = CVPixelBufferGetBaseAddressOfPlane(buffer, index).cast::<u8>();
         (0..h)
             .map(|y| {
                 // SAFETY: the buffer is locked by the caller and a row has
@@ -265,29 +330,34 @@ mod surface_tests {
     #[test]
     fn a_surface_turns_clockwise_in_both_planes() {
         let format = objc2_core_video::kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
-        let src = CVPixelBuffer::new(format, 4, 2, None).unwrap();
-        src.lock_base_address(0);
-        // SAFETY: locked; every written byte is inside its plane row.
-        unsafe {
-            for index in 0..2 {
-                let stride = src.get_bytes_per_row_of_plane(index);
-                let base = src.get_base_address_of_plane(index).cast::<u8>();
-                let (w, h) = (
-                    src.get_width_of_plane(index),
-                    src.get_height_of_plane(index),
-                );
-                let unit = if index == 0 { 1 } else { 2 };
-                for y in 0..h {
-                    for x in 0..w * unit {
-                        *base.add(y * stride + x) = (y * 16 + x) as u8;
-                    }
+        let src = new_pixel_buffer(format, 4, 2).unwrap();
+        assert!(lock(&src, CVPixelBufferLockFlags::empty()));
+        for index in 0..2 {
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(&src, index);
+            let base = CVPixelBufferGetBaseAddressOfPlane(&src, index).cast::<u8>();
+            let (w, h) = (
+                CVPixelBufferGetWidthOfPlane(&src, index),
+                CVPixelBufferGetHeightOfPlane(&src, index),
+            );
+            let unit = if index == 0 { 1 } else { 2 };
+            for y in 0..h {
+                for x in 0..w * unit {
+                    // SAFETY: locked; every written byte is inside its plane
+                    // row.
+                    unsafe { *base.add(y * stride + x) = (y * 16 + x) as u8 };
                 }
             }
         }
-        src.unlock_base_address(0);
+        unlock(&src, CVPixelBufferLockFlags::empty());
         let turned = turn_surface(&src, 1, false).expect("turns a bi-planar buffer");
-        assert_eq!((turned.get_width(), turned.get_height()), (2, 4));
-        turned.lock_base_address(kCVPixelBufferLock_ReadOnly);
+        assert_eq!(
+            (
+                CVPixelBufferGetWidth(&turned),
+                CVPixelBufferGetHeight(&turned)
+            ),
+            (2, 4)
+        );
+        assert!(lock(&turned, CVPixelBufferLockFlags::ReadOnly));
         let luma = plane(&turned, 0, false);
         // Source rows [0 1 2 3] and [16 17 18 19]; clockwise: columns read
         // bottom to top become rows.
@@ -298,6 +368,6 @@ mod surface_tests {
         let chroma = plane(&turned, 1, true);
         // Source chroma is 2x1 pairs: [0 1][2 3]; turned it is 1x2.
         assert_eq!(chroma, vec![vec![0, 1], vec![2, 3]]);
-        turned.unlock_base_address(kCVPixelBufferLock_ReadOnly);
+        unlock(&turned, CVPixelBufferLockFlags::ReadOnly);
     }
 }

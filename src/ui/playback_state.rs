@@ -79,7 +79,7 @@ pub(crate) struct PlaybackUi {
     /// Muted, looping inline players for visible videos and GIFs.
     /// Shared with the history's animation layer, which draws the clips'
     /// current frames (`inline_video::LiveSource`).
-    pub(super) inline_videos: std::rc::Rc<std::cell::RefCell<super::inline_video::InlineVideos>>,
+    pub(super) inline_videos: std::rc::Rc<super::inline_players::InlineVideos>,
     /// MED1: playback speed multiplier, 0.5–2.0 (TGX `PlaybackSpeed*`;
     /// applied by the pitch-preserving tempo stretcher + the playback clock rate).
     pub(super) speed: f64,

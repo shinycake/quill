@@ -243,18 +243,7 @@ pub(in crate::ui) fn animation_attachment(
         caption_width,
     );
     let live = inline.is_some();
-    let picture = if let Some(inline) = inline {
-        // The badge rides with the clip: an animation layer redraws both.
-        live_tile(inline, move |frame| {
-            div()
-                .relative()
-                .w(frame_w)
-                .h(frame_h)
-                .child(inline_surface(frame, frame_w, frame_h, corners))
-                .child(gif_badge())
-                .into_any_element()
-        })
-    } else if !blocked && let Some(path) = visual {
+    let still = move |path| {
         img(path)
             .id(("gif-img", row_id))
             .w(frame_w)
@@ -271,6 +260,22 @@ pub(in crate::ui) fn animation_attachment(
                     .into_any_element()
             })
             .into_any_element()
+    };
+    let picture = if let Some(inline) = inline {
+        // The badge rides with the clip: an animation layer redraws both.
+        // The still shows under it until the first picture.
+        let under = visual.filter(|_| !blocked).map(still);
+        live_tile(inline, under, (frame_w, frame_h), move |frame| {
+            div()
+                .relative()
+                .w(frame_w)
+                .h(frame_h)
+                .child(inline_surface(frame, frame_w, frame_h, corners))
+                .child(gif_badge())
+                .into_any_element()
+        })
+    } else if !blocked && let Some(path) = visual {
+        still(path)
     } else {
         div()
             .id(("gif-ph", row_id))
@@ -417,27 +422,12 @@ pub(in crate::ui) fn video_attachment(
     );
     let live = inline.is_some();
     let total = video.duration;
-    let picture = if let Some(inline) = inline {
-        // The time left counts down with the clip: an animation layer
-        // redraws the badge with it.
-        live_tile(inline, move |frame| {
-            let left = match frame.remaining_secs {
-                Some(left) => format_voice_duration(left.ceil() as i32),
-                None => format_voice_duration(total),
-            };
-            div()
-                .relative()
-                .w(frame_w)
-                .h(frame_h)
-                .child(inline_surface(frame, frame_w, frame_h, corners))
-                .child(video_badge(left, true))
-                .into_any_element()
-        })
-    } else if !blocked && let Some(path) = visual {
+    let (width, height) = (video.width, video.height);
+    let still = move |path: PathBuf| {
         img(crate::ui::image_budget::sized_media(
             &path,
             (frame_w, frame_h),
-            Some((video.width, video.height)),
+            Some((width, height)),
             crate::ui::image_budget::Fit::Cover,
         ))
         .id(("video-img", row_id))
@@ -455,6 +445,27 @@ pub(in crate::ui) fn video_attachment(
                 .into_any_element()
         })
         .into_any_element()
+    };
+    let picture = if let Some(inline) = inline {
+        // The time left counts down with the clip: an animation layer
+        // redraws the badge with it. The still shows under it until the
+        // first picture.
+        let under = visual.clone().filter(|_| !blocked).map(still);
+        live_tile(inline, under, (frame_w, frame_h), move |frame| {
+            let left = match frame.remaining_secs {
+                Some(left) => format_voice_duration(left.ceil() as i32),
+                None => format_voice_duration(total),
+            };
+            div()
+                .relative()
+                .w(frame_w)
+                .h(frame_h)
+                .child(inline_surface(frame, frame_w, frame_h, corners))
+                .child(video_badge(left, true))
+                .into_any_element()
+        })
+    } else if !blocked && let Some(path) = visual {
+        still(path)
     } else {
         div()
             .id(("video-ph", row_id))
@@ -541,7 +552,7 @@ pub(in crate::ui) fn video_attachment(
                                         // With the native player, videos play in
                                         // the media viewer (Telegram Desktop's
                                         // behavior); inline frames otherwise.
-                                        if crate::ui::native_video::supported()
+                                        if crate::ui::video_player::supported()
                                             && let Some((chat_id, message_id)) = viewer
                                         {
                                             this.open_media_viewer(chat_id, message_id, cx);

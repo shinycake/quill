@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.8 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // windows stop receiving vsync frames while idle, and a renderer that can't
 // recover from a lost device closes its window instead of panicking.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
@@ -39,12 +39,12 @@ pub(crate) const WM_GPUI_FORCE_UPDATE_WINDOW: u32 = WM_USER + 5;
 pub(crate) const WM_GPUI_KEYBOARD_LAYOUT_CHANGED: u32 = WM_USER + 6;
 pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
-pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
+pub(crate) const WM_GPUI_DISPLAYS_CHANGED: u32 = WM_USER + 10;
 /// Quill: destroy this window because its GPU device is gone and could not be recreated.
-pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: u32 = WM_USER + 10;
+pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: u32 = WM_USER + 11;
 /// Quill: tells the platform window that the GPU device is gone for good (see
 /// `WindowsPlatformInner::handle_device_gone`).
-pub(crate) const WM_GPUI_GPU_DEVICE_GONE: u32 = WM_USER + 11;
+pub(crate) const WM_GPUI_GPU_DEVICE_GONE: u32 = WM_USER + 12;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
@@ -125,8 +125,6 @@ impl WindowsWindowInner {
             WM_PAINT => self.handle_paint_msg(handle),
             WM_CLOSE => self.handle_close_msg(),
             WM_DESTROY => self.handle_destroy_msg(handle),
-            WM_QUERYENDSESSION => Some(1),
-            WM_ENDSESSION => self.handle_end_session_msg(wparam),
             WM_MOUSEMOVE => self.handle_mouse_move_msg(handle, lparam, wparam),
             WM_MOUSELEAVE | WM_NCMOUSELEAVE => self.handle_mouse_leave_msg(),
             WM_NCMOUSEMOVE => self.handle_nc_mouse_move_msg(handle, lparam),
@@ -190,20 +188,6 @@ impl WindowsWindowInner {
         }
     }
 
-    fn handle_end_session_msg(&self, wparam: WPARAM) -> Option<isize> {
-        if wparam.0 != 0 {
-            unsafe {
-                SendMessageW(
-                    self.platform_window_handle,
-                    WM_GPUI_END_SESSION,
-                    Some(WPARAM(self.validation_number)),
-                    None,
-                );
-            }
-        }
-        Some(0)
-    }
-
     fn handle_move_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
         let origin = logical_point(
             lparam.signed_loword() as f32,
@@ -226,7 +210,7 @@ impl WindowsWindowInner {
             // monitor is invalid, we do nothing.
             if !monitor.is_invalid() && self.state.display.get().handle != monitor {
                 // we will get the same monitor if we only have one
-                self.state.display.set(WindowsDisplay::new(
+                self.set_display(WindowsDisplay::new(
                     WindowsDisplay::display_id_for_monitor(monitor),
                 )?);
             }
@@ -973,8 +957,16 @@ impl WindowsWindowInner {
             return None;
         }
         let new_display = WindowsDisplay::new(WindowsDisplay::display_id_for_monitor(new_monitor))?;
-        self.state.display.set(new_display);
+        self.set_display(new_display);
         Some(0)
+    }
+
+    fn set_display(&self, display: WindowsDisplay) {
+        self.state.display.set(display);
+        if let Some(mut callback) = self.state.callbacks.display_changed.take() {
+            callback();
+            self.state.callbacks.display_changed.set(Some(callback));
+        }
     }
 
     fn handle_hit_test_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {

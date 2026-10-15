@@ -1,4 +1,4 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
 // bidirectional text support and inline tokens in bidi rows. See third_party/gpui-base/QUILL-CHANGES.md.
 /// Display mapping system for Editor/Input.
 ///

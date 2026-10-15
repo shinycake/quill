@@ -3,11 +3,13 @@
 //! Pure (no GPUI), so the decisions are unit-tested.
 //!
 //! On macOS the display link reports the refresh period and the vsync the
-//! current frame targets (the present "hint"). Elsewhere the element's draw
-//! starts stand in: the typical spacing of the closest draws is the frame
-//! interval (a player that sleeps between pictures draws at whole multiples
-//! of it, so only the shortest gaps count), and the next vsync is predicted
-//! from the last start.
+//! current frame targets (the present "hint"). On Windows and Wayland GPUI
+//! reports the display's refresh period (`Window::refresh_interval`).
+//! Without a period (X11) the element's draw starts stand in: the typical
+//! spacing of the closest draws is the frame interval (a player that sleeps
+//! between pictures draws at whole multiples of it, so only the shortest
+//! gaps count). Without a hint the next vsync is predicted from the last
+//! start.
 #![deny(clippy::indexing_slicing)]
 
 use std::collections::VecDeque;
@@ -18,6 +20,11 @@ const HISTORY: usize = 8;
 /// The fastest and slowest display the estimate accepts (240 Hz, 20 Hz).
 const MIN_INTERVAL: Duration = Duration::from_micros(4_167);
 const MAX_INTERVAL: Duration = Duration::from_millis(50);
+/// Two draw starts closer than this are the same frame (a tile drawn by
+/// its layer and by its slice). Well under half a 240 Hz frame, so a late
+/// frame followed by an early one still counts as two; GPUI exposes no
+/// frame counter to tell draws apart by identity.
+const SAME_FRAME: Duration = Duration::from_millis(2);
 /// Until two draws were seen: a 60 Hz display.
 const DEFAULT_INTERVAL: Duration = Duration::from_micros(16_667);
 /// A wake this close to now is not worth a timer: ask for the next frame.
@@ -39,6 +46,18 @@ impl PresentEstimator {
     /// A draw started at `at`.
     pub(crate) fn record_draw(&mut self, at: Instant) {
         if self.starts.back().is_some_and(|last| *last >= at) {
+            return;
+        }
+        // Drawn twice in one frame (an inline tile: its row in the
+        // conversation slice, then its copy in the animation layer): one
+        // start per frame, or the spacing would read as a 240 Hz display.
+        // Under half a 240 Hz interval: a late frame followed by an early
+        // one still counts as two.
+        if self
+            .starts
+            .back()
+            .is_some_and(|last| at.saturating_duration_since(*last) < SAME_FRAME)
+        {
             return;
         }
         if self.starts.len() == HISTORY {
@@ -66,7 +85,8 @@ impl PresentEstimator {
         }
     }
 
-    /// The platform's refresh period (macOS display link), or `None`.
+    /// The platform's refresh period (macOS display link, else the
+    /// window's display as GPUI reports it), or `None`.
     pub(crate) fn set_period(&mut self, period: Option<Duration>) {
         self.period = period.filter(|period| *period >= MIN_INTERVAL && *period <= MAX_INTERVAL);
     }
@@ -264,6 +284,33 @@ mod tests {
     }
 
     #[test]
+    fn a_reported_period_paces_the_first_frames_instead_of_60hz() {
+        // A clip starting on a 144 Hz display: before two draws were seen
+        // the estimate says 60 Hz; the display's reported period does not.
+        let now = Instant::now();
+        let mut estimator = PresentEstimator::default();
+        estimator.set_period(Some(hz(144.0)));
+        assert!(close(estimator.predict(now).duration_since(now), hz(144.0)));
+        assert!(close(estimator.lead(), hz(144.0)));
+        // A 60 fps clip: its next picture is over two 144 Hz frames away,
+        // so the player sleeps between pictures. With the 60 Hz guess it
+        // asks for the very next frame instead.
+        let due = now + hz(60.0);
+        assert!(matches!(
+            request_policy(now, Some(due), estimator.interval(), estimator.lead()),
+            FrameRequest::SleepUntil(_)
+        ));
+        let sixty = PresentEstimator::default();
+        assert_eq!(
+            request_policy(now, Some(due), sixty.interval(), sixty.lead()),
+            FrameRequest::NextFrame
+        );
+        // A 360 Hz display is past what the estimate accepts: ignored.
+        estimator.set_period(Some(hz(360.0)));
+        assert!(close(estimator.interval(), hz(60.0)));
+    }
+
+    #[test]
     fn without_a_period_only_the_closest_draws_set_the_interval() {
         let t0 = Instant::now();
         let mut estimator = PresentEstimator::default();
@@ -373,5 +420,36 @@ mod tests {
         // Never more than three frames (a stale prediction).
         estimator.note_present(last + Duration::from_millis(500));
         assert!(close(estimator.lead(), hz(120.0) * 3));
+    }
+
+    #[test]
+    fn two_draws_in_one_frame_count_once() {
+        // Two tiles of one clip draw in the same frame (a layer copy and a
+        // slice paint): the second start must not halve the interval.
+        let t0 = Instant::now();
+        let mut estimator = PresentEstimator::default();
+        let period = hz(120.0);
+        for i in 0u32..12 {
+            let at = t0 + period * i;
+            estimator.record_draw(at);
+            estimator.record_draw(at + Duration::from_micros(400));
+        }
+        assert!(
+            close(estimator.interval(), period),
+            "{:?}",
+            estimator.interval()
+        );
+    }
+
+    #[test]
+    fn jittered_240_hz_frames_are_not_merged() {
+        // Gaps down to 2.97 ms (a late frame, then an early one) are still
+        // separate frames at 240 Hz.
+        let (estimator, _) = steady(240.0, 16, &[0, 600, -600, 400, -400]);
+        assert!(
+            close(estimator.interval(), hz(240.0)),
+            "{:?}",
+            estimator.interval()
+        );
     }
 }
