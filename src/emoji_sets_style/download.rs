@@ -33,6 +33,29 @@ pub fn install(app_root: &Path, id: EmojiSetId, zip: &[u8]) -> Result<(), String
     super::pack::unpack(zip, &set_dir(app_root, id)).map_err(|e| e.to_string())
 }
 
+/// Install a pack the user downloaded by hand (the landing page links the
+/// release zips): the file's hash says which set it is, so any name works.
+pub fn install_file(app_root: &Path, file: &Path) -> Result<EmojiSetId, String> {
+    use super::catalog::MAX_PACK_BYTES;
+
+    const NOT_A_PACK: &str = "That file isn't a Quill emoji set.";
+    let len = std::fs::metadata(file)
+        .map_err(|_| "Couldn't read that file.")?
+        .len();
+    if len > MAX_PACK_BYTES {
+        return Err(NOT_A_PACK.into());
+    }
+    let zip = std::fs::read(file).map_err(|_| "Couldn't read that file.")?;
+    let hash = Sha256::digest(&zip);
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    let id = EmojiSetId::ALL
+        .into_iter()
+        .find(|id| !id.is_system() && id.sha256() == hex)
+        .ok_or(NOT_A_PACK)?;
+    install(app_root, id, &zip)?;
+    Ok(id)
+}
+
 #[cfg(feature = "ui")]
 fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, &'static str> {
     use std::io::Read;
@@ -119,6 +142,20 @@ mod tests {
         assert!(install(&root, EmojiSetId::System, b"").is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn a_file_that_is_no_pack_is_refused() {
+        let root = std::env::temp_dir().join(format!("quill-emoji-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::create_dir_all(&root);
+        let file = root.join("emoji-set-noto.zip");
+        let _ = std::fs::write(&file, b"renamed holiday photo");
+        let err = install_file(&root, &file).unwrap_err();
+        assert!(err.contains("isn't a Quill emoji set"));
+        assert!(install_file(&root, &root.join("missing.zip")).is_err());
+        assert!(!set_dir(&root, EmojiSetId::Noto).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 /// The real packs, built by `quill-tools/emoji-sets`: set
@@ -139,7 +176,8 @@ mod built_packs {
             let zip = std::fs::read(Path::new(&dir).join(format!("emoji-set-{}.zip", id.key())))
                 .expect("pack");
             assert_eq!(zip.len() as u64, id.bytes(), "{id:?} size");
-            install(&root, id, &zip).expect("install");
+            let file = Path::new(&dir).join(format!("emoji-set-{}.zip", id.key()));
+            assert_eq!(install_file(&root, &file), Ok(id), "{id:?} from a file");
             let pack = super::super::pack::SpritePack::load(&set_dir(&root, id)).expect("load");
             assert!(pack.len() >= 3900, "{id:?} has {} emoji", pack.len());
             for emoji in ["😀", "❤️", "👍🏽", "🇺🇸", "👨‍👩‍👧", "1️⃣"]

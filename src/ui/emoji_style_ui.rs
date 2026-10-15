@@ -56,6 +56,9 @@ pub(super) struct EmojiStyleUi {
     download_task: Option<Task<()>>,
     switch_task: Option<Task<()>>,
     failed: Option<(EmojiSetId, String)>,
+    /// "Install from file…": the task, and why the last file was refused.
+    file_task: Option<Task<()>>,
+    file_error: Option<String>,
 }
 
 /// `<app data>`, where `emoji-sets/` lives.
@@ -263,6 +266,48 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "Install from file…": a zip the user downloaded from the landing
+    /// page (for machines that can't reach the release). Quill-only; the
+    /// file's hash picks the set, then it is switched to like a download.
+    fn install_emoji_set_file(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = app_root() else {
+            return;
+        };
+        self.settings.emoji_style.file_error = None;
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Install".into()),
+        });
+        self.settings.emoji_style.file_task = Some(cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picker.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let result = cx
+                .background_executor()
+                .spawn(async move { quill::emoji_sets_style::download::install_file(&root, &path) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(id) => {
+                        let state = &mut this.settings.emoji_style;
+                        state.ready.insert(id);
+                        if state.failed.as_ref().is_some_and(|(f, _)| *f == id) {
+                            state.failed = None;
+                        }
+                        this.switch_emoji_set(id, cx);
+                    }
+                    Err(message) => this.settings.emoji_style.file_error = Some(message),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
     /// The Settings row that opens the box (tdesktop: Chat settings,
     /// "Choose emoji set" with the emoji menu icon).
     pub(super) fn emoji_set_settings_row(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -369,13 +414,28 @@ impl QuillApp {
                 .into_iter()
                 .filter_map(EmojiSetId::credit)
                 .collect();
-            let body = div().flex().flex_col().gap_3().child(list).child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("{}.", credits.join(". "))),
-            );
-            let footer = div().flex().justify_end().child(
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(list)
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("{}.", credits.join(". "))),
+                )
+                .when_some(
+                    this.settings.emoji_style.file_error.clone(),
+                    |body, error| {
+                        body.child(div().text_xs().text_color(cx.theme().danger).child(error))
+                    },
+                );
+            let install = Button::new("emoji-sets-install-file")
+                .label("Install from file\u{2026}")
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| this.install_emoji_set_file(cx)));
+            let footer = div().flex().justify_between().gap_2().child(install).child(
                 Button::new("emoji-sets-close")
                     .label("Close")
                     .on_click(cx.listener(|this, _, window, cx| {
