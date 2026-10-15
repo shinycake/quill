@@ -182,3 +182,14 @@ fn native_stream_connect_needs_no_capture_and_asks_for_parts() {
     ));
     engine.leave_group_call(8).expect("Teardown");
 }
+
+/// Group playback must carry external camera and screen writers: without
+/// them ntgcalls v3.0.3 `optimize_sources` disables incoming video and the
+/// frames callback never sees a participant's picture.
+#[test]
+fn group_playback_video_is_external() {
+    let (camera, screen) = NtgcallsEngine::external_playback_video();
+    assert_eq!(camera.media_source, NTG_MEDIA_SOURCE_EXTERNAL);
+    assert_eq!(screen.media_source, NTG_MEDIA_SOURCE_EXTERNAL);
+    assert!(camera.input.is_null() && screen.input.is_null());
+}

@@ -301,28 +301,19 @@ impl NtgcallsEngine {
         // Everyone else's voices: the call mixes them into its playback
         // "microphone" receiver, which names the output device.
         let mut speaker_audio = audio_description(speaker.as_ref());
-        // A stream's pictures reach the frames callback only through
-        // external playback writers (`stream_manager.cpp`,
-        // `optimize_sources` gates `enable_video_incoming` on them).
-        let mut stream_camera = ntg_video_description {
-            media_source: NTG_MEDIA_SOURCE_EXTERNAL,
-            ..Self::screen_video_description(None)
-        };
-        let mut stream_screen = stream_camera;
-        let is_stream = media.mode.is_stream();
+        // Every picture (a stream's, and participants' camera and screen
+        // share in a normal video chat) reaches the frames callback only
+        // through external playback writers: ntgcalls v3.0.3
+        // `stream_manager.cpp` `optimize_sources` gates
+        // `enable_video_incoming` on them, and `setup_video_playback_callbacks`
+        // drops frames without one. NULL descriptions would silently drop
+        // all incoming video, so RTC calls pass them too.
+        let (mut playback_camera, mut playback_screen) = Self::external_playback_video();
         let playback = ntg_media_description {
             microphone: &mut speaker_audio,
             speaker: null_mut(),
-            camera: if is_stream {
-                &mut stream_camera
-            } else {
-                null_mut()
-            },
-            screen: if is_stream {
-                &mut stream_screen
-            } else {
-                null_mut()
-            },
+            camera: &mut playback_camera,
+            screen: &mut playback_screen,
         };
         // SAFETY: as above.
         let rc = unsafe {
@@ -340,6 +331,16 @@ impl NtgcallsEngine {
             });
         }
         self.apply_group_mute(group_call_id)
+    }
+
+    /// External playback descriptions (camera, screen) that make ntgcalls
+    /// enable incoming video and hand decoded frames to the callback.
+    fn external_playback_video() -> (ntg_video_description, ntg_video_description) {
+        let camera = ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_EXTERNAL,
+            ..Self::screen_video_description(None)
+        };
+        (camera, camera)
     }
 
     /// Phase C2i: desktop-capture video description for screen-share
