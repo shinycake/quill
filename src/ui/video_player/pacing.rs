@@ -388,4 +388,23 @@ mod tests {
         estimator.note_present(last + Duration::from_millis(500));
         assert!(close(estimator.lead(), hz(120.0) * 3));
     }
+
+    #[test]
+    fn two_draws_in_one_frame_count_once() {
+        // Two tiles of one clip draw in the same frame (a layer copy and a
+        // slice paint): the second start must not halve the interval.
+        let t0 = Instant::now();
+        let mut estimator = PresentEstimator::default();
+        let period = hz(120.0);
+        for i in 0u32..12 {
+            let at = t0 + period * i;
+            estimator.record_draw(at);
+            estimator.record_draw(at + Duration::from_micros(400));
+        }
+        assert!(
+            close(estimator.interval(), period),
+            "{:?}",
+            estimator.interval()
+        );
+    }
 }

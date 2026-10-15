@@ -15,13 +15,23 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 thread_local! {
-    /// The next `VideoPlayer::open` on this thread gets this backend.
-    static NEXT_BACKEND: RefCell<Option<Box<dyn Backend>>> = const { RefCell::new(None) };
+    /// The next `VideoPlayer::open`s on this thread get these backends, in
+    /// order.
+    static NEXT_BACKEND: RefCell<std::collections::VecDeque<Box<dyn Backend>>> =
+        const { RefCell::new(std::collections::VecDeque::new()) };
 }
 
-/// Take the scripted backend a test installed, if any (`open_backend`).
+/// Take the next scripted backend a test installed, if any (`open_backend`).
 pub(super) fn take_scripted_backend() -> Option<Box<dyn Backend>> {
-    NEXT_BACKEND.with(|next| next.borrow_mut().take())
+    NEXT_BACKEND.with(|next| next.borrow_mut().pop_front())
+}
+
+/// Hand `script` to the next `VideoPlayer::open` on this thread.
+fn queue_backend(script: &Rc<RefCell<Script>>) {
+    NEXT_BACKEND.with(|next| {
+        next.borrow_mut()
+            .push_back(Box::new(Scripted(script.clone())))
+    });
 }
 
 #[derive(Default)]
@@ -300,11 +310,15 @@ fn the_trace_line_has_the_documented_columns() {
     assert!(none.ends_with(",0,-1000.000,0.00"), "{none}");
 }
 
+/// Inline tiles and round videos in a chat on scripted players.
+#[cfg(feature = "demo-capture")]
+mod inline;
+
 /// The viewer on a clip that is still opening: the transport shows it,
 /// and closing then drops the player without a crash.
 #[cfg(feature = "demo-capture")]
 mod viewer {
-    use super::{NEXT_BACKEND, Script, Scripted};
+    use super::{Script, queue_backend};
     use crate::ui::app::QuillApp;
     use crate::ui::keybindings::bind_keys;
     use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -363,7 +377,7 @@ mod viewer {
             cx.notify();
         });
         let script = Rc::new(RefCell::new(Script::default()));
-        NEXT_BACKEND.with(|next| *next.borrow_mut() = Some(Box::new(Scripted(script.clone()))));
+        queue_backend(&script);
         app.update_in(vcx, |app, _, cx| {
             app.open_media_viewer(ChatId(11), MessageId(204), cx);
         });
@@ -583,7 +597,7 @@ mod viewer {
             window.focus(&focus, cx);
             cx.notify();
         });
-        NEXT_BACKEND.with(|next| *next.borrow_mut() = Some(Box::new(Scripted(script.clone()))));
+        queue_backend(&script);
         app.update_in(vcx_ref, |app, _, cx| {
             app.open_media_viewer(ChatId(11), MessageId(204), cx);
         });

@@ -99,6 +99,14 @@ impl Slices {
         self.scope.get()
     }
 
+    /// The conversation slice and its animation layer's view, for tests.
+    #[cfg(test)]
+    pub(super) fn conversation_ids(&self) -> Option<(EntityId, EntityId)> {
+        self.conversation
+            .as_ref()
+            .map(|parts| (parts.slice.entity_id(), parts.painter.entity_id()))
+    }
+
     /// Whether content being built now belongs to the chat list.
     pub(super) fn in_sidebar(&self) -> bool {
         self.in_slice(self.sidebar.as_ref())
