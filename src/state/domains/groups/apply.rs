@@ -168,6 +168,8 @@ impl Session {
                 ton_usd_rate,
                 starref_join,
                 starref_setup,
+                premium_purchase,
+                fragment,
             } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
                     self.groups.boosts_per_gift = Some(boosts_per_gift);
@@ -184,6 +186,8 @@ impl Session {
                 limits.starref_join_allowed = starref_join;
                 limits.starref_setup_allowed = starref_setup;
                 limits.app_config_loaded = true;
+                self.payments.hub.purchase = premium_purchase;
+                self.payments.hub.fragment = fragment;
             }
             // `getChatBoostFeatures` answer, kept for the chat it was
             // asked for.

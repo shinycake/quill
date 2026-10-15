@@ -36,6 +36,8 @@ pub enum PaymentsPayload {
     PremiumState(crate::premium_hub::PremiumStateInfo),
     /// `bankCardInfo` — the `getBankCardInfo` answer.
     BankCardInfo(BankCardInfoData),
+    /// `collectibleItemInfo` — the `getCollectibleItemInfo` answer.
+    CollectibleInfo(crate::collectible_info::CollectibleInfo),
     /// `premiumGiftCodeInfo` — the `checkPremiumGiftCode` answer.
     GiftCodeInfo(GiftCodeInfoData),
     /// `giveawayInfoOngoing` / `giveawayInfoCompleted` — the `getGiveawayInfo` answer.

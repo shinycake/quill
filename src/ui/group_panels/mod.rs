@@ -189,6 +189,8 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             live.driver.set_info_panel(Some(target));
+            // The Fragment address and number prefixes come from the app config.
+            let _ = live.driver.ensure_earn_app_config();
             // Shared-media counts for the open chat (Telegram Desktop's
             // "N photos · N videos …" rows).
             if !matches!(

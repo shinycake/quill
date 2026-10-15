@@ -44,6 +44,17 @@ impl Session {
                     lookup.info = None;
                 }
             }
+            // Nothing to show: a username is copied as a link (tdesktop's
+            // `COLLECTIBLE_NOT_FOUND`), a phone number just stays as it is.
+            Some(RequestPurpose::GetCollectibleInfo) => {
+                if let Some(lookup) = self.payments.hub.collectible.as_mut() {
+                    lookup.loading = false;
+                    lookup.failed = Some(match err.class {
+                        ErrorClass::CollectibleNotFound => "COLLECTIBLE_NOT_FOUND".to_string(),
+                        _ => error_reason(err),
+                    });
+                }
+            }
             Some(RequestPurpose::CheckPremiumGiftCode | RequestPurpose::ApplyPremiumGiftCode) => {
                 self.apply_gift_code_error(err, pending);
             }

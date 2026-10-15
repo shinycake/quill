@@ -38,6 +38,7 @@ pub mod chatlist_style;
 pub mod chatlist_suggestions;
 pub mod checklist;
 pub mod code_language;
+pub mod collectible_info;
 pub mod community_mode;
 pub mod composer;
 pub mod composer_doc;

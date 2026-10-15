@@ -277,3 +277,38 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 }
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// Look up a tapped collectible username or phone number
+    /// (`getCollectibleItemInfo`). The same item is not asked twice while
+    /// its lookup is running (tdesktop `resolveCollectible`).
+    pub fn request_collectible_info(
+        &mut self,
+        lookup: crate::collectible_info::CollectibleLookup,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let running = self
+            .session
+            .payments
+            .hub
+            .collectible
+            .as_ref()
+            .is_some_and(|open| open.loading && open.entity == lookup.entity);
+        if running {
+            return Ok(None);
+        }
+        let (kind, entity) = (lookup.kind, lookup.entity.clone());
+        let extra = self
+            .session
+            .request(RequestPurpose::GetCollectibleInfo, None);
+        self.session.payments.hub.collectible = Some(lookup);
+        let json = crate::telegram::requests::get_collectible_item_info(extra, kind, &entity);
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.payments.hub.collectible = None;
+            return Err(err);
+        }
+        Ok(Some(extra))
+    }
+}

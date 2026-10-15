@@ -1,9 +1,8 @@
 //! The Premium promo page: header, the feature list, plans with prices, the
 //! "Doubled limits" page and the subscribe button.
 //!
-//! tdesktop `settings/settings_premium.cpp`. Subscribing opens @PremiumBot,
-//! as tdesktop does when the store flow is not available; Quill takes no
-//! payment itself (`premium-in-app-purchase` stays blocked).
+//! tdesktop `settings/settings_premium.cpp`. Subscribing follows
+//! `StartPremiumPayment` (`purchase.rs`).
 
 use super::*;
 use crate::ui::native_video::{NativeVideo, Purpose};
@@ -77,7 +76,7 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
-    fn preview_feature_title(&self, index: usize) -> Option<&'static str> {
+    pub(super) fn preview_feature_title(&self, index: usize) -> Option<&'static str> {
         self.session()?
             .payments
             .hub
@@ -345,7 +344,7 @@ impl QuillApp {
         body
     }
 
-    /// Plans and the subscribe button. Opens @PremiumBot; no payment here.
+    /// Plans and the subscribe button (`start_premium_payment`).
     fn promo_subscribe(&self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let Some(session) = self.session() else {
@@ -409,16 +408,14 @@ impl QuillApp {
             }
             section = section.child(row);
         }
-        section = section
-            .child(
-                Button::new("premium-subscribe")
-                    .label(subscribe_label(&plans))
-                    .primary()
-                    .on_click(cx.listener(|_, _, _, cx| cx.open_url(PREMIUM_BOT_URL))),
-            )
-            .child(div().text_xs().text_color(muted).text_center().child(
-                "Subscriptions are managed through @PremiumBot. Quill never takes payment.",
-            ));
+        section = section.child(
+            Button::new("premium-subscribe")
+                .label(subscribe_label(&plans))
+                .primary()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.start_premium_payment(window, cx);
+                })),
+        );
         section
     }
 

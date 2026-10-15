@@ -406,6 +406,14 @@ impl QuillApp {
                     .when_some(username, |this, name| {
                         // tdesktop's username row: click copies, the
                         // right-click menu offers Copy Username and Copy Link.
+                        // A collectible username opens its Fragment box.
+                        let collectible = session.is_some_and(|s| {
+                            s.groups
+                                .supergroup_username_lists
+                                .get(&supergroup_id)
+                                .is_some_and(|lists| lists.collectible.contains(&name))
+                        });
+                        let owner_name = title.clone();
                         let owner = cx.entity().downgrade();
                         let mention = format!("@{name}");
                         let actions = [
@@ -429,7 +437,19 @@ impl QuillApp {
                                 .cursor_pointer()
                                 .child(mention)
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.copy_profile_text(&tapped.text, tapped.toast, cx);
+                                    if collectible {
+                                        let name = tapped.text.trim_start_matches('@');
+                                        let link = quill::profile_forms::profile_link(name);
+                                        this.open_collectible_info(
+                                            name,
+                                            &owner_name,
+                                            Some(chat_id),
+                                            link,
+                                            cx,
+                                        );
+                                    } else {
+                                        this.copy_profile_text(&tapped.text, tapped.toast, cx);
+                                    }
                                 }))
                                 .context_menu(move |menu, _, _| copy_menu(menu, &owner, &actions)),
                         )
