@@ -259,6 +259,7 @@
 "qll_chat_forward_2" = "Forward {count}";
 "qll_chat_frequent_contacts" = "Frequent contacts";
 "qll_chat_from" = "From…";
+"qll_chat_get_latest_quill" = "Get latest Quill";
 "qll_chat_getting_link_info" = "Getting link info…";
 "qll_chat_gifs_closed" = "GIFs closed";
 "qll_chat_global" = "Global";
@@ -284,6 +285,8 @@
 "qll_chat_join_requests_2" = "Join requests";
 "qll_chat_join_requests_need_a_live" = "join requests need a live connection (demo)";
 "qll_chat_join_voice_chat" = "Join voice chat";
+"qll_chat_joined_the_group_from_the" = "{someone} joined the group from the community \"{name}\"";
+"qll_chat_joined_the_group_from_the_2" = "{someone} joined the group from the community";
 "qll_chat_jump_to_bottom" = "Jump to bottom, {unread_count}";
 "qll_chat_jump_to_bottom_2" = "Jump to bottom";
 "qll_chat_jump_to_date" = "Jump to date";
@@ -350,6 +353,7 @@
 "qll_chat_open_link" = "Open Link";
 "qll_chat_opened_chat" = "opened chat";
 "qll_chat_opened_link" = "opened link";
+"qll_chat_original" = "Original: {into}";
 "qll_chat_paste_as_plain_text" = "Paste as Plain Text\t{chord}";
 "qll_chat_photo" = "Photo";
 "qll_chat_photo_copied" = "photo copied";
@@ -367,6 +371,7 @@
 "qll_chat_processing_join_requests" = "processing join requests";
 "qll_chat_public_chats" = "Public chats";
 "qll_chat_put_the_cursor_inside_a" = "Put the cursor inside a code block first.";
+"qll_chat_quill_cannot_display_this_message" = "Quill cannot display this message. A newer release may support it.";
 "qll_chat_quote" = "Quote";
 "qll_chat_quote_reply" = "Quote & Reply";
 "qll_chat_reacted" = "{reacted}/{seen} Reacted";
@@ -473,6 +478,7 @@
 "qll_chat_silent" = "Silent";
 "qll_chat_similar_channels" = "Similar channels";
 "qll_chat_skip" = "Skip";
+"qll_chat_someone" = "Someone";
 "qll_chat_sound_added" = "Sound added!";
 "qll_chat_start_voice_chat" = "Start voice chat";
 "qll_chat_statistics" = "Statistics";
@@ -490,6 +496,9 @@
 "qll_chat_the_text_changed_select_it" = "the text changed; select it again to add the date";
 "qll_chat_the_text_changed_select_it_2" = "the text changed; select it again to add the link";
 "qll_chat_this_chat_type_is_not" = "this chat type is not supported yet";
+"qll_chat_this_chat_was_added_to" = "This chat was added to community \"{name}\"";
+"qll_chat_this_chat_was_added_to_2" = "This chat was added to community";
+"qll_chat_this_chat_was_removed_from" = "This chat was removed from community";
 "qll_chat_this_contact" = "this contact";
 "qll_chat_this_conversation_type_is_not" = "This conversation type is not supported yet.";
 "qll_chat_this_message_is_unavailable" = "This message is unavailable.";
@@ -531,6 +540,8 @@
 "qll_chat_why_are_you_reporting_this" = "Why are you reporting this {subject}?";
 "qll_chat_will_be_sent_as_messages" = "Will be sent as {parts} messages";
 "qll_chat_you_dont_have_permission_to" = "You don't have permission to post in this topic.";
+"qll_chat_you_joined_the_group_from" = "You joined the group from the community \"{name}\"";
+"qll_chat_you_joined_the_group_from_2" = "You joined the group from the community";
 "qll_chat_your_account_is_frozen_and" = "Your account is frozen and can't send messages.";
 "qll_chat_your_account_is_frozen_and_2" = "Your account is frozen and read-only. Open the banner at the top for details.";
 "qll_chat_your_number" = "your number";

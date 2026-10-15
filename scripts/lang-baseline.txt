@@ -40,7 +40,6 @@
 1 src/ui/giveaway_pick_ui.rs
 1 src/ui/group_admin_settings.rs
 2 src/ui/groups/build_group_confirm_dialog.rs
-8 src/ui/history/session_history_row.rs
 3 src/ui/inline_playback.rs
 4 src/ui/message_media/audio.rs
 1 src/ui/message_menu_ui/menu_save_to_rows.rs
