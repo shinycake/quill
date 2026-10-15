@@ -15,6 +15,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::NewContactOutcome;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -41,9 +42,7 @@ pub(crate) fn new_contact_names(first: &str, last: &str) -> Option<(String, Stri
 
 /// tdesktop `lng_contact_not_joined`.
 pub(crate) fn not_joined_text(name: &str) -> String {
-    format!(
-        "Unfortunately {name} has not joined Telegram yet, but you can send them an invitation.\n\nWe will notify you when any of your contacts join Telegram."
-    )
+    tr_with(keys::CONTACT_NOT_JOINED, &[("name", name)])
 }
 
 impl QuillApp {
@@ -114,7 +113,10 @@ impl QuillApp {
                 cx.notify();
             }
             Some(NewContactOutcome::Failed(code)) => {
-                self.connection.status_note = format!("add contact failed (error {code})");
+                self.connection.status_note = tr_with(
+                    keys::Q_OPS_ADD_CONTACT_FAILED_ERROR,
+                    &[("code", &code.to_string())],
+                );
                 cx.notify();
             }
         }
@@ -135,7 +137,7 @@ impl QuillApp {
             this.take_new_contact_outcome(cx);
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("New Contact"))
+                .title(crate::ui::shell::dialog_title(tr(keys::ADD_CONTACT_BUTTON)))
                 .on_close(on_close);
             let Some(state) = this.dialogs.add_contact_dialog.as_ref() else {
                 return dialog;
@@ -159,7 +161,7 @@ impl QuillApp {
                     .into_any_element();
                 let footer = div().flex().justify_end().child(
                     Button::new("new-contact-retry")
-                        .label("Try someone else")
+                        .label(tr(keys::TRY_OTHER_CONTACT))
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(dialog) = this.dialogs.add_contact_dialog.as_mut() {
                                 dialog.not_joined = false;
@@ -175,9 +177,12 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(field("First name", &state.first_name_input))
-                    .child(field("Last name", &state.last_name_input))
-                    .child(field("Phone Number", &state.phone_input))
+                    .child(field(tr(keys::Q_OPS_FIRST_NAME), &state.first_name_input))
+                    .child(field(tr(keys::Q_OPS_LAST_NAME), &state.last_name_input))
+                    .child(field(
+                        tr(keys::NEW_CONTACT_PHONE_NUMBER),
+                        &state.phone_input,
+                    ))
                     .into_any_element();
                 let footer = div()
                     .flex()
@@ -185,14 +190,14 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("new-contact-create")
-                            .label("Create")
+                            .label(tr(keys::ADD_CONTACT))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_new_contact(window, cx);
                             })),
                     )
                     .child(
                         Button::new("new-contact-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_add_contact_dialog(cx);

@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::data_settings::top_chats_by_size;
+use quill::lang::{keys, tr, tr_with};
 use quill::storage_limits::{
     KEEP_LIMITS, SIZE_LIMITS, StorageOptionValue, keep_label, options_for, size_limit_label,
 };
@@ -55,7 +56,12 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().font_semibold().text_sm().child("Total"))
+                .child(
+                    div()
+                        .font_semibold()
+                        .text_sm()
+                        .child(tr(keys::LOCAL_STORAGE_DEVICE_TOTAL)),
+                )
                 .child(
                     div()
                         .text_sm()
@@ -63,10 +69,12 @@ impl QuillApp {
                 ),
         );
         for category in &categories {
-            let size_text = format!(
-                "{} files · {}",
-                category.count,
-                format_storage_bytes(category.size)
+            let size_text = tr_with(
+                keys::Q_OPS_FILES,
+                &[
+                    ("count", &category.count.to_string()),
+                    ("size", &(format_storage_bytes(category.size)).to_string()),
+                ],
             );
             let row = div().flex().items_center().justify_between().gap_2();
             let label = category.label;
@@ -115,12 +123,14 @@ impl QuillApp {
             clearing,
         ));
         if clearing {
-            section = section.child(div().text_sm().child("Clearing…")).child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Please keep this window open while the cache is being cleared."),
-            );
+            section = section
+                .child(div().text_sm().child(tr(keys::LOCAL_STORAGE_CLEARING)))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::LOCAL_STORAGE_CLEARING_ABOUT)),
+                );
         } else if let Some(freed) = freed {
             section = section.child(
                 div()
@@ -141,9 +151,7 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(
-                    "All media will stay in the Telegram cloud and can be re-downloaded if you need them again.",
-                ),
+                .child(tr(keys::LOCAL_STORAGE_ABOUT)),
         );
         section = self.local_storage_chats(cx, section, stats, clearing);
         section.child(self.local_storage_limits(cx))
@@ -164,7 +172,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("local-storage-clear-selected")
-                        .label("Clear selected")
+                        .label(tr(keys::LOCAL_STORAGE_CLEAR_SELECTED))
                         .outline()
                         .disabled(selected.is_empty() || clearing)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -174,7 +182,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("local-storage-clear-all")
-                        .label("Clear all")
+                        .label(tr(keys::LOCAL_STORAGE_CLEAR))
                         .outline()
                         .disabled(clearing)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -184,19 +192,20 @@ impl QuillApp {
                 );
         };
         let question = match pending {
-            StorageClear::All => "Clear all cached files?".to_string(),
+            StorageClear::All => tr(keys::Q_OPS_CLEAR_ALL_CACHED_FILES).to_string(),
             StorageClear::Selected => format!(
                 "Clear {} selected {} ({})?",
                 selected.len(),
                 if selected.len() == 1 { "type" } else { "types" },
                 format_storage_bytes(selected_size)
             ),
-            StorageClear::Chat(chat_id) => {
-                format!(
-                    "Clear the cached files of {}?",
-                    self.storage_chat_title(chat_id)
-                )
-            }
+            StorageClear::Chat(chat_id) => tr_with(
+                keys::Q_OPS_CLEAR_THE_CACHED_FILES_OF,
+                &[(
+                    "storage_chat_title",
+                    &(self.storage_chat_title(chat_id)).to_string(),
+                )],
+            ),
         };
         div()
             .flex()
@@ -209,7 +218,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("local-storage-clear-confirm")
-                            .label("Clear")
+                            .label(tr(keys::LOCAL_STORAGE_CLEAR_SOME))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.run_storage_clear(cx);
@@ -217,7 +226,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("local-storage-clear-cancel")
-                            .label("Keep")
+                            .label(tr(keys::Q_OPS_KEEP))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.settings.storage_confirm = None;
@@ -229,7 +238,7 @@ impl QuillApp {
 
     fn storage_chat_title(&self, chat_id: i64) -> String {
         if chat_id == 0 {
-            return "other chats".to_string();
+            return tr(keys::Q_OPS_OTHER_CHATS).to_string();
         }
         self.session()
             .and_then(|s| s.chats.get(&chat_id).map(|c| c.title.clone()))
@@ -284,7 +293,7 @@ impl QuillApp {
         for (chat_id, size, count) in top {
             let title = self.storage_chat_title(chat_id);
             let title = if chat_id == 0 {
-                "Other chats".to_string()
+                tr(keys::Q_OPS_OTHER_CHATS_2).to_string()
             } else {
                 title
             };
@@ -296,14 +305,23 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!("{count} files · {}", format_storage_bytes(size))),
+                                .child(tr_with(
+                                    keys::Q_OPS_FILES_2,
+                                    &[
+                                        ("count", &count.to_string()),
+                                        (
+                                            "format_storage_bytes",
+                                            &(format_storage_bytes(size)).to_string(),
+                                        ),
+                                    ],
+                                )),
                         )
                         .text_right(),
                     )
                     .child(
                         Self::table_cell(
                             Button::new(format!("local-storage-clear-chat-{chat_id}"))
-                                .label("Clear")
+                                .label(tr(keys::LOCAL_STORAGE_CLEAR_SOME))
                                 .ghost()
                                 .small()
                                 .disabled(clearing)
@@ -317,10 +335,10 @@ impl QuillApp {
                     ),
             );
         }
-        section.child(subheading("Chats")).child(
+        section.child(subheading(tr(keys::RECENT_CHATS))).child(
             Table::new()
                 .with_ix(1)
-                .accessibility_label("Storage by chat")
+                .accessibility_label(tr(keys::Q_OPS_STORAGE_BY_CHAT))
                 .w_full()
                 .child(chat_body),
         )
@@ -349,7 +367,7 @@ impl QuillApp {
         }
         sizes = sizes.child(
             Button::new("local-storage-size-none")
-                .label("No limit")
+                .label(tr(keys::Q_OPS_NO_LIMIT))
                 .small()
                 .when(size.is_none(), |b| b.primary())
                 .when(size.is_some(), |b| b.outline())
@@ -372,7 +390,7 @@ impl QuillApp {
         }
         ages = ages.child(
             Button::new("local-storage-keep-never")
-                .label("Never")
+                .label(tr(keys::LOCAL_STORAGE_LIMIT_NEVER))
                 .small()
                 .when(keep.is_none(), |b| b.primary())
                 .when(keep.is_some(), |b| b.outline())
@@ -384,18 +402,24 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(subheading("Manage limits"))
-            .child(div().text_sm().child("Total size limit"))
+            .child(subheading(tr(keys::LOCAL_STORAGE_MANAGE_TITLE)))
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr(keys::LOCAL_STORAGE_SIZE_LIMIT_TITLE)),
+            )
             .child(sizes)
-            .child(div().text_sm().child("Clear files older than"))
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr(keys::LOCAL_STORAGE_TIME_LIMIT_TITLE)),
+            )
             .child(ages)
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "If your cache size exceeds this limit, the oldest unused media will be removed from the device.",
-                    ),
+                    .child(tr(keys::LOCAL_STORAGE_MAX_SIZE_ABOUT)),
             )
     }
 

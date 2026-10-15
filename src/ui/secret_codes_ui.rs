@@ -12,6 +12,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::advanced::codes::Code;
 use quill::advanced::{debug_mode, experimental, test_environment};
+use quill::lang::{keys, tr, tr_with};
 use quill::settings::{active_account, list_accounts, safe_app_root};
 use quill::telegram::envelope::AuthorizationState;
 
@@ -103,7 +104,7 @@ impl QuillApp {
             .append(true)
             .open(&path);
         if !quill::platform::reveal_in_file_manager(&path) {
-            self.connection.status_note = "Could not open the logs folder.".into();
+            self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_THE_LOGS).into();
         }
         cx.notify();
     }
@@ -142,7 +143,10 @@ impl QuillApp {
                 self.connection.status_note = toast.into();
             }
             Err(error) => {
-                self.connection.status_note = format!("Could not switch the environment: {error}");
+                self.connection.status_note = tr_with(
+                    keys::Q_OPS_COULD_NOT_SWITCH_THE_ENVIRONMENT,
+                    &[("error", &error.to_string())],
+                );
             }
         }
         cx.notify();
@@ -188,7 +192,7 @@ impl QuillApp {
         let root = safe_app_root();
         let api = quill::telegram::hub::TdHub::shared_api();
         if debug_mode::enabled() {
-            debug_mode::debug_log("Debug logs stopped.");
+            debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STOPPED));
             debug_mode::set_enabled(false);
             if let Some(api) = api {
                 let _ = debug_mode::stop_tdlib_log(&api);
@@ -198,15 +202,21 @@ impl QuillApp {
             if let (Some(api), Some(root)) = (api, root.as_deref())
                 && let Err(error) = debug_mode::start_tdlib_log(&api, root)
             {
-                self.connection.status_note = format!("TDLib debug log did not start: {error}");
+                self.connection.status_note = tr_with(
+                    keys::Q_OPS_TDLIB_DEBUG_LOG_DID_NOT,
+                    &[("error", &error.to_string())],
+                );
             }
-            debug_mode::debug_log("Debug logs started.");
+            debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STARTED));
             self.settings.open = false;
         }
         if let Some(root) = root.as_deref()
             && let Err(error) = debug_mode::persist(root, debug_mode::enabled())
         {
-            self.connection.status_note = format!("Could not remember the debug mode: {error}");
+            self.connection.status_note = tr_with(
+                keys::Q_OPS_COULD_NOT_REMEMBER_THE_DEBUG,
+                &[("error", &error.to_string())],
+            );
         }
         cx.notify();
     }
@@ -230,7 +240,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("debug-mode-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.settings.advanced.debug_confirm = None;
@@ -250,7 +260,7 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Debug logs"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_DEBUG_LOGS)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         content.child(

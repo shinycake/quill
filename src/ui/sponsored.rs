@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::state::{RequestPurpose, Session, SponsoredReportFlight};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, ParsedFile, SponsoredMessage};
@@ -36,9 +37,9 @@ pub(super) fn apply_ready_sponsored(
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     session.open_chat(ChatId(13));
     for (id, text) in [
-        (201, "Welcome to the channel. New posts land here."),
-        (202, "Tonight's release notes are out - read them below."),
-        (203, "Poll results: dark mode wins by a mile."),
+        (201, tr(keys::Q_OPS_WELCOME_TO_THE_CHANNEL_NEW)),
+        (202, tr(keys::Q_OPS_TONIGHTS_RELEASE_NOTES_ARE_OUT)),
+        (203, tr(keys::Q_OPS_POLL_RESULTS_DARK_MODE_WINS)),
     ] {
         let post = format!(
             r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":13,"sender_id":{{"@type":"messageSenderChat","chat_id":13}},"is_outgoing":false,"is_channel_post":true,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#
@@ -108,34 +109,40 @@ pub(super) fn sponsored_message_row(
             Button::new(format!("sponsored-menu-{row_id}"))
                 .icon(IconName::Ellipsis)
                 .ghost()
-                .tooltip("About this ad")
-                .accessibility_label("Ad options")
+                .tooltip(tr(keys::Q_OPS_ABOUT_THIS_AD))
+                .accessibility_label(tr(keys::Q_OPS_AD_OPTIONS))
                 .dropdown_menu(move |menu, _, _| {
                     let about = owner.clone();
                     let about_message = about_message.clone();
                     let report = owner.clone();
                     let hide = owner.clone();
-                    let mut menu = menu.item(PopupMenuItem::new("About this ad").on_click(
-                        move |_, _, cx| {
-                            let _ = about.update(cx, |this, cx| {
-                                this.open_sponsored_about(&about_message, cx)
-                            });
-                        },
-                    ));
-                    if can_report {
-                        menu =
-                            menu.item(PopupMenuItem::new("Report ad").on_click(move |_, _, cx| {
-                                let _ = report.update(cx, |this, cx| {
-                                    this.report_sponsored_message_ui(chat_id, menu_id, cx);
+                    let mut menu =
+                        menu.item(PopupMenuItem::new(tr(keys::Q_OPS_ABOUT_THIS_AD)).on_click(
+                            move |_, _, cx| {
+                                let _ = about.update(cx, |this, cx| {
+                                    this.open_sponsored_about(&about_message, cx)
                                 });
-                            }));
+                            },
+                        ));
+                    if can_report {
+                        menu = menu.item(
+                            PopupMenuItem::new(tr(keys::SPONSORED_MENU_REVENUED_REPORT)).on_click(
+                                move |_, _, cx| {
+                                    let _ = report.update(cx, |this, cx| {
+                                        this.report_sponsored_message_ui(chat_id, menu_id, cx);
+                                    });
+                                },
+                            ),
+                        );
                     }
                     menu.item(
-                        PopupMenuItem::new("Hide ads (Premium)").on_click(move |_, _, cx| {
-                            let _ = hide.update(cx, |this, cx| {
-                                this.hide_sponsored_messages_ui(chat_id, menu_id, cx);
-                            });
-                        }),
+                        PopupMenuItem::new(tr(keys::Q_OPS_HIDE_ADS_PREMIUM)).on_click(
+                            move |_, _, cx| {
+                                let _ = hide.update(cx, |this, cx| {
+                                    this.hide_sponsored_messages_ui(chat_id, menu_id, cx);
+                                });
+                            },
+                        ),
                     )
                 }),
         );
@@ -360,7 +367,7 @@ impl QuillApp {
                     .child(div().text_sm().child(message))
                     .child(
                         Button::new("sponsored-outcome-dismiss")
-                            .label("Dismiss")
+                            .label(tr(keys::Q_OPS_DISMISS))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.dismiss_sponsored_outcome_ui(cx);
@@ -420,9 +427,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note =
                 match live.driver.hide_sponsored_messages(chat_id, message_id) {
-                    Ok(Some(_)) => "hiding ads…".into(),
+                    Ok(Some(_)) => tr(keys::Q_OPS_HIDING_ADS).into(),
                     Ok(None) => self.connection.status_note.clone(),
-                    Err(_) => "could not hide ads".into(),
+                    Err(_) => tr(keys::Q_OPS_COULD_NOT_HIDE_ADS).into(),
                 };
         } else if let Some(session) = self.demo_session.as_mut()
             && session.begin_sponsored_hide(chat_id, message_id) == Some(true)
@@ -468,7 +475,7 @@ impl QuillApp {
             .child(options)
             .child(
                 Button::new("sponsored-report-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.dismiss_sponsored_report_ui(cx);
@@ -490,9 +497,9 @@ impl QuillApp {
                 .driver
                 .report_sponsored_message(chat_id, message_id, "")
             {
-                Ok(Some(_)) => "reporting sponsored message…".into(),
-                Ok(None) => "report not available for this row".into(),
-                Err(_) => "could not send report".into(),
+                Ok(Some(_)) => tr(keys::Q_OPS_REPORTING_SPONSORED_MESSAGE).into(),
+                Ok(None) => tr(keys::Q_OPS_REPORT_NOT_AVAILABLE_FOR_THIS).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_REPORT).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if session
@@ -509,9 +516,9 @@ impl QuillApp {
                 if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
-                self.connection.status_note = "demo — report options injected".into();
+                self.connection.status_note = tr(keys::Q_OPS_DEMO_REPORT_OPTIONS_INJECTED).into();
             } else {
-                self.connection.status_note = "report not available for this row".into();
+                self.connection.status_note = tr(keys::Q_OPS_REPORT_NOT_AVAILABLE_FOR_THIS).into();
             }
         }
         cx.notify();
@@ -533,8 +540,8 @@ impl QuillApp {
                 flight.message_id,
                 option_id,
             ) {
-                Ok(_) => "report sent…".into(),
-                Err(_) => "could not send report".into(),
+                Ok(_) => tr(keys::Q_OPS_REPORT_SENT).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_REPORT).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let extra = session.request(
@@ -549,7 +556,7 @@ impl QuillApp {
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                 session.apply(owned);
             }
-            self.connection.status_note = "demo — report sent".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_REPORT_SENT).into();
         }
         cx.notify();
     }

@@ -9,6 +9,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::call_link::{BAD_LINK_NOTE, CallLinkStep, step_note};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The link's chat is open: offer its call. The call screen's Join
@@ -21,7 +22,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Calls need a signed-in account.".into();
+            self.connection.status_note = tr(keys::Q_OPS_CALLS_NEED_A_SIGNED_IN).into();
             cx.notify();
             return;
         };
@@ -34,9 +35,9 @@ impl QuillApp {
                     Some(note) => note,
                     None if matches!(step, CallLinkStep::Offer { .. }) => {
                         if live_stream {
-                            "Opening the live stream…".into()
+                            tr(keys::Q_OPS_OPENING_THE_LIVE_STREAM).into()
                         } else {
-                            "Opening the voice chat…".into()
+                            tr(keys::Q_OPS_OPENING_THE_VOICE_CHAT).into()
                         }
                     }
                     None => self.connection.status_note.clone(),
@@ -58,7 +59,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.confirm_call_link_leave().is_err()
         {
-            self.connection.status_note = "Couldn't leave the call.".into();
+            self.connection.status_note = tr(keys::Q_OPS_COULDNT_LEAVE_THE_CALL).into();
         }
         cx.notify();
     }
@@ -93,7 +94,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("call-link-leave-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CALL_CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.cancel_call_link_leave(cx);
@@ -110,7 +111,7 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element();
-            finish(dialog, "Join call", body, footer, on_close)
+            finish(dialog, tr(keys::VIEW_BUTTON_CALL), body, footer, on_close)
         })
     }
 }

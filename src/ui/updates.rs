@@ -5,6 +5,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::updater::{UpdateState, check_release};
 
 impl QuillApp {
@@ -63,7 +64,7 @@ impl QuillApp {
                         Err(_) => {
                             this.settings.update_state = UpdateState::InstallFailed(
                                 release,
-                                "Could not start the update installer. Retry the update.",
+                                tr(keys::Q_OPS_COULD_NOT_START_THE_UPDATE),
                             );
                         }
                     },
@@ -87,14 +88,14 @@ impl QuillApp {
                 div()
                     .id("quill-updates-heading")
                     .role(Role::Heading)
-                    .aria_label("Quill updates")
+                    .aria_label(tr(keys::Q_OPS_QUILL_UPDATES))
                     .font_semibold()
-                    .child("Quill updates"),
+                    .child(tr(keys::Q_OPS_QUILL_UPDATES)),
             )
             .child(
                 Switch::new("check-updates-on-launch")
                     .checked(self.appearance.check_updates_on_launch)
-                    .accessibility_label("Check for updates on launch")
+                    .accessibility_label(tr(keys::Q_OPS_CHECK_FOR_UPDATES_ON_LAUNCH))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_appearance(cx, |a| a.check_updates_on_launch = on)
                     })),
@@ -102,7 +103,7 @@ impl QuillApp {
             .child(
                 div()
                     .text_xs()
-                    .child("Check GitHub Releases automatically on launch."),
+                    .child(tr(keys::Q_OPS_CHECK_GITHUB_RELEASES_AUTOMATICALLY_ON)),
             )
             .child(
                 div()
@@ -115,7 +116,7 @@ impl QuillApp {
             .children(self.install_beta_row(cx))
             .child(
                 Button::new("check-for-updates")
-                    .label("Check for updates")
+                    .label(tr(keys::Q_OPS_CHECK_FOR_UPDATES))
                     .disabled(matches!(
                         self.settings.update_state,
                         UpdateState::Checking
@@ -136,32 +137,32 @@ impl QuillApp {
                         .id("quill-release-notes")
                         .role(Role::Label)
                         .aria_label(if release.notes.is_empty() {
-                            "No release notes were provided.".to_string()
+                            tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED).to_string()
                         } else {
                             release.notes.clone()
                         })
                         .text_sm()
                         .child(if release.notes.is_empty() {
-                            "No release notes were provided.".into()
+                            tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED).into()
                         } else {
                             release.notes.clone()
                         }),
                 )
                 .child(
                     Button::new("open-quill-release")
-                        .label("View release on GitHub")
+                        .label(tr(keys::Q_OPS_VIEW_RELEASE_ON_GITHUB))
                         .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
                 );
             if matches!(self.settings.update_state, UpdateState::Installed(_)) {
                 section = section.child(
                     Button::new("acknowledge-update-changelog")
-                        .label("Dismiss changelog")
+                        .label(tr(keys::Q_OPS_DISMISS_CHANGELOG))
                         .on_click(cx.listener(|this, _, _, cx| {
                             match quill::update_install::acknowledge_changelog() {
                                 Ok(()) => this.settings.update_state = UpdateState::UpToDate,
                                 Err(_) => {
                                     this.connection.status_note =
-                                        "Could not save changelog dismissal. Retry.".into()
+                                        tr(keys::Q_OPS_COULD_NOT_SAVE_CHANGELOG_DISMISSAL).into()
                                 }
                             }
                             cx.notify();
@@ -171,7 +172,7 @@ impl QuillApp {
                 let release = release.clone();
                 section = section.child(
                     Button::new("install-quill-update")
-                        .label("Download, install and restart")
+                        .label(tr(keys::Q_OPS_DOWNLOAD_INSTALL_AND_RESTART))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.install_update(release.clone(), cx)
                         })),
@@ -180,7 +181,7 @@ impl QuillApp {
                 section = section.child(
                     div()
                         .text_xs()
-                        .child("Install the release package from GitHub for this installation."),
+                        .child(tr(keys::Q_OPS_INSTALL_THE_RELEASE_PACKAGE_FROM)),
                 );
             }
         }
@@ -190,7 +191,10 @@ impl QuillApp {
     /// "About Quill": version, the unofficial-client and no-warranty notice,
     /// and the bundled open-source license notices.
     pub(super) fn about_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let version = format!("Quill {}", quill::version::APP);
+        let version = tr_with(
+            keys::Q_OPS_QUILL,
+            &[("quill_version_app", (quill::version::APP))],
+        );
         div()
             .flex()
             .flex_col()
@@ -199,9 +203,9 @@ impl QuillApp {
                 div()
                     .id("about-quill-heading")
                     .role(Role::Heading)
-                    .aria_label("About Quill")
+                    .aria_label(tr(keys::Q_OPS_ABOUT_QUILL))
                     .font_semibold()
-                    .child("About Quill"),
+                    .child(tr(keys::Q_OPS_ABOUT_QUILL)),
             )
             .child(
                 div()
@@ -222,7 +226,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("open-source-licenses")
-                    .label("Open-source licenses")
+                    .label(tr(keys::Q_OPS_OPEN_SOURCE_LICENSES))
                     .on_click(cx.listener(|_, _, _, cx| {
                         let opened = quill::about::bundled_notices()
                             .is_some_and(|path| quill::platform::open_local_file(&path));
@@ -262,7 +266,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("show-release-notes")
-                            .label("Release notes")
+                            .label(tr(keys::Q_OPS_RELEASE_NOTES))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.settings.appearance_open = true;
@@ -271,7 +275,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("dismiss-update-banner")
-                            .label("Dismiss")
+                            .label(tr(keys::Q_OPS_DISMISS))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.settings.update_banner_dismissed = true;

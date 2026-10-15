@@ -17,6 +17,7 @@ use gpui_kit::*;
 use quill::business_bots::{bot_set_excluded, bot_set_included};
 use quill::business_settings::{BusinessChats, BusinessRecipients, ChatType, RECIPIENT_CHATS_MAX};
 use quill::folder_picker::{filter_chats, picker_counter};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::ChatKind;
 
@@ -77,7 +78,10 @@ impl QuillApp {
     fn business_chat_title(&self, chat_id: i64) -> String {
         self.session()
             .and_then(|s| s.chats.get(&chat_id))
-            .map_or_else(|| format!("Chat {chat_id}"), |c| c.title.clone())
+            .map_or_else(
+                || tr_with(keys::Q_OPS_CHAT, &[("chat_id", &chat_id.to_string())]),
+                |c| c.title.clone(),
+            )
     }
 
     pub(super) fn business_avatar(&self, chat_id: i64, title: &str) -> AnyElement {
@@ -105,7 +109,7 @@ impl QuillApp {
         } else {
             current.excluded.clone()
         };
-        let search = super::live_input(window, cx, "Search");
+        let search = super::live_input(window, cx, tr(keys::Q_OPS_SEARCH));
         if let Some(d) = self.business_mut() {
             d.picker = Some(PickerDraft {
                 target,
@@ -194,9 +198,12 @@ impl QuillApp {
         let key = target_key(target);
         let side = if excluded { "excluded" } else { "included" };
         let (title, button) = if excluded {
-            ("Excluded chats", "Exclude Chats")
+            (
+                tr(keys::Q_OPS_EXCLUDED_CHATS),
+                tr(keys::Q_OPS_EXCLUDE_CHATS),
+            )
         } else {
-            ("Included chats", "Select Chats")
+            (tr(keys::Q_OPS_INCLUDED_CHATS), tr(keys::Q_OPS_SELECT_CHATS))
         };
         let mut block = div()
             .flex()
@@ -265,17 +272,11 @@ impl QuillApp {
         let key = target_key(target);
         let all = recipients.all_but_excluded;
         let (title, about) = match target {
-            Recipients::Greeting => (
-                "Recipients",
-                "Select chats or entire chat categories for sending greeting messages.",
-            ),
-            Recipients::Away => (
-                "Recipients",
-                "Select chats or entire chat categories for sending an away message.",
-            ),
+            Recipients::Greeting => (tr(keys::AWAY_RECIPIENTS), tr(keys::GREETING_SELECT)),
+            Recipients::Away => (tr(keys::AWAY_RECIPIENTS), tr(keys::AWAY_SELECT)),
             Recipients::Bot => (
-                "Chats accessible for the bot",
-                "Select chats or entire chat categories which the bot will not have access to.",
+                tr(keys::CHATBOTS_ACCESS_TITLE),
+                tr(keys::CHATBOTS_EXCLUDE_ABOUT),
             ),
         };
         let mut section = div()
@@ -288,11 +289,11 @@ impl QuillApp {
                     .selected_index(Some(if all { 0 } else { 1 }))
                     .child(
                         Radio::new(SharedString::from(format!("business-{key}-all")))
-                            .label("All 1-to-1 Chats Except..."),
+                            .label(tr(keys::CHATBOTS_ALL_EXCEPT)),
                     )
                     .child(
                         Radio::new(SharedString::from(format!("business-{key}-selected")))
-                            .label("Only Selected Chats"),
+                            .label(tr(keys::Q_OPS_ONLY_SELECTED_CHATS)),
                     )
                     .on_click(cx.listener(move |this, &ix: &usize, window, cx| {
                         let included_empty = this
@@ -374,8 +375,11 @@ impl QuillApp {
                     .icon(IconName::X)
                     .ghost()
                     .small()
-                    .tooltip("Remove")
-                    .accessibility_label(format!("Remove {title}"))
+                    .tooltip(tr(keys::BOX_REMOVE))
+                    .accessibility_label(tr_with(
+                        keys::Q_OPS_REMOVE,
+                        &[("title", &title.to_string())],
+                    ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.remove_business_entry(target, excluded, chat, chat_type, cx);
                     })),
@@ -401,7 +405,7 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(muted)
-                .child("Chat types"),
+                .child(tr(keys::Q_OPS_CHAT_TYPES)),
         );
         for kind in ChatType::ALL {
             types = types.child(
@@ -433,7 +437,7 @@ impl QuillApp {
                     .py_3()
                     .text_sm()
                     .text_color(muted)
-                    .child("No chats found."),
+                    .child(tr(keys::Q_OPS_NO_CHATS_FOUND_2)),
             );
         }
         for (chat_id, title) in rows {
@@ -486,7 +490,7 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(muted)
-                            .child("Chats"),
+                            .child(tr(keys::RECENT_CHATS)),
                     )
                     .child(
                         div()
@@ -499,7 +503,7 @@ impl QuillApp {
                             )),
                     ),
             )
-            .child(Input::new(&picker.search).aria_label("Search chats"))
+            .child(Input::new(&picker.search).aria_label(tr(keys::Q_OPS_SEARCH_CHATS)))
             .child(list)
     }
 }

@@ -12,6 +12,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::request_share::{PeerFacts, chat_candidate, confirm_text, empty_text, user_candidate};
 use quill::telegram::envelope::{ChatKind, RequestChatSpec, RequestUsersSpec};
 use std::cell::RefCell;
@@ -150,8 +151,7 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note =
-                "sharing with a bot needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_OPS_SHARING_WITH_A_BOT_NEEDS).into();
             cx.notify();
             return;
         };
@@ -182,8 +182,11 @@ impl QuillApp {
             },
         };
         self.connection.status_note = match result {
-            Ok(()) => format!("shared with {}", share.bot_name),
-            Err(_) => "could not share with the bot".into(),
+            Ok(()) => tr_with(
+                keys::Q_OPS_SHARED_WITH,
+                &[("bot_name", &share.bot_name.to_string())],
+            ),
+            Err(_) => tr(keys::Q_OPS_COULD_NOT_SHARE_WITH_THE).into(),
         };
         cx.notify();
     }
@@ -207,7 +210,7 @@ impl QuillApp {
             let mut body = div().flex().flex_col().gap_2();
             let mut footer = div().flex().justify_end().gap_2().child(
                 Button::new("request-share-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.message_ui.request_share = None;
@@ -217,12 +220,11 @@ impl QuillApp {
             );
             let (title, confirm_label) = match (&share.kind, share.confirm) {
                 (RequestShareKind::Phone { .. }, _) => {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .child("Do you want to share your phone number with this bot?"),
-                    );
-                    ("Share phone number", Some("Share"))
+                    body = body.child(div().text_sm().child(tr(keys::BOT_SHARE_PHONE)));
+                    (
+                        tr(keys::Q_OPS_SHARE_PHONE_NUMBER),
+                        Some(tr(keys::BACKGROUND_SHARE)),
+                    )
                 }
                 (_, true) => {
                     let names: Vec<String> = share
@@ -235,7 +237,7 @@ impl QuillApp {
                         })
                         .collect();
                     body = body.child(div().text_sm().child(confirm_text(&names, &share.bot_name)));
-                    ("Send to bot", Some("Send"))
+                    (tr(keys::Q_OPS_SEND_TO_BOT), Some(tr(keys::SHARE_CONFIRM)))
                 }
                 (kind, false) => {
                     let users = matches!(kind, RequestShareKind::Users(_));
@@ -244,7 +246,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(text_muted())
-                            .child("Select a chat"),
+                            .child(tr(keys::Q_OPS_SELECT_A_CHAT)),
                     );
                     if rows.is_empty() {
                         body = body.child(
@@ -273,7 +275,7 @@ impl QuillApp {
                     {
                         footer = footer.child(
                             Button::new("request-share-next")
-                                .label("Next")
+                                .label(tr(keys::CREATE_GROUP_NEXT))
                                 .primary()
                                 .disabled(share.selected.is_empty())
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -284,7 +286,7 @@ impl QuillApp {
                                 })),
                         );
                     }
-                    ("Select a chat", None)
+                    (tr(keys::Q_OPS_SELECT_A_CHAT), None)
                 }
             };
             if let Some(label) = confirm_label {

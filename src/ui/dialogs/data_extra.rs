@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::file_prefs;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, full_stamp};
 use quill::network_usage::{NetworkGroup, NetworkUsage};
 use quill::voice::format_voice_duration;
@@ -23,25 +24,23 @@ impl QuillApp {
         let configured = file_prefs::configured_download_dir();
         let shown = match (&configured, quill::media_viewer::os_downloads_dir()) {
             (Some(dir), _) => dir.display().to_string(),
-            (None, Some(dir)) => format!("{} (default)", dir.display()),
-            (None, None) => "Not available".to_string(),
+            (None, Some(dir)) => tr_with(
+                keys::Q_OPS_DEFAULT,
+                &[("display", &(dir.display()).to_string())],
+            ),
+            (None, None) => tr(keys::Q_OPS_NOT_AVAILABLE).to_string(),
         };
         let stale = prefs.download_dir.is_some() && configured.is_none();
         let mut section = div().flex().flex_col().gap_2();
         section = section
-            .child(section_header("Download folder"))
-            .child(
-                div()
-                    .id("download-folder-path")
-                    .text_sm()
-                    .child(shown),
-            )
+            .child(section_header(tr(keys::Q_OPS_DOWNLOAD_FOLDER)))
+            .child(div().id("download-folder-path").text_sm().child(shown))
             .when(stale, |this| {
                 this.child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("The chosen folder is missing, so the default one is used."),
+                        .child(tr(keys::Q_OPS_THE_CHOSEN_FOLDER_IS_MISSING)),
                 )
             })
             .child(
@@ -51,7 +50,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("download-folder-choose")
-                            .label("Choose folder…")
+                            .label(tr(keys::Q_OPS_CHOOSE_FOLDER))
                             .outline()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -61,7 +60,7 @@ impl QuillApp {
                     .when(prefs.download_dir.is_some(), |this| {
                         this.child(
                             Button::new("download-folder-default")
-                                .label("Use default")
+                                .label(tr(keys::Q_OPS_USE_DEFAULT))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -82,20 +81,22 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("Ask where to save each file"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .child(tr(keys::Q_OPS_ASK_WHERE_TO_SAVE_EACH)),
+                            )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(
-                                        "Choose a folder every time you save a photo, video or file.",
-                                    ),
+                                    .child(tr(keys::Q_OPS_CHOOSE_A_FOLDER_EVERY_TIME)),
                             ),
                     )
                     .child(
                         Switch::new("download-folder-ask")
                             .checked(prefs.ask_download_path)
-                            .accessibility_label("Ask where to save each file")
+                            .accessibility_label(tr(keys::Q_OPS_ASK_WHERE_TO_SAVE_EACH))
                             .on_click(cx.listener(|_, &on: &bool, _, cx| {
                                 file_prefs::update(|p| p.ask_download_path = on);
                                 cx.notify();
@@ -112,7 +113,7 @@ impl QuillApp {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Use as download folder".into()),
+            prompt: Some(tr(keys::Q_OPS_USE_AS_DOWNLOAD_FOLDER).into()),
         });
         cx.spawn(async move |this, cx| {
             let result = picker.await;
@@ -137,16 +138,16 @@ impl QuillApp {
             session.and_then(|s| s.settings.privacy_data.network_usage.clone());
         let loading = session.is_some_and(|s| s.settings.privacy_data.network_loading);
         let mut section = div().flex().flex_col().gap_2();
-        section = section.child(section_header("Network usage"));
+        section = section.child(section_header(tr(keys::Q_OPS_NETWORK_USAGE)));
         let Some(usage) = usage else {
             return section.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(if loading {
-                        "Loading…"
+                        tr(keys::Q_OPS_LOADING)
                     } else {
-                        "No network usage data yet."
+                        tr(keys::Q_OPS_NO_NETWORK_USAGE_DATA_YET)
                     }),
             );
         };
@@ -157,7 +158,12 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().text_sm().child("Total"))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .text_sm()
+                            .child(tr(keys::LOCAL_STORAGE_DEVICE_TOTAL)),
+                    )
                     .child(
                         div()
                             .id("network-usage-total")
@@ -181,7 +187,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Nothing has been sent or received yet."),
+                    .child(tr(keys::Q_OPS_NOTHING_HAS_BEEN_SENT_OR)),
             );
         }
         for group in groups {
@@ -208,11 +214,11 @@ impl QuillApp {
                     .child(
                         div()
                             .text_sm()
-                            .child("Reset the statistics? The counters start from zero."),
+                            .child(tr(keys::Q_OPS_RESET_THE_STATISTICS_THE_COUNTERS)),
                     )
                     .child(
                         Button::new("network-usage-reset-confirm")
-                            .label("Reset")
+                            .label(tr(keys::Q_OPS_RESET))
                             .danger()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -228,7 +234,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("network-usage-reset-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -241,7 +247,7 @@ impl QuillApp {
             section.child(
                 div().flex().child(
                     Button::new("network-usage-reset")
-                        .label("Reset statistics")
+                        .label(tr(keys::Q_OPS_RESET_STATISTICS))
                         .outline()
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| {

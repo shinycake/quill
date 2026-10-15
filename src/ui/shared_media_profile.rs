@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::MessageId;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{
     SharedMediaAction, SharedMediaItem, SharedMediaTab, SharedMediaVisual, playlist_message_id,
@@ -32,7 +33,7 @@ impl QuillApp {
             let gallery = &mut live.driver.session.media.shared_media;
             if gallery.open {
                 if live.driver.set_shared_media_split(split).is_err() {
-                    self.connection.status_note = "could not load that tab".into();
+                    self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB).into();
                 }
             } else {
                 gallery.media_split = split;
@@ -61,7 +62,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_more_shared_media(tab).is_err()
         {
-            self.connection.status_note = "could not load more".into();
+            self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_LOAD_MORE).into();
         }
         cx.notify();
     }
@@ -266,8 +267,8 @@ impl QuillApp {
             .child(
                 Button::new(("shared-media-load-more", tab.index() as u64))
                     .ghost()
-                    .label("Load more")
-                    .accessibility_label("Load more shared media")
+                    .label(tr(keys::Q_OPS_LOAD_MORE))
+                    .accessibility_label(tr(keys::Q_OPS_LOAD_MORE_SHARED_MEDIA))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.load_more_shared_media_ui(tab, cx);
                     })),
@@ -318,7 +319,11 @@ impl QuillApp {
     pub(super) fn playlist_panel(&self, user_id: i64, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let me = session.and_then(|s| s.my_user_id) == Some(user_id);
-        let title = if me { "Your playlist" } else { "Playlist" };
+        let title = if me {
+            tr(keys::MEDIA_SAVED_MUSIC_YOUR)
+        } else {
+            tr(keys::MEDIA_SAVED_MUSIC_TITLE)
+        };
         let playlist = session.and_then(|s| s.media.playlists.get(&user_id));
         let chat = session
             .and_then(|s| s.open_chat)
@@ -412,8 +417,8 @@ impl QuillApp {
                     div().flex().justify_center().py_2().child(
                         Button::new("playlist-load-more")
                             .ghost()
-                            .label("Load more")
-                            .accessibility_label("Load more tracks")
+                            .label(tr(keys::Q_OPS_LOAD_MORE))
+                            .accessibility_label(tr(keys::Q_OPS_LOAD_MORE_TRACKS))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.fetch_playlist(user_id, true);
@@ -449,7 +454,7 @@ impl QuillApp {
                         div()
                             .id("playlist-close")
                             .role(gpui_kit::Role::Button)
-                            .aria_label("Close playlist")
+                            .aria_label(tr(keys::Q_OPS_CLOSE_PLAYLIST))
                             .tab_index(0)
                             .cursor_pointer()
                             .px_2()
@@ -471,9 +476,9 @@ impl QuillApp {
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .child(if playlist.is_some() {
-                            "No music files here yet"
+                            tr(keys::MEDIA_SONG_EMPTY)
                         } else {
-                            "Loading…"
+                            tr(keys::PROFILE_LOADING)
                         }),
                 )
             })

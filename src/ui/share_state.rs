@@ -6,6 +6,7 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::composer::ForwardDraft;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::ForwardResult;
 
 pub(crate) struct ShareUi {
@@ -43,7 +44,7 @@ impl ShareUi {
     ) -> Self {
         let share_comment_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Add a comment")
+                .placeholder(tr(keys::Q_OPS_ADD_A_COMMENT))
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });

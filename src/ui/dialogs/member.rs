@@ -2,6 +2,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::MemberListFilter;
 /// Slice G1: member-management dialog tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,10 +16,10 @@ pub enum MemberTab {
 impl MemberTab {
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::All => "Members",
-            Self::Administrators => "Admins",
-            Self::Restricted => "Restricted",
-            Self::Banned => "Banned",
+            Self::All => tr(keys::Q_OPS_MEMBERS),
+            Self::Administrators => tr(keys::Q_OPS_ADMINS),
+            Self::Restricted => tr(keys::Q_OPS_RESTRICTED),
+            Self::Banned => tr(keys::Q_OPS_BANNED),
         }
     }
 
@@ -57,13 +58,13 @@ impl MemberDialog {
     ) -> Self {
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search members")
+                .placeholder(tr(keys::Q_OPS_SEARCH_MEMBERS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let add_search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search contacts to add")
+                .placeholder(tr(keys::Q_OPS_SEARCH_CONTACTS_TO_ADD))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

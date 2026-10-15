@@ -10,6 +10,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{
     age_verification_about, age_verification_bot_url, freeze_deadline_label, live_left_label,
     live_strip_label, speech_trial_toast,
@@ -67,7 +68,7 @@ impl QuillApp {
             div()
                 .id("frozen-account-banner")
                 .role(Role::Button)
-                .aria_label("Your account is frozen. View details")
+                .aria_label(tr(keys::Q_OPS_YOUR_ACCOUNT_IS_FROZEN_VIEW))
                 .tab_index(0)
                 .cursor_pointer()
                 .w_full()
@@ -84,13 +85,13 @@ impl QuillApp {
                     div()
                         .font_semibold()
                         .text_sm()
-                        .child("Your account is frozen!"),
+                        .child(tr(keys::FROZEN_BAR_TITLE)),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Click to view details \u{203a}"),
+                        .child(tr(keys::Q_OPS_CLICK_TO_VIEW_DETAILS)),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.account.freeze_info_open = true;
@@ -112,7 +113,7 @@ impl QuillApp {
         let mut strip = div()
             .id("live-share-strip")
             .role(Role::Group)
-            .aria_label("Live location sharing")
+            .aria_label(tr(keys::Q_OPS_LIVE_LOCATION_SHARING))
             .w_full()
             .flex_none()
             .flex()
@@ -134,10 +135,10 @@ impl QuillApp {
                 .chats
                 .get(&share.chat_id.0)
                 .map(|chat| chat.title.clone())
-                .unwrap_or_else(|| "Chat".to_string());
+                .unwrap_or_else(|| tr(keys::Q_OPS_CHAT_2).to_string());
             let mut detail = live_left_label(share.expires_at, now);
             if share.viewed {
-                detail.push_str(" \u{b7} Viewed");
+                detail.push_str(tr(keys::Q_OPS_VIEWED));
             }
             let (chat_id, message_id) = (share.chat_id, share.message_id);
             strip = strip.child(
@@ -161,10 +162,10 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(("live-share-stop", index as u64))
-                            .label("Stop")
+                            .label(tr(keys::Q_OPS_STOP))
                             .small()
                             .outline()
-                            .accessibility_label("Stop sharing live location")
+                            .accessibility_label(tr(keys::Q_OPS_STOP_SHARING_LIVE_LOCATION))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.stop_live_location(chat_id, message_id, cx);
                             })),
@@ -176,7 +177,10 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("and {} more", shares.len() - LIVE_STRIP_ROWS)),
+                    .child(tr_with(
+                        keys::Q_OPS_AND_MORE,
+                        &[("len", &(shares.len() - LIVE_STRIP_ROWS).to_string())],
+                    )),
             );
         }
         Some(strip.into_any_element())
@@ -197,8 +201,10 @@ impl QuillApp {
             );
         };
         let deadline = freeze_deadline_label(&info, quill::local_time::now_unix());
-        let appeal =
-            format!("Appeal via @SpamBot before {deadline}, or your account will be deleted.");
+        let appeal = tr_with(
+            keys::Q_OPS_APPEAL_VIA_SPAMBOT_BEFORE_OR,
+            &[("deadline", &deadline.to_string())],
+        );
         let row = |title: &str, text: String, cx: &mut Context<Self>| {
             div()
                 .flex()
@@ -216,7 +222,7 @@ impl QuillApp {
         for (title, text) in FROZEN_ROWS {
             body = body.child(row(title, text.to_string(), cx));
         }
-        body = body.child(row("Appeal Before Deactivation", appeal, cx));
+        body = body.child(row(tr(keys::Q_OPS_APPEAL_BEFORE_DEACTIVATION), appeal, cx));
         let url = info.appeal_link.clone();
         let footer = div()
             .flex()
@@ -224,7 +230,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("frozen-close")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.account.freeze_info_open = false;
@@ -234,7 +240,7 @@ impl QuillApp {
             .when(!url.is_empty(), |this| {
                 this.child(
                     Button::new("frozen-appeal")
-                        .label("Submit an Appeal")
+                        .label(tr(keys::Q_OPS_SUBMIT_AN_APPEAL))
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_message_url(&url, cx);
@@ -242,7 +248,7 @@ impl QuillApp {
                 )
             });
         (
-            "Your Account is Frozen".into(),
+            tr(keys::FROZEN_TITLE).into(),
             body.into_any_element(),
             footer.into_any_element(),
             false,
@@ -273,9 +279,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "This is a one-time process using your phone's camera. Open the verification bot in Telegram for Android or iOS. Your selfie will not be stored by Telegram.",
-                    ),
+                    .child(tr(keys::Q_OPS_THIS_IS_A_ONE_TIME)),
             );
         let footer = div()
             .flex()
@@ -283,7 +287,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("age-verify-close")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.account.age_verify_open = false;
@@ -293,7 +297,7 @@ impl QuillApp {
             .when_some(bot_url, |this, url| {
                 this.child(
                     Button::new("age-verify-open")
-                        .label("Verify My Age")
+                        .label(tr(keys::Q_OPS_VERIFY_MY_AGE))
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.account.age_verify_started = true;
@@ -302,7 +306,7 @@ impl QuillApp {
                 )
             });
         (
-            "Age Verification".into(),
+            tr(keys::Q_OPS_AGE_VERIFICATION).into(),
             body.into_any_element(),
             footer.into_any_element(),
             false,

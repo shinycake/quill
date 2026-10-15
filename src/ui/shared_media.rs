@@ -8,6 +8,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaTab, SharedMediaTabStatus};
 use quill::telegram::envelope::ChatKind;
 
@@ -31,7 +32,7 @@ impl QuillApp {
         let chat = session.chats.get(&chat_id.0);
         let title = chat
             .map(|c| c.title.clone())
-            .unwrap_or_else(|| "Shared media".to_string());
+            .unwrap_or_else(|| tr(keys::PROFILE_SHARED_MEDIA).to_string());
         let is_channel = chat.is_some_and(|c| {
             matches!(
                 c.kind,
@@ -77,7 +78,7 @@ impl QuillApp {
                         div()
                             .id("shared-media-close")
                             .role(gpui_kit::Role::Button)
-                            .aria_label("Close shared media")
+                            .aria_label(tr(keys::Q_OPS_CLOSE_SHARED_MEDIA))
                             .tab_index(0)
                             .cursor_pointer()
                             .px_2()
@@ -133,9 +134,12 @@ impl QuillApp {
                 .py_10()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(format!(
-                    "Loading {}…",
-                    active_tab.label_in(is_channel).to_lowercase()
+                .child(tr_with(
+                    keys::Q_OPS_LOADING_2,
+                    &[(
+                        "to_lowercase",
+                        &(active_tab.label_in(is_channel).to_lowercase()).to_string(),
+                    )],
                 ))
                 .into_any_element(),
             SharedMediaTabStatus::Failed => div()
@@ -170,7 +174,7 @@ impl QuillApp {
                     div()
                         .id("shared-media-retry")
                         .role(gpui_kit::Role::Button)
-                        .aria_label("Retry loading shared media")
+                        .aria_label(tr(keys::Q_OPS_RETRY_LOADING_SHARED_MEDIA))
                         .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())
@@ -179,7 +183,7 @@ impl QuillApp {
                         .rounded_md()
                         .text_sm()
                         .text_color(accent())
-                        .child("Retry")
+                        .child(tr(keys::Q_OPS_RETRY))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.retry_shared_media_ui(cx);
                         })),
@@ -256,15 +260,16 @@ impl QuillApp {
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_shared_media() {
                 Ok(true) => {
-                    self.connection.status_note = "shared media".into();
+                    self.connection.status_note = tr(keys::Q_OPS_SHARED_MEDIA).into();
                     true
                 }
                 Ok(false) => {
-                    self.connection.status_note = "select a chat to browse its shared media".into();
+                    self.connection.status_note = tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE).into();
                     false
                 }
                 Err(_) => {
-                    self.connection.status_note = "could not open shared media".into();
+                    self.connection.status_note =
+                        tr(keys::Q_OPS_COULD_NOT_OPEN_SHARED_MEDIA).into();
                     false
                 }
             }
@@ -272,11 +277,11 @@ impl QuillApp {
             match session.open_chat {
                 Some(chat_id) => {
                     session.media.shared_media.open_for(chat_id);
-                    self.connection.status_note = "shared media".into();
+                    self.connection.status_note = tr(keys::Q_OPS_SHARED_MEDIA).into();
                     true
                 }
                 None => {
-                    self.connection.status_note = "select a chat to browse its shared media".into();
+                    self.connection.status_note = tr(keys::Q_OPS_SELECT_A_CHAT_TO_BROWSE).into();
                     false
                 }
             }
@@ -294,7 +299,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.media.shared_media.close();
         }
-        self.connection.status_note = "shared media closed".into();
+        self.connection.status_note = tr(keys::Q_OPS_SHARED_MEDIA_CLOSED).into();
         cx.notify();
     }
 
@@ -307,7 +312,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_shared_media_tab(tab).is_err() {
-                self.connection.status_note = "could not load that tab".into();
+                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.media.shared_media.select_tab(tab);
@@ -319,7 +324,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let tab = live.driver.session.media.shared_media.active_tab;
             if live.driver.fetch_shared_media(tab).is_err() {
-                self.connection.status_note = "could not retry loading shared media".into();
+                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_RETRY_LOADING_SHARED).into();
             }
         }
         cx.notify();
@@ -334,8 +339,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.jump_to_shared_media_item(message_id) {
-                Ok(_) => self.connection.status_note = "jumped to message".into(),
-                Err(_) => self.connection.status_note = "could not open that message".into(),
+                Ok(_) => self.connection.status_note = tr(keys::Q_OPS_JUMPED_TO_MESSAGE).into(),
+                Err(_) => {
+                    self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_THAT_MESSAGE).into()
+                }
             }
         }
         cx.notify();

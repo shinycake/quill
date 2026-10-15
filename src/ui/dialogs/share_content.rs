@@ -1,6 +1,7 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 /// Which attach-menu item opened the share panel.
 pub(crate) enum ShareContentKind {
@@ -38,7 +39,7 @@ impl ShareContentDialog {
     pub(crate) fn contact(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
             kind: ShareContentKind::Contact {
-                query: line(window, cx, "Search contacts"),
+                query: line(window, cx, tr(keys::Q_OPS_SEARCH_CONTACTS)),
             },
             error: None,
         }
@@ -47,8 +48,8 @@ impl ShareContentDialog {
     pub(crate) fn location(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
             kind: ShareContentKind::Location {
-                latitude: line(window, cx, "Latitude, e.g. 37.7749"),
-                longitude: line(window, cx, "Longitude, e.g. -122.4194"),
+                latitude: line(window, cx, tr(keys::Q_OPS_LATITUDE_E_G_37_7749)),
+                longitude: line(window, cx, tr(keys::Q_OPS_LONGITUDE_E_G_122_4194)),
             },
             error: None,
         }

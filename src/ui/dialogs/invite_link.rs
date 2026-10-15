@@ -2,6 +2,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 /// Phase D3a: invite-link create dialog above the composer. Fields map
 /// 1:1 to `createChatInviteLink` (schema 1.8.67 line 14097): name,
 /// expiration, member limit, creates-join-request toggle. Expiration is
@@ -32,25 +33,25 @@ impl InviteLinkDialog {
     ) -> Self {
         let stars_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Stars per month (0 = free link)")
+                .placeholder(tr(keys::Q_OPS_STARS_PER_MONTH_0_FREE))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Link name (optional)")
+                .placeholder(tr(keys::CHAT_LINK_NAME))
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
         });
         let expiration_days_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Expires in days (0 = never)")
+                .placeholder(tr(keys::Q_OPS_EXPIRES_IN_DAYS_0_NEVER))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let member_limit_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Member limit (0 = unlimited)")
+                .placeholder(tr(keys::Q_OPS_MEMBER_LIMIT_0_UNLIMITED))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

@@ -36,6 +36,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 use quill::business_info::BusinessInfo;
+use quill::lang::{keys, tr, tr_with};
 
 /// Whether a screen may be left after its save ran.
 pub(super) enum Leave {
@@ -95,7 +96,7 @@ pub(super) fn limited_input(
 
 impl QuillApp {
     pub(super) fn open_business(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let zone_search = live_input(window, cx, "Search");
+        let zone_search = live_input(window, cx, tr(keys::Q_OPS_SEARCH));
         self.dialogs.business_dialog = Some(BusinessDialog {
             view: View::Hub,
             greeting: None,
@@ -348,7 +349,10 @@ impl QuillApp {
                 if send(&mut live.driver) {
                     Leave::Go(None)
                 } else {
-                    Leave::Go(Some(format!("Could not send the {what}.")))
+                    Leave::Go(Some(tr_with(
+                        keys::Q_OPS_COULD_NOT_SEND_THE,
+                        &[("what", what)],
+                    )))
                 }
             }
         }

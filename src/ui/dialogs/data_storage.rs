@@ -24,17 +24,18 @@ use gpui_kit::*;
 use quill::data_settings::{
     AutoDownloadNetSettings, DataStoragePrefs, NetworkKind, size_cap_label,
 };
+use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 pub(crate) fn format_storage_bytes(n: i64) -> String {
     if n <= 0 {
-        "0 B".to_string()
+        tr(keys::Q_OPS_0_B).to_string()
     } else if n < 1024 {
-        format!("{n} B")
+        tr_with(keys::Q_OPS_B, &[("n", &n.to_string())])
     } else if n < 1024 * 1024 {
-        format!("{} KB", n / 1024)
+        tr_with(keys::Q_OPS_KB, &[("n_1024", &(n / 1024).to_string())])
     } else if n < 1024 * 1024 * 1024 {
         format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
     } else {
@@ -100,14 +101,17 @@ impl QuillApp {
                     format!("{} downloads", network.label()),
                     this.data_storage_editor_body(cx, *network, draft),
                 ),
-                None => ("Data & Storage".to_string(), this.data_storage_body(cx)),
+                None => (
+                    tr(keys::Q_OPS_DATA_STORAGE).to_string(),
+                    this.data_storage_body(cx),
+                ),
             };
             let mut footer = div().flex().justify_end().gap_2();
             if editing.is_some() {
                 footer = footer
                     .child(
                         Button::new("data-storage-back")
-                            .label("Back")
+                            .label(tr(keys::Q_OPS_BACK))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.settings.data_storage_editor = None;
@@ -116,7 +120,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("data-storage-save")
-                            .label("Save")
+                            .label(tr(keys::SETTINGS_SAVE))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some((network, draft)) =
@@ -151,7 +155,7 @@ impl QuillApp {
                 footer = footer
                     .child(
                         Button::new("storage-refresh")
-                            .label("Refresh")
+                            .label(tr(keys::Q_OPS_REFRESH))
                             .outline()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.refresh_storage_usage(cx);
@@ -160,7 +164,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("close-storage-usage")
-                            .label("Done")
+                            .label(tr(keys::BOX_DONE))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.settings.storage_usage_open = false;
@@ -204,7 +208,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(danger())
-                    .child(format!("Error: {err}")),
+                    .child(tr_with(keys::Q_OPS_ERROR, &[("err", &err.to_string())])),
             );
         }
         // `parity:data-export-full`: the full export has its own box.
@@ -213,10 +217,12 @@ impl QuillApp {
             .and_then(|s| s.settings.account_export.as_ref())
             .map(|export| export.progress().label());
         body = body
-            .child(section_header("Export Telegram data"))
-            .child(div().text_xs().child(
-                "Save your account information, contacts, stories, chats and media as HTML or JSON files.",
-            ));
+            .child(section_header(tr(keys::SETTINGS_EXPORT_DATA)))
+            .child(
+                div()
+                    .text_xs()
+                    .child(tr(keys::Q_OPS_SAVE_YOUR_ACCOUNT_INFORMATION_CONTACTS)),
+            );
         if let Some(label) = &running {
             body = body.child(
                 div()
@@ -231,9 +237,9 @@ impl QuillApp {
             div().flex().child(
                 Button::new("account-export-open")
                     .label(if running.is_some() {
-                        "Show export progress"
+                        tr(keys::Q_OPS_SHOW_EXPORT_PROGRESS)
                     } else {
-                        "Export Telegram data…"
+                        tr(keys::Q_OPS_EXPORT_TELEGRAM_DATA)
                     })
                     .outline()
                     .small()
@@ -245,7 +251,7 @@ impl QuillApp {
             ),
         );
         // --- Automatic downloads ---
-        body = body.child(section_header("Automatic downloads"));
+        body = body.child(section_header(tr(keys::Q_OPS_AUTOMATIC_DOWNLOADS)));
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);
         if !prefs.is_some_and(|p| p.seeded) {
             let loading = session.is_some_and(|s| s.settings.auto_download_presets_loading);
@@ -254,9 +260,9 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(if loading {
-                        "Loading download settings…"
+                        tr(keys::Q_OPS_LOADING_DOWNLOAD_SETTINGS)
                     } else {
-                        "Download settings unavailable."
+                        tr(keys::Q_OPS_DOWNLOAD_SETTINGS_UNAVAILABLE)
                     }),
             );
         } else if let Some(prefs) = prefs {
@@ -282,18 +288,22 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("Use less data for calls"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .child(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS)),
+                            )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Lower data usage during Telegram calls"),
+                                    .child(tr(keys::Q_OPS_LOWER_DATA_USAGE_DURING_TELEGRAM)),
                             ),
                     )
                     .child(
                         Switch::new("data-storage-less-data-calls")
                             .checked(all_on)
-                            .accessibility_label("Use less data for calls")
+                            .accessibility_label(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     // Send failures land on
@@ -316,7 +326,7 @@ impl QuillApp {
         // --- Download folder (B13) ---
         body = body.child(self.download_folder_section(cx));
         // --- Storage usage ---
-        body = body.child(section_header("Storage usage"));
+        body = body.child(section_header(tr(keys::Q_OPS_STORAGE_USAGE)));
         let stats = session
             .as_ref()
             .and_then(|s| s.settings.storage_stats.clone());
@@ -328,9 +338,9 @@ impl QuillApp {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if loading {
-                            "Loading…"
+                            tr(keys::Q_OPS_LOADING)
                         } else {
-                            "No storage data yet."
+                            tr(keys::Q_OPS_NO_STORAGE_DATA_YET)
                         }),
                 );
             }
@@ -357,7 +367,10 @@ impl QuillApp {
                 network.label().replace(' ', "-")
             ))
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("{} automatic download settings", network.label()))
+            .aria_label(tr_with(
+                keys::Q_OPS_AUTOMATIC_DOWNLOAD_SETTINGS,
+                &[("label", (network.label()))],
+            ))
             .tab_index(0)
             .cursor_pointer()
             .flex()
@@ -408,7 +421,7 @@ impl QuillApp {
                     div()
                         .flex()
                         .flex_col()
-                        .child(div().text_sm().child("Automatic download"))
+                        .child(div().text_sm().child(tr(keys::Q_OPS_AUTOMATIC_DOWNLOAD)))
                         .child(
                             div()
                                 .text_xs()
@@ -422,7 +435,7 @@ impl QuillApp {
                 .child(
                     Switch::new("data-storage-enabled")
                         .checked(draft.is_auto_download_enabled)
-                        .accessibility_label("Automatic download")
+                        .accessibility_label(tr(keys::Q_OPS_AUTOMATIC_DOWNLOAD))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
                                 draft.is_auto_download_enabled = on;
@@ -431,25 +444,25 @@ impl QuillApp {
                         })),
                 ),
         );
-        body = body.child(section_header("Maximum file size"));
+        body = body.child(section_header(tr(keys::Q_OPS_MAXIMUM_FILE_SIZE)));
         body = body.child(self.data_storage_cap_row(
             cx,
             "data-storage-cap-photo",
-            "Photos",
+            tr(keys::Q_OPS_PHOTOS),
             draft.max_photo_file_size,
             AutoDownloadNetSettings::cycle_photo_cap,
         ));
         body = body.child(self.data_storage_cap_row(
             cx,
             "data-storage-cap-video",
-            "Videos",
+            tr(keys::Q_OPS_VIDEOS),
             draft.max_video_file_size,
             AutoDownloadNetSettings::cycle_video_cap,
         ));
         body = body.child(self.data_storage_cap_row(
             cx,
             "data-storage-cap-other",
-            "Other files",
+            tr(keys::Q_OPS_OTHER_FILES),
             draft.max_other_file_size,
             AutoDownloadNetSettings::cycle_other_cap,
         ));
@@ -459,11 +472,15 @@ impl QuillApp {
                 .items_center()
                 .justify_between()
                 .py_1()
-                .child(div().text_sm().child("Use less data for calls"))
+                .child(
+                    div()
+                        .text_sm()
+                        .child(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS)),
+                )
                 .child(
                     Switch::new("data-storage-editor-less-data-calls")
                         .checked(draft.use_less_data_for_calls)
-                        .accessibility_label("Use less data for calls")
+                        .accessibility_label(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some((_, draft)) = this.settings.data_storage_editor.as_mut() {
                                 draft.use_less_data_for_calls = on;
@@ -476,7 +493,7 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Saved on this device; applies to new downloads."),
+                .child(tr(keys::Q_OPS_SAVED_ON_THIS_DEVICE_APPLIES)),
         );
         body
     }

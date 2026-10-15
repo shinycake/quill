@@ -5,6 +5,7 @@
 use super::*;
 use crate::ui::{accent_strong, bg_badge_muted};
 use gpui_kit::component::badge::Badge;
+use quill::lang::{keys, tr};
 use quill::notify_accounts::account_name_in_title;
 use quill::telegram::envelope::AuthorizationState;
 
@@ -67,7 +68,7 @@ pub(in crate::ui) fn accounts_menu_row(unread: AccountUnread, cx: &App) -> AnyEl
         .items_center()
         .justify_between()
         .gap_2()
-        .child("Accounts")
+        .child(tr(keys::Q_OPS_ACCOUNTS))
         .child(super::account_row::counter_pill(
             "accounts-menu",
             unread,

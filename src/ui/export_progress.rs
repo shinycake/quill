@@ -10,6 +10,7 @@ use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::export::{Progress, Stage};
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Poll-loop step: keep the box fresh while the export advances, and when
@@ -31,10 +32,12 @@ impl QuillApp {
         let progress = export.progress();
         if progress.is_settled() && self.dialogs.chat_export_progress_hidden {
             let note = match &progress.stage {
-                Stage::Finished(summary) => format!(
-                    "Exported {} messages to {}",
-                    summary.messages,
-                    summary.folder.display()
+                Stage::Finished(summary) => tr_with(
+                    keys::Q_OPS_EXPORTED_MESSAGES_TO,
+                    &[
+                        ("messages", &summary.messages.to_string()),
+                        ("display", &(summary.folder.display()).to_string()),
+                    ],
                 ),
                 other => Progress {
                     stage: other.clone(),
@@ -77,12 +80,10 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(format!("History of {title}")),
-            )
+            .child(div().text_sm().text_color(muted).child(tr_with(
+                keys::Q_OPS_HISTORY_OF,
+                &[("title", &title.to_string())],
+            )))
             .child(bar)
             .child(
                 div()
@@ -93,16 +94,19 @@ impl QuillApp {
                     .child(label),
             );
         if let Stage::Finished(summary) = &progress.stage {
-            body = body.child(div().text_xs().text_color(muted).child(format!(
-                "{} files saved, {} left out of the export.",
-                summary.files, summary.skipped
+            body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                keys::Q_OPS_FILES_SAVED_LEFT_OUT_OF,
+                &[
+                    ("files", &summary.files.to_string()),
+                    ("skipped", &summary.skipped.to_string()),
+                ],
             )));
         } else if !settled {
             body = body.child(
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("You can close this window. The export keeps running."),
+                    .child(tr(keys::Q_OPS_YOU_CAN_CLOSE_THIS_WINDOW_2)),
             );
         }
         let mut footer = div().flex().justify_end().gap_2();
@@ -110,26 +114,28 @@ impl QuillApp {
             if matches!(progress.stage, Stage::Finished(_)) {
                 footer = footer.child(
                     Button::new("chat-export-show")
-                        .label("Show folder")
+                        .label(tr(keys::Q_OPS_SHOW_FOLDER))
                         .outline()
                         .on_click(move |_, _, cx| cx.reveal_path(&folder)),
                 );
             }
-            footer = footer.child(Button::new("chat-export-done").label("Done").on_click(
-                cx.listener(|this, _, window, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        live.driver.session.settings.chat_export = None;
-                    }
-                    this.dialogs.chat_export_seen = None;
-                    cx.notify();
-                    this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
-                }),
-            ));
+            footer = footer.child(
+                Button::new("chat-export-done")
+                    .label(tr(keys::BOX_DONE))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if let Some(live) = this.live.as_mut() {
+                            live.driver.session.settings.chat_export = None;
+                        }
+                        this.dialogs.chat_export_seen = None;
+                        cx.notify();
+                        this.close_kit_dialog_if_done(DialogKind::ChatExport, window, cx);
+                    })),
+            );
         } else {
             footer = footer
                 .child(
                     Button::new("chat-export-hide")
-                        .label("Hide")
+                        .label(tr(keys::Q_OPS_HIDE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.dialogs.chat_export_progress_hidden = true;
@@ -139,7 +145,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("chat-export-stop")
-                        .label("Cancel export")
+                        .label(tr(keys::Q_OPS_CANCEL_EXPORT))
                         .outline()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(export) =

@@ -19,6 +19,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::ComposerSnapshot;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::schedule::ScheduleKind;
 use quill::share_box::{ShareSend, forward_bar_lines, share_done_label};
 use quill::telegram::envelope::{ChatKind, MessageSender};
@@ -65,7 +66,11 @@ fn share_dest_row(
         .role(gpui_kit::Role::Button)
         .aria_label(format!(
             "{title}, {}",
-            if checked { "selected" } else { "not selected" }
+            if checked {
+                "selected"
+            } else {
+                tr(keys::Q_OPS_NOT_SELECTED)
+            }
         ))
         .tab_index(0)
         .cursor_pointer()
@@ -128,7 +133,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&dest.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         if dest_is_secret {
-            return Some("This message cannot be forwarded to secret chats.".into());
+            return Some(tr(keys::Q_OPS_THIS_MESSAGE_CANNOT_BE_FORWARDED).into());
         }
         // Phase A1: slow-mode gate applies to forwards — forwarding sends
         // messages to the destination chat.
@@ -146,7 +151,7 @@ impl QuillApp {
         };
         let dests: Vec<ChatId> = self.share.selection.chats().to_vec();
         if dests.is_empty() {
-            self.connection.status_note = "choose a chat to forward to".into();
+            self.connection.status_note = tr(keys::Q_OPS_CHOOSE_A_CHAT_TO_FORWARD).into();
             cx.notify();
             return;
         }
@@ -190,7 +195,10 @@ impl QuillApp {
             self.connection.status_note = if failed == 0 {
                 share_done_label(draft.count(), &titles)
             } else {
-                format!("could not forward to {failed} chat(s)")
+                tr_with(
+                    keys::Q_OPS_COULD_NOT_FORWARD_TO_CHAT,
+                    &[("failed", &failed.to_string())],
+                )
             };
         } else if self.demo_session.is_some() {
             for dest in &dests {
@@ -252,7 +260,7 @@ impl QuillApp {
         if !comment.is_empty() {
             self.set_composer_markup(&comment, window, cx);
         }
-        self.connection.status_note = "forward bar ready — press Send".into();
+        self.connection.status_note = tr(keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND).into();
         cx.notify();
     }
 
@@ -309,12 +317,14 @@ impl QuillApp {
                 .forward_messages_with_options(dest, &draft, &options);
             match result {
                 Ok(_) => {
-                    self.connection.status_note = "forwarding…".into();
+                    self.connection.status_note = tr(keys::Q_OPS_FORWARDING).into();
                     self.share.pending_forward = None;
                     self.share.forward_bar_dest = None;
                     self.composer_ui.scheduling = quill::composer::ComposerScheduling::None;
                 }
-                Err(_) => self.connection.status_note = "could not forward messages".into(),
+                Err(_) => {
+                    self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_FORWARD_MESSAGES).into()
+                }
             }
         } else if self.demo_session.is_some() {
             self.apply_demo_forward(dest, &draft);
@@ -355,9 +365,9 @@ impl QuillApp {
             .child(
                 Checkbox::new((prefix, 0usize))
                     .label(if multiple {
-                        "Hide sender names"
+                        tr(keys::Q_OPS_HIDE_SENDER_NAMES)
                     } else {
-                        "Hide sender name"
+                        tr(keys::Q_OPS_HIDE_SENDER_NAME)
                     })
                     .checked(send_copy)
                     .on_click(cx.listener(|this, &on, _, cx| {
@@ -373,9 +383,9 @@ impl QuillApp {
             .child(
                 Checkbox::new((prefix, 1usize))
                     .label(if multiple {
-                        "Hide captions"
+                        tr(keys::Q_OPS_HIDE_CAPTIONS)
                     } else {
-                        "Hide caption"
+                        tr(keys::Q_OPS_HIDE_CAPTION)
                     })
                     .checked(remove_caption)
                     .disabled(!send_copy)
@@ -402,7 +412,7 @@ impl QuillApp {
                 self.session()
                     .and_then(|s| s.chats.get(&d.from_chat_id.0).map(|c| c.title.clone()))
             })
-            .unwrap_or_else(|| "this chat".into());
+            .unwrap_or_else(|| tr(keys::Q_OPS_THIS_CHAT).into());
         let session = self.session();
         let dests: Vec<(ChatId, String, Option<PathBuf>)> = session
             .map(|session| {
@@ -425,18 +435,27 @@ impl QuillApp {
             .and_then(|id| session.map(|s| s.is_saved_messages(id)))
             .unwrap_or(false);
         let schedule_label = match ScheduleKind::for_saved_messages(single_saved) {
-            ScheduleKind::Reminder => "Remind me",
-            ScheduleKind::Schedule => "Schedule",
+            ScheduleKind::Reminder => tr(keys::Q_OPS_REMIND_ME),
+            ScheduleKind::Schedule => tr(keys::Q_OPS_SCHEDULE),
         };
         let heading = if count == 1 {
-            format!("Forward 1 message from {from_title}")
+            tr_with(
+                keys::Q_OPS_FORWARD_1_MESSAGE_FROM,
+                &[("from_title", &from_title.to_string())],
+            )
         } else {
-            format!("Forward {count} messages from {from_title}")
+            tr_with(
+                keys::Q_OPS_FORWARD_MESSAGES_FROM,
+                &[
+                    ("count", &count.to_string()),
+                    ("from_title", &from_title.to_string()),
+                ],
+            )
         };
         let summary = match selected {
-            0 => "Choose one or more chats".to_string(),
-            1 => "1 chat selected".to_string(),
-            n => format!("{n} chats selected"),
+            0 => tr(keys::Q_OPS_CHOOSE_ONE_OR_MORE_CHATS).to_string(),
+            1 => tr(keys::Q_OPS_1_CHAT_SELECTED).to_string(),
+            n => tr_with(keys::Q_OPS_CHATS_SELECTED, &[("n", &n.to_string())]),
         };
         let mut list = div()
             .id("forward-dest-list")
@@ -451,9 +470,9 @@ impl QuillApp {
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child(if searching {
-                        "Searching…"
+                        tr(keys::Q_OPS_SEARCHING)
                     } else {
-                        "No matching chats."
+                        tr(keys::Q_OPS_NO_MATCHING_CHATS)
                     }),
             );
         } else {
@@ -484,11 +503,11 @@ impl QuillApp {
                             .text_sm()
                             .font_semibold()
                             .text_color(accent())
-                            .child("Forward to…"),
+                            .child(tr(keys::Q_OPS_FORWARD_TO)),
                     )
                     .child(
                         Button::new("cancel-forward-picker")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_forward_picker(window, cx);
@@ -498,7 +517,7 @@ impl QuillApp {
             .child(div().text_xs().text_color(text_primary()).child(heading))
             .child(
                 Textarea::new(&self.share.search_input)
-                    .aria_label("Search forwarding destinations")
+                    .aria_label(tr(keys::Q_OPS_SEARCH_FORWARDING_DESTINATIONS))
                     .h(px(36.)),
             )
             .child(list)
@@ -510,7 +529,7 @@ impl QuillApp {
             )
             .child(
                 Textarea::new(&self.share.comment_input)
-                    .aria_label("Comment")
+                    .aria_label(tr(keys::Q_OPS_COMMENT))
                     .h(px(36.)),
             )
             .child(self.forward_option_checkboxes("forward-option", cx))
@@ -523,7 +542,7 @@ impl QuillApp {
                     .when(can_link, |row| {
                         row.child(
                             Button::new("share-copy-link")
-                                .label("Copy link")
+                                .label(tr(keys::CONTEXT_COPY_LINK))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.share_copy_link(cx);
@@ -542,7 +561,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("share-silent")
-                            .label("Send without sound")
+                            .label(tr(keys::Q_OPS_SEND_WITHOUT_SOUND))
                             .ghost()
                             .disabled(selected == 0)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -550,15 +569,17 @@ impl QuillApp {
                             })),
                     )
                     .when(selected == 1, |row| {
-                        row.child(Button::new("share-continue").label("Open chat").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.share_continue_in_chat(window, cx);
-                            }),
-                        ))
+                        row.child(
+                            Button::new("share-continue")
+                                .label(tr(keys::Q_OPS_OPEN_CHAT))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.share_continue_in_chat(window, cx);
+                                })),
+                        )
                     })
                     .child(
                         Button::new("share-send")
-                            .label("Send")
+                            .label(tr(keys::SHARE_CONFIRM))
                             .primary()
                             .disabled(selected == 0)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -613,7 +634,7 @@ impl QuillApp {
                                     .text_xs()
                                     .font_semibold()
                                     .text_color(accent())
-                                    .child("Forward"),
+                                    .child(tr(keys::Q_OPS_FORWARD)),
                             )
                             .child(
                                 div()
@@ -637,7 +658,7 @@ impl QuillApp {
                             .gap_1()
                             .child(
                                 Button::new("forward-bar-change")
-                                    .label("Change recipient")
+                                    .label(tr(keys::Q_OPS_CHANGE_RECIPIENT))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.change_forward_recipient(window, cx);
@@ -648,7 +669,7 @@ impl QuillApp {
                                     .icon(gpui_kit::assets::IconName::X)
                                     .xsmall()
                                     .ghost()
-                                    .accessibility_label("Cancel forward")
+                                    .accessibility_label(tr(keys::Q_OPS_CANCEL_FORWARD))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.clear_forward(window, cx);
                                     })),
@@ -691,7 +712,7 @@ impl QuillApp {
                 .flex_none()
                 .rounded_full()
                 .role(gpui_kit::Role::Button)
-                .aria_label(format!("Send as {name}"))
+                .aria_label(tr_with(keys::Q_OPS_SEND_AS, &[("name", &name.to_string())]))
                 .tab_index(0)
                 .cursor_pointer()
                 .child(chat_avatar(&name, photo.as_deref(), 28.))
@@ -719,17 +740,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if locked {
-            self.connection.status_note =
-                "Subscribe to Telegram Premium to be able to comment on behalf of your channels in group chats."
-                    .into();
+            self.connection.status_note = tr(keys::Q_OPS_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO).into();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.set_chat_message_sender(chat_id, sender)
             {
-                Ok(()) => "changing sender…".into(),
-                Err(_) => "could not change the sender".into(),
+                Ok(()) => tr(keys::Q_OPS_CHANGING_SENDER).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_CHANGE_THE_SENDER).into(),
             };
         } else {
             self.apply_demo_message_sender(chat_id, sender);
@@ -760,7 +779,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Loading…"),
+                    .child(tr(keys::Q_OPS_LOADING)),
             );
         }
         for (index, entry) in senders.iter().enumerate() {
@@ -789,7 +808,10 @@ impl QuillApp {
                     .py_1()
                     .rounded_md()
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Send as {title}, {status}"))
+                    .aria_label(tr_with(
+                        keys::Q_OPS_SEND_AS_2,
+                        &[("title", &title.to_string()), ("status", status)],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
@@ -838,13 +860,18 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().font_semibold().child("Send message as…"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(keys::Q_OPS_SEND_MESSAGE_AS)),
+                    )
                     .child(
                         Button::new("send-as-close")
                             .icon(gpui_kit::assets::IconName::X)
                             .xsmall()
                             .ghost()
-                            .accessibility_label("Close")
+                            .accessibility_label(tr(keys::CLOSE))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.composer_ui.send_as_open = false;
                                 cx.notify();

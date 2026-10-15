@@ -2,6 +2,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 /// Slice G2: chat welcome-message editor (info panel → "Welcome
 /// message", admins with `can_send_welcome_messages` only).
 /// `new_input` feeds `addChatWelcomeMessage`; `editing` +
@@ -19,13 +20,13 @@ impl WelcomeDialog {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>, chat_id: ChatId) -> Self {
         let new_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("New welcome message")
+                .placeholder(tr(keys::Q_OPS_NEW_WELCOME_MESSAGE))
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
         let edit_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Welcome message")
+                .placeholder(tr(keys::WELCOME_MESSAGES_TITLE))
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });

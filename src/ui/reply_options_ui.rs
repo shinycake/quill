@@ -18,6 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{ComposerReplyTo, QuoteSelection};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::reply_options::{ReplyOption, quote_segments, reply_options};
 use quill::telegram::envelope::{ChatKind, MessageSender, effective_content};
 use std::path::PathBuf;
@@ -38,7 +39,10 @@ fn reply_dest_row(
         .py_1()
         .rounded_md()
         .role(gpui_kit::Role::Button)
-        .aria_label(format!("Reply in {title}"))
+        .aria_label(tr_with(
+            keys::FORUM_REPLY_IN,
+            &[("topic", &title.to_string())],
+        ))
         .tab_index(0)
         .cursor_pointer()
         .pressable(cx.theme())
@@ -115,8 +119,8 @@ impl QuillApp {
             .icon(IconName::EllipsisVertical)
             .ghost()
             .small()
-            .tooltip("Reply options")
-            .accessibility_label("Reply options")
+            .tooltip(tr(keys::Q_OPS_REPLY_OPTIONS))
+            .accessibility_label(tr(keys::Q_OPS_REPLY_OPTIONS))
             .dropdown_menu(move |mut menu, _, _| {
                 for option in &options {
                     let option = *option;
@@ -154,7 +158,7 @@ impl QuillApp {
             ReplyOption::UpdateQuote => {
                 self.share.reply_elsewhere_open = false;
                 self.share.reply_quote_open = true;
-                self.connection.status_note = "pick the part to quote".into();
+                self.connection.status_note = tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE).into();
             }
             ReplyOption::ReplyInAnotherChat => {
                 self.open_reply_elsewhere(window, cx);
@@ -194,7 +198,7 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.connection.status_note = "reply in…".into();
+        self.connection.status_note = tr(keys::Q_OPS_REPLY_IN).into();
         cx.notify();
     }
 
@@ -225,8 +229,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&dest.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         if secret {
-            self.connection.status_note =
-                "Replies from another chat can't go to secret chats.".into();
+            self.connection.status_note = tr(keys::Q_OPS_REPLIES_FROM_ANOTHER_CHAT_CANT).into();
             cx.notify();
             return;
         }
@@ -242,7 +245,7 @@ impl QuillApp {
         self.select_listed_chat(dest, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
-        self.connection.status_note = "replying from another chat".into();
+        self.connection.status_note = tr(keys::Q_OPS_REPLYING_FROM_ANOTHER_CHAT).into();
         cx.notify();
     }
 
@@ -320,7 +323,7 @@ impl QuillApp {
                 (
                     chat.id,
                     if session.is_saved_messages(chat.id) {
-                        "Saved Messages".to_string()
+                        tr(keys::SAVED_MESSAGES).to_string()
                     } else {
                         chat.title.clone()
                     },
@@ -342,9 +345,9 @@ impl QuillApp {
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child(if searching {
-                        "Searching…"
+                        tr(keys::Q_OPS_SEARCHING)
                     } else {
-                        "No matching chats."
+                        tr(keys::Q_OPS_NO_MATCHING_CHATS)
                     }),
             );
         } else {
@@ -374,11 +377,11 @@ impl QuillApp {
                                 .text_sm()
                                 .font_semibold()
                                 .text_color(accent())
-                                .child("Reply in…"),
+                                .child(tr(keys::REPLY_IN_ANOTHER_TITLE)),
                         )
                         .child(
                             Button::new("reply-elsewhere-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_reply_panels(window, cx);
@@ -387,14 +390,14 @@ impl QuillApp {
                 )
                 .child(
                     Textarea::new(&self.share.search_input)
-                        .aria_label("Search chats")
+                        .aria_label(tr(keys::Q_OPS_SEARCH_CHATS))
                         .h(px(36.)),
                 )
                 .when_some(author, |this, (id, title, photo)| {
-                    this.child(section_label("Message author", cx))
+                    this.child(section_label(tr(keys::REPLY_IN_AUTHOR), cx))
                         .child(reply_dest_row(id, title, photo, cx))
                 })
-                .child(section_label("Your chats", cx))
+                .child(section_label(tr(keys::REPLY_IN_CHATS_LIST), cx))
                 .child(list)
                 .into_any_element(),
         )
@@ -433,7 +436,11 @@ impl QuillApp {
                     .role(gpui_kit::Role::Button)
                     .aria_label(format!(
                         "{}: {label}",
-                        if selected { "Quoted" } else { "Quote" }
+                        if selected {
+                            tr(keys::Q_OPS_QUOTED)
+                        } else {
+                            tr(keys::Q_OPS_QUOTE)
+                        }
                     ))
                     .tab_index(0)
                     .cursor_pointer()
@@ -473,14 +480,14 @@ impl QuillApp {
                         .justify_between()
                         .child(div().text_sm().font_semibold().text_color(accent()).child(
                             if picked.is_some() {
-                                "Update Quote"
+                                tr(keys::REPLY_OPTIONS_QUOTE)
                             } else {
-                                "Quote Part of Message"
+                                tr(keys::Q_OPS_QUOTE_PART_OF_MESSAGE)
                             },
                         ))
                         .child(
                             Button::new("reply-quote-done")
-                                .label("Done")
+                                .label(tr(keys::BOX_DONE))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_reply_panels(window, cx);
@@ -492,7 +499,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("You can select a specific part to quote."),
+                        .child(tr(keys::REPLY_ABOUT_QUOTE)),
                 )
                 .into_any_element(),
         )

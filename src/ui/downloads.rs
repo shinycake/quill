@@ -8,6 +8,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
+use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
 impl QuillApp {
     pub(super) fn request_media_download(
@@ -25,15 +26,16 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.download_user_file(file_id, sponsored);
             self.connection.status_note = match result {
-                Ok(Some(_)) => "downloading…".into(),
-                Ok(None) => "already local or in progress".into(),
+                Ok(Some(_)) => tr(keys::Q_OPS_DOWNLOADING).into(),
+                Ok(None) => tr(keys::Q_OPS_ALREADY_LOCAL_OR_IN_PROGRESS).into(),
                 Err(_) => {
                     self.clear_pending_media_playback(file_id);
-                    "Could not download. Please try again.".into()
+                    tr(keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY).into()
                 }
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — addFileToDownloads runs with live TDLib".into();
+            self.connection.status_note =
+                tr(keys::Q_OPS_DEMO_ADDFILETODOWNLOADS_RUNS_WITH_LIVE).into();
         }
         cx.notify();
     }
@@ -87,7 +89,7 @@ impl QuillApp {
             for file_id in failed {
                 self.clear_pending_media_playback(file_id);
             }
-            self.connection.status_note = "Download stopped. Press Play to try again.".into();
+            self.connection.status_note = tr(keys::Q_OPS_DOWNLOAD_STOPPED_PRESS_PLAY_TO).into();
             cx.notify();
         }
     }
@@ -105,7 +107,7 @@ impl QuillApp {
             // and files that may reveal the IP address.
             Some(path) => self.open_file_guarded(path, cx),
             None => {
-                self.connection.status_note = "could not open the file".into();
+                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_THE_FILE).into();
                 cx.notify();
             }
         }
@@ -121,9 +123,9 @@ impl QuillApp {
             .map(PathBuf::from);
         self.connection.status_note = match path {
             Some(path) if quill::platform::reveal_in_file_manager(&path) => {
-                "revealed in file manager".into()
+                tr(keys::Q_OPS_REVEALED_IN_FILE_MANAGER).into()
             }
-            _ => "could not reveal the file".into(),
+            _ => tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE).into(),
         };
         cx.notify();
     }
@@ -136,13 +138,14 @@ impl QuillApp {
             self.connection.status_note = match live.driver.cancel_download(file_id) {
                 Ok(true) => {
                     self.clear_pending_media_playback(file_id);
-                    "Download canceled.".into()
+                    tr(keys::Q_OPS_DOWNLOAD_CANCELED).into()
                 }
-                Ok(false) => "nothing to cancel".into(),
-                Err(_) => "could not cancel the download".into(),
+                Ok(false) => tr(keys::Q_OPS_NOTHING_TO_CANCEL).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_CANCEL_THE_DOWNLOAD).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — cancelDownloadFile runs with live TDLib".into();
+            self.connection.status_note =
+                tr(keys::Q_OPS_DEMO_CANCELDOWNLOADFILE_RUNS_WITH_LIVE).into();
         }
         cx.notify();
     }
@@ -153,13 +156,13 @@ impl QuillApp {
     pub(super) fn pause_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.pause_download(file_id) {
-                Ok(true) => "download paused".into(),
-                Ok(false) => "nothing to pause".into(),
-                Err(_) => "could not pause the download".into(),
+                Ok(true) => tr(keys::Q_OPS_DOWNLOAD_PAUSED).into(),
+                Ok(false) => tr(keys::Q_OPS_NOTHING_TO_PAUSE).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_PAUSE_THE_DOWNLOAD).into(),
             };
         } else if self.demo_session.is_some() {
             self.connection.status_note =
-                "demo — toggleDownloadIsPaused runs with live TDLib".into();
+                tr(keys::Q_OPS_DEMO_TOGGLEDOWNLOADISPAUSED_RUNS_WITH_LIVE).into();
         }
         cx.notify();
     }
@@ -168,13 +171,13 @@ impl QuillApp {
     pub(super) fn resume_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.resume_download(file_id) {
-                Ok(true) => "download resumed".into(),
-                Ok(false) => "nothing to resume".into(),
-                Err(_) => "could not resume the download".into(),
+                Ok(true) => tr(keys::Q_OPS_DOWNLOAD_RESUMED).into(),
+                Ok(false) => tr(keys::Q_OPS_NOTHING_TO_RESUME).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_RESUME_THE_DOWNLOAD).into(),
             };
         } else if self.demo_session.is_some() {
             self.connection.status_note =
-                "demo — toggleDownloadIsPaused runs with live TDLib".into();
+                tr(keys::Q_OPS_DEMO_TOGGLEDOWNLOADISPAUSED_RUNS_WITH_LIVE).into();
         }
         cx.notify();
     }
@@ -212,13 +215,13 @@ impl QuillApp {
                     .py_2()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(div().font_semibold().child("Downloads"))
+                    .child(div().font_semibold().child(tr(keys::ALL_DOWNLOADS)))
                     .child(
                         Button::new("downloads-panel-close")
-                            .accessibility_label("Close downloads")
+                            .accessibility_label(tr(keys::Q_OPS_CLOSE_DOWNLOADS))
                             .icon(IconName::X)
                             .ghost()
-                            .tooltip("Close downloads")
+                            .tooltip(tr(keys::Q_OPS_CLOSE_DOWNLOADS))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     live.driver.session.media.downloads_panel_open = false;
@@ -247,7 +250,7 @@ impl QuillApp {
                     .py_4()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No downloads yet."),
+                    .child(tr(keys::Q_OPS_NO_DOWNLOADS_YET)),
             );
         } else {
             panel = panel.children(self.download_sections("", cx));
@@ -300,19 +303,19 @@ impl QuillApp {
         };
         let mut out = Vec::new();
         if !active.is_empty() {
-            out.push(heading("Active"));
+            out.push(heading(tr(keys::Q_OPS_ACTIVE)));
             for file_id in active {
                 out.push(self.download_row(file_id, true, false, cx));
             }
         }
         if !failed.is_empty() {
-            out.push(heading("Failed"));
+            out.push(heading(tr(keys::Q_OPS_FAILED)));
             for file_id in failed {
                 out.push(self.download_row(file_id, false, true, cx));
             }
         }
         if !recent.is_empty() {
-            out.push(heading("Recent"));
+            out.push(heading(tr(keys::Q_OPS_RECENT)));
             for file_id in recent.into_iter().rev() {
                 out.push(self.download_row(file_id, false, false, cx));
             }
@@ -335,7 +338,7 @@ impl QuillApp {
         let name = session
             .as_ref()
             .map(|s| download_display_name(s, file_id))
-            .unwrap_or_else(|| format!("File {file_id}"));
+            .unwrap_or_else(|| tr_with(keys::Q_OPS_FILE, &[("file_id", &file_id.to_string())]));
         let size_label = file
             .map(|f| f.display_size())
             .map(format_bytes)
@@ -355,9 +358,9 @@ impl QuillApp {
                 size_label.clone()
             };
             let lead = if paused {
-                "Paused".to_string()
+                tr(keys::Q_OPS_PAUSED).to_string()
             } else {
-                progress.map_or("Downloading…".to_string(), |p| {
+                progress.map_or(tr(keys::Q_OPS_DOWNLOADING_2).to_string(), |p| {
                     format!("{}%", (p * 100.0).round() as i32)
                 })
             };
@@ -367,7 +370,7 @@ impl QuillApp {
                 format!("{lead} · {amount}")
             }
         } else if failed {
-            "Download failed".to_string()
+            tr(keys::Q_OPS_DOWNLOAD_FAILED).to_string()
         } else {
             size_label.clone()
         };
@@ -381,9 +384,9 @@ impl QuillApp {
                     IconName::Pause
                 },
                 if paused {
-                    "Resume download"
+                    tr(keys::Q_OPS_RESUME_DOWNLOAD)
                 } else {
-                    "Pause download"
+                    tr(keys::Q_OPS_PAUSE_DOWNLOAD)
                 },
                 // Paused: a frozen ring; unknown progress: a spinning one.
                 Some(if paused {
@@ -393,9 +396,9 @@ impl QuillApp {
                 }),
             )
         } else if failed {
-            (IconName::RotateCcw, "Retry download", None)
+            (IconName::RotateCcw, tr(keys::Q_OPS_RETRY_DOWNLOAD), None)
         } else {
-            (IconName::File, "Open file", None)
+            (IconName::File, tr(keys::Q_OPS_OPEN_FILE), None)
         };
         let disc = super::message_media::action_disc(
             ("download-disc", file_id as u64),
@@ -424,8 +427,8 @@ impl QuillApp {
                     .icon(IconName::X)
                     .ghost()
                     .small()
-                    .tooltip("Cancel download")
-                    .accessibility_label("Cancel download")
+                    .tooltip(tr(keys::Q_OPS_CANCEL_DOWNLOAD))
+                    .accessibility_label(tr(keys::Q_OPS_CANCEL_DOWNLOAD))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.cancel_media_download(FileId(file_id), cx);
                     })),
@@ -436,8 +439,8 @@ impl QuillApp {
                     .icon(IconName::FolderOpen)
                     .ghost()
                     .small()
-                    .tooltip("Show in folder")
-                    .accessibility_label("Show downloaded file in folder")
+                    .tooltip(tr(keys::Q_OPS_SHOW_IN_FOLDER))
+                    .accessibility_label(tr(keys::Q_OPS_SHOW_DOWNLOADED_FILE_IN_FOLDER))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.reveal_downloaded_file(FileId(file_id), cx);
                     })),

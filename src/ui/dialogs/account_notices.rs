@@ -14,6 +14,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{LoginReview, prevented_login_message, unconfirmed_login_message};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -71,9 +72,7 @@ impl QuillApp {
             .and_then(|live| live.driver.session.settings.notices.review_outcome.take());
         match outcome {
             Some(LoginReview::Allowed) => {
-                self.connection.status_note =
-                    "New Login Allowed. You can check the list of your active logins in Active Devices."
-                        .into();
+                self.connection.status_note = tr(keys::Q_OPS_NEW_LOGIN_ALLOWED_YOU_CAN).into();
             }
             Some(LoginReview::Prevented { places }) => self.auth_ui.login_prevented = Some(places),
             None => {}
@@ -95,7 +94,7 @@ impl QuillApp {
             div()
                 .id("unconfirmed-login-banner")
                 .role(Role::Group)
-                .aria_label("New login")
+                .aria_label(tr(keys::Q_OPS_NEW_LOGIN))
                 .w_full()
                 .flex_none()
                 .flex()
@@ -111,7 +110,7 @@ impl QuillApp {
                     div()
                         .font_semibold()
                         .text_sm()
-                        .child("Someone just got access to your messages!"),
+                        .child(tr(keys::UNCONFIRMED_AUTH_TITLE)),
                 )
                 .child(div().text_sm().text_center().max_w(px(520.)).child(message))
                 .when_some(error, |this, error| {
@@ -123,7 +122,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("unconfirmed-login-yes")
-                                .label("Yes, it\u{2019}s me")
+                                .label(tr(keys::UNCONFIRMED_AUTH_CONFIRM))
                                 .primary()
                                 .disabled(busy)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -132,7 +131,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("unconfirmed-login-no")
-                                .label("No, it\u{2019}s not me!")
+                                .label(tr(keys::UNCONFIRMED_AUTH_DENY))
                                 .outline()
                                 .disabled(busy)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -151,7 +150,8 @@ impl QuillApp {
             demo.settings.notices.unconfirmed_count = 0;
             demo.settings.notices.unconfirmed_entries.clear();
             if !confirmed {
-                self.auth_ui.login_prevented = Some(vec!["Berlin, Germany (Pixel 9)".into()]);
+                self.auth_ui.login_prevented =
+                    Some(vec![tr(keys::Q_OPS_BERLIN_GERMANY_PIXEL_9).into()]);
             }
         }
         cx.notify();
@@ -262,7 +262,10 @@ impl QuillApp {
                 if min_age > 0 {
                     body = body.child(
                         Checkbox::new("terms-age")
-                            .label(format!("I confirm that I am {min_age} or over"))
+                            .label(tr_with(
+                                keys::Q_OPS_I_CONFIRM_THAT_I_AM,
+                                &[("min_age", &min_age.to_string())],
+                            ))
                             .checked(self.auth_ui.terms_age_ok)
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 this.auth_ui.terms_age_ok = on;
@@ -275,7 +278,7 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(danger())
-                                .child("Confirm your age to continue."),
+                                .child(tr(keys::Q_OPS_CONFIRM_YOUR_AGE_TO_CONTINUE)),
                         );
                     }
                 }
@@ -288,7 +291,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("terms-decline")
-                            .label("Decline")
+                            .label(tr(keys::CALL_DECLINE))
                             .ghost()
                             .disabled(in_flight)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -299,9 +302,9 @@ impl QuillApp {
                     .child(
                         Button::new("terms-agree")
                             .label(if in_flight {
-                                "Working\u{2026}"
+                                tr(keys::Q_OPS_WORKING)
                             } else {
-                                "Agree & Continue"
+                                tr(keys::Q_OPS_AGREE_CONTINUE)
                             })
                             .primary()
                             .disabled(in_flight)
@@ -317,7 +320,7 @@ impl QuillApp {
                             })),
                     );
                 (
-                    "Terms of Service".into(),
+                    tr(keys::Q_OPS_TERMS_OF_SERVICE).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                     true,
@@ -331,7 +334,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("terms-sorry-back")
-                            .label("Back")
+                            .label(tr(keys::Q_OPS_BACK))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.auth_ui.terms_step = TermsStep::Terms;
@@ -340,7 +343,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("terms-sorry-delete")
-                            .label("Decline & Delete")
+                            .label(tr(keys::Q_OPS_DECLINE_DELETE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.auth_ui.terms_step = TermsStep::DeleteWarning;
@@ -348,7 +351,7 @@ impl QuillApp {
                             })),
                     );
                 (
-                    "Terms of Service".into(),
+                    tr(keys::Q_OPS_TERMS_OF_SERVICE).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                     true,
@@ -369,7 +372,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("terms-delete-back")
-                            .label("Back")
+                            .label(tr(keys::Q_OPS_BACK))
                             .primary()
                             .disabled(busy_delete)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -380,9 +383,9 @@ impl QuillApp {
                     .child(
                         Button::new("terms-delete-now")
                             .label(if busy_delete {
-                                "Deleting\u{2026}"
+                                tr(keys::Q_OPS_DELETING)
                             } else {
-                                "Delete now"
+                                tr(keys::Q_OPS_DELETE_NOW)
                             })
                             .danger()
                             .disabled(busy_delete)
@@ -390,13 +393,15 @@ impl QuillApp {
                                 // TDLib: declined terms must call
                                 // `deleteAccount` with this reason.
                                 if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.delete_account("Decline ToS update", "");
+                                    let _ = live
+                                        .driver
+                                        .delete_account(tr(keys::Q_OPS_DECLINE_TOS_UPDATE), "");
                                 }
                                 cx.notify();
                             })),
                     );
                 (
-                    "Terms of Service".into(),
+                    tr(keys::Q_OPS_TERMS_OF_SERVICE).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                     true,
@@ -428,7 +433,7 @@ impl QuillApp {
         let footer = if force_logout {
             div().flex().justify_end().child(
                 Button::new("service-notice-logout")
-                    .label("Log out")
+                    .label(tr(keys::Q_OPS_LOG_OUT))
                     .primary()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
@@ -454,7 +459,7 @@ impl QuillApp {
             )
         };
         (
-            "Telegram".into(),
+            tr(keys::Q_OPS_TELEGRAM).into(),
             body.into_any_element(),
             footer.into_any_element(),
             force_logout,
@@ -467,9 +472,9 @@ impl QuillApp {
     ) -> (SharedString, AnyElement, AnyElement, bool) {
         let places = self.auth_ui.login_prevented.clone().unwrap_or_default();
         let title = if places.len() == 1 {
-            "New Login Prevented"
+            tr(keys::Q_OPS_NEW_LOGIN_PREVENTED)
         } else {
-            "New Logins Prevented"
+            tr(keys::Q_OPS_NEW_LOGINS_PREVENTED)
         };
         let body = div()
             .flex()

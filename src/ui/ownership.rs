@@ -16,6 +16,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::moderation::{GroupFlavor, OwnerCandidate, owner_choices};
 use quill::state::{MemberListFilter, OwnerLookup, SupergroupMembersFetch, transfer_block_reason};
 use quill::telegram::envelope::{CanTransferOwnershipResult, MessageSender, ParsedChatMember};
@@ -169,9 +170,9 @@ impl QuillApp {
         input.update(cx, |input, cx| input.set_value("", window, cx));
         drop(password);
         self.connection.status_note = match sent {
-            Some(Ok(Some(_))) => "transferring ownership…".into(),
-            Some(_) => "ownership can't be transferred right now".into(),
-            None => "transferring ownership needs a live connection (demo)".into(),
+            Some(Ok(Some(_))) => tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP).into(),
+            Some(_) => tr(keys::Q_OPS_OWNERSHIP_CANT_BE_TRANSFERRED_RIGHT).into(),
+            None => tr(keys::Q_OPS_TRANSFERRING_OWNERSHIP_NEEDS_A_LIVE).into(),
         };
         cx.notify();
     }
@@ -212,7 +213,10 @@ impl QuillApp {
         } else {
             "group"
         };
-        self.connection.status_note = format!("{name} is now the owner of the {place}.");
+        self.connection.status_note = tr_with(
+            keys::Q_OPS_IS_NOW_THE_OWNER_OF,
+            &[("name", &name.to_string()), ("place", place)],
+        );
         self.admin.ownership_dialog = None;
         if leave_after {
             self.leave_channel(ChatId(done.chat_id), cx);
@@ -239,7 +243,7 @@ impl QuillApp {
                 .map(|d| (d.chat_id, d.stage, d.password_input.clone()))
             else {
                 return dialog
-                    .title(crate::ui::shell::dialog_title("Transfer ownership"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_TRANSFER_OWNERSHIP)))
                     .on_close(on_close);
             };
             let flavor = this.group_flavor(chat_id).unwrap_or(GroupFlavor::Supergroup);
@@ -263,23 +267,23 @@ impl QuillApp {
             let title: String;
             match stage {
                 OwnershipStage::Leave => {
-                    title = format!("Leave {}?", if place == "channel" { "Channel" } else { "Group" });
+                    title = format!("Leave {}?", if place == "channel" { tr(keys::Q_OPS_CHANNEL) } else { tr(keys::Q_OPS_GROUP) });
                     let line = match ownership.owner_after_leaving.get(&chat_id.0) {
                         Some(OwnerLookup::Loaded(user_id)) => {
                             let name = this.contact_display_name(*user_id);
-                            let when = if legacy { "immediately" } else { "in 1 week" };
+                            let when = if legacy { "immediately" } else { tr(keys::Q_OPS_IN_1_WEEK) };
                             format!(
                                 "If you leave, {name} will become the new owner of {chat_title} {when}."
                             )
                         }
                         Some(OwnerLookup::Failed(message)) => message.clone(),
-                        _ => "Finding out who becomes the next owner…".to_string(),
+                        _ => tr(keys::Q_OPS_FINDING_OUT_WHO_BECOMES_THE).to_string(),
                     };
                     body = body.child(div().text_sm().text_color(muted).child(line));
                     footer = footer
                         .child(
                             Button::new("own-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_ownership_dialog(cx);
@@ -288,7 +292,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("own-appoint")
-                                .label("Appoint Another Owner")
+                                .label(tr(keys::Q_OPS_APPOINT_ANOTHER_OWNER))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.set_ownership_stage(
                                         OwnershipStage::Pick { leave_after: true },
@@ -299,7 +303,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("own-leave")
-                                .label(format!("Leave {}", if place == "channel" { "Channel" } else { "Group" }))
+                                .label(format!("Leave {}", if place == "channel" { tr(keys::Q_OPS_CHANNEL) } else { tr(keys::Q_OPS_GROUP) }))
                                 .danger()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.leave_after_ownership(chat_id, window, cx);
@@ -308,9 +312,9 @@ impl QuillApp {
                 }
                 OwnershipStage::Pick { leave_after } => {
                     title = if leave_after {
-                        "Appoint New Owner".to_string()
+                        tr(keys::Q_OPS_APPOINT_NEW_OWNER).to_string()
                     } else {
-                        format!("Transfer {place} ownership")
+                        tr_with(keys::Q_OPS_TRANSFER_OWNERSHIP_2, &[("place", place)])
                     };
                     let choices = this.ownership_candidates(chat_id);
                     let mut list = div()
@@ -322,7 +326,7 @@ impl QuillApp {
                         .overflow_y_scroll();
                     if choices.is_empty() {
                         list = list.child(div().text_sm().text_color(muted).child(
-                            "There are no eligible participants to appoint as owner.",
+                            tr(keys::SELECT_NEXT_OWNER_BOX_EMPTY_LIST),
                         ));
                     }
                     for (user_id, is_admin) in choices.into_iter().take(100) {
@@ -359,7 +363,7 @@ impl QuillApp {
                     body = body.child(list);
                     footer = footer.child(
                         Button::new("own-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_ownership_dialog(cx);
@@ -368,7 +372,7 @@ impl QuillApp {
                     );
                 }
                 OwnershipStage::Confirm { user_id, leave_after } => {
-                    title = "Change owner".to_string();
+                    title = tr(keys::Q_OPS_CHANGE_OWNER).to_string();
                     let name = this.contact_display_name(user_id);
                     let back = OwnershipStage::Pick { leave_after };
                     let blocked = ownership
@@ -379,24 +383,24 @@ impl QuillApp {
                     let in_flight = ownership.transfer_in_flight.is_some();
                     if let Some(reason) = blocked {
                         body = body
-                            .child(div().text_sm().font_semibold().child("Security check"))
+                            .child(div().text_sm().font_semibold().child(tr(keys::Q_OPS_SECURITY_CHECK)))
                             .child(div().text_sm().text_color(muted).child(format!(
                                 "You can transfer this {place} to {name} only if you have enabled Two-Step Verification more than 7 days ago and logged in on this device more than 24 hours ago."
                             )))
                             .child(div().text_sm().text_color(cx.theme().danger).child(reason));
                     } else if !ready {
-                        body = body.child(div().text_sm().text_color(muted).child("Checking…"));
+                        body = body.child(div().text_sm().text_color(muted).child(tr(keys::Q_OPS_CHECKING)));
                     } else {
                         body = body
                             .child(div().text_sm().text_color(muted).child(format!(
                                 "This will transfer the full owner rights for {chat_title} to {name}. The new owner will be free to remove any of your admin privileges or even ban you."
                             )))
                             .child(div().text_sm().text_color(muted).child(
-                                "Please enter your Two-Step Verification password to complete the transfer.",
+                                tr(keys::Q_OPS_PLEASE_ENTER_YOUR_TWO_STEP),
                             ))
                             .child(
                                 Input::new(&password_input)
-                                    .aria_label("Two-step verification password")
+                                    .aria_label(tr(keys::Q_OPS_TWO_STEP_VERIFICATION_PASSWORD))
                                     .content_type(InputContentType::Password),
                             );
                     }
@@ -406,7 +410,7 @@ impl QuillApp {
                     footer = footer
                         .child(
                             Button::new("own-back")
-                                .label("Back")
+                                .label(tr(keys::Q_OPS_BACK))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.set_ownership_stage(back, cx);
@@ -416,7 +420,7 @@ impl QuillApp {
                         .when(ready, |footer| {
                             footer.child(
                                 Button::new("own-submit")
-                                    .label(if in_flight { "Transferring…" } else { "Change owner" })
+                                    .label(if in_flight { tr(keys::Q_OPS_TRANSFERRING) } else { tr(keys::Q_OPS_CHANGE_OWNER) })
                                     .danger()
                                     .disabled(in_flight)
                                     .on_click(cx.listener(move |this, _, window, cx| {

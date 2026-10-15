@@ -13,6 +13,7 @@ use gpui_kit::*;
 use quill::chatlist_calls::{
     CLEAR_ABOUT, CLEAR_BUTTON, CLEAR_REVOKE_LABEL, CLEAR_TITLE, can_clear,
 };
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn open_clear_calls(&mut self, cx: &mut Context<Self>) {
@@ -83,7 +84,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("clear-calls-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.chat_list.global.clear_calls_open = false;
                             cx.notify();

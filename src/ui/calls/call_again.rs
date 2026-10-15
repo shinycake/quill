@@ -1,6 +1,7 @@
 //! Methods moved out of `calls.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Phase C2i: "Call again" from a history row — honours the
@@ -16,7 +17,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline())
         {
-            self.connection.status_note = "You're offline — can't start a call".into();
+            self.connection.status_note = tr(keys::Q_OPS_YOURE_OFFLINE_CANT_START_A).into();
             cx.notify();
             return;
         }
@@ -51,7 +52,13 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().text_sm().font_semibold().px_1().child("Recent calls"))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .px_1()
+                        .child(tr(keys::Q_OPS_RECENT_CALLS)),
+                )
                 .when(
                     quill::chatlist_calls::can_clear(entries.len(), clearing),
                     |this| {
@@ -71,11 +78,11 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Couldn’t load call history."),
+                        .child(tr(keys::Q_OPS_COULDN_T_LOAD_CALL_HISTORY)),
                 )
                 .child(
                     Button::new("calls-retry")
-                        .label("Retry")
+                        .label(tr(keys::Q_OPS_RETRY))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(live) = this.live.as_mut()
@@ -92,14 +99,14 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Loading calls…"),
+                    .child(tr(keys::Q_OPS_LOADING_CALLS)),
             );
         } else if entries.is_empty() {
             list = list.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No recent calls."),
+                    .child(tr(keys::Q_OPS_NO_RECENT_CALLS)),
             );
         } else {
             for entry in &entries {
@@ -108,7 +115,7 @@ impl QuillApp {
             if has_more {
                 list = list.child(
                     Button::new("calls-load-more")
-                        .label("Load more")
+                        .label(tr(keys::Q_OPS_LOAD_MORE))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(live) = this.live.as_mut()
@@ -142,14 +149,16 @@ impl QuillApp {
                 call_entry_label(*is_video, discard_reason, *duration, entry.is_outgoing),
                 *is_video,
             ),
-            MessageContent::GroupCallInvitation { .. } => ("Group call".to_owned(), false),
-            _ => ("Call".to_owned(), false),
+            MessageContent::GroupCallInvitation { .. } => {
+                (tr(keys::Q_OPS_GROUP_CALL).to_owned(), false)
+            }
+            _ => (tr(keys::PROFILE_ACTION_SHORT_CALL).to_owned(), false),
         };
         let peer = self.recent_call_peer(entry.chat_id);
         let name = peer
             .as_ref()
             .map(|(_, name)| name.clone())
-            .unwrap_or_else(|| "Call".to_owned());
+            .unwrap_or_else(|| tr(keys::PROFILE_ACTION_SHORT_CALL).to_owned());
         let missed = !entry.is_outgoing
             && matches!(
                 entry.content,
@@ -192,7 +201,7 @@ impl QuillApp {
             })
             .child(if let Some((user_id, _)) = peer {
                 Button::new(("call-again", entry.id.0 as u64))
-                    .label("Call again")
+                    .label(tr(keys::Q_OPS_CALL_AGAIN))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.call_again(user_id, is_video, cx);

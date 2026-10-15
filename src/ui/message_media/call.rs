@@ -4,6 +4,7 @@
 //! icon in the corner that calls back.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::CallDiscardReason;
 
 /// `historyCallWidth`: the call card's bubble width.
@@ -17,14 +18,14 @@ pub(in crate::ui) fn call_title(
     outgoing: bool,
 ) -> String {
     let what = match (outgoing, reason) {
-        (true, CallDiscardReason::Missed) => "Cancelled",
-        (true, _) => "Outgoing",
-        (false, CallDiscardReason::Missed) => "Missed",
-        (false, CallDiscardReason::Declined) => "Declined",
-        (false, _) => "Incoming",
+        (true, CallDiscardReason::Missed) => tr(keys::Q_OPS_CANCELLED),
+        (true, _) => tr(keys::Q_OPS_OUTGOING),
+        (false, CallDiscardReason::Missed) => tr(keys::Q_OPS_MISSED),
+        (false, CallDiscardReason::Declined) => tr(keys::Q_OPS_DECLINED),
+        (false, _) => tr(keys::Q_OPS_INCOMING),
     };
     if is_video {
-        format!("{what} video call")
+        tr_with(keys::Q_OPS_VIDEO_CALL_4, &[("what", what)])
     } else {
         format!("{what} call")
     }
@@ -42,9 +43,15 @@ pub(in crate::ui) fn call_missed(reason: &CallDiscardReason) -> bool {
 /// `Ui::FormatDurationWords`: "45 seconds", "6 min 12 s".
 pub(in crate::ui) fn duration_words(seconds: i32) -> String {
     if seconds > 59 {
-        format!("{} min {} s", seconds / 60, seconds % 60)
+        tr_with(
+            keys::Q_OPS_MIN_S,
+            &[
+                ("seconds_60", &(seconds / 60).to_string()),
+                ("seconds_60_2", &(seconds % 60).to_string()),
+            ],
+        )
     } else if seconds == 1 {
-        "1 second".to_string()
+        tr(keys::Q_OPS_1_SECOND).to_string()
     } else {
         format!("{seconds} seconds")
     }
@@ -94,9 +101,9 @@ pub(in crate::ui) fn call_card(
     };
     let width = crate::ui::history::bubble_width::content_for_outer(CALL_WIDTH, plain);
     let label = if is_video {
-        "Video call again"
+        tr(keys::Q_OPS_VIDEO_CALL_AGAIN)
     } else {
-        "Call again"
+        tr(keys::Q_OPS_CALL_AGAIN)
     };
     div()
         .id(("call-card", row))

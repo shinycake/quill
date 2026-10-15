@@ -17,6 +17,7 @@ use quill::business_hours_edit::{
 };
 use quill::business_info::OpeningHours;
 use quill::business_settings::{TimeZone, closest_time_zone};
+use quill::lang::{keys, tr};
 use quill::local_time::{now_unix, utc_offset_at};
 
 const ABOUT: &str = "Turn this on to show your opening hours schedule to your customers.";
@@ -38,7 +39,11 @@ fn time_field(
 
 /// Minute of the day a time field shows.
 fn field_minute(state: &Entity<TimeFieldState>, cx: &App) -> i32 {
-    let text = state.read(cx).time().format("%H:%M").to_string();
+    let text = state
+        .read(cx)
+        .time()
+        .format(tr(keys::Q_OPS_H_M))
+        .to_string();
     let mut parts = text.split(':').filter_map(|p| p.parse::<i32>().ok());
     let hour = parts.next().unwrap_or(0);
     let minute = parts.next().unwrap_or(0);
@@ -189,11 +194,11 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().child("Show Business Hours"))
+                    .child(div().text_sm().child(tr(keys::HOURS_SHOW)))
                     .child(
                         Switch::new("business-hours-enable")
                             .checked(enabled)
-                            .accessibility_label("Show Business Hours")
+                            .accessibility_label(tr(keys::HOURS_SHOW))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 if let Some(h) = this.business_mut().and_then(|d| d.hours.as_mut())
                                 {
@@ -256,12 +261,12 @@ impl QuillApp {
         }
         let zone = self
             .business_zone()
-            .map_or_else(|| "Loading…".to_string(), |z| z.full_name());
+            .map_or_else(|| tr(keys::Q_OPS_LOADING).to_string(), |z| z.full_name());
         body = body.child(days).child(
             crate::ui::pressable::action_row(
                 "business-time-zone",
                 Some(IconName::Clock),
-                "Time Zone",
+                tr(keys::HOURS_TIME_ZONE),
                 false,
                 cx,
             )
@@ -304,7 +309,7 @@ impl QuillApp {
                             .flex()
                             .items_center()
                             .justify_between()
-                            .child(div().text_sm().child("Opening Time"))
+                            .child(div().text_sm().child(tr(keys::HOURS_OPENING)))
                             .child(TimeField::new(&open)),
                     )
                     .child(
@@ -316,10 +321,13 @@ impl QuillApp {
                                 div()
                                     .flex()
                                     .gap_1()
-                                    .child(div().text_sm().child("Closing Time"))
+                                    .child(div().text_sm().child(tr(keys::HOURS_CLOSING)))
                                     .when(next_day, |this| {
                                         this.child(
-                                            div().text_sm().text_color(muted).child("(Next day)"),
+                                            div()
+                                                .text_sm()
+                                                .text_color(muted)
+                                                .child(tr(keys::Q_OPS_NEXT_DAY)),
                                         )
                                     }),
                             )
@@ -328,7 +336,7 @@ impl QuillApp {
                     .child(
                         div().flex().child(
                             Button::new(("business-day-remove", index as u64))
-                                .label("Remove")
+                                .label(tr(keys::HOURS_REMOVE))
                                 .ghost()
                                 .small()
                                 .text_color(cx.theme().danger)
@@ -352,7 +360,7 @@ impl QuillApp {
                 crate::ui::pressable::action_row(
                     "business-day-add",
                     Some(IconName::Plus),
-                    "Add a Set of Hours",
+                    tr(keys::HOURS_ADD_BUTTON),
                     false,
                     cx,
                 )
@@ -385,7 +393,13 @@ impl QuillApp {
             .overflow_y_scroll()
             .max_h(px(360.));
         if zones.is_empty() {
-            list = list.child(div().py_2().text_sm().text_color(muted).child("Loading…"));
+            list = list.child(
+                div()
+                    .py_2()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::Q_OPS_LOADING)),
+            );
         }
         for (index, zone) in zones
             .into_iter()
@@ -415,7 +429,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(Input::new(&search).aria_label("Search time zones"))
+            .child(Input::new(&search).aria_label(tr(keys::Q_OPS_SEARCH_TIME_ZONES)))
             .child(list)
     }
 
@@ -434,7 +448,7 @@ impl QuillApp {
         };
         let wanted = if enabled && !week.is_empty() {
             let Some(zone) = self.business_zone() else {
-                self.business_error("The time zones are still loading.", cx);
+                self.business_error(tr(keys::Q_OPS_THE_TIME_ZONES_ARE_STILL), cx);
                 return Leave::Stay;
             };
             let raw = edit::normalized(week)
@@ -448,7 +462,7 @@ impl QuillApp {
         if wanted == self.my_business().opening_hours {
             return Leave::Go(None);
         }
-        self.business_send("business hours", |driver| {
+        self.business_send(tr(keys::Q_OPS_BUSINESS_HOURS_2), |driver| {
             driver.save_business_hours(wanted.as_ref()).is_ok()
         })
     }

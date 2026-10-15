@@ -13,6 +13,7 @@ use quill::call_device_prefs::{
     ACCEPT_CALLS_TITLE, SYSTEM_PREFS_TITLE, current_session_accepts_calls, open_system_sound_prefs,
     system_sound_target,
 };
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn call_device_prefs_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -72,7 +73,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| {
                             if !open_system_sound_prefs() {
                                 this.connection.status_note =
-                                    "Couldn't open the system sound settings.".into();
+                                    tr(keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND).into();
                                 cx.notify();
                             }
                         })),

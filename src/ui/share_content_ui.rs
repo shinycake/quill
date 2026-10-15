@@ -15,6 +15,7 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::SendReply;
 use quill::telegram::requests::{ContactShare, parse_coordinates};
 
@@ -31,7 +32,7 @@ impl QuillApp {
 
     pub(super) fn open_share_contact_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.share_target().is_none() {
-            self.connection.status_note = "you can't send contacts here".into();
+            self.connection.status_note = tr(keys::Q_OPS_YOU_CANT_SEND_CONTACTS_HERE).into();
             cx.notify();
             return;
         }
@@ -49,7 +50,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.share_target().is_none() {
-            self.connection.status_note = "you can't send locations here".into();
+            self.connection.status_note = tr(keys::Q_OPS_YOU_CANT_SEND_LOCATIONS_HERE).into();
             cx.notify();
             return;
         }
@@ -99,7 +100,7 @@ impl QuillApp {
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
-            self.connection.status_note = "sharing needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION).into();
             cx.notify();
             return;
         };
@@ -110,9 +111,11 @@ impl QuillApp {
             Ok(_) => {
                 self.share.content_dialog = None;
                 self.composer_ui.pending_reply = None;
-                self.connection.status_note = "sending contact…".into();
+                self.connection.status_note = tr(keys::Q_OPS_SENDING_CONTACT).into();
             }
-            Err(_) => self.connection.status_note = "could not send the contact".into(),
+            Err(_) => {
+                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_SEND_THE_CONTACT).into()
+            }
         }
         cx.notify();
     }
@@ -128,7 +131,7 @@ impl QuillApp {
         let reply_to = self.share_reply(chat_id);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "sending dice needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_OPS_SENDING_DICE_NEEDS_A_LIVE).into();
             cx.notify();
             return;
         };
@@ -138,9 +141,9 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.composer_ui.pending_reply = None;
-                self.connection.status_note = "rolling…".into();
+                self.connection.status_note = tr(keys::Q_OPS_ROLLING).into();
             }
-            Err(_) => self.connection.status_note = "could not send the dice".into(),
+            Err(_) => self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_SEND_THE_DICE).into(),
         }
         cx.notify();
     }
@@ -177,7 +180,7 @@ impl QuillApp {
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
-            self.connection.status_note = "sharing needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_OPS_SHARING_NEEDS_A_LIVE_CONNECTION).into();
             cx.notify();
             return;
         };
@@ -188,9 +191,11 @@ impl QuillApp {
             Ok(_) => {
                 self.share.content_dialog = None;
                 self.composer_ui.pending_reply = None;
-                self.connection.status_note = "sending location…".into();
+                self.connection.status_note = tr(keys::Q_OPS_SENDING_LOCATION).into();
             }
-            Err(_) => self.connection.status_note = "could not send the location".into(),
+            Err(_) => {
+                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_SEND_THE_LOCATION).into()
+            }
         }
         cx.notify();
     }
@@ -254,7 +259,7 @@ impl QuillApp {
                             .py_1()
                             .rounded_md()
                             .role(gpui_kit::Role::Button)
-                            .aria_label(format!("Send {name}"))
+                            .aria_label(tr_with(keys::Q_OPS_SEND, &[("name", &name.to_string())]))
                             .tab_index(0)
                             .cursor_pointer()
                             .pressable(cx.theme())
@@ -281,14 +286,19 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(text_muted())
-                            .child("No contacts with a phone number match."),
+                            .child(tr(keys::Q_OPS_NO_CONTACTS_WITH_A_PHONE)),
                     );
                 }
                 body = body
-                    .child(div().text_sm().font_semibold().child("Send Contact"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(keys::Q_OPS_SEND_CONTACT)),
+                    )
                     .child(
                         Textarea::new(query)
-                            .aria_label("Search contacts")
+                            .aria_label(tr(keys::Q_OPS_SEARCH_CONTACTS))
                             .h(px(36.)),
                     )
                     .child(list);
@@ -298,14 +308,27 @@ impl QuillApp {
                 longitude,
             } => {
                 body = body
-                    .child(div().text_sm().font_semibold().child("Send Location"))
-                    .child(Textarea::new(latitude).aria_label("Latitude").h(px(36.)))
-                    .child(Textarea::new(longitude).aria_label("Longitude").h(px(36.)))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(keys::Q_OPS_SEND_LOCATION)),
+                    )
+                    .child(
+                        Textarea::new(latitude)
+                            .aria_label(tr(keys::Q_OPS_LATITUDE))
+                            .h(px(36.)),
+                    )
+                    .child(
+                        Textarea::new(longitude)
+                            .aria_label(tr(keys::Q_OPS_LONGITUDE))
+                            .h(px(36.)),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(text_muted())
-                            .child("The location is sent once; it does not follow you."),
+                            .child(tr(keys::Q_OPS_THE_LOCATION_IS_SENT_ONCE)),
                     );
             }
         }
@@ -323,7 +346,7 @@ impl QuillApp {
         if is_location {
             actions = actions.child(
                 Button::new("share-content-send")
-                    .label("Send")
+                    .label(tr(keys::SHARE_CONFIRM))
                     .on_click(cx.listener(|this, _, _, cx| this.submit_share_location(cx))),
             );
         }
@@ -331,7 +354,7 @@ impl QuillApp {
             body.child(
                 actions.child(
                     Button::new("share-content-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.close_share_content_dialog(cx);

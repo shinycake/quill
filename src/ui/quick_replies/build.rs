@@ -12,6 +12,7 @@ use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::quick_replies::{self as qr, NAME_MAX};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -48,26 +49,26 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Quick replies are a Telegram Premium feature."),
+                    .child(tr(keys::Q_OPS_QUICK_REPLIES_ARE_A_TELEGRAM)),
             );
         }
         body = body.child(
             action_row(
                 "quick-replies-add",
                 Some(IconName::Plus),
-                "Add Quick Reply",
+                tr(keys::REPLIES_ADD),
                 false,
                 cx,
             )
             .when(!premium || full, |row| row.opacity(0.5))
             .on_click(cx.listener(move |this, _, window, cx| {
                 if !premium {
-                    this.quick_replies_error_line("Quick replies need Telegram Premium.", cx);
-                } else if full {
                     this.quick_replies_error_line(
-                        "You have reached the limit for quick replies.",
+                        tr(keys::Q_OPS_QUICK_REPLIES_NEED_TELEGRAM_PREMIUM),
                         cx,
                     );
+                } else if full {
+                    this.quick_replies_error_line(tr(keys::Q_OPS_YOU_HAVE_REACHED_THE_LIMIT), cx);
                 } else {
                     this.quick_replies_go(View::Name { rename_of: None }, window, cx);
                 }
@@ -134,11 +135,11 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .child(div().text_sm().child(if rename_of.is_some() {
-                "Change the name of your shortcut."
+                tr(keys::REPLIES_EDIT_ABOUT)
             } else {
-                "Add a shortcut for your reply."
+                tr(keys::REPLIES_ADD_SHORTCUT)
             }))
-            .child(Input::new(&state.name_input).aria_label("Shortcut"))
+            .child(Input::new(&state.name_input).aria_label(tr(keys::REPLIES_ADD_PLACEHOLDER)))
             .child(
                 div()
                     .text_xs()
@@ -156,7 +157,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("quick-replies-name-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let back = match rename_of {
@@ -168,7 +169,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("quick-replies-name-save")
-                            .label("Save")
+                            .label(tr(keys::SETTINGS_SAVE))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.submit_quick_reply_name(window, cx);
@@ -223,9 +224,9 @@ impl QuillApp {
         let full = messages.len() >= message_limit && editing.is_none();
         let mut body = div().flex().flex_col().gap_2();
         if messages.is_empty() {
-            body = body.child(div().text_sm().text_color(muted).child(format!(
-                "Enter a message below that will be sent in chat when you type /{name}. \
-                         You can access Quick Replies in any chat with a person by typing /."
+            body = body.child(div().text_sm().text_color(muted).child(tr_with(
+                keys::Q_OPS_ENTER_A_MESSAGE_BELOW_THAT,
+                &[("name", &name.to_string())],
             )));
         }
         for (index, message) in messages.iter().enumerate() {
@@ -252,7 +253,7 @@ impl QuillApp {
                         .icon(IconName::Pencil)
                         .ghost()
                         .small()
-                        .accessibility_label("Edit message")
+                        .accessibility_label(tr(keys::Q_OPS_EDIT_MESSAGE))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.begin_quick_reply_edit(message_id, text.clone(), window, cx);
                         })),
@@ -264,7 +265,7 @@ impl QuillApp {
                         .icon(IconName::Trash)
                         .ghost()
                         .small()
-                        .accessibility_label("Delete message")
+                        .accessibility_label(tr(keys::Q_OPS_DELETE_MESSAGE))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.delete_quick_reply_message(shortcut_id, message_id, cx);
                         })),
@@ -273,14 +274,17 @@ impl QuillApp {
             body = body.child(row);
         }
         let field_note = if full {
-            format!("A shortcut can have {message_limit} messages.")
+            tr_with(
+                keys::Q_OPS_A_SHORTCUT_CAN_HAVE_MESSAGES,
+                &[("message_limit", &message_limit.to_string())],
+            )
         } else if editing.is_some() {
-            "Editing a message.".to_string()
+            tr(keys::Q_OPS_EDITING_A_MESSAGE).to_string()
         } else {
             String::new()
         };
         body = body
-            .child(Textarea::new(&state.text_input).aria_label("Quick reply message"))
+            .child(Textarea::new(&state.text_input).aria_label(tr(keys::Q_OPS_QUICK_REPLY_MESSAGE)))
             .when(!field_note.is_empty(), |this| {
                 this.child(div().text_xs().text_color(muted).child(field_note))
             })
@@ -292,7 +296,7 @@ impl QuillApp {
                     .when(editing.is_some(), |this| {
                         this.child(
                             Button::new("quick-replies-edit-cancel")
-                                .label("Cancel edit")
+                                .label(tr(keys::Q_OPS_CANCEL_EDIT))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.cancel_quick_reply_edit(window, cx);
@@ -301,7 +305,11 @@ impl QuillApp {
                     })
                     .child(
                         Button::new("quick-replies-message-save")
-                            .label(if editing.is_some() { "Save" } else { "Add" })
+                            .label(if editing.is_some() {
+                                tr(keys::SETTINGS_SAVE)
+                            } else {
+                                tr(keys::Q_OPS_ADD)
+                            })
                             .primary()
                             .disabled(!premium || full)
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -318,7 +326,7 @@ impl QuillApp {
                 .child(
                     Button::new("quick-replies-rename")
                         .icon(IconName::Pencil)
-                        .label("Edit Shortcut")
+                        .label(tr(keys::REPLIES_EDIT_TITLE))
                         .ghost()
                         .small()
                         .disabled(!premium || id.is_none())
@@ -338,9 +346,9 @@ impl QuillApp {
                     Button::new("quick-replies-delete-shortcut")
                         .icon(IconName::Trash)
                         .label(if confirm {
-                            "Delete with all messages?"
+                            tr(keys::Q_OPS_DELETE_WITH_ALL_MESSAGES)
                         } else {
-                            "Delete Shortcut"
+                            tr(keys::Q_OPS_DELETE_SHORTCUT)
                         })
                         .ghost()
                         .small()
@@ -368,14 +376,14 @@ impl QuillApp {
             let premium = this.session().is_some_and(|s| s.my_is_premium());
             let (title, mut body) = match state.view.clone() {
                 View::List => (
-                    "Quick Replies".to_string(),
+                    tr(keys::BUSINESS_SUBTITLE_QUICK_REPLIES).to_string(),
                     this.quick_replies_list_body(premium, cx),
                 ),
                 View::Name { rename_of } => (
                     if rename_of.is_some() {
-                        "Edit Shortcut".to_string()
+                        tr(keys::REPLIES_EDIT_TITLE).to_string()
                     } else {
-                        "New Quick Reply".to_string()
+                        tr(keys::REPLIES_ADD_TITLE).to_string()
                     },
                     this.quick_replies_name_body(rename_of, &state, cx),
                 ),
@@ -403,27 +411,28 @@ impl QuillApp {
                 body = body.child(div().text_xs().text_color(danger).child(line));
             }
             let in_list = state.view == View::List;
-            let footer =
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .when(!in_list, |this| {
-                        this.child(
-                            Button::new("quick-replies-back")
-                                .label("Back")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.quick_replies_go(View::List, window, cx);
-                                })),
-                        )
-                    })
-                    .child(Button::new("quick-replies-close").label("Close").on_click(
-                        cx.listener(|this, _, window, cx| {
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .when(!in_list, |this| {
+                    this.child(
+                        Button::new("quick-replies-back")
+                            .label(tr(keys::Q_OPS_BACK))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.quick_replies_go(View::List, window, cx);
+                            })),
+                    )
+                })
+                .child(
+                    Button::new("quick-replies-close")
+                        .label(tr(keys::CLOSE))
+                        .on_click(cx.listener(|this, _, window, cx| {
                             this.close_quick_replies(cx);
                             this.close_kit_dialog_if_done(DialogKind::QuickReplies, window, cx);
-                        }),
-                    ));
+                        })),
+                );
             let content = div()
                 .flex()
                 .flex_col()

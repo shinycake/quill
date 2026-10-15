@@ -12,6 +12,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::business_chat_links::{ChatLink, plain_links};
+use quill::lang::{keys, tr};
 
 const ABOUT: &str = "Give your customers short links that start a chat with you – and suggest \
 the first message from them to you.";
@@ -56,11 +57,11 @@ impl QuillApp {
         }
         let text = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Add Preset Message")
+                .placeholder(tr(keys::CHAT_LINK_PLACEHOLDER))
                 .auto_grow(2, 6)
                 .submit_on_enter(false)
         });
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Link Name (optional)"));
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::CHAT_LINK_NAME)));
         if let Some(link) = &link {
             let (markup, title) = (link.markup.clone(), link.title.clone());
             text.update(cx, |input, cx| input.set_value(markup, window, cx));
@@ -103,11 +104,11 @@ impl QuillApp {
             (Some(live), None) => live.driver.create_chat_link(&markup, &title),
         };
         if sent.is_err() {
-            self.business_error("Could not send the link.", cx);
+            self.business_error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_LINK), cx);
             return;
         }
         self.business_go(View::ChatLinks, window, cx);
-        self.business_note("Chat link saved.", cx);
+        self.business_note(tr(keys::CHAT_LINK_SAVED), cx);
     }
 
     fn delete_business_link(&mut self, link: &str, cx: &mut Context<Self>) {
@@ -122,7 +123,7 @@ impl QuillApp {
             d.confirm_delete = None;
         }
         if sent.is_err() {
-            self.business_error("Could not delete the link.", cx);
+            self.business_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_LINK), cx);
         }
         cx.notify();
     }
@@ -204,21 +205,27 @@ impl QuillApp {
                                 owner.update(cx, |this, cx| action(this, &link, window, cx));
                             })
                         };
-                        menu.item(item("Copy", |this, link, _, cx| {
+                        menu.item(item(tr(keys::CHAT_LINK_COPY), |this, link, _, cx| {
                             this.copy_business_link(&link.link, cx);
                         }))
-                        .item(item("Get QR Code", |this, link, window, cx| {
-                            this.show_business_link_qr(link.link.clone(), window, cx);
-                        }))
-                        .item(item("Edit", |this, link, window, cx| {
+                        .item(item(
+                            tr(keys::Q_OPS_GET_QR_CODE),
+                            |this, link, window, cx| {
+                                this.show_business_link_qr(link.link.clone(), window, cx);
+                            },
+                        ))
+                        .item(item(tr(keys::Q_OPS_EDIT), |this, link, window, cx| {
                             this.open_business_link_edit(Some(link.clone()), window, cx);
                         }))
-                        .item(item("Delete", |this, link, _, cx| {
-                            if let Some(d) = this.business_mut() {
-                                d.confirm_delete = Some(link.link.clone());
-                            }
-                            cx.notify();
-                        }))
+                        .item(item(
+                            tr(keys::CHAT_LINK_DELETE),
+                            |this, link, _, cx| {
+                                if let Some(d) = this.business_mut() {
+                                    d.confirm_delete = Some(link.link.clone());
+                                }
+                                cx.notify();
+                            },
+                        ))
                     }),
             )
     }
@@ -244,7 +251,7 @@ impl QuillApp {
                 crate::ui::pressable::action_row(
                     "business-link-create",
                     Some(IconName::Plus),
-                    "Create a Link to Chat",
+                    tr(keys::CHAT_LINKS_CREATE_LINK),
                     false,
                     cx,
                 )
@@ -264,11 +271,7 @@ impl QuillApp {
                     .rounded_md()
                     .border_1()
                     .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .text_sm()
-                            .child("Are you sure you want to delete this chat link?"),
-                    )
+                    .child(div().text_sm().child(tr(keys::CHAT_LINK_DELETE_SURE)))
                     .child(
                         div()
                             .flex()
@@ -276,7 +279,7 @@ impl QuillApp {
                             .gap_2()
                             .child(
                                 Button::new("business-link-delete-cancel")
-                                    .label("Cancel")
+                                    .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(d) = this.business_mut() {
@@ -287,7 +290,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("business-link-delete")
-                                    .label("Delete")
+                                    .label(tr(keys::CHAT_LINK_DELETE))
                                     .danger()
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.delete_business_link(&link, cx);
@@ -298,7 +301,12 @@ impl QuillApp {
         }
         match links {
             None => {
-                body = body.child(div().text_sm().text_color(muted).child("Loading…"));
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(tr(keys::CONTACTS_LOADING)),
+                );
             }
             Some(links) => {
                 let mut list = div().flex().flex_col();
@@ -322,7 +330,7 @@ impl QuillApp {
                 .gap_1()
                 .text_xs()
                 .text_color(muted)
-                .child("You can also use a simple link for a chat with you –");
+                .child(tr(keys::Q_OPS_YOU_CAN_ALSO_USE_A));
             for (index, link) in plain.into_iter().enumerate() {
                 if index > 0 {
                     footer = footer.child("or");
@@ -333,7 +341,7 @@ impl QuillApp {
                         .label(link)
                         .ghost()
                         .xsmall()
-                        .tooltip("Copy")
+                        .tooltip(tr(keys::CHAT_LINK_COPY))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.copy_business_link(&copy, cx);
                         })),
@@ -360,8 +368,8 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .child(div().text_xs().text_color(muted).child(MESSAGE_ABOUT))
-            .child(Textarea::new(&text).aria_label("Preset message"))
-            .child(Input::new(&name).aria_label("Link name"))
+            .child(Textarea::new(&text).aria_label(tr(keys::Q_OPS_PRESET_MESSAGE)))
+            .child(Input::new(&name).aria_label(tr(keys::Q_OPS_LINK_NAME)))
             .child(div().text_xs().text_color(muted).child(NAME_ABOUT))
     }
 
@@ -399,11 +407,11 @@ impl QuillApp {
                     .text_xs()
                     .text_color(muted)
                     .text_center()
-                    .child("Everyone on Telegram can scan this code to contact you."),
+                    .child(tr(keys::CHAT_LINK_QR_ABOUT)),
             )
             .child(
                 Button::new("business-link-qr-copy")
-                    .label("Copy Link")
+                    .label(tr(keys::CONTEXT_COPY_LINK))
                     .icon(IconName::Copy)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.copy_business_link(&copy, cx);
