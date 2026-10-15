@@ -144,6 +144,7 @@ pub(in crate::ui) fn video_note_attachment(
                 .inline_videos
                 .toggle_sound(chat_id.0, message_id.0)
             {
+                this.round_sound_started((chat_id.0, message_id.0), cx);
                 if !viewed {
                     this.mark_voice_opened(chat_id, message_id);
                 }
