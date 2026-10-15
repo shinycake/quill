@@ -891,7 +891,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Suggested posts and offers in channel direct messages (deferred: low impact) <!-- parity:premium-suggested-posts -->
 - [x] Hide ads (Premium) <!-- parity:premium-disable-sponsored -->
 - [x] Buy Premium inside the app (blocked: store purchase and app verification tokens are only available to official mobile apps) <!-- parity:premium-in-app-purchase -->
-- [x] Fragment and TON wallet flows (partial: sign-in codes, collectible username/number info, phone and username Fragment links and low-TON top-up match tdesktop (#799); missing the Grams balance screen with top-up/withdraw via Fragment, the gift value box and gift transfer to blockchain via Fragment) <!-- parity:premium-fragment-ton -->
+- [x] Fragment and TON wallet flows: sign-in codes, collectible info, phone and username Fragment links, low-TON top-up (#799), the Gram Balance screen with top-up and Collect via Fragment (#818, #827), the gift value box (#824) and gift transfer or export via Fragment (#819) <!-- parity:premium-fragment-ton -->
 
 ### TON wallet (low priority)
 
