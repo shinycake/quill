@@ -29,21 +29,21 @@ use std::rc::Rc;
 /// 1.8.67, line 3512) as (section title, toggle label, description),
 /// in schema order. Labels mirror TGX
 /// `SettingsArchiveChatListController`.
-pub(super) const ARCHIVE_SETTING_ROWS: [(&str, &str, &str); 3] = [
+pub(super) const ARCHIVE_SETTING_ROWS: [(quill::lang::Key, quill::lang::Key, quill::lang::Key); 3] = [
     (
-        "Chats from unknown users",
-        "Archive and Mute",
-        "Automatically archive and mute new chats, groups and channels from non-contacts.",
+        keys::Q_PREFS_CHATS_FROM_UNKNOWN_USERS,
+        keys::SETTINGS_AUTO_ARCHIVE,
+        keys::SETTINGS_AUTO_ARCHIVE_ABOUT,
     ),
     (
-        "Unmuted chats",
-        "Always keep archived",
-        "Keep archived chats in the Archive even if they are unmuted and get a new message.",
+        keys::SETTINGS_UNMUTED_CHATS,
+        keys::SETTINGS_ALWAYS_IN_ARCHIVE,
+        keys::SETTINGS_UNMUTED_CHATS_ABOUT,
     ),
     (
-        "Chats from folders",
-        "Always keep archived",
-        "Keep archived chats from folders in the Archive even if they are unmuted and get a new message.",
+        keys::SETTINGS_CHATS_FROM_FOLDERS,
+        keys::SETTINGS_ALWAYS_IN_ARCHIVE,
+        keys::SETTINGS_CHATS_FROM_FOLDERS_ABOUT,
     ),
 ];
 
@@ -181,12 +181,12 @@ impl QuillApp {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .child(div().text_xs().font_semibold().child(*title))
+                            .child(div().text_xs().font_semibold().child(tr(*title)))
                             .child(
                                 // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                                 Checkbox::new(format!("archive-setting-{index}"))
                                     .checked(enabled)
-                                    .label(*label)
+                                    .label(tr(*label))
                                     .on_click(cx.listener(move |this, &on, window, cx| {
                                         this.set_archive_setting(index, on, cx);
                                         this.close_kit_dialog_if_done(
@@ -200,7 +200,7 @@ impl QuillApp {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(*desc),
+                                    .child(tr(*desc)),
                             ),
                     );
                 }
@@ -378,14 +378,18 @@ impl QuillApp {
                     PrivacyWho::Contacts,
                     PrivacyWho::Nobody,
                 ];
-                const LABELS: [&str; 3] = ["Everybody", "My Contacts", "Nobody"];
+                const LABELS: [quill::lang::Key; 3] = [
+                    keys::EDIT_PRIVACY_EVERYONE,
+                    keys::Q_PREFS_MY_CONTACTS,
+                    keys::Q_PREFS_NOBODY,
+                ];
                 let selected = current.and_then(|w| WHOS.iter().position(|x| *x == w));
                 RadioGroup::vertical(id)
                     .selected_index(selected)
                     .children(
-                        WHOS.iter()
-                            .zip(LABELS.iter())
-                            .map(|(who, label)| Radio::new(format!("{id}-{who:?}")).label(*label)),
+                        WHOS.iter().zip(LABELS.iter()).map(|(who, label)| {
+                            Radio::new(format!("{id}-{who:?}")).label(tr(*label))
+                        }),
                     )
                     .on_click(cx.listener(move |this, &ix, _, cx| {
                         if let Some(&who) = WHOS.get(ix) {
@@ -828,14 +832,14 @@ impl QuillApp {
                             ),
                     ),
             );
-        const ROWS: [(&str, u8); 7] = [
-            ("Photos", AUTO_DOWNLOAD_PHOTO),
-            ("Voice messages", AUTO_DOWNLOAD_VOICE),
-            ("Video messages", AUTO_DOWNLOAD_VIDEO_NOTE),
-            ("Videos", AUTO_DOWNLOAD_VIDEO),
-            ("Files", AUTO_DOWNLOAD_FILE),
-            ("Music", AUTO_DOWNLOAD_MUSIC),
-            ("GIFs", AUTO_DOWNLOAD_GIF),
+        const ROWS: [(quill::lang::Key, u8); 7] = [
+            (keys::Q_PREFS_PHOTOS, AUTO_DOWNLOAD_PHOTO),
+            (keys::Q_PREFS_VOICE_MESSAGES, AUTO_DOWNLOAD_VOICE),
+            (keys::Q_PREFS_VIDEO_MESSAGES, AUTO_DOWNLOAD_VIDEO_NOTE),
+            (keys::Q_PREFS_VIDEOS, AUTO_DOWNLOAD_VIDEO),
+            (keys::Q_PREFS_FILES, AUTO_DOWNLOAD_FILE),
+            (keys::Q_PREFS_MUSIC, AUTO_DOWNLOAD_MUSIC),
+            (keys::Q_PREFS_GIFS, AUTO_DOWNLOAD_GIF),
         ];
         let kinds = [
             (tr(keys::Q_PREFS_PRIVATE), prefs.auto_download_private),
@@ -858,7 +862,7 @@ impl QuillApp {
         grid = grid.child(header);
         for (row_idx, (label, flag)) in ROWS.iter().enumerate() {
             let mut row = div().flex().items_center().gap_2();
-            row = row.child(div().w(px(110.)).text_sm().child(*label));
+            row = row.child(div().w(px(110.)).text_sm().child(tr(*label)));
             for (kind_idx, (kind, bits)) in kinds.iter().enumerate() {
                 let on = bits & flag != 0;
                 let flag = *flag;
@@ -875,7 +879,7 @@ impl QuillApp {
                                 .checked(on)
                                 .accessibility_label(tr_with(
                                     keys::Q_PREFS_IN_CHATS,
-                                    &[("label", label), ("kind", kind)],
+                                    &[("label", tr(*label)), ("kind", kind)],
                                 ))
                                 .on_click(cx.listener(move |this, &on, _, cx| {
                                     this.set_media_pref(
@@ -947,13 +951,13 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(*title),
+                            .child(tr(*title)),
                     )
                     .child(
                         Switch::new(format!("archive-privacy-{index}"))
                             .checked(archive_setting_get(&settings, index))
-                            .label(*label)
-                            .accessibility_label(format!("{title}: {label}"))
+                            .label(tr(*label))
+                            .accessibility_label(format!("{}: {}", tr(*title), tr(*label)))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.set_archive_setting(index, on, cx);
                             })),
@@ -962,7 +966,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(*desc),
+                            .child(tr(*desc)),
                     ),
             );
         }

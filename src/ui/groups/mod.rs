@@ -26,25 +26,25 @@ use std::sync::atomic::AtomicU64;
 /// (TDLib 1.8.67, `schema/td_api.tl:1092`), in schema field order. The
 /// checkbox dialogs index this array together with
 /// [`admin_right_get`]/[`admin_right_set`].
-pub const ADMIN_RIGHT_LABELS: [&str; 18] = [
-    "Manage chat",
-    "Change info",
-    "Post messages",
-    "Edit messages",
-    "Delete messages",
-    "Invite users",
-    "Restrict members",
-    "Pin messages",
-    "Manage topics",
-    "Promote members",
-    "Manage video chats",
-    "Post stories",
-    "Edit stories",
-    "Delete stories",
-    "Manage direct messages",
-    "Manage tags",
-    "Send welcome messages",
-    "Remain anonymous",
+pub const ADMIN_RIGHT_LABELS: [quill::lang::Key; 18] = [
+    keys::Q_PEOPLE_MANAGE_CHAT,
+    keys::Q_PEOPLE_CHANGE_INFO,
+    keys::RIGHTS_CHANNEL_POST,
+    keys::Q_PEOPLE_EDIT_MESSAGES,
+    keys::RIGHTS_GROUP_DELETE,
+    keys::Q_PEOPLE_INVITE_USERS,
+    keys::Q_PEOPLE_RESTRICT_MEMBERS,
+    keys::RIGHTS_GROUP_PIN,
+    keys::RIGHTS_GROUP_TOPICS,
+    keys::Q_PEOPLE_PROMOTE_MEMBERS,
+    keys::RIGHTS_GROUP_MANAGE_CALLS,
+    keys::RIGHTS_CHANNEL_POST_STORIES,
+    keys::Q_PEOPLE_EDIT_STORIES,
+    keys::Q_PEOPLE_DELETE_STORIES,
+    keys::RIGHTS_CHANNEL_MANAGE_DIRECT,
+    keys::Q_PEOPLE_MANAGE_TAGS,
+    keys::RIGHTS_GROUP_SEND_WELCOME_MESSAGES,
+    keys::RIGHTS_GROUP_ANONYMOUS,
 ];
 
 /// Phase D3b: read one right of a [`ChatAdminRights`] by schema-field
@@ -115,23 +115,23 @@ pub fn admin_rights_summary(rights: &ChatAdminRights) -> String {
 
 /// Slice G1: the 16 `chatPermissions` fields (schema 1.8.67, line 1070)
 /// with checkbox labels, in schema order.
-pub const CHAT_PERMISSION_LABELS: [&str; 16] = [
-    "Send messages",
-    "Send audios",
-    "Send documents",
-    "Send photos",
-    "Send videos",
-    "Send video notes",
-    "Send voice notes",
-    "Send polls",
-    "Send other (stickers/GIFs)",
-    "Add link previews",
-    "React to messages",
-    "Edit tag",
-    "Change info",
-    "Invite users",
-    "Pin messages",
-    "Create topics",
+pub const CHAT_PERMISSION_LABELS: [quill::lang::Key; 16] = [
+    keys::Q_PEOPLE_SEND_MESSAGES,
+    keys::Q_PEOPLE_SEND_AUDIOS,
+    keys::Q_PEOPLE_SEND_DOCUMENTS,
+    keys::Q_PEOPLE_SEND_PHOTOS,
+    keys::Q_PEOPLE_SEND_VIDEOS,
+    keys::Q_PEOPLE_SEND_VIDEO_NOTES,
+    keys::Q_PEOPLE_SEND_VOICE_NOTES,
+    keys::Q_PEOPLE_SEND_POLLS,
+    keys::Q_PEOPLE_SEND_OTHER_STICKERS_GIFS,
+    keys::Q_PEOPLE_ADD_LINK_PREVIEWS,
+    keys::Q_PEOPLE_REACT_TO_MESSAGES,
+    keys::Q_PEOPLE_EDIT_TAG,
+    keys::Q_PEOPLE_CHANGE_INFO,
+    keys::Q_PEOPLE_INVITE_USERS,
+    keys::RIGHTS_GROUP_PIN,
+    keys::RIGHTS_GROUP_ADD_TOPICS,
 ];
 
 /// Slice G1: read one permission of a [`ChatPermissions`] by

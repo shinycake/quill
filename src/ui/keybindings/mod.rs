@@ -95,7 +95,7 @@ pub struct RebindableAction {
     /// Stable id used in persisted prefs (e.g. "focus-composer").
     pub id: &'static str,
     /// Display label in the shortcuts settings section.
-    pub label: &'static str,
+    pub label: quill::lang::Key,
     /// Default keystrokes (all platforms).
     pub defaults: &'static [&'static str],
 }
@@ -106,192 +106,192 @@ pub struct RebindableAction {
 pub const REBINDABLE_ACTIONS: &[RebindableAction] = &[
     RebindableAction {
         id: "focus-sidebar",
-        label: "Focus chat list",
+        label: keys::Q_PREFS_FOCUS_CHAT_LIST,
         // Cmd/Ctrl+1..8 open the pinned chats (tdesktop), so focusing the
         // list moved to the Alt variant.
         defaults: &["cmd-alt-1", "ctrl-alt-1"],
     },
     RebindableAction {
         id: "focus-composer",
-        label: "Focus composer",
+        label: keys::Q_PREFS_FOCUS_COMPOSER,
         defaults: &["cmd-shift-l", "ctrl-shift-l"],
     },
     RebindableAction {
         id: "next-chat",
-        label: "Next chat",
+        label: keys::Q_PREFS_NEXT_CHAT,
         defaults: &["alt-down", "ctrl-tab", primary!("pagedown")],
     },
     RebindableAction {
         id: "prev-chat",
-        label: "Previous chat",
+        label: keys::Q_PREFS_PREVIOUS_CHAT,
         defaults: &["alt-up", "ctrl-shift-tab", primary!("pageup")],
     },
     RebindableAction {
         id: "load-older",
-        label: "Load older messages",
+        label: keys::Q_PREFS_LOAD_OLDER_MESSAGES,
         // Cmd/Ctrl+Up replies to the previous message (tdesktop).
         defaults: &["alt-pageup"],
     },
     RebindableAction {
         id: "open-search",
-        label: "Search",
+        label: keys::Q_PREFS_SEARCH,
         defaults: &["cmd-k", "ctrl-k"],
     },
     RebindableAction {
         id: "open-chat-search",
-        label: "Search in chat",
+        label: keys::Q_PREFS_SEARCH_IN_CHAT,
         defaults: &["cmd-f", "ctrl-f"],
     },
     RebindableAction {
         id: "chat-search-newer",
-        label: "Next search result",
+        label: keys::Q_PREFS_NEXT_SEARCH_RESULT,
         defaults: &["cmd-g", "ctrl-g"],
     },
     RebindableAction {
         id: "chat-search-older",
-        label: "Previous search result",
+        label: keys::Q_PREFS_PREVIOUS_SEARCH_RESULT,
         defaults: &["cmd-shift-g", "ctrl-shift-g"],
     },
     RebindableAction {
         id: "cancel-search",
-        label: "Cancel search",
+        label: keys::Q_PREFS_CANCEL_SEARCH,
         defaults: &["escape"],
     },
     RebindableAction {
         id: "format-bold",
-        label: "Bold",
+        label: keys::Q_PREFS_BOLD,
         defaults: &[primary!("b")],
     },
     RebindableAction {
         id: "format-italic",
-        label: "Italic",
+        label: keys::Q_PREFS_ITALIC,
         defaults: &[primary!("i")],
     },
     RebindableAction {
         id: "format-underline",
-        label: "Underline",
+        label: keys::Q_PREFS_UNDERLINE,
         defaults: &[primary!("u")],
     },
     RebindableAction {
         id: "format-strikethrough",
-        label: "Strikethrough",
+        label: keys::Q_PREFS_STRIKETHROUGH,
         defaults: &[primary!("shift-x")],
     },
     RebindableAction {
         id: "format-monospace",
-        label: "Monospace",
+        label: keys::Q_PREFS_MONOSPACE,
         defaults: &[primary!("shift-m")],
     },
     RebindableAction {
         id: "format-blockquote",
-        label: "Quote",
+        label: keys::Q_PREFS_QUOTE,
         defaults: QUOTE_CHORDS,
     },
     RebindableAction {
         id: "format-spoiler",
-        label: "Spoiler",
+        label: keys::Q_PREFS_SPOILER,
         defaults: &[primary!("shift-p")],
     },
     RebindableAction {
         id: "format-clear",
-        label: "Clear formatting",
+        label: keys::Q_PREFS_CLEAR_FORMATTING,
         defaults: &[primary!("shift-n")],
     },
     RebindableAction {
         id: "viewer-prev",
-        label: "Previous media",
+        label: keys::Q_PREFS_PREVIOUS_MEDIA,
         defaults: &["left"],
     },
     RebindableAction {
         id: "viewer-next",
-        label: "Next media",
+        label: keys::Q_PREFS_NEXT_MEDIA,
         defaults: &["right"],
     },
     RebindableAction {
         id: "viewer-zoom-reset",
-        label: "Reset zoom",
+        label: keys::Q_PREFS_RESET_ZOOM,
         defaults: &["0"],
     },
     RebindableAction {
         id: "viewer-zoom-in",
-        label: "Zoom in",
+        label: keys::Q_PREFS_ZOOM_IN,
         defaults: &["=", primary!("=")],
     },
     RebindableAction {
         id: "viewer-zoom-out",
-        label: "Zoom out",
+        label: keys::Q_PREFS_ZOOM_OUT,
         defaults: &["-", primary!("-")],
     },
     RebindableAction {
         id: "viewer-flip-h",
-        label: "Flip photo horizontally",
+        label: keys::Q_PREFS_FLIP_PHOTO_HORIZONTALLY,
         defaults: &["h"],
     },
     RebindableAction {
         id: "viewer-flip-v",
-        label: "Flip photo vertically",
+        label: keys::Q_PREFS_FLIP_PHOTO_VERTICALLY,
         defaults: &["v"],
     },
     RebindableAction {
         id: "viewer-copy",
-        label: "Copy photo",
+        label: keys::Q_PREFS_COPY_PHOTO,
         defaults: &[primary!("c")],
     },
     RebindableAction {
         id: "story-pause",
-        label: "Pause or resume story",
+        label: keys::Q_PREFS_PAUSE_OR_RESUME_STORY,
         defaults: &["space"],
     },
     RebindableAction {
         id: "viewer-save",
-        label: "Save media",
+        label: keys::Q_PREFS_SAVE_MEDIA,
         defaults: &[primary!("s")],
     },
     // Commands of tdesktop's shortcut list that ship without a chord
     // (`core/shortcuts.cpp` `fillDefaults`), except reopening a window.
     RebindableAction {
         id: "reopen-closed-window",
-        label: "Reopen closed window",
+        label: keys::Q_PREFS_REOPEN_CLOSED_WINDOW,
         defaults: &[primary!("shift-t")],
     },
     RebindableAction {
         id: "archive-chat",
-        label: "Archive chat",
+        label: keys::Q_PREFS_ARCHIVE_CHAT,
         defaults: &[],
     },
     RebindableAction {
         id: "show-scheduled",
-        label: "Scheduled messages",
+        label: keys::Q_PREFS_SCHEDULED_MESSAGES,
         defaults: &[],
     },
     RebindableAction {
         id: "just-send",
-        label: "Just send",
+        label: keys::Q_PREFS_JUST_SEND,
         defaults: &[],
     },
     RebindableAction {
         id: "send-silently",
-        label: "Silent send",
+        label: keys::Q_PREFS_SILENT_SEND,
         defaults: &[],
     },
     RebindableAction {
         id: "schedule-send",
-        label: "Schedule",
+        label: keys::Q_PREFS_SCHEDULE,
         defaults: &[],
     },
     RebindableAction {
         id: "toggle-link-preview",
-        label: "Toggle link preview",
+        label: keys::Q_PREFS_TOGGLE_LINK_PREVIEW,
         defaults: &[],
     },
     RebindableAction {
         id: "record-round",
-        label: "Record Round Message",
+        label: keys::Q_PREFS_RECORD_ROUND_MESSAGE,
         defaults: &[],
     },
     RebindableAction {
         id: "show-admin-log",
-        label: "Group/Channel Recent Actions",
+        label: keys::SHORTCUTS_ADMIN_LOG,
         defaults: &[],
     },
 ];
@@ -445,7 +445,7 @@ pub enum KeybindingConflict {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedKeybinding {
     pub id: &'static str,
-    pub label: &'static str,
+    pub label: quill::lang::Key,
     pub live: Vec<String>,
     pub rejected: Option<KeybindingConflict>,
 }
@@ -493,7 +493,7 @@ pub fn keybinding_conflict(
             .any(|live| parse_chord(live).is_some_and(|other| same_chord(&other, &parsed)))
         {
             return Some(KeybindingConflict::Rebindable {
-                other_label: row.label,
+                other_label: tr(row.label),
             });
         }
     }
@@ -645,7 +645,7 @@ fn owner_label(resolved: &[ResolvedKeybinding], ks: &Keystroke) -> Option<&'stat
         row.live.iter().find_map(|live| {
             parse_chord(live)
                 .filter(|other| same_chord(other, ks))
-                .map(|_| row.label)
+                .map(|_| tr(row.label))
         })
     })
 }
