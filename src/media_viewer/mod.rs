@@ -24,6 +24,7 @@ mod boost;
 mod controls;
 mod files;
 mod items;
+pub mod pip;
 mod quality;
 mod save;
 mod transform;
