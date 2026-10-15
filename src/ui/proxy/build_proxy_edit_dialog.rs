@@ -1,6 +1,7 @@
 //! Methods moved out of `proxy.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(in crate::ui) fn build_proxy_edit_dialog(
@@ -17,7 +18,7 @@ impl QuillApp {
             let Some(editor) = this.settings.proxy.editor.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Edit proxy"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::PROXY_EDIT)))
                     .on_close(on_close);
             };
             let editing = editor.id;
@@ -54,32 +55,40 @@ impl QuillApp {
                 )
                 .child(Self::editor_field(
                     cx,
-                    "Hostname",
-                    Input::new(&server).aria_label("Hostname").h(px(40.)),
+                    tr(keys::Q_PREFS_HOSTNAME),
+                    Input::new(&server)
+                        .aria_label(tr(keys::Q_PREFS_HOSTNAME))
+                        .h(px(40.)),
                 ))
                 .child(Self::editor_field(
                     cx,
-                    "Port",
-                    Input::new(&port).aria_label("Port").h(px(40.)),
+                    tr(keys::PROXY_BOX_PORT),
+                    Input::new(&port)
+                        .aria_label(tr(keys::PROXY_BOX_PORT))
+                        .h(px(40.)),
                 ));
             if kind == ProxyKind::Mtproto {
                 body = body.child(Self::editor_field(
                     cx,
-                    "Secret",
-                    Input::new(&secret).aria_label("Secret").h(px(40.)),
+                    tr(keys::PROXY_BOX_SECRET),
+                    Input::new(&secret)
+                        .aria_label(tr(keys::PROXY_BOX_SECRET))
+                        .h(px(40.)),
                 ));
             } else {
                 body = body
                     .child(Self::editor_field(
                         cx,
-                        "Username (optional)",
-                        Input::new(&username).aria_label("Username").h(px(40.)),
+                        tr(keys::Q_PREFS_USERNAME_OPTIONAL),
+                        Input::new(&username)
+                            .aria_label(tr(keys::PROXY_BOX_USERNAME))
+                            .h(px(40.)),
                     ))
                     .child(Self::editor_field(
                         cx,
-                        "Password (optional)",
+                        tr(keys::Q_PREFS_PASSWORD_OPTIONAL),
                         Input::new(&password)
-                            .aria_label("Password")
+                            .aria_label(tr(keys::PROXY_BOX_PASSWORD))
                             .content_type(InputContentType::Password)
                             .h(px(40.)),
                     ));
@@ -92,7 +101,7 @@ impl QuillApp {
                 footer = footer
                     .child(
                         Button::new("proxy-edit-delete")
-                            .label("Delete")
+                            .label(tr(keys::SETTINGS_QUICK_DIALOG_ACTION_DELETE))
                             .danger()
                             .ghost()
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -103,7 +112,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("proxy-edit-copy")
-                            .label("Copy link")
+                            .label(tr(keys::CONTEXT_COPY_LINK))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.copy_proxy_link(id, cx);
@@ -114,7 +123,7 @@ impl QuillApp {
                 .child(div().flex_1())
                 .child(
                     Button::new("proxy-edit-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_proxy_editor(cx);
@@ -123,7 +132,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("proxy-edit-save")
-                        .label("Save")
+                        .label(tr(keys::SETTINGS_SAVE))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_proxy_editor(cx);
@@ -133,9 +142,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if editing.is_some() {
-                    "Edit proxy"
+                    tr(keys::PROXY_EDIT)
                 } else {
-                    "Add proxy"
+                    tr(keys::PROXY_ADD)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -189,7 +198,9 @@ impl QuillApp {
             let Some(link) = this.settings.proxy.link.as_ref() else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Proxy Server"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::PROXY_BOX_TABLE_TITLE,
+                    )))
                     .on_close(on_close);
             };
             let draft = link.draft.clone();
@@ -201,32 +212,64 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(Self::link_row("Server", draft.server.clone(), cx))
-                .child(Self::link_row("Port", draft.port.to_string(), cx));
+                .child(Self::link_row(
+                    tr(keys::PROXY_BOX_SERVER),
+                    draft.server.clone(),
+                    cx,
+                ))
+                .child(Self::link_row(
+                    tr(keys::PROXY_BOX_PORT),
+                    draft.port.to_string(),
+                    cx,
+                ));
             if draft.kind == ProxyKind::Mtproto {
-                body = body.child(Self::link_row("Secret", draft.secret.clone(), cx));
+                body = body.child(Self::link_row(
+                    tr(keys::PROXY_BOX_SECRET),
+                    draft.secret.clone(),
+                    cx,
+                ));
             } else {
                 if !draft.username.is_empty() {
-                    body = body.child(Self::link_row("Username", draft.username.clone(), cx));
+                    body = body.child(Self::link_row(
+                        tr(keys::PROXY_BOX_USERNAME),
+                        draft.username.clone(),
+                        cx,
+                    ));
                 }
                 if !draft.password.is_empty() {
-                    body = body.child(Self::link_row("Password", draft.password.clone(), cx));
+                    body = body.child(Self::link_row(
+                        tr(keys::PROXY_BOX_PASSWORD),
+                        draft.password.clone(),
+                        cx,
+                    ));
                 }
             }
             let status = match ping {
                 Some(status) => {
                     let (text, color) = match status {
-                        PingStatus::Checking => ("Checking…".to_string(), text_muted()),
-                        PingStatus::Available(ms) => {
-                            (format!("Available (ping: {ms} ms)"), success())
+                        PingStatus::Checking => {
+                            (tr(keys::PROXY_BOX_TABLE_CHECKING).to_string(), text_muted())
                         }
-                        PingStatus::Unavailable => ("Not Available".to_string(), danger()),
+                        PingStatus::Available(ms) => (
+                            tr_with(
+                                keys::PROXY_BOX_TABLE_AVAILABLE,
+                                &[("ping", &ms.to_string())],
+                            ),
+                            success(),
+                        ),
+                        PingStatus::Unavailable => {
+                            (tr(keys::PROXY_BOX_TABLE_UNAVAILABLE).to_string(), danger())
+                        }
                     };
-                    div().text_sm().font_semibold().text_color(color).child(text)
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(color)
+                        .child(text)
                 }
                 None => div().child(
                     Button::new("proxy-link-check")
-                        .label("Check Status")
+                        .label(tr(keys::PROXY_BOX_CHECK_STATUS))
                         .ghost()
                         .xsmall()
                         .on_click(cx.listener(|this, _, _, cx| this.check_link_proxy(cx))),
@@ -242,7 +285,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Status"),
+                            .child(tr(keys::PROXY_BOX_STATUS)),
                     )
                     .child(status),
             );
@@ -253,12 +296,15 @@ impl QuillApp {
                         .items_center()
                         .justify_between()
                         .gap_2()
-                        .child(div().text_xs().text_color(text_muted()).child(
-                            "This will expose your IP address to the admin of the proxy server.",
-                        ))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(text_muted())
+                                .child(tr(keys::PROXY_CHECK_IP_WARNING)),
+                        )
                         .child(
                             Button::new("proxy-link-proceed")
-                                .label("Proceed")
+                                .label(tr(keys::PROXY_CHECK_IP_PROCEED))
                                 .xsmall()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.confirm_link_ip_warning(cx);
@@ -267,9 +313,12 @@ impl QuillApp {
                 );
             }
             if draft.kind == ProxyKind::Mtproto {
-                body = body.child(div().text_xs().text_color(text_muted()).child(
-                    "This proxy may display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.",
-                ));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(text_muted())
+                        .child(tr(keys::PROXY_SPONSOR_WARNING)),
+                );
             }
             let footer = div()
                 .flex()
@@ -277,7 +326,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("proxy-link-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_proxy_link(cx);
@@ -286,7 +335,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("proxy-link-connect")
-                        .label("Connect Proxy")
+                        .label(tr(keys::PROXY_BOX_TABLE_BUTTON))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.connect_link_proxy(cx);
@@ -295,7 +344,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Proxy Server"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::PROXY_BOX_TABLE_TITLE,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {

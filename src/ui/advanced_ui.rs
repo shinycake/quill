@@ -11,6 +11,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::advanced::experimental::{self, Category, Imported, OptionSpec, Values};
 use quill::advanced::update_channel;
+use quill::lang::{keys, tr};
 use quill::updater::UpdateState;
 
 pub(super) const ADVANCED_PAGE: &str = "Advanced";
@@ -187,7 +188,7 @@ impl QuillApp {
         }
         let mut actions = div().flex().gap_2().child(
             Button::new("experimental-export")
-                .label("Export")
+                .label(tr(keys::Q_PREFS_EXPORT))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     let code = experimental::encode_export(this.experimental_values());
@@ -199,7 +200,7 @@ impl QuillApp {
         if experimental::is_importable(&clipboard) {
             actions = actions.child(
                 Button::new("experimental-import")
-                    .label("Import")
+                    .label(tr(keys::Q_PREFS_IMPORT))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.import_experimental(cx))),
             );

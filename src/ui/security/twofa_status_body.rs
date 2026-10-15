@@ -1,6 +1,7 @@
 //! Methods moved out of `security.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Slice A2: the status screen — current state plus the pending
@@ -18,12 +19,17 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().font_semibold().text_sm().child("Status"))
                 .child(
                     div()
+                        .font_semibold()
                         .text_sm()
-                        .child(if state.has_password { "On" } else { "Off" }),
-                ),
+                        .child(tr(keys::PROXY_BOX_STATUS)),
+                )
+                .child(div().text_sm().child(if state.has_password {
+                    tr(keys::SETTINGS_CLOUD_PASSWORD_ON)
+                } else {
+                    tr(keys::SETTINGS_CLOUD_PASSWORD_OFF)
+                })),
         );
         if state.has_password && !state.password_hint.is_empty() {
             body = body.child(
@@ -47,11 +53,16 @@ impl QuillApp {
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().font_semibold().text_sm().child("Recovery email"))
+                .child(
+                    div()
+                        .font_semibold()
+                        .text_sm()
+                        .child(tr(keys::SETTINGS_CLOUD_PASSWORD_EMAIL_TITLE)),
+                )
                 .child(div().text_sm().child(if state.has_recovery_email_address {
-                    "Set"
+                    tr(keys::Q_PREFS_SET)
                 } else {
-                    "Not set"
+                    tr(keys::Q_PREFS_NOT_SET)
                 })),
         );
         if let Some(pattern) = &state.pending_email_pattern {
@@ -65,7 +76,7 @@ impl QuillApp {
             // TGX `ChangePassword`, verbatim.
             actions = actions.child(
                 Button::new("twofa-goto-change")
-                    .label("Change Password")
+                    .label(tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_PASSWORD_CHANGE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.goto_twofa_view(TwofaView::Change);
@@ -74,7 +85,7 @@ impl QuillApp {
             );
             actions = actions.child(
                 Button::new("twofa-goto-disable")
-                    .label("Turn off")
+                    .label(tr(keys::Q_PREFS_TURN_OFF))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.goto_twofa_view(TwofaView::Disable);
@@ -85,9 +96,9 @@ impl QuillApp {
                 Button::new("twofa-goto-email")
                     // TGX `SetRecoveryEmail` / `ChangeRecoveryEmail`.
                     .label(if state.has_recovery_email_address {
-                        "Change Recovery Email"
+                        tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_EMAIL_CHANGE)
                     } else {
-                        "Set Recovery Email"
+                        tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_EMAIL_NEW)
                     })
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -99,7 +110,7 @@ impl QuillApp {
             // TGX `SetAdditionalPassword`, verbatim.
             actions = actions.child(
                 Button::new("twofa-goto-enable")
-                    .label("Set additional password")
+                    .label(tr(keys::Q_PREFS_SET_ADDITIONAL_PASSWORD))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.goto_twofa_view(TwofaView::Enable);
@@ -112,7 +123,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Working…"),
+                    .child(tr(keys::Q_PREFS_WORKING)),
             );
         }
         body.child(actions)
@@ -126,12 +137,18 @@ impl QuillApp {
             div()
                 .font_semibold()
                 .text_sm()
-                .child("Set additional password"),
+                .child(tr(keys::Q_PREFS_SET_ADDITIONAL_PASSWORD)),
         )
-        .child(div().mt_1().font_semibold().text_sm().child("New password"))
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::Q_PREFS_NEW_PASSWORD)),
+        )
         .child(
             Input::new(&self.twofa.new_password)
-                .aria_label("New two-step verification password")
+                .aria_label(tr(keys::Q_PREFS_NEW_TWO_STEP_VERIFICATION_PASSWORD))
                 .content_type(InputContentType::Password)
                 .h(px(40.)),
         )
@@ -140,11 +157,11 @@ impl QuillApp {
                 .mt_1()
                 .font_semibold()
                 .text_sm()
-                .child("Hint (optional)"),
+                .child(tr(keys::Q_PREFS_HINT_OPTIONAL)),
         )
         .child(
             Textarea::new(&self.twofa.hint)
-                .aria_label("Password hint")
+                .aria_label(tr(keys::SETTINGS_CLOUD_PASSWORD_HINT_TITLE))
                 .h(px(40.)),
         )
         .child(
@@ -152,65 +169,84 @@ impl QuillApp {
                 .mt_1()
                 .font_semibold()
                 .text_sm()
-                .child("Recovery email (optional)"),
+                .child(tr(keys::Q_PREFS_RECOVERY_EMAIL_OPTIONAL)),
         )
         .child(
             Textarea::new(&self.twofa.email)
-                .aria_label("Recovery email address")
+                .aria_label(tr(keys::Q_PREFS_RECOVERY_EMAIL_ADDRESS))
                 .h(px(40.)),
         )
         .child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Sent securely to Telegram."),
+                .child(tr(keys::Q_PREFS_SENT_SECURELY_TO_TELEGRAM)),
         )
-        .child(self.twofa_form_buttons(cx, TwofaView::Enable, "Set password"))
+        .child(self.twofa_form_buttons(
+            cx,
+            TwofaView::Enable,
+            tr(keys::RIGHTS_TRANSFER_SET_PASSWORD),
+        ))
     }
 
     /// Slice A2: change form — current + new password + hint.
     pub(in crate::ui) fn twofa_change_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
-        body.child(div().font_semibold().text_sm().child("Change Password"))
-            .child(
-                div()
-                    .mt_1()
-                    .font_semibold()
-                    .text_sm()
-                    .child("Current password"),
-            )
-            .child(
-                Input::new(&self.twofa.current_password)
-                    .aria_label("Current two-step verification password")
-                    .content_type(InputContentType::Password)
-                    .h(px(40.)),
-            )
-            .child(div().mt_1().font_semibold().text_sm().child("New password"))
-            .child(
-                Input::new(&self.twofa.new_password)
-                    .aria_label("New two-step verification password")
-                    .content_type(InputContentType::Password)
-                    .h(px(40.)),
-            )
-            .child(
-                div()
-                    .mt_1()
-                    .font_semibold()
-                    .text_sm()
-                    .child("Hint (optional)"),
-            )
-            .child(
-                Textarea::new(&self.twofa.hint)
-                    .aria_label("Password hint")
-                    .h(px(40.)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Sent securely to Telegram."),
-            )
-            .child(self.twofa_forgot_link(cx))
-            .child(self.twofa_form_buttons(cx, TwofaView::Change, "Change password"))
+        body.child(
+            div()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_PASSWORD_CHANGE)),
+        )
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::Q_PREFS_CURRENT_PASSWORD)),
+        )
+        .child(
+            Input::new(&self.twofa.current_password)
+                .aria_label(tr(keys::Q_PREFS_CURRENT_TWO_STEP_VERIFICATION_PASSWORD))
+                .content_type(InputContentType::Password)
+                .h(px(40.)),
+        )
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::Q_PREFS_NEW_PASSWORD)),
+        )
+        .child(
+            Input::new(&self.twofa.new_password)
+                .aria_label(tr(keys::Q_PREFS_NEW_TWO_STEP_VERIFICATION_PASSWORD))
+                .content_type(InputContentType::Password)
+                .h(px(40.)),
+        )
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::Q_PREFS_HINT_OPTIONAL)),
+        )
+        .child(
+            Textarea::new(&self.twofa.hint)
+                .aria_label(tr(keys::SETTINGS_CLOUD_PASSWORD_HINT_TITLE))
+                .h(px(40.)),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(keys::Q_PREFS_SENT_SECURELY_TO_TELEGRAM)),
+        )
+        .child(self.twofa_forgot_link(cx))
+        .child(self.twofa_form_buttons(
+            cx,
+            TwofaView::Change,
+            tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_PASSWORD_CHANGE),
+        ))
     }
 
     /// Slice A2: disable form — current password, `setPassword` with an
@@ -220,24 +256,24 @@ impl QuillApp {
             div()
                 .font_semibold()
                 .text_sm()
-                .child("Turn off two-step verification"),
+                .child(tr(keys::Q_PREFS_TURN_OFF_TWO_STEP_VERIFICATION)),
         )
         .child(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("You will no longer be asked for an extra password when signing in."),
+                .child(tr(keys::Q_PREFS_YOU_WILL_NO_LONGER_BE)),
         )
         .child(
             div()
                 .mt_1()
                 .font_semibold()
                 .text_sm()
-                .child("Current password"),
+                .child(tr(keys::Q_PREFS_CURRENT_PASSWORD)),
         )
         .child(
             Input::new(&self.twofa.current_password)
-                .aria_label("Current two-step verification password")
+                .aria_label(tr(keys::Q_PREFS_CURRENT_TWO_STEP_VERIFICATION_PASSWORD))
                 .content_type(InputContentType::Password)
                 .h(px(40.)),
         )
@@ -245,49 +281,54 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Sent securely to Telegram."),
+                .child(tr(keys::Q_PREFS_SENT_SECURELY_TO_TELEGRAM)),
         )
         .child(self.twofa_forgot_link(cx))
-        .child(self.twofa_form_buttons(cx, TwofaView::Disable, "Turn off"))
+        .child(self.twofa_form_buttons(cx, TwofaView::Disable, tr(keys::Q_PREFS_TURN_OFF)))
     }
 
     /// Slice A2: recovery-email form — current password + new address
     /// (`setRecoveryEmailAddress`, schema 1.8.67, line 11458).
     pub(in crate::ui) fn twofa_email_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
-        body.child(div().font_semibold().text_sm().child("Recovery email"))
-            .child(
-                div()
-                    .mt_1()
-                    .font_semibold()
-                    .text_sm()
-                    .child("Current password"),
-            )
-            .child(
-                Input::new(&self.twofa.current_password)
-                    .aria_label("Current two-step verification password")
-                    .content_type(InputContentType::Password)
-                    .h(px(40.)),
-            )
-            .child(
-                div()
-                    .mt_1()
-                    .font_semibold()
-                    .text_sm()
-                    .child("New recovery email"),
-            )
-            .child(
-                Textarea::new(&self.twofa.email)
-                    .aria_label("Recovery email address")
-                    .h(px(40.)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("The change stays pending until the new address is confirmed."),
-            )
-            .child(self.twofa_forgot_link(cx))
-            .child(self.twofa_form_buttons(cx, TwofaView::Email, "Save"))
+        body.child(
+            div()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::SETTINGS_CLOUD_PASSWORD_EMAIL_TITLE)),
+        )
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::Q_PREFS_CURRENT_PASSWORD)),
+        )
+        .child(
+            Input::new(&self.twofa.current_password)
+                .aria_label(tr(keys::Q_PREFS_CURRENT_TWO_STEP_VERIFICATION_PASSWORD))
+                .content_type(InputContentType::Password)
+                .h(px(40.)),
+        )
+        .child(
+            div()
+                .mt_1()
+                .font_semibold()
+                .text_sm()
+                .child(tr(keys::Q_PREFS_NEW_RECOVERY_EMAIL)),
+        )
+        .child(
+            Textarea::new(&self.twofa.email)
+                .aria_label(tr(keys::Q_PREFS_RECOVERY_EMAIL_ADDRESS))
+                .h(px(40.)),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(keys::Q_PREFS_THE_CHANGE_STAYS_PENDING_UNTIL)),
+        )
+        .child(self.twofa_forgot_link(cx))
+        .child(self.twofa_form_buttons(cx, TwofaView::Email, tr(keys::SETTINGS_SAVE)))
     }
 
     /// Slice A2: the shared submit/back row for the 2FA forms. Submit
@@ -331,7 +372,7 @@ impl QuillApp {
                     ))
                     .child(
                         Button::new("twofa-back")
-                            .label("Back")
+                            .label(tr(keys::Q_PREFS_BACK))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.goto_twofa_view(TwofaView::Status);
@@ -356,9 +397,12 @@ impl QuillApp {
                 .driver
                 .toggle_session_can_accept_secret_chats(session_id)
             {
-                Ok(_) => self.connection.status_note = "Updating session setting…".into(),
+                Ok(_) => {
+                    self.connection.status_note = tr(keys::Q_PREFS_UPDATING_SESSION_SETTING).into()
+                }
                 Err(_) => {
-                    self.connection.status_note = "Could not update the session setting.".into()
+                    self.connection.status_note =
+                        tr(keys::Q_PREFS_COULD_NOT_UPDATE_THE_SESSION).into()
                 }
             }
         }
@@ -370,9 +414,12 @@ impl QuillApp {
     pub(in crate::ui) fn toggle_session_calls(&mut self, session_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.toggle_session_can_accept_calls(session_id) {
-                Ok(_) => self.connection.status_note = "Updating session setting…".into(),
+                Ok(_) => {
+                    self.connection.status_note = tr(keys::Q_PREFS_UPDATING_SESSION_SETTING).into()
+                }
                 Err(_) => {
-                    self.connection.status_note = "Could not update the session setting.".into()
+                    self.connection.status_note =
+                        tr(keys::Q_PREFS_COULD_NOT_UPDATE_THE_SESSION).into()
                 }
             }
         }
@@ -392,11 +439,9 @@ impl QuillApp {
         let question = match confirm {
             SessionsConfirm::TerminateOne {
                 incomplete: true, ..
-            } => "Terminate this login attempt?",
-            SessionsConfirm::TerminateOne { .. } => "Terminate this session?",
-            SessionsConfirm::TerminateAll => {
-                "Are you sure you want to terminate all other sessions?"
-            }
+            } => tr(keys::Q_PREFS_TERMINATE_THIS_LOGIN_ATTEMPT),
+            SessionsConfirm::TerminateOne { .. } => tr(keys::Q_PREFS_TERMINATE_THIS_SESSION),
+            SessionsConfirm::TerminateAll => tr(keys::SETTINGS_RESET_SURE),
         };
         div()
             .id("sessions-confirm")
@@ -423,7 +468,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("sessions-confirm-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cancel_sessions_confirm(cx);
@@ -431,7 +476,11 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("sessions-confirm-terminate")
-                            .label(if mutating { "Working…" } else { "Terminate" })
+                            .label(if mutating {
+                                tr(keys::Q_PREFS_WORKING)
+                            } else {
+                                tr(keys::SETTINGS_RESET_BUTTON)
+                            })
                             .danger()
                             .disabled(mutating)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -490,7 +539,7 @@ impl QuillApp {
         ));
         sub.push(meta.join(" · "));
         let title = if s.device_model.trim().is_empty() {
-            "Unknown device".to_string()
+            tr(keys::Q_PREFS_UNKNOWN_DEVICE).to_string()
         } else {
             s.device_model.clone()
         };
@@ -527,7 +576,7 @@ impl QuillApp {
                                         .rounded_full()
                                         .bg(accent_light())
                                         .text_color(text_on_fill())
-                                        .child("This Device"),
+                                        .child(tr(keys::Q_PREFS_THIS_DEVICE)),
                                 )
                             }),
                     )
@@ -557,7 +606,7 @@ impl QuillApp {
             actions = actions
                 .child(
                     Switch::new(format!("toggle-secret-chats-{session_id}"))
-                        .label("Secret Chats")
+                        .label(tr(keys::Q_PREFS_SECRET_CHATS))
                         .checked(secret_on)
                         .disabled(mutating)
                         .on_click(cx.listener(move |this, &on, _, cx| {
@@ -568,7 +617,7 @@ impl QuillApp {
                 )
                 .child(
                     Switch::new(format!("toggle-calls-{session_id}"))
-                        .label("Calls")
+                        .label(tr(keys::SETTINGS_CALLS))
                         .checked(calls_on)
                         .disabled(mutating)
                         .on_click(cx.listener(move |this, &on, _, cx| {
@@ -582,7 +631,7 @@ impl QuillApp {
         if !s.is_current {
             actions = actions.child(
                 Button::new(format!("terminate-session-{session_id}"))
-                    .label("Terminate")
+                    .label(tr(keys::SETTINGS_RESET_BUTTON))
                     .small()
                     .custom(quiet_danger(cx))
                     .disabled(mutating)
@@ -593,7 +642,7 @@ impl QuillApp {
         }
         actions = actions.child(
             Button::new(format!("session-details-{session_id}"))
-                .label("Details")
+                .label(tr(keys::Q_PREFS_DETAILS))
                 .small()
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -679,8 +728,8 @@ impl QuillApp {
                 WebsitesConfirm::DisconnectAll => live.driver.disconnect_all_websites().map(|_| ()),
             };
             self.connection.status_note = match result {
-                Ok(()) => "Disconnecting website…".into(),
-                Err(_) => "Could not disconnect the website.".into(),
+                Ok(()) => tr(keys::Q_PREFS_DISCONNECTING_WEBSITE).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_DISCONNECT_THE_WEBSITE).into(),
             };
         }
         cx.notify();
@@ -705,15 +754,13 @@ impl QuillApp {
                 .find(|w| w.id == website_id)
                 .map(|w| {
                     if w.domain_name.trim().is_empty() {
-                        "Disconnect this website?".to_string()
+                        tr(keys::Q_PREFS_DISCONNECT_THIS_WEBSITE).to_string()
                     } else {
                         format!("Disconnect {}?", w.domain_name.trim())
                     }
                 })
-                .unwrap_or_else(|| "Disconnect this website?".to_string()),
-            WebsitesConfirm::DisconnectAll => {
-                "Are you sure you want to disconnect all websites?".to_string()
-            }
+                .unwrap_or_else(|| tr(keys::Q_PREFS_DISCONNECT_THIS_WEBSITE).to_string()),
+            WebsitesConfirm::DisconnectAll => tr(keys::Q_PREFS_ARE_YOU_SURE_YOU_WANT).to_string(),
         };
         div()
             .id("websites-confirm")
@@ -740,7 +787,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("websites-confirm-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cancel_websites_confirm(cx);
@@ -748,7 +795,11 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("websites-confirm-disconnect")
-                            .label(if mutating { "Working…" } else { "Disconnect" })
+                            .label(if mutating {
+                                tr(keys::Q_PREFS_WORKING)
+                            } else {
+                                tr(keys::SETTINGS_DISCONNECT)
+                            })
                             .danger()
                             .disabled(mutating)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -794,7 +845,7 @@ impl QuillApp {
         ));
         sub.push(meta.join(" · "));
         let title = if w.domain_name.trim().is_empty() {
-            "Unknown website".to_string()
+            tr(keys::Q_PREFS_UNKNOWN_WEBSITE).to_string()
         } else {
             w.domain_name.clone()
         };
@@ -829,7 +880,7 @@ impl QuillApp {
                 // TGX `DisconnectWebsiteAction` "Disconnect Website".
                 div().flex_shrink_0().child(
                     Button::new(format!("disconnect-website-{website_id}"))
-                        .label("Disconnect")
+                        .label(tr(keys::SETTINGS_DISCONNECT))
                         .small()
                         .custom(quiet_danger(cx))
                         .disabled(mutating)

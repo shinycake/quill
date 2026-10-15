@@ -2,6 +2,7 @@
 //! in-app sounds, the defaults dialog sections, and Reset All.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Slice parity:chatlist-badge-settings: update one badge-counter
@@ -20,11 +21,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.badge_prefs = prefs;
             if let Err(err) = live.driver.save_badge_prefs() {
-                self.connection.status_note = format!("couldn’t save badge settings: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PREFS_COULDN_T_SAVE_BADGE_SETTINGS,
+                    &[("err", &err.to_string())],
+                );
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.badge_prefs = prefs;
-            self.connection.status_note = "demo: badge settings are not saved".into();
+            self.connection.status_note = tr(keys::Q_PREFS_DEMO_BADGE_SETTINGS_ARE_NOT).into();
         }
         cx.notify();
     }
@@ -38,11 +42,15 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.desktop_notifications = on;
             if let Err(err) = live.driver.save_desktop_notifications() {
-                self.connection.status_note = format!("couldn’t save desktop notifications: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PREFS_COULDN_T_SAVE_DESKTOP_NOTIFICATIONS,
+                    &[("err", &err.to_string())],
+                );
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.desktop_notifications = on;
-            self.connection.status_note = "demo: desktop notifications are not saved".into();
+            self.connection.status_note =
+                tr(keys::Q_PREFS_DEMO_DESKTOP_NOTIFICATIONS_ARE_NOT).into();
         }
         cx.notify();
     }
@@ -61,11 +69,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.inapp_sounds_enabled = on;
             if let Err(err) = live.driver.save_inapp_sounds_enabled() {
-                self.connection.status_note = format!("couldn’t save notification sounds: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PREFS_COULDN_T_SAVE_NOTIFICATION_SOUNDS,
+                    &[("err", &err.to_string())],
+                );
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.inapp_sounds_enabled = on;
-            self.connection.status_note = "demo: in-app sounds are not saved".into();
+            self.connection.status_note = tr(keys::Q_PREFS_DEMO_IN_APP_SOUNDS_ARE).into();
         }
         cx.notify();
     }
@@ -102,10 +113,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Used when a chat keeps the default setting. \
-                         Changes apply via setScopeNotificationSettings.",
-                    ),
+                    .child(tr(keys::Q_PREFS_USED_WHEN_A_CHAT_KEEPS)),
             );
             if let Some(confirm) = this.notify.notifications_confirm {
                 body = body.child(this.notifications_confirm_banner(confirm, cx));
@@ -135,7 +143,7 @@ impl QuillApp {
             let footer = div().flex().justify_end().gap_2().children([
                 Button::new("reset-all-notif-settings")
                     .small()
-                    .label("Reset all")
+                    .label(tr(keys::Q_PREFS_RESET_ALL))
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.notify.notifications_confirm = Some(NotificationsConfirm::ResetAll);
@@ -144,7 +152,7 @@ impl QuillApp {
                     .into_any_element(),
                 Button::new("close-notif-defaults")
                     .small()
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.notify.notification_defaults_open = false;
@@ -159,7 +167,9 @@ impl QuillApp {
             ]);
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Notification defaults"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_PREFS_NOTIFICATION_DEFAULTS,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -234,39 +244,44 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().text_sm().child("App badge counter"))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_APP_BADGE_COUNTER)),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Tray icon badge"),
+                            .child(tr(keys::Q_PREFS_TRAY_ICON_BADGE)),
                     ),
             )
             .child(self.badge_switch_row(
                 cx,
                 "include-muted",
-                "Include muted chats",
+                tr(keys::Q_PREFS_INCLUDE_MUTED_CHATS),
                 prefs.include_muted,
                 |p, on| p.include_muted = on,
             ))
             .child(self.badge_switch_row(
                 cx,
                 "include-archived",
-                "Include archived chats",
+                tr(keys::Q_PREFS_INCLUDE_ARCHIVED_CHATS),
                 prefs.include_archived,
                 |p, on| p.include_archived = on,
             ))
             .child(self.badge_switch_row(
                 cx,
                 "include-muted-folders",
-                "Include muted chats in folder counters",
+                tr(keys::SETTINGS_INCLUDE_MUTED_FOLDERS),
                 prefs.include_muted_folders,
                 |p, on| p.include_muted_folders = on,
             ))
             .child(self.badge_switch_row(
                 cx,
                 "count-messages",
-                "Count unread messages (off: count chats)",
+                tr(keys::Q_PREFS_COUNT_UNREAD_MESSAGES_OFF_COUNT),
                 prefs.count_messages,
                 |p, on| p.count_messages = on,
             ))
@@ -324,7 +339,12 @@ impl QuillApp {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .child(div().font_semibold().text_sm().child("Events"))
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::SETTINGS_EVENTS_TITLE)),
+            )
             .child(
                 div()
                     .flex()
@@ -335,12 +355,12 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Contact joined Telegram"),
+                            .child(tr(keys::SETTINGS_EVENTS_JOINED)),
                     )
                     .child(
                         Switch::new("contact-joined-toggle")
                             .checked(on)
-                            .accessibility_label("Contact joined Telegram")
+                            .accessibility_label(tr(keys::SETTINGS_EVENTS_JOINED))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_contact_joined_notifications(on, cx);
                             })),
@@ -391,12 +411,12 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .text_sm()
-                    .child("Desktop notifications"),
+                    .child(tr(keys::SETTINGS_DESKTOP_NOTIFY)),
             )
             .child(
                 Switch::new("desktop-notifications-toggle")
                     .checked(enabled)
-                    .accessibility_label("Desktop notifications")
+                    .accessibility_label(tr(keys::SETTINGS_DESKTOP_NOTIFY))
                     .on_click(cx.listener(move |this, &on, _, cx| {
                         this.set_desktop_notifications(on, cx);
                     })),
@@ -425,11 +445,16 @@ impl QuillApp {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .child(div().font_semibold().text_sm().child("In-app sounds"))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_IN_APP_SOUNDS)),
+                    )
                     .child(
                         Switch::new("inapp-sounds-toggle")
                             .checked(enabled)
-                            .accessibility_label("Play sounds")
+                            .accessibility_label(tr(keys::Q_PREFS_PLAY_SOUNDS))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.set_inapp_sounds_enabled(on, cx);
                             })),
@@ -439,7 +464,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Play sounds while using the app"),
+                    .child(tr(keys::Q_PREFS_PLAY_SOUNDS_WHILE_USING_THE)),
             )
             .into_any_element()
     }
@@ -452,8 +477,8 @@ impl QuillApp {
     pub(in crate::ui) fn reset_all_notification_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.reset_all_notification_settings() {
-                Ok(_) => "resetting all notification settings…".into(),
-                Err(_) => "could not reset notification settings".into(),
+                Ok(_) => tr(keys::Q_PREFS_RESETTING_ALL_NOTIFICATION_SETTINGS).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_RESET_NOTIFICATION_SETTINGS).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             for scope in NotificationSettingsScope::ALL {
@@ -462,7 +487,7 @@ impl QuillApp {
                     .scope_notification_settings
                     .insert(scope, ScopeNotificationSettings::default());
             }
-            self.connection.status_note = "notification settings reset".into();
+            self.connection.status_note = tr(keys::Q_PREFS_NOTIFICATION_SETTINGS_RESET).into();
         }
         cx.notify();
     }
@@ -477,9 +502,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let question = match confirm {
-            NotificationsConfirm::ResetAll => {
-                "Reset all notification settings to the server defaults? This cannot be undone."
-            }
+            NotificationsConfirm::ResetAll => tr(keys::Q_PREFS_RESET_ALL_NOTIFICATION_SETTINGS_TO),
         };
         div()
             .id("notifications-confirm")
@@ -507,7 +530,7 @@ impl QuillApp {
                     .child(
                         Button::new("notifications-confirm-cancel")
                             .small()
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cancel_notifications_reset(cx);
@@ -516,7 +539,7 @@ impl QuillApp {
                     .child(
                         Button::new("notifications-confirm-reset")
                             .small()
-                            .label("Reset")
+                            .label(tr(keys::Q_PREFS_RESET))
                             .danger()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.confirm_notifications_reset(cx);

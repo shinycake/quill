@@ -1,6 +1,7 @@
 //! Methods moved out of `passcode.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(crate) fn build_passcode_dialog(
@@ -16,14 +17,14 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let body = this.passcode_body(cx);
             let title = match this.account.passcode.view {
-                PasscodeView::Status => "Local passcode",
-                PasscodeView::Create => "Create local passcode",
-                PasscodeView::Change => "Change passcode",
-                PasscodeView::Remove => "Turn off passcode",
+                PasscodeView::Status => tr(keys::SETTINGS_PASSCODE_TITLE),
+                PasscodeView::Create => tr(keys::PASSCODE_CREATE_TITLE),
+                PasscodeView::Change => tr(keys::PASSCODE_CHANGE),
+                PasscodeView::Remove => tr(keys::Q_PREFS_TURN_OFF_PASSCODE),
             };
             let footer = div().flex().justify_end().child(
                 Button::new("close-passcode")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_passcode(window, cx);
@@ -84,18 +85,22 @@ impl QuillApp {
         match ui.view {
             PasscodeView::Status => {
                 body = body
-                    .child(div().text_sm().text_color(muted).child(
-                        "When a local passcode is set, a lock icon appears at the top of your \
-                         chat list. Click it to lock Quill.",
-                    ))
-                    .child(div().text_sm().text_color(muted).child(
-                        "Note: if you forget your passcode, you'll need to log out of Quill \
-                         and log in again.",
-                    ));
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(tr(keys::Q_PREFS_WHEN_A_LOCAL_PASSCODE_IS)),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(tr(keys::Q_PREFS_NOTE_IF_YOU_FORGET_YOUR)),
+                    );
                 if !ui.enabled {
                     body = body.child(
                         Button::new("passcode-turn-on")
-                            .label("Turn on passcode")
+                            .label(tr(keys::Q_PREFS_TURN_ON_PASSCODE))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.goto_passcode_view(PasscodeView::Create, window, cx)
@@ -107,29 +112,37 @@ impl QuillApp {
             }
             PasscodeView::Create => {
                 body = body
-                    .child(self.passcode_field("Passcode", &ui.new))
-                    .child(self.passcode_field("Confirm passcode", &ui.confirm))
-                    .child(div().text_xs().text_color(muted).child(
-                        "The passcode protects your saved data on this device. It is never \
-                         stored or sent anywhere.",
-                    ))
-                    .child(self.passcode_form_buttons(cx, "Save passcode", false));
+                    .child(self.passcode_field(tr(keys::Q_PREFS_PASSCODE), &ui.new))
+                    .child(self.passcode_field(tr(keys::Q_PREFS_CONFIRM_PASSCODE), &ui.confirm))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_PREFS_THE_PASSCODE_PROTECTS_YOUR_SAVED)),
+                    )
+                    .child(self.passcode_form_buttons(cx, tr(keys::PASSCODE_CHANGE_BUTTON), false));
             }
             PasscodeView::Change => {
                 body = body
-                    .child(self.passcode_field("Current passcode", &ui.old))
-                    .child(self.passcode_field("New passcode", &ui.new))
-                    .child(self.passcode_field("Confirm new passcode", &ui.confirm))
-                    .child(self.passcode_form_buttons(cx, "Save passcode", false));
+                    .child(self.passcode_field(tr(keys::Q_PREFS_CURRENT_PASSCODE), &ui.old))
+                    .child(self.passcode_field(tr(keys::Q_PREFS_NEW_PASSCODE), &ui.new))
+                    .child(self.passcode_field(tr(keys::Q_PREFS_CONFIRM_NEW_PASSCODE), &ui.confirm))
+                    .child(self.passcode_form_buttons(cx, tr(keys::PASSCODE_CHANGE_BUTTON), false));
             }
             PasscodeView::Remove => {
                 body = body
-                    .child(div().text_sm().text_color(muted).child(
-                        "Quill will open without asking for a passcode. Your saved data goes \
-                         back to being protected by this device's keychain only.",
-                    ))
-                    .child(self.passcode_field("Current passcode", &ui.old))
-                    .child(self.passcode_form_buttons(cx, "Turn off passcode", true));
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(tr(keys::Q_PREFS_QUILL_WILL_OPEN_WITHOUT_ASKING)),
+                    )
+                    .child(self.passcode_field(tr(keys::Q_PREFS_CURRENT_PASSCODE), &ui.old))
+                    .child(self.passcode_form_buttons(
+                        cx,
+                        tr(keys::Q_PREFS_TURN_OFF_PASSCODE),
+                        true,
+                    ));
             }
         }
         let _ = busy;
@@ -144,7 +157,11 @@ impl QuillApp {
     ) -> Div {
         let busy = self.account.passcode.busy;
         let mut submit = Button::new("passcode-submit")
-            .label(if busy { "Working…" } else { label })
+            .label(if busy {
+                tr(keys::Q_PREFS_WORKING)
+            } else {
+                label
+            })
             .loading(busy)
             .disabled(busy)
             .on_click(cx.listener(|this, _, window, cx| this.submit_passcode_form(window, cx)));
@@ -159,7 +176,7 @@ impl QuillApp {
             .justify_end()
             .child(
                 Button::new("passcode-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.goto_passcode_view(PasscodeView::Status, window, cx)
@@ -171,36 +188,37 @@ impl QuillApp {
     pub(super) fn passcode_enabled_section(&mut self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         let secs = self.account.passcode.autolock_secs;
-        let mut section =
-            div().flex().flex_col().gap_3().child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(
-                        Button::new("passcode-change")
-                            .label("Change passcode")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.goto_passcode_view(PasscodeView::Change, window, cx)
-                            })),
-                    )
-                    .child(Button::new("passcode-lock-now").label("Lock now").on_click(
-                        cx.listener(|this, _, window, cx| {
+        let mut section = div().flex().flex_col().gap_3().child(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap_2()
+                .child(
+                    Button::new("passcode-change")
+                        .label(tr(keys::PASSCODE_CHANGE))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.goto_passcode_view(PasscodeView::Change, window, cx)
+                        })),
+                )
+                .child(
+                    Button::new("passcode-lock-now")
+                        .label(tr(keys::Q_PREFS_LOCK_NOW))
+                        .on_click(cx.listener(|this, _, window, cx| {
                             this.close_passcode(window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Passcode, window, cx);
                             this.lock_by_passcode(cx);
-                        }),
-                    ))
-                    .child(
-                        Button::new("passcode-remove")
-                            .label("Turn off passcode")
-                            .ghost()
-                            .custom(super::security::quiet_danger(cx))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.goto_passcode_view(PasscodeView::Remove, window, cx)
-                            })),
-                    ),
-            );
+                        })),
+                )
+                .child(
+                    Button::new("passcode-remove")
+                        .label(tr(keys::Q_PREFS_TURN_OFF_PASSCODE))
+                        .ghost()
+                        .custom(super::security::quiet_danger(cx))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.goto_passcode_view(PasscodeView::Remove, window, cx)
+                        })),
+                ),
+        );
         let mut presets = div().flex().flex_wrap().gap_1();
         for preset in AUTOLOCK_PRESETS {
             presets = presets.child(
@@ -234,13 +252,13 @@ impl QuillApp {
                         .child(
                             div().w(px(96.)).child(
                                 Input::new(&self.account.passcode.custom_time)
-                                    .aria_label("Custom auto-lock time, hours and minutes")
+                                    .aria_label(tr(keys::Q_PREFS_CUSTOM_AUTO_LOCK_TIME_HOURS))
                                     .h(px(32.)),
                             ),
                         )
                         .child(
                             Button::new("autolock-custom")
-                                .label("Set custom time")
+                                .label(tr(keys::Q_PREFS_SET_CUSTOM_TIME))
                                 .outline()
                                 .selected(custom)
                                 .on_click(
@@ -252,7 +270,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Custom time is hours:minutes, like 0:30."),
+                        .child(tr(keys::Q_PREFS_CUSTOM_TIME_IS_HOURS_MINUTES)),
                 ),
         );
         if self.system_unlock_offered() {
@@ -274,10 +292,12 @@ impl QuillApp {
                                     .font_semibold()
                                     .child(super::system_unlock::label()),
                             )
-                            .child(div().text_xs().text_color(muted).child(
-                                "Enter your passcode once after each launch, then unlock with \
-                                 the system prompt.",
-                            )),
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_PREFS_ENTER_YOUR_PASSCODE_ONCE_AFTER)),
+                            ),
                     )
                     .child(
                         Switch::new("passcode-system-unlock")

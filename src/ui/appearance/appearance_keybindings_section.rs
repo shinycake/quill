@@ -1,6 +1,7 @@
 //! Methods moved out of `appearance.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Parity slice (platform-custom-keybindings): the shortcuts section.
@@ -53,7 +54,7 @@ impl QuillApp {
             // A joined pair like "cmd-shift-g / ctrl-shift-g" is wider than
             // the row; stack those so the label does not paint under the chip.
             let key_lines: Vec<String> = if is_capturing {
-                vec!["press keys…".to_string()]
+                vec![tr(keys::Q_PREFS_PRESS_KEYS).to_string()]
             } else if current.chars().count() > 20 {
                 current.split(" / ").map(str::to_string).collect()
             } else {
@@ -87,7 +88,11 @@ impl QuillApp {
                         )
                         .child(
                             Button::new(format!("kb-change-{id}"))
-                                .label(if is_capturing { "Cancel" } else { "Change" })
+                                .label(if is_capturing {
+                                    tr(keys::CANCEL)
+                                } else {
+                                    tr(keys::Q_PREFS_CHANGE)
+                                })
                                 .small()
                                 .ghost()
                                 .on_click({
@@ -107,7 +112,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new(format!("kb-reset-{id}"))
-                                .label("Reset")
+                                .label(tr(keys::Q_PREFS_RESET))
                                 .small()
                                 .ghost()
                                 .on_click({
@@ -170,8 +175,8 @@ impl QuillApp {
         });
         self.appearance_section(
             cx,
-            "Keyboard shortcuts",
-            "Rebind the shortcuts below. Changes apply immediately and are saved on this device. Window and app shortcuts (quit, close, …) can't be changed.",
+            tr(keys::Q_PREFS_KEYBOARD_SHORTCUTS),
+            tr(keys::Q_PREFS_REBIND_THE_SHORTCUTS_BELOW_CHANGES),
             div().flex().flex_col().children(rows).into_any_element(),
         )
     }
@@ -242,10 +247,8 @@ impl QuillApp {
                 }
             }
             Some((false, _)) => {
-                self.settings.keybinding_error = Some((
-                    id,
-                    "Couldn't save that shortcut. The previous one is still active.".into(),
-                ));
+                self.settings.keybinding_error =
+                    Some((id, tr(keys::Q_PREFS_COULDNT_SAVE_THAT_SHORTCUT_THE).into()));
             }
             _ => {}
         }

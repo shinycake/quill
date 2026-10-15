@@ -3,6 +3,7 @@
 //! notifications are on.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::notify::NotifyView;
 
 impl QuillApp {
@@ -18,13 +19,15 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.notify_view = view;
             if let Err(err) = live.driver.save_notify_view() {
-                self.connection.status_note =
-                    format!("couldn’t save notification preview settings: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PREFS_COULDN_T_SAVE_NOTIFICATION_PREVIEW,
+                    &[("err", &err.to_string())],
+                );
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.notify_view = view;
             self.connection.status_note =
-                "demo: notification preview settings are not saved".into();
+                tr(keys::Q_PREFS_DEMO_NOTIFICATION_PREVIEW_SETTINGS_ARE).into();
         }
         cx.notify();
     }
@@ -70,13 +73,13 @@ impl QuillApp {
                 .border_color(cx.theme().border)
                 .child(row(
                     "notify-view-name",
-                    "Show sender name",
+                    tr(keys::Q_PREFS_SHOW_SENDER_NAME),
                     view.shows_name(),
                     true,
                 ))
                 .child(row(
                     "notify-view-text",
-                    "Show message text",
+                    tr(keys::Q_PREFS_SHOW_MESSAGE_TEXT),
                     view.shows_text(),
                     false,
                 ))

@@ -16,6 +16,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::AccountKey;
+use quill::lang::{keys, tr};
 use quill::passcode::{
     self, AUTOLOCK_PRESETS, IdleTracker, MasterKey, PasscodeError, global_unlock,
 };
@@ -85,10 +86,10 @@ impl PasscodeUi {
                     .submit_on_enter(true)
             })
         };
-        let old = field(window, cx, "Current passcode");
-        let new = field(window, cx, "New passcode");
-        let confirm = field(window, cx, "Re-enter new passcode");
-        let lock_input = field(window, cx, "Your passcode");
+        let old = field(window, cx, tr(keys::Q_PREFS_CURRENT_PASSCODE));
+        let new = field(window, cx, tr(keys::Q_PREFS_NEW_PASSCODE));
+        let confirm = field(window, cx, tr(keys::PASSCODE_CONFIRM_NEW));
+        let lock_input = field(window, cx, tr(keys::PASSCODE_PH));
         let custom_time = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("10:00")
@@ -177,9 +178,9 @@ impl PasscodeUi {
     /// "inactive" (idle measured by input to this window).
     pub(crate) fn autolock_title() -> &'static str {
         if passcode::os_idle_known() {
-            "Auto-lock if away for"
+            tr(keys::Q_PREFS_AUTO_LOCK_IF_AWAY_FOR)
         } else {
-            "Auto-lock if inactive for"
+            tr(keys::Q_PREFS_AUTO_LOCK_IF_INACTIVE_FOR)
         }
     }
 }
@@ -306,7 +307,7 @@ impl QuillApp {
             return;
         }
         let Some(root) = self.passcode_root() else {
-            self.account.passcode.error = Some("No app data folder is available.".into());
+            self.account.passcode.error = Some(tr(keys::Q_PREFS_NO_APP_DATA_FOLDER_IS).into());
             cx.notify();
             return;
         };
@@ -334,7 +335,7 @@ impl QuillApp {
                     this.account.passcode.enabled = true;
                     this.account.passcode.autolock_secs = passcode::DEFAULT_AUTOLOCK_SECS;
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
-                    this.connection.status_note = "Local passcode turned on".into();
+                    this.connection.status_note = tr(keys::Q_PREFS_LOCAL_PASSCODE_TURNED_ON).into();
                 }
                 Err(err) => this.account.passcode.error = Some(error_text(&err)),
             },
@@ -348,7 +349,8 @@ impl QuillApp {
         let new = self.read_field(&self.account.passcode.new, cx);
         let confirm = self.read_field(&self.account.passcode.confirm, cx);
         if old.is_empty() {
-            self.account.passcode.error = Some("Enter your current passcode".into());
+            self.account.passcode.error =
+                Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSCODE).into());
             cx.notify();
             return;
         }
@@ -374,7 +376,7 @@ impl QuillApp {
             |this, result, window, cx| match result {
                 Ok(()) => {
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
-                    this.connection.status_note = "Local passcode changed".into();
+                    this.connection.status_note = tr(keys::Q_PREFS_LOCAL_PASSCODE_CHANGED).into();
                 }
                 Err(err) => this.account.passcode.error = Some(error_text(&err)),
             },
@@ -386,7 +388,8 @@ impl QuillApp {
     fn submit_remove_passcode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let old = self.read_field(&self.account.passcode.old, cx);
         if old.is_empty() {
-            self.account.passcode.error = Some("Enter your current passcode".into());
+            self.account.passcode.error =
+                Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSCODE).into());
             cx.notify();
             return;
         }
@@ -417,7 +420,8 @@ impl QuillApp {
                     this.account.passcode.system_unlock = false;
                     this.account.passcode.system_unlock_key = None;
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
-                    this.connection.status_note = "Local passcode turned off".into();
+                    this.connection.status_note =
+                        tr(keys::Q_PREFS_LOCAL_PASSCODE_TURNED_OFF).into();
                 }
                 Err(err) => this.account.passcode.error = Some(error_text(&err)),
             },
@@ -450,8 +454,7 @@ impl QuillApp {
                 self.set_autolock_secs(secs, cx);
             }
             None => {
-                self.account.passcode.error =
-                    Some("Enter a time as hours:minutes, like 0:30".into());
+                self.account.passcode.error = Some(tr(keys::Q_PREFS_ENTER_A_TIME_AS_HOURS).into());
                 cx.notify();
             }
         }
@@ -536,7 +539,7 @@ impl QuillApp {
         }
         let typed = self.read_field(&self.account.passcode.lock_input, cx);
         if typed.is_empty() {
-            self.lock_failed("Enter your passcode".into(), cx);
+            self.lock_failed(tr(keys::Q_PREFS_ENTER_YOUR_PASSCODE).into(), cx);
             return;
         }
         if self.account.passcode.demo {
@@ -576,17 +579,14 @@ impl QuillApp {
     /// Touch ID / system password on the lock screen.
     pub(crate) fn unlock_with_system(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(master) = self.account.passcode.system_unlock_key.clone() else {
-            self.lock_failed(
-                "Enter your passcode once before using system unlock".into(),
-                cx,
-            );
+            self.lock_failed(tr(keys::Q_PREFS_ENTER_YOUR_PASSCODE_ONCE_BEFORE).into(), cx);
             return;
         };
         if self.account.passcode.busy {
             return;
         }
         self.account.passcode.busy = true;
-        let receiver = super::system_unlock::authenticate("unlock Quill");
+        let receiver = super::system_unlock::authenticate(tr(keys::Q_PREFS_UNLOCK_QUILL));
         self.spawn_system_unlock_wait(receiver, master, window, cx);
     }
 
@@ -711,8 +711,8 @@ impl QuillApp {
         Button::new("lock-app")
             .icon(gpui_kit::assets::IconName::Lock)
             .ghost()
-            .tooltip("Lock Quill")
-            .accessibility_label("Lock Quill")
+            .tooltip(tr(keys::Q_PREFS_LOCK_QUILL))
+            .accessibility_label(tr(keys::Q_PREFS_LOCK_QUILL))
             .on_click(cx.listener(|this, _, _, cx| this.lock_by_passcode(cx)))
             .into_any_element()
     }
@@ -763,21 +763,21 @@ impl QuillApp {
                 div()
                     .id("lock-title")
                     .role(Role::Heading)
-                    .aria_label("Enter your local passcode")
+                    .aria_label(tr(keys::PASSCODE_ENTER))
                     .text_xl()
                     .font_semibold()
-                    .child("Enter your local passcode"),
+                    .child(tr(keys::PASSCODE_ENTER)),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Unlock Quill to continue."),
+                    .child(tr(keys::Q_PREFS_UNLOCK_QUILL_TO_CONTINUE)),
             )
             .child(
                 div().w_full().relative().left(px(shake)).child(
                     Input::new(&ui.lock_input)
-                        .aria_label("Local passcode")
+                        .aria_label(tr(keys::SETTINGS_PASSCODE_TITLE))
                         .content_type(InputContentType::Password)
                         .h(px(40.)),
                 ),
@@ -793,7 +793,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("lock-submit")
-                    .label("Submit")
+                    .label(tr(keys::PASSCODE_SUBMIT))
                     .primary()
                     .w_full()
                     .loading(ui.busy)
@@ -822,12 +822,17 @@ impl QuillApp {
                     .rounded_md()
                     .border_1()
                     .border_color(cx.theme().border)
-                    .child(div().text_sm().child("Log out and delete local data?"))
-                    .child(div().text_xs().text_color(muted).child(
-                        "Without the passcode the saved data cannot be opened. Logging out \
-                         removes it from this device, for every account, and turns the \
-                         passcode off. Your chats stay in the Telegram cloud.",
-                    ))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_LOG_OUT_AND_DELETE_LOCAL)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_PREFS_WITHOUT_THE_PASSCODE_THE_SAVED)),
+                    )
                     .child(
                         div()
                             .flex()
@@ -835,7 +840,7 @@ impl QuillApp {
                             .justify_end()
                             .child(
                                 Button::new("lock-logout-cancel")
-                                    .label("Cancel")
+                                    .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.account.passcode.logout_confirm = false;
@@ -844,7 +849,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("lock-logout-confirm")
-                                    .label("Log out")
+                                    .label(tr(keys::PASSCODE_LOGOUT))
                                     .danger()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.confirm_lock_logout(window, cx)
@@ -855,7 +860,7 @@ impl QuillApp {
         } else {
             column.child(
                 Button::new("lock-logout")
-                    .label("Log out")
+                    .label(tr(keys::PASSCODE_LOGOUT))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.account.passcode.logout_confirm = true;

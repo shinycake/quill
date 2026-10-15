@@ -16,6 +16,7 @@ use super::actions::{
 };
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::settings::CustomKeybinding;
 
 /// The platform's primary modifier plus a key, as a keystroke literal:
@@ -454,14 +455,15 @@ pub struct ResolvedKeybinding {
 pub fn conflict_message(chord: &str, conflict: &KeybindingConflict) -> String {
     match conflict {
         KeybindingConflict::Invalid => {
-            format!("{chord} isn't a valid shortcut and was not applied.")
+            tr_with(keys::Q_PREFS_ISNT_A_VALID_SHORTCUT_AND, &[("chord", chord)])
         }
         KeybindingConflict::FixedChrome => {
-            format!("{chord} is reserved for a built-in shortcut and was not applied.")
+            tr_with(keys::Q_PREFS_IS_RESERVED_FOR_A_BUILT, &[("chord", chord)])
         }
-        KeybindingConflict::Rebindable { other_label } => {
-            format!("{chord} is already used by {other_label} and was not applied.")
-        }
+        KeybindingConflict::Rebindable { other_label } => tr_with(
+            keys::Q_PREFS_IS_ALREADY_USED_BY_AND,
+            &[("chord", chord), ("other_label", other_label)],
+        ),
     }
 }
 
@@ -530,7 +532,8 @@ pub fn resolve_keybindings(customs: &[CustomKeybinding]) -> Vec<ResolvedKeybindi
                     KeybindingConflict::FixedChrome
                 } else {
                     KeybindingConflict::Rebindable {
-                        other_label: owner_label(&resolved, &ks).unwrap_or("another shortcut"),
+                        other_label: owner_label(&resolved, &ks)
+                            .unwrap_or(tr(keys::Q_PREFS_ANOTHER_SHORTCUT)),
                     }
                 };
                 resolved.push(ResolvedKeybinding {
@@ -729,223 +732,8 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     cx.bind_keys(bindings);
 }
 
-/// One row of the app's keyboard-shortcut reference: the single source of
-/// truth for both `bind_keys` (what the app listens for) and the shortcuts
-/// reference dialog (what the user sees). `keystroke` is gpui format
-/// (e.g. `"cmd-q"`); the dialog renders it through kit's `Kbd`.
-pub struct ShortcutRow {
-    pub label: &'static str,
-    pub section: &'static str,
-    pub binding: KeyBinding,
-}
-
-fn row<A: Action>(
-    keystroke: &'static str,
-    label: &'static str,
-    section: &'static str,
-    action: A,
-) -> ShortcutRow {
-    ShortcutRow {
-        label,
-        section,
-        binding: KeyBinding::new(keystroke, action, None),
-    }
-}
-
-/// Every keybinding the app registers, in reference-dialog order. Rows that
-/// share a label (e.g. `cmd-q` / `ctrl-q`) render as one entry with both
-/// chips.
-pub fn shortcut_rows() -> Vec<ShortcutRow> {
-    let mut rows = vec![
-        // General.
-        row("cmd-q", "Quit Quill", "General", QuitApp),
-        row("ctrl-q", "Quit Quill", "General", QuitApp),
-        // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
-        // minimize; F11 / Cmd+Ctrl+F fullscreen).
-        row("cmd-l", "Lock Quill", "General", LockApp),
-        row("ctrl-l", "Lock Quill", "General", LockApp),
-        row("cmd-w", "Close window", "General", CloseWindow),
-        row("ctrl-w", "Close window", "General", CloseWindow),
-        row("cmd-m", "Minimize window", "General", MinimizeWindow),
-        row("ctrl-m", "Minimize window", "General", MinimizeWindow),
-        // A menu item shows its action's first binding: the macOS Window
-        // menu's "Toggle Full Screen" reads ⌃⌘F, as in Telegram Desktop.
-        #[cfg(target_os = "macos")]
-        row(
-            "cmd-ctrl-f",
-            "Toggle fullscreen",
-            "General",
-            ToggleFullscreen,
-        ),
-        row("f11", "Toggle fullscreen", "General", ToggleFullscreen),
-        row(
-            primary!("shift-t"),
-            "Reopen closed window",
-            "General",
-            ReopenClosedWindow,
-        ),
-        row(
-            "cmd-ctrl-f",
-            "Toggle fullscreen",
-            "General",
-            ToggleFullscreen,
-        ),
-        // Navigation.
-        row("cmd-alt-1", "Focus chat list", "Navigation", FocusSidebar),
-        row("ctrl-alt-1", "Focus chat list", "Navigation", FocusSidebar),
-        row(
-            "cmd-shift-l",
-            "Focus message composer",
-            "Navigation",
-            FocusComposer,
-        ),
-        row(
-            "ctrl-shift-l",
-            "Focus message composer",
-            "Navigation",
-            FocusComposer,
-        ),
-        row("alt-down", "Next chat", "Navigation", NextChat),
-        row("ctrl-tab", "Next chat", "Navigation", NextChat),
-        row(primary!("pagedown"), "Next chat", "Navigation", NextChat),
-        row("alt-up", "Previous chat", "Navigation", PrevChat),
-        row("ctrl-shift-tab", "Previous chat", "Navigation", PrevChat),
-        row(primary!("pageup"), "Previous chat", "Navigation", PrevChat),
-        row("alt-pageup", "Load older messages", "Navigation", LoadOlder),
-        // Search.
-        row("cmd-k", "Quick switch chats", "Search", OpenSearch),
-        row("ctrl-k", "Quick switch chats", "Search", OpenSearch),
-        row("cmd-f", "Find in chat", "Search", OpenChatSearch),
-        row("ctrl-f", "Find in chat", "Search", OpenChatSearch),
-        row("cmd-g", "Next search result", "Search", ChatSearchNewer),
-        row("ctrl-g", "Next search result", "Search", ChatSearchNewer),
-        row(
-            "cmd-shift-g",
-            "Previous search result",
-            "Search",
-            ChatSearchOlder,
-        ),
-        row(
-            "ctrl-shift-g",
-            "Previous search result",
-            "Search",
-            ChatSearchOlder,
-        ),
-        row("escape", "Close search / cancel", "Search", CancelSearch),
-        // Parity slice 5: the handlers no-op (and let the keystroke reach
-        // text inputs) unless the media viewer is open.
-        row(
-            "space",
-            "Pause or resume story",
-            "Media viewer",
-            StoryTogglePause,
-        ),
-        row("left", "Previous item", "Media viewer", ViewerPrev),
-        row("right", "Next item", "Media viewer", ViewerNext),
-        row("0", "Reset zoom", "Media viewer", ViewerZoomReset),
-        row("=", "Zoom in", "Media viewer", ViewerZoomIn),
-        row(primary!("="), "Zoom in", "Media viewer", ViewerZoomIn),
-        row("-", "Zoom out", "Media viewer", ViewerZoomOut),
-        row(primary!("-"), "Zoom out", "Media viewer", ViewerZoomOut),
-        row(
-            "h",
-            "Flip horizontally",
-            "Media viewer",
-            ViewerFlipHorizontal,
-        ),
-        row("v", "Flip vertically", "Media viewer", ViewerFlipVertical),
-        row(primary!("c"), "Copy photo", "Media viewer", ViewerCopy),
-        row(primary!("s"), "Save", "Media viewer", ViewerSave),
-        // M1: composer formatting shortcuts; the handlers no-op unless
-        // the composer textarea has focus.
-        row(primary!("b"), "Bold", "Composer", FormatBold),
-        row(primary!("i"), "Italic", "Composer", FormatItalic),
-        row(primary!("u"), "Underline", "Composer", FormatUnderline),
-        row(
-            primary!("shift-x"),
-            "Strikethrough",
-            "Composer",
-            FormatStrikethrough,
-        ),
-        row(
-            primary!("shift-m"),
-            "Monospace",
-            "Composer",
-            FormatMonospace,
-        ),
-        // Quote rows are appended below (one per chord spelling).
-        row(primary!("shift-p"), "Spoiler", "Composer", FormatSpoiler),
-        row(
-            primary!("shift-n"),
-            "Clear formatting",
-            "Composer",
-            FormatClear,
-        ),
-        // Scoped to the composer's key context; with nothing selected it
-        // falls back to quick switch (see `composer_bindings`).
-        ShortcutRow {
-            label: "Link (selected text)",
-            section: "Composer",
-            binding: KeyBinding::new(link_chord(), ComposerEditLink, Some(COMPOSER_INPUT_CONTEXT)),
-        },
-        row(
-            paste_plain_chord(),
-            "Paste as plain text",
-            "Composer",
-            ComposerPastePlain,
-        ),
-    ];
-    rows.extend(
-        QUOTE_CHORDS
-            .iter()
-            .map(|chord| row(chord, "Quote", "Composer", FormatBlockQuote))
-            .chain(composer_extra_rows()),
-    );
-    // The reference dialog prints a heading whenever the section changes,
-    // so each group goes in next to its own section.
-    let at = rows
-        .iter()
-        .position(|r| r.section == "Search")
-        .unwrap_or(rows.len());
-    rows.splice(
-        at..at,
-        chat_nav_rows().into_iter().chain(pinned_chat_rows()),
-    );
-    let at = rows
-        .iter()
-        .position(|r| r.section == "Media viewer")
-        .unwrap_or(rows.len());
-    rows.splice(at..at, message_rows());
-    rows
-}
-
-/// Chat-list navigation chords from tdesktop's `fillDefaults`: first/last
-/// chat, folders, Saved Messages, Archive, Contacts, read, menu, preview.
-/// Not user-rebindable (they are claimed like window chrome).
-fn chat_nav_rows() -> Vec<ShortcutRow> {
-    vec![
-        row(primary!("alt-home"), "First chat", "Navigation", FirstChat),
-        row(primary!("alt-end"), "Last chat", "Navigation", LastChat),
-        row("ctrl-shift-up", "Previous folder", "Navigation", PrevFolder),
-        row("ctrl-shift-down", "Next folder", "Navigation", NextFolder),
-        row(
-            primary!("0"),
-            "Open Saved Messages",
-            "Navigation",
-            OpenSavedMessages,
-        ),
-        row(primary!("9"), "Open Archive", "Navigation", OpenArchive),
-        row(primary!("j"), "Open Contacts", "Navigation", OpenContacts),
-        row(
-            primary!("r"),
-            "Mark chat as read",
-            "Navigation",
-            MarkChatRead,
-        ),
-        row(primary!("\\"), "Chat menu", "Navigation", ShowChatMenu),
-        row(primary!("]"), "Chat preview", "Navigation", ShowChatPreview),
-    ]
-}
+mod shortcut_rows;
+pub use shortcut_rows::*;
 
 mod pinned_chat_rows;
 #[allow(unused_imports)]

@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
 use quill::state::{ContactRow, Session};
 use quill::telegram::client::copy_and_parse;
@@ -38,8 +39,8 @@ impl PrivacyEditorTarget {
     fn label(self) -> &'static str {
         match self {
             PrivacyEditorTarget::Rule(key) => key.label(),
-            PrivacyEditorTarget::NewChat => "Who can message me",
-            PrivacyEditorTarget::FileOpen => "File open confirmations",
+            PrivacyEditorTarget::NewChat => tr(keys::Q_PREFS_WHO_CAN_MESSAGE_ME),
+            PrivacyEditorTarget::FileOpen => tr(keys::Q_PREFS_FILE_OPEN_CONFIRMATIONS),
         }
     }
 }
@@ -55,8 +56,8 @@ pub(crate) enum PrivacyExceptionKind {
 impl PrivacyExceptionKind {
     fn label(self) -> &'static str {
         match self {
-            PrivacyExceptionKind::Always => "Always allow",
-            PrivacyExceptionKind::Never => "Never allow",
+            PrivacyExceptionKind::Always => tr(keys::EDIT_PRIVACY_GROUPS_ALWAYS_EMPTY),
+            PrivacyExceptionKind::Never => tr(keys::EDIT_PRIVACY_GROUPS_NEVER_EMPTY),
         }
     }
 }
@@ -161,8 +162,8 @@ impl QuillApp {
                             .child(
                                 Button::new(format!("privacy-close-{id}"))
                                     .icon(gpui_kit::assets::IconName::X)
-                                    .tooltip("Close")
-                                    .accessibility_label("Close")
+                                    .tooltip(tr(keys::CLOSE))
+                                    .accessibility_label(tr(keys::CLOSE))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_privacy_top(cx);
@@ -188,7 +189,13 @@ impl QuillApp {
         }
 
         let mut visibility = div().flex().flex_col().gap_1();
-        visibility = visibility.child(div().text_sm().font_semibold().px_1().child("Who can see"));
+        visibility = visibility.child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .px_1()
+                .child(tr(keys::Q_PREFS_WHO_CAN_SEE)),
+        );
         for key in PrivacySettingKey::visibility_rows() {
             visibility = visibility.child(self.privacy_rule_row(cx, key));
         }
@@ -200,7 +207,7 @@ impl QuillApp {
                 .text_sm()
                 .font_semibold()
                 .px_1()
-                .child("Who can contact me"),
+                .child(tr(keys::Q_PREFS_WHO_CAN_CONTACT_ME)),
         );
         contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::AllowCalls));
         contact = contact.child(self.privacy_rule_row(cx, PrivacySettingKey::PeerToPeer));
@@ -221,12 +228,18 @@ impl QuillApp {
         // (`parity:bots-payment-clear`) — destructive, with the shared
         // confirm dialog, next to the other data-clearing controls.
         let mut payments = div().flex().flex_col().gap_1();
-        payments = payments.child(div().text_sm().font_semibold().px_1().child("Payments"));
+        payments = payments.child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .px_1()
+                .child(tr(keys::Q_PREFS_PAYMENTS)),
+        );
         payments = payments.child(
             div().flex().flex_col().gap_1().child(
                 Button::new("privacy-clear-payment-info")
                     .small()
-                    .label("Clear saved payment/shipping info…")
+                    .label(tr(keys::Q_PREFS_CLEAR_SAVED_PAYMENT_SHIPPING_INFO))
                     .custom(super::security::quiet_danger(cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.open_group_confirm(
@@ -241,11 +254,16 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("Deletes the shipping info and payment credentials Telegram saved from past checkouts."),
+                .child(tr(keys::Q_PREFS_DELETES_THE_SHIPPING_INFO_AND)),
         );
         body = body.child(payments);
 
-        self.privacy_shell(cx, "main", "Privacy", body.into_any_element())
+        self.privacy_shell(
+            cx,
+            "main",
+            tr(keys::SETTINGS_PRIVACY_TITLE),
+            body.into_any_element(),
+        )
     }
 
     /// tdesktop Settings > Privacy > "Suggest frequent contacts": whether
@@ -264,7 +282,7 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .px_1()
-                    .child("Frequent contacts"),
+                    .child(tr(keys::Q_PREFS_FREQUENT_CONTACTS)),
             )
             .child(
                 div()
@@ -273,11 +291,15 @@ impl QuillApp {
                     .justify_between()
                     .gap_2()
                     .px_2()
-                    .child(div().text_sm().child("Suggest frequent contacts"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_SUGGEST_FREQUENT_CONTACTS)),
+                    )
                     .child(
                         Switch::new("privacy-suggest-frequent-contacts")
                             .checked(enabled)
-                            .accessibility_label("Suggest frequent contacts")
+                            .accessibility_label(tr(keys::Q_PREFS_SUGGEST_FREQUENT_CONTACTS))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 this.set_top_chats_disabled(!on, cx);
                             })),
@@ -288,9 +310,7 @@ impl QuillApp {
                     .text_xs()
                     .px_2()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Display people you message frequently at the top of the search section for quick access.",
-                    ),
+                    .child(tr(keys::SETTINGS_TOP_PEERS_ABOUT)),
             )
             .into_any_element()
     }
@@ -353,7 +373,12 @@ impl QuillApp {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(div().text_sm().font_semibold().child("Blocked users"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::Q_PREFS_BLOCKED_USERS)),
+                        )
                         .child(
                             div()
                                 .text_xs()
@@ -364,7 +389,7 @@ impl QuillApp {
                 .child(
                     Button::new("privacy-block-add")
                         .small()
-                        .label("Block…")
+                        .label(tr(keys::Q_PREFS_BLOCK))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.privacy.block_picker_open = true;
@@ -381,7 +406,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("Couldn't load blocked users."),
+                    .child(tr(keys::Q_PREFS_COULDNT_LOAD_BLOCKED_USERS)),
             );
         } else if loading && list.is_empty() {
             section = section.child(
@@ -389,7 +414,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("Loading…"),
+                    .child(tr(keys::Q_PREFS_LOADING)),
             );
         } else if list.is_empty() {
             section = section.child(
@@ -397,7 +422,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("No blocked users."),
+                    .child(tr(keys::Q_PREFS_NO_BLOCKED_USERS)),
             );
         }
         for user_id in &list {
@@ -408,7 +433,10 @@ impl QuillApp {
             section = section.child(
                 Button::new("privacy-blocked-more")
                     .small()
-                    .label(format!("Load more ({remaining} remaining)"))
+                    .label(tr_with(
+                        keys::Q_PREFS_LOAD_MORE_REMAINING,
+                        &[("remaining", &remaining.to_string())],
+                    ))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
@@ -431,7 +459,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.users.get(&user_id))
             .map(|u| u.display_name())
-            .unwrap_or_else(|| format!("User {user_id}"));
+            .unwrap_or_else(|| tr_with(keys::Q_PREFS_USER, &[("user_id", &user_id.to_string())]));
         let confirming = self.privacy.unblock_confirm == Some(user_id);
         let mut row = div()
             .id(format!("privacy-blocked-{user_id}"))
@@ -449,7 +477,7 @@ impl QuillApp {
                     .child(
                         Button::new(format!("privacy-unblock-confirm-{user_id}"))
                             .small()
-                            .label("Unblock")
+                            .label(tr(keys::Q_PREFS_UNBLOCK))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.unblock_user(user_id, cx);
                             })),
@@ -457,7 +485,7 @@ impl QuillApp {
                     .child(
                         Button::new(format!("privacy-unblock-cancel-{user_id}"))
                             .small()
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.privacy.unblock_confirm = None;
@@ -469,7 +497,7 @@ impl QuillApp {
             row = row.child(
                 Button::new(format!("privacy-unblock-{user_id}"))
                     .small()
-                    .label("Unblock")
+                    .label(tr(keys::Q_PREFS_UNBLOCK))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.privacy.unblock_confirm = Some(user_id);
@@ -494,7 +522,7 @@ impl QuillApp {
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .px_1()
-                .child("Choose a contact to block:"),
+                .child(tr(keys::Q_PREFS_CHOOSE_A_CONTACT_TO_BLOCK)),
         );
         if rows.is_empty() {
             body = body.child(
@@ -502,7 +530,7 @@ impl QuillApp {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .px_2()
-                    .child("No more contacts."),
+                    .child(tr(keys::Q_PREFS_NO_MORE_CONTACTS)),
             );
         }
         for row in rows {
@@ -667,9 +695,7 @@ impl QuillApp {
                         .text_xs()
                         .px_2()
                         .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Restricting who can send you voice messages needs Telegram Premium.",
-                        ),
+                        .child(tr(keys::Q_PREFS_RESTRICTING_WHO_CAN_SEND_YOU)),
                 );
             }
         }
@@ -847,13 +873,13 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
 /// `SettingsPrivacyKeyController` shows the mode plus exceptions).
 fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
     match session.settings.privacy.get(&key) {
-        None | Some(PrivacyKeyState::Loading) => "Loading…".to_string(),
-        Some(PrivacyKeyState::Failed) => "Couldn't load".to_string(),
+        None | Some(PrivacyKeyState::Loading) => tr(keys::Q_PREFS_LOADING).to_string(),
+        Some(PrivacyKeyState::Failed) => tr(keys::Q_PREFS_COULDNT_LOAD).to_string(),
         Some(PrivacyKeyState::Ready(detail)) => {
             let mut value = detail
                 .who
                 .map(|w| w.label().to_string())
-                .unwrap_or_else(|| "Custom".to_string());
+                .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string());
             let (always, never) = detail.exception_counts();
             if always > 0 || never > 0 {
                 value.push_str(&format!(" (+{always}/−{never})"));
@@ -866,8 +892,12 @@ fn privacy_key_value(session: &Session, key: PrivacySettingKey) -> String {
 /// B13: the "Who can message me" row value (tdesktop Messages privacy).
 pub(super) fn new_chat_privacy_value(session: &Session) -> String {
     match session.settings.privacy_data.new_chat {
-        None | Some(quill::privacy::NewChatPrivacyState::Loading) => "Loading…".to_string(),
-        Some(quill::privacy::NewChatPrivacyState::Failed) => "Couldn't load".to_string(),
+        None | Some(quill::privacy::NewChatPrivacyState::Loading) => {
+            tr(keys::Q_PREFS_LOADING).to_string()
+        }
+        Some(quill::privacy::NewChatPrivacyState::Failed) => {
+            tr(keys::Q_PREFS_COULDNT_LOAD).to_string()
+        }
         Some(quill::privacy::NewChatPrivacyState::Ready(settings)) => {
             if settings.incoming_paid_message_star_count > 0 {
                 format!(
@@ -875,9 +905,9 @@ pub(super) fn new_chat_privacy_value(session: &Session) -> String {
                     settings.incoming_paid_message_star_count
                 )
             } else if settings.allow_from_unknown {
-                "Everybody".to_string()
+                tr(keys::EDIT_PRIVACY_EVERYONE).to_string()
             } else {
-                "Contacts & Premium".to_string()
+                tr(keys::EDIT_PRIVACY_CONTACTS_AND_PREMIUM).to_string()
             }
         }
     }

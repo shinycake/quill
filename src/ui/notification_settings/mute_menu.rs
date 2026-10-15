@@ -1,6 +1,7 @@
 //! The per-chat mute menu.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     pub(in crate::ui) fn close_mute_menu(&mut self, cx: &mut Context<Self>) {
@@ -13,7 +14,7 @@ impl QuillApp {
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.notify.mute_menu_open = true;
         self.notify.mute_custom_open = false;
-        self.connection.status_note = "mute for…".into();
+        self.connection.status_note = tr(keys::Q_PREFS_MUTE_FOR).into();
         cx.notify();
     }
 
@@ -27,9 +28,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_mute_for(chat_id, mute_for);
             self.connection.status_note = match result {
-                Ok(_) if mute_for == 0 => "unmuting…".into(),
-                Ok(_) => "muting…".into(),
-                Err(_) => "could not change mute".into(),
+                Ok(_) if mute_for == 0 => tr(keys::Q_PREFS_UNMUTING).into(),
+                Ok(_) => tr(keys::Q_PREFS_MUTING).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_MUTE).into(),
             };
             cx.notify();
             return;
@@ -91,22 +92,22 @@ impl QuillApp {
             "{} \u{b7} Sound: {} \u{b7} Previews: {}",
             if muted {
                 if chat_settings.is_muted_forever() {
-                    "Muted forever"
+                    tr(keys::Q_PREFS_MUTED_FOREVER)
                 } else {
-                    "Muted"
+                    tr(keys::NOTIFICATION_EXCEPTIONS_MUTED)
                 }
             } else {
-                "Unmuted"
+                tr(keys::NOTIFICATION_EXCEPTIONS_UNMUTED)
             },
             sound_label,
             if preview_on { "on" } else { "off" },
         );
 
         let presets = [
-            ("1 hour", MUTE_FOR_1_HOUR),
-            ("8 hours", MUTE_FOR_8_HOURS),
-            ("2 days", MUTE_FOR_2_DAYS),
-            ("Forever", MUTE_FOREVER),
+            (trn(keys::HOURS, 1), MUTE_FOR_1_HOUR),
+            (trn(keys::HOURS, 8), MUTE_FOR_8_HOURS),
+            (trn(keys::DAYS, 2), MUTE_FOR_2_DAYS),
+            (tr(keys::Q_PREFS_FOREVER).to_string(), MUTE_FOREVER),
         ];
         let sound_disabled = !chat_settings.use_default_sound && chat_settings.sound_id == 0;
         let custom_open = self.notify.mute_custom_open;
@@ -131,7 +132,7 @@ impl QuillApp {
         preset_row = preset_row.child(
             Button::new("mute-custom-toggle")
                 .small()
-                .label("Custom\u{2026}")
+                .label(tr(keys::Q_PREFS_CUSTOM))
                 .outline()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.notify.mute_custom_open = !this.notify.mute_custom_open;
@@ -142,7 +143,7 @@ impl QuillApp {
             preset_row = preset_row.child(
                 Button::new("mute-unmute")
                     .small()
-                    .label("Unmute")
+                    .label(tr(keys::MUTE_MENU_UNMUTE))
                     .outline()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(chat_id) = open_chat {
@@ -175,18 +176,28 @@ impl QuillApp {
                 .gap_1()
                 .child(stepper(
                     "mute-days-minus",
-                    "\u{2212} day".into(),
+                    tr(keys::Q_PREFS_DAY).into(),
                     true,
                     false,
                 ))
-                .child(stepper("mute-days-plus", "+ day".into(), false, false))
+                .child(stepper(
+                    "mute-days-plus",
+                    tr(keys::Q_PREFS_DAY_2).into(),
+                    false,
+                    false,
+                ))
                 .child(stepper(
                     "mute-hours-minus",
-                    "\u{2212} hour".into(),
+                    tr(keys::Q_PREFS_HOUR).into(),
                     true,
                     true,
                 ))
-                .child(stepper("mute-hours-plus", "+ hour".into(), false, true))
+                .child(stepper(
+                    "mute-hours-plus",
+                    tr(keys::Q_PREFS_HOUR_2).into(),
+                    false,
+                    true,
+                ))
                 .child(
                     Button::new("mute-custom-apply")
                         .small()
@@ -227,12 +238,12 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().child("Notifications"))
+                    .child(div().font_semibold().child(tr(keys::CHART_TITLE_MUTE)))
                     .child(
                         Button::new("close-mute-menu")
                             .icon(gpui_kit::assets::IconName::X)
-                            .tooltip("Close")
-                            .accessibility_label("Close")
+                            .tooltip(tr(keys::CLOSE))
+                            .accessibility_label(tr(keys::CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_mute_menu(cx);
@@ -255,7 +266,7 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Mute for"),
+                    .child(tr(keys::Q_PREFS_MUTE_FOR_2)),
             )
             .child(preset_row)
             .children(custom_row)
@@ -269,13 +280,15 @@ impl QuillApp {
                     .child(
                         div()
                             .text_sm()
-                            .child("Show message preview in notifications"),
+                            .child(tr(keys::Q_PREFS_SHOW_MESSAGE_PREVIEW_IN_NOTIFICATIONS)),
                     )
                     .child(
                         // Phase 6: kit Switch (was: On/Off ghost button).
                         Switch::new("notif-preview-toggle")
                             .checked(preview_on)
-                            .accessibility_label("Show message preview in notifications")
+                            .accessibility_label(tr(
+                                keys::Q_PREFS_SHOW_MESSAGE_PREVIEW_IN_NOTIFICATIONS,
+                            ))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 if let Some(chat_id) = open_chat {
                                     this.apply_chat_preview(chat_id, on, cx);
@@ -289,18 +302,17 @@ impl QuillApp {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .child(
-                        div()
-                            .text_sm()
-                            .child(format!("Notification sound: {sound_label}")),
-                    )
+                    .child(div().text_sm().child(tr_with(
+                        keys::Q_PREFS_NOTIFICATION_SOUND,
+                        &[("sound_label", &sound_label.to_string())],
+                    )))
                     .child(
                         Button::new("notif-sound-picker-toggle")
                             .small()
                             .label(if self.notify.notif_sound_picker_open {
-                                "Hide"
+                                tr(keys::Q_PREFS_HIDE)
                             } else {
-                                "Change"
+                                tr(keys::Q_PREFS_CHANGE)
                             })
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -341,11 +353,15 @@ impl QuillApp {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(div().text_sm().child("Mute story notifications"))
+                .child(
+                    div()
+                        .text_sm()
+                        .child(tr(keys::Q_PREFS_MUTE_STORY_NOTIFICATIONS)),
+                )
                 .child(
                     Switch::new("notif-story-mute-toggle")
                         .checked(story_muted)
-                        .accessibility_label("Mute story notifications")
+                        .accessibility_label(tr(keys::Q_PREFS_MUTE_STORY_NOTIFICATIONS))
                         .on_click(cx.listener(move |this, &on, _, cx| {
                             if let Some(chat_id) = open_chat {
                                 this.apply_chat_story_mute(chat_id, on, cx);
@@ -359,11 +375,11 @@ impl QuillApp {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(div().text_sm().child("Show story poster"))
+                .child(div().text_sm().child(tr(keys::Q_PREFS_SHOW_STORY_POSTER)))
                 .child(
                     Switch::new("notif-story-poster-toggle")
                         .checked(story_poster_on)
-                        .accessibility_label("Show story poster")
+                        .accessibility_label(tr(keys::Q_PREFS_SHOW_STORY_POSTER))
                         .on_click(cx.listener(move |this, &on, _, cx| {
                             if let Some(chat_id) = open_chat {
                                 this.apply_chat_story_poster(chat_id, on, cx);
@@ -377,18 +393,17 @@ impl QuillApp {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .child(format!("Story sound: {story_sound_label}")),
-                )
+                .child(div().text_sm().child(tr_with(
+                    keys::Q_PREFS_STORY_SOUND,
+                    &[("story_sound_label", &story_sound_label.to_string())],
+                )))
                 .child(
                     Button::new("notif-story-sound-picker-toggle")
                         .small()
                         .label(if self.notify.story_sound_picker_open {
-                            "Hide"
+                            tr(keys::Q_PREFS_HIDE)
                         } else {
-                            "Change"
+                            tr(keys::Q_PREFS_CHANGE)
                         })
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -423,7 +438,7 @@ impl QuillApp {
         panel.child(
             Button::new("notif-open-defaults")
                 .small()
-                .label("Defaults for all chats\u{2026}")
+                .label(tr(keys::Q_PREFS_DEFAULTS_FOR_ALL_CHATS))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.notify.notification_defaults_open = true;

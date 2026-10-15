@@ -8,6 +8,7 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with, trn};
 use std::cell::RefCell;
 use std::rc::Rc;
 use zeroize::Zeroize;
@@ -26,24 +27,14 @@ pub(crate) const ACCOUNT_TTL_OPTIONS: [(u8, i32); 6] =
 /// otherwise whole months, whole years when they divide evenly.
 pub(crate) fn format_account_ttl(days: i32) -> String {
     if days < 30 {
-        return if days == 1 {
-            "1 day".to_string()
-        } else {
-            format!("{days} days")
-        };
+        return trn(keys::DAYS, days);
     }
     let months = days / 30;
     if months % 12 == 0 {
         let years = months / 12;
-        if years == 1 {
-            "1 year".to_string()
-        } else {
-            format!("{years} years")
-        }
-    } else if months == 1 {
-        "1 month".to_string()
+        trn(keys::YEARS, years)
     } else {
-        format!("{months} months")
+        trn(keys::MONTHS, months)
     }
 }
 
@@ -60,11 +51,7 @@ pub(crate) const LOGOUT_WARNING_COPY: &str = "Remember, logging out kills all yo
 
 /// TGX option labels (`xMonths` plural): "1 month", "3 months", ….
 fn ttl_option_label(months: u8) -> String {
-    if months == 1 {
-        "1 month".to_string()
-    } else {
-        format!("{months} months")
-    }
+    trn(keys::MONTHS, months)
 }
 
 /// Slice A9: working state for the Account dialog. Lives on `QuillApp`;
@@ -85,13 +72,13 @@ impl AccountLifecycleState {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let reason = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Reason (optional)")
+                .placeholder(tr(keys::Q_PREFS_REASON_OPTIONAL))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let password = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Two-step verification password")
+                .placeholder(tr(keys::Q_PREFS_TWO_STEP_VERIFICATION_PASSWORD))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -181,25 +168,25 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .text_sm()
-                    .child("Auto-delete messages"),
+                    .child(tr(keys::Q_PREFS_AUTO_DELETE_MESSAGES)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Automatically delete new messages in all your new chats after a certain period of time. You can also set a timer for each chat in its menu."),
+                    .child(tr(keys::Q_PREFS_AUTOMATICALLY_DELETE_NEW_MESSAGES_IN)),
             )
             .child(div().text_sm().child(match secs {
                 Some(secs) => format!("Currently: {}", quill::auto_delete::format_ttl(secs)),
-                None if busy => "Loading\u{2026}".to_string(),
-                None => "No data yet.".to_string(),
+                None if busy => tr(keys::Q_PREFS_LOADING).to_string(),
+                None => tr(keys::Q_PREFS_NO_DATA_YET).to_string(),
             }));
         if let Some(line) = error {
             body = body.child(
                 div()
                     .text_xs()
                     .text_color(danger())
-                    .child(format!("Error: {line}")),
+                    .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
             );
         }
         let active_ix = secs.and_then(|secs| PRESETS.iter().position(|(_, s)| *s == secs));
@@ -305,7 +292,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(danger())
-                        .child(format!("Error: {line}")),
+                        .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
             let auto_delete = session
@@ -331,7 +318,7 @@ impl QuillApp {
 
             let footer = div().flex().justify_end().child(
                 Button::new("close-account-lifecycle")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_account_lifecycle(window, cx);
@@ -340,7 +327,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Account"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_PREFS_ACCOUNT)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
@@ -375,21 +362,21 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .text_sm()
-                    .child("Delete my account if away for"),
+                    .child(tr(keys::Q_PREFS_DELETE_MY_ACCOUNT_IF_AWAY)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("If you do not come online at least once within this period, your account will be deleted along with all messages and contacts."),
+                    .child(tr(keys::Q_PREFS_IF_YOU_DO_NOT_COME)),
             )
             .child(div().text_sm().child(match ttl_days {
                 Some(days) => format!("Currently: {}", format_account_ttl(days)),
                 None => {
                     if ttl_loading {
-                        "Loading…".to_string()
+                        tr(keys::Q_PREFS_LOADING).to_string()
                     } else {
-                        "No data yet.".to_string()
+                        tr(keys::Q_PREFS_NO_DATA_YET).to_string()
                     }
                 }
             }));
@@ -416,7 +403,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Working…"),
+                    .child(tr(keys::Q_PREFS_WORKING)),
             );
         }
         body
@@ -441,27 +428,37 @@ impl QuillApp {
                     .font_semibold()
                     .text_sm()
                     .text_color(danger())
-                    .child("Delete my account now"),
+                    .child(tr(keys::Q_PREFS_DELETE_MY_ACCOUNT_NOW)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Permanently delete the account, and all associated information from Telegram servers."),
+                    .child(tr(keys::Q_PREFS_PERMANENTLY_DELETE_THE_ACCOUNT_AND)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Access to your chats will be lost forever. All existing chats will see you as Deleted Account. Using the same phone number will create a new account."),
+                    .child(tr(keys::Q_PREFS_ACCESS_TO_YOUR_CHATS_WILL)),
             )
-            .child(div().mt_1().font_semibold().text_sm().child("Reason"))
-            .child(Textarea::new(&self.account.lifecycle.reason).aria_label("Reason for deleting account").h(px(40.)))
+            .child(
+                div()
+                    .mt_1()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::Q_PREFS_REASON)),
+            )
+            .child(
+                Textarea::new(&self.account.lifecycle.reason)
+                    .aria_label(tr(keys::Q_PREFS_REASON_FOR_DELETING_ACCOUNT))
+                    .h(px(40.)),
+            )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Tell us about any issues; after you delete the account, we won't be able to restore any data you lose in the process."),
+                    .child(tr(keys::Q_PREFS_TELL_US_ABOUT_ANY_ISSUES)),
             );
         if has_password {
             body = body
@@ -470,25 +467,25 @@ impl QuillApp {
                         .mt_1()
                         .font_semibold()
                         .text_sm()
-                        .child("Two-step verification password"),
+                        .child(tr(keys::Q_PREFS_TWO_STEP_VERIFICATION_PASSWORD)),
                 )
                 .child(
                     Textarea::new(&self.account.lifecycle.password)
-                        .aria_label("Two-step verification password")
+                        .aria_label(tr(keys::Q_PREFS_TWO_STEP_VERIFICATION_PASSWORD))
                         .h(px(40.)),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Sent securely to Telegram."),
+                        .child(tr(keys::Q_PREFS_SENT_SECURELY_TO_TELEGRAM)),
                 );
         } else if pw_loading {
             body = body.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Checking two-step verification status…"),
+                    .child(tr(keys::Q_PREFS_CHECKING_TWO_STEP_VERIFICATION_STATUS)),
             );
         }
         if self.account.lifecycle.confirm_delete {
@@ -496,7 +493,7 @@ impl QuillApp {
         } else {
             body = body.child(
                 Button::new("account-delete")
-                    .label("Permanently delete account")
+                    .label(tr(keys::Q_PREFS_PERMANENTLY_DELETE_ACCOUNT))
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.account.lifecycle.confirm_delete = true;
@@ -528,9 +525,10 @@ impl QuillApp {
             .border_color(danger())
             .bg(danger_bg())
             .child(
-                div().text_sm().text_color(danger()).child(
-                    "Danger: this is the last confirmation prompt. Once you press the button below, all data will be erased from Telegram servers. Using the same phone number will create a new empty account.",
-                ),
+                div()
+                    .text_sm()
+                    .text_color(danger())
+                    .child(tr(keys::Q_PREFS_DANGER_THIS_IS_THE_LAST)),
             )
             .child(
                 div()
@@ -539,7 +537,7 @@ impl QuillApp {
                     .justify_end()
                     .child(
                         Button::new("account-delete-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.account.lifecycle.confirm_delete = false;
@@ -549,9 +547,9 @@ impl QuillApp {
                     .child(
                         Button::new("account-delete-final")
                             .label(if mutating {
-                                "Working…"
+                                tr(keys::Q_PREFS_WORKING)
                             } else {
-                                "Alright, delete account."
+                                tr(keys::Q_PREFS_ALRIGHT_DELETE_ACCOUNT)
                             })
                             .danger()
                             .disabled(mutating)
@@ -570,19 +568,24 @@ impl QuillApp {
     /// warning (`LOGOUT_WARNING_COPY`).
     fn account_logout_body(&self, cx: &mut Context<Self>, mut body: Div) -> Div {
         body = body
-            .child(div().font_semibold().text_sm().child("Log out"))
+            .child(
+                div()
+                    .font_semibold()
+                    .text_sm()
+                    .child(tr(keys::Q_PREFS_LOG_OUT)),
+            )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Sign out of this Telegram account on this device."),
+                    .child(tr(keys::Q_PREFS_SIGN_OUT_OF_THIS_TELEGRAM)),
             );
         if self.account.lifecycle.confirm_logout {
             body = body.child(self.account_logout_confirm_banner(cx));
         } else {
             body = body.child(
                 Button::new("account-logout")
-                    .label("Log out")
+                    .label(tr(keys::Q_PREFS_LOG_OUT))
                     .danger()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.account.lifecycle.confirm_logout = true;
@@ -612,7 +615,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(danger())
-                    .child("Log out of Quill?"),
+                    .child(tr(keys::Q_PREFS_LOG_OUT_OF_QUILL)),
             )
             .child(
                 div()
@@ -627,7 +630,7 @@ impl QuillApp {
                     .justify_end()
                     .child(
                         Button::new("account-logout-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.account.lifecycle.confirm_logout = false;
@@ -636,7 +639,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("account-logout-final")
-                            .label("Log out")
+                            .label(tr(keys::Q_PREFS_LOG_OUT))
                             .danger()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.submit_logout(cx);

@@ -1,6 +1,7 @@
 //! Reaction notification settings.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Parity slice: apply a reaction-notification source
@@ -22,7 +23,8 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.status_note = "reaction settings still loading…".into();
+                self.connection.status_note =
+                    tr(keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
@@ -33,8 +35,8 @@ impl QuillApp {
             }
             let result = live.driver.send_reaction_notification_settings(&settings);
             self.connection.status_note = match result {
-                Ok(_) => "reaction notification setting updated…".into(),
-                Err(_) => "could not change reaction notification setting".into(),
+                Ok(_) => tr(keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_NOTIFICATION).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
@@ -49,7 +51,8 @@ impl QuillApp {
                 ReactionSourceKind::PollVote => settings.poll_vote_source = source,
             }
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.status_note = "reaction notification setting updated".into();
+            self.connection.status_note =
+                tr(keys::Q_PREFS_REACTION_NOTIFICATION_SETTING_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -69,15 +72,16 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.status_note = "reaction settings still loading…".into();
+                self.connection.status_note =
+                    tr(keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
             settings.sound_id = sound_id;
             let result = live.driver.send_reaction_notification_settings(&settings);
             self.connection.status_note = match result {
-                Ok(_) => "reaction sound updated…".into(),
-                Err(_) => "could not change reaction sound".into(),
+                Ok(_) => tr(keys::Q_PREFS_REACTION_SOUND_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_SOUND).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
@@ -88,7 +92,7 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.sound_id = sound_id;
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.status_note = "reaction sound updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_REACTION_SOUND_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -111,15 +115,16 @@ impl QuillApp {
                 .reaction_notification_settings
                 .clone()
             else {
-                self.connection.status_note = "reaction settings still loading…".into();
+                self.connection.status_note =
+                    tr(keys::Q_PREFS_REACTION_SETTINGS_STILL_LOADING).into();
                 cx.notify();
                 return;
             };
             settings.show_preview = show_preview;
             let result = live.driver.send_reaction_notification_settings(&settings);
             self.connection.status_note = match result {
-                Ok(_) => "reaction preview updated…".into(),
-                Err(_) => "could not change reaction preview".into(),
+                Ok(_) => tr(keys::Q_PREFS_REACTION_PREVIEW_UPDATED).into(),
+                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_REACTION_PREVIEW).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             // Screenshot demo: apply locally so the dialog reflects it.
@@ -130,7 +135,7 @@ impl QuillApp {
                 .unwrap_or_default();
             settings.show_preview = show_preview;
             session.settings.reaction_notification_settings = Some(settings);
-            self.connection.status_note = "reaction preview updated".into();
+            self.connection.status_note = tr(keys::Q_PREFS_REACTION_PREVIEW_UPDATED_2).into();
         }
         cx.notify();
     }
@@ -152,13 +157,13 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.settings.reaction_notification_settings.is_some());
         let sound_label = match settings.sound_id {
-            -1 => "Default".to_string(),
-            0 => "None".to_string(),
+            -1 => tr(keys::SETTINGS_NOTIFICATIONS_DISPLAY_DEFAULT).to_string(),
+            0 => tr(keys::SETTINGS_NO_BLOCKED_USERS).to_string(),
             id => saved_sounds
                 .iter()
                 .find(|s| s.id == id)
                 .map(|s| s.title.clone())
-                .unwrap_or_else(|| "Custom".to_string()),
+                .unwrap_or_else(|| tr(keys::Q_PREFS_CUSTOM_2).to_string()),
         };
         let current_choice = match settings.sound_id {
             -1 => SoundChoice::Default,
@@ -181,22 +186,33 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_semibold().text_sm().child("Reactions"))
+                    .child(
+                        div()
+                            .font_semibold()
+                            .text_sm()
+                            .child(tr(keys::NOTIFICATION_REACTIONS)),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(if loaded {
-                                "Set".to_string()
+                                tr(keys::Q_PREFS_SET).to_string()
                             } else {
-                                "Loading…".to_string()
+                                tr(keys::Q_PREFS_LOADING).to_string()
                             }),
                     ),
             );
         for (kind, label) in [
-            (ReactionSourceKind::Message, "Message reactions"),
-            (ReactionSourceKind::Story, "Story reactions"),
-            (ReactionSourceKind::PollVote, "Poll votes"),
+            (
+                ReactionSourceKind::Message,
+                tr(keys::Q_PREFS_MESSAGE_REACTIONS),
+            ),
+            (ReactionSourceKind::Story, tr(keys::Q_PREFS_STORY_REACTIONS)),
+            (
+                ReactionSourceKind::PollVote,
+                tr(keys::NOTIFICATION_REACTIONS_POLL_VOTES),
+            ),
         ] {
             section = section.child(self.reaction_source_row(cx, kind, label));
         }
@@ -211,13 +227,13 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Show sender and emoji in notification"),
+                            .child(tr(keys::Q_PREFS_SHOW_SENDER_AND_EMOJI_IN)),
                     )
                     .child(
                         // Phase 6: kit Switch.
                         Switch::new("reaction-preview")
                             .checked(settings.show_preview)
-                            .accessibility_label("Show sender and emoji in reaction notifications")
+                            .accessibility_label(tr(keys::Q_PREFS_SHOW_SENDER_AND_EMOJI_IN_2))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.apply_reaction_preview(on, cx);
                             })),
@@ -233,7 +249,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("Sound: {sound_label}")),
+                            .child(tr_with(
+                                keys::Q_PREFS_SOUND,
+                                &[("sound_label", &sound_label.to_string())],
+                            )),
                     )
                     .child(
                         Button::new("reaction-sound-toggle")
@@ -242,9 +261,9 @@ impl QuillApp {
                                 if self.notify.defaults_sound_picker
                                     == Some(SoundPickerTarget::Reaction)
                                 {
-                                    "Hide"
+                                    tr(keys::Q_PREFS_HIDE)
                                 } else {
-                                    "Change"
+                                    tr(keys::Q_PREFS_CHANGE)
                                 },
                             )
                             .ghost()
@@ -288,9 +307,15 @@ impl QuillApp {
                 .child(format!("{label}:")),
         );
         for (preset_label, source) in [
-            ("None", ReactionNotificationSource::None),
-            ("Contacts", ReactionNotificationSource::Contacts),
-            ("Everyone", ReactionNotificationSource::All),
+            (
+                tr(keys::SETTINGS_NO_BLOCKED_USERS),
+                ReactionNotificationSource::None,
+            ),
+            (
+                tr(keys::MENU_CONTACTS),
+                ReactionNotificationSource::Contacts,
+            ),
+            (tr(keys::Q_PREFS_EVERYONE), ReactionNotificationSource::All),
         ] {
             row = row.child(
                 Button::new(format!("reaction-source-{kind:?}-{source:?}"))

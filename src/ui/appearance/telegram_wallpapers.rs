@@ -8,6 +8,7 @@ use super::*;
 use crate::ui::wallpaper::Wallpaper;
 use crate::ui::wallpaper_preview::PreviewSource;
 use gpui_kit::component::checkbox::Checkbox;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::Background;
 
 /// Whether the gallery offers removing `background`: not the one in use
@@ -38,7 +39,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Loading wallpapers…"),
+                        .child(tr(keys::Q_PREFS_LOADING_WALLPAPERS)),
                 );
             }
             Some(list) if list.is_empty() => {
@@ -46,7 +47,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("No wallpapers installed on this account."),
+                        .child(tr(keys::Q_PREFS_NO_WALLPAPERS_INSTALLED_ON_THIS)),
                 );
             }
             Some(list) => {
@@ -69,8 +70,8 @@ impl QuillApp {
                                     .icon(gpui_kit::assets::IconName::X)
                                     .ghost()
                                     .xsmall()
-                                    .tooltip("Remove from installed wallpapers")
-                                    .accessibility_label("Remove wallpaper")
+                                    .tooltip(tr(keys::Q_PREFS_REMOVE_FROM_INSTALLED_WALLPAPERS))
+                                    .accessibility_label(tr(keys::Q_PREFS_REMOVE_WALLPAPER))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.dialogs.wallpaper_remove = Some(id);
                                         cx.notify();
@@ -89,9 +90,9 @@ impl QuillApp {
         body = body.child(
             div().flex().child(
                 Button::new("appearance-tg-wallpaper-file")
-                    .label("From file…")
+                    .label(tr(keys::Q_PREFS_FROM_FILE))
                     .small()
-                    .tooltip("Preview a JPEG, PNG or WebP image as your wallpaper")
+                    .tooltip(tr(keys::Q_PREFS_PREVIEW_A_JPEG_PNG_OR))
                     .on_click(cx.listener(|this, _, _, cx| this.choose_wallpaper_file(cx))),
             ),
         );
@@ -105,7 +106,7 @@ impl QuillApp {
             body = body.child(
                 Checkbox::new("appearance-tg-wallpaper-tile")
                     .checked(self.appearance.wallpaper_tile(dark))
-                    .label("Tile background")
+                    .label(tr(keys::Q_PREFS_TILE_BACKGROUND))
                     .on_click(cx.listener(move |this, &on, _, cx| {
                         this.set_appearance(cx, |a| a.set_wallpaper_tile(dark, on));
                     })),
@@ -119,13 +120,16 @@ impl QuillApp {
                     .id("appearance-tg-wallpaper-error")
                     .text_xs()
                     .text_color(super::super::danger_dark())
-                    .child(format!("Couldn’t update wallpapers: {error}")),
+                    .child(tr_with(
+                        keys::Q_PREFS_COULDN_T_UPDATE_WALLPAPERS,
+                        &[("error", &error.to_string())],
+                    )),
             );
         }
         self.appearance_section(
             cx,
-            "Telegram wallpapers",
-            "Your installed wallpapers: colors, gradients, patterns and photos. Pick one to preview it. Chat wallpapers and themes are set per chat from its info panel.",
+            tr(keys::Q_PREFS_TELEGRAM_WALLPAPERS),
+            tr(keys::Q_PREFS_YOUR_INSTALLED_WALLPAPERS_COLORS_GRADIENTS),
             body.into_any_element(),
         )
     }
@@ -140,11 +144,11 @@ impl QuillApp {
                 div()
                     .flex_1()
                     .text_sm()
-                    .child("Delete this wallpaper from your installed wallpapers?"),
+                    .child(tr(keys::Q_PREFS_DELETE_THIS_WALLPAPER_FROM_YOUR)),
             )
             .child(
                 Button::new("appearance-tg-wallpaper-remove-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -154,7 +158,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("appearance-tg-wallpaper-remove-confirm")
-                    .label("Delete")
+                    .label(tr(keys::BOX_DELETE))
                     .danger()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {

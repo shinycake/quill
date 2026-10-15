@@ -7,6 +7,7 @@
 //! is the sender picture. Never set in normal use.
 
 use super::*;
+use quill::lang::{keys, tr};
 use std::sync::atomic::AtomicBool;
 
 impl QuillApp {
@@ -27,8 +28,8 @@ impl QuillApp {
         let notification = quill::notify::OsNotification {
             chat_id: ChatId(0),
             message_id: Some(quill::ids::MessageId(1)),
-            title: "Quill notification check".to_string(),
-            body: "Type a reply or press a button; nothing is sent.".to_string(),
+            title: tr(keys::Q_PREFS_QUILL_NOTIFICATION_CHECK).to_string(),
+            body: tr(keys::Q_PREFS_TYPE_A_REPLY_OR_PRESS).to_string(),
         };
         eprintln!(
             "posting the QUILL_DEBUG_NOTIFICATION check (picture: {})",
