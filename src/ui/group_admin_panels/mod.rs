@@ -727,7 +727,10 @@ impl QuillApp {
         } else if remaining < 172_800 {
             tr(keys::Q_PEOPLE_EXPIRES_TOMORROW).into()
         } else {
-            format!("Expires in {} days", remaining / 86_400)
+            tr_with(
+                keys::Q_PEOPLE_EXPIRES_IN_DAYS,
+                &[("remaining_86_400", &(remaining / 86_400).to_string())],
+            )
         }
     }
 }

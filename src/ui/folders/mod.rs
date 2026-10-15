@@ -240,7 +240,10 @@ impl QuillApp {
             let title = if confirm.shared && !suggested.is_empty() {
                 tr(keys::FILTERS_BY_LINK_REMOVE).to_string()
             } else {
-                format!("Delete “{}”?", confirm.name)
+                tr_with(
+                    keys::Q_CHATLIST_DELETE,
+                    &[("name", &confirm.name.to_string())],
+                )
             };
             dialog
                 .overlay(true)
@@ -797,7 +800,10 @@ impl QuillApp {
             }
         };
         self.connection.status_note = match result {
-            Ok(()) => format!("folder {} added", spec.name),
+            Ok(()) => tr_with(
+                keys::Q_CHATLIST_FOLDER_ADDED_2,
+                &[("name", &spec.name.to_string())],
+            ),
             Err(err) => format!("could not add folder: {err:?}"),
         };
         cx.notify();

@@ -53,8 +53,10 @@ impl QuillApp {
         };
         match edit.replacement_for(path, as_file) {
             Ok(replacement) => {
-                self.connection.status_note =
-                    format!("Replacing attachment with {}", replacement.file_name);
+                self.connection.status_note = tr_with(
+                    keys::Q_CHAT_REPLACING_ATTACHMENT_WITH,
+                    &[("file_name", &replacement.file_name.to_string())],
+                );
                 // A different file starts without the video editor's edits.
                 if edit
                     .media_edit

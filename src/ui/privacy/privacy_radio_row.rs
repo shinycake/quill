@@ -114,7 +114,10 @@ impl QuillApp {
         div()
             .id(format!("privacy-exceptions-{kind:?}"))
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("{} · {} exceptions", target.label(), kind.label()))
+            .aria_label(tr_with(
+                keys::Q_PREFS_EXCEPTIONS_2,
+                &[("label", (target.label())), ("label_2", (kind.label()))],
+            ))
             .tab_index(0)
             .cursor_pointer()
             .flex()
@@ -450,7 +453,10 @@ impl QuillApp {
                 div()
                     .id(format!("privacy-picker-user-{user_id}"))
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Add {} to privacy exceptions", row.name))
+                    .aria_label(tr_with(
+                        keys::Q_PREFS_ADD_TO_PRIVACY_EXCEPTIONS_2,
+                        &[("name", &row.name.to_string())],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .flex()

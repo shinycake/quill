@@ -178,9 +178,12 @@ impl QuillApp {
             .border_color(border)
             .cursor_pointer()
             .role(gpui_kit::Role::Button)
-            .aria_label(format!(
-                "Business hours: {}, {timing}",
-                state.unwrap_or("hours")
+            .aria_label(tr_with(
+                keys::Q_PEOPLE_BUSINESS_HOURS,
+                &[
+                    ("unwrap_or", (state.unwrap_or("hours"))),
+                    ("timing", &timing.to_string()),
+                ],
             ))
             .tab_index(0)
             .hover(move |style| style.bg(hover))

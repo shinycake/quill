@@ -584,7 +584,10 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("{} members selected", selected.len())),
+                            .child(tr_with(
+                                keys::Q_PEOPLE_MEMBERS_SELECTED,
+                                &[("len", &(selected.len()).to_string())],
+                            )),
                     );
                 }
             }
@@ -603,7 +606,10 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("g1-create-submit")
-                        .label(format!("Create {}", kind.title().to_lowercase()))
+                        .label(tr_with(
+                            keys::Q_PEOPLE_CREATE,
+                            &[("to_lowercase", &(kind.title().to_lowercase()).to_string())],
+                        ))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_create_chat_dialog(cx);
                             this.close_kit_dialog_if_done(DialogKind::CreateChat, window, cx);

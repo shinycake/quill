@@ -524,9 +524,12 @@ impl QuillApp {
         // limit): refuse over-limit drafts before the emptiness check so
         // the note names the limit instead of "type a message".
         if quill::rich::rich_blocks_char_len(&blocks) > quill::rich::RICH_TEXT_MAX_CHARS {
-            self.connection.status_note = format!(
-                "rich message too long (max {} characters)",
-                quill::rich::RICH_TEXT_MAX_CHARS
+            self.connection.status_note = tr_with(
+                keys::Q_CHAT_RICH_MESSAGE_TOO_LONG_MAX,
+                &[(
+                    "quill_rich_rich_text_max_chars",
+                    &(quill::rich::RICH_TEXT_MAX_CHARS).to_string(),
+                )],
             );
             cx.notify();
             return;

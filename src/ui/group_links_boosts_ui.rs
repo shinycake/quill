@@ -53,7 +53,10 @@ pub(crate) fn username_confirm_text(channel: bool, show: bool) -> String {
 pub(crate) fn boost_status(boost: &ParsedChatBoost, now_unix_secs: i64) -> String {
     let at = civil_local(i64::from(boost.expiration_date));
     let now = civil_local(now_unix_secs);
-    let expires = format!("boost expires on {}", day_label(&at, &now));
+    let expires = tr_with(
+        keys::BOOSTS_LIST_STATUS,
+        &[("date", &(day_label(&at, &now)).to_string())],
+    );
     match boost.source {
         ParsedBoostSource::Premium { .. } => expires,
         ParsedBoostSource::GiftCode { .. } => tr_with(
@@ -299,11 +302,13 @@ impl QuillApp {
         if let Some((level, count)) = level.filter(|_| {
             session.is_some_and(|s| !s.groups.chat_boost_details.contains_key(&chat_id.0))
         }) {
-            body = body.child(
-                div()
-                    .text_sm()
-                    .child(format!("Level {level} · {}", boost_count_title(count))),
-            );
+            body = body.child(div().text_sm().child(tr_with(
+                keys::Q_PEOPLE_LEVEL,
+                &[
+                    ("level", &level.to_string()),
+                    ("boost_count_title", &(boost_count_title(count)).to_string()),
+                ],
+            )));
         }
         body = body.child(
             div()
@@ -423,7 +428,10 @@ impl QuillApp {
                     let left = state.total_count - state.boosts.len() as i32;
                     body = body.child(
                         Button::new("boosts-more")
-                            .label(format!("Show {}", more_boosts_label(left)))
+                            .label(tr_with(
+                                keys::Q_PEOPLE_SHOW_2,
+                                &[("more_boosts_label", &(more_boosts_label(left)).to_string())],
+                            ))
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {

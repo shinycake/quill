@@ -92,7 +92,9 @@
 "lng_settings_section_filters" = "Folders";
 "lng_star_ref_link_copied_title" = "Link copied to clipboard";
 "qll_chatlist_account_info_not_loaded_yet" = "account info not loaded yet";
+"qll_chatlist_ada_lovelace" = "Ada Lovelace";
 "qll_chatlist_add_chats_to_the_folder" = "Add chats to the folder from its settings.";
+"qll_chatlist_add_to" = "Add to {folder_name}";
 "qll_chatlist_alphabet_index" = "Alphabet index";
 "qll_chatlist_archive" = "Archive";
 "qll_chatlist_archive_chat" = "Archive chat";
@@ -116,6 +118,7 @@
 "qll_chatlist_could_not_open_chat" = "could not open chat";
 "qll_chatlist_couldn_t_add_the_folder" = "Couldn’t add the folder: {error}";
 "qll_chatlist_default" = "Default: {default_icon}";
+"qll_chatlist_delete" = "Delete “{name}”?";
 "qll_chatlist_delete_folder" = "Delete folder";
 "qll_chatlist_delete_invite_link" = "Delete invite link";
 "qll_chatlist_delete_link" = "Delete link";
@@ -132,6 +135,7 @@
 "qll_chatlist_folder" = "Folder {folder_id}";
 "qll_chatlist_folder_2" = "Folder {id}";
 "qll_chatlist_folder_added" = "Folder added";
+"qll_chatlist_folder_added_2" = "folder {name} added";
 "qll_chatlist_folder_created" = "folder created";
 "qll_chatlist_folder_deleted" = "folder deleted";
 "qll_chatlist_folder_tags_off" = "folder tags off";
@@ -161,6 +165,7 @@
 "qll_chatlist_marked_as_unread_2" = "Marked as unread";
 "qll_chatlist_marking_as_read" = "marking as read…";
 "qll_chatlist_marking_as_unread" = "marking as unread…";
+"qll_chatlist_mixed_height_history" = "Mixed-height history";
 "qll_chatlist_move_to_main_list" = "Move to main list";
 "qll_chatlist_mute" = "Mute";
 "qll_chatlist_new_chats_hidden" = "new chats hidden";
@@ -174,6 +179,7 @@
 "qll_chatlist_no_chats_yet" = "No chats yet";
 "qll_chatlist_no_folder_destinations_available_for" = "No folder destinations available for this chat.";
 "qll_chatlist_no_folders_yet_create_one" = "No folders yet. Create one to organize your chats.";
+"qll_chatlist_no_saved_messages_chat_in" = "no Saved Messages chat in this demo";
 "qll_chatlist_no_unread_chats" = "No unread chats";
 "qll_chatlist_not_now" = "Not now";
 "qll_chatlist_open_the_chat_to_mark" = "open the chat to mark it as read";
@@ -185,8 +191,10 @@
 "qll_chatlist_qr_code" = "QR code";
 "qll_chatlist_read" = "Read";
 "qll_chatlist_remove" = "Remove {title}";
+"qll_chatlist_remove_from" = "Remove from {folder_name}";
 "qll_chatlist_request_already_in_flight" = "request already in flight";
 "qll_chatlist_resend_code" = "Resend code";
+"qll_chatlist_rtl_emoji_samples" = "RTL / emoji samples";
 "qll_chatlist_scan_with_a_logged_in" = "Scan with a logged-in Telegram app. The QR payload is never logged.";
 "qll_chatlist_search_chats" = "Search chats";
 "qll_chatlist_search_contacts" = "Search contacts";
@@ -199,10 +207,12 @@
 "qll_chatlist_submit_code" = "Submit code";
 "qll_chatlist_submit_email" = "Submit email";
 "qll_chatlist_submit_phone" = "Submit phone";
+"qll_chatlist_tag_color" = "Tag color {color_id_1}";
 "qll_chatlist_tap_to_change" = "Tap to change";
 "qll_chatlist_topics" = "Topics";
 "qll_chatlist_unarchiving" = "unarchiving…";
 "qll_chatlist_unpinning" = "unpinning…";
 "qll_chatlist_unread_chats" = "{text} unread chats";
+"qll_chatlist_unread_chats_2" = "{count} unread chats";
 "qll_chatlist_waiting_for_the_qr_payload" = "Waiting for the QR payload from Telegram…";
 "qll_chatlist_you_are_all_caught_up" = "You are all caught up.";

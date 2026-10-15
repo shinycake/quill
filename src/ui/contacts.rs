@@ -130,7 +130,12 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.user(dialog_state.user_id))
                 .map(|u| u.display_name())
-                .unwrap_or_else(|| format!("User {}", dialog_state.user_id));
+                .unwrap_or_else(|| {
+                    tr_with(
+                        keys::Q_PEOPLE_USER,
+                        &[("user_id", &dialog_state.user_id.to_string())],
+                    )
+                });
             let body = div()
                 .flex()
                 .flex_col()
@@ -402,7 +407,10 @@ impl QuillApp {
                                 "{truncated} over the {VCARD_IMPORT_LIMIT}-card limit"
                             ));
                         }
-                        format!("importing contacts… ({})", details.join(", "))
+                        tr_with(
+                            keys::Q_PEOPLE_IMPORTING_CONTACTS_2,
+                            &[("join", &(details.join(", ")).to_string())],
+                        )
                     };
                 }
                 Ok(None) => {

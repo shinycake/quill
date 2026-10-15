@@ -115,7 +115,13 @@ impl QuillApp {
                             tr(keys::CREATE_GROUP_INVITE_LINK).into()
                         };
                         let uses = if link.member_limit > 0 {
-                            format!("{}/{} uses", link.member_count, link.member_limit)
+                            tr_with(
+                                keys::Q_PEOPLE_USES,
+                                &[
+                                    ("member_count", &link.member_count.to_string()),
+                                    ("member_limit", &link.member_limit.to_string()),
+                                ],
+                            )
                         } else {
                             format!("{} uses", link.member_count)
                         };
@@ -571,7 +577,12 @@ impl QuillApp {
             .session()
             .and_then(|session| session.user(entry.user_id))
             .map(|user| user.display_name())
-            .unwrap_or_else(|| format!("User {}", entry.user_id));
+            .unwrap_or_else(|| {
+                tr_with(
+                    keys::Q_PEOPLE_USER,
+                    &[("user_id", &entry.user_id.to_string())],
+                )
+            });
         let role = if entry.is_owner {
             tr(keys::Q_PEOPLE_OWNER).to_string()
         } else if entry.custom_title.is_empty() {

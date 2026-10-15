@@ -19,7 +19,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::moderation::{RestrictUntil, UntilError, validate_restrict_until};
 use quill::moderation_exceptions::initial_until;
@@ -492,7 +492,12 @@ impl QuillApp {
                 .session()
                 .and_then(|session| session.user(dialog_state.user_id))
                 .map(|user| user.display_name())
-                .unwrap_or_else(|| format!("User {}", dialog_state.user_id));
+                .unwrap_or_else(|| {
+                    tr_with(
+                        keys::Q_PEOPLE_USER,
+                        &[("user_id", &dialog_state.user_id.to_string())],
+                    )
+                });
             let title = format!(
                 "{} {name}",
                 if dialog_state.ban {

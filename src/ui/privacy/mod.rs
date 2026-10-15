@@ -539,7 +539,10 @@ impl QuillApp {
                 div()
                     .id(format!("privacy-block-pick-{user_id}"))
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Block {}", row.name))
+                    .aria_label(tr_with(
+                        keys::Q_PREFS_BLOCK_2,
+                        &[("name", &row.name.to_string())],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .flex()
@@ -900,9 +903,12 @@ pub(super) fn new_chat_privacy_value(session: &Session) -> String {
         }
         Some(quill::privacy::NewChatPrivacyState::Ready(settings)) => {
             if settings.incoming_paid_message_star_count > 0 {
-                format!(
-                    "{} Stars per message",
-                    settings.incoming_paid_message_star_count
+                tr_with(
+                    keys::Q_PREFS_STARS_PER_MESSAGE,
+                    &[(
+                        "incoming_paid_message_star_count",
+                        &settings.incoming_paid_message_star_count.to_string(),
+                    )],
                 )
             } else if settings.allow_from_unknown {
                 tr(keys::EDIT_PRIVACY_EVERYONE).to_string()

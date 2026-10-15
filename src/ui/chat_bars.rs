@@ -64,7 +64,13 @@ pub(crate) fn requested_status(date: i32) -> String {
             keys::GROUP_REQUESTS_STATUS_YESTERDAY,
             &[("time", &time.to_string())],
         ),
-        _ => format!("requested to join {} at {time}", day_label(&at, &now)),
+        _ => tr_with(
+            keys::GROUP_REQUESTS_STATUS_DATE_TIME,
+            &[
+                ("date", &(day_label(&at, &now)).to_string()),
+                ("time", &time.to_string()),
+            ],
+        ),
     }
 }
 
@@ -435,9 +441,12 @@ impl QuillApp {
                 ok &= live.driver.remove_chat_from_list(dialog.chat_id).is_ok();
             }
             self.connection.status_note = if ok {
-                format!(
-                    "{} is now blocked",
-                    self.contact_display_name(dialog.user_id)
+                tr_with(
+                    keys::Q_CHAT_IS_NOW_BLOCKED,
+                    &[(
+                        "user_id",
+                        &(self.contact_display_name(dialog.user_id)).to_string(),
+                    )],
                 )
             } else {
                 tr(keys::Q_CHAT_COULD_NOT_BLOCK_THE_USER).into()
@@ -613,9 +622,12 @@ fn bar_request_date(bar: &ChatActionBar) -> i32 {
 fn open_join_request_notice(window: &mut Window, cx: &mut App, title: &str, date: i32) {
     let at = civil_local(i64::from(date));
     let now = civil_local(now_unix());
-    let text = format!(
-        "You received this message because you requested to join {title} on {}.",
-        day_label(&at, &now)
+    let text = tr_with(
+        keys::FROM_REQUEST_BODY,
+        &[
+            ("name", title),
+            ("date", &(day_label(&at, &now)).to_string()),
+        ],
     );
     window.open_alert_dialog(cx, move |alert, _, _| {
         alert

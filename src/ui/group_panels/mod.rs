@@ -643,7 +643,15 @@ pub(super) fn format_birthday(date: quill::telegram::envelope::Birthdate) -> Str
             if (today.month, today.day) < (date.month, date.day) {
                 age -= 1;
             }
-            format!("{month} {}, {year} ({age} years old)", date.day)
+            tr_with(
+                keys::Q_PEOPLE_YEARS_OLD,
+                &[
+                    ("month", month),
+                    ("day", &date.day.to_string()),
+                    ("year", &year.to_string()),
+                    ("age", &age.to_string()),
+                ],
+            )
         }
         None => format!("{month} {}", date.day),
     }

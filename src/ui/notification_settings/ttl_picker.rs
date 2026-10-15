@@ -29,7 +29,7 @@ impl QuillApp {
         // arbitrary seconds; other chats need day multiples.
         let presets: Vec<(&str, i32)> = if is_secret {
             vec![
-                ("Off", 0),
+                (tr(keys::SETTINGS_TTL_AFTER_OFF), 0),
                 ("5s", 5),
                 ("30s", 30),
                 ("1m", 60),
@@ -41,7 +41,7 @@ impl QuillApp {
             // tdesktop `lng_manage_messages_ttl_after1..3`; a longer or
             // odd period goes through the Custom stepper below.
             vec![
-                ("Off", 0),
+                (tr(keys::SETTINGS_TTL_AFTER_OFF), 0),
                 (tr(keys::MANAGE_MESSAGES_TTL_AFTER1), 86_400),
                 (tr(keys::MANAGE_MESSAGES_TTL_AFTER2), 604_800),
                 (tr(keys::MANAGE_MESSAGES_TTL_AFTER3), 2_678_400),

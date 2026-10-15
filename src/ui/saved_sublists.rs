@@ -160,7 +160,16 @@ impl QuillApp {
                 );
                 Some((
                     tr(keys::SAVED_MESSAGES).to_owned(),
-                    format!("Tag {label} · {}", count_line(search.history.total_count)),
+                    tr_with(
+                        keys::Q_PEOPLE_TAG_3,
+                        &[
+                            ("label", &label.to_string()),
+                            (
+                                "total_count",
+                                &(count_line(search.history.total_count)).to_string(),
+                            ),
+                        ],
+                    ),
                 ))
             }
         }

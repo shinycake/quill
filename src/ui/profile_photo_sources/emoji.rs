@@ -9,7 +9,7 @@ use crate::ui::pressable::PressableDiv;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::profile_photo_gradient::render_background;
 use quill::profile_photo_sources::{PRESET_COUNT, PhotoSticker, gradient_preset};
@@ -280,7 +280,10 @@ impl QuillApp {
                     .border_color(ring(index == builder.preset))
                     .cursor_pointer()
                     .role(Role::Button)
-                    .aria_label(format!("Background {}", index + 1))
+                    .aria_label(tr_with(
+                        keys::Q_PEOPLE_BACKGROUND,
+                        &[("index_1", &(index + 1).to_string())],
+                    ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.choose_background(index, window, cx);
@@ -417,7 +420,7 @@ impl QuillApp {
                     .aria_label(if item.emoji.is_empty() {
                         tr(keys::Q_PEOPLE_ITEM).to_string()
                     } else {
-                        format!("Item {}", item.emoji)
+                        tr_with(keys::Q_PEOPLE_ITEM_2, &[("emoji", &item.emoji.to_string())])
                     })
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {

@@ -792,7 +792,10 @@ impl QuillApp {
                     .aria_label(if color_id < 0 {
                         tr(keys::FILTERS_TAG_COLOR_NO).to_string()
                     } else {
-                        format!("Tag color {}", color_id + 1)
+                        tr_with(
+                            keys::Q_CHATLIST_TAG_COLOR,
+                            &[("color_id_1", &(color_id + 1).to_string())],
+                        )
                     })
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {

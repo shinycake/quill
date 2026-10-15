@@ -641,7 +641,12 @@ impl QuillApp {
             match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
                 Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
                     .user(user_id.0)
-                    .map(|user| format!("Also delete for {}", user.first_name))
+                    .map(|user| {
+                        tr_with(
+                            keys::Q_CHAT_ALSO_DELETE_FOR,
+                            &[("first_name", &user.first_name.to_string())],
+                        )
+                    })
                     .unwrap_or_else(|| tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into()),
                 _ => tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into(),
             }
@@ -649,7 +654,10 @@ impl QuillApp {
         let question = if ids.len() == 1 {
             tr(keys::SELECTED_DELETE_SURE_THIS).to_string()
         } else {
-            format!("Do you want to delete {} messages?", ids.len())
+            tr_with(
+                keys::Q_CHAT_DO_YOU_WANT_TO_DELETE,
+                &[("len", &(ids.len()).to_string())],
+            )
         };
         let revoke = std::rc::Rc::new(std::cell::Cell::new(true));
         let app = cx.entity().downgrade();
@@ -740,7 +748,12 @@ impl QuillApp {
             {
                 Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
                     .and_then(|s| s.user(user_id.0))
-                    .map(|user| format!("Also delete for {}", user.first_name))
+                    .map(|user| {
+                        tr_with(
+                            keys::Q_CHAT_ALSO_DELETE_FOR,
+                            &[("first_name", &user.first_name.to_string())],
+                        )
+                    })
                     .unwrap_or_else(|| tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into()),
                 _ => tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into(),
             }

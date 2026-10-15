@@ -1,7 +1,7 @@
 //! Methods moved out of `groups_forum.rs` to keep files under 1000 lines.
 
 use super::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase 5.1: the topic list for a forum supergroup — one row per
@@ -51,7 +51,10 @@ impl QuillApp {
             // kit `Badge`.
             let unread = topic.unread_count;
             let name = if topic.name.is_empty() {
-                format!("Topic {}", topic.forum_topic_id)
+                tr_with(
+                    keys::Q_PEOPLE_TOPIC,
+                    &[("forum_topic_id", &topic.forum_topic_id.to_string())],
+                )
             } else {
                 topic.name.clone()
             };
