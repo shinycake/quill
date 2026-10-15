@@ -1,10 +1,13 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.1 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 //! Behavior and infrastructure foundations for GPUI applications.
 //!
 //! Primitives deliberately avoid presentation styles. Layout, positioning,
 //! colors, sizing, and motion belong to applications or the
 //! `gpui-component` façade.
+
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+#[cfg(all(feature = "gpui-fast", test))]
+extern crate gpui_fast_platform as gpui_platform;
 
 mod accordion;
 pub mod actions;
@@ -160,7 +163,7 @@ pub use resizable::{
 pub use resizable::{PANEL_MIN_SIZE, resize_handle};
 pub use root::{Root, RootPlugin};
 pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
-pub use scrollable_mask::ScrollableMask;
+pub use scrollable_mask::{RoundedFrameCover, ScrollableMask};
 pub use scrollbar::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarHandle, ScrollbarMode, ScrollbarMotion,
     ScrollbarStyles, ScrollbarThumbStyle, ScrollbarTrackStyle,
@@ -187,7 +190,7 @@ pub use text::{
 pub use text_selection::{
     TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,
     TextSelectionEvent, TextSelectionHandle, TextSelectionLayer, TextSelectionProjection,
-    RunGeometry, TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
+    TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
     TextSelectionWindowPoints, TouchHandleLayout,
 };
 pub use theme::{PlotTheme, ResizableTheme, ScrollbarTheme, Theme, ThemeAppearance};
@@ -206,7 +209,9 @@ pub use toast::{
 pub use toggle::{Toggle, ToggleStyles};
 pub use toggle_group::ToggleGroup;
 pub use toolbar::{Toolbar, ToolbarGroup};
-pub use tooltip::{Tooltip, TooltipOverlay, TooltipPositioner, TooltipRequest, TooltipTransition};
+pub use tooltip::{
+    Tooltip, TooltipDefaults, TooltipOverlay, TooltipPositioner, TooltipRequest, TooltipTransition,
+};
 pub use touch_selection::{SelectionEdge, TouchHandle, TouchSelectionSnapshot};
 pub use tree::{Tree, TreeEntry, TreeEntryState, TreeEvent, TreeItem, TreeState};
 #[doc(hidden)]
