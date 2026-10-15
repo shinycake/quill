@@ -186,3 +186,18 @@ pub fn get_bank_card_info(extra: RequestId, number: &str) -> String {
     })
     .to_string()
 }
+
+/// `getCollectibleItemInfo` (schema/td_api.tl:16777). Response is
+/// `collectibleItemInfo`.
+pub fn get_collectible_item_info(
+    extra: RequestId,
+    kind: crate::collectible_info::CollectibleKind,
+    entity: &str,
+) -> String {
+    json!({
+        "@type": "getCollectibleItemInfo",
+        "@extra": extra.as_extra(),
+        "type": crate::collectible_info::item_type(kind, entity),
+    })
+    .to_string()
+}

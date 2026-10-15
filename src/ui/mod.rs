@@ -184,6 +184,7 @@ mod chat_wide_ui;
 mod chatlist_global;
 mod chatlist_style;
 mod checklists;
+mod collectible_info_ui;
 mod command_shortcuts;
 mod composer;
 #[cfg(test)]
@@ -230,6 +231,7 @@ mod folder_tabs;
 mod folders;
 mod forum_extras;
 mod forward;
+mod fragment_link;
 mod gifs_ui;
 mod gift_auction_bid;
 mod gift_auction_ui;

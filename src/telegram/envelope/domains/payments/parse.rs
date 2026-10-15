@@ -101,6 +101,9 @@ pub(crate) fn parse_payments_payload(
         "bankCardInfo" => Ok(EnvelopePayload::Payments(PaymentsPayload::BankCardInfo(
             BankCardInfoData::parse(value),
         ))),
+        "collectibleItemInfo" => Ok(EnvelopePayload::Payments(PaymentsPayload::CollectibleInfo(
+            crate::collectible_info::parse_collectible_info(value),
+        ))),
         "premiumGiftCodeInfo" => Ok(EnvelopePayload::Payments(PaymentsPayload::GiftCodeInfo(
             GiftCodeInfoData::parse(value),
         ))),

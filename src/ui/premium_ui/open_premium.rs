@@ -8,6 +8,8 @@ impl QuillApp {
             live.driver.session.payments.hub.premium_open = true;
             live.driver.session.payments.hub.promo_page =
                 quill::premium_hub::promo::PromoPage::Overview;
+            // The subscribe button needs `premium_bot_username` / `premium_invoice_slug`.
+            let _ = live.driver.ensure_earn_app_config();
             live.driver.maybe_fetch_premium()
         });
         if let Some(Err(_)) = sent {

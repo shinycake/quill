@@ -426,12 +426,41 @@ impl QuillApp {
                 .text_color(cx.theme().muted_foreground)
                 .child("Checking…")
                 .into_any_element()
+        } else if verdict == Some(UsernameCheckResult::Purchasable) {
+            // tdesktop `UsernameCheckInfo::PurchaseAvailable`: the Fragment
+            // address from the app config, or its raw error without one.
+            let url = self.session().and_then(|session| {
+                session
+                    .payments
+                    .hub
+                    .fragment
+                    .username_url(username_text.trim_start_matches('@'))
+            });
+            match url {
+                Some(url) => div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(super::fragment_link::text_with_link(
+                        "edit-profile-username-fragment",
+                        "Sorry, this link is taken. But it's available for purchase. ",
+                        "Learn more...",
+                        "",
+                        url,
+                        cx,
+                    ))
+                    .into_any_element(),
+                None => div()
+                    .text_sm()
+                    .text_color(danger())
+                    .child("INTERNAL_SERVER_ERROR")
+                    .into_any_element(),
+            }
         } else if let Some(result) = verdict {
             let (text, color) = match result {
                 UsernameCheckResult::Available => ("Available", success()),
                 UsernameCheckResult::Occupied => ("Occupied", danger()),
                 UsernameCheckResult::Invalid => ("Invalid username", danger()),
-                UsernameCheckResult::Purchasable => ("Taken — purchasable on Fragment", danger()),
+                UsernameCheckResult::Purchasable => ("", danger()),
                 UsernameCheckResult::PublicChatsTooMany => ("Too many public usernames", danger()),
                 UsernameCheckResult::PublicGroupsUnavailable => ("Unavailable", danger()),
             };

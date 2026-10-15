@@ -779,7 +779,9 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
     })
 }
 
+pub mod fragment;
 pub mod promo;
+pub mod purchase;
 pub mod upgraded;
 
 /// `premiumFeatures`: the feature rows and limits Telegram reports, plus the
@@ -843,10 +845,6 @@ pub fn parse_premium_state(value: &Value) -> PremiumStateInfo {
     }
 }
 
-/// Premium Bot link the "Get Premium" button opens (as the folder-limit
-/// box does). Subscribing happens outside Quill.
-pub const PREMIUM_BOT_URL: &str = "https://t.me/PremiumBot";
-
 /// Per-surface state of the hub dialogs. Lives in `Session` so the poll loop
 /// and reducer own every transition (the Subscriptions-dialog pattern).
 #[derive(Debug, Clone, Default)]
@@ -883,6 +881,17 @@ pub struct PremiumHub {
     pub gifts_stale: bool,
     // Premium.
     pub premium_open: bool,
+    /// `premium_bot_username` / `premium_invoice_slug` from the app config.
+    pub purchase: purchase::PremiumPurchase,
+    /// Where Quill links out to Fragment (`fragment_prefixes`, `whitelisted_domains`).
+    pub fragment: fragment::FragmentConfig,
+    /// The collectible username or phone number whose box is open.
+    pub collectible: Option<crate::collectible_info::CollectibleLookup>,
+    /// The ref the Premium dialog was opened with (tdesktop `ShowPremium`).
+    pub premium_ref: String,
+    /// Lowercase username of the Premium bot the subscribe button opened,
+    /// and the ref; opening that chat sends `/start <ref>` by itself.
+    pub auto_start: Option<(String, String)>,
     pub premium: Option<PremiumInfo>,
     pub premium_state: Option<PremiumStateInfo>,
     pub premium_loading: bool,
