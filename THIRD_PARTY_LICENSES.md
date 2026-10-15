@@ -13,8 +13,8 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 - MIT License: 650
 - Apache License 2.0: 41
+- Unicode License v3: 24
 - ISC License: 22
-- Unicode License v3: 19
 - Mozilla Public License 2.0: 16
 - BSD 3-Clause "New" or "Revised" License: 15
 - BSD Zero Clause License: 4
@@ -13185,10 +13185,15 @@ authorization of the copyright holder.
 ### Unicode License v3
 
 Used by:
+- [fixed_decimal 0.7.2](https://github.com/unicode-org/icu4x)
 - [icu_collections 2.3.0](https://github.com/unicode-org/icu4x)
 - [icu_locale_core 2.3.0](https://github.com/unicode-org/icu4x)
+- [icu_locale_fallback 2.3.0](https://github.com/unicode-org/icu4x)
+- [icu_locale_fallback_data 2.3.0](https://github.com/unicode-org/icu4x)
 - [icu_normalizer 2.3.0](https://github.com/unicode-org/icu4x)
 - [icu_normalizer_data 2.3.0](https://github.com/unicode-org/icu4x)
+- [icu_plurals 2.3.0](https://github.com/unicode-org/icu4x)
+- [icu_plurals_data 2.3.0](https://github.com/unicode-org/icu4x)
 - [icu_properties 2.3.0](https://github.com/unicode-org/icu4x)
 - [icu_properties_data 2.3.0](https://github.com/unicode-org/icu4x)
 - [icu_provider 2.3.1](https://github.com/unicode-org/icu4x)
