@@ -878,7 +878,10 @@ impl QuillApp {
                 let emoji = emoji.clone();
                 move |this, _, window, cx| this.insert_panel_emoji(emoji.clone(), window, cx)
             }))
-            .child(emoji);
+            .child(
+                super::emoji_sprites::glyph(&emoji, super::emoji_sprites::edge_for(px(26.)))
+                    .unwrap_or_else(|| emoji.clone().into_any_element()),
+            );
         if !in_recent {
             return cell.into_any_element();
         }

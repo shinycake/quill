@@ -584,7 +584,13 @@ pub(super) fn session_chat_row(
                                                 .font_semibold()
                                                 .min_w_0()
                                                 .truncate()
-                                                .child(super::bidi_line::one_line_plain(title)),
+                                                .child(
+                                                    super::emoji_sprites::one_line(&title, px(14.))
+                                                        .unwrap_or_else(|| {
+                                                            super::bidi_line::one_line_plain(title)
+                                                                .into_any_element()
+                                                        }),
+                                                ),
                                         )
                                         .when_some(title_badge, |this, badge| {
                                             this.child(title_badge_element(

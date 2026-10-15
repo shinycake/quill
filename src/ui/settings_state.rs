@@ -83,6 +83,8 @@ pub(crate) struct SettingsUi {
     /// Advanced and experimental settings, the secret codes, the test
     /// environment (`ui/advanced_state.rs`).
     pub(super) advanced: super::advanced_state::AdvancedUi,
+    /// Settings → Chat → "Choose emoji set" and the set in use (`ui/emoji_style_ui.rs`).
+    pub(super) emoji_style: super::emoji_style_ui::EmojiStyleUi,
 }
 
 impl SettingsUi {
@@ -129,6 +131,7 @@ impl SettingsUi {
             update_banner_dismissed: false,
             phone_change_note: false,
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
+            emoji_style: Default::default(),
         }
     }
 }

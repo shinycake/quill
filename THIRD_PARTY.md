@@ -67,6 +67,8 @@ the exact commits and a written offer in `LGPL-SOURCES.txt`
 |---|---|---|
 | Emoji list `assets/emoji/emoji-17.tsv` (compiled in) | Unicode-3.0 (`assets/emoji/LICENSE.txt`, shipped as `licenses/unicode-emoji/LICENSE.txt`) | Derived from Unicode 17.0 `emoji-test.txt`. |
 | English spellcheck word list `assets/spellcheck/en.txt` (compiled in) | CC BY-SA 4.0 (`licenses/spellcheck-wordlist.txt`) | Adapted from FrequencyWords by Hermit Dave (`content/2018/en/en_50k.txt`). The adapted list is also CC BY-SA 4.0; this applies to the word list only. |
+| Emoji set previews `assets/emoji/sets/emoji-set-noto-preview.png` (compiled in) and the downloadable Noto pack | Apache-2.0 (Noto Emoji, googlefonts/noto-emoji); flags from region-flags, public domain | Four faces per set for Settings → "Choose emoji set". The full pack is not shipped; it is downloaded on request from the `emoji-sets-v1` release and built by `quill-tools/emoji-sets` (`docs/decisions/emoji-set-style.md`). |
+| Emoji set preview `assets/emoji/sets/emoji-set-twemoji-preview.png` (compiled in) and the downloadable Twemoji pack | CC-BY 4.0 (Twemoji by Twitter, Inc. and contributors, jdecked/twemoji) | Attributed in the "Choose emoji set" box and in the pack's `LICENSE.txt`. Downloaded on request like the Noto pack. |
 | App and tray icons (`assets/icons/`) | Quill project | Quill's own design, a "Q" with a quill feather (`docs/decisions/codex-app-icon.md`). It is not the Telegram logo. |
 | Call tones | Quill project | Synthesized in code (`src/ui/call_tones.rs`); no audio files and none of Telegram's GPL sounds. |
 | Fonts | none bundled | Quill uses the operating system's fonts. |

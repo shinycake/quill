@@ -52,7 +52,11 @@ pub(crate) fn chat_list_preview_line_layered(
     // byte length, so entity offsets still hold).
     let preview = preview.replace(['\n', '\r'], " ");
     let muted = cx.theme().muted_foreground;
-    if entities.is_empty() {
+    // Emoji the active set draws need the run-by-run row below; the
+    // system font keeps the single text node.
+    let sprites =
+        !quill::text::has_rtl_text(&preview) && super::emoji_sprites::pieces(&preview).is_some();
+    if entities.is_empty() && !sprites {
         // A single text node, so an overlong preview ends in an ellipsis.
         let text = match icon {
             Some(glyph) => format!("{glyph} {preview}"),
@@ -179,26 +183,55 @@ pub(crate) fn chat_list_preview_line_layered(
             continue;
         }
         let style = &run.style;
-        let mut el = div().whitespace_nowrap().child(run.text);
-        if style.bold {
-            el = el.font_weight(FontWeight::BOLD);
+        let segments: Vec<(String, Option<std::sync::Arc<RenderImage>>)> =
+            match (!style.spoiler && !style.code && !style.pre)
+                .then(|| super::emoji_sprites::pieces(&run.text))
+                .flatten()
+            {
+                Some(pieces) => pieces
+                    .into_iter()
+                    .map(|p| {
+                        (
+                            run.text.get(p.range).unwrap_or_default().to_string(),
+                            p.image,
+                        )
+                    })
+                    .collect(),
+                None => vec![(run.text, None)],
+            };
+        for (segment, sprite) in segments {
+            if let Some(image) = sprite {
+                parts.push((
+                    false,
+                    div().child(
+                        img(ImageSource::Render(image))
+                            .size(px(14.))
+                            .object_fit(ObjectFit::Contain),
+                    ),
+                ));
+                continue;
+            }
+            let mut el = div().whitespace_nowrap().child(segment);
+            if style.bold {
+                el = el.font_weight(FontWeight::BOLD);
+            }
+            if style.italic {
+                el = el.italic();
+            }
+            if style.underline {
+                el = el.underline();
+            }
+            if style.strikethrough {
+                el = el.line_through();
+            }
+            if style.code || style.pre {
+                el = el.font_family(MONO_FONT);
+            }
+            if style.spoiler {
+                el = el.bg(fill_muted()).text_color(fill_muted()).rounded_sm();
+            }
+            parts.push((true, el));
         }
-        if style.italic {
-            el = el.italic();
-        }
-        if style.underline {
-            el = el.underline();
-        }
-        if style.strikethrough {
-            el = el.line_through();
-        }
-        if style.code || style.pre {
-            el = el.font_family(MONO_FONT);
-        }
-        if style.spoiler {
-            el = el.bg(fill_muted()).text_color(fill_muted()).rounded_sm();
-        }
-        parts.push((true, el));
     }
     // The last text run shrinks and ends in the ellipsis; everything
     // before it keeps its width.
