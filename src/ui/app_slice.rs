@@ -100,7 +100,7 @@ impl Slices {
     }
 
     /// The conversation slice and its animation layer's view, for tests.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "demo-capture"))]
     pub(super) fn conversation_ids(&self) -> Option<(EntityId, EntityId)> {
         self.conversation
             .as_ref()

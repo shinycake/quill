@@ -22,15 +22,12 @@ pub(super) enum Purpose {
     /// A muted loop in the history, drawn at most this many px on its
     /// longer side (twice the tile, for HiDPI).
     Inline { max_edge: u32 },
-    /// The media viewer: full size, with sound.
-    Viewer,
 }
 
 impl Purpose {
     fn options(self) -> OpenOptions {
         match self {
             Purpose::Inline { max_edge } => OpenOptions::inline(max_edge.max(16)),
-            Purpose::Viewer => OpenOptions::viewer(),
         }
     }
 }
@@ -182,7 +179,6 @@ mod tests {
         assert_eq!((inline.max_width, inline.max_height), (640, 640));
         // A degenerate tile still decodes something visible.
         assert_eq!(Purpose::Inline { max_edge: 0 }.options().max_width, 16);
-        assert!(Purpose::Viewer.options().want_audio);
     }
 
     #[test]

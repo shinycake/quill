@@ -668,14 +668,14 @@ impl InlineVideos {
     }
 
     /// The slot's player, for tests.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "demo-capture"))]
     pub(super) fn player(&self, key: Key) -> Option<VideoPlayer> {
         self.with(|state| state.players.get(&key).map(|slot| slot.player.clone()))
             .flatten()
     }
 
     /// Whether the slot is paused off screen, for tests.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "demo-capture"))]
     pub(super) fn is_hidden(&self, key: Key) -> bool {
         self.with(|state| {
             state
@@ -724,7 +724,7 @@ mod tests {
             OffScreenStep::Release
         );
         let just_before = now
-            .checked_sub(RELEASE_AFTER - Duration::from_millis(1))
+            .checked_sub(RELEASE_AFTER.saturating_sub(Duration::from_millis(1)))
             .unwrap();
         assert_eq!(
             off_screen_step(false, Some(just_before), now),

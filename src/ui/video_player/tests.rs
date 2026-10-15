@@ -27,6 +27,7 @@ pub(super) fn take_scripted_backend() -> Option<Box<dyn Backend>> {
 }
 
 /// Hand `script` to the next `VideoPlayer::open` on this thread.
+#[cfg(feature = "demo-capture")]
 fn queue_backend(script: &Rc<RefCell<Script>>) {
     NEXT_BACKEND.with(|next| {
         next.borrow_mut()
@@ -597,7 +598,7 @@ mod viewer {
             window.focus(&focus, cx);
             cx.notify();
         });
-        queue_backend(&script);
+        queue_backend(script);
         app.update_in(vcx_ref, |app, _, cx| {
             app.open_media_viewer(ChatId(11), MessageId(204), cx);
         });
