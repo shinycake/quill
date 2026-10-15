@@ -134,7 +134,11 @@ impl QuillApp {
             return slot.as_ref().map(|(_, image)| image.clone());
         }
         let image = Self::video_render_image(frame)?;
-        *slot = Some((key, image.clone()));
+        // The slot's previous frame stays in the atlas until the sweeper
+        // retires it; overwriting it silently would leak it there.
+        if let Some((_, old)) = slot.replace((key, image.clone())) {
+            crate::ui::image_budget::retire_all([old]);
+        }
         Some(image)
     }
 
@@ -163,9 +167,14 @@ impl QuillApp {
         let image = Self::video_render_image(frame)?;
         // Tiles of any other call are dead weight.
         self.prune_group_video_images(Some(call_id));
-        self.group_call
-            .video_images
-            .insert(key, (frame.seq, image.clone()));
+        // Same for the tile's previous frame.
+        if let Some(old) = replace_tile(
+            &mut self.group_call.video_images,
+            key,
+            (frame.seq, image.clone()),
+        ) {
+            crate::ui::image_budget::retire_all([old]);
+        }
         Some(image)
     }
 
@@ -441,6 +450,16 @@ pub(super) fn viewer_error_message(
     }
 }
 
+/// Store `tile` under `key` and return the frame image it replaced, if
+/// any, so the caller can retire that image from the atlas.
+fn replace_tile<K: std::hash::Hash + Eq, V>(
+    tiles: &mut std::collections::HashMap<K, (u64, V)>,
+    key: K,
+    tile: (u64, V),
+) -> Option<V> {
+    tiles.insert(key, tile).map(|(_, old)| old)
+}
+
 /// Remove and return every tile whose call isn't `live_call`.
 fn take_dead_call_tiles<V>(
     tiles: &mut std::collections::HashMap<(i32, i64, bool), V>,
@@ -458,8 +477,17 @@ fn take_dead_call_tiles<V>(
 
 #[cfg(test)]
 mod tests {
-    use super::take_dead_call_tiles;
+    use super::{replace_tile, take_dead_call_tiles};
     use std::collections::HashMap;
+
+    #[test]
+    fn replacing_a_tile_hands_back_the_old_frame_to_retire() {
+        let mut tiles: HashMap<(i32, i64, bool), (u64, u8)> = HashMap::new();
+        assert_eq!(replace_tile(&mut tiles, (1, 10, false), (1, 7)), None);
+        assert_eq!(replace_tile(&mut tiles, (1, 10, false), (2, 8)), Some(7));
+        assert_eq!(tiles.get(&(1, 10, false)), Some(&(2, 8)));
+        assert_eq!(tiles.len(), 1);
+    }
 
     #[test]
     fn tiles_empty_when_the_call_ends_and_drop_when_it_changes() {
