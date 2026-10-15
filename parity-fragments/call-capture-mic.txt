@@ -1,2 +1,0 @@
-# Capture module, external microphone, RNNoise switch (docs/decisions/call-capture.md)
-parity:calls-noise-suppression

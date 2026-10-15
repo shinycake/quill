@@ -723,7 +723,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Video chat invite link (`getVideoChatInviteLink` with Copy, `revokeGroupCallInviteLink`; code + demo only, live unverified) <!-- parity:calls-invite-link -->
 - [x] In-call chat messages for group calls (`sendGroupCallMessage` + live `updateNewGroupCallMessage` feed with composer, gated on `can_send_messages`/`are_messages_allowed`; no history getter exists in the schema, so live feed only; code + demo only, live unverified) <!-- parity:calls-group-messages -->
 - [x] Push-to-talk with a shortcut and release delay <!-- parity:calls-push-to-talk -->
-- [ ] Noise suppression toggle in group calls (designed: ntgcalls 3 accepts external microphone frames, so Quill can denoise the mic itself; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-noise-suppression -->
+- [x] Noise suppression toggle in group calls (designed: ntgcalls 3 accepts external microphone frames, so Quill can denoise the mic itself; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-noise-suppression -->
 - [x] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
 - [x] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
 - [ ] Screen source chooser with window and screen thumbnails (designed: Quill captures screens and windows itself and feeds ntgcalls external frames; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-screen-source-chooser -->
