@@ -4,6 +4,7 @@
 //! and the "Load more" row of a paged list.
 
 use super::*;
+use quill::lang::{keys, tr};
 use quill::state::{SearchConfirm, SearchMediaRow, SharedMediaTab, media_month_starts};
 
 /// tdesktop `kCollapsedChannelsCount`.
@@ -75,7 +76,7 @@ impl QuillApp {
             let mut block = section(
                 "search-channels-joined",
                 "search-channel",
-                "Channels you joined",
+                tr(keys::Q_CHAT_CHANNELS_YOU_JOINED),
                 joined_rows,
                 cx,
             );
@@ -83,7 +84,11 @@ impl QuillApp {
                 block = block.child(
                     div().flex().child(
                         Button::new("search-channels-more")
-                            .label(if expanded { "Show less" } else { "Show more" })
+                            .label(if expanded {
+                                tr(keys::Q_CHAT_SHOW_LESS)
+                            } else {
+                                tr(keys::Q_CHAT_SHOW_MORE)
+                            })
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -100,7 +105,7 @@ impl QuillApp {
             tab = tab.child(section(
                 "search-channels-similar",
                 "search-channel-similar",
-                "Similar channels",
+                tr(keys::Q_CHAT_SIMILAR_CHANNELS),
                 recommended,
                 cx,
             ));
@@ -109,14 +114,14 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("Loading similar channels…"),
+                    .child(tr(keys::Q_CHAT_LOADING_SIMILAR_CHANNELS)),
             );
         } else if total == 0 {
             tab = tab.child(
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("Type to search channels."),
+                    .child(tr(keys::Q_CHAT_TYPE_TO_SEARCH_CHANNELS)),
             );
         }
         Some(tab.into_any_element())
@@ -260,9 +265,9 @@ impl QuillApp {
                     .py_1()
                     .child(
                         Button::new("search-load-more")
-                            .label("Could not load more. Try again")
+                            .label(tr(keys::Q_CHAT_COULD_NOT_LOAD_MORE_TRY))
                             .ghost()
-                            .accessibility_label("Try loading more search results again")
+                            .accessibility_label(tr(keys::Q_CHAT_TRY_LOADING_MORE_SEARCH_RESULTS))
                             .on_click(cx.listener(|this, _, _, cx| this.load_more_search_ui(cx))),
                     )
                     .into_any_element(),
@@ -277,7 +282,7 @@ impl QuillApp {
                     .py_1()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Loading…")
+                    .child(tr(keys::Q_CHAT_LOADING_2))
                     .into_any_element(),
             );
         }
@@ -288,7 +293,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_more_search_results().is_err()
         {
-            self.connection.status_note = "could not load more results".into();
+            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_LOAD_MORE_RESULTS).into();
         }
         cx.notify();
     }
@@ -322,7 +327,7 @@ impl QuillApp {
         let block = div().id("search-downloads").flex().flex_col();
         if rows.is_empty() {
             let text = if query.trim().is_empty() {
-                "No downloads yet.".to_string()
+                tr(keys::Q_CHAT_NO_DOWNLOADS_YET).to_string()
             } else {
                 format!("No downloads match “{}”.", query.trim())
             };
@@ -354,7 +359,7 @@ impl QuillApp {
                     .id("search-posts-premium")
                     .text_xs()
                     .text_color(muted)
-                    .child("Searching public posts past the free limit needs Telegram Premium.")
+                    .child(tr(keys::Q_CHAT_SEARCHING_PUBLIC_POSTS_PAST_THE))
                     .into_any_element(),
             );
         }
@@ -373,7 +378,7 @@ impl QuillApp {
                     Button::new("search-posts-paid-button")
                         .label(format!("Search for \u{2605}{}", limits.star_count))
                         .small()
-                        .accessibility_label("Search public posts with Stars")
+                        .accessibility_label(tr(keys::Q_CHAT_SEARCH_PUBLIC_POSTS_WITH_STARS))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.set_search_prompt(Some(SearchConfirm::PaidPostSearch), None, cx);
                         })),
@@ -388,7 +393,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.search_public_posts_paid().is_err()
         {
-            self.connection.status_note = "could not search public posts".into();
+            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEARCH_PUBLIC_POSTS).into();
         }
         cx.notify();
     }

@@ -21,6 +21,7 @@ use quill::composer::{
     ComposerShortcut, FormatAction, LinkChord, apply_format_markup, link_chord_target,
     normalize_link_url,
 };
+use quill::lang::{keys, tr, tr_with};
 use std::ops::Range;
 
 /// The link dialog above the composer (tdesktop's "Edit link" box): one URL
@@ -55,7 +56,14 @@ pub(super) fn shortcut_hint(shortcut: ComposerShortcut) -> String {
     if cfg!(target_os = "macos") {
         format!("{}⌘{key}", if spec.shift { "⇧" } else { "" })
     } else {
-        format!("Ctrl+{}{key}", if spec.shift { "Shift+" } else { "" })
+        format!(
+            "Ctrl+{}{key}",
+            if spec.shift {
+                tr(keys::Q_CHAT_SHIFT)
+            } else {
+                ""
+            }
+        )
     }
 }
 
@@ -124,7 +132,7 @@ impl QuillApp {
         let selected = selected.to_string();
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Enter a link")
+                .placeholder(tr(keys::Q_CHAT_ENTER_A_LINK))
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
@@ -166,7 +174,7 @@ impl QuillApp {
         let selected = dialog.selected.clone();
         let Some(url) = normalize_link_url(&typed) else {
             // Nothing (or something unusable) typed: leave the dialog open.
-            self.connection.status_note = "enter a valid link".into();
+            self.connection.status_note = tr(keys::Q_CHAT_ENTER_A_VALID_LINK).into();
             cx.notify();
             return;
         };
@@ -174,8 +182,7 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         if text.get(range.clone()) != Some(selected.as_str()) {
             // The draft changed under the dialog; don't link the wrong text.
-            self.connection.status_note =
-                "the text changed; select it again to add the link".into();
+            self.connection.status_note = tr(keys::Q_CHAT_THE_TEXT_CHANGED_SELECT_IT_2).into();
             cx.notify();
             return;
         }
@@ -215,26 +222,33 @@ impl QuillApp {
                 .border_1()
                 .border_color(accent())
                 .bg(bg_canvas())
-                .child(div().text_sm().font_semibold().child("Add link"))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(keys::Q_CHAT_ADD_LINK)),
+                )
                 .child(
                     div()
                         .text_xs()
                         .opacity(0.7)
                         .child(format!("Link for “{}”", dialog.selected)),
                 )
-                .child(Textarea::new(&dialog.input).aria_label("Link address"))
+                .child(Textarea::new(&dialog.input).aria_label(tr(keys::Q_CHAT_LINK_ADDRESS)))
                 .child(
                     div()
                         .flex()
                         .gap_2()
-                        .child(Button::new("composer-link-save").label("Save").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.apply_composer_link(window, cx);
-                            }),
-                        ))
+                        .child(
+                            Button::new("composer-link-save")
+                                .label(tr(keys::SETTINGS_SAVE))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.apply_composer_link(window, cx);
+                                })),
+                        )
                         .child(
                             Button::new("composer-link-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_composer_link_dialog(window, cx);
@@ -257,14 +271,14 @@ impl QuillApp {
         // the rich editor still writes fences.
         let (block, current) = if self.composer_ui.rich_editor_open {
             let Some(fence) = quill::code_language::fence_at(&text, caret) else {
-                self.connection.status_note = "Put the cursor inside a code block first.".into();
+                self.connection.status_note = tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A).into();
                 cx.notify();
                 return;
             };
             (fence.block.clone(), fence.current(&text).to_string())
         } else {
             let Some(found) = self.composer_code_block_at_caret(cx) else {
-                self.connection.status_note = "Put the cursor inside a code block first.".into();
+                self.connection.status_note = tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A).into();
                 cx.notify();
                 return;
             };
@@ -272,7 +286,7 @@ impl QuillApp {
         };
         let input = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
-                .placeholder("Auto-Detect")
+                .placeholder(tr(keys::Q_CHAT_AUTO_DETECT))
                 .auto_grow(1, 1)
                 .submit_on_enter(true);
             state.set_value(&current, window, cx);
@@ -321,7 +335,7 @@ impl QuillApp {
                 .is_some_and(|(range, _)| range == block);
             if !still_there {
                 self.close_code_language_dialog(window, cx);
-                self.connection.status_note = "The text changed. Open Code Language again.".into();
+                self.connection.status_note = tr(keys::Q_CHAT_THE_TEXT_CHANGED_OPEN_CODE).into();
                 cx.notify();
                 return;
             }
@@ -345,7 +359,7 @@ impl QuillApp {
         let Some(fence) = fence else {
             // The draft changed under the box; do not edit the wrong block.
             self.close_code_language_dialog(window, cx);
-            self.connection.status_note = "The text changed. Open Code Language again.".into();
+            self.connection.status_note = tr(keys::Q_CHAT_THE_TEXT_CHANGED_OPEN_CODE).into();
             cx.notify();
             return;
         };
@@ -383,14 +397,19 @@ impl QuillApp {
                 .border_1()
                 .border_color(accent())
                 .bg(bg_canvas())
-                .child(div().text_sm().font_semibold().child("Code Language"))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(keys::Q_CHAT_CODE_LANGUAGE)),
+                )
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Language for syntax highlighting."),
+                        .child(tr(keys::FORMATTING_CODE_LANGUAGE)),
                 )
-                .child(Textarea::new(&dialog.input).aria_label("Code language"))
+                .child(Textarea::new(&dialog.input).aria_label(tr(keys::Q_CHAT_CODE_LANGUAGE_2)))
                 .child(
                     div()
                         .flex()
@@ -420,14 +439,14 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("composer-code-language-save")
-                                .label("Save")
+                                .label(tr(keys::SETTINGS_SAVE))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.apply_code_language(window, cx);
                                 })),
                         )
                         .child(
                             Button::new("composer-code-language-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_code_language_dialog(window, cx);
@@ -470,30 +489,38 @@ impl QuillApp {
             (labelled(label, shortcut), action)
         };
         let entries = [
-            item("Bold", ComposerShortcut::Bold, Box::new(FormatBold)),
-            item("Italic", ComposerShortcut::Italic, Box::new(FormatItalic)),
             item(
-                "Underline",
+                tr(keys::Q_CHAT_BOLD),
+                ComposerShortcut::Bold,
+                Box::new(FormatBold),
+            ),
+            item(
+                tr(keys::Q_CHAT_ITALIC),
+                ComposerShortcut::Italic,
+                Box::new(FormatItalic),
+            ),
+            item(
+                tr(keys::Q_CHAT_UNDERLINE),
                 ComposerShortcut::Underline,
                 Box::new(FormatUnderline),
             ),
             item(
-                "Strikethrough",
+                tr(keys::Q_CHAT_STRIKETHROUGH),
                 ComposerShortcut::Strikethrough,
                 Box::new(FormatStrikethrough),
             ),
             item(
-                "Quote",
+                tr(keys::Q_CHAT_QUOTE),
                 ComposerShortcut::BlockQuote,
                 Box::new(FormatBlockQuote),
             ),
             item(
-                "Monospace",
+                tr(keys::Q_CHAT_MONOSPACE),
                 ComposerShortcut::Monospace,
                 Box::new(FormatMonospace),
             ),
             item(
-                "Spoiler",
+                tr(keys::MENU_FORMATTING_SPOILER),
                 ComposerShortcut::Spoiler,
                 Box::new(FormatSpoiler),
             ),
@@ -505,37 +532,40 @@ impl QuillApp {
         submenu = submenu
             .separator()
             .menu_with_disabled(
-                labelled("Create link", ComposerShortcut::EditLink),
+                labelled(tr(keys::Q_CHAT_CREATE_LINK), ComposerShortcut::EditLink),
                 !has_selection,
                 Box::new(ComposerEditLink),
             )
             .menu_with_disabled(
-                labelled("Date", ComposerShortcut::EditDate),
+                labelled(tr(keys::Q_CHAT_DATE), ComposerShortcut::EditDate),
                 !date_enabled,
                 Box::new(super::actions::ComposerEditDate),
             )
             .menu_with_disabled(
-                "Code Language…",
+                tr(keys::Q_CHAT_CODE_LANGUAGE_3),
                 !in_code_block,
                 Box::new(ComposerEditCodeLanguage),
             )
             .menu(
-                labelled("Clear formatting", ComposerShortcut::ClearFormatting),
+                labelled(
+                    tr(keys::Q_CHAT_CLEAR_FORMATTING),
+                    ComposerShortcut::ClearFormatting,
+                ),
                 Box::new(FormatClear),
             );
-        menu.submenu("Formatting", submenu)
+        menu.submenu(tr(keys::Q_CHAT_FORMATTING), submenu)
     }
 
     /// Paste as plain text, listed next to Paste (tdesktop has
     /// "Paste without formatting" there).
     pub(super) fn paste_plain_menu_item(menu: NativeMenu) -> NativeMenu {
         let chord = if cfg!(target_os = "macos") {
-            "⇧⌘V"
+            tr(keys::Q_CHAT_V)
         } else {
-            "Ctrl+Shift+V"
+            tr(keys::Q_CHAT_CTRL_SHIFT_V)
         };
         menu.menu(
-            format!("Paste as Plain Text\t{chord}"),
+            tr_with(keys::Q_CHAT_PASTE_AS_PLAIN_TEXT, &[("chord", chord)]),
             Box::new(ComposerPastePlain),
         )
     }

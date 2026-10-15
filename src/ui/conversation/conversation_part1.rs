@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// One part of the open chat's column: the composer
@@ -22,12 +23,12 @@ impl QuillApp {
                 .min_h_0()
                 .min_w_0()
                 .role(Role::Log)
-                .aria_label("Message history")
+                .aria_label(tr(keys::Q_CHAT_MESSAGE_HISTORY))
                 .child(self.chat.clone())
                 .into_any_element(),
             PaneMode::Connecting => pane_placeholder(
-                "Not signed in",
-                "Sign in to see your chats and messages.",
+                tr(keys::Q_CHAT_NOT_SIGNED_IN),
+                tr(keys::Q_CHAT_SIGN_IN_TO_SEE_YOUR),
                 cx,
             )
             .into_any_element(),
@@ -35,14 +36,11 @@ impl QuillApp {
         };
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
-            PaneMode::Connecting => Some("Sign in to send messages.".to_string()),
+            PaneMode::Connecting => Some(tr(keys::Q_CHAT_SIGN_IN_TO_SEND_MESSAGES).to_string()),
             PaneMode::Ready
                 if composer.is_none() && self.session().is_some_and(|s| s.is_frozen()) =>
             {
-                Some(
-                    "Your account is frozen and read-only. Open the banner at the top for details."
-                        .to_string(),
-                )
+                Some(tr(keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND_2).to_string())
             }
             PaneMode::Ready if composer.is_none() => {
                 let open = self.session().and_then(|s| s.open_chat);
@@ -72,16 +70,16 @@ impl QuillApp {
                             .is_some_and(|c| c.can_post() && c.can_send_basic_messages)
                     });
                     if topic_closed {
-                        Some("This topic is closed — new messages are disabled.".to_string())
+                        Some(tr(keys::Q_CHAT_THIS_TOPIC_IS_CLOSED_NEW).to_string())
                     } else if !send_allowed {
-                        Some("You don't have permission to post in this topic.".to_string())
+                        Some(tr(keys::Q_CHAT_YOU_DONT_HAVE_PERMISSION_TO).to_string())
                     } else {
                         // The topic's info hasn't loaded yet; the composer
                         // appears once it arrives.
-                        Some("Loading topic…".to_string())
+                        Some(tr(keys::Q_CHAT_LOADING_TOPIC).to_string())
                     }
                 } else if open.is_none() {
-                    Some("Select a chat to start messaging.".to_string())
+                    Some(tr(keys::Q_CHAT_SELECT_A_CHAT_TO_START).to_string())
                 } else {
                     // Phase B1: secret chats that can't send yet explain why
                     // instead of the generic unsupported note.
@@ -96,7 +94,7 @@ impl QuillApp {
                                 .map(str::to_string)
                         })
                         .or(Some(
-                            "This conversation type is not supported yet.".to_string(),
+                            tr(keys::Q_CHAT_THIS_CONVERSATION_TYPE_IS_NOT).to_string(),
                         ))
                 }
             }
@@ -357,11 +355,11 @@ impl QuillApp {
                                             .icon(IconName::FaceSlightlySmiling)
                                             .ghost()
                                             .tooltip(if self.sticker_panel_open() {
-                                                "Close stickers"
+                                                tr(keys::Q_CHAT_CLOSE_STICKERS)
                                             } else {
-                                                "Stickers"
+                                                tr(keys::Q_CHAT_STICKERS)
                                             })
-                                            .accessibility_label("Stickers")
+                                            .accessibility_label(tr(keys::Q_CHAT_STICKERS))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.toggle_media_panel(
                                                     super::media_panel::PanelTab::Emoji,
@@ -383,7 +381,7 @@ impl QuillApp {
                                             Textarea::new(&self.composer)
                                                 .appearance(false)
                                                 .bordered(false)
-                                                .aria_label("Message")
+                                                .aria_label(tr(keys::SR_CHAT_COLUMN_MESSAGE))
                                                 // Custom emoji drawn inline
                                                 // (codex:composer-input).
                                                 .token(self.composer_token_renderer(cx))
@@ -474,7 +472,7 @@ impl QuillApp {
         let open = session.and_then(|s| s.open_chat);
         let title = open
             .and_then(|id| session.and_then(|s| s.chats.get(&id.0).map(|c| c.title.clone())))
-            .unwrap_or_else(|| "No chat selected".into());
+            .unwrap_or_else(|| tr(keys::Q_CHAT_NO_CHAT_SELECTED).into());
         let supported = open
             .and_then(|id| session.and_then(|s| s.chats.get(&id.0).map(|c| c.supported())))
             .unwrap_or(false);
@@ -600,18 +598,19 @@ impl QuillApp {
             .child(super::subsection_tabs::with_left_column(
                 tabs_left,
                 if let Some(reason) = gate {
-                    pane_placeholder("Unsupported chat", reason, cx).into_any_element()
+                    pane_placeholder(tr(keys::Q_CHAT_UNSUPPORTED_CHAT), reason, cx)
+                        .into_any_element()
                 } else if open.is_none() {
                     pane_placeholder(
-                        "Select a chat",
-                        "Choose a conversation from the sidebar to start messaging.",
+                        tr(keys::Q_CHAT_SELECT_A_CHAT),
+                        tr(keys::Q_CHAT_CHOOSE_A_CONVERSATION_FROM_THE),
                         cx,
                     )
                     .into_any_element()
                 } else if !supported {
                     pane_placeholder(
-                        "Unsupported chat",
-                        "This conversation type is not supported yet.",
+                        tr(keys::Q_CHAT_UNSUPPORTED_CHAT),
+                        tr(keys::Q_CHAT_THIS_CONVERSATION_TYPE_IS_NOT),
                         cx,
                     )
                     .into_any_element()
@@ -667,8 +666,8 @@ impl QuillApp {
                     // a choice.
                     if self.chat_list.forum_column_shown {
                         pane_placeholder(
-                            "Choose a topic",
-                            "Pick a topic from the list to read and write in it.",
+                            tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
+                            tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
                             cx,
                         )
                         .into_any_element()
@@ -681,8 +680,8 @@ impl QuillApp {
                     // with `topic_id`).
                     if topic_empty {
                         pane_placeholder(
-                            "No messages in this topic yet",
-                            "No messages in this topic yet.",
+                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
+                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
                             cx,
                         )
                         .into_any_element()
@@ -729,11 +728,11 @@ impl QuillApp {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Couldn’t load messages ·"),
+                                    .child(tr(keys::Q_CHAT_COULDN_T_LOAD_MESSAGES)),
                             )
                             .child(
                                 Button::new("history-retry")
-                                    .label("Retry")
+                                    .label(tr(keys::Q_CHAT_RETRY))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.retry_history_load(cx);
@@ -750,8 +749,8 @@ impl QuillApp {
                         intro
                     } else {
                         pane_placeholder(
-                            "No messages yet",
-                            "History arrives via getChatHistory and updates.",
+                            tr(keys::Q_CHAT_NO_MESSAGES_YET),
+                            tr(keys::Q_CHAT_HISTORY_ARRIVES_VIA_GETCHATHISTORY_AND),
                             cx,
                         )
                         .into_any_element()

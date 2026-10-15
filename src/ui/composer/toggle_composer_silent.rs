@@ -1,6 +1,7 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 /// See [`QuillApp::send_options_state`].
 #[derive(Clone, Copy)]
@@ -111,8 +112,13 @@ impl QuillApp {
             && let Some(chat_id) = live.driver.session.open_chat
         {
             match live.driver.get_chat_scheduled_messages(chat_id) {
-                Ok(_) => self.connection.status_note = "loading scheduled messages…".into(),
-                Err(_) => self.connection.status_note = "could not load scheduled messages".into(),
+                Ok(_) => {
+                    self.connection.status_note = tr(keys::Q_CHAT_LOADING_SCHEDULED_MESSAGES).into()
+                }
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_CHAT_COULD_NOT_LOAD_SCHEDULED_MESSAGES).into()
+                }
             }
         }
         self.composer_ui.scheduled_dialog_open = true;
@@ -140,9 +146,12 @@ impl QuillApp {
                     .messages
                     .scheduled_messages
                     .retain(|m| m.id != message_id);
-                self.connection.status_note = "scheduled message deleted".into();
+                self.connection.status_note = tr(keys::Q_CHAT_SCHEDULED_MESSAGE_DELETED).into();
             }
-            Err(_) => self.connection.status_note = "could not delete scheduled message".into(),
+            Err(_) => {
+                self.connection.status_note =
+                    tr(keys::Q_CHAT_COULD_NOT_DELETE_SCHEDULED_MESSAGE).into()
+            }
         }
         cx.notify();
     }
@@ -158,8 +167,8 @@ impl QuillApp {
         Button::new("composer-format-menu")
             .icon(IconName::ALargeSmall)
             .ghost()
-            .tooltip("Formatting")
-            .accessibility_label("Formatting")
+            .tooltip(tr(keys::Q_CHAT_FORMATTING))
+            .accessibility_label(tr(keys::Q_CHAT_FORMATTING))
             .on_click(|event, window, cx| {
                 if matches!(event, ClickEvent::Keyboard(_)) {
                     window.dispatch_action(
@@ -174,35 +183,47 @@ impl QuillApp {
                 // format directly because focus is on the menu, not the
                 // composer, when it fires.
                 let entries: [(&str, FormatAction, Option<Box<dyn Action>>); 9] = [
-                    ("Bold", FormatAction::Bold, Some(Box::new(FormatBold))),
-                    ("Italic", FormatAction::Italic, Some(Box::new(FormatItalic))),
                     (
-                        "Underline",
+                        tr(keys::Q_CHAT_BOLD),
+                        FormatAction::Bold,
+                        Some(Box::new(FormatBold)),
+                    ),
+                    (
+                        tr(keys::Q_CHAT_ITALIC),
+                        FormatAction::Italic,
+                        Some(Box::new(FormatItalic)),
+                    ),
+                    (
+                        tr(keys::Q_CHAT_UNDERLINE),
                         FormatAction::Underline,
                         Some(Box::new(FormatUnderline)),
                     ),
                     (
-                        "Strikethrough",
+                        tr(keys::Q_CHAT_STRIKETHROUGH),
                         FormatAction::Strikethrough,
                         Some(Box::new(FormatStrikethrough)),
                     ),
                     (
-                        "Inline code",
+                        tr(keys::Q_CHAT_INLINE_CODE),
                         FormatAction::Code,
                         Some(Box::new(FormatMonospace)),
                     ),
-                    ("Code block", FormatAction::Pre, None),
+                    (tr(keys::Q_CHAT_CODE_BLOCK), FormatAction::Pre, None),
                     (
-                        "Spoiler",
+                        tr(keys::MENU_FORMATTING_SPOILER),
                         FormatAction::Spoiler,
                         Some(Box::new(FormatSpoiler)),
                     ),
                     (
-                        "Block quote",
+                        tr(keys::Q_CHAT_BLOCK_QUOTE),
                         FormatAction::BlockQuote,
                         Some(Box::new(FormatBlockQuote)),
                     ),
-                    ("Insert link", FormatAction::Link(String::new()), None),
+                    (
+                        tr(keys::Q_CHAT_INSERT_LINK),
+                        FormatAction::Link(String::new()),
+                        None,
+                    ),
                 ];
                 for (name, action, shortcut) in entries {
                     let owner = owner.clone();
@@ -226,7 +247,7 @@ impl QuillApp {
                 }
                 let owner = owner.clone();
                 menu.separator().item(
-                    PopupMenuItem::new("Clear formatting")
+                    PopupMenuItem::new(tr(keys::Q_CHAT_CLEAR_FORMATTING))
                         .action(Box::new(FormatClear))
                         .on_click(move |_, window, cx| {
                             let _ =
@@ -265,7 +286,7 @@ impl QuillApp {
         let schedule = owner.clone();
         let toggle_preview = owner;
         menu.item(
-            PopupMenuItem::new("Send without sound")
+            PopupMenuItem::new(tr(keys::SEND_SILENT_MESSAGE))
                 .checked(silent)
                 .on_click(move |_, _, cx| {
                     let _ = toggle_silent.update(cx, |this, cx| {
@@ -282,7 +303,7 @@ impl QuillApp {
             }),
         )
         .item(
-            PopupMenuItem::new("Link preview")
+            PopupMenuItem::new(tr(keys::Q_CHAT_LINK_PREVIEW))
                 .checked(!preview_off)
                 .on_click(move |_, _, cx| {
                     let _ = toggle_preview.update(cx, |this, cx| {
@@ -325,12 +346,12 @@ impl QuillApp {
         if self.composer_effective_silent() {
             any = true;
             row = row.child(
-                chip("chip-silent", "Silent".into(), cx).child(
+                chip("chip-silent", tr(keys::Q_CHAT_SILENT).into(), cx).child(
                     Button::new("chip-silent-clear")
                         .icon(gpui_kit::assets::IconName::X)
                         .xsmall()
                         .ghost()
-                        .accessibility_label("Send with sound")
+                        .accessibility_label(tr(keys::Q_CHAT_SEND_WITH_SOUND))
                         .on_click(cx.listener(|this, _, _, cx| {
                             if this.composer_effective_silent() {
                                 this.toggle_composer_silent();
@@ -345,12 +366,12 @@ impl QuillApp {
             ComposerScheduling::SendAtDate(date) => Some(format!(
                 "{} · {}",
                 match self.schedule_kind() {
-                    ScheduleKind::Reminder => "Reminder",
-                    ScheduleKind::Schedule => "Scheduled",
+                    ScheduleKind::Reminder => tr(keys::Q_CHAT_REMINDER),
+                    ScheduleKind::Schedule => tr(keys::Q_CHAT_SCHEDULED),
                 },
                 super::message_text::format_unix_date_time(date)
             )),
-            ComposerScheduling::SendWhenOnline => Some("When online".to_string()),
+            ComposerScheduling::SendWhenOnline => Some(tr(keys::Q_CHAT_WHEN_ONLINE).to_string()),
         };
         if let Some(label) = schedule_label {
             any = true;
@@ -370,7 +391,7 @@ impl QuillApp {
                             .icon(gpui_kit::assets::IconName::X)
                             .xsmall()
                             .ghost()
-                            .accessibility_label("Send now")
+                            .accessibility_label(tr(keys::CONTEXT_SEND_NOW_MSG))
                             .swallow_press()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.composer_ui.scheduling = ComposerScheduling::None;
@@ -382,12 +403,12 @@ impl QuillApp {
         if self.composer_ui.preview_disabled {
             any = true;
             row = row.child(
-                chip("chip-preview", "No link preview".into(), cx).child(
+                chip("chip-preview", tr(keys::Q_CHAT_NO_LINK_PREVIEW).into(), cx).child(
                     Button::new("chip-preview-clear")
                         .icon(gpui_kit::assets::IconName::X)
                         .xsmall()
                         .ghost()
-                        .accessibility_label("Show link preview")
+                        .accessibility_label(tr(keys::Q_CHAT_SHOW_LINK_PREVIEW))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.composer_ui.preview_disabled = false;
                             cx.notify();
@@ -406,7 +427,7 @@ impl QuillApp {
         {
             row = row.child(
                 Button::new("rich-editor-open")
-                    .label("⛶ Rich editor")
+                    .label(tr(keys::Q_CHAT_RICH_EDITOR))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         let premium = this
@@ -419,10 +440,10 @@ impl QuillApp {
                             this.composer_ui.rich_editor_open = true;
                             this.set_composer_markup(&markup, window, cx);
                             this.connection.status_note =
-                                "rich editor — markup becomes blocks".into();
+                                tr(keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS).into();
                         } else {
                             this.connection.status_note =
-                                "Rich messages require Telegram Premium".into();
+                                tr(keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM).into();
                         }
                         cx.notify();
                     })),
@@ -448,16 +469,16 @@ impl QuillApp {
     ) {
         let text = self.composer_markup(cx);
         if text.trim().is_empty() {
-            self.connection.status_note = "type something first — the AI works on the draft".into();
+            self.connection.status_note = tr(keys::Q_CHAT_TYPE_SOMETHING_FIRST_THE_AI).into();
         } else if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
             self.connection.status_note = match send(live, chat_id, &text) {
                 Ok(_) => working_note.into(),
-                Err(_) => "AI tools unavailable here".into(),
+                Err(_) => tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE).into(),
             };
         } else {
-            self.connection.status_note = "AI tools unavailable here".into();
+            self.connection.status_note = tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE).into();
         }
         cx.notify();
     }
@@ -476,10 +497,10 @@ impl QuillApp {
         for (id, label, template) in [
             ("rich-block-h1", "H1", "# "),
             ("rich-block-h2", "H2", "## "),
-            ("rich-block-list", "\u{2022} List", "- "),
-            ("rich-block-check", "\u{2611} Check", "[] "),
-            ("rich-block-details", "\u{25be} Details", ">> "),
-            ("rich-block-divider", "\u{2014} Divider", "---\n"),
+            ("rich-block-list", tr(keys::Q_CHAT_LIST), "- "),
+            ("rich-block-check", tr(keys::Q_CHAT_CHECK), "[] "),
+            ("rich-block-details", tr(keys::Q_CHAT_DETAILS), ">> "),
+            ("rich-block-divider", tr(keys::Q_CHAT_DIVIDER), "---\n"),
         ] {
             buttons = buttons.child(Button::new(id).label(label).ghost().on_click(cx.listener(
                 move |this, _, window, cx| {
@@ -504,31 +525,38 @@ impl QuillApp {
         // `composeRichMessageWithAi` on them; "Create" treats the
         // draft as the prompt for `createRichMessageWithAi` and the
         // created blocks replace the draft.
-        buttons = buttons.child(Button::new("rich-ai-fix").label("✨ Fix").ghost().on_click(
-            cx.listener(move |this, _, _, cx| {
-                this.run_ai_composer_action(cx, "AI fixing the text…", |live, chat_id, text| {
-                    live.driver.fix_text_with_ai(chat_id, text)
-                });
-            }),
-        ));
         buttons = buttons.child(
-            Button::new("rich-ai-rewrite")
-                .label("✨ Rewrite")
-                .ghost()
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.run_ai_composer_action(cx, "AI rewriting…", |live, chat_id, text| {
-                        live.driver.compose_text_with_ai(chat_id, text)
-                    });
-                })),
-        );
-        buttons = buttons.child(
-            Button::new("rich-ai-create")
-                .label("✨ Create")
+            Button::new("rich-ai-fix")
+                .label(tr(keys::Q_CHAT_FIX))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.run_ai_composer_action(
                         cx,
-                        "AI creating from the prompt…",
+                        tr(keys::Q_CHAT_AI_FIXING_THE_TEXT),
+                        |live, chat_id, text| live.driver.fix_text_with_ai(chat_id, text),
+                    );
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-rewrite")
+                .label(tr(keys::Q_CHAT_REWRITE))
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        tr(keys::Q_CHAT_AI_REWRITING),
+                        |live, chat_id, text| live.driver.compose_text_with_ai(chat_id, text),
+                    );
+                })),
+        );
+        buttons = buttons.child(
+            Button::new("rich-ai-create")
+                .label(tr(keys::Q_CHAT_CREATE))
+                .ghost()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_ai_composer_action(
+                        cx,
+                        tr(keys::Q_CHAT_AI_CREATING_FROM_THE_PROMPT),
                         |live, chat_id, text| {
                             live.driver.create_rich_message_with_ai(chat_id, text)
                         },
@@ -537,12 +565,12 @@ impl QuillApp {
         );
         buttons = buttons.child(
             Button::new("rich-ai-fix-rich")
-                .label("✨ Fix rich")
+                .label(tr(keys::Q_CHAT_FIX_RICH))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.run_ai_composer_action(
                         cx,
-                        "AI fixing the blocks…",
+                        tr(keys::Q_CHAT_AI_FIXING_THE_BLOCKS),
                         |live, chat_id, text| {
                             let blocks = quill::rich::preview_blocks(text);
                             live.driver.fix_rich_message_with_ai(chat_id, &blocks)
@@ -552,12 +580,12 @@ impl QuillApp {
         );
         buttons = buttons.child(
             Button::new("rich-ai-rewrite-rich")
-                .label("✨ Rewrite rich")
+                .label(tr(keys::Q_CHAT_REWRITE_RICH))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.run_ai_composer_action(
                         cx,
-                        "AI rewriting the blocks…",
+                        tr(keys::Q_CHAT_AI_REWRITING_THE_BLOCKS),
                         |live, chat_id, text| {
                             let blocks = quill::rich::preview_blocks(text);
                             live.driver.compose_rich_message_with_ai(chat_id, &blocks)
@@ -681,11 +709,11 @@ impl QuillApp {
     pub(in crate::ui) fn unpin_all_messages(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.unpin_all_chat_messages(chat_id) {
-                Ok(_) => "unpinning all…".into(),
-                Err(_) => "could not unpin all".into(),
+                Ok(_) => tr(keys::Q_CHAT_UNPINNING_ALL).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_UNPIN_ALL).into(),
             };
         } else {
-            self.connection.status_note = "no live connection".into();
+            self.connection.status_note = tr(keys::Q_CHAT_NO_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -704,11 +732,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note =
                 match live.driver.resend_failed_message(chat_id, message_id) {
-                    Ok(_) => self.send_started_note(ComposerScheduling::None, "retrying send…"),
-                    Err(_) => "could not retry".into(),
+                    Ok(_) => self.send_started_note(
+                        ComposerScheduling::None,
+                        tr(keys::Q_CHAT_RETRYING_SEND),
+                    ),
+                    Err(_) => tr(keys::Q_CHAT_COULD_NOT_RETRY).into(),
                 };
         } else {
-            self.connection.status_note = "no live connection".into();
+            self.connection.status_note = tr(keys::Q_CHAT_NO_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -725,11 +756,11 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.get_message_link(chat_id, message_id) {
-                Ok(_) => "fetching message link…".into(),
-                Err(_) => "could not get message link".into(),
+                Ok(_) => tr(keys::Q_CHAT_FETCHING_MESSAGE_LINK).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_GET_MESSAGE_LINK).into(),
             };
         } else {
-            self.connection.status_note = "no live connection".into();
+            self.connection.status_note = tr(keys::Q_CHAT_NO_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -737,239 +768,9 @@ impl QuillApp {
     /// Phase B3: label for the picker button (`⏱` cycle affordance).
     pub(in crate::ui) fn self_destruct_button_label(&self) -> String {
         match self.composer_ui.self_destruct {
-            None => "Off".to_string(),
+            None => tr(keys::Q_CHAT_OFF).to_string(),
             Some(SelfDestructSend::Timer(secs)) => format!("{secs}s"),
-            Some(SelfDestructSend::Immediately) => "View once".to_string(),
+            Some(SelfDestructSend::Immediately) => tr(keys::Q_CHAT_VIEW_ONCE).to_string(),
         }
-    }
-
-    /// Phase 3.3: recompute the `/` command menu from the composer text.
-    /// Called on every composer event (`Change` path) and after
-    /// programmatic `set_value` writes, which suppress `Change`. Opens
-    /// when the text ends with a `/`-led token at a word boundary and the
-    /// open chat's bot has commands; closes otherwise (non-bot chat, no
-    /// commands, invalid trigger, empty composer).
-    pub(in crate::ui) fn sync_command_menu(&mut self, cx: &mut Context<Self>) {
-        let text = self.composer.read(cx).value().to_string();
-        // Bots slice: the `@bot` inline trigger owns the composer start —
-        // the `/` menu never competes with the inline-results dropdown.
-        let inline_active = quill::composer::inline_query_trigger(&text).is_some();
-        let triggered = command_menu_trigger(&text).is_some() && !inline_active;
-        let open_chat = self.session().and_then(|session| session.open_chat);
-        if triggered {
-            self.load_quick_replies_for_menu();
-        }
-        let has_items = open_chat.is_some_and(|chat_id| {
-            self.session()
-                .map(|session| !session.command_menu_items(chat_id).is_empty())
-                .unwrap_or(false)
-        });
-        let open = triggered && has_items;
-        if open == self.composer_ui.command_menu_open {
-            return;
-        }
-        self.composer_ui.command_menu_open = open;
-        // tdesktop starts below the "Edit Quick Replies" row.
-        self.composer_ui.command_menu_selected =
-            self.command_menu_state(cx).map_or(0, |(_, items)| {
-                usize::from(
-                    items
-                        .first()
-                        .is_some_and(|i| i.quick_reply == Some(quill::quick_replies::EDIT_ROW)),
-                )
-            });
-        cx.notify();
-    }
-
-    /// Phase 3.3: Esc / blur / selection / chat-switch dismissal. Returns
-    /// true when the menu was open (the key interceptor swallows the
-    /// keystroke only then).
-    pub(in crate::ui) fn close_command_menu(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.composer_ui.command_menu_open {
-            return false;
-        }
-        self.composer_ui.command_menu_open = false;
-        self.composer_ui.command_menu_selected = 0;
-        cx.notify();
-        true
-    }
-
-    /// Phase 3.3: Up/Down highlight. Returns true when the menu consumed
-    /// the key (open with rows to move between); the selection wraps.
-    pub(in crate::ui) fn step_command_menu(&mut self, delta: i32, cx: &mut Context<Self>) -> bool {
-        let rows = self
-            .command_menu_state(cx)
-            .map(|(_, items)| items.len())
-            .unwrap_or(0);
-        if !self.composer_ui.command_menu_open || rows == 0 {
-            return false;
-        }
-        self.composer_ui.command_menu_selected = (self.composer_ui.command_menu_selected as i32
-            + delta)
-            .rem_euclid(rows as i32) as usize;
-        cx.notify();
-        true
-    }
-
-    /// Phase 3.3: current menu rows — (typed prefix, prefix-filtered
-    /// items). `None` when the menu is closed, the composer has no `/`
-    /// trigger, the open chat's bot has no commands, or nothing matches.
-    pub(in crate::ui) fn command_menu_state(
-        &self,
-        cx: &Context<Self>,
-    ) -> Option<(String, Vec<CommandMenuItem>)> {
-        if !self.composer_ui.command_menu_open {
-            return None;
-        }
-        let text = self.composer.read(cx).value().to_string();
-        let prefix = command_menu_trigger(&text)?;
-        let chat_id = self.session()?.open_chat?;
-        let items = self.session()?.command_menu_items(chat_id);
-        if items.is_empty() {
-            return None;
-        }
-        let filtered: Vec<CommandMenuItem> = filter_command_menu_items(&items, prefix)
-            .into_iter()
-            .cloned()
-            .collect();
-        if filtered.is_empty() {
-            return None;
-        }
-        Some((
-            prefix.to_string(),
-            quill::quick_replies::with_edit_row(filtered),
-        ))
-    }
-
-    /// Phase 3.3: Enter with the menu open picks the highlighted row.
-    /// Returns true when Enter was consumed.
-    pub(in crate::ui) fn pick_command_menu_selection(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let items = self
-            .command_menu_state(cx)
-            .map(|(_, items)| items)
-            .unwrap_or_default();
-        if !self.composer_ui.command_menu_open || items.is_empty() {
-            return false;
-        }
-        let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
-        self.pick_command_menu_index(index, window, cx);
-        true
-    }
-
-    /// Phase 3.3: tap / Enter pick. The partial `/`-token is replaced via
-    /// the 3.1 insert helper, then the menu closes (the next `Change`
-    /// reopens it if a trigger token remains).
-    pub(in crate::ui) fn pick_command_menu_index(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let items = self
-            .command_menu_state(cx)
-            .map(|(_, items)| items)
-            .unwrap_or_default();
-        let Some(item) = items.get(index) else {
-            return;
-        };
-        if let Some(shortcut_id) = item.quick_reply {
-            self.send_quick_reply_row(shortcut_id, window, cx);
-            return;
-        }
-        self.insert_command_menu_index(index, window, cx);
-    }
-
-    /// Tab: put the highlighted command in the composer instead of sending
-    /// it (tdesktop `ByTab`). The "Edit Quick Replies" row still opens the
-    /// settings. Returns true when Tab was consumed.
-    pub(in crate::ui) fn insert_command_menu_selection(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let items = self
-            .command_menu_state(cx)
-            .map(|(_, items)| items)
-            .unwrap_or_default();
-        if !self.composer_ui.command_menu_open || items.is_empty() {
-            return false;
-        }
-        let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
-        let Some(item) = items.get(index) else {
-            return false;
-        };
-        match item.quick_reply {
-            Some(quill::quick_replies::EDIT_ROW) => {
-                self.send_quick_reply_row(quill::quick_replies::EDIT_ROW, window, cx)
-            }
-            _ => self.insert_command_menu_index(index, window, cx),
-        }
-        true
-    }
-
-    fn insert_command_menu_index(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let items = self
-            .command_menu_state(cx)
-            .map(|(_, items)| items)
-            .unwrap_or_default();
-        let Some(item) = items.get(index) else {
-            return;
-        };
-        let command = item.command.clone();
-        let current = self.composer_markup(cx);
-        let base = strip_command_menu_trigger(&current).unwrap_or(current.as_str());
-        // Trailing space (tdesktop behavior): without it, the `/`-token
-        // trigger still matches `/command`, the menu reopens on the next
-        // Enter and consumes it in a no-op loop — Enter could never send.
-        let next = format!(
-            "{} ",
-            quill::composer::insert_bot_command_text(base, &command).trim_end()
-        );
-        self.set_composer_markup(&next, window, cx);
-        self.composer.update(cx, |input, cx| {
-            let end = input.value().len();
-            input.set_selected_range(end..end, cx);
-        });
-        self.close_command_menu(cx);
-    }
-
-    /// A clicked command is sent at once (Telegram Desktop's bot command
-    /// list): the composer's `/`-token is dropped, any other text stays.
-    pub(in crate::ui) fn send_command_menu_index(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let items = self
-            .command_menu_state(cx)
-            .map(|(_, items)| items)
-            .unwrap_or_default();
-        let Some(item) = items.get(index) else {
-            return;
-        };
-        if let Some(shortcut_id) = item.quick_reply {
-            self.send_quick_reply_row(shortcut_id, window, cx);
-            return;
-        }
-        let command = format!("/{}", item.command.trim_start_matches('/'));
-        let current = self.composer_markup(cx);
-        let rest = strip_command_menu_trigger(&current)
-            .unwrap_or(current.as_str())
-            .to_string();
-        self.close_command_menu(cx);
-        self.set_composer_markup(rest.trim_end(), window, cx);
-        self.composer
-            .update(cx, |input, cx| input.focus(window, cx));
-        self.submit_composer(command, window, cx);
     }
 }

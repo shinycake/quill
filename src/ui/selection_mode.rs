@@ -12,6 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::effective_content;
 
 /// A history row's selection-mode decoration (see
@@ -205,7 +206,10 @@ impl QuillApp {
             .border_color(cx.theme().border)
             .child(
                 Button::new("selection-forward")
-                    .label(format!("Forward {count}"))
+                    .label(tr_with(
+                        keys::Q_CHAT_FORWARD_2,
+                        &[("count", &count.to_string())],
+                    ))
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_forward_picker(window, cx);
@@ -213,7 +217,10 @@ impl QuillApp {
             )
             .child(
                 Button::new("selection-delete")
-                    .label(format!("Delete {count}"))
+                    .label(tr_with(
+                        keys::Q_CHAT_DELETE,
+                        &[("count", &count.to_string())],
+                    ))
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.confirm_delete_selection(window, cx);
@@ -221,9 +228,9 @@ impl QuillApp {
             )
             .child(
                 Button::new("selection-copy")
-                    .label("Copy as Text")
+                    .label(tr(keys::Q_CHAT_COPY_AS_TEXT))
                     .ghost()
-                    .tooltip("Copy Selected as Text")
+                    .tooltip(tr(keys::CONTEXT_COPY_SELECTED_ITEMS))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.copy_selection_text(cx);
                     })),
@@ -231,9 +238,9 @@ impl QuillApp {
             .when(!self.selection_missing_files(chat_id).is_empty(), |bar| {
                 bar.child(
                     Button::new("selection-download")
-                        .label("Download")
+                        .label(tr(keys::Q_CHAT_DOWNLOAD))
                         .ghost()
-                        .tooltip("Download Selected")
+                        .tooltip(tr(keys::Q_CHAT_DOWNLOAD_SELECTED))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.download_selection(cx);
                         })),
@@ -242,9 +249,9 @@ impl QuillApp {
             .when(self.selection_has_media(chat_id), |bar| {
                 bar.child(
                     Button::new("selection-save")
-                        .label("Save")
+                        .label(tr(keys::SETTINGS_SAVE))
                         .ghost()
-                        .tooltip("Save Selected")
+                        .tooltip(tr(keys::Q_CHAT_SAVE_SELECTED))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.save_selection(cx);
                         })),
@@ -253,9 +260,9 @@ impl QuillApp {
             .when(self.selection_unpinnable(chat_id), |bar| {
                 bar.child(
                     Button::new("selection-unpin")
-                        .label("Unpin")
+                        .label(tr(keys::CONTEXT_UNPIN_FROM_TOP))
                         .ghost()
-                        .tooltip("Unpin Selected")
+                        .tooltip(tr(keys::Q_CHAT_UNPIN_SELECTED))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             if let Some(draft) = this.share.pending_forward.clone() {
                                 this.confirm_unpin(
@@ -271,7 +278,10 @@ impl QuillApp {
             .when(self.selection_reportable(chat_id), |bar| {
                 bar.child(
                     Button::new("selection-report")
-                        .label(format!("Report {count}"))
+                        .label(tr_with(
+                            keys::Q_CHAT_REPORT_2,
+                            &[("count", &count.to_string())],
+                        ))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.report_selection(window, cx);
@@ -281,7 +291,7 @@ impl QuillApp {
             .child(div().flex_1())
             .child(
                 Button::new("selection-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.clear_forward(window, cx);
@@ -442,8 +452,8 @@ impl QuillApp {
             let _ = live.driver.ensure_media_files(&missing);
         }
         self.connection.status_note = match missing.len() {
-            1 => "downloading 1 file…".into(),
-            n => format!("downloading {n} files…"),
+            1 => tr(keys::Q_CHAT_DOWNLOADING_1_FILE).into(),
+            n => tr_with(keys::Q_CHAT_DOWNLOADING_FILES, &[("n", &n.to_string())]),
         };
         cx.notify();
     }
@@ -483,7 +493,8 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&missing);
             }
-            self.connection.status_note = "downloading… choose Save again when it finishes".into();
+            self.connection.status_note =
+                tr(keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AGAIN_WHEN).into();
             cx.notify();
             return;
         }
@@ -491,7 +502,7 @@ impl QuillApp {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Save".into()),
+            prompt: Some(tr(keys::SETTINGS_SAVE).into()),
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dirs))) = picker.await else {
@@ -516,8 +527,8 @@ impl QuillApp {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.connection.status_note = match saved {
-                    1 => "saved 1 file".into(),
-                    n => format!("saved {n} files"),
+                    1 => tr(keys::Q_CHAT_SAVED_1_FILE).into(),
+                    n => tr_with(keys::Q_CHAT_SAVED_FILES, &[("n", &n.to_string())]),
                 };
                 cx.notify();
             });
@@ -631,12 +642,12 @@ impl QuillApp {
                 Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
                     .user(user_id.0)
                     .map(|user| format!("Also delete for {}", user.first_name))
-                    .unwrap_or_else(|| "Delete for everyone".into()),
-                _ => "Delete for everyone".into(),
+                    .unwrap_or_else(|| tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into()),
+                _ => tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into(),
             }
         });
         let question = if ids.len() == 1 {
-            "Do you want to delete this message?".to_string()
+            tr(keys::SELECTED_DELETE_SURE_THIS).to_string()
         } else {
             format!("Do you want to delete {} messages?", ids.len())
         };
@@ -662,8 +673,8 @@ impl QuillApp {
                         )
                     })
                 })
-                .ok_text("Delete")
-                .cancel_text("Cancel")
+                .ok_text(tr(keys::BOX_DELETE))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let revoke = revoke.get();
@@ -686,7 +697,7 @@ impl QuillApp {
         self.begin_vanish(chat_id, ids);
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
-                self.connection.status_note = "could not delete messages".into();
+                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES).into();
             }
         } else if self.demo_session.is_some() {
             for id in ids {
@@ -730,8 +741,8 @@ impl QuillApp {
                 Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
                     .and_then(|s| s.user(user_id.0))
                     .map(|user| format!("Also delete for {}", user.first_name))
-                    .unwrap_or_else(|| "Delete for everyone".into()),
-                _ => "Delete for everyone".into(),
+                    .unwrap_or_else(|| tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into()),
+                _ => tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into(),
             }
         });
         let revoke = std::rc::Rc::new(std::cell::Cell::new(confirm.revoke));
@@ -747,7 +758,7 @@ impl QuillApp {
             let on_ok_choice = choice.clone();
             let on_ok_offer = moderation.clone();
             alert
-                .description("Do you want to delete this message?")
+                .description(tr(keys::SELECTED_DELETE_SURE_THIS))
                 .when(label.is_some() || moderation_offer.is_some(), |alert| {
                     let label = label.clone();
                     alert.content(move |content, _, _| {
@@ -775,21 +786,24 @@ impl QuillApp {
                             let rows: [(&'static str, String, bool, Get, Set); 3] = [
                                 (
                                     "delete-moderate-spam",
-                                    "Report Spam".to_string(),
+                                    tr(keys::Q_CHAT_REPORT_SPAM_2).to_string(),
                                     offer.options.report_spam,
                                     |c| c.report_spam,
                                     |c, v| c.report_spam = v,
                                 ),
                                 (
                                     "delete-moderate-all",
-                                    format!("Delete all from {name}"),
+                                    tr_with(
+                                        keys::DELETE_ALL_FROM_USER,
+                                        &[("user", &name.to_string())],
+                                    ),
                                     offer.options.delete_all,
                                     |c| c.delete_all,
                                     |c, v| c.delete_all = v,
                                 ),
                                 (
                                     "delete-moderate-ban",
-                                    format!("Ban {name}"),
+                                    tr_with(keys::Q_CHAT_BAN, &[("name", &name.to_string())]),
                                     offer.options.ban_or_restrict,
                                     |c| c.ban,
                                     |c, v| c.ban = v,
@@ -821,7 +835,7 @@ impl QuillApp {
                                     gpui_kit::component::checkbox::Checkbox::new(
                                         "delete-moderate-restrict",
                                     )
-                                    .label("Only restrict: they stay and can read, nothing else")
+                                    .label(tr(keys::Q_CHAT_ONLY_RESTRICT_THEY_STAY_AND))
                                     .checked(state.get().restrict_instead)
                                     .on_click(
                                         move |checked, window, _| {
@@ -837,8 +851,8 @@ impl QuillApp {
                         content
                     })
                 })
-                .ok_text("Delete")
-                .cancel_text("Cancel")
+                .ok_text(tr(keys::BOX_DELETE))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let mut confirm = confirm.clone();

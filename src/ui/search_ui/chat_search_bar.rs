@@ -1,6 +1,7 @@
 //! Methods moved out of `search_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(in crate::ui) fn chat_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -47,22 +48,36 @@ impl QuillApp {
         let subject = if !query.is_empty() {
             format!("“{query}”")
         } else if let Some(name) = &sender_label {
-            format!("messages from {name}")
+            tr_with(keys::Q_CHAT_MESSAGES_FROM, &[("name", &name.to_string())])
         } else {
             media.label().to_lowercase()
         };
         let caption = match status {
-            SearchStatus::Idle => "Type to search this chat.".to_string(),
-            SearchStatus::Searching => format!("Searching {subject}…"),
+            SearchStatus::Idle => tr(keys::Q_CHAT_TYPE_TO_SEARCH_THIS_CHAT).to_string(),
+            SearchStatus::Searching => {
+                tr_with(keys::Q_CHAT_SEARCHING, &[("subject", &subject.to_string())])
+            }
             SearchStatus::Ready => {
                 if jump_note.is_empty() {
-                    format!("Results for {subject}")
+                    tr_with(
+                        keys::Q_CHAT_RESULTS_FOR,
+                        &[("subject", &subject.to_string())],
+                    )
                 } else {
-                    format!("Results for {subject} · {jump_note}")
+                    tr_with(
+                        keys::Q_CHAT_RESULTS_FOR_2,
+                        &[
+                            ("subject", &subject.to_string()),
+                            ("jump_note", &jump_note.to_string()),
+                        ],
+                    )
                 }
             }
-            SearchStatus::Empty => format!("No messages match {subject}."),
-            SearchStatus::Failed => "Search in chat failed.".to_string(),
+            SearchStatus::Empty => tr_with(
+                keys::Q_CHAT_NO_MESSAGES_MATCH,
+                &[("subject", &subject.to_string())],
+            ),
+            SearchStatus::Failed => tr(keys::Q_CHAT_SEARCH_IN_CHAT_FAILED).to_string(),
             SearchStatus::Closed => String::new(),
         };
         let picker_open = picker.is_some();
@@ -74,7 +89,7 @@ impl QuillApp {
             tag_chips.push(
                 Self::filter_chip(
                     "chat-search-scope-chat",
-                    "This chat",
+                    tr(keys::SEARCH_TAB_THIS_CHAT),
                     true,
                     |_, _, _| {},
                     cx,
@@ -127,9 +142,9 @@ impl QuillApp {
                         div().id("chat-search-field").flex_1().child(
                             Textarea::new(&self.search_ui.chat_input)
                                 .aria_label(if picker_open {
-                                    "Search members"
+                                    tr(keys::Q_CHAT_SEARCH_MEMBERS)
                                 } else {
-                                    "Search this conversation"
+                                    tr(keys::Q_CHAT_SEARCH_THIS_CONVERSATION)
                                 })
                                 .h(px(36.)),
                         ),
@@ -147,8 +162,8 @@ impl QuillApp {
                         Button::new("chat-search-older")
                             .icon(gpui_kit::assets::IconName::ChevronUp)
                             .ghost()
-                            .tooltip("Older match")
-                            .accessibility_label("Older match")
+                            .tooltip(tr(keys::Q_CHAT_OLDER_MATCH))
+                            .accessibility_label(tr(keys::Q_CHAT_OLDER_MATCH))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.chat_search_older(cx);
                             })),
@@ -157,8 +172,8 @@ impl QuillApp {
                         Button::new("chat-search-newer")
                             .icon(gpui_kit::assets::IconName::ChevronDown)
                             .ghost()
-                            .tooltip("Newer match")
-                            .accessibility_label("Newer match")
+                            .tooltip(tr(keys::Q_CHAT_NEWER_MATCH))
+                            .accessibility_label(tr(keys::Q_CHAT_NEWER_MATCH))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.chat_search_newer(cx);
                             })),
@@ -167,8 +182,8 @@ impl QuillApp {
                         Button::new("chat-search-calendar")
                             .icon(gpui_kit::assets::IconName::Calendar)
                             .ghost()
-                            .tooltip("Jump to date")
-                            .accessibility_label("Jump to date")
+                            .tooltip(tr(keys::Q_CHAT_JUMP_TO_DATE))
+                            .accessibility_label(tr(keys::Q_CHAT_JUMP_TO_DATE))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_jump_date_ui(cx);
                             })),
@@ -176,8 +191,8 @@ impl QuillApp {
                     .child(
                         Button::new("chat-search-close")
                             .icon(gpui_kit::assets::IconName::X)
-                            .tooltip("Close search")
-                            .accessibility_label("Close search")
+                            .tooltip(tr(keys::Q_CHAT_CLOSE_SEARCH))
+                            .accessibility_label(tr(keys::Q_CHAT_CLOSE_SEARCH))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_chat_search_ui(window, cx);
@@ -193,9 +208,10 @@ impl QuillApp {
                     .items_center()
                     .gap_1()
                     .when(can_pick, |this| {
-                        let label = sender_label
-                            .as_ref()
-                            .map_or_else(|| "From…".to_string(), |name| format!("From: {name}"));
+                        let label = sender_label.as_ref().map_or_else(
+                            || tr(keys::Q_CHAT_FROM).to_string(),
+                            |name| tr_with(keys::DLG_SEARCH_FROM, &[("user", &name.to_string())]),
+                        );
                         this.child(Self::filter_chip(
                             "chat-search-from",
                             &label,
@@ -243,16 +259,16 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.set_search_query(query) {
                 Ok(SearchQueryOutcome::Sent(_)) => {
-                    self.connection.status_note = "searching…".into()
+                    self.connection.status_note = tr(keys::Q_CHAT_SEARCHING_2).into()
                 }
                 Ok(SearchQueryOutcome::Debounced { token }) => {
                     self.schedule_search_commit(token, cx);
                 }
                 Ok(SearchQueryOutcome::Unchanged) if query.trim().is_empty() => {
-                    self.connection.status_note = "search chats and messages".into();
+                    self.connection.status_note = tr(keys::Q_CHAT_SEARCH_CHATS_AND_MESSAGES).into();
                 }
                 Ok(SearchQueryOutcome::Unchanged) => {}
-                Err(_) => self.connection.status_note = "could not search".into(),
+                Err(_) => self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEARCH).into(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
@@ -274,9 +290,13 @@ impl QuillApp {
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
                     match live.driver.commit_debounced_search(token) {
-                        Ok(Some(_)) => this.connection.status_note = "searching…".into(),
+                        Ok(Some(_)) => {
+                            this.connection.status_note = tr(keys::Q_CHAT_SEARCHING_2).into()
+                        }
                         Ok(None) => {}
-                        Err(_) => this.connection.status_note = "could not search".into(),
+                        Err(_) => {
+                            this.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEARCH).into()
+                        }
                     }
                 }
                 cx.notify();
@@ -321,8 +341,8 @@ impl QuillApp {
                 .driver
                 .select_search_chat(chat_id, &text, reply, now_ms)
             {
-                Ok(_) => "chat selected".into(),
-                Err(_) => "could not open chat".into(),
+                Ok(_) => tr(keys::Q_CHAT_CHAT_SELECTED).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_OPEN_CHAT).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(prev) = session.open_chat
@@ -341,7 +361,7 @@ impl QuillApp {
             }
             session.close_search();
             session.open_chat(chat_id);
-            self.connection.status_note = "chat selected".into();
+            self.connection.status_note = tr(keys::Q_CHAT_CHAT_SELECTED).into();
         }
         self.dismiss_cross_chat_state(chat_id, cx);
         self.restore_open_draft(window, cx);
@@ -364,8 +384,8 @@ impl QuillApp {
                 .driver
                 .select_search_message(chat_id, message_id, &text, reply, now_ms)
             {
-                Ok(_) => "opened chat".into(),
-                Err(_) => "could not open chat".into(),
+                Ok(_) => tr(keys::Q_CHAT_OPENED_CHAT).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_OPEN_CHAT).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some(prev) = session.open_chat
@@ -385,7 +405,7 @@ impl QuillApp {
             session.promote_search_message(chat_id, message_id);
             session.close_search();
             session.open_chat(chat_id);
-            self.connection.status_note = "opened chat".into();
+            self.connection.status_note = tr(keys::Q_CHAT_OPENED_CHAT).into();
         }
         self.dismiss_cross_chat_state(chat_id, cx);
         self.restore_open_draft(window, cx);
@@ -416,7 +436,7 @@ impl QuillApp {
                     }))
                     .child(
                         Textarea::new(&self.search_ui.input)
-                            .aria_label("Search")
+                            .aria_label(tr(keys::Q_CHAT_SEARCH))
                             .h(px(40.)),
                     ),
             )
@@ -427,8 +447,8 @@ impl QuillApp {
                         .icon(gpui_kit::assets::IconName::X)
                         .ghost()
                         .small()
-                        .tooltip("Close search")
-                        .accessibility_label("Close search")
+                        .tooltip(tr(keys::Q_CHAT_CLOSE_SEARCH))
+                        .accessibility_label(tr(keys::Q_CHAT_CLOSE_SEARCH))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.cancel_search(window, cx);
                         })),
@@ -468,9 +488,9 @@ impl QuillApp {
             .w_full()
             .gap_1();
         let all_label = if selected.is_none() {
-            "✓ All chats"
+            tr(keys::Q_CHAT_ALL_CHATS)
         } else {
-            "All chats"
+            tr(keys::SEARCH_FILTER_ALL)
         };
         chips = chips.child(
             Button::new("search-community-filter-all")
@@ -517,7 +537,7 @@ impl QuillApp {
             scopes.push(
                 Self::filter_chip(
                     "search-scope-this-chat",
-                    "This chat",
+                    tr(keys::SEARCH_TAB_THIS_CHAT),
                     false,
                     move |this, window, cx| this.search_query_in_this_chat(&query, window, cx),
                     cx,
@@ -554,7 +574,7 @@ impl QuillApp {
         types.push(
             Self::filter_chip(
                 "search-filter-archived",
-                "From archive",
+                tr(keys::SEARCH_FILTER_FROM_ARCHIVE),
                 filters.archived,
                 move |this, _, cx| {
                     let mut next = this
@@ -624,11 +644,11 @@ impl QuillApp {
                 .gap_1()
                 .child(strip)
                 .when(!scopes.is_empty(), |this| {
-                    this.child(group("Search", scopes))
+                    this.child(group(tr(keys::Q_CHAT_SEARCH), scopes))
                 })
                 .when(narrowing, |this| {
-                    this.child(group("Chats", types))
-                        .child(group("Date", dates))
+                    this.child(group(tr(keys::RECENT_CHATS), types))
+                        .child(group(tr(keys::Q_CHAT_DATE), dates))
                 })
                 .into_any_element(),
         )
@@ -716,13 +736,18 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_xs().font_semibold().child("Frequent contacts"))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child(tr(keys::Q_CHAT_FREQUENT_CONTACTS)),
+            )
             .child(strip);
         if let Some(target) = menu {
-            let name = session
-                .chats
-                .get(&target.0)
-                .map_or_else(|| "this contact".to_string(), |chat| chat.title.clone());
+            let name = session.chats.get(&target.0).map_or_else(
+                || tr(keys::Q_CHAT_THIS_CONTACT).to_string(),
+                |chat| chat.title.clone(),
+            );
             block = block.child(
                 div()
                     .id("search-frequent-menu")
@@ -732,7 +757,10 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         Button::new("search-frequent-remove")
-                            .label(format!("Remove {name} from Recent"))
+                            .label(tr_with(
+                                keys::Q_CHAT_REMOVE_FROM_RECENT,
+                                &[("name", &name.to_string())],
+                            ))
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -741,7 +769,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("search-frequent-disable")
-                            .label("Remove all & Disable")
+                            .label(tr(keys::Q_CHAT_REMOVE_ALL_DISABLE))
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -754,7 +782,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("search-frequent-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -779,18 +807,22 @@ impl QuillApp {
             .map_or(0, |limits| limits.star_count);
         let (text, action): (String, String) = match confirm {
             SearchConfirm::PaidPostSearch => (
-                format!(
-                    "Search public posts for \u{2605}{paid_price}? The Stars are spent on this one search."
+                tr_with(
+                    keys::Q_CHAT_SEARCH_PUBLIC_POSTS_FOR_THE,
+                    &[("paid_price", &paid_price.to_string())],
                 ),
-                format!("Search for \u{2605}{paid_price}"),
+                tr_with(
+                    keys::Q_CHAT_SEARCH_FOR,
+                    &[("paid_price", &paid_price.to_string())],
+                ),
             ),
             SearchConfirm::ClearRecents => (
-                "Do you want to clear your search history?".into(),
-                "Clear all".into(),
+                tr(keys::RECENT_CLEAR_SURE).into(),
+                tr(keys::Q_CHAT_CLEAR_ALL).into(),
             ),
             SearchConfirm::DisableTopChats => (
-                "Clear and disable the frequent contacts list? You can turn it back on in Settings > Privacy > Suggest frequent contacts.".into(),
-                "Hide".into(),
+                tr(keys::Q_CHAT_CLEAR_AND_DISABLE_THE_FREQUENT).into(),
+                tr(keys::Q_CHAT_HIDE).into(),
             ),
         };
         div()
@@ -819,7 +851,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("search-confirm-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .small()
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {

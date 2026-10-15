@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, trn};
 
 impl QuillApp {
     pub(in crate::ui) fn unpin_from_banner(
@@ -12,8 +13,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.unpin_chat_message(chat_id, message_id);
             self.connection.status_note = match result {
-                Ok(_) => "unpinning…".into(),
-                Err(_) => "could not unpin".into(),
+                Ok(_) => tr(keys::Q_CHAT_UNPINNING).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_UNPIN).into(),
             };
             cx.notify();
             return;
@@ -62,9 +63,9 @@ impl QuillApp {
         let message_id = item.id;
         let preview = effective_preview(item);
         let title = if index == 0 {
-            "Pinned message".to_string()
+            tr(keys::PINNED_MESSAGE).to_string()
         } else if count == 2 {
-            "Previous message".to_string()
+            tr(keys::Q_CHAT_PREVIOUS_MESSAGE).to_string()
         } else {
             format!("Pinned message #{}", count - index)
         };
@@ -93,11 +94,15 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::X)
                 .ghost()
                 .small()
-                .tooltip(if can_pin { "Unpin" } else { "Hide" })
-                .accessibility_label(if can_pin {
-                    "Unpin message"
+                .tooltip(if can_pin {
+                    tr(keys::CONTEXT_UNPIN_FROM_TOP)
                 } else {
-                    "Hide pinned message"
+                    tr(keys::Q_CHAT_HIDE)
+                })
+                .accessibility_label(if can_pin {
+                    tr(keys::Q_CHAT_UNPIN_MESSAGE)
+                } else {
+                    tr(keys::Q_CHAT_HIDE_PINNED_MESSAGE)
                 })
                 .on_click(cx.listener(move |_, _, window, cx| {
                     let app = cx.entity().downgrade();
@@ -105,8 +110,8 @@ impl QuillApp {
                         confirm(
                             window,
                             cx,
-                            "Would you like to unpin this message?",
-                            "Unpin",
+                            tr(keys::PINNED_UNPIN_SURE),
+                            tr(keys::CONTEXT_UNPIN_FROM_TOP),
                             move |cx| {
                                 let _ = app.update(cx, |this, cx| {
                                     this.unpin_from_banner(chat_id, message_id, cx);
@@ -123,8 +128,8 @@ impl QuillApp {
                 .ghost()
                 .small()
                 .selected(self.history.pinned_list_open)
-                .tooltip("Pinned messages")
-                .accessibility_label("Pinned messages")
+                .tooltip(tr(keys::Q_CHAT_PINNED_MESSAGES))
+                .accessibility_label(tr(keys::Q_CHAT_PINNED_MESSAGES))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.history.pinned_list_open = !this.history.pinned_list_open;
                     cx.notify();
@@ -150,7 +155,7 @@ impl QuillApp {
                         .min_w_0()
                         .flex_1()
                         .role(gpui_kit::Role::Button)
-                        .aria_label("Go to pinned message")
+                        .aria_label(tr(keys::Q_CHAT_GO_TO_PINNED_MESSAGE))
                         .tab_index(0)
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -255,7 +260,7 @@ impl QuillApp {
             row.context_menu(move |menu, _, _| {
                 let owner = owner.clone();
                 menu.item(
-                    gpui_kit::component::menu::PopupMenuItem::new("Go To Message")
+                    gpui_kit::component::menu::PopupMenuItem::new(tr(keys::Q_CHAT_GO_TO_MESSAGE))
                         .icon(gpui_kit::assets::IconName::MessageSquare)
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
@@ -272,11 +277,7 @@ impl QuillApp {
         let noun = if count == 1 { "message" } else { "messages" };
         let footer = if can_pin {
             Button::new("pinned-list-unpin-all")
-                .label(if count == 1 {
-                    "Unpin 1 message".to_string()
-                } else {
-                    format!("Unpin all {count} messages")
-                })
+                .label(trn(keys::PINNED_UNPIN_ALL, count))
                 .ghost()
                 .on_click(cx.listener(move |_, _, window, cx| {
                     let app = cx.entity().downgrade();
@@ -284,7 +285,7 @@ impl QuillApp {
                         window,
                         cx,
                         quill::selection_pin::UNPIN_ALL_QUESTION,
-                        "Unpin",
+                        tr(keys::CONTEXT_UNPIN_FROM_TOP),
                         move |cx| {
                             let _ = app.update(cx, |this, cx| {
                                 this.history.pinned_list_open = false;
@@ -295,7 +296,7 @@ impl QuillApp {
                 }))
         } else {
             Button::new("pinned-list-hide")
-                .label("Don't show pinned messages")
+                .label(tr(keys::PINNED_HIDE_ALL))
                 .ghost()
                 .on_click(cx.listener(move |_, _, window, cx| {
                     let app = cx.entity().downgrade();
@@ -343,7 +344,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.jump_to_replied_message(message_id) {
                 Ok(_) => chat_search_jump_note(&live.driver.session),
-                Err(_) => "could not jump to message".into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);

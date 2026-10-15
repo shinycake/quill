@@ -10,6 +10,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::*;
 use quill::chat_header_menu::{HeaderEntry, HeaderFacts, header_entries};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::InfoPanelTarget;
 use quill::telegram::envelope::ChatKind;
 
@@ -47,18 +48,18 @@ impl QuillApp {
             let as_topics = session.chat_views_as_topics(id);
             if session.is_saved_messages(id) {
                 return Some(if as_topics {
-                    "View as Messages"
+                    tr(keys::Q_CHAT_VIEW_AS_MESSAGES)
                 } else {
-                    "View as Chats"
+                    tr(keys::Q_CHAT_VIEW_AS_CHATS)
                 });
             }
             (chat?.is_forum_chat()
                 && !session.subsection_tabs_used_for(id)
                 && session.open_topic.is_none())
             .then_some(if as_topics {
-                "View as Messages"
+                tr(keys::Q_CHAT_VIEW_AS_MESSAGES)
             } else {
-                "View as Topics"
+                tr(keys::Q_CHAT_VIEW_AS_TOPICS)
             })
         });
         let supergroup_stats = chat.is_some_and(|c| match c.kind {
@@ -115,7 +116,7 @@ impl QuillApp {
         Button::new("chat-more-menu")
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
-            .accessibility_label("Chat actions")
+            .accessibility_label(tr(keys::Q_CHAT_CHAT_ACTIONS))
             .on_click(|event, window, cx| {
                 if matches!(event, ClickEvent::Keyboard(_)) {
                     window.dispatch_action(
@@ -212,40 +213,40 @@ fn entry_label(
     match entry {
         HeaderEntry::Mute => (
             if muted {
-                "Unmute notifications"
+                tr(keys::Q_CHAT_UNMUTE_NOTIFICATIONS)
             } else {
-                "Mute notifications"
+                tr(keys::Q_CHAT_MUTE_NOTIFICATIONS)
             },
             Some(N::ChatMute),
         ),
-        HeaderEntry::NewTopic => ("New Topic", Some(N::NewTopic)),
+        HeaderEntry::NewTopic => (tr(keys::Q_CHAT_NEW_TOPIC), Some(N::NewTopic)),
         HeaderEntry::ViewProfile(label) => (label, None),
         HeaderEntry::ViewAsTopics => (
-            view_toggle.unwrap_or("View as Topics"),
+            view_toggle.unwrap_or(tr(keys::Q_CHAT_VIEW_AS_TOPICS)),
             Some(N::ViewAsTopics),
         ),
         HeaderEntry::Boost(label) => (label, None),
-        HeaderEntry::CreatePoll => ("Create poll", None),
-        HeaderEntry::Wallpaper => ("Set wallpaper", None),
-        HeaderEntry::ViewDiscussion => ("View discussion", None),
-        HeaderEntry::Export => ("Export chat history", Some(N::ExportChat)),
-        HeaderEntry::Report => ("Report", None),
+        HeaderEntry::CreatePoll => (tr(keys::Q_CHAT_CREATE_POLL), None),
+        HeaderEntry::Wallpaper => (tr(keys::CHAT_THEME_WALLPAPER), None),
+        HeaderEntry::ViewDiscussion => (tr(keys::Q_CHAT_VIEW_DISCUSSION), None),
+        HeaderEntry::Export => (tr(keys::PROFILE_EXPORT_CHAT), Some(N::ExportChat)),
+        HeaderEntry::Report => (tr(keys::Q_CHAT_REPORT), None),
         HeaderEntry::Archive => (
             if archived {
-                "Unarchive chat"
+                tr(keys::Q_CHAT_UNARCHIVE_CHAT)
             } else {
-                "Archive chat"
+                tr(keys::SHORTCUTS_ARCHIVE_CHAT)
             },
             Some(N::ChatArchive),
         ),
-        HeaderEntry::Folders => ("Add to folder", Some(N::ChatFolders)),
-        HeaderEntry::SharedMedia => ("Shared media", Some(N::SharedMedia)),
-        HeaderEntry::Statistics => ("Statistics", None),
-        HeaderEntry::Monetization => ("Monetization", None),
-        HeaderEntry::AutoDelete => ("Auto-Delete", None),
-        HeaderEntry::ReceivedGifts => ("Received gifts", Some(N::ChatGifts)),
-        HeaderEntry::Gift => ("Send a gift", Some(N::SendGift)),
-        HeaderEntry::NewWindow => ("Open in new window", Some(N::NewWindow)),
-        HeaderEntry::CloseSecretChat => ("Close secret chat", None),
+        HeaderEntry::Folders => (tr(keys::FILTERS_MENU_ADD), Some(N::ChatFolders)),
+        HeaderEntry::SharedMedia => (tr(keys::Q_CHAT_SHARED_MEDIA), Some(N::SharedMedia)),
+        HeaderEntry::Statistics => (tr(keys::Q_CHAT_STATISTICS), None),
+        HeaderEntry::Monetization => (tr(keys::Q_CHAT_MONETIZATION), None),
+        HeaderEntry::AutoDelete => (tr(keys::MANAGE_MESSAGES_TTL_MENU), None),
+        HeaderEntry::ReceivedGifts => (tr(keys::Q_CHAT_RECEIVED_GIFTS), Some(N::ChatGifts)),
+        HeaderEntry::Gift => (tr(keys::Q_CHAT_SEND_A_GIFT), Some(N::SendGift)),
+        HeaderEntry::NewWindow => (tr(keys::CONTEXT_NEW_WINDOW), Some(N::NewWindow)),
+        HeaderEntry::CloseSecretChat => (tr(keys::Q_CHAT_CLOSE_SECRET_CHAT), None),
     }
 }

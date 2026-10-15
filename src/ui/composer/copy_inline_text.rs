@@ -1,6 +1,7 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase 3.2: `inlineKeyboardButtonTypeCopyText` — copy to the clipboard.
@@ -28,7 +29,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose File".into()),
+            prompt: Some(tr(keys::Q_CHAT_CHOOSE_FILE).into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -76,7 +77,7 @@ impl QuillApp {
             edit.media_edit.replacement = None;
         }
         self.composer_ui.edit_replace_as_file = false;
-        self.connection.status_note = "replacement cleared".into();
+        self.connection.status_note = tr(keys::Q_CHAT_REPLACEMENT_CLEARED).into();
         cx.notify();
     }
 
@@ -191,7 +192,7 @@ impl QuillApp {
         self.set_composer_markup(&restored, window, cx);
         let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
-        self.connection.status_note = "edit cancelled".into();
+        self.connection.status_note = tr(keys::Q_CHAT_EDIT_CANCELLED).into();
         cx.notify();
     }
 
@@ -234,18 +235,20 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);
-                    self.connection.status_note =
-                        self.send_started_note(ComposerScheduling::None, "saving edit…");
+                    self.connection.status_note = self
+                        .send_started_note(ComposerScheduling::None, tr(keys::Q_CHAT_SAVING_EDIT));
                 }
                 Err(quill::connect::ConnectSendError::TextTooLong { limit }) => {
                     // R8: tdesktop `lng_edit_limit_reached` — the edit stays
                     // open so the text can be shortened.
                     let over = quill::text_split::units_over_limit(&text, limit);
-                    self.connection.status_note =
-                        format!("message too long (max {limit} characters, remove {over})");
+                    self.connection.status_note = tr_with(
+                        keys::Q_CHAT_MESSAGE_TOO_LONG_MAX_CHARACTERS,
+                        &[("limit", &limit.to_string()), ("over", &over.to_string())],
+                    );
                 }
                 Err(_) => {
-                    self.connection.status_note = "could not edit message".into();
+                    self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_EDIT_MESSAGE).into();
                 }
             }
             cx.notify();
@@ -254,7 +257,7 @@ impl QuillApp {
         if self.demo_session.is_some() {
             self.apply_demo_edit(&edit, text.trim());
             self.finish_edit_restore_draft(window, cx);
-            self.connection.status_note = "demo edit applied locally (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_CHAT_DEMO_EDIT_APPLIED_LOCALLY_NO).into();
             cx.notify();
         }
     }
@@ -270,7 +273,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn cancel_delete(&mut self, cx: &mut Context<Self>) {
         self.message_ui.pending_delete = None;
-        self.connection.status_note = "delete cancelled".into();
+        self.connection.status_note = tr(keys::Q_CHAT_DELETE_CANCELLED).into();
         cx.notify();
     }
 
@@ -282,12 +285,12 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.delete_confirmed(&confirm);
             self.connection.status_note = match result {
-                Ok(_) => "deleting…".into(),
-                Err(_) => "could not delete message".into(),
+                Ok(_) => tr(keys::Q_CHAT_DELETING).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGE).into(),
             };
         } else if self.demo_session.is_some() {
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
-            self.connection.status_note = "demo delete applied locally (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_CHAT_DEMO_DELETE_APPLIED_LOCALLY_NO).into();
         }
         cx.notify();
     }
@@ -299,7 +302,7 @@ impl QuillApp {
         self.share.reply_elsewhere_open = false;
         self.share.reply_quote_open = false;
         self.note_open_draft(true, cx);
-        self.connection.status_note = "reply cancelled".into();
+        self.connection.status_note = tr(keys::Q_CHAT_REPLY_CANCELLED).into();
         cx.notify();
     }
 

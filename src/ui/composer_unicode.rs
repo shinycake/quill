@@ -14,6 +14,7 @@ use super::actions::ComposerInsertControlChar;
 use super::app::QuillApp;
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 /// Qt's `qt_controlCharacters`, in its order and wording.
 pub(super) const CONTROL_CHARACTERS: [(&str, char); 14] = [
@@ -83,7 +84,7 @@ impl QuillApp {
             submenu = submenu.menu(label, Box::new(ComposerInsertControlChar { character }));
         }
         menu.separator()
-            .submenu("Insert Unicode control character", submenu)
+            .submenu(tr(keys::MENU_INSERT_UNICODE), submenu)
     }
 
     /// Type the chosen character over the selection.

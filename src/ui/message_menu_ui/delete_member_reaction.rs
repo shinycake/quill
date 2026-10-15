@@ -1,6 +1,7 @@
 //! Methods moved out of `message_menu_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// "Delete" on a row of the who-reacted list: the admin removes that
@@ -18,10 +19,10 @@ impl QuillApp {
                 .driver
                 .delete_message_reactions_from(chat_id, message_id, sender)
             {
-                Ok(Some(_)) => "deleting reaction…".into(),
-                _ => "could not delete the reaction".into(),
+                Ok(Some(_)) => tr(keys::Q_CHAT_DELETING_REACTION).into(),
+                _ => tr(keys::Q_CHAT_COULD_NOT_DELETE_THE_REACTION).into(),
             },
-            None => "reaction deletion needs a live connection (demo)".into(),
+            None => tr(keys::Q_CHAT_REACTION_DELETION_NEEDS_A_LIVE).into(),
         };
         cx.notify();
     }
@@ -76,7 +77,7 @@ impl QuillApp {
             user_name: session
                 .user(user_id)
                 .map(|u| u.display_name())
-                .unwrap_or_else(|| "this user".into()),
+                .unwrap_or_else(|| tr(keys::Q_CHAT_THIS_USER).into()),
             options,
             can_restrict_instead: flavor == GroupFlavor::Supergroup && options.ban_or_restrict,
         })

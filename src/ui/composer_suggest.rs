@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer_doc::ComposerTag;
+use quill::lang::{keys, tr, tr_with};
 use quill::suggest::{
     EMOJI_LIMIT, RecentHashtags, SuggestKind, SuggestQuery, detect, search_emoji,
 };
@@ -285,7 +286,10 @@ impl QuillApp {
             &Self::appearance_paths(),
             &self.composer_ui.suggest.hashtags,
         ) {
-            self.connection.status_note = format!("Couldn't save recent hashtags: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_CHAT_COULDNT_SAVE_RECENT_HASHTAGS,
+                &[("err", &err.to_string())],
+            );
         }
     }
 
@@ -314,7 +318,7 @@ impl QuillApp {
         Some(IntoElement::into_any_element(match active.query.kind {
             SuggestKind::Hashtag => {
                 let mut list = panel
-                    .aria_label("Hashtag suggestions")
+                    .aria_label(tr(keys::Q_CHAT_HASHTAG_SUGGESTIONS))
                     .flex_col()
                     .max_w(px(440.));
                 for (index, item) in active.items.iter().enumerate() {
@@ -383,7 +387,7 @@ impl QuillApp {
                     );
                 }
                 panel
-                    .aria_label("Emoji suggestions")
+                    .aria_label(tr(keys::Q_CHAT_EMOJI_SUGGESTIONS))
                     .flex_col()
                     .max_w(px(440.))
                     .child(row)

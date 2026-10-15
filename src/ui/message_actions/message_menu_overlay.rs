@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// M1: right-click message context menu — Reply, Copy, Forward, Pin,
@@ -115,9 +116,9 @@ impl QuillApp {
                 gpui_kit::assets::IconName::Reply,
                 "menu-reply",
                 if quote.is_some() {
-                    "Quote & Reply"
+                    tr(keys::Q_CHAT_QUOTE_REPLY)
                 } else {
-                    "Reply"
+                    tr(keys::Q_CHAT_REPLY)
                 },
                 this,
                 window,
@@ -161,9 +162,12 @@ impl QuillApp {
                     .text_color(text_menu())
                     .hover(|style| style.bg(row_hover))
                     .role(gpui_kit::Role::MenuItem)
-                    .aria_label(format!("Reply with timecode {timecode}"))
+                    .aria_label(tr_with(
+                        keys::Q_CHAT_REPLY_WITH_TIMECODE,
+                        &[("timecode", &timecode.to_string())],
+                    ))
                     .child(Icon::new(gpui_kit::assets::IconName::Reply).size(px(16.)))
-                    .child(div().flex_1().child("Reply with timecode"))
+                    .child(div().flex_1().child(tr(keys::Q_CHAT_REPLY_WITH_TIMECODE_2)))
                     .child(
                         div()
                             .text_xs()
@@ -189,7 +193,7 @@ impl QuillApp {
                 order::REPLY_ELSEWHERE,
                 gpui_kit::assets::IconName::Replace,
                 "menu-reply-another-chat",
-                "Reply in Another Chat",
+                tr(keys::REPLY_IN_ANOTHER_CHAT),
                 this,
                 window,
                 cx,
@@ -200,8 +204,8 @@ impl QuillApp {
             );
         }
         let copy = match selection {
-            Some(selected) => Some(("Copy Selected Text", selected)),
-            None => copyable.map(|text| ("Copy Text", text)),
+            Some(selected) => Some((tr(keys::Q_CHAT_COPY_SELECTED_TEXT), selected)),
+            None => copyable.map(|text| (tr(keys::Q_CHAT_COPY_TEXT), text)),
         };
         // Protected chats allow neither copying nor forwarding, before
         // TDLib's per-message answer arrives too.
@@ -214,7 +218,7 @@ impl QuillApp {
             item!(
                 // Copy Selected Text leads the menu; Copy Text follows the
                 // media actions (`FillContextMenuItems`).
-                if label == "Copy Text" {
+                if label == tr(keys::Q_CHAT_COPY_TEXT) {
                     order::COPY_TEXT
                 } else {
                     order::COPY_SELECTED
@@ -245,7 +249,7 @@ impl QuillApp {
                 order::TRANSLATE_SELECTED,
                 gpui_kit::assets::IconName::Languages,
                 "menu-translate-selected",
-                "Translate Selected Text",
+                tr(keys::Q_CHAT_TRANSLATE_SELECTED_TEXT),
                 this,
                 window,
                 cx,
@@ -275,7 +279,7 @@ impl QuillApp {
                 order::TRANSLATE,
                 gpui_kit::assets::IconName::Languages,
                 "menu-translate",
-                "Translate",
+                tr(keys::Q_CHAT_TRANSLATE),
                 this,
                 window,
                 cx,
@@ -296,7 +300,7 @@ impl QuillApp {
                     4,
                     gpui_kit::assets::IconName::ExternalLink,
                     "menu-open-link",
-                    "Open Link",
+                    tr(keys::Q_CHAT_OPEN_LINK),
                     this,
                     _window,
                     cx,
@@ -351,7 +355,7 @@ impl QuillApp {
                 50,
                 gpui_kit::assets::IconName::Forward,
                 "menu-forward",
-                "Forward",
+                tr(keys::Q_CHAT_FORWARD),
                 this,
                 window,
                 cx,
@@ -365,7 +369,7 @@ impl QuillApp {
                 70,
                 gpui_kit::assets::IconName::CircleCheck,
                 "menu-select",
-                "Select",
+                tr(keys::Q_CHAT_SELECT),
                 this,
                 _window,
                 cx,
@@ -380,7 +384,7 @@ impl QuillApp {
                     71,
                     gpui_kit::assets::IconName::CircleCheck,
                     "menu-select-up-to",
-                    "Select up to this message",
+                    tr(keys::CONTEXT_SELECT_MSG_BULK),
                     this,
                     _window,
                     cx,
@@ -398,7 +402,7 @@ impl QuillApp {
                 51,
                 gpui_kit::assets::IconName::Link,
                 "menu-copy-game-link",
-                "Copy game link",
+                tr(keys::Q_CHAT_COPY_GAME_LINK),
                 this,
                 _window,
                 cx,
@@ -423,7 +427,7 @@ impl QuillApp {
                 20,
                 gpui_kit::assets::IconName::Pencil,
                 "menu-edit",
-                "Edit",
+                tr(keys::MAC_MENU_EDIT),
                 this,
                 window,
                 cx,
@@ -462,7 +466,7 @@ impl QuillApp {
                 order::ADD_OFFER,
                 gpui_kit::assets::IconName::CircleDollarSign,
                 "menu-add-offer",
-                "Add Offer",
+                tr(keys::Q_CHAT_ADD_OFFER),
                 this,
                 window,
                 cx,
@@ -473,7 +477,11 @@ impl QuillApp {
             );
         }
         if allows(message.can_pin() && !is_channel_post, |a| a.can_be_pinned) {
-            let label = if pinned { "Unpin" } else { "Pin" };
+            let label = if pinned {
+                tr(keys::Q_CHAT_UNPIN)
+            } else {
+                tr(keys::CONTEXT_PIN_MSG)
+            };
             item!(
                 30,
                 if pinned {
@@ -517,7 +525,11 @@ impl QuillApp {
             && can_stop_poll(message.is_outgoing, &poll_content.poll)
         {
             let is_quiz = matches!(poll_content.poll.poll_type, PollType::Quiz { .. });
-            let label = if is_quiz { "Stop Quiz" } else { "Stop Poll" };
+            let label = if is_quiz {
+                tr(keys::Q_CHAT_STOP_QUIZ)
+            } else {
+                tr(keys::Q_CHAT_STOP_POLL)
+            };
             item!(
                 55,
                 gpui_kit::assets::IconName::CircleStop,
@@ -543,7 +555,7 @@ impl QuillApp {
                 order::RETRACT_VOTE,
                 gpui_kit::assets::IconName::Undo2,
                 "menu-retract-vote",
-                "Retract vote",
+                tr(keys::Q_CHAT_RETRACT_VOTE),
                 this,
                 _window,
                 cx,
@@ -563,7 +575,7 @@ impl QuillApp {
                 quill::message_menu::order::POLL_STATS,
                 gpui_kit::assets::IconName::ChartPie,
                 "menu-poll-stats",
-                "Poll Stats",
+                tr(keys::Q_CHAT_POLL_STATS),
                 this,
                 _window,
                 cx,
@@ -581,7 +593,7 @@ impl QuillApp {
                 quill::message_menu::order::STATISTICS,
                 gpui_kit::assets::IconName::ChartPie,
                 "menu-statistics",
-                "Statistics",
+                tr(keys::Q_CHAT_STATISTICS),
                 this,
                 window,
                 cx,
@@ -603,7 +615,7 @@ impl QuillApp {
             // Comments for channel posts; "View N Replies" / "View Thread"
             // for group messages (tdesktop `lng_replies_view`).
             let label: SharedString = if is_channel_post {
-                "View Comments".into()
+                tr(keys::Q_CHAT_VIEW_COMMENTS).into()
             } else {
                 quill::state::replies_menu_label(reply_count).into()
             };
@@ -627,7 +639,7 @@ impl QuillApp {
                 58,
                 gpui_kit::assets::IconName::RotateCw,
                 "menu-retry",
-                "Resend",
+                tr(keys::Q_CHAT_RESEND),
                 this,
                 _window,
                 cx,
@@ -656,7 +668,7 @@ impl QuillApp {
                 60,
                 gpui_kit::assets::IconName::Trash,
                 "menu-delete",
-                "Delete",
+                tr(keys::MAC_MENU_DELETE),
                 this,
                 window,
                 cx,
@@ -679,7 +691,7 @@ impl QuillApp {
                 order::DELETE,
                 gpui_kit::assets::IconName::X,
                 "menu-cancel-upload",
-                "Cancel Upload",
+                tr(keys::Q_CHAT_CANCEL_UPLOAD),
                 true,
                 cx,
                 move |this, _, cx| {
@@ -702,7 +714,7 @@ impl QuillApp {
                 order::REPORT,
                 gpui_kit::assets::IconName::Flag,
                 "menu-report",
-                "Report",
+                tr(keys::Q_CHAT_REPORT),
                 false,
                 cx,
                 move |this, _, cx| {
@@ -802,11 +814,11 @@ impl QuillApp {
                     gpui_kit::assets::IconName::ChevronLeft,
                     "menu-back",
                     match sub {
-                        MessageMenuPage::SaveTo => "Save to...",
+                        MessageMenuPage::SaveTo => tr(keys::Q_CHAT_SAVE_TO),
                         MessageMenuPage::AddToSet { emoji } => {
                             quill::sticker_set_box::SetKind::of(emoji).add_to_set_label()
                         }
-                        _ => "Back",
+                        _ => tr(keys::Q_CHAT_BACK),
                     },
                     false,
                     cx,

@@ -22,6 +22,7 @@ use quill::composer::{
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::effective_content;
@@ -150,7 +151,7 @@ impl QuillApp {
                         .pt_2()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Global"),
+                        .child(tr(keys::Q_CHAT_GLOBAL)),
                 );
             }
             let name = item.command.clone();
@@ -291,7 +292,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.gifs.close();
         }
-        self.connection.status_note = "GIFs closed".into();
+        self.connection.status_note = tr(keys::Q_CHAT_GIFS_CLOSED).into();
         cx.notify();
     }
 
@@ -336,13 +337,13 @@ impl QuillApp {
                     topic_id: None,
                 },
             ) {
-                Ok(_) => "sending GIF".into(),
-                Err(_) => "could not send GIF".into(),
+                Ok(_) => tr(keys::Q_CHAT_SENDING_GIF).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SEND_GIF).into(),
             };
-            self.connection.status_note == "sending GIF"
+            self.connection.status_note == tr(keys::Q_CHAT_SENDING_GIF)
         } else if self.demo_session.is_some() {
             self.apply_demo_gif(chat_id, file_id, duration, width, height, reply);
-            self.connection.status_note = "demo GIF applied locally (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_CHAT_DEMO_GIF_APPLIED_LOCALLY_NO).into();
             true
         } else {
             false
@@ -365,19 +366,19 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.close();
         }
-        self.connection.status_note = "stickers closed".into();
+        self.connection.status_note = tr(keys::Q_CHAT_STICKERS_CLOSED).into();
         cx.notify();
     }
 
     pub(super) fn select_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.select_sticker_set(set_id) {
-                Ok(_) => "sticker set".into(),
-                Err(_) => "could not open sticker set".into(),
+                Ok(_) => tr(keys::Q_CHAT_STICKER_SET).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_OPEN_STICKER_SET).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.select_sticker_set(set_id);
-            self.connection.status_note = "sticker set".into();
+            self.connection.status_note = tr(keys::Q_CHAT_STICKER_SET).into();
         }
         cx.notify();
     }
@@ -504,8 +505,8 @@ impl QuillApp {
         Button::new("composer-attach")
             .icon(IconName::Paperclip)
             .ghost()
-            .tooltip("Attach")
-            .accessibility_label("Attach")
+            .tooltip(tr(keys::Q_CHAT_ATTACH))
+            .accessibility_label(tr(keys::Q_CHAT_ATTACH))
             .on_click(|event, window, cx| {
                 if matches!(event, ClickEvent::Keyboard(_)) {
                     window.dispatch_action(
@@ -516,8 +517,8 @@ impl QuillApp {
             })
             .dropdown_menu(move |mut menu, window, cx| {
                 for (label, icon, as_files) in [
-                    ("Photo or video", IconName::Image, false),
-                    ("File", IconName::File, true),
+                    (tr(keys::Q_CHAT_PHOTO_OR_VIDEO), IconName::Image, false),
+                    (tr(keys::Q_CHAT_FILE), IconName::File, true),
                 ] {
                     let owner = owner.clone();
                     menu = menu.item(PopupMenuItem::new(label).icon(icon).on_click(
@@ -531,7 +532,7 @@ impl QuillApp {
                 // button; this item starts one too, so it is easy to find.
                 let video_owner = owner.clone();
                 menu = menu.item(
-                    PopupMenuItem::new("Video message")
+                    PopupMenuItem::new(tr(keys::IN_DLG_VIDEO_MESSAGE))
                         .icon(IconName::Video)
                         .on_click(move |_, _, cx| {
                             let _ = video_owner
@@ -546,7 +547,7 @@ impl QuillApp {
                 let mut menu = menu.separator();
                 if checklists_allowed {
                     menu = menu.item(
-                        PopupMenuItem::new("Checklist")
+                        PopupMenuItem::new(tr(keys::Q_CHAT_CHECKLIST))
                             .icon(IconName::CircleCheck)
                             .on_click(move |_, window, cx| {
                                 let _ = checklist_owner
@@ -556,9 +557,9 @@ impl QuillApp {
                 }
                 menu.item(
                     PopupMenuItem::new(if polls_allowed {
-                        "Poll"
+                        tr(keys::POLLS_MENU_ITEM)
                     } else {
-                        "Polls are restricted here"
+                        tr(keys::Q_CHAT_POLLS_ARE_RESTRICTED_HERE)
                     })
                     .icon(IconName::ChartBar)
                     .disabled(!polls_allowed)
@@ -566,18 +567,22 @@ impl QuillApp {
                         let _ = poll_owner.update(cx, |this, cx| this.open_poll_dialog(window, cx));
                     }),
                 )
-                .item(PopupMenuItem::new("Contact").icon(IconName::User).on_click(
-                    move |_, window, cx| {
-                        let _ = contact_owner
-                            .update(cx, |this, cx| this.open_share_contact_panel(window, cx));
-                    },
-                ))
-                .item(PopupMenuItem::new("Location").icon(IconName::Map).on_click(
-                    move |_, window, cx| {
-                        let _ = location_owner
-                            .update(cx, |this, cx| this.open_share_location_panel(window, cx));
-                    },
-                ))
+                .item(
+                    PopupMenuItem::new(tr(keys::Q_CHAT_CONTACT))
+                        .icon(IconName::User)
+                        .on_click(move |_, window, cx| {
+                            let _ = contact_owner
+                                .update(cx, |this, cx| this.open_share_contact_panel(window, cx));
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(tr(keys::LOCATION_TITLE))
+                        .icon(IconName::Map)
+                        .on_click(move |_, window, cx| {
+                            let _ = location_owner
+                                .update(cx, |this, cx| this.open_share_location_panel(window, cx));
+                        }),
+                )
                 .map(|mut menu| {
                     if attach_bots.is_empty() {
                         return menu;
@@ -598,19 +603,23 @@ impl QuillApp {
                     }
                     menu
                 })
-                .submenu("Dice", window, cx, {
+                .submenu(tr(keys::SR_MESSAGE_COLUMN_DICE), window, cx, {
                     let owner = owner.clone();
                     let dice = dice.clone();
                     move |mut sub, _, _| {
                         for emoji in &dice {
                             let owner = owner.clone();
                             let rolled = emoji.clone();
-                            sub = sub.item(PopupMenuItem::new(format!("Roll {emoji}")).on_click(
-                                move |_, _, cx| {
+                            sub = sub.item(
+                                PopupMenuItem::new(tr_with(
+                                    keys::Q_CHAT_ROLL,
+                                    &[("emoji", &emoji.to_string())],
+                                ))
+                                .on_click(move |_, _, cx| {
                                     let _ =
                                         owner.update(cx, |this, cx| this.roll_dice(&rolled, cx));
-                                },
-                            ));
+                                }),
+                            );
                         }
                         sub
                     }
@@ -635,10 +644,10 @@ impl QuillApp {
             AttachmentGroup::new("composer-attachments").with_edge_fade(cx.theme().background);
         for (index, attachment) in self.composer_ui.pending_attachments.iter().enumerate() {
             let (icon, kind) = match attachment.kind {
-                AttachmentKind::Photo => (IconName::Image, "Photo"),
-                AttachmentKind::Video => (IconName::Film, "Video"),
-                AttachmentKind::Document => (IconName::File, "File"),
-                AttachmentKind::VideoNote => (IconName::Video, "Video message"),
+                AttachmentKind::Photo => (IconName::Image, tr(keys::Q_CHAT_PHOTO)),
+                AttachmentKind::Video => (IconName::Film, tr(keys::Q_CHAT_VIDEO)),
+                AttachmentKind::Document => (IconName::File, tr(keys::Q_CHAT_FILE)),
+                AttachmentKind::VideoNote => (IconName::Video, tr(keys::IN_DLG_VIDEO_MESSAGE)),
             };
             // Photos and videos show as preview tiles (the photo itself),
             // files as compact rows — Telegram Desktop's send box shows the
@@ -696,7 +705,7 @@ impl QuillApp {
                                             .icon(IconName::Pencil)
                                             .xsmall()
                                             .ghost()
-                                            .tooltip("Edit")
+                                            .tooltip(tr(keys::Q_CHAT_EDIT))
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.open_photo_editor(index, cx);
                                             })),
@@ -711,9 +720,9 @@ impl QuillApp {
                                             .ghost()
                                             .selected(spoiler)
                                             .tooltip(if spoiler {
-                                                "Remove spoiler"
+                                                tr(keys::Q_CHAT_REMOVE_SPOILER)
                                             } else {
-                                                "Hide with spoiler"
+                                                tr(keys::Q_CHAT_HIDE_WITH_SPOILER)
                                             })
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.toggle_attachment_spoiler(index, cx);
@@ -747,19 +756,21 @@ impl QuillApp {
                 .label(self.self_destruct_button_label())
                 .ghost()
                 .small()
-                .tooltip("Self-destruct timer")
+                .tooltip(tr(keys::Q_CHAT_SELF_DESTRUCT_TIMER))
                 .dropdown_menu(move |mut menu, _, _| {
                     for choice in QuillApp::SELF_DESTRUCT_CHOICES {
                         let owner = owner.clone();
                         let label = match choice {
-                            None => "Off".to_string(),
+                            None => tr(keys::Q_CHAT_OFF).to_string(),
                             Some(SelfDestructSend::Timer(secs)) if secs < 60 => {
                                 format!("{secs} seconds")
                             }
                             Some(SelfDestructSend::Timer(secs)) => {
                                 format!("{} minute", secs / 60)
                             }
-                            Some(SelfDestructSend::Immediately) => "View once".to_string(),
+                            Some(SelfDestructSend::Immediately) => {
+                                tr(keys::Q_CHAT_VIEW_ONCE).to_string()
+                            }
                         };
                         menu = menu.item(
                             PopupMenuItem::new(label)
@@ -790,7 +801,7 @@ impl QuillApp {
                     .when(can_files, |row| {
                         row.child(
                             Checkbox::new("composer-send-as-files")
-                                .label("Send without compression")
+                                .label(tr(keys::Q_CHAT_SEND_WITHOUT_COMPRESSION))
                                 .checked(as_files)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     ComposerAttachment::set_send_as_files(
@@ -807,7 +818,7 @@ impl QuillApp {
                     .when(several, |row| {
                         row.child(
                             Checkbox::new("composer-group-media")
-                                .label("Send as album")
+                                .label(tr(keys::Q_CHAT_SEND_AS_ALBUM))
                                 .checked(grouped)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.toggle_composer_group_media(cx);
@@ -815,7 +826,7 @@ impl QuillApp {
                         )
                         .child(
                             Checkbox::new("composer-remember-grouping")
-                                .label("Remember choice")
+                                .label(tr(keys::Q_CHAT_REMEMBER_CHOICE))
                                 .checked(remember)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.toggle_remember_media_grouping(cx);
@@ -827,7 +838,11 @@ impl QuillApp {
                     .child(div().flex_1())
                     .child(
                         Button::new("clear-attach")
-                            .label(if several { "Remove all" } else { "Remove" })
+                            .label(if several {
+                                tr(keys::Q_CHAT_REMOVE_ALL)
+                            } else {
+                                tr(keys::BOX_REMOVE)
+                            })
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| this.clear_attachment(cx))),
@@ -847,7 +862,7 @@ impl QuillApp {
         let mut list = div()
             .id("mention-menu")
             .role(gpui_kit::Role::ListBox)
-            .aria_label("Mention suggestions")
+            .aria_label(tr(keys::Q_CHAT_MENTION_SUGGESTIONS))
             .flex()
             .flex_col()
             .max_w(px(440.))

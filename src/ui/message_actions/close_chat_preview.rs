@@ -2,6 +2,7 @@
 
 use super::*;
 use quill::go_to_message::{GoToTarget, MessageListContext, go_to_message_offered, go_to_target};
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Slice CL: dismiss the peek preview (click anywhere, the release
@@ -29,7 +30,7 @@ impl QuillApp {
         let title = session
             .and_then(|session| session.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
-            .unwrap_or_else(|| "Chat".to_string());
+            .unwrap_or_else(|| tr(keys::Q_CHAT_CHAT).to_string());
         // Prefer already-loaded messages (open chats, recent traffic,
         // demo fixtures); the one-shot live fetch fills unopened chats.
         let mut lines: Vec<(String, String, u64)> = session
@@ -119,13 +120,15 @@ impl QuillApp {
                         row.context_menu(move |menu, _, _| {
                             let owner = owner.clone();
                             menu.item(
-                                gpui_kit::component::menu::PopupMenuItem::new("Go To Message")
-                                    .icon(gpui_kit::assets::IconName::MessageSquare)
-                                    .on_click(move |_, window, cx| {
-                                        let _ = owner.update(cx, |this, cx| {
-                                            this.go_to_message_in(chat_id, message_id, window, cx);
-                                        });
-                                    }),
+                                gpui_kit::component::menu::PopupMenuItem::new(tr(
+                                    keys::Q_CHAT_GO_TO_MESSAGE,
+                                ))
+                                .icon(gpui_kit::assets::IconName::MessageSquare)
+                                .on_click(move |_, window, cx| {
+                                    let _ = owner.update(cx, |this, cx| {
+                                        this.go_to_message_in(chat_id, message_id, window, cx);
+                                    });
+                                }),
                             )
                         })
                         .into_any_element()
@@ -154,7 +157,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No messages yet."),
+                    .child(tr(keys::Q_CHAT_NO_MESSAGES_YET_2)),
             );
         }
         let panel = div()
@@ -306,7 +309,7 @@ impl QuillApp {
                 5,
                 Lucide::ExternalLink,
                 "chat-menu-new-window",
-                "Open in new window",
+                tr(keys::CONTEXT_NEW_WINDOW),
                 this,
                 window,
                 cx,
@@ -325,7 +328,11 @@ impl QuillApp {
                 Lucide::Archive
             },
             "chat-menu-archive",
-            if archived { "Unarchive" } else { "Archive" },
+            if archived {
+                tr(keys::Q_CHAT_UNARCHIVE)
+            } else {
+                tr(keys::Q_CHAT_ARCHIVE)
+            },
             this,
             cx,
             {
@@ -338,7 +345,11 @@ impl QuillApp {
             20,
             if pinned { Lucide::PinOff } else { Lucide::Pin },
             "chat-menu-pin",
-            if pinned { "Unpin" } else { "Pin" },
+            if pinned {
+                tr(keys::Q_CHAT_UNPIN)
+            } else {
+                tr(keys::CONTEXT_PIN_MSG)
+            },
             this,
             cx,
             {
@@ -352,9 +363,9 @@ impl QuillApp {
             if muted { Lucide::Bell } else { Lucide::BellOff },
             "chat-menu-mute",
             if muted {
-                "Unmute notifications"
+                tr(keys::Q_CHAT_UNMUTE_NOTIFICATIONS)
             } else {
-                "Mute notifications"
+                tr(keys::Q_CHAT_MUTE_NOTIFICATIONS)
             },
             this,
             cx,
@@ -373,9 +384,9 @@ impl QuillApp {
             },
             "chat-menu-read",
             if unread {
-                "Mark as read"
+                tr(keys::CONTEXT_MARK_READ)
             } else {
-                "Mark as unread"
+                tr(keys::Q_CHAT_MARK_AS_UNREAD)
             },
             this,
             cx,
@@ -424,7 +435,7 @@ impl QuillApp {
                 41,
                 Lucide::AtSign,
                 "chat-menu-read-mentions",
-                "Mark all mentions as read",
+                tr(keys::CONTEXT_MARK_READ_MENTIONS_ALL),
                 this,
                 cx,
                 {
@@ -443,7 +454,7 @@ impl QuillApp {
                 42,
                 Lucide::Heart,
                 "chat-menu-read-reactions",
-                "Read all reactions",
+                tr(keys::Q_CHAT_READ_ALL_REACTIONS),
                 this,
                 cx,
                 {
@@ -462,7 +473,7 @@ impl QuillApp {
                 43,
                 Lucide::ChartBar,
                 "chat-menu-read-poll-votes",
-                "Read all poll votes",
+                tr(keys::CONTEXT_MARK_READ_POLL_VOTES_ALL),
                 this,
                 cx,
                 {
@@ -481,7 +492,7 @@ impl QuillApp {
             50,
             Lucide::ListChecks,
             "chat-menu-select",
-            "Select",
+            tr(keys::Q_CHAT_SELECT),
             this,
             cx,
             {
@@ -495,7 +506,7 @@ impl QuillApp {
                 60,
                 Lucide::Eraser,
                 "chat-menu-clear",
-                "Clear history",
+                tr(keys::Q_CHAT_CLEAR_HISTORY),
                 this,
                 cx,
                 {
@@ -514,7 +525,7 @@ impl QuillApp {
                 61,
                 Lucide::Eraser,
                 "chat-menu-clear-all",
-                "Clear history for everyone",
+                tr(keys::Q_CHAT_CLEAR_HISTORY_FOR_EVERYONE),
                 this,
                 cx,
                 {
@@ -533,11 +544,19 @@ impl QuillApp {
         // server offers (`reportChat` with no message ids, answered by a
         // `reportChatResult`).
         if chat.can_be_reported && self.live.is_some() {
-            item!(70, Lucide::Flag, "chat-menu-report", "Report", this, cx, {
-                this.chat_list.menu = None;
-                this.open_message_report(chat_id, Vec::new(), cx);
-                cx.notify();
-            });
+            item!(
+                70,
+                Lucide::Flag,
+                "chat-menu-report",
+                tr(keys::Q_CHAT_REPORT),
+                this,
+                cx,
+                {
+                    this.chat_list.menu = None;
+                    this.open_message_report(chat_id, Vec::new(), cx);
+                    cx.notify();
+                }
+            );
         }
         // Slice CL3: Block/Unblock the peer of a private or secret chat
         // (`setMessageSenderBlockList`, schema 1.8.67, line 14492;
@@ -560,9 +579,9 @@ impl QuillApp {
                 Lucide::Ban,
                 "chat-menu-block",
                 if blocked {
-                    "Unblock user"
+                    tr(keys::Q_CHAT_UNBLOCK_USER)
                 } else {
-                    "Block user"
+                    tr(keys::Q_CHAT_BLOCK_USER)
                 },
                 this,
                 cx,
@@ -582,7 +601,7 @@ impl QuillApp {
                 85,
                 Lucide::Download,
                 "chat-menu-export",
-                "Export chat history",
+                tr(keys::PROFILE_EXPORT_CHAT),
                 this,
                 cx,
                 {
@@ -597,7 +616,7 @@ impl QuillApp {
                 90,
                 Lucide::Trash,
                 "chat-menu-delete",
-                "Delete chat",
+                tr(keys::Q_CHAT_DELETE_CHAT),
                 this,
                 cx,
                 {
@@ -700,12 +719,17 @@ impl QuillApp {
                         .py_2()
                         .border_b_1()
                         .border_color(border())
-                        .child(div().text_sm().font_medium().child("Instant View"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_medium()
+                                .child(tr(keys::Q_CHAT_INSTANT_VIEW)),
+                        )
                         .child(
                             Button::new("instant-view-close")
                                 .icon(gpui_kit::assets::IconName::X)
-                                .tooltip("Close")
-                                .accessibility_label("Close")
+                                .tooltip(tr(keys::CLOSE))
+                                .accessibility_label(tr(keys::CLOSE))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(live) = this.live.as_mut() {
                                         live.driver.session.messages.instant_view = None;
@@ -768,9 +792,9 @@ impl QuillApp {
 
     pub(in crate::ui) fn open_message_url(&mut self, url: &str, cx: &mut Context<Self>) {
         self.connection.status_note = if quill::platform::open_external_url(url) {
-            "opened link".into()
+            tr(keys::Q_CHAT_OPENED_LINK).into()
         } else {
-            "could not open link".into()
+            tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK).into()
         };
         cx.notify();
     }
@@ -810,7 +834,7 @@ impl QuillApp {
             }
         }
         if requested {
-            self.connection.status_note = "loading Instant View…".into();
+            self.connection.status_note = tr(keys::Q_CHAT_LOADING_INSTANT_VIEW).into();
             cx.notify();
         } else {
             self.open_message_url(&url, cx);
@@ -831,14 +855,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_callback_query(chat_id, message_id, &data);
             self.connection.status_note = match result {
-                Ok(_) => "sending…".into(),
-                Err(_) => "could not send callback".into(),
+                Ok(_) => tr(keys::Q_CHAT_SENDING).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK).into(),
             };
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
-            self.connection.status_note = "demo — callback sent (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_CHAT_DEMO_CALLBACK_SENT_NO_LIVE).into();
             cx.notify();
         }
     }
@@ -938,7 +962,7 @@ impl QuillApp {
             self.connection.status_note = match live.driver.jump_to_chat_search_message(message_id)
             {
                 Ok(_) => chat_search_jump_note(&live.driver.session),
-                Err(_) => "could not jump to pinned message".into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_PINNED).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
