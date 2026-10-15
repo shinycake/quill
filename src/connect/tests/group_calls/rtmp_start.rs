@@ -1,38 +1,56 @@
 //! Connect-driver tests: "Stream with..." for a chat with no video chat
 //! (tdesktop `StartRtmpProcess`): the URL request, the answer feeding the
 //! box, Revoke, Start Streaming as `createVideoChat` with `is_rtmp_stream`,
-//! and the failure path.
+//! the failure path, and who may manage video chats (`canManageGroupCall`)
+//! as `updateSupergroup` reports it.
 use super::*;
 use crate::calls::rtmp_start::RtmpInfo;
 use crate::ids::ChatId;
-use crate::telegram::envelope::ChannelMemberStatus;
 use std::sync::atomic::AtomicU64;
 
 static SEQ: AtomicU64 = AtomicU64::new(50_000);
 const CHAT: i64 = 51;
 
+const CREATOR: &str =
+    r#"{"@type":"chatMemberStatusCreator","is_anonymous":false,"is_member":true}"#;
+const MEMBER: &str = r#"{"@type":"chatMemberStatusMember"}"#;
+
+/// `updateSupergroup` for the channel with the viewer's own `status`.
+fn supergroup_update(status: &str) -> String {
+    format!(
+        r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":51,"member_count":9,"is_channel":true,"status":{status}}}}}"#
+    )
+}
+
+fn admin(can_manage_video_chats: bool) -> String {
+    format!(
+        r#"{{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{{"@type":"chatAdministratorRights","can_manage_chat":true,"can_manage_video_chats":{can_manage_video_chats}}}}}"#
+    )
+}
+
+fn ingest(driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str) {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    driver
+        .ingest(copy_and_parse(json, &SEQ, &sink).unwrap())
+        .unwrap();
+}
+
+/// The channel as TDLib introduces it: `updateSupergroup` with the
+/// viewer's status first, then `updateNewChat`.
+fn driver_with_status(status: &str) -> (Arc<RecordingSender>, ConnectDriver<Arc<RecordingSender>>) {
+    let (_dir, recorder, mut driver, _seq) = group_call_test_driver();
+    ingest(&mut driver, &supergroup_update(status));
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":51,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":51,"is_channel":true},"unread_count":0}}"#,
+    );
+    (recorder, driver)
+}
+
 fn driver_with_channel(
     manager: bool,
 ) -> (Arc<RecordingSender>, ConnectDriver<Arc<RecordingSender>>) {
-    let (_dir, recorder, mut driver, seq) = group_call_test_driver();
-    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
-    ingest_call_json(
-        &mut driver,
-        &seq,
-        &sink,
-        r#"{"@type":"updateNewChat","chat":{"id":51,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":51,"is_channel":true},"unread_count":0}}"#,
-    );
-    if let Some(chat) = driver.session.chats.get_mut(&CHAT) {
-        chat.set_member_status(
-            if manager {
-                ChannelMemberStatus::Creator
-            } else {
-                ChannelMemberStatus::Member
-            },
-            None,
-        );
-    }
-    (recorder, driver)
+    driver_with_status(if manager { CREATOR } else { MEMBER })
 }
 
 fn last(recorder: &RecordingSender) -> Value {
@@ -40,10 +58,7 @@ fn last(recorder: &RecordingSender) -> Value {
 }
 
 fn reply(driver: &mut ConnectDriver<Arc<RecordingSender>>, json: Value) {
-    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
-    driver
-        .ingest(copy_and_parse(&json.to_string(), &SEQ, &sink).unwrap())
-        .unwrap();
+    ingest(driver, &json.to_string());
 }
 
 fn url_answer(request: &Value, url: &str, key: &str) -> Value {
@@ -52,6 +67,15 @@ fn url_answer(request: &Value, url: &str, key: &str) -> Value {
         "@extra": request["@extra"],
         "url": url,
         "stream_key": key,
+    })
+}
+
+fn error_answer(request: &Value) -> Value {
+    serde_json::json!({
+        "@type": "error",
+        "@extra": request["@extra"],
+        "code": 500,
+        "message": "INTERNAL",
     })
 }
 
@@ -152,15 +176,7 @@ fn a_failed_request_marks_the_process_and_leaves_the_call_error_alone() {
     let (recorder, mut driver) = driver_with_channel(true);
     driver.begin_rtmp_start(ChatId(CHAT)).expect("sends");
     let request = last(&recorder);
-    reply(
-        &mut driver,
-        serde_json::json!({
-            "@type": "error",
-            "@extra": request["@extra"],
-            "code": 500,
-            "message": "INTERNAL",
-        }),
-    );
+    reply(&mut driver, error_answer(&request));
     let start = driver.session.calls.rtmp_start.as_ref().expect("process");
     assert!(start.failed && !start.box_open());
     assert!(driver.session.calls.group_call_error.is_none());
@@ -168,16 +184,52 @@ fn a_failed_request_marks_the_process_and_leaves_the_call_error_alone() {
 
 #[test]
 fn administrator_rights_decide_who_manages_video_chats() {
-    let (_recorder, mut driver) = driver_with_channel(false);
     let id = ChatId(CHAT);
-    assert!(!driver.session.chat_can_manage_video_chats(id));
-    if let Some(chat) = driver.session.chats.get_mut(&CHAT) {
-        chat.set_member_status(ChannelMemberStatus::Administrator, None);
-        chat.set_admin_can_manage_video_chats(Some(false));
-    }
-    assert!(!driver.session.chat_can_manage_video_chats(id));
-    if let Some(chat) = driver.session.chats.get_mut(&CHAT) {
-        chat.set_admin_can_manage_video_chats(Some(true));
-    }
+    let (_recorder, driver) = driver_with_channel(false);
+    assert!(!driver.session.chat_can_manage_video_chats(id), "member");
+    let (_recorder, driver) = driver_with_channel(true);
+    assert!(driver.session.chat_can_manage_video_chats(id), "creator");
+    let (_recorder, driver) = driver_with_status(&admin(false));
+    assert!(
+        !driver.session.chat_can_manage_video_chats(id),
+        "an administrator without the right"
+    );
+}
+
+#[test]
+fn a_channel_administrator_with_the_right_gets_it_from_update_supergroup() {
+    // `updateSupergroup` precedes `updateNewChat`: the right is in place
+    // when the chat appears, with no own-member probe.
+    let (recorder, mut driver) = driver_with_status(&admin(true));
+    let id = ChatId(CHAT);
     assert!(driver.session.chat_can_manage_video_chats(id));
+    driver.begin_rtmp_start(id).expect("a manager may stream");
+    assert_eq!(last(&recorder)["@type"], "getVideoChatRtmpUrl");
+}
+
+#[test]
+fn promotion_and_demotion_update_the_right() {
+    let id = ChatId(CHAT);
+    let (_recorder, mut driver) = driver_with_channel(false);
+    assert!(!driver.session.chat_can_manage_video_chats(id));
+    ingest(&mut driver, &supergroup_update(&admin(true)));
+    assert!(driver.session.chat_can_manage_video_chats(id), "promoted");
+    ingest(&mut driver, &supergroup_update(&admin(false)));
+    assert!(
+        !driver.session.chat_can_manage_video_chats(id),
+        "right taken"
+    );
+    ingest(&mut driver, &supergroup_update(&admin(true)));
+    ingest(&mut driver, &supergroup_update(MEMBER));
+    assert!(!driver.session.chat_can_manage_video_chats(id), "demoted");
+}
+
+#[test]
+fn a_direct_messages_chat_never_manages_video_chats() {
+    let (_recorder, mut driver) = driver_with_channel(true);
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":51,"member_count":9,"is_channel":false,"is_direct_messages_group":true,"is_administered_direct_messages_group":true,"status":{"@type":"chatMemberStatusCreator","is_anonymous":false,"is_member":true}}}"#,
+    );
+    assert!(!driver.session.chat_can_manage_video_chats(ChatId(CHAT)));
 }

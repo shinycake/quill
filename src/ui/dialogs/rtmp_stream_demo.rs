@@ -10,7 +10,7 @@ use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::calls::rtmp_start::{RtmpInfo, RtmpStart};
 use quill::ids::ChatId;
-use quill::telegram::envelope::ChannelMemberStatus;
+use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
 use std::sync::atomic::Ordering;
 
 /// The demo channel.
@@ -35,14 +35,28 @@ impl QuillApp {
     }
 }
 
+/// The viewer administers the demo channel with the video chat right, as
+/// `updateSupergroup` reports it, and the channel has no video chat.
+pub(super) fn seed_manager(session: &mut quill::state::Session) {
+    let Some(chat) = session.chats.get_mut(&CHANNEL) else {
+        return;
+    };
+    chat.video_chat = None;
+    if let ChatKind::Supergroup { supergroup_id, .. } = chat.kind {
+        session
+            .groups
+            .supergroup_member_status
+            .insert(supergroup_id, ChannelMemberStatus::Administrator);
+        session
+            .groups
+            .supergroup_manage_video_chats_right
+            .insert(supergroup_id, true);
+    }
+}
+
 /// The answer is in: the box has its Server URL and Stream Key.
 pub(super) fn seed_rtmp_start(session: &mut quill::state::Session) {
-    if let Some(chat) = session.chats.get_mut(&CHANNEL) {
-        chat.video_chat = None;
-        // The viewer administers the channel with video chat rights.
-        chat.set_member_status(ChannelMemberStatus::Administrator, Some(true));
-        chat.set_admin_can_manage_video_chats(Some(true));
-    }
+    seed_manager(session);
     let mut start = RtmpStart::new(ChatId(CHANNEL));
     start.accept(
         ChatId(CHANNEL),

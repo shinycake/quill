@@ -96,6 +96,10 @@ pub enum GroupsPayload {
         /// Welcome-message management requires this right (or creator
         /// status).
         can_send_welcome_messages: Option<bool>,
+        /// `rights.can_manage_video_chats` from own
+        /// `chatMemberStatusAdministrator`; `None` for any other status or
+        /// a missing rights block. tdesktop `canManageGroupCall`.
+        can_manage_video_chats: Option<bool>,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,
@@ -170,6 +174,10 @@ pub enum GroupsPayload {
         /// `chatMemberStatusAdministrator` (schema 1.8.67, line 1090);
         /// `None` for any other status or a missing rights block.
         can_send_welcome_messages: Option<bool>,
+        /// `rights.can_manage_video_chats` from own
+        /// `chatMemberStatusAdministrator`; `None` for any other status or
+        /// a missing rights block. tdesktop `canManageGroupCall`.
+        can_manage_video_chats: Option<bool>,
         /// Slice G1: `supergroup.join_by_request` (schema 1.8.67, lines
         /// 2733/2746) — drives the "Approve new members" toggle.
         join_by_request: bool,

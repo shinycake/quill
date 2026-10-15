@@ -685,6 +685,7 @@ impl Session {
                 can_manage_topics,
                 can_change_info,
                 can_send_welcome_messages,
+                can_manage_video_chats,
                 join_by_request,
                 is_broadcast_group,
                 sign_messages,
@@ -695,6 +696,9 @@ impl Session {
                 direct_messages,
             } => {
                 self.set_direct_messages_role(supergroup_id, direct_messages);
+                self.groups
+                    .supergroup_manage_video_chats_right
+                    .insert(supergroup_id, can_manage_video_chats.unwrap_or(false));
                 self.payments
                     .paid_messages
                     .dm_price
@@ -754,6 +758,7 @@ impl Session {
                 can_manage_topics,
                 can_change_info,
                 can_send_welcome_messages,
+                can_manage_video_chats,
                 join_by_request,
                 is_broadcast_group,
                 sign_messages,
@@ -763,6 +768,13 @@ impl Session {
                 direct_messages,
             } => {
                 self.set_direct_messages_role(supergroup_id, direct_messages);
+                // Same as the other rights: only the `getSupergroup`
+                // answer is trusted for the viewer's own status.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupergroup) {
+                    self.groups
+                        .supergroup_manage_video_chats_right
+                        .insert(supergroup_id, can_manage_video_chats.unwrap_or(false));
+                }
                 self.payments
                     .paid_messages
                     .dm_price

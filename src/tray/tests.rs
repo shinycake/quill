@@ -62,7 +62,6 @@ fn chat(id: i64, unread_count: i32) -> ChatSummary {
         my_admin_can_change_info: None,
         my_admin_can_send_welcome_messages: None,
         my_admin_can_promote_members: None,
-        my_admin_can_manage_video_chats: None,
         my_admin_can_restrict_members: None,
         my_admin_can_pin_messages: None,
         my_restriction: None,
