@@ -10,15 +10,16 @@ use gpui::{
 use image::RgbaImage;
 use objc2::runtime::AnyObject;
 
-use core_foundation::base::TCFType;
-use core_video::{
-    metal_texture::CVMetalTextureGetTexture, metal_texture_cache::CVMetalTextureCache,
-    pixel_buffer::{kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVPixelFormatType_64RGBAHalf},
-};
 use foreign_types::{ForeignType, ForeignTypeRef};
 use metal::{
     CAMetalLayer, CommandQueue, MTLGPUFamily, MTLPixelFormat, MTLResourceOptions, NSRange,
     NSUInteger,
+};
+use objc2_core_foundation::CFRetained;
+use objc2_core_video::{
+    CVMetalTexture, CVMetalTextureCache, CVMetalTextureGetTexture, CVPixelBufferGetHeight,
+    CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
+    CVPixelBufferGetWidthOfPlane, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
 };
 use parking_lot::Mutex;
 
@@ -123,19 +124,11 @@ pub struct MetalRenderer {
     monochrome_sprites_pipeline_state: metal::RenderPipelineState,
     polychrome_sprites_pipeline_state: metal::RenderPipelineState,
     surfaces_pipeline_state: metal::RenderPipelineState,
-    // QUILL: HDR still images (`64RGBAHalf` surfaces), and the drawable
-    // format the pipelines above were built for. A float (EDR) layer swaps
-    // in a set built for `RGBA16Float`; the other set is kept for the way
-    // back.
-    hdr_surfaces_pipeline_state: metal::RenderPipelineState,
-    drawable_format: MTLPixelFormat,
-    other_pipelines: Option<DrawablePipelines>,
-    library: metal::Library,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
     sprite_atlas: Arc<MetalAtlas>,
-    core_video_texture_cache: core_video::metal_texture_cache::CVMetalTextureCache,
+    core_video_texture_cache: CFRetained<CVMetalTextureCache>,
     path_intermediate_texture: Option<metal::Texture>,
     path_intermediate_msaa_texture: Option<metal::Texture>,
     path_sample_count: u32,
@@ -367,20 +360,28 @@ impl MetalRenderer {
             MTLPixelFormat::BGRA8Unorm,
         );
 
-        let hdr_surfaces_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "hdr_surfaces",
-            "surface_vertex",
-            "hdr_surface_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-
         let command_queue = device.new_command_queue();
         let supports_shared_storage = cfg!(target_os = "ios") || is_apple_gpu;
         let sprite_atlas = Arc::new(MetalAtlas::new(device.clone(), supports_shared_storage));
-        let core_video_texture_cache =
-            CVMetalTextureCache::new(None, device.clone(), None).unwrap();
+        // metal and objc2-metal expose the same Objective-C device; the borrowed
+        // protocol object remains valid while `device` owns it.
+        let core_video_texture_cache = unsafe {
+            let mut cache = ptr::null_mut();
+            let status = CVMetalTextureCache::create(
+                None,
+                None,
+                &*device
+                    .as_ptr()
+                    .cast::<objc2::runtime::ProtocolObject<dyn objc2_metal::MTLDevice>>(),
+                None,
+                ptr::NonNull::from(&mut cache),
+            );
+            assert_eq!(
+                status, kCVReturnSuccess,
+                "failed to create CoreVideo Metal texture cache"
+            );
+            CFRetained::from_raw(ptr::NonNull::new(cache).expect("CoreVideo returned a null cache"))
+        };
 
         Self {
             device,
@@ -398,10 +399,6 @@ impl MetalRenderer {
             monochrome_sprites_pipeline_state,
             polychrome_sprites_pipeline_state,
             surfaces_pipeline_state,
-            hdr_surfaces_pipeline_state,
-            drawable_format: MTLPixelFormat::BGRA8Unorm,
-            other_pipelines: None,
-            library,
             unit_vertices,
             instance_buffer_pool,
             sprite_atlas,
@@ -541,7 +538,6 @@ impl MetalRenderer {
         texture: &metal::TextureRef,
         viewport_size: Size<DevicePixels>,
     ) -> Result<metal::CommandBuffer> {
-        self.match_drawable_format(texture.pixel_format());
         let mut writer = InstanceBufferWriter::new(
             &self.device,
             &self.instance_buffer_pool,
@@ -1213,96 +1209,60 @@ impl MetalRenderer {
             &viewport_size as *const Size<DevicePixels> as *const _,
         );
 
-        // QUILL: the surface's pixel format picks the pipeline; a format
-        // nothing here draws is skipped (upstream asserted).
-        let extended_output = u32::from(self.drawable_format == MTLPixelFormat::RGBA16Float);
         for (index, surface) in surfaces.iter().enumerate() {
+            let image_buffer = &surface.image_buffer;
             let texture_size = size(
-                DevicePixels::from(surface.image_buffer.get_width() as i32),
-                DevicePixels::from(surface.image_buffer.get_height() as i32),
+                DevicePixels::from(CVPixelBufferGetWidth(image_buffer) as i32),
+                DevicePixels::from(CVPixelBufferGetHeight(image_buffer) as i32),
             );
-            let format = surface.image_buffer.get_pixel_format();
-            if format == kCVPixelFormatType_64RGBAHalf {
-                let Ok(texture) = self.core_video_texture_cache.create_texture_from_image(
-                    surface.image_buffer.as_concrete_TypeRef(),
-                    None,
-                    MTLPixelFormat::RGBA16Float,
-                    surface.image_buffer.get_width(),
-                    surface.image_buffer.get_height(),
-                    0,
-                ) else {
-                    continue;
-                };
-                let params = HdrSurfaceParams {
-                    headroom: hdr_headroom(&surface.image_buffer),
-                    extended_output,
-                };
-                command_encoder.set_render_pipeline_state(&self.hdr_surfaces_pipeline_state);
-                command_encoder.set_vertex_bytes(
-                    SurfaceInputIndex::TextureSize as u64,
-                    mem::size_of_val(&texture_size) as u64,
-                    &texture_size as *const Size<DevicePixels> as *const _,
-                );
-                command_encoder.set_fragment_bytes(
-                    0,
-                    mem::size_of_val(&params) as u64,
-                    &params as *const HdrSurfaceParams as *const _,
-                );
-                // SAFETY: `texture` is a live CVMetalTexture; its MTLTexture
-                // lives as long as it, past this draw's encoding.
-                command_encoder.set_fragment_texture(SurfaceInputIndex::YTexture as u64, unsafe {
-                    let texture = CVMetalTextureGetTexture(texture.as_concrete_TypeRef());
-                    Some(metal::TextureRef::from_ptr(texture as *mut _))
-                });
-                command_encoder.draw_primitives_instanced_base_instance(
-                    metal::MTLPrimitiveType::Triangle,
-                    0,
-                    6,
-                    1,
-                    (first_surface + index) as u64,
-                );
-                continue;
-            }
-            if format != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange {
-                log::warn!("skipping a surface in an unsupported pixel format {format:#x}");
-                continue;
-            }
-            command_encoder.set_render_pipeline_state(&self.surfaces_pipeline_state);
 
-            let Ok(y_texture) = self.core_video_texture_cache.create_texture_from_image(
-                surface.image_buffer.as_concrete_TypeRef(),
-                None,
-                MTLPixelFormat::R8Unorm,
-                surface.image_buffer.get_width_of_plane(0),
-                surface.image_buffer.get_height_of_plane(0),
-                0,
-            ) else {
-                continue;
+            assert_eq!(
+                CVPixelBufferGetPixelFormatType(image_buffer),
+                kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            );
+
+            let plane_texture = |plane, format| unsafe {
+                let mut texture = ptr::null_mut();
+                let status = CVMetalTextureCache::create_texture_from_image(
+                    None,
+                    &self.core_video_texture_cache,
+                    image_buffer,
+                    None,
+                    format,
+                    CVPixelBufferGetWidthOfPlane(image_buffer, plane),
+                    CVPixelBufferGetHeightOfPlane(image_buffer, plane),
+                    plane,
+                    ptr::NonNull::from(&mut texture),
+                );
+                assert_eq!(
+                    status, kCVReturnSuccess,
+                    "failed to create CoreVideo Metal texture"
+                );
+                CFRetained::<CVMetalTexture>::from_raw(
+                    ptr::NonNull::new(texture).expect("CoreVideo returned a null texture"),
+                )
             };
-            let Ok(cb_cr_texture) = self.core_video_texture_cache.create_texture_from_image(
-                surface.image_buffer.as_concrete_TypeRef(),
-                None,
-                MTLPixelFormat::RG8Unorm,
-                surface.image_buffer.get_width_of_plane(1),
-                surface.image_buffer.get_height_of_plane(1),
-                1,
-            ) else {
-                continue;
-            };
+            let y_texture = plane_texture(0, objc2_metal::MTLPixelFormat::R8Unorm);
+            let cb_cr_texture = plane_texture(1, objc2_metal::MTLPixelFormat::RG8Unorm);
 
             command_encoder.set_vertex_bytes(
                 SurfaceInputIndex::TextureSize as u64,
                 mem::size_of_val(&texture_size) as u64,
                 &texture_size as *const Size<DevicePixels> as *const _,
             );
-            // let y_texture = y_texture.get_texture().unwrap().
             command_encoder.set_fragment_texture(SurfaceInputIndex::YTexture as u64, unsafe {
-                let texture = CVMetalTextureGetTexture(y_texture.as_concrete_TypeRef());
-                Some(metal::TextureRef::from_ptr(texture as *mut _))
+                let texture = CVMetalTextureGetTexture(&y_texture)
+                    .expect("CoreVideo returned no Metal texture");
+                Some(metal::TextureRef::from_ptr(
+                    objc2::rc::Retained::as_ptr(&texture) as *mut _,
+                ))
             });
             command_encoder.set_fragment_texture(SurfaceInputIndex::CbCrTexture as u64, unsafe {
-                let texture = CVMetalTextureGetTexture(cb_cr_texture.as_concrete_TypeRef());
-                Some(metal::TextureRef::from_ptr(texture as *mut _))
+                let texture = CVMetalTextureGetTexture(&cb_cr_texture)
+                    .expect("CoreVideo returned no Metal texture");
+                Some(metal::TextureRef::from_ptr(
+                    objc2::rc::Retained::as_ptr(&texture) as *mut _,
+                ))
             });
 
             command_encoder.draw_primitives_instanced_base_instance(
@@ -1314,118 +1274,6 @@ impl MetalRenderer {
             );
         }
     }
-
-    /// QUILL: rebuild (or swap back) the pipelines that draw into the
-    /// drawable when its pixel format changes (an EDR float layer and back).
-    /// Path rasterization keeps its own 8-bit intermediate.
-    fn match_drawable_format(&mut self, format: MTLPixelFormat) {
-        if format == self.drawable_format {
-            return;
-        }
-        let incoming = match self.other_pipelines.take() {
-            Some(pipelines) if pipelines.format == format => pipelines,
-            _ => DrawablePipelines::build(&self.device, &self.library, format),
-        };
-        let outgoing = DrawablePipelines {
-            format: self.drawable_format,
-            path_sprites: mem::replace(&mut self.path_sprites_pipeline_state, incoming.path_sprites),
-            shadows: mem::replace(&mut self.shadows_pipeline_state, incoming.shadows),
-            quads: mem::replace(&mut self.quads_pipeline_state, incoming.quads),
-            underlines: mem::replace(&mut self.underlines_pipeline_state, incoming.underlines),
-            monochrome_sprites: mem::replace(
-                &mut self.monochrome_sprites_pipeline_state,
-                incoming.monochrome_sprites,
-            ),
-            polychrome_sprites: mem::replace(
-                &mut self.polychrome_sprites_pipeline_state,
-                incoming.polychrome_sprites,
-            ),
-            surfaces: mem::replace(&mut self.surfaces_pipeline_state, incoming.surfaces),
-            hdr_surfaces: mem::replace(&mut self.hdr_surfaces_pipeline_state, incoming.hdr_surfaces),
-        };
-        self.other_pipelines = Some(outgoing);
-        self.drawable_format = format;
-    }
-}
-
-/// QUILL: the pipelines that draw into the drawable, for one pixel format.
-struct DrawablePipelines {
-    format: MTLPixelFormat,
-    path_sprites: metal::RenderPipelineState,
-    shadows: metal::RenderPipelineState,
-    quads: metal::RenderPipelineState,
-    underlines: metal::RenderPipelineState,
-    monochrome_sprites: metal::RenderPipelineState,
-    polychrome_sprites: metal::RenderPipelineState,
-    surfaces: metal::RenderPipelineState,
-    hdr_surfaces: metal::RenderPipelineState,
-}
-
-impl DrawablePipelines {
-    fn build(device: &metal::DeviceRef, library: &metal::LibraryRef, format: MTLPixelFormat) -> Self {
-        let plain = |label: &str, vertex: &str, fragment: &str| {
-            build_pipeline_state(device, library, label, vertex, fragment, format)
-        };
-        Self {
-            format,
-            path_sprites: build_path_sprite_pipeline_state(
-                device,
-                library,
-                "path_sprites",
-                "path_sprite_vertex",
-                "path_sprite_fragment",
-                format,
-            ),
-            shadows: plain("shadows", "shadow_vertex", "shadow_fragment"),
-            quads: plain("quads", "quad_vertex", "quad_fragment"),
-            underlines: plain("underlines", "underline_vertex", "underline_fragment"),
-            monochrome_sprites: plain(
-                "monochrome_sprites",
-                "monochrome_sprite_vertex",
-                "monochrome_sprite_fragment",
-            ),
-            polychrome_sprites: plain(
-                "polychrome_sprites",
-                "polychrome_sprite_vertex",
-                "polychrome_sprite_fragment",
-            ),
-            surfaces: plain("surfaces", "surface_vertex", "surface_fragment"),
-            hdr_surfaces: plain("hdr_surfaces", "surface_vertex", "hdr_surface_fragment"),
-        }
-    }
-}
-
-/// QUILL: `hdr_surface_fragment`'s parameters (`HdrSurfaceParams` in
-/// shaders.metal).
-#[repr(C)]
-struct HdrSurfaceParams {
-    headroom: f32,
-    extended_output: u32,
-}
-
-/// QUILL: the EDR headroom the app attached to an HDR pixel buffer
-/// (`QuillHdrHeadroom`, a CFNumber); 1.0 without one.
-fn hdr_headroom(buffer: &core_video::pixel_buffer::CVPixelBuffer) -> f32 {
-    use core_foundation::{base::CFType, number::CFNumber, string::CFString};
-    let key = CFString::from_static_string("QuillHdrHeadroom");
-    // SAFETY: a live pixel buffer and key; the attachment comes back under
-    // the get rule and is retained by `wrap_under_get_rule`.
-    let value = unsafe {
-        let value = core_video::buffer::CVBufferGetAttachment(
-            buffer.as_concrete_TypeRef().cast(),
-            key.as_concrete_TypeRef(),
-            ptr::null_mut(),
-        );
-        if value.is_null() {
-            return 1.0;
-        }
-        CFType::wrap_under_get_rule(value)
-    };
-    value
-        .downcast::<CFNumber>()
-        .and_then(|number| number.to_f32())
-        .filter(|headroom| headroom.is_finite() && *headroom >= 1.0)
-        .unwrap_or(1.0)
 }
 
 fn new_command_encoder_for_texture<'a>(
@@ -1464,11 +1312,6 @@ fn new_command_encoder_for_texture<'a>(
 fn read_texture_to_image(texture: &metal::TextureRef) -> Result<RgbaImage> {
     let width = texture.width() as u32;
     let height = texture.height() as u32;
-    // QUILL: a window showing an HDR still draws to a float drawable;
-    // capture it as its standard-range (clamped) picture.
-    if texture.pixel_format() == MTLPixelFormat::RGBA16Float {
-        return read_float_texture_to_image(texture, width, height);
-    }
     let bytes_per_row = width as usize * 4;
     let mut pixels = vec![0u8; height as usize * bytes_per_row];
 
@@ -1493,49 +1336,6 @@ fn read_texture_to_image(texture: &metal::TextureRef) -> Result<RgbaImage> {
     }
 
     RgbaImage::from_raw(width, height, pixels).context("failed to create RgbaImage from pixel data")
-}
-
-/// QUILL: reads an RGBA16Float texture in extended sRGB (gamma-encoded)
-/// and clamps it to 8-bit sRGB.
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
-fn read_float_texture_to_image(
-    texture: &metal::TextureRef,
-    width: u32,
-    height: u32,
-) -> Result<RgbaImage> {
-    let bytes_per_row = width as usize * 8;
-    let mut halves = vec![0u16; height as usize * width as usize * 4];
-    let region = metal::MTLRegion {
-        origin: metal::MTLOrigin { x: 0, y: 0, z: 0 },
-        size: metal::MTLSize {
-            width: width as u64,
-            height: height as u64,
-            depth: 1,
-        },
-    };
-    texture.get_bytes(
-        halves.as_mut_ptr() as *mut std::ffi::c_void,
-        bytes_per_row as u64,
-        region,
-        0,
-    );
-    let pixels = halves
-        .iter()
-        .map(|&bits| (half_to_f32(bits).clamp(0.0, 1.0) * 255.0).round() as u8)
-        .collect();
-    RgbaImage::from_raw(width, height, pixels).context("failed to create RgbaImage from pixel data")
-}
-
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
-fn half_to_f32(bits: u16) -> f32 {
-    let exponent = (bits >> 10) & 0x1f;
-    let mantissa = f32::from(bits & 0x3ff);
-    let magnitude = match exponent {
-        0 => mantissa * 2.0_f32.powi(-24),
-        0x1f => f32::INFINITY,
-        _ => (1.0 + mantissa / 1024.0) * 2.0_f32.powi(i32::from(exponent) - 15),
-    };
-    if bits & 0x8000 != 0 { -magnitude } else { magnitude }
 }
 
 fn build_pipeline_state(
@@ -1894,5 +1694,81 @@ impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
 
     fn sprite_atlas(&self) -> Arc<dyn gpui::PlatformAtlas> {
         self.renderer.sprite_atlas().clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use objc2_core_foundation::{CFDictionary, CFType};
+    use objc2_core_video::{
+        CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
+        CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
+        CVPixelBufferUnlockBaseAddress, kCVPixelBufferIOSurfacePropertiesKey,
+    };
+
+    #[test]
+    fn render_core_video_surface() {
+        let attributes = CFDictionary::from_slices(
+            &[unsafe { kCVPixelBufferIOSurfacePropertiesKey }],
+            &[&*CFDictionary::<CFType, CFType>::empty()],
+        );
+        let mut image_buffer = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                CVPixelBufferCreate(
+                    None,
+                    16,
+                    16,
+                    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                    Some(attributes.as_opaque()),
+                    ptr::NonNull::from(&mut image_buffer),
+                )
+            },
+            kCVReturnSuccess
+        );
+        let image_buffer =
+            unsafe { CFRetained::from_raw(ptr::NonNull::new(image_buffer).unwrap()) };
+        unsafe {
+            assert_eq!(
+                CVPixelBufferLockBaseAddress(&image_buffer, CVPixelBufferLockFlags::empty()),
+                kCVReturnSuccess
+            );
+            for plane in 0..2 {
+                let bytes = CVPixelBufferGetBaseAddressOfPlane(&image_buffer, plane).cast::<u8>();
+                let length = CVPixelBufferGetBytesPerRowOfPlane(&image_buffer, plane)
+                    * CVPixelBufferGetHeightOfPlane(&image_buffer, plane);
+                slice::from_raw_parts_mut(bytes, length).fill(128);
+            }
+            assert_eq!(
+                CVPixelBufferUnlockBaseAddress(&image_buffer, CVPixelBufferLockFlags::empty()),
+                kCVReturnSuccess
+            );
+        }
+
+        let bounds = Bounds {
+            origin: Point::default(),
+            size: size(ScaledPixels(16.0), ScaledPixels(16.0)),
+        };
+        let mut scene = Scene::default();
+        scene.insert_primitive(PaintSurface {
+            order: 0,
+            bounds,
+            content_mask: ContentMask { bounds },
+            image_buffer: image_buffer.clone(),
+        });
+        drop(image_buffer);
+        scene.finish();
+
+        let mut renderer = MetalRenderer::new_headless(Arc::new(Mutex::new(Default::default())));
+        let image = renderer
+            .render_scene_to_image(&scene, size(DevicePixels(16), DevicePixels(16)))
+            .unwrap();
+        for image::Rgba([red, green, blue, alpha]) in image.pixels() {
+            assert!(red.abs_diff(128) <= 2);
+            assert!(green.abs_diff(128) <= 2);
+            assert!(blue.abs_diff(128) <= 2);
+            assert_eq!(*alpha, 255);
+        }
     }
 }

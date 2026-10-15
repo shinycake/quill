@@ -899,60 +899,6 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
   return ycbcrToRGBTransform * ycbcr;
 }
 
-// QUILL: HDR still images (`kCVPixelFormatType_64RGBAHalf`, linear extended
-// sRGB, premultiplied alpha). `headroom` is the display's EDR headroom (1 on
-// an SDR target); `extended_output` is set when the drawable is a float
-// layer in extended sRGB.
-struct HdrSurfaceParams {
-  float headroom;
-  uint extended_output;
-};
-
-// Identity up to 80% of the headroom, then a smooth roll-off that reaches
-// the headroom only at infinity (slope 1 at the knee). Twin of
-// `hdr_tone_map` in Quill's `src/ui/hdr_image/tone_map.rs`.
-float hdr_tone_map(float x, float headroom) {
-  float knee = 0.8 * headroom;
-  if (x <= knee) {
-    return x;
-  }
-  float span = headroom - knee;
-  float over = x - knee;
-  return knee + span * (over / (over + span));
-}
-
-// The sRGB transfer function, mirrored for negative values (extended sRGB
-// keeps out-of-gamut colors as negatives).
-float srgb_encode(float value) {
-  float magnitude = fabs(value);
-  float encoded = magnitude <= 0.0031308 ? magnitude * 12.92
-                                         : 1.055 * pow(magnitude, 1.0 / 2.4) - 0.055;
-  return copysign(encoded, value);
-}
-
-fragment float4 hdr_surface_fragment(
-    SurfaceFragmentInput input [[stage_in]],
-    texture2d<half> image [[texture(SurfaceInputIndex_YTexture)]],
-    constant HdrSurfaceParams *params [[buffer(0)]]) {
-  constexpr sampler texture_sampler(mag_filter::linear, min_filter::linear);
-  float4 color = float4(image.sample(texture_sampler, input.texture_position));
-  float alpha = color.a;
-  float3 rgb = alpha > 0.0 ? color.rgb / alpha : float3(0.0);
-  bool extended = params->extended_output != 0;
-  float headroom = max(params->headroom, 1.0);
-  float peak = max(max(rgb.r, rgb.g), rgb.b);
-  // An 8-bit drawable is a passing frame (EDR switching on or off): clip
-  // rather than dim SDR white with the knee.
-  if (extended && peak > 0.0) {
-    rgb *= hdr_tone_map(peak, headroom) / peak;
-  }
-  if (!extended) {
-    rgb = clamp(rgb, 0.0, 1.0);
-  }
-  return float4(srgb_encode(rgb.r), srgb_encode(rgb.g), srgb_encode(rgb.b),
-                alpha);
-}
-
 float4 hsla_to_rgba(Hsla hsla) {
   float h = hsla.h * 6.0; // Now, it's an angle but scaled in [0, 6) range
   float s = hsla.s;
