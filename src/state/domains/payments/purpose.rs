@@ -79,6 +79,8 @@ pub enum PaymentsPurpose {
     GetTonExplorerUrl,
     /// A read-only TON wallet request (`crate::ton_wallet`).
     TonWallet(crate::ton_wallet::TonWalletPurpose),
+    /// Settings → My Grams (`crate::premium_hub::ton`).
+    Grams(crate::premium_hub::ton::GramsPurpose),
     /// `checkPremiumGiftCode` for a gift code link. Response is
     /// `premiumGiftCodeInfo`.
     CheckPremiumGiftCode,

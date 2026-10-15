@@ -34,6 +34,7 @@ mod gift_manage;
 mod gift_market;
 mod giveaway_members;
 mod giveaways;
+mod grams;
 mod group_admin;
 mod group_calls;
 mod groups;
