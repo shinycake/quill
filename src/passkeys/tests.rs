@@ -72,10 +72,15 @@ fn the_row_label_follows_tdesktop() {
 
 #[test]
 fn the_row_follows_webauthn_and_the_passkeys() {
-    // WebAuthn (a USB key over CTAP2) on macOS and Linux, not yet Windows.
+    // WebAuthn: a USB key over CTAP2 on macOS and Linux, webauthn.dll on
+    // Windows when the system has it.
     assert_eq!(
         webauthn_supported(),
-        cfg!(any(target_os = "macos", target_os = "linux"))
+        cfg!(any(target_os = "macos", target_os = "linux")) || crate::webauthn::system_dialog()
+    );
+    assert_eq!(
+        crate::webauthn::system_dialog(),
+        cfg!(windows) && webauthn_supported()
     );
     // Without passkeys the row shows only when one can be created.
     assert_eq!(known(vec![]).row_shown(), webauthn_supported());

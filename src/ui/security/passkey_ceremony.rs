@@ -22,11 +22,11 @@ use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{Key, keys, tr};
-use quill::webauthn::ceremony::UsbKeys;
-use quill::webauthn::{Ceremony, CeremonyError, CeremonyEvent};
+use quill::webauthn::{self, Ceremony, CeremonyError, CeremonyEvent, ParentWindow};
 use std::time::Duration;
 use zeroize::Zeroizing;
 
@@ -42,6 +42,9 @@ pub(in crate::ui) enum CeremonySheet {
     Pin { invalid: bool },
     /// The ceremony failed; the text says why.
     Error(Key),
+    /// Windows: the system's Windows Security dialog runs the ceremony;
+    /// Quill shows a spinner row and Cancel until it returns.
+    System,
 }
 
 /// What the ceremony is for.
@@ -93,6 +96,33 @@ fn login_error(error: &CeremonyError) -> Key {
         CeremonyError::PinBlocked => keys::PASSKEY_PIN_BLOCKED,
         CeremonyError::Cancelled | CeremonyError::Other(_) => keys::PASSKEY_ERROR_LOGIN,
     }
+}
+
+/// The sheet a new ceremony opens on: Windows Security's own dialog, or
+/// the security key sheet.
+fn first_sheet() -> CeremonySheet {
+    if webauthn::system_dialog() {
+        CeremonySheet::System
+    } else {
+        CeremonySheet::Key
+    }
+}
+
+/// The window the Windows Security dialog opens over (tdesktop
+/// `NativeParentWindow`: the active window, here the one the ceremony
+/// dialog is in). Nothing elsewhere.
+fn parent_window(window: &Window) -> ParentWindow {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = HasWindowHandle::window_handle(window)
+            && let RawWindowHandle::Win32(handle) = handle.as_raw()
+        {
+            return ParentWindow(handle.hwnd.get());
+        }
+    }
+    let _ = window;
+    ParentWindow::default()
 }
 
 impl CeremonyUi {
@@ -214,16 +244,16 @@ impl QuillApp {
         if let Some(options) = start {
             self.privacy.passkeys.ceremony = Some(CeremonyUi::new(
                 CeremonyMode::Register,
-                CeremonySheet::Key,
-                Some(Ceremony::register(options, Box::new(UsbKeys))),
+                first_sheet(),
+                Some(webauthn::start_register(options, parent_window(window))),
             ));
             changed = true;
         }
         if let Some(options) = start_login {
             self.privacy.passkeys.ceremony = Some(CeremonyUi::new(
                 CeremonyMode::Login,
-                CeremonySheet::Key,
-                Some(Ceremony::login(options, Box::new(UsbKeys))),
+                first_sheet(),
+                Some(webauthn::start_login(options, parent_window(window))),
             ));
             changed = true;
         }
@@ -294,6 +324,26 @@ impl QuillApp {
             }
             CeremonyEvent::Failed(CeremonyError::Cancelled) => {
                 self.privacy.passkeys.ceremony = None;
+            }
+            CeremonyEvent::Failed(error)
+                if self
+                    .privacy
+                    .passkeys
+                    .ceremony
+                    .as_ref()
+                    .is_some_and(|ui| ui.sheet == CeremonySheet::System) =>
+            {
+                // tdesktop `ShowNativeError`: no error sheet over the
+                // system dialog, a toast with the generic reason.
+                let Some(ui) = self.privacy.passkeys.ceremony.take() else {
+                    return;
+                };
+                quill::webauthn::log(&format!("{:?} failed: {error:?}", ui.mode));
+                self.connection.status_note = tr(match ui.mode {
+                    CeremonyMode::Register => keys::PASSKEY_ERROR_REGISTER,
+                    CeremonyMode::Login => keys::PASSKEY_ERROR_LOGIN,
+                })
+                .into();
             }
             CeremonyEvent::Failed(error) => {
                 if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {
@@ -372,12 +422,14 @@ impl QuillApp {
             },
         );
         app.update(cx, |this, cx| {
-            let sheet = this
+            let (mode, sheet) = this
                 .privacy
                 .passkeys
                 .ceremony
                 .as_ref()
-                .map_or(CeremonySheet::Key, |ui| ui.sheet);
+                .map_or((CeremonyMode::Register, CeremonySheet::Key), |ui| {
+                    (ui.mode, ui.sheet)
+                });
             let pin_input = this.privacy.passkeys.pin_input.clone();
             let (title, about) = match sheet {
                 CeremonySheet::Key => (keys::PASSKEY_TOUCH, keys::PASSKEY_INSERT),
@@ -388,21 +440,47 @@ impl QuillApp {
                     (keys::PASSKEY_PIN_TITLE, keys::PASSKEY_PIN_INVALID)
                 }
                 CeremonySheet::Error(reason) => (keys::PASSKEY_CABLE_ERROR_TITLE, reason),
+                CeremonySheet::System => (
+                    match mode {
+                        CeremonyMode::Register => keys::PASSKEY_CABLE_REGISTER_TITLE,
+                        CeremonyMode::Login => keys::PASSKEY_CABLE_LOGIN_TITLE,
+                    },
+                    keys::Q_PASSKEY_WINDOWS_WAITING,
+                ),
             };
-            let mut body = div().flex().flex_col().gap_3().child(
-                div()
-                    .id("passkey-ceremony-about")
-                    .test_support()
-                    .role(Role::Status)
-                    .aria_label(tr(about))
-                    .text_sm()
-                    .text_color(if sheet == (CeremonySheet::Pin { invalid: true }) {
-                        crate::ui::chat_theme::danger().into()
-                    } else {
-                        cx.theme().foreground
-                    })
-                    .child(tr(about)),
-            );
+            let mut body = div().flex().flex_col().gap_3();
+            body = if sheet == CeremonySheet::System {
+                // One row: the spinner and what Quill waits for.
+                body.child(
+                    div()
+                        .id("passkey-ceremony-about")
+                        .test_support()
+                        .role(Role::Status)
+                        .aria_label(tr(about))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_sm()
+                        .text_color(cx.theme().foreground)
+                        .child(Spinner::new().small())
+                        .child(tr(about)),
+                )
+            } else {
+                body.child(
+                    div()
+                        .id("passkey-ceremony-about")
+                        .test_support()
+                        .role(Role::Status)
+                        .aria_label(tr(about))
+                        .text_sm()
+                        .text_color(if sheet == (CeremonySheet::Pin { invalid: true }) {
+                            crate::ui::chat_theme::danger().into()
+                        } else {
+                            cx.theme().foreground
+                        })
+                        .child(tr(about)),
+                )
+            };
             let is_pin = matches!(sheet, CeremonySheet::Pin { .. });
             if is_pin && let Some(input) = &pin_input {
                 body = body.child(
@@ -482,7 +560,8 @@ crate::ui::screenshot_demo::register_demos![
 impl QuillApp {
     /// `ready-passkey-ceremony`: the ceremony dialog over the box, with
     /// `QUILL_DEMO_PASSKEY_CEREMONY` set to `key` (default), `pin`,
-    /// `pin-invalid` or `error`. No worker runs.
+    /// `pin-invalid`, `error` or `windows` (the Windows Security waiting
+    /// row). No worker runs.
     fn demo_passkey_ceremony(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.seed_demo_passkeys();
         let _ = self.passkey_pin_input(window, cx);
@@ -495,6 +574,7 @@ impl QuillApp {
             "pin" => CeremonySheet::Pin { invalid: false },
             "pin-invalid" => CeremonySheet::Pin { invalid: true },
             "error" => CeremonySheet::Error(keys::PASSKEY_ERROR_NO_DEVICE),
+            "windows" => CeremonySheet::System,
             _ => CeremonySheet::Key,
         };
         self.privacy.passkeys.ceremony = Some(CeremonyUi::new(CeremonyMode::Register, sheet, None));

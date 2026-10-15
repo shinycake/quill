@@ -138,7 +138,7 @@ crate::ui::screenshot_demo::register_demos![
 
 impl QuillApp {
     /// `wait-qr-passkey`: the QR screen with "Log in using passkey", and
-    /// with `QUILL_DEMO_PASSKEY_LOGIN` set to `key`, `pin`, `error` or
+    /// with `QUILL_DEMO_PASSKEY_LOGIN` set to `key`, `windows`, `pin`, `error` or
     /// `server-error`, the sign-in dialog's sheet or the error line. No
     /// worker runs.
     fn demo_passkey_login(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -149,6 +149,7 @@ impl QuillApp {
             .as_str()
         {
             "key" => Some(CeremonySheet::Key),
+            "windows" => Some(CeremonySheet::System),
             "pin" => Some(CeremonySheet::Pin { invalid: false }),
             "error" => Some(CeremonySheet::Error(keys::PASSKEY_ERROR_NO_CREDENTIALS)),
             "server-error" => {

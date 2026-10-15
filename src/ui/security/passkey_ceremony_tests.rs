@@ -141,3 +141,58 @@ fn a_failure_shows_the_error_sheet_and_close_ends_it(cx: &mut TestAppContext) {
     assert_eq!(sheet(&app, vcx), None);
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
 }
+
+/// Windows: while Windows Security runs the ceremony Quill shows one
+/// waiting row and Cancel, nothing to type and no Confirm.
+#[gpui_kit::test]
+fn the_windows_waiting_row_has_only_cancel(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.show_passkey_sheet(CeremonySheet::System, cx)
+    });
+    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
+    vcx.update(|window, cx| {
+        assert_eq!(
+            window.find("passkey-ceremony-about").label(),
+            Some("Waiting for Windows Security…")
+        );
+        assert!(window.try_find("passkey-pin").is_none());
+        assert!(window.try_find("passkey-pin-confirm").is_none());
+        assert!(window.try_find("passkey-ceremony-close").is_none());
+        window.click("passkey-ceremony-cancel", cx);
+    });
+    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
+    assert_eq!(sheet(&app, vcx), None);
+}
+
+/// Windows: a failure closes the dialog and toasts the generic reason
+/// (tdesktop `ShowNativeError`) instead of an error sheet; a cancel in the
+/// system dialog just closes it.
+#[gpui_kit::test]
+fn a_windows_failure_is_a_toast(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.show_passkey_sheet(CeremonySheet::System, cx);
+        app.feed_ceremony_event(
+            CeremonyEvent::Failed(CeremonyError::Other("hr 0x80090011".into())),
+            cx,
+        );
+    });
+    assert_eq!(sheet(&app, vcx), None);
+    assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.connection.status_note,
+            "Couldn't add a passkey with the security key."
+        );
+    });
+    app.update_in(vcx, |app, _, cx| {
+        app.connection.status_note.clear();
+        app.show_passkey_sheet(CeremonySheet::System, cx);
+        app.feed_ceremony_event(CeremonyEvent::Failed(CeremonyError::Cancelled), cx);
+    });
+    assert_eq!(sheet(&app, vcx), None);
+    app.read_with(vcx, |app, _| assert!(app.connection.status_note.is_empty()));
+}

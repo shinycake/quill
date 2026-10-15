@@ -35,10 +35,10 @@ pub const DEFAULT_MAX_PASSKEYS: usize = 10;
 
 /// Whether this build can create passkeys and sign in with them (tdesktop
 /// `Platform::WebAuthn::IsSupported`): a USB security key over CTAP2 on
-/// macOS and Linux (`crate::webauthn`); Windows waits for its
-/// `webauthn.dll` backend. It shows the Passkeys row on accounts without
-/// passkeys and enables the "Create Passkey" button.
-pub const fn webauthn_supported() -> bool {
+/// macOS and Linux, `webauthn.dll` on Windows (`crate::webauthn`). It
+/// shows the Passkeys row on accounts without passkeys and enables the
+/// "Create Passkey" button.
+pub fn webauthn_supported() -> bool {
     crate::webauthn::supported()
 }
 
