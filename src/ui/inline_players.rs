@@ -668,14 +668,16 @@ impl InlineVideos {
     }
 
     /// The slot's player, for tests.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn player(&self, key: Key) -> Option<VideoPlayer> {
         self.with(|state| state.players.get(&key).map(|slot| slot.player.clone()))
             .flatten()
     }
 
     /// Whether the slot is paused off screen, for tests.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn is_hidden(&self, key: Key) -> bool {
         self.with(|state| {
             state

@@ -240,7 +240,8 @@ thread_local! {
 }
 
 /// The views video frames were asked for since the last call, for tests.
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(crate) fn take_video_targets() -> Vec<EntityId> {
     VIDEO_TARGETS.with(|targets| std::mem::take(&mut *targets.borrow_mut()))
 }
