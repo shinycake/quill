@@ -317,6 +317,17 @@ Deviations in this PR:
 How verified: gate OK (core 4429, UI 692); driver tests for the switch
 races, queued patches, deletes and the failed-switch restore.
 
+## PR 3: the chat view
+
+The composer, the history view, chat bars (join requests, pinned
+messages), message menus and actions, selection mode and in-chat search
+are converted (`lang/en/chat.strings`). Counts use tdesktop's plural keys
+(`lng_group_requests_pending`, `lng_pinned_unpin_all`). Generic single
+words are matched to tdesktop keys only when the key means the same thing
+on that screen (spoiler → `lng_menu_formatting_spoiler`, poll →
+`lng_polls_menu_item`); otherwise they get a `qll_chat_*` key. Gate OK
+(core 4444, UI 697).
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

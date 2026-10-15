@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 /// The open thread's window, read once per render: it drives the unread
 /// divider, the jump button's badge, forward paging and scroll anchoring
@@ -168,9 +169,9 @@ impl QuillApp {
                     if message.is_outgoing {
                         session
                             .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
-                            .map_or_else(|| "You".into(), |u| u.display_name())
+                            .map_or_else(|| tr(keys::FROM_YOU).into(), |u| u.display_name())
                     } else if is_group {
-                        "Member".into()
+                        tr(keys::Q_CHAT_MEMBER).into()
                     } else {
                         sender_name.to_string()
                     }
@@ -680,7 +681,10 @@ impl QuillApp {
                     .relative()
                     // kit Phase 7: screen-reader landmark for the message history.
                     .role(Role::Log)
-                    .aria_label(format!("Message history — {sender_name}"))
+                    .aria_label(tr_with(
+                        keys::Q_CHAT_MESSAGE_HISTORY_2,
+                        &[("sender_name", sender_name)],
+                    ))
                     // Middle-click autoscroll (`ui/widgets/middle_click_autoscroll`).
                     .on_mouse_down(
                         MouseButton::Middle,
@@ -752,9 +756,12 @@ impl QuillApp {
                         // tdesktop `lng_jump_to_bottom`; the badge's count
                         // follows the name, as on the other jump buttons.
                         let name = if unread_count > 0 {
-                            format!("Jump to bottom, {unread_count}")
+                            tr_with(
+                                keys::Q_CHAT_JUMP_TO_BOTTOM,
+                                &[("unread_count", &unread_count.to_string())],
+                            )
                         } else {
-                            "Jump to bottom".to_string()
+                            tr(keys::Q_CHAT_JUMP_TO_BOTTOM_2).to_string()
                         };
                         button
                             .accessibility_label(name)

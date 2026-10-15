@@ -1,6 +1,7 @@
 //! Methods moved out of `search_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(in crate::ui) fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -109,32 +110,44 @@ impl QuillApp {
             SearchStatus::Idle if recents && has_results => String::new(),
             SearchStatus::Idle => tab.idle_hint().to_string(),
             SearchStatus::Searching if has_results => String::new(),
-            SearchStatus::Searching if recents => "Loading recent chats…".to_string(),
-            SearchStatus::Searching if browsing_media => "Loading…".to_string(),
-            SearchStatus::Searching => format!("Searching “{query}”…"),
+            SearchStatus::Searching if recents => tr(keys::Q_CHAT_LOADING_RECENT_CHATS).to_string(),
+            SearchStatus::Searching if browsing_media => tr(keys::Q_CHAT_LOADING_2).to_string(),
+            SearchStatus::Searching => {
+                tr_with(keys::Q_CHAT_SEARCHING_3, &[("query", &query.to_string())])
+            }
             SearchStatus::Empty if browsing_media => tab.idle_hint().to_string(),
-            SearchStatus::Empty if tab == SearchTab::Channels => {
-                format!("No channels match “{query}”.")
-            }
-            SearchStatus::Empty if tab.is_media() => {
-                format!("Nothing matches “{query}”.")
-            }
+            SearchStatus::Empty if tab == SearchTab::Channels => tr_with(
+                keys::Q_CHAT_NO_CHANNELS_MATCH,
+                &[("query", &query.to_string())],
+            ),
+            SearchStatus::Empty if tab.is_media() => tr_with(
+                keys::Q_CHAT_NOTHING_MATCHES,
+                &[("query", &query.to_string())],
+            ),
             SearchStatus::Ready => String::new(),
             SearchStatus::Empty if public_scope && limits_exceeded => {
-                "The free daily limit for searching public posts is used up.".to_string()
+                tr(keys::Q_CHAT_THE_FREE_DAILY_LIMIT_FOR).to_string()
             }
-            SearchStatus::Empty if public_scope => {
-                format!("No public posts match “{query}”.")
-            }
-            SearchStatus::Empty => format!("No chats or messages match “{query}”."),
-            SearchStatus::Failed => "Search failed.".to_string(),
+            SearchStatus::Empty if public_scope => tr_with(
+                keys::Q_CHAT_NO_PUBLIC_POSTS_MATCH,
+                &[("query", &query.to_string())],
+            ),
+            SearchStatus::Empty => tr_with(
+                keys::Q_CHAT_NO_CHATS_OR_MESSAGES_MATCH,
+                &[("query", &query.to_string())],
+            ),
+            SearchStatus::Failed => tr(keys::Q_CHAT_SEARCH_FAILED).to_string(),
             SearchStatus::Closed => String::new(),
         };
-        let chat_heading = if recents { "Recent" } else { "Chats" };
-        let message_heading = if public_scope {
-            "Public posts"
+        let chat_heading = if recents {
+            tr(keys::Q_CHAT_RECENT)
         } else {
-            "Messages"
+            tr(keys::RECENT_CHATS)
+        };
+        let message_heading = if public_scope {
+            tr(keys::SEARCH_TAB_PUBLIC_POSTS)
+        } else {
+            tr(keys::Q_CHAT_MESSAGES)
         };
         let confirm = session.and_then(|s| s.search.search.confirm);
         let messages_empty = messages.is_empty();
@@ -220,7 +233,7 @@ impl QuillApp {
                         .when(recents, |this| {
                             this.child(
                                 Button::new("clear-search-recents")
-                                    .label("Clear")
+                                    .label(tr(keys::Q_CHAT_CLEAR))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.set_search_prompt(
@@ -257,8 +270,11 @@ impl QuillApp {
                                     .icon(gpui_kit::assets::IconName::X)
                                     .ghost()
                                     .xsmall()
-                                    .tooltip("Remove from Recent")
-                                    .accessibility_label(format!("Remove {row_title} from Recent"))
+                                    .tooltip(tr(keys::Q_CHAT_REMOVE_FROM_RECENT_2))
+                                    .accessibility_label(tr_with(
+                                        keys::Q_CHAT_REMOVE_FROM_RECENT_3,
+                                        &[("row_title", &row_title.to_string())],
+                                    ))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.remove_recent_search(id, cx);
                                     })),
@@ -279,7 +295,12 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(div().text_xs().font_semibold().child("Public chats"));
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .child(tr(keys::Q_CHAT_PUBLIC_CHATS)),
+                    );
                 for (id, title, preview) in public_chats {
                     let photo = self.chat_photo_for_row(id);
                     block = block.child(search_result_row(

@@ -20,6 +20,7 @@ use gpui_kit::*;
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::poll::chat_allows_polls;
 use quill::state::{
@@ -93,7 +94,7 @@ impl QuillApp {
                 let session = self.session()?;
                 let thread = session.thread_for_chat(chat_id)?;
                 Some((
-                    "Discussion".to_string(),
+                    tr(keys::Q_CHAT_DISCUSSION).to_string(),
                     thread.subtitle(),
                     thread.is_comments(),
                 ))
@@ -148,7 +149,7 @@ impl QuillApp {
         } else if let Some((name, _)) = &saved_header {
             name.clone()
         } else if saved {
-            "Saved Messages".to_string()
+            tr(keys::SAVED_MESSAGES).to_string()
         } else if let Some((name, _)) = &topic_header {
             name.clone()
         } else {
@@ -245,7 +246,14 @@ impl QuillApp {
             (Some(line), false)
         } else if muted {
             (
-                Some(if forever { "muted forever" } else { "muted" }.to_string()),
+                Some(
+                    if forever {
+                        tr(keys::Q_CHAT_MUTED_FOREVER)
+                    } else {
+                        "muted"
+                    }
+                    .to_string(),
+                ),
                 false,
             )
         } else {
@@ -344,7 +352,7 @@ impl QuillApp {
             )
             .when_some(info_target, |this, target| {
                 this.role(gpui_kit::Role::Button)
-                    .aria_label("Open conversation information")
+                    .aria_label(tr(keys::Q_CHAT_OPEN_CONVERSATION_INFORMATION))
                     .tab_index(0)
                     .cursor_pointer()
                     .rounded_md()
@@ -409,10 +417,10 @@ impl QuillApp {
                         .when(view_in_chat, |this| {
                             this.child(
                                 Button::new("thread-view-in-chat")
-                                    .label("View in chat")
+                                    .label(tr(keys::Q_CHAT_VIEW_IN_CHAT))
                                     .ghost()
-                                    .tooltip("Show the post in the discussion group")
-                                    .accessibility_label("View in chat")
+                                    .tooltip(tr(keys::Q_CHAT_SHOW_THE_POST_IN_THE))
+                                    .accessibility_label(tr(keys::Q_CHAT_VIEW_IN_CHAT))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.view_thread_in_chat(cx);
                                     })),
@@ -423,8 +431,8 @@ impl QuillApp {
                                 Button::new("chat-call")
                                     .icon(gpui_kit::assets::IconName::Phone)
                                     .ghost()
-                                    .tooltip("Call")
-                                    .accessibility_label("Call")
+                                    .tooltip(tr(keys::Q_CHAT_CALL))
+                                    .accessibility_label(tr(keys::Q_CHAT_CALL))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.start_call_for_user(user_id, false, cx);
                                     })),
@@ -440,11 +448,11 @@ impl QuillApp {
                                     })
                                     .ghost()
                                     .tooltip(if chat_search_open {
-                                        "Close search"
+                                        tr(keys::Q_CHAT_CLOSE_SEARCH)
                                     } else {
-                                        "Search this chat"
+                                        tr(keys::Q_CHAT_SEARCH_THIS_CHAT)
                                     })
-                                    .accessibility_label("Search this chat")
+                                    .accessibility_label(tr(keys::Q_CHAT_SEARCH_THIS_CHAT))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         if this.chat_search_is_open() {
                                             this.close_chat_search_ui(window, cx);
@@ -461,14 +469,14 @@ impl QuillApp {
                                     .ghost()
                                     .when(voice_live, |button| button.selected(true))
                                     .tooltip(if voice_live {
-                                        "Join voice chat"
+                                        tr(keys::Q_CHAT_JOIN_VOICE_CHAT)
                                     } else {
-                                        "Start voice chat"
+                                        tr(keys::Q_CHAT_START_VOICE_CHAT)
                                     })
                                     .accessibility_label(if voice_live {
-                                        "Join voice chat"
+                                        tr(keys::Q_CHAT_JOIN_VOICE_CHAT)
                                     } else {
-                                        "Start voice chat"
+                                        tr(keys::Q_CHAT_START_VOICE_CHAT)
                                     })
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.start_or_join_video_chat(chat_id, window, cx);
@@ -486,8 +494,12 @@ impl QuillApp {
                                     .icon(gpui_kit::assets::IconName::PanelRight)
                                     .ghost()
                                     .selected(open)
-                                    .tooltip(if open { "Hide info" } else { "Show info" })
-                                    .accessibility_label("Toggle chat info")
+                                    .tooltip(if open {
+                                        tr(keys::Q_CHAT_HIDE_INFO)
+                                    } else {
+                                        tr(keys::Q_CHAT_SHOW_INFO)
+                                    })
+                                    .accessibility_label(tr(keys::Q_CHAT_TOGGLE_CHAT_INFO))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         if open {
                                             this.close_info_panel(cx);

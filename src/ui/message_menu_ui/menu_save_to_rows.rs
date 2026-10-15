@@ -1,6 +1,7 @@
 //! Methods moved out of `message_menu_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// The "Save to..." page: Profile, Saved Messages, Downloads
@@ -35,7 +36,7 @@ impl QuillApp {
                 1,
                 IconName::User,
                 "menu-save-to-profile",
-                "... Profile",
+                tr(keys::CONTEXT_SAVE_MUSIC_PROFILE),
                 false,
                 cx,
                 {
@@ -49,12 +50,12 @@ impl QuillApp {
                                 &target.performer,
                                 &target.file_name,
                             ) {
-                                Ok(_) => "Audio added to your Profile.".into(),
-                                Err(_) => "could not save to your profile".into(),
+                                Ok(_) => tr(keys::SAVED_MUSIC_ADDED).into(),
+                                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_YOUR).into(),
                             };
                         } else {
                             this.connection.status_note =
-                                "demo — saving to the profile needs live TDLib".into();
+                                tr(keys::Q_CHAT_DEMO_SAVING_TO_THE_PROFILE).into();
                         }
                         this.message_ui.menu = None;
                         cx.notify();
@@ -67,7 +68,7 @@ impl QuillApp {
                 2,
                 IconName::Bookmark,
                 "menu-save-to-saved",
-                "... Saved Messages",
+                tr(keys::CONTEXT_SAVE_MUSIC_SAVED),
                 false,
                 cx,
                 move |this, _, cx| {
@@ -77,12 +78,12 @@ impl QuillApp {
                     if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
                         this.connection.status_note =
                             match live.driver.forward_messages(ChatId(me), &draft) {
-                                Ok(_) => "saved to Saved Messages".into(),
-                                Err(_) => "could not save to Saved Messages".into(),
+                                Ok(_) => tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES).into(),
+                                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED).into(),
                             };
                     } else {
                         this.connection.status_note =
-                            "demo — Saved Messages needs live TDLib".into();
+                            tr(keys::Q_CHAT_DEMO_SAVED_MESSAGES_NEEDS_LIVE).into();
                     }
                     this.message_ui.menu = None;
                     cx.notify();
@@ -93,7 +94,7 @@ impl QuillApp {
             3,
             IconName::Download,
             "menu-save-to-downloads",
-            "... Downloads",
+            tr(keys::CONTEXT_SAVE_MUSIC_FOLDER),
             false,
             cx,
             move |this, _, cx| {
@@ -108,7 +109,7 @@ impl QuillApp {
             5,
             "menu-save-to-about",
             None,
-            "Choose where you want this audio to be saved.",
+            tr(keys::CONTEXT_SAVE_MUSIC_ABOUT),
         ));
         rows
     }
@@ -187,7 +188,7 @@ impl QuillApp {
                     order::AUDIENCE,
                     "menu-seen-loading",
                     Some(IconName::Eye),
-                    "Loading...",
+                    tr(keys::Q_CHAT_LOADING),
                 ));
             }
             let seen = audience.viewers.ready().map(|v| v.len());
@@ -197,7 +198,13 @@ impl QuillApp {
                 .map(|p| p.total_count.max(0) as usize);
             let label = match (seen, reacted) {
                 (Some(seen), Some(reacted)) if reacted > 0 && seen > 0 && reacted <= seen => {
-                    Some(format!("{reacted}/{seen} Reacted"))
+                    Some(tr_with(
+                        keys::Q_CHAT_REACTED,
+                        &[
+                            ("reacted", &reacted.to_string()),
+                            ("seen", &seen.to_string()),
+                        ],
+                    ))
                 }
                 (_, Some(reacted)) if reacted > 0 => Some(reacted_label(reacted)),
                 (Some(seen), _) => Some(seen_label(kind, seen)),
@@ -356,7 +363,7 @@ impl QuillApp {
             let (name, photo) =
                 super::super::history::reactor_avatar(&sender, Some(session), &roots);
             let name = if name.is_empty() {
-                "Unknown".to_string()
+                tr(keys::Q_CHAT_UNKNOWN).to_string()
             } else {
                 name
             };
@@ -413,8 +420,8 @@ impl QuillApp {
                                 .text_color(danger_bright())
                                 .hover(|style| style.bg(row_hover))
                                 .role(gpui_kit::Role::Button)
-                                .aria_label("Delete reaction")
-                                .child("Delete")
+                                .aria_label(tr(keys::Q_CHAT_DELETE_REACTION))
+                                .child(tr(keys::MAC_MENU_DELETE))
                                 // Keep the row's own click (open profile) out of it.
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -464,8 +471,10 @@ impl QuillApp {
                 .px_2()
                 .py_1();
             let all_selected = tab.is_none();
-            let mut entries: Vec<(Option<ReactionType>, String)> =
-                vec![(None, format!("All {total}"))];
+            let mut entries: Vec<(Option<ReactionType>, String)> = vec![(
+                None,
+                tr_with(keys::Q_CHAT_ALL, &[("total", &total.to_string())]),
+            )];
             for (reaction, count) in &chips {
                 let glyph = match reaction {
                     ReactionType::Emoji { emoji } => {
@@ -548,7 +557,11 @@ impl QuillApp {
                             this.cursor_pointer().hover(|style| style.bg(hover))
                         })
                         .role(gpui_kit::Role::Button)
-                        .child(if loading { "Loading..." } else { "Show more" })
+                        .child(if loading {
+                            tr(keys::Q_CHAT_LOADING)
+                        } else {
+                            tr(keys::Q_CHAT_SHOW_MORE)
+                        })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(live) = this.live.as_mut() {
                                 let _ = live.driver.fetch_reactors_tab(
@@ -568,7 +581,7 @@ impl QuillApp {
                 10,
                 "menu-audience-tab-loading",
                 None,
-                "Loading...",
+                tr(keys::Q_CHAT_LOADING),
             ));
         }
         if let Some(viewers) = audience.viewers.ready()
@@ -591,7 +604,7 @@ impl QuillApp {
         }
         if rows.is_empty() {
             let text = if audience.viewers.is_loading() || audience.reactions.is_loading() {
-                "Loading...".to_string()
+                tr(keys::Q_CHAT_LOADING).to_string()
             } else {
                 seen_label(SeenKind::Seen, 0)
             };
@@ -617,7 +630,7 @@ impl QuillApp {
                 .is_err()
             {
                 self.message_ui.menu_ui.report_open = false;
-                self.connection.status_note = "could not start the report".into();
+                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_START_THE_REPORT).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.begin_message_report(chat_id, message_ids);
@@ -664,7 +677,7 @@ impl QuillApp {
                 )
                 .is_err()
         {
-            self.connection.status_note = "could not send the report".into();
+            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT).into();
         }
         cx.notify();
     }
@@ -698,7 +711,7 @@ impl QuillApp {
                 .to_string()
         };
         if text.is_empty() && !is_optional {
-            self.connection.status_note = "add a comment to send the report".into();
+            self.connection.status_note = tr(keys::Q_CHAT_ADD_A_COMMENT_TO_SEND).into();
             cx.notify();
             return;
         }
@@ -708,7 +721,7 @@ impl QuillApp {
                 .report_messages(flow.chat_id, &flow.message_ids, &option_id, &text, None)
                 .is_err()
         {
-            self.connection.status_note = "could not send the report".into();
+            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEND_THE_REPORT).into();
         }
         self.message_ui
             .menu_ui
@@ -741,14 +754,14 @@ impl QuillApp {
             let dialog = dialog.overlay(true);
             let Some(flow) = this.message_report_flow() else {
                 return dialog
-                    .title(shell::dialog_title("Report"))
+                    .title(shell::dialog_title(tr(keys::Q_CHAT_REPORT)))
                     .on_close(on_close);
             };
             // A chat report (the chat menus) carries no message ids.
             let (report_title, subject) = if flow.message_ids.is_empty() {
-                ("Report chat", "chat")
+                (tr(keys::Q_CHAT_REPORT_CHAT), "chat")
             } else {
-                ("Report message", "message")
+                (tr(keys::REPORT_MESSAGE_TITLE), "message")
             };
             let close_button = |label: &'static str| {
                 Button::new("message-report-close")
@@ -761,7 +774,7 @@ impl QuillApp {
             };
             let back_button = (!flow.trail.is_empty()).then(|| {
                 Button::new("message-report-back")
-                    .label("Back")
+                    .label(tr(keys::Q_CHAT_BACK))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.message_report_back(cx)))
             });
@@ -769,8 +782,13 @@ impl QuillApp {
             let mut footer = div().flex().justify_end().gap_2();
             match &flow.stage {
                 MessageReportStage::Checking | MessageReportStage::Sending => {
-                    body = body.child(div().text_sm().text_color(text_muted()).child("Reporting…"));
-                    footer = footer.child(close_button("Cancel"));
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(text_muted())
+                            .child(tr(keys::Q_CHAT_REPORTING)),
+                    );
+                    footer = footer.child(close_button(tr(keys::CANCEL)));
                 }
                 MessageReportStage::PickOption { title, options } => {
                     body = body.child(
@@ -779,7 +797,10 @@ impl QuillApp {
                             .font_semibold()
                             .text_color(text_menu())
                             .child(if title.is_empty() {
-                                format!("Why are you reporting this {subject}?")
+                                tr_with(
+                                    keys::Q_CHAT_WHY_ARE_YOU_REPORTING_THIS,
+                                    &[("subject", subject)],
+                                )
                             } else {
                                 title.clone()
                             }),
@@ -813,7 +834,7 @@ impl QuillApp {
                     if let Some(back) = back_button {
                         footer = footer.child(back);
                     }
-                    footer = footer.child(close_button("Close"));
+                    footer = footer.child(close_button(tr(keys::CLOSE)));
                 }
                 MessageReportStage::TextRequired { is_optional, .. } => {
                     let is_optional = *is_optional;
@@ -833,9 +854,9 @@ impl QuillApp {
                         .child(
                             Textarea::new(&this.message_ui.menu_ui.report_text)
                                 .aria_label(if is_optional {
-                                    "Add Comment (Optional)"
+                                    tr(keys::Q_CHAT_ADD_COMMENT_OPTIONAL)
                                 } else {
-                                    "Add Comment"
+                                    tr(keys::Q_CHAT_ADD_COMMENT)
                                 })
                                 .h(px(72.)),
                         );
@@ -845,7 +866,7 @@ impl QuillApp {
                     if is_optional {
                         footer = footer.child(
                             Button::new("message-report-skip")
-                                .label("Skip")
+                                .label(tr(keys::Q_CHAT_SKIP))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.send_message_report_text(true, window, cx);
@@ -854,7 +875,7 @@ impl QuillApp {
                     }
                     footer = footer.child(
                         Button::new("message-report-send")
-                            .label("Report")
+                            .label(tr(keys::Q_CHAT_REPORT))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.send_message_report_text(false, window, cx);
@@ -866,13 +887,13 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(success())
-                            .child("Thank you! Your report will be reviewed by our team."),
+                            .child(tr(keys::REPORT_THANKS)),
                     );
-                    footer = footer.child(close_button("Close"));
+                    footer = footer.child(close_button(tr(keys::CLOSE)));
                 }
                 MessageReportStage::Failed(message) => {
                     body = body.child(div().text_sm().text_color(danger()).child(message.clone()));
-                    footer = footer.child(close_button("Close"));
+                    footer = footer.child(close_button(tr(keys::CLOSE)));
                 }
             }
             dialog

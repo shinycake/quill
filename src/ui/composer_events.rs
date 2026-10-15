@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::composer::{SendKeyMode, should_send_on_enter};
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// A compose field with Quill's placeholder, growth, send key and
@@ -23,7 +24,7 @@ impl QuillApp {
         let submit_on_enter = send_key_mode == SendKeyMode::Enter;
         let composer = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
-                .placeholder("Write a message...")
+                .placeholder(tr(keys::MESSAGE_PH))
                 .auto_grow(1, 8)
                 .submit_on_enter(submit_on_enter);
             // Formatting shows in the field (codex:composer-input).

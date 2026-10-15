@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::{civil_local, day_label, hhmm, now_unix};
 use quill::state::JoinRequestFetch;
 use quill::telegram::envelope::{ChatActionBar, ChatKind};
@@ -53,8 +54,14 @@ pub(crate) fn requested_status(date: i32) -> String {
     let now = civil_local(now_unix());
     let time = hhmm(&at);
     match now.day_number() - at.day_number() {
-        0 => format!("requested to join today at {time}"),
-        1 => format!("requested to join yesterday at {time}"),
+        0 => tr_with(
+            keys::GROUP_REQUESTS_STATUS_TODAY,
+            &[("time", &time.to_string())],
+        ),
+        1 => tr_with(
+            keys::GROUP_REQUESTS_STATUS_YESTERDAY,
+            &[("time", &time.to_string())],
+        ),
         _ => format!("requested to join {} at {time}", day_label(&at, &now)),
     }
 }
@@ -129,7 +136,11 @@ impl QuillApp {
         let unarchive = bar.can_unarchive();
         if unarchive {
             push(
-                Self::bar_button("action-bar-unarchive".into(), "Unarchive", false),
+                Self::bar_button(
+                    "action-bar-unarchive".into(),
+                    tr(keys::Q_CHAT_UNARCHIVE),
+                    false,
+                ),
                 Box::new(move |this, _, cx| this.bar_unarchive(chat_id, cx)),
             );
         }
@@ -137,14 +148,18 @@ impl QuillApp {
             (ChatActionBar::ReportAddBlock { .. }, Some(uid)) => {
                 if !unarchive {
                     push(
-                        Self::bar_button("action-bar-add".into(), "Add contact", false),
+                        Self::bar_button(
+                            "action-bar-add".into(),
+                            tr(keys::Q_CHAT_ADD_CONTACT),
+                            false,
+                        ),
                         Box::new(move |this, window, cx| {
                             this.open_add_contact_dialog(uid, window, cx)
                         }),
                     );
                 }
                 push(
-                    Self::bar_button("action-bar-block".into(), "Block user", true),
+                    Self::bar_button("action-bar-block".into(), tr(keys::Q_CHAT_BLOCK_USER), true),
                     Box::new(move |this, _, cx| this.open_block_bar_dialog(chat_id, uid, cx)),
                 );
             }
@@ -152,7 +167,7 @@ impl QuillApp {
                 push(
                     Self::bar_button(
                         "action-bar-add".into(),
-                        format!("Add {name} to contacts"),
+                        tr_with(keys::NEW_CONTACT_ADD_NAME, &[("user", &name.to_string())]),
                         false,
                     ),
                     Box::new(move |this, window, cx| this.open_add_contact_dialog(uid, window, cx)),
@@ -160,7 +175,11 @@ impl QuillApp {
             }
             (ChatActionBar::SharePhoneNumber, Some(uid)) => {
                 push(
-                    Self::bar_button("action-bar-share".into(), "Share my phone number", false),
+                    Self::bar_button(
+                        "action-bar-share".into(),
+                        tr(keys::NEW_CONTACT_SHARE),
+                        false,
+                    ),
                     Box::new(move |this, window, cx| {
                         this.bar_share_phone(chat_id, uid, window, cx)
                     }),
@@ -168,9 +187,9 @@ impl QuillApp {
             }
             (ChatActionBar::ReportSpam { .. }, _) => {
                 let label = if unarchive {
-                    "Report spam"
+                    tr(keys::Q_CHAT_REPORT_SPAM)
                 } else {
-                    "Report spam and leave"
+                    tr(keys::REPORT_SPAM_AND_LEAVE)
                 };
                 push(
                     Self::bar_button("action-bar-report".into(), label, true),
@@ -179,7 +198,11 @@ impl QuillApp {
             }
             (ChatActionBar::InviteMembers, _) if can_add_members => {
                 push(
-                    Self::bar_button("action-bar-invite".into(), "Add members", false),
+                    Self::bar_button(
+                        "action-bar-invite".into(),
+                        tr(keys::RIGHTS_CHAT_ADD_MEMBERS),
+                        false,
+                    ),
                     Box::new(move |this, window, cx| this.open_member_dialog(chat_id, window, cx)),
                 );
             }
@@ -190,7 +213,14 @@ impl QuillApp {
         } = &bar
         {
             let what = if *is_channel { "channel" } else { "group" };
-            let text = format!("{name} is an admin of {title}, a {what} you requested to join.");
+            let text = tr_with(
+                keys::Q_CHAT_IS_AN_ADMIN_OF_A,
+                &[
+                    ("name", &name.to_string()),
+                    ("title", &title.to_string()),
+                    ("what", what),
+                ],
+            );
             let (title, date) = (title.clone(), bar_request_date(&bar));
             return Some(
                 self.bar_shell("chat-action-bar", cx)
@@ -246,8 +276,8 @@ impl QuillApp {
                             .icon(gpui_kit::assets::IconName::X)
                             .ghost()
                             .small()
-                            .tooltip("Hide")
-                            .accessibility_label("Hide")
+                            .tooltip(tr(keys::Q_CHAT_HIDE))
+                            .accessibility_label(tr(keys::Q_CHAT_HIDE))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.bar_dismiss(chat_id, cx);
                             })),
@@ -260,7 +290,7 @@ impl QuillApp {
     fn bar_dismiss(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.dismiss_chat_action_bar(chat_id).is_err() {
-                self.connection.status_note = "could not hide the bar".into();
+                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_HIDE_THE_BAR).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -279,7 +309,7 @@ impl QuillApp {
                 .is_ok();
             let _ = live.driver.dismiss_chat_action_bar(chat_id);
             if !(moved && reset) {
-                self.connection.status_note = "could not unarchive the chat".into();
+                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_UNARCHIVE_THE_CHAT).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -301,23 +331,26 @@ impl QuillApp {
             .map(|u| u.phone_number.clone())
             .filter(|p| !p.is_empty())
             .map(|p| format!("+{}", p.trim_start_matches('+')))
-            .unwrap_or_else(|| "your number".to_string());
+            .unwrap_or_else(|| tr(keys::Q_CHAT_YOUR_NUMBER).to_string());
         let app = cx.entity().downgrade();
-        let text = format!("Do you want to share your phone number {phone} with {name}?");
+        let text = tr_with(
+            keys::NEW_CONTACT_SHARE_SURE,
+            &[("phone", &phone.to_string()), ("user", &name.to_string())],
+        );
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
-                .title("Share my phone number")
+                .title(tr(keys::NEW_CONTACT_SHARE))
                 .description(text.clone())
                 .ok_text("OK")
-                .cancel_text("Cancel")
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
                         if let Some(live) = this.live.as_mut() {
                             if live.driver.share_phone_number(chat_id, user_id).is_err() {
                                 this.connection.status_note =
-                                    "could not share your phone number".into();
+                                    tr(keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE).into();
                             }
                         } else if let Some(session) = this.demo_session.as_mut() {
                             session.set_chat_action_bar(chat_id.0, None);
@@ -336,18 +369,18 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .is_some_and(|c| c.kind.is_channel());
         let text = if channel {
-            "Are you sure you want to report spam in this channel?"
+            tr(keys::REPORT_SPAM_SURE_CHANNEL)
         } else {
-            "Are you sure you want to report this group for spam?"
+            tr(keys::REPORT_SPAM_SURE_GROUP)
         };
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
-                .title("Report spam")
+                .title(tr(keys::Q_CHAT_REPORT_SPAM))
                 .description(text)
-                .ok_text("Report")
-                .cancel_text("Cancel")
+                .ok_text(tr(keys::Q_CHAT_REPORT))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| this.submit_bar_report(chat_id, cx));
@@ -361,9 +394,9 @@ impl QuillApp {
             let reported = live.driver.report_chat(chat_id);
             let left = live.driver.leave_channel(chat_id);
             self.connection.status_note = if reported.is_ok() && left.is_ok() {
-                "Thank you for your report".into()
+                tr(keys::REPORT_SPAM_DONE).into()
             } else {
-                "could not report the chat".into()
+                tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT).into()
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -405,7 +438,7 @@ impl QuillApp {
                     self.contact_display_name(dialog.user_id)
                 )
             } else {
-                "could not block the user".into()
+                tr(keys::Q_CHAT_COULD_NOT_BLOCK_THE_USER).into()
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(dialog.chat_id.0, None);
@@ -428,7 +461,7 @@ impl QuillApp {
             let dialog = dialog.overlay(true);
             let Some(state) = this.dialogs.block_bar_dialog.as_ref() else {
                 return dialog
-                    .title(crate::ui::shell::dialog_title("Block user"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::Q_CHAT_BLOCK_USER)))
                     .on_close(on_close);
             };
             let name = this.contact_display_name(state.user_id);
@@ -437,12 +470,13 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_sm().child(format!(
-                    "Do you want to block {name} from messaging and calling you on Telegram?"
+                .child(div().text_sm().child(tr_with(
+                    keys::BLOCKED_LIST_CONFIRM_TEXT,
+                    &[("name", &name.to_string())],
                 )))
                 .child(
                     Checkbox::new("block-bar-report")
-                        .label("Report spam")
+                        .label(tr(keys::Q_CHAT_REPORT_SPAM))
                         .checked(report)
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(d) = this.dialogs.block_bar_dialog.as_mut() {
@@ -453,7 +487,7 @@ impl QuillApp {
                 )
                 .child(
                     Checkbox::new("block-bar-delete")
-                        .label("Delete this chat")
+                        .label(tr(keys::Q_CHAT_DELETE_THIS_CHAT))
                         .checked(delete_chat)
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(d) = this.dialogs.block_bar_dialog.as_mut() {
@@ -468,7 +502,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("block-bar-submit")
-                        .label("Block")
+                        .label(tr(keys::Q_CHAT_BLOCK))
                         .danger()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_block_bar_dialog(cx);
@@ -477,7 +511,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("block-bar-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_block_bar_dialog(cx);
@@ -485,7 +519,10 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .title(crate::ui::shell::dialog_title(format!("Block {name}")))
+                .title(crate::ui::shell::dialog_title(tr_with(
+                    keys::Q_CHAT_BLOCK_2,
+                    &[("name", &name.to_string())],
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
@@ -520,11 +557,7 @@ impl QuillApp {
             .get(&chat_id.0)
             .cloned()
             .unwrap_or_default();
-        let text = if count == 1 {
-            "1 join request".to_string()
-        } else {
-            format!("{count} join requests")
-        };
+        let text = trn(keys::GROUP_REQUESTS_PENDING, count);
         let avatars = users
             .iter()
             .take(REQUEST_AVATARS)
@@ -575,7 +608,7 @@ impl QuillApp {
     ) {
         let search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search")
+                .placeholder(tr(keys::Q_CHAT_SEARCH))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -641,15 +674,21 @@ impl QuillApp {
         let place = if is_channel { "channel" } else { "group" };
         let (title, text, ok) = if approve {
             (
-                "Add all",
-                format!("Do you want to add {count} requested people to the {place}?"),
-                "Add all",
+                tr(keys::Q_CHAT_ADD_ALL),
+                tr_with(
+                    keys::Q_CHAT_DO_YOU_WANT_TO_ADD,
+                    &[("count", &count.to_string()), ("place", place)],
+                ),
+                tr(keys::Q_CHAT_ADD_ALL),
             )
         } else {
             (
-                "Dismiss all",
-                format!("Do you want to dismiss {count} join requests?"),
-                "Dismiss all",
+                tr(keys::Q_CHAT_DISMISS_ALL),
+                tr_with(
+                    keys::Q_CHAT_DO_YOU_WANT_TO_DISMISS,
+                    &[("count", &count.to_string())],
+                ),
+                tr(keys::Q_CHAT_DISMISS_ALL),
             )
         };
         let app = cx.entity().downgrade();
@@ -659,7 +698,7 @@ impl QuillApp {
                 .title(title)
                 .description(text.clone())
                 .ok_text(ok)
-                .cancel_text("Cancel")
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
@@ -679,10 +718,10 @@ impl QuillApp {
     ) {
         self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.process_all_chat_join_requests(chat_id, approve) {
-                Ok(_) => "processing join requests".into(),
-                Err(_) => "could not process join requests".into(),
+                Ok(_) => tr(keys::Q_CHAT_PROCESSING_JOIN_REQUESTS).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_PROCESS_JOIN_REQUESTS).into(),
             },
-            None => "join requests need a live connection (demo)".into(),
+            None => tr(keys::Q_CHAT_JOIN_REQUESTS_NEED_A_LIVE).into(),
         };
         cx.notify();
     }
@@ -720,7 +759,9 @@ impl QuillApp {
                 .map(|d| (d.chat_id, d.search.clone()))
             else {
                 return dialog
-                    .title(crate::ui::shell::dialog_title("Join requests"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::Q_CHAT_JOIN_REQUESTS_2,
+                    )))
                     .on_close(on_close);
             };
             let is_channel = this
@@ -728,15 +769,15 @@ impl QuillApp {
                 .and_then(|s| s.chats.get(&chat_id.0))
                 .is_some_and(|c| c.kind.is_channel());
             let add_label = if is_channel {
-                "Add to Channel"
+                tr(keys::Q_CHAT_ADD_TO_CHANNEL)
             } else {
-                "Add to Group"
+                tr(keys::Q_CHAT_ADD_TO_GROUP)
             };
             let fetch = this
                 .session()
                 .and_then(|s| s.groups.join_requests.get(&chat_id.0))
                 .cloned();
-            let mut title = "Join requests".to_string();
+            let mut title = tr(keys::Q_CHAT_JOIN_REQUESTS_2).to_string();
             let mut body = div().flex().flex_col().gap_2();
             let searching = this
                 .session()
@@ -744,7 +785,7 @@ impl QuillApp {
                 .is_some_and(|q| !q.is_empty());
             body = body.child(
                 Textarea::new(&search)
-                    .aria_label("Search join requests")
+                    .aria_label(tr(keys::Q_CHAT_SEARCH_JOIN_REQUESTS))
                     .h(px(40.)),
             );
             if let Some(JoinRequestFetch::Loaded(list)) = &fetch
@@ -758,7 +799,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("join-requests-add-all")
-                                .label("Add all")
+                                .label(tr(keys::Q_CHAT_ADD_ALL))
                                 .small()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.confirm_process_all_join_requests(
@@ -768,7 +809,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("join-requests-dismiss-all")
-                                .label("Dismiss all")
+                                .label(tr(keys::Q_CHAT_DISMISS_ALL))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -785,7 +826,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Loading join requests…"),
+                            .child(tr(keys::Q_CHAT_LOADING_JOIN_REQUESTS)),
                     );
                 }
                 Some(JoinRequestFetch::Failed(message)) => {
@@ -803,17 +844,13 @@ impl QuillApp {
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(if searching {
-                                    "No matching join requests."
+                                    tr(keys::Q_CHAT_NO_MATCHING_JOIN_REQUESTS)
                                 } else {
-                                    "There are no pending join requests."
+                                    tr(keys::GROUP_REQUESTS_NONE)
                                 }),
                         );
                     } else {
-                        title = if list.total_count == 1 {
-                            "1 join request".to_string()
-                        } else {
-                            format!("{} join requests", list.total_count.max(1))
-                        };
+                        title = trn(keys::GROUP_REQUESTS_PENDING, list.total_count.max(1));
                     }
                     let has_more = (list.requests.len() as i32) < list.total_count;
                     for request in list.requests {
@@ -855,7 +892,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new(format!("join-request-dismiss-{uid}"))
-                                        .label("Dismiss")
+                                        .label(tr(keys::Q_CHAT_DISMISS))
                                         .ghost()
                                         .small()
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -867,7 +904,7 @@ impl QuillApp {
                     if has_more {
                         body = body.child(
                             Button::new("join-requests-more")
-                                .label("Show more")
+                                .label(tr(keys::Q_CHAT_SHOW_MORE))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -912,14 +949,14 @@ impl QuillApp {
             return None;
         }
         let title = if chat.kind.is_channel() {
-            "Live Stream"
+            tr(keys::VIEW_BUTTON_VOICE_CHAT_CHANNEL)
         } else {
-            "Voice Chat"
+            tr(keys::Q_CHAT_VOICE_CHAT)
         };
         let sub = if video_chat.has_participants {
-            "Active now"
+            tr(keys::Q_CHAT_ACTIVE_NOW)
         } else {
-            "Click to join"
+            tr(keys::Q_CHAT_CLICK_TO_JOIN)
         };
         Some(
             self.bar_shell("voice-chat-bar", cx)
@@ -945,9 +982,9 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("voice-chat-bar-join")
-                        .label("Join")
+                        .label(tr(keys::Q_CHAT_JOIN))
                         .small()
-                        .accessibility_label("Join voice chat")
+                        .accessibility_label(tr(keys::Q_CHAT_JOIN_VOICE_CHAT))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.start_or_join_video_chat(chat_id, window, cx);
                         })),
@@ -974,9 +1011,9 @@ fn open_join_request_notice(window: &mut Window, cx: &mut App, title: &str, date
     );
     window.open_alert_dialog(cx, move |alert, _, _| {
         alert
-            .title("Response to your join request")
+            .title(tr(keys::FROM_REQUEST_TITLE_GROUP))
             .description(text.clone())
-            .ok_text("I understand")
+            .ok_text(tr(keys::Q_CHAT_I_UNDERSTAND))
             .show_cancel(false)
     });
 }

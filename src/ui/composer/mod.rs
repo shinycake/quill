@@ -24,6 +24,7 @@ use quill::composer::{
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::schedule::ScheduleKind;
 use quill::send_rights::SendKind;
 use quill::state::{Session, effective_preview};
@@ -60,13 +61,13 @@ impl QuillApp {
     ) {
         match self.pane_mode() {
             PaneMode::Connecting => {
-                self.connection.status_note = "sign in before sending".into();
+                self.connection.status_note = tr(keys::Q_CHAT_SIGN_IN_BEFORE_SENDING).into();
                 cx.notify();
             }
             PaneMode::Ready => {
                 if self.session().is_some_and(|s| s.is_frozen()) {
                     self.connection.status_note =
-                        "Your account is frozen and can't send messages.".into();
+                        tr(keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND).into();
                     cx.notify();
                     return;
                 }
@@ -100,12 +101,12 @@ impl QuillApp {
                 });
                 if let Some((open_chat, view_generation, supported)) = plan {
                     let Some(chat_id) = open_chat else {
-                        self.connection.status_note = "select a chat to send".into();
+                        self.connection.status_note = tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEND).into();
                         cx.notify();
                         return;
                     };
                     if supported != Some(true) {
-                        self.connection.status_note = "this chat type is not supported yet".into();
+                        self.connection.status_note = tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT).into();
                         cx.notify();
                         return;
                     }
@@ -116,14 +117,14 @@ impl QuillApp {
                     // soundless one is sent as a GIF.
                     if self.tray_videos_checking() {
                         self.connection.status_note =
-                            "checking the video… send again in a moment".into();
+                            tr(keys::Q_CHAT_CHECKING_THE_VIDEO_SEND_AGAIN).into();
                         cx.notify();
                         return;
                     }
                     // A picture sent as a file is still getting its thumbnail.
                     if self.tray_thumbnails_pending() {
                         self.connection.status_note =
-                            "preparing the file… send again in a moment".into();
+                            tr(keys::Q_CHAT_PREPARING_THE_FILE_SEND_AGAIN).into();
                         cx.notify();
                         return;
                     }
@@ -258,7 +259,8 @@ impl QuillApp {
                         snap.media = media_options;
                     }
                     if snaps.first().is_none_or(ComposerSnapshot::is_empty) {
-                        self.connection.status_note = "type a message or attach a file".into();
+                        self.connection.status_note =
+                            tr(keys::Q_CHAT_TYPE_A_MESSAGE_OR_ATTACH).into();
                         cx.notify();
                         return;
                     }
@@ -273,7 +275,8 @@ impl QuillApp {
                         if quill::text_split::units_over_limit(&only.text, limit) > 0 {
                             let parts = quill::text_split::split_markup_text(&only.text, limit);
                             if parts.is_empty() {
-                                self.connection.status_note = "message too long to send".into();
+                                self.connection.status_note =
+                                    tr(keys::Q_CHAT_MESSAGE_TOO_LONG_TO_SEND).into();
                                 cx.notify();
                                 return;
                             }
@@ -339,7 +342,7 @@ impl QuillApp {
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             self.forget_local_draft(chat_id);
                             self.connection.status_note =
-                                self.send_started_note(scheduling, "sending…");
+                                self.send_started_note(scheduling, tr(keys::Q_CHAT_SENDING));
                         }
                         Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) => {
                             // MED4: runtime `message_caption_length_max`
@@ -371,11 +374,11 @@ impl QuillApp {
                                         && quill::video::probe_local_video_note(&att.path).is_err()
                                 });
                             self.connection.status_note = if note_unreadable {
-                                "video note must be a square clip (max 60s, 640px)".into()
+                                tr(keys::Q_CHAT_VIDEO_NOTE_MUST_BE_A).into()
                             } else if video_unreadable {
-                                "could not read video duration or size".into()
+                                tr(keys::Q_CHAT_COULD_NOT_READ_VIDEO_DURATION).into()
                             } else {
-                                "could not send message".into()
+                                tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE).into()
                             };
                         }
                     }
@@ -395,8 +398,7 @@ impl QuillApp {
                         att.kind == AttachmentKind::VideoNote
                             && quill::video::probe_local_video_note(&att.path).is_err()
                     }) {
-                        self.connection.status_note =
-                            "video note must be a square clip (max 60s, 640px)".into();
+                        self.connection.status_note = tr(keys::Q_CHAT_VIDEO_NOTE_MUST_BE_A).into();
                         cx.notify();
                         return;
                     }
@@ -428,7 +430,7 @@ impl QuillApp {
                     self.composer
                         .update(cx, |input, cx| input.set_value("", window, cx));
                     self.connection.status_note =
-                        "demo send applied locally (no live Telegram)".into();
+                        tr(keys::Q_CHAT_DEMO_SEND_APPLIED_LOCALLY_NO).into();
                     cx.notify();
                 }
             }
@@ -468,17 +470,18 @@ impl QuillApp {
         // user and we never want to fake a successful send.
         let premium = session.my_is_premium();
         if !premium {
-            self.connection.status_note = "Rich messages require Telegram Premium".into();
+            self.connection.status_note =
+                tr(keys::Q_CHAT_RICH_MESSAGES_REQUIRE_TELEGRAM_PREMIUM).into();
             cx.notify();
             return;
         }
         let Some(chat_id) = open_chat else {
-            self.connection.status_note = "select a chat to send".into();
+            self.connection.status_note = tr(keys::Q_CHAT_SELECT_A_CHAT_TO_SEND).into();
             cx.notify();
             return;
         };
         if supported != Some(true) {
-            self.connection.status_note = "this chat type is not supported yet".into();
+            self.connection.status_note = tr(keys::Q_CHAT_THIS_CHAT_TYPE_IS_NOT).into();
             cx.notify();
             return;
         }
@@ -529,7 +532,7 @@ impl QuillApp {
             return;
         }
         if quill::rich::input_rich_message(&blocks).is_none() {
-            self.connection.status_note = "type a message or attach a file".into();
+            self.connection.status_note = tr(keys::Q_CHAT_TYPE_A_MESSAGE_OR_ATTACH).into();
             cx.notify();
             return;
         }
@@ -561,10 +564,10 @@ impl QuillApp {
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
                 self.connection.status_note =
-                    self.send_started_note(options.scheduling, "sending…");
+                    self.send_started_note(options.scheduling, tr(keys::Q_CHAT_SENDING));
             }
             Err(_) => {
-                self.connection.status_note = "could not send rich message".into();
+                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEND_RICH_MESSAGE).into();
             }
         }
         cx.notify();
@@ -585,8 +588,7 @@ impl QuillApp {
                     self.set_edit_replacement(only, cx);
                 }
                 _ => {
-                    self.connection.status_note =
-                        "Drop a single file to replace the attachment.".into();
+                    self.connection.status_note = tr(keys::Q_CHAT_DROP_A_SINGLE_FILE_TO).into();
                     cx.notify();
                 }
             }
@@ -596,7 +598,10 @@ impl QuillApp {
             &mut self.composer_ui.pending_attachments,
             paths,
         ) {
-            Ok(count) => format!("Attached {count} files. Send to upload."),
+            Ok(count) => tr_with(
+                keys::Q_CHAT_ATTACHED_FILES_SEND_TO_UPLOAD,
+                &[("count", &count.to_string())],
+            ),
             Err(note) => note.into(),
         };
         self.check_tray_videos(cx);
@@ -631,7 +636,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Choose Files".into()),
+            prompt: Some(tr(keys::Q_CHAT_CHOOSE_FILES).into()),
         });
         // The picker answers later: attach into the composer of the
         // window that asked (`chat_window::slot`).
@@ -731,13 +736,16 @@ impl QuillApp {
                 ComposerAttachment::push_attachment(&mut self.composer_ui.pending_attachments, att);
                 self.connection.status_note =
                     if self.composer_ui.pending_attachments.len() == before {
-                        format!("album is full ({before})")
+                        tr_with(
+                            keys::Q_CHAT_ALBUM_IS_FULL,
+                            &[("before", &before.to_string())],
+                        )
                     } else {
                         format!("attached {name}")
                     };
             }
             None => {
-                self.connection.status_note = "could not paste image".into();
+                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_PASTE_IMAGE).into();
             }
         }
         cx.notify();
@@ -773,7 +781,7 @@ impl QuillApp {
         self.composer_ui.self_destruct = None;
         // MED1: the grouping override belongs to this composer batch.
         self.composer_ui.group_media = None;
-        self.connection.status_note = "attachment cleared".into();
+        self.connection.status_note = tr(keys::Q_CHAT_ATTACHMENT_CLEARED).into();
         cx.notify();
     }
 
@@ -825,9 +833,11 @@ impl QuillApp {
     ) {
         self.composer_ui.self_destruct = next;
         self.connection.status_note = match next {
-            None => "self-destruct off".into(),
-            Some(SelfDestructSend::Timer(secs)) => format!("self-destruct: {secs}s"),
-            Some(SelfDestructSend::Immediately) => "self-destruct: view once".into(),
+            None => tr(keys::Q_CHAT_SELF_DESTRUCT_OFF).into(),
+            Some(SelfDestructSend::Timer(secs)) => {
+                tr_with(keys::Q_CHAT_SELF_DESTRUCT_S, &[("secs", &secs.to_string())])
+            }
+            Some(SelfDestructSend::Immediately) => tr(keys::Q_CHAT_SELF_DESTRUCT_VIEW_ONCE).into(),
         };
         cx.notify();
     }

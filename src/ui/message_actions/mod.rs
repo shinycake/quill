@@ -19,6 +19,7 @@ use quill::composer::DeleteConfirm;
 use quill::connect::PREVIEW_HISTORY_LIMIT;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::message_menu::order;
 use quill::poll::can_stop_poll;
 use quill::state::{RequestPurpose, effective_preview};
@@ -38,14 +39,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note =
-                "Stopping a live location needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_CHAT_STOPPING_A_LIVE_LOCATION_NEEDS).into();
             cx.notify();
             return;
         };
         self.connection.status_note = match live.driver.stop_live_location(chat_id, message_id) {
-            Ok(_) => "Stopped sharing your live location".into(),
-            Err(_) => "Couldn't stop sharing; try again.".into(),
+            Ok(_) => tr(keys::Q_CHAT_STOPPED_SHARING_YOUR_LIVE_LOCATION).into(),
+            Err(_) => tr(keys::Q_CHAT_COULDNT_STOP_SHARING_TRY_AGAIN).into(),
         };
         cx.notify();
     }
@@ -67,11 +67,11 @@ impl QuillApp {
         self.connection.status_note = match kind {
             Some(ChatKind::Supergroup {
                 is_channel: true, ..
-            }) => "Sorry, copying from this channel is disabled by admins.",
+            }) => tr(keys::ERROR_NOCOPY_CHANNEL),
             Some(ChatKind::Private { .. } | ChatKind::Secret { .. }) | None => {
-                "Sorry, copying from this chat is restricted."
+                tr(keys::ERROR_NOCOPY_USER)
             }
-            _ => "Sorry, copying from this group is disabled by admins.",
+            _ => tr(keys::ERROR_NOCOPY_GROUP),
         }
         .into();
         cx.notify();
@@ -94,7 +94,7 @@ fn confirm(
         alert
             .description(question)
             .ok_text(action)
-            .cancel_text("Cancel")
+            .cancel_text(tr(keys::CANCEL))
             .show_cancel(true)
             .on_ok(move |_, _, cx| {
                 on_confirm(cx);
@@ -116,7 +116,7 @@ fn confirm_hide_pinned(
         window,
         cx,
         quill::selection_pin::HIDE_PINNED_QUESTION,
-        "Hide",
+        tr(keys::Q_CHAT_HIDE),
         move |cx| {
             let _ = app.update(cx, |this, cx| {
                 this.history.hidden_pinned.insert(chat_id.0, newest);

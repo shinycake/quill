@@ -1,6 +1,7 @@
 //! Methods moved out of `composer_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(in crate::ui) fn send_sticker_pick(
@@ -55,13 +56,13 @@ impl QuillApp {
                     topic_id: None,
                 },
             ) {
-                Ok(_) => "sticker sent".into(),
-                Err(_) => "could not send sticker".into(),
+                Ok(_) => tr(keys::Q_CHAT_STICKER_SENT).into(),
+                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SEND_STICKER).into(),
             };
-            self.connection.status_note == "sticker sent"
+            self.connection.status_note == tr(keys::Q_CHAT_STICKER_SENT)
         } else if self.demo_session.is_some() {
             self.apply_demo_sticker(chat_id, &emoji, file_id, reply);
-            self.connection.status_note = "sticker sent".into();
+            self.connection.status_note = tr(keys::Q_CHAT_STICKER_SENT).into();
             true
         } else {
             false
@@ -80,8 +81,8 @@ impl QuillApp {
     ) -> impl IntoElement {
         let preview = edit.original_text.clone();
         let kind = match edit.kind {
-            quill::composer::ComposerEditKind::Text => "Editing message",
-            quill::composer::ComposerEditKind::Caption => "Editing caption",
+            quill::composer::ComposerEditKind::Text => tr(keys::Q_CHAT_EDITING_MESSAGE),
+            quill::composer::ComposerEditKind::Caption => tr(keys::Q_CHAT_EDITING_CAPTION),
         };
         // An edited photo or video shows its small preview, as tdesktop's
         // field header does.
@@ -90,11 +91,11 @@ impl QuillApp {
         let replace_button = edit.allows_replace().then(|| {
             Button::new("composer-edit-replace")
                 .icon(gpui_kit::assets::IconName::Paperclip)
-                .label("Replace")
+                .label(tr(keys::Q_CHAT_REPLACE))
                 .ghost()
                 .small()
-                .tooltip("Replace attachment")
-                .accessibility_label("Replace attachment")
+                .tooltip(tr(keys::Q_CHAT_REPLACE_ATTACHMENT))
+                .accessibility_label(tr(keys::Q_CHAT_REPLACE_ATTACHMENT))
                 .on_click(cx.listener(|this, _, _, cx| this.pick_edit_replacement(cx)))
                 .into_any_element()
         });
@@ -118,8 +119,8 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::X)
                 .ghost()
                 .small()
-                .tooltip("Cancel editing")
-                .accessibility_label("Cancel editing")
+                .tooltip(tr(keys::Q_CHAT_CANCEL_EDITING))
+                .accessibility_label(tr(keys::Q_CHAT_CANCEL_EDITING))
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.clear_edit(window, cx);
                 })),
@@ -182,7 +183,7 @@ impl QuillApp {
                 if let Some(live) = this.live.as_mut()
                     && live.driver.request_composer_link_preview(&url).is_err()
                 {
-                    this.connection.status_note = "couldn't load link preview".into();
+                    this.connection.status_note = tr(keys::Q_CHAT_COULDNT_LOAD_LINK_PREVIEW).into();
                 }
                 cx.notify();
             })
@@ -267,7 +268,7 @@ impl QuillApp {
                 cx.notify();
             });
         }
-        menu = menu.label("Link Preview Settings");
+        menu = menu.label(tr(keys::Q_CHAT_LINK_PREVIEW_SETTINGS));
         if urls.len() > 1 {
             for (index, url) in urls.iter().enumerate() {
                 let owner = owner.clone();
@@ -294,27 +295,34 @@ impl QuillApp {
             let above = choice.above_text;
             let toggle = owner.clone();
             menu = menu.item(
-                PopupMenuItem::new(if above { "Move Down" } else { "Move Up" }).on_click(
-                    move |_, _, cx| {
-                        apply(
-                            &toggle,
-                            cx,
-                            Some(if above {
-                                "Link preview will appear below the text"
-                            } else {
-                                "Link preview will appear above the text"
-                            }),
-                            |c| c.above_text = !above,
-                        );
-                    },
-                ),
+                PopupMenuItem::new(if above {
+                    tr(keys::Q_CHAT_MOVE_DOWN)
+                } else {
+                    tr(keys::Q_CHAT_MOVE_UP)
+                })
+                .on_click(move |_, _, cx| {
+                    apply(
+                        &toggle,
+                        cx,
+                        Some(if above {
+                            tr(keys::Q_CHAT_LINK_PREVIEW_WILL_APPEAR_BELOW)
+                        } else {
+                            tr(keys::Q_CHAT_LINK_PREVIEW_WILL_APPEAR_ABOVE)
+                        }),
+                        |c| c.above_text = !above,
+                    );
+                }),
             );
             if let Some((large, noun)) = size_toggle {
                 let resize = owner.clone();
                 menu = menu.item(
                     PopupMenuItem::new(format!(
                         "{} {noun}",
-                        if large { "Shrink" } else { "Enlarge" }
+                        if large {
+                            tr(keys::Q_CHAT_SHRINK)
+                        } else {
+                            tr(keys::Q_CHAT_ENLARGE)
+                        }
                     ))
                     .on_click(move |_, _, cx| {
                         apply(&resize, cx, None, |c| {
@@ -331,9 +339,9 @@ impl QuillApp {
         let off = owner;
         menu.item(
             PopupMenuItem::new(if disabled {
-                "Show Preview"
+                tr(keys::Q_CHAT_SHOW_PREVIEW)
             } else {
-                "Do Not Preview"
+                tr(keys::Q_CHAT_DO_NOT_PREVIEW)
             })
             .on_click(move |_, _, cx| {
                 apply(&off, cx, None, |c| c.disabled = !disabled);
@@ -403,9 +411,9 @@ impl QuillApp {
                 }
                 // TDLib 404: "no link info" (TGX
                 // `LinkPreview.isNotFound`) — honest, never a fake card.
-                Some(None) => Some("No preview for this link".to_string()),
+                Some(None) => Some(tr(keys::Q_CHAT_NO_PREVIEW_FOR_THIS_LINK).to_string()),
                 // Request in flight.
-                None => Some("Getting link info…".to_string()),
+                None => Some(tr(keys::Q_CHAT_GETTING_LINK_INFO).to_string()),
             },
             None => None,
         };
@@ -422,9 +430,9 @@ impl QuillApp {
                     p.kind,
                     quill::telegram::envelope::LinkPreviewKind::EmbeddedPlayer { .. }
                 ) {
-                    "Video"
+                    tr(keys::Q_CHAT_VIDEO)
                 } else {
-                    "Photo"
+                    tr(keys::Q_CHAT_PHOTO)
                 };
                 (large, noun)
             });
@@ -449,7 +457,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(text_muted())
-                    .child("Preview off"),
+                    .child(tr(keys::Q_CHAT_PREVIEW_OFF)),
             );
         } else if let Some(line) = preview_line {
             row = row.child(
@@ -463,11 +471,11 @@ impl QuillApp {
         }
         row = row.child(
             Button::new("composer-preview-options")
-                .label("Link options")
+                .label(tr(keys::Q_CHAT_LINK_OPTIONS))
                 .ghost()
                 .small()
-                .tooltip("Link Preview Settings")
-                .accessibility_label("Link Preview Settings")
+                .tooltip(tr(keys::Q_CHAT_LINK_PREVIEW_SETTINGS))
+                .accessibility_label(tr(keys::Q_CHAT_LINK_PREVIEW_SETTINGS))
                 .dropdown_menu(move |menu, _, _| {
                     Self::link_options_menu(
                         owner.clone(),
@@ -526,7 +534,7 @@ impl QuillApp {
                 .when(as_file_toggle, |this| {
                     this.child(
                         Checkbox::new("composer-edit-replace-as-file")
-                            .label("Send as a document")
+                            .label(tr(keys::SEND_AS_DOCUMENTS_ONE))
                             .checked(as_file)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_edit_replace_as_file(cx);
@@ -536,7 +544,7 @@ impl QuillApp {
                 .when(spoiler_toggle, |this| {
                     this.child(
                         Checkbox::new("composer-edit-replace-spoiler")
-                            .label("Spoiler")
+                            .label(tr(keys::MENU_FORMATTING_SPOILER))
                             .checked(spoiler)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_edit_replace_spoiler(cx);
@@ -548,8 +556,8 @@ impl QuillApp {
                         .icon(IconName::X)
                         .ghost()
                         .xsmall()
-                        .tooltip("Keep the original attachment")
-                        .accessibility_label("Keep the original attachment")
+                        .tooltip(tr(keys::Q_CHAT_KEEP_THE_ORIGINAL_ATTACHMENT))
+                        .accessibility_label(tr(keys::Q_CHAT_KEEP_THE_ORIGINAL_ATTACHMENT))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.clear_edit_replacement(cx);
                         })),
@@ -617,12 +625,12 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(text_muted())
-                                .child("Add a caption…"),
+                                .child(tr(keys::Q_CHAT_ADD_A_CAPTION)),
                         )
                         .when(captionable && !self.open_chat_is_secret(), |this| {
                             this.child(
                                 Checkbox::new("composer-caption-above")
-                                    .label("Caption above media")
+                                    .label(tr(keys::Q_CHAT_CAPTION_ABOVE_MEDIA))
                                     .checked(above)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(edit) = this.composer_ui.pending_edit.as_mut() {
@@ -669,7 +677,13 @@ impl QuillApp {
             (format!("\u{2212}{}", over.min(999)), danger_bright())
         } else {
             let parts = quill::text_split::split_markup_text(value.trim(), limit).len();
-            (format!("Will be sent as {parts} messages"), text_muted())
+            (
+                tr_with(
+                    keys::Q_CHAT_WILL_BE_SENT_AS_MESSAGES,
+                    &[("parts", &parts.to_string())],
+                ),
+                text_muted(),
+            )
         };
         Some(
             div()
@@ -693,13 +707,11 @@ impl QuillApp {
             "delete-confirm",
             gpui_kit::assets::IconName::Trash,
             danger().into(),
-            warning.map_or("Delete message?", |(title, _)| title),
+            warning.map_or(tr(keys::Q_CHAT_DELETE_MESSAGE), |(title, _)| title),
             match warning {
                 Some((_, text)) => text.to_string(),
-                None if can_revoke && revoke => {
-                    "It will be deleted for everyone in this chat.".to_string()
-                }
-                None => "It will be deleted for you only.".to_string(),
+                None if can_revoke && revoke => tr(keys::Q_CHAT_IT_WILL_BE_DELETED_FOR).to_string(),
+                None => tr(keys::Q_CHAT_IT_WILL_BE_DELETED_FOR_2).to_string(),
             },
             Some(
                 div()
@@ -711,7 +723,7 @@ impl QuillApp {
                             // M1: only own outgoing messages offer the
                             // for-everyone option (`deleteMessages.revoke`).
                             Checkbox::new("delete-for-everyone")
-                                .label("Delete for everyone")
+                                .label(tr(keys::Q_CHAT_DELETE_FOR_EVERYONE))
                                 .checked(revoke)
                                 .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                     if let Some(confirm) = this.message_ui.pending_delete.as_mut() {
@@ -726,7 +738,7 @@ impl QuillApp {
                             .label(if warning.is_some() {
                                 quill::suggested_posts::DELETE_ANYWAY
                             } else {
-                                "Delete"
+                                tr(keys::BOX_DELETE)
                             })
                             .danger()
                             .small()
@@ -740,8 +752,8 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::X)
                 .ghost()
                 .small()
-                .tooltip("Cancel")
-                .accessibility_label("Cancel delete")
+                .tooltip(tr(keys::CANCEL))
+                .accessibility_label(tr(keys::Q_CHAT_CANCEL_DELETE))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.cancel_delete(cx);
                 })),
@@ -824,8 +836,8 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::X)
                 .ghost()
                 .small()
-                .tooltip("Cancel reply")
-                .accessibility_label("Cancel reply")
+                .tooltip(tr(keys::Q_CHAT_CANCEL_REPLY))
+                .accessibility_label(tr(keys::Q_CHAT_CANCEL_REPLY))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.clear_reply(cx);
                 })),

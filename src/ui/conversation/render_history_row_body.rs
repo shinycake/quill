@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn render_history_row_body(
@@ -284,7 +285,7 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(danger())
-                                .child("⚠ Failed to send — right-click → Retry send"),
+                                .child(tr(keys::Q_CHAT_FAILED_TO_SEND_RIGHT_CLICK)),
                         )
                     })
                     .children(selection_overlay)
@@ -366,7 +367,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.retry_history().is_err()
         {
-            self.connection.status_note = "could not load history".into();
+            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY).into();
         }
         cx.notify();
     }

@@ -21,6 +21,7 @@ use gpui_kit::component::*;
 use gpui_kit::{TestSupportExt, *};
 use quill::composer::{FormatAction, apply_format_markup, date_link, date_link_time};
 use quill::composer_doc::ComposerTag;
+use quill::lang::{keys, tr};
 use quill::local_time::{civil_local, now_unix};
 use std::ops::Range;
 
@@ -129,7 +130,7 @@ impl QuillApp {
             .filter(|time| (1..=MAX_DATE).contains(time))
             .and_then(|time| i32::try_from(time).ok())
         else {
-            self.connection.status_note = "pick a date and time".into();
+            self.connection.status_note = tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME).into();
             cx.notify();
             return;
         };
@@ -138,8 +139,7 @@ impl QuillApp {
         self.close_composer_date_dialog(window, cx);
         let text = self.composer.read(cx).value().to_string();
         if text.get(range.clone()) != Some(selected.as_str()) {
-            self.connection.status_note =
-                "the text changed; select it again to add the date".into();
+            self.connection.status_note = tr(keys::Q_CHAT_THE_TEXT_CHANGED_SELECT_IT).into();
             cx.notify();
             return;
         }
@@ -168,7 +168,7 @@ impl QuillApp {
     /// `ready-composer-date`: "tonight" selected and the box open.
     fn demo_composer_date(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.update(cx, |input, cx| {
-            input.set_value("See you tonight", window, cx);
+            input.set_value(tr(keys::Q_CHAT_SEE_YOU_TONIGHT), window, cx);
             input.set_selected_range(8..15, cx);
         });
         self.open_composer_date_dialog(window, cx);
@@ -193,19 +193,26 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .font_semibold()
-                        .child("Choose date and time"),
+                        .child(tr(keys::FORMATTING_DATE_TITLE)),
                 )
-                .child(DatePicker::new(&dialog.picker).placeholder("Pick a date and time"))
+                .child(
+                    DatePicker::new(&dialog.picker)
+                        .placeholder(tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME_2)),
+                )
                 .child(
                     div()
                         .flex()
                         .gap_2()
-                        .child(Button::new("composer-date-save").label("Save").on_click(
-                            cx.listener(|this, _, window, cx| this.apply_composer_date(window, cx)),
-                        ))
+                        .child(
+                            Button::new("composer-date-save")
+                                .label(tr(keys::SETTINGS_SAVE))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.apply_composer_date(window, cx)
+                                })),
+                        )
                         .child(
                             Button::new("composer-date-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_composer_date_dialog(window, cx);
