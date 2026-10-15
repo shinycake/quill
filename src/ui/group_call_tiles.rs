@@ -1,13 +1,16 @@
 //! The voice chat window's video area: one tile per camera or screen
 //! stream, a pinned tile shown large, and a "paused" state when the
-//! sender pauses (`groupCallParticipantVideoInfo.is_paused`).
+//! sender pauses (`groupCallParticipantVideoInfo.is_paused`, or your own
+//! shared window hidden): the blurred last frame under the pause icon
+//! (`group_call_paused.rs`).
 //!
 //! tdesktop: `calls/group/calls_group_viewport.cpp` (pin) and
-//! `calls_group_viewport_tile.cpp` (paused overlay).
+//! `calls_group_viewport_raster.cpp` (paused tile).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
+use super::group_call_paused::paused_overlay;
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
@@ -25,12 +28,14 @@ struct Tile {
 }
 
 impl QuillApp {
-    /// One stream's picture: the latest decoded frame, or `None`.
+    /// One stream's picture: the latest decoded frame (blurred and small
+    /// while paused), or `None`.
     fn group_stream_picture(
         &mut self,
         call: &ActiveGroupCall,
         participant: &ParsedGroupCallParticipant,
         screen: bool,
+        paused: bool,
         contain: bool,
     ) -> Option<AnyElement> {
         let MessageSender::User { user_id } = participant.participant_id else {
@@ -42,12 +47,16 @@ impl QuillApp {
         } else {
             self.demo_ui.group_frames.get(&(user_id, screen)).cloned()
         }?;
-        let image = self.cached_group_video_image(call.id, user_id, screen, &frame)?;
+        let image = if paused {
+            self.cached_paused_image(call.id, user_id, screen, &frame)?
+        } else {
+            self.cached_group_video_image(call.id, user_id, screen, &frame)?
+        };
         Some(
             img(ImageSource::Render(image))
                 .size_full()
                 .rounded(px(if contain { 0. } else { 10. }))
-                .object_fit(if contain {
+                .object_fit(if contain && !paused {
                     ObjectFit::Contain
                 } else {
                     ObjectFit::Cover
@@ -93,10 +102,13 @@ impl QuillApp {
                 }
             }
             if participant.screen_sharing_enabled {
+                // Your own hidden window shows paused at once, before the
+                // participant update.
                 let paused = participant
                     .screen_sharing_video_info
                     .as_ref()
-                    .is_some_and(|info| info.is_paused);
+                    .is_some_and(|info| info.is_paused)
+                    || (participant.is_current_user && call.screen_share_paused);
                 if let Some(picture) =
                     self.stream_or_placeholder(call, participant, true, &name, paused, contain)
                 {
@@ -176,7 +188,7 @@ impl QuillApp {
         paused: bool,
         contain: bool,
     ) -> Option<AnyElement> {
-        self.group_stream_picture(call, participant, screen, contain)
+        self.group_stream_picture(call, participant, screen, paused, contain)
             .or_else(|| paused.then(|| initials_avatar(name, 56.).into_any_element()))
     }
 }
@@ -210,26 +222,7 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                 .justify_center()
                 .child(tile.picture),
         )
-        .when(tile.paused, |this| {
-            this.child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .bg(rgba(0x000000a0))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(4.))
-                    .text_color(white())
-                    .child(Icon::new(IconName::Pause).with_size(px(22.)))
-                    .child(div().text_size(px(13.)).child(if key.screen {
-                        "Screen sharing paused"
-                    } else {
-                        "Camera paused"
-                    })),
-            )
-        })
+        .when(tile.paused, |this| this.child(paused_overlay(false)))
         .child(
             div()
                 .absolute()
@@ -331,24 +324,7 @@ fn stage_view(tile: Tile, cx: &mut Context<QuillApp>) -> AnyElement {
                 .justify_center()
                 .child(tile.picture),
         )
-        .when(tile.paused, |this| {
-            this.child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .bg(rgba(0x000000a0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(white())
-                    .text_size(px(15.))
-                    .child(if key.screen {
-                        "Screen sharing paused"
-                    } else {
-                        "Camera paused"
-                    }),
-            )
-        })
+        .when(tile.paused, |this| this.child(paused_overlay(true)))
         .child(
             div()
                 .absolute()

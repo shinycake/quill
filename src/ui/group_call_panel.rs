@@ -454,6 +454,7 @@ impl QuillApp {
             .children(self.group_call_share_overlay(&call, cx))
             .children(rename)
             .children(self.group_call_settings_overlay(cx))
+            .children(self.screen_privacy_overlay(true, cx))
             .into_any_element()
     }
 

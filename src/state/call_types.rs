@@ -171,6 +171,10 @@ pub struct ActiveGroupCall {
     /// `screen_sharing` once the presentation transport connected.
     pub screen_share_pending: bool,
     pub screen_sharing: bool,
+    /// Your shared window is hidden, so the share is paused (the driver
+    /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
+    /// the paused state at once, before the participant update.
+    pub screen_share_paused: bool,
     /// The `Text` presentation answer from
     /// `startGroupCallScreenSharing`; consumed by the driver pump to
     /// finish the presentation handshake.
@@ -265,6 +269,7 @@ impl ActiveGroupCall {
             transport_error: None,
             screen_share_pending: false,
             screen_sharing: false,
+            screen_share_paused: false,
             screen_share_answer: String::new(),
             share_links: Default::default(),
             is_rtmp_stream: false,

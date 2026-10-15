@@ -90,6 +90,14 @@ pub fn external_capture_from(has_backend: bool, env: Option<&str>) -> bool {
     has_backend && !env.is_some_and(|value| value.trim().eq_ignore_ascii_case("native"))
 }
 
+/// Whether screen sharing sends Quill's own capture (an external screen
+/// source) instead of ntgcalls' desktop capture: only where Quill has a
+/// screen backend (macOS so far, `calls::capture::screen`), and not
+/// under `QUILL_CALL_CAPTURE=native`.
+pub fn external_screen_capture_enabled() -> bool {
+    external_capture_enabled() && cfg!(all(feature = "ui", target_os = "macos"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +118,16 @@ mod tests {
         assert!(!external_capture_from(true, Some("native")));
         assert!(!external_capture_from(true, Some(" Native ")));
         assert!(!external_capture_from(false, None));
+    }
+
+    #[test]
+    fn screen_capture_is_external_only_with_a_screen_backend() {
+        if !cfg!(all(feature = "ui", target_os = "macos")) {
+            assert!(!external_screen_capture_enabled());
+        }
+        if !external_capture_enabled() {
+            assert!(!external_screen_capture_enabled());
+        }
     }
 
     #[test]

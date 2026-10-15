@@ -710,7 +710,8 @@ impl QuillApp {
                         .live
                         .as_ref()
                         .is_some_and(|live| live.driver.call_screen_source_available())
-                        || self.live.is_none();
+                        || self.live.is_none()
+                        || self.uses_screen_chooser();
                     if screen_ready {
                         buttons = buttons.child(
                             Button::new("call-screenshare")

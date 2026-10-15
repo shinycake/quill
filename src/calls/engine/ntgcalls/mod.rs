@@ -376,8 +376,11 @@ impl NtgcallsEngine {
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
-        let screen = self.device_input(None, MediaDeviceKind::Screen)?;
-        let mut screen_video = Self::screen_video_description(screen.as_ref());
+        let screen = self.capture_screen_input()?;
+        let mut screen_video = external::capture_screen_description(
+            external_screen_capture_enabled(),
+            screen.as_ref(),
+        );
         let capture = ntg_media_description {
             microphone: null_mut(),
             speaker: null_mut(),
@@ -415,7 +418,7 @@ impl NtgcallsEngine {
         let speaker = self.device_input(config.speaker.as_deref(), MediaDeviceKind::Speaker)?;
         let camera = native_input(config.camera.as_deref())?;
         let screen = if config.screen_share_on {
-            self.device_input(None, MediaDeviceKind::Screen)?
+            self.capture_screen_input()?
         } else {
             None
         };
@@ -434,7 +437,10 @@ impl NtgcallsEngine {
                 .map_or(null_mut(), |value| value.as_ptr().cast_mut()),
             keep_open: false,
         };
-        let mut screen_video = Self::screen_video_description(screen.as_ref());
+        let mut screen_video = external::capture_screen_description(
+            external_screen_capture_enabled(),
+            screen.as_ref(),
+        );
         let capture = ntg_media_description {
             microphone: &mut mic_audio,
             speaker: null_mut(),

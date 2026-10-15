@@ -26,12 +26,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !engine_available {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // Honest gate: the presentation handshake needs a screen-capture
-        // source, and the native engine enumerates them via
-        // `media_devices` (`MediaDeviceKind::Screen`).
-        if !self.group_call_screen_source_available() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         let sharing = self
             .session
             .calls
@@ -59,9 +53,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 call.screen_sharing = false;
                 call.screen_share_pending = false;
+                call.screen_share_paused = false;
                 call.screen_share_answer.clear();
             }
             return Ok(extra);
+        }
+        // Honest gate: the presentation handshake needs a screen-capture
+        // source (the engine's `MediaDeviceKind::Screen` list, or the
+        // chooser's pick when Quill captures the screen). Stopping needs
+        // none: a vanished source must not trap the user in "sharing".
+        if !self.group_call_screen_source_available() {
+            return Err(ConnectSendError::InvalidRequest);
         }
         let Some(engine) = self.call_engine.as_deref_mut() else {
             return Err(ConnectSendError::InvalidRequest);

@@ -235,12 +235,32 @@ impl QuillApp {
     /// error surfaces in the status note without flipping the flag
     /// (driver contract). Demo: flips the flag only, no live
     /// Telegram.
+    ///
+    /// Where Quill captures the screen itself, the button opens the
+    /// chooser instead, sharing or not (tdesktop `calls_panel.cpp`); its
+    /// Share Screen and Stop Sharing come back through
+    /// [`Self::share_call_screen`].
     pub(super) fn toggle_call_screen_share(&mut self, cx: &mut Context<Self>) {
+        let Some((call_id, sharing)) = self
+            .session()
+            .and_then(|session| session.calls.active_call.as_ref())
+            .map(|call| (call.id, call.screen_sharing))
+        else {
+            return;
+        };
+        if self.open_screen_chooser(super::screen_share_state::ScreenFor::Private(call_id), cx) {
+            return;
+        }
+        self.share_call_screen(!sharing, cx);
+    }
+
+    /// Start (`sharing`) or stop sharing the screen in the 1:1 call.
+    pub(super) fn share_call_screen(&mut self, sharing: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let Some(call) = live.driver.session.calls.active_call.as_ref() else {
                 return;
             };
-            let (call_id, sharing) = (call.id, !call.screen_sharing);
+            let call_id = call.id;
             self.connection.status_note = match live.driver.set_call_screen_share(call_id, sharing)
             {
                 Ok(()) => {
@@ -260,7 +280,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.active_call.as_mut())
         {
-            call.screen_sharing = !call.screen_sharing;
+            call.screen_sharing = sharing;
             self.connection.status_note = tr(keys::Q_OPS_DEMO_SCREEN_SHARE_TOGGLE_NO).into();
         }
         cx.notify();

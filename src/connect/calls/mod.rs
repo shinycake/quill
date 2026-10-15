@@ -121,7 +121,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// offers no screen-share control ("No screen source available").
     /// Phase C2i: shared by the 1:1 screen-share toggle (same native
     /// `MediaDeviceKind::Screen` gate, no presentation handshake).
+    /// When Quill captures the screen itself (`connect::call_screen`),
+    /// the source is the one picked in the chooser.
     pub fn call_screen_source_available(&self) -> bool {
+        if self.call_screen.enabled() {
+            return self.call_screen.chosen().is_some();
+        }
         self.call_devices_cache
             .iter()
             .any(|device| device.kind == MediaDeviceKind::Screen)

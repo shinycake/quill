@@ -99,6 +99,8 @@ pub struct QuillApp {
     pub(super) twofa: super::twofa_state::TwoStepUi,
     /// Video chat UI: its window, dialogs, composer, pin and push-to-talk.
     pub(super) group_call: super::group_call_state::GroupCallUi,
+    /// Screen sharing: the source chooser, privacy box and paused tiles.
+    pub(super) screen_share: super::screen_share_state::ScreenShareUi,
     /// Voice and round video recording (`ui/recording_state.rs`).
     pub(super) recording: super::recording_state::RecordingUi,
     /// Group and channel management boxes: invite links, admins, members, permissions (`ui/admin_state.rs`).

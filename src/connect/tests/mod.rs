@@ -13,6 +13,7 @@ mod business_extra;
 mod business_settings;
 mod call_audio;
 mod call_capture;
+mod call_screen;
 mod calls;
 mod chat_appearance;
 mod chat_list;

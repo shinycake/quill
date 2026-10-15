@@ -107,11 +107,15 @@
 "lng_greeting_select" = "Select chats or entire chat categories for sending greeting messages.";
 "lng_group_call_close" = "Close";
 "lng_group_call_connecting" = "Connecting...";
+"lng_group_call_mac_settings" = "Open Settings";
 "lng_group_call_noise_suppression" = "Enable Noise Suppression";
+"lng_group_call_screen_share_start" = "Share Screen";
 "lng_group_call_screen_share_stop" = "Stop Sharing";
+"lng_group_call_screen_title" = "Screen {index}";
 "lng_group_call_settings" = "Settings";
 "lng_group_call_settings_title" = "Settings";
 "lng_group_call_tooltip_screen" = "Share screen";
+"lng_group_call_video_paused" = "Video is paused";
 "lng_group_invite_context_copy" = "Copy";
 "lng_group_invite_context_delete" = "Delete";
 "lng_group_invite_context_delete_all" = "Delete all";
@@ -813,6 +817,8 @@
 "qll_ops_schedule" = "Schedule";
 "qll_ops_scheduled_for" = "scheduled for {format_unix_date_time}";
 "qll_ops_screen" = "Screen";
+"qll_ops_screen_access_allow" = "Please allow **Screen Recording** for Quill in Privacy Settings.";
+"qll_ops_screen_access_needed" = "Quill does not have access to screen recording required for Screen Sharing.";
 "qll_ops_screen_share_off" = "screen share off";
 "qll_ops_screen_share_on" = "screen share on";
 "qll_ops_screen_share_paused_by_peer" = "Screen share paused by peer";
@@ -976,6 +982,7 @@
 "qll_ops_welcome_to_the_channel_new" = "Welcome to the channel. New posts land here.";
 "qll_ops_what_went_wrong_optional" = "What went wrong? (optional)";
 "qll_ops_will_send_when_the_contact" = "will send when the contact is online";
+"qll_ops_window_index" = "Window {index}";
 "qll_ops_working" = "Working…";
 "qll_ops_write_the_message_first" = "Write the message first.";
 "qll_ops_wrong_number" = "Wrong number?";
