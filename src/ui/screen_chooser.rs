@@ -6,7 +6,9 @@
 //! - Each source shows one picture, taken when the chooser opens.
 //! - A click selects. The first screen starts selected, or the source you
 //!   are sharing. The bottom bar has Cancel and Share Screen, or Stop
-//!   Sharing when the selection is the shared source.
+//!   Sharing when the selection (and the audio box) is what you share.
+//! - Where system audio can be shared (Windows), a "Share System Audio"
+//!   box sits bottom left, starting as the running share has it.
 //! - Without screen recording access, a box over the call window asks for
 //!   it and opens the OS privacy settings (tdesktop
 //!   `ScreenSharingPrivacyRequestBox`).
@@ -19,6 +21,7 @@ use super::app::QuillApp;
 use super::group_call_panel::{MEMBER_MUTED_ICON, MEMBERS_BG, MEMBERS_BG_OVER};
 use super::screen_share_state::{ChooserSource, ScreenFor};
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::{ActiveTheme, Root};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -83,9 +86,17 @@ pub(super) fn initial_selection(
 }
 
 /// Whether the bottom bar shows Stop Sharing instead of Share Screen
-/// (tdesktop `updateButtonsVisibility`).
-pub(super) fn shows_stop(selected: Option<&SourceId>, active: Option<&SourceId>) -> bool {
-    active.is_some() && (selected.is_none() || selected == active)
+/// (tdesktop `updateButtonsVisibility`): the shared source is selected
+/// and the audio box matches the running share.
+pub(super) fn shows_stop(
+    selected: Option<&SourceId>,
+    active: Option<&SourceId>,
+    with_audio: bool,
+    active_with_audio: bool,
+) -> bool {
+    active.is_some()
+        && (selected.is_none() || selected == active)
+        && with_audio == active_with_audio
 }
 
 fn label_text(label: SourceLabel) -> String {
@@ -154,6 +165,29 @@ impl QuillApp {
             }
             None => self.screen_share.demo_active.clone(),
         }
+    }
+
+    /// Whether the chooser offers "Share System Audio" (tdesktop
+    /// `LoopbackAudioCaptureSupported`).
+    pub(super) fn offers_system_audio(&self) -> bool {
+        match self.live.as_ref() {
+            Some(live) => live.driver.call_screen().system_audio_enabled(),
+            None => self.screen_share.demo_system_audio,
+        }
+    }
+
+    /// Whether the running share includes system audio (tdesktop
+    /// `chooseSourceActiveWithAudio`).
+    fn active_screen_audio(&self) -> bool {
+        match self.live.as_ref() {
+            Some(live) => live.driver.call_screen().with_audio(),
+            None => self.screen_share.demo_active_audio,
+        }
+    }
+
+    pub(super) fn set_screen_audio(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.screen_share.with_audio = on;
+        cx.notify();
     }
 
     /// The share button: the privacy box, or the chooser. Returns false
@@ -227,6 +261,7 @@ impl QuillApp {
         }
         let active = self.active_screen_source();
         self.screen_share.selected = initial_selection(&sources, active.as_ref());
+        self.screen_share.with_audio = active.is_some() && self.active_screen_audio();
         let labels = source_labels(&sources);
         self.screen_share.sources = sources
             .into_iter()
@@ -292,6 +327,7 @@ impl QuillApp {
         share.for_call = None;
         share.sources.clear();
         share.selected = None;
+        share.with_audio = false;
         share.generation = share.generation.wrapping_add(1);
         cx.notify();
     }
@@ -323,8 +359,9 @@ impl QuillApp {
         ) else {
             return;
         };
+        let with_audio = self.screen_share.with_audio && self.offers_system_audio();
         if let Some(live) = self.live.as_mut() {
-            live.driver.choose_call_screen_source(id);
+            live.driver.choose_call_screen_source(id, with_audio);
             let session = &live.driver.session;
             let sharing = match for_call {
                 ScreenFor::Group => session
@@ -343,6 +380,7 @@ impl QuillApp {
             }
         } else {
             self.screen_share.demo_active = Some(id);
+            self.screen_share.demo_active_audio = with_audio;
             self.set_demo_screen_sharing(for_call, true);
         }
         self.close_screen_chooser(cx);
@@ -357,6 +395,7 @@ impl QuillApp {
             self.stop_screen_share(for_call, cx);
         } else {
             self.screen_share.demo_active = None;
+            self.screen_share.demo_active_audio = false;
             self.set_demo_screen_sharing(for_call, false);
         }
         self.close_screen_chooser(cx);
@@ -414,7 +453,14 @@ impl QuillApp {
     fn screen_chooser_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let active = self.active_screen_source();
         let selected = self.screen_share.selected.clone();
-        let stop = shows_stop(selected.as_ref(), active.as_ref());
+        let offers_audio = self.offers_system_audio();
+        let with_audio = offers_audio && self.screen_share.with_audio;
+        let stop = shows_stop(
+            selected.as_ref(),
+            active.as_ref(),
+            with_audio,
+            active.is_some() && self.active_screen_audio(),
+        );
         let mut grid = div()
             .flex()
             .flex_wrap()
@@ -455,14 +501,28 @@ impl QuillApp {
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.accept_screen_source(cx)))
         };
+        let audio_box = offers_audio.then(|| {
+            Checkbox::new("screen-chooser-audio")
+                .checked(with_audio)
+                // The kit label is the theme's foreground; the chooser is
+                // dark like the call window (tdesktop `groupCallBoxCheckbox`).
+                .child(
+                    div()
+                        .text_color(white())
+                        .child(tr(keys::GROUP_CALL_SCREEN_SHARE_AUDIO)),
+                )
+                .on_click(
+                    cx.listener(|this, checked: &bool, _, cx| this.set_screen_audio(*checked, cx)),
+                )
+        });
         let bottom = div()
             .h(px(BOTTOM_H))
             .flex_none()
             .px(px(BOTTOM_SKIP))
             .flex()
             .items_center()
-            .justify_end()
             .gap(px(BOTTOM_SKIP))
+            .child(div().flex_1().min_w_0().children(audio_box))
             .child(
                 Button::new("screen-chooser-cancel")
                     .label(tr(keys::CANCEL).to_uppercase())

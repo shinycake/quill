@@ -135,6 +135,7 @@
 "lng_group_call_rtmp_url_subtitle" = "Server URL";
 "lng_group_call_rtmp_viewers#one" = "{count} viewer";
 "lng_group_call_rtmp_viewers#other" = "{count} viewers";
+"lng_group_call_screen_share_audio" = "Share System Audio";
 "lng_group_call_screen_share_start" = "Share Screen";
 "lng_group_call_screen_share_stop" = "Stop Sharing";
 "lng_group_call_screen_title" = "Screen {index}";
@@ -853,6 +854,7 @@
 "qll_ops_screen_share_off" = "screen share off";
 "qll_ops_screen_share_on" = "screen share on";
 "qll_ops_screen_share_paused_by_peer" = "Screen share paused by peer";
+"qll_ops_screen_unsupported" = "Screen sharing needs Windows 10 version 1903 or later.";
 "qll_ops_search" = "Search";
 "qll_ops_search_chats" = "Search chats";
 "qll_ops_search_chats_to_add_to" = "Search chats to add to community";

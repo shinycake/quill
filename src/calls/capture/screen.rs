@@ -106,7 +106,11 @@ pub fn native_backend() -> Option<Arc<dyn ScreenBackend>> {
     {
         Some(Arc::new(super::screen_mac::MacScreen))
     }
-    #[cfg(not(all(feature = "ui", target_os = "macos")))]
+    #[cfg(all(feature = "ui", windows))]
+    {
+        Some(Arc::new(super::screen_win::WinScreen))
+    }
+    #[cfg(not(all(feature = "ui", any(target_os = "macos", windows))))]
     {
         None
     }

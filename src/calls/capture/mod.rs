@@ -8,13 +8,18 @@
 //!   frames into the engine (`CallEngine::external_frame_sender`).
 //! - `mic_cpal` (UI builds): the microphone through cpal.
 //! - `screen`: screen sources, the I420 conversions and the per-OS
-//!   [`screen::ScreenBackend`]; `screen_mac` is ScreenCaptureKit.
+//!   [`screen::ScreenBackend`]; `screen_mac` is ScreenCaptureKit,
+//!   `screen_win` Windows.Graphics.Capture (`screen_bgra` converts its
+//!   BGRA frames).
+//! - `system_audio`: "Share System Audio", mixed into the microphone
+//!   frames; `system_audio_cpal` is WASAPI loopback (Windows).
 //!
 //! Design: `docs/decisions/call-capture.md`.
 #![deny(clippy::indexing_slicing)]
 
-use std::sync::Arc;
+use crate::locks::LockExt;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub mod denoise;
@@ -22,8 +27,14 @@ pub mod feeder;
 #[cfg(feature = "ui")]
 pub mod mic_cpal;
 pub mod screen;
+pub mod screen_bgra;
 #[cfg(all(feature = "ui", target_os = "macos"))]
 pub mod screen_mac;
+#[cfg(all(feature = "ui", windows))]
+pub mod screen_win;
+pub mod system_audio;
+#[cfg(all(feature = "ui", windows))]
+pub mod system_audio_cpal;
 
 pub use denoise::MicProcessor;
 pub use feeder::{CaptureClock, CaptureFeeder, FeedFrame, FrameSink};
@@ -91,6 +102,8 @@ pub struct MicControls {
     noise_suppression: AtomicBool,
     muted: AtomicBool,
     level: Arc<LevelCell>,
+    /// Shared system audio added to each frame ("Share System Audio").
+    system_audio: Mutex<Option<Arc<system_audio::SystemAudioMix>>>,
 }
 
 impl MicControls {
@@ -99,7 +112,17 @@ impl MicControls {
             noise_suppression: AtomicBool::new(noise_suppression),
             muted: AtomicBool::new(false),
             level,
+            system_audio: Mutex::new(None),
         }
+    }
+
+    /// The system audio to mix in, while it is shared.
+    pub fn system_audio(&self) -> Option<Arc<system_audio::SystemAudioMix>> {
+        self.system_audio.lock_or_recover().clone()
+    }
+
+    pub fn set_system_audio(&self, mix: Option<Arc<system_audio::SystemAudioMix>>) {
+        *self.system_audio.lock_or_recover() = mix;
     }
 
     pub fn noise_suppression(&self) -> bool {

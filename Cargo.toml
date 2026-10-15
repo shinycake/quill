@@ -267,7 +267,12 @@ embed-resource = "3"
 # Local time zone offsets; secret chats kept out of screen capture.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Networking_WindowsWebServices", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Power", "Win32_System_Registry","Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # ISpellChecker (Windows 8+ Spell Checking API), as tdesktop's spellcheck_win.cpp.
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_EnhancedStorage", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Imaging", "Media", "Media_Playback", "Foundation"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_EnhancedStorage", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Imaging", "Media", "Media_Playback", "Foundation",
+    # Screen sharing (src/calls/capture/screen_win.rs): Windows.Graphics.Capture.
+    "Foundation_Metadata", "Graphics", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11",
+    "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture"] }
 # OS notifications: the inline reply field and the sender picture ride beside
 # GPUI's `SystemNotification` through the Quill patch in the vendored platform
 # crate (`notification_extras`, docs/decisions/codex-notify-native.md). Same

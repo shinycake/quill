@@ -33,6 +33,8 @@ pub(crate) struct ScreenShareUi {
     pub(super) for_call: Option<ScreenFor>,
     pub(super) sources: Vec<ChooserSource>,
     pub(super) selected: Option<SourceId>,
+    /// The chooser's "Share System Audio" box (Windows only).
+    pub(super) with_audio: bool,
     /// Bumped on every open, so a stale listing or thumbnail is dropped.
     pub(super) generation: u64,
     /// The privacy box shown over this call's window.
@@ -41,6 +43,10 @@ pub(crate) struct ScreenShareUi {
     pub(super) backend: Option<Arc<dyn ScreenBackend>>,
     /// The demo's "currently shared" source (live calls ask the driver).
     pub(super) demo_active: Option<SourceId>,
+    /// Whether the demo's share includes system audio.
+    pub(super) demo_active_audio: bool,
+    /// Show the system audio box in demos and tests, as on Windows.
+    pub(super) demo_system_audio: bool,
     /// Paused tiles: the last frame, small and blurred (tdesktop
     /// `BlurLargeImage`), by `(call, user, screen)` and frame seq.
     pub(super) paused_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,

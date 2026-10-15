@@ -16,13 +16,21 @@
 //! Your own picture for your tile comes from the capture's preview slot,
 //! a few times a second, into the group frame slots.
 //!
-//! Builds without a screen backend (Windows and Linux until their slices)
-//! never start this: ntgcalls' desktop capture runs as before.
+//! "Share System Audio" (Windows, tdesktop's chooser checkbox): while a
+//! share picked with it runs, a loopback capture records what the
+//! computer plays and the call microphone (`call_capture`) mixes it into
+//! its frames. It stops with the share, or when the box is cleared.
+//!
+//! Builds without a screen backend (Linux until its slice) never start
+//! this: ntgcalls' desktop capture runs as before.
 
 use super::*;
 use crate::calls::capture::feeder::VIDEO_SINK_FRAMES;
 use crate::calls::capture::screen::{
     PreviewSlot, ScreenCapture, ScreenOptions, SourceId, native_backend,
+};
+use crate::calls::capture::system_audio::{
+    SystemAudioCapture, SystemAudioMix, system_audio_supported,
 };
 use crate::calls::capture::{CaptureError, CaptureEvent, CaptureFeeder, FrameSink, VideoFrame};
 use crate::calls::engine::{CaptureTarget, TransportState, external_screen_capture_enabled};
@@ -43,13 +51,21 @@ pub type ScreenOpener = Box<
     ) -> Result<Box<dyn ScreenCapture>, CaptureError>,
 >;
 
+/// Starts recording system audio into the mix. The driver uses WASAPI
+/// loopback; tests inject a fake.
+pub type SystemAudioOpener =
+    Box<dyn FnMut(Arc<SystemAudioMix>) -> Result<Box<dyn SystemAudioCapture>, CaptureError>>;
+
 /// Driver-side state of the shared screen.
 #[derive(Default)]
 pub struct CallScreen {
     /// The source the chooser picked for the next or running share.
     chosen: Option<SourceId>,
+    /// Whether the chooser's "Share System Audio" was ticked with it.
+    with_audio: bool,
     active: Option<ActiveScreen>,
     opener: Option<ScreenOpener>,
+    audio_opener: Option<SystemAudioOpener>,
     /// Bumped for every preview handed to the UI, so its image cache
     /// never mistakes a new capture's picture for an old one.
     preview_seq: u64,
@@ -66,10 +82,24 @@ struct ActiveScreen {
     preview: Arc<PreviewSlot>,
     last_preview: u64,
     paused: bool,
+    /// The system audio shared with it, while running.
+    audio: Option<SharedAudio>,
+}
+
+struct SharedAudio {
+    mix: Arc<SystemAudioMix>,
+    capture: Box<dyn SystemAudioCapture>,
+}
+
+impl Drop for SharedAudio {
+    fn drop(&mut self) {
+        self.capture.stop();
+    }
 }
 
 impl Drop for ActiveScreen {
     fn drop(&mut self) {
+        self.audio = None;
         self.capture.stop();
     }
 }
@@ -87,6 +117,30 @@ impl CallScreen {
     /// turns it on.
     pub fn enabled(&self) -> bool {
         self.opener.is_some() || (!cfg!(test) && external_screen_capture_enabled())
+    }
+
+    /// Use `opener` instead of WASAPI loopback (tests, demos). Also
+    /// turns system audio on in builds without it.
+    pub fn inject_audio_opener(&mut self, opener: SystemAudioOpener) {
+        self.audio_opener = Some(opener);
+    }
+
+    /// Whether this build can share system audio (the chooser shows its
+    /// checkbox).
+    pub fn system_audio_enabled(&self) -> bool {
+        self.audio_opener.is_some() || (!cfg!(test) && system_audio_supported())
+    }
+
+    /// Whether the picked share includes system audio.
+    pub fn with_audio(&self) -> bool {
+        self.with_audio
+    }
+
+    /// Whether system audio is being recorded for the running share.
+    pub fn sharing_audio(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.audio.is_some())
     }
 
     /// The source being shared right now.
@@ -146,6 +200,7 @@ impl CallScreen {
                     preview,
                     last_preview: 0,
                     paused: false,
+                    audio: None,
                 });
                 self.error = None;
                 Ok(())
@@ -158,6 +213,19 @@ impl CallScreen {
     }
 }
 
+#[cfg(all(feature = "ui", windows))]
+fn open_loopback(mix: Arc<SystemAudioMix>) -> Result<Box<dyn SystemAudioCapture>, CaptureError> {
+    let capture = crate::calls::capture::system_audio_cpal::start_loopback(mix)?;
+    Ok(Box::new(capture))
+}
+
+#[cfg(not(all(feature = "ui", windows)))]
+fn open_loopback(_mix: Arc<SystemAudioMix>) -> Result<Box<dyn SystemAudioCapture>, CaptureError> {
+    Err(CaptureError::Unsupported(
+        "System audio can't be shared in this build.".into(),
+    ))
+}
+
 /// What the pump learned from the running capture this time.
 enum ScreenChange {
     None,
@@ -166,11 +234,18 @@ enum ScreenChange {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Pick the source to share (the chooser's "Share Screen"). A running
-    /// share switches to it on the next pump.
-    pub fn choose_call_screen_source(&mut self, source: SourceId) {
+    /// Pick the source to share (the chooser's "Share Screen"), with or
+    /// without system audio. A running share switches to it on the next
+    /// pump.
+    pub fn choose_call_screen_source(&mut self, source: SourceId, with_audio: bool) {
         self.call_screen.chosen = Some(source);
+        self.call_screen.with_audio = with_audio && self.call_screen.system_audio_enabled();
         self.call_screen.error = None;
+    }
+
+    /// Use a fake system audio capture (tests, demos).
+    pub fn inject_call_system_audio(&mut self, opener: SystemAudioOpener) {
+        self.call_screen.inject_audio_opener(opener);
     }
 
     /// The shared screen's state, for the UI and tests.
@@ -206,6 +281,53 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.call_screen.enabled() {
             return;
         }
+        self.pump_shared_screen();
+        self.pump_system_audio();
+    }
+
+    /// Start or stop the system audio of the running share, and hand it
+    /// to the call microphone.
+    fn pump_system_audio(&mut self) {
+        let screen = &mut self.call_screen;
+        let wanted = screen.with_audio && screen.system_audio_enabled();
+        let mut failed = None;
+        let mix = match screen.active.as_mut() {
+            Some(active) if wanted => {
+                if active.audio.is_none() {
+                    let mix = Arc::new(SystemAudioMix::default());
+                    let started = match screen.audio_opener.as_mut() {
+                        Some(opener) => opener(mix.clone()),
+                        None => open_loopback(mix.clone()),
+                    };
+                    match started {
+                        Ok(capture) => active.audio = Some(SharedAudio { mix, capture }),
+                        Err(err) => failed = Some(err.to_string()),
+                    }
+                }
+                active.audio.as_ref().map(|audio| audio.mix.clone())
+            }
+            Some(active) => {
+                active.audio = None;
+                None
+            }
+            None => None,
+        };
+        if let Some(err) = failed {
+            // The screen keeps going without it; no retry every pump.
+            screen.with_audio = false;
+            screen.error = Some(err);
+        }
+        let same = match (self.call_capture.system_audio(), mix.as_ref()) {
+            (Some(have), Some(want)) => Arc::ptr_eq(have, want),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.call_capture.set_system_audio(mix);
+        }
+    }
+
+    fn pump_shared_screen(&mut self) {
         let wanted = self.screen_wanted();
         let chosen = self.call_screen.chosen.clone();
         // A different call or source: close the old capture first.
@@ -217,6 +339,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The share ended: the next one asks for a source again.
             if wanted.is_none() {
                 self.call_screen.chosen = None;
+                self.call_screen.with_audio = false;
             }
         }
         match self.screen_change() {
@@ -225,6 +348,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             ScreenChange::Ended(error) => {
                 self.call_screen.active = None;
                 self.call_screen.chosen = None;
+                self.call_screen.with_audio = false;
                 self.call_screen.error = error;
                 self.stop_sharing_screen();
                 return;
