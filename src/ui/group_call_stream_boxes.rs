@@ -163,6 +163,7 @@ impl QuillApp {
             StreamOverlay::RevokeKey => confirm_box(
                 tr(keys::GROUP_CALL_RTMP_REVOKE_SURE).into(),
                 tr(keys::GROUP_INVITE_CONTEXT_REVOKE),
+                false,
                 cx,
                 |this, cx| {
                     this.replace_video_chat_rtmp_url(cx);
@@ -171,7 +172,8 @@ impl QuillApp {
             ),
             StreamOverlay::KeyWarning => confirm_box(
                 bold(tr(keys::GROUP_CALL_RTMP_KEY_WARNING)),
-                tr(keys::BOX_OK),
+                tr(keys::FROM_REQUEST_UNDERSTAND),
+                true,
                 cx,
                 |this, cx| {
                     this.group_call.stream.key_shown = true;
@@ -510,9 +512,13 @@ fn bold(text: &str) -> SharedString {
 }
 
 /// tdesktop's `MakeConfirmBox`: the text, Cancel and the confirm button.
+/// `attention`: the Stream Key warning (`FillRtmpRows`), bold (its `**`
+/// markup) with the attention (danger) button; otherwise plain text and
+/// the default button.
 fn confirm_box(
     text: SharedString,
     confirm: &'static str,
+    attention: bool,
     cx: &mut Context<QuillApp>,
     on_confirm: impl Fn(&mut QuillApp, &mut Context<QuillApp>) + 'static,
 ) -> AnyElement {
@@ -522,8 +528,9 @@ fn confirm_box(
         .gap(px(14.))
         .child(
             div()
+                .id("group-call-stream-confirm-text")
                 .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
+                .when(attention, |this| this.font_weight(FontWeight::SEMIBOLD))
                 .child(text),
         )
         .child(
@@ -542,7 +549,8 @@ fn confirm_box(
                 .child(
                     Button::new("group-call-stream-confirm")
                         .label(confirm)
-                        .primary()
+                        .when(attention, |button| button.danger())
+                        .when(!attention, |button| button.primary())
                         .on_click(cx.listener(move |this, _, _, cx| on_confirm(this, cx))),
                 ),
         )
