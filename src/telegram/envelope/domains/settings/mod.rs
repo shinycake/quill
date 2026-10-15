@@ -22,6 +22,8 @@ pub enum SettingsPayload {
     },
     /// `languagePackInfo` — the `getLanguagePackInfo` answer.
     LanguagePackInfo(LanguagePackInfoData),
+    /// Language pack lists, strings and string updates.
+    Language(LanguagePayload),
     /// `updateActiveNotifications` (schema 1.8.67, line 10688): chats that
     /// still have notifications from a previous launch.
     UpdateActiveNotifications { chat_ids: Vec<ChatId> },

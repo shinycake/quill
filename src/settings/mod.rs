@@ -251,7 +251,7 @@ pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Resu
 const PROXY_PREFS: &str = "proxy_prefs.json";
 
 /// The app root an account folder (`<root>/accounts/<key>`) lives in.
-fn app_root_of(paths: &AccountPaths) -> Option<&Path> {
+pub(crate) fn app_root_of(paths: &AccountPaths) -> Option<&Path> {
     paths.root.parent()?.parent()
 }
 

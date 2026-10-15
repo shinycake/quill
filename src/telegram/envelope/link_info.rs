@@ -44,8 +44,12 @@ impl GiftCodeInfoData {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguagePackInfoData {
     pub id: String,
+    /// The pack this one is based on (missing strings come from it).
+    pub base_language_pack_id: String,
     pub name: String,
     pub native_name: String,
+    /// CLDR locale of the pack's plural rules.
+    pub plural_code: String,
     pub is_official: bool,
     pub is_rtl: bool,
     pub is_beta: bool,
@@ -59,8 +63,10 @@ impl LanguagePackInfoData {
         let flag = |key: &str| value.get(key).and_then(Value::as_bool).unwrap_or(false);
         Self {
             id: json_field_str(value, "id"),
+            base_language_pack_id: json_field_str(value, "base_language_pack_id"),
             name: json_field_str(value, "name"),
             native_name: json_field_str(value, "native_name"),
+            plural_code: json_field_str(value, "plural_code"),
             is_official: flag("is_official"),
             is_rtl: flag("is_rtl"),
             is_beta: flag("is_beta"),

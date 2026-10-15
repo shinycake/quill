@@ -1,0 +1,276 @@
+//! Interface language packs: the switch flow, string updates and the saved
+//! choice at startup (docs/decisions/language-packs.md).
+use super::super::*;
+use super::*;
+use crate::diagnostics::{DiagnosticSink, MemorySink};
+use crate::lang::PackValue;
+use crate::lang::prefs::{LanguageChoice, save_choice};
+use crate::platform::MemorySecretStore;
+use crate::telegram::client::copy_and_parse;
+use crate::telegram::envelope::LanguagePackInfoData;
+use serde_json::{Value, json};
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+
+struct Fixture {
+    driver: ConnectDriver<Arc<RecordingSender>>,
+    recorder: Arc<RecordingSender>,
+    sink: Arc<dyn DiagnosticSink>,
+    seq: AtomicU64,
+    dir: std::path::PathBuf,
+    /// Requests the ready driver sent before the test began.
+    skip: usize,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let driver = ready_driver(&recorder, prepared, &sink, &seq);
+        let skip = recorder.snapshot().len();
+        Self {
+            driver,
+            recorder,
+            sink,
+            seq,
+            dir,
+            skip,
+        }
+    }
+
+    fn feed(&mut self, value: Value) {
+        self.driver
+            .ingest(copy_and_parse(&value.to_string(), &self.seq, &self.sink).unwrap())
+            .unwrap();
+    }
+
+    fn sent(&self) -> Vec<Value> {
+        self.recorder
+            .snapshot()
+            .iter()
+            .skip(self.skip)
+            .map(|j| serde_json::from_str(j).unwrap())
+            .collect()
+    }
+
+    /// The `@extra` of the last sent `getLanguagePackStrings` for `pack`.
+    fn strings_extra(&self, pack: &str) -> Value {
+        self.sent()
+            .into_iter()
+            .rev()
+            .find(|v| v["@type"] == "getLanguagePackStrings" && v["language_pack_id"] == pack)
+            .map(|v| v["@extra"].clone())
+            .unwrap()
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn pack(id: &str, base: &str) -> LanguagePackInfoData {
+    LanguagePackInfoData {
+        id: id.into(),
+        base_language_pack_id: base.into(),
+        name: "Portuguese (Brazil)".into(),
+        native_name: "Português (Brasil)".into(),
+        plural_code: "pt".into(),
+        is_official: true,
+        is_rtl: false,
+        is_beta: false,
+        is_installed: false,
+        total_string_count: 0,
+        translated_string_count: 0,
+    }
+}
+
+fn strings(extra: &Value, key: &str, text: &str) -> Value {
+    json!({"@type":"languagePackStrings","@extra":extra,"strings":[
+        {"@type":"languagePackString","key":key,
+         "value":{"@type":"languagePackStringValueOrdinary","value":text}}]})
+}
+
+#[test]
+fn switch_selects_fetches_pack_and_base_then_synchronizes() {
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "pt")).unwrap();
+    let types: Vec<String> = f
+        .sent()
+        .iter()
+        .map(|v| v["@type"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        types,
+        [
+            "setOption",
+            "getLanguagePackStrings",
+            "getLanguagePackStrings",
+            "synchronizeLanguagePack"
+        ]
+    );
+    assert_eq!(f.sent()[0]["name"], "language_pack_id");
+    assert_eq!(f.sent()[0]["value"]["value"], "pt-br");
+    let pack_extra = f.strings_extra("pt-br");
+    let base_extra = f.strings_extra("pt");
+    f.feed(strings(&pack_extra, "lng_languages", "Idioma"));
+    assert!(f.driver.session.settings.language.ready.is_none());
+    f.feed(strings(&base_extra, "lng_box_ok", "OK"));
+    let ready = f.driver.session.settings.language.ready.take().unwrap();
+    assert_eq!(ready.info.id, "pt-br");
+    assert_eq!(
+        ready.pack,
+        vec![("lng_languages".into(), PackValue::Ordinary("Idioma".into()))]
+    );
+    assert_eq!(ready.base.len(), 1);
+    assert_eq!(
+        f.driver
+            .session
+            .settings
+            .language
+            .current
+            .as_ref()
+            .map(|c| c.id.as_str()),
+        Some("pt-br")
+    );
+}
+
+#[test]
+fn a_newer_switch_drops_the_older_answers() {
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    let old = f.strings_extra("pt-br");
+    let mut de = pack("de", "");
+    de.plural_code = "de".into();
+    f.driver.switch_language(de).unwrap();
+    f.feed(strings(&old, "lng_languages", "Idioma"));
+    assert!(f.driver.session.settings.language.ready.is_none());
+    let new = f.strings_extra("de");
+    f.feed(strings(&new, "lng_languages", "Sprache"));
+    assert_eq!(
+        f.driver
+            .session
+            .settings
+            .language
+            .ready
+            .as_ref()
+            .map(|r| r.info.id.as_str()),
+        Some("de")
+    );
+}
+
+#[test]
+fn unofficial_packs_are_added_first_and_english_needs_no_strings() {
+    let mut f = Fixture::new();
+    let mut custom = pack("x-quill", "");
+    custom.is_official = false;
+    f.driver.switch_language(custom).unwrap();
+    assert_eq!(f.sent()[0]["@type"], "addCustomServerLanguagePack");
+
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("en", "")).unwrap();
+    let sent = f.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["value"]["value"], "en");
+    let ready = f.driver.session.settings.language.ready.take().unwrap();
+    assert!(ready.pack.is_empty());
+    assert!(f.driver.session.settings.language.current.is_none());
+}
+
+#[test]
+fn string_updates_patch_the_current_pack_or_ask_for_a_reload() {
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    let extra = f.strings_extra("pt-br");
+    f.feed(strings(&extra, "lng_languages", "Idioma"));
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"android",
+        "language_pack_id":"pt-br","strings":[]}),
+    );
+    assert!(!f.driver.session.settings.language.reload);
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
+        "value":{"@type":"languagePackStringValueDeleted"}}]}),
+    );
+    assert_eq!(
+        f.driver.session.settings.language.patch,
+        vec![("lng_box_ok".into(), PackValue::Deleted)]
+    );
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[]}),
+    );
+    assert!(f.driver.session.settings.language.reload);
+}
+
+#[test]
+fn failed_strings_end_the_switch_with_an_error() {
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    let extra = f.strings_extra("pt-br");
+    f.feed(json!({"@type":"error","@extra":extra,"code":400,"message":"LANG_PACK_INVALID"}));
+    let state = &f.driver.session.settings.language;
+    assert!(state.switching.is_none() && state.ready.is_none());
+    assert!(state.error.is_some());
+}
+
+#[test]
+fn startup_points_tdlib_at_tdesktop_strings_and_restores_the_saved_pack() {
+    let mut f = Fixture::new();
+    f.driver.send_language_options().unwrap();
+    let sent = f.sent();
+    assert_eq!(sent.len(), 2, "English: options only");
+    assert_eq!(sent[0]["value"]["value"], "tdesktop");
+    assert!(
+        sent[1]["value"]["value"]
+            .as_str()
+            .unwrap()
+            .ends_with("langpack.sqlite")
+    );
+
+    let mut f = Fixture::new();
+    let choice = LanguageChoice {
+        pack_id: "de".into(),
+        plural_code: "de".into(),
+        name: "German".into(),
+        native_name: "Deutsch".into(),
+        ..Default::default()
+    };
+    save_choice(&f.dir, &choice).unwrap();
+    f.driver.send_language_options().unwrap();
+    assert!(f.sent().iter().any(|v| v["@type"] == "setOption"
+        && v["name"] == "language_pack_id"
+        && v["value"]["value"] == "de"));
+    let extra = f.strings_extra("de");
+    f.feed(strings(&extra, "lng_languages", "Sprache"));
+    assert_eq!(
+        f.driver
+            .session
+            .settings
+            .language
+            .ready
+            .as_ref()
+            .map(|r| r.info.native_name.as_str()),
+        Some("Deutsch")
+    );
+}
+
+#[test]
+fn the_pack_list_comes_from_the_localization_target() {
+    let mut f = Fixture::new();
+    let extra = f.driver.request_language_packs().unwrap();
+    assert!(f.driver.session.settings.language.packs_loading);
+    assert_eq!(f.sent()[0]["@type"], "getLocalizationTargetInfo");
+    f.feed(
+        json!({"@type":"localizationTargetInfo","@extra":extra.as_extra(),"language_packs":[
+        {"@type":"languagePackInfo","id":"en","name":"English","native_name":"English",
+         "plural_code":"en","is_official":true}]}),
+    );
+    let state = &f.driver.session.settings.language;
+    assert!(!state.packs_loading);
+    assert_eq!(state.packs.len(), 1);
+}

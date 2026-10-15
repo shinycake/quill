@@ -4,8 +4,9 @@
 //! The gift code box mirrors tdesktop's `GiftCodeBox`: who made the code,
 //! who it is for, what it gives, why, and when. An unused code gets a
 //! "Use Link" button; only that click sends `applyPremiumGiftCode`. The
-//! language box shows the pack and says Quill ships English only; it never
-//! changes a setting.
+//! language box is tdesktop's "Change language?" box: the pack, how much
+//! of it is translated, and an Apply Language button that switches the
+//! interface the same way Settings → Language does.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
@@ -17,6 +18,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::deep_link_types::{gift_duration, gift_reason, language_progress};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{GiftCodeLookup, LanguageLinkLookup, Session};
 use quill::telegram::envelope::MessageSender;
 use std::cell::RefCell;
@@ -37,19 +39,19 @@ fn sender_name(session: Option<&Session>, sender: MessageSender) -> String {
     }
 }
 
-pub(super) fn info_row(label: &'static str, value: String) -> impl IntoElement {
+pub(super) fn info_row(label: impl Into<SharedString>, value: String) -> impl IntoElement {
     div()
         .flex()
         .justify_between()
         .gap_4()
         .text_sm()
-        .child(div().text_color(text_muted()).child(label))
+        .child(div().text_color(text_muted()).child(label.into()))
         .child(div().text_right().child(value))
 }
 
 pub(super) fn finish(
     dialog: Dialog,
-    title: &'static str,
+    title: impl Into<SharedString>,
     body: AnyElement,
     footer: AnyElement,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -299,15 +301,15 @@ impl QuillApp {
         })
     }
 
-    fn language_body(lookup: &LanguageLinkLookup) -> AnyElement {
-        let mut body = div().flex().flex_col().gap_2();
+    fn language_body(lookup: &LanguageLinkLookup, current: &str) -> AnyElement {
+        let body = div().flex().flex_col().gap_2();
         if lookup.loading {
             return body
                 .child(
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Looking up the language…"),
+                        .child(tr(keys::Q_LANGUAGE_LINK_LOOKING_UP)),
                 )
                 .into_any_element();
         }
@@ -318,7 +320,8 @@ impl QuillApp {
                         lookup
                             .error
                             .clone()
-                            .unwrap_or_else(|| "This language link is not valid.".into()),
+                            .map(SharedString::from)
+                            .unwrap_or_else(|| tr(keys::LANGUAGE_NOT_FOUND)),
                     ),
                 )
                 .into_any_element();
@@ -328,25 +331,41 @@ impl QuillApp {
         } else {
             info.native_name.clone()
         };
-        body = body.child(div().text_lg().font_semibold().child(title));
+        let mut body = body.child(div().text_lg().font_semibold().child(title.clone()));
         if !info.name.is_empty() && info.name != info.native_name {
-            body = body.child(info_row("Language", info.name.clone()));
+            body = body.child(info_row(tr(keys::LANGUAGES), info.name.clone()));
         }
         if let Some(progress) =
             language_progress(info.total_string_count, info.translated_string_count)
         {
-            body = body.child(info_row("Progress", progress));
+            body = body.child(info_row(tr(keys::Q_LANGUAGE_LINK_PROGRESS), progress));
         }
         if info.is_beta {
-            body = body.child(info_row("Status", "Beta".into()));
+            body = body.child(info_row(
+                tr(keys::Q_LANGUAGE_LINK_STATUS),
+                tr(keys::Q_LANGUAGE_LINK_BETA).to_string(),
+            ));
         }
-        body = body.child(
-            div()
-                .text_sm()
-                .text_color(text_muted())
-                .child("Quill is available in English only for now, so this language is not applied. Nothing was changed."),
-        );
-        body.into_any_element()
+        let note = if info.id.eq_ignore_ascii_case(current) {
+            tr(keys::Q_LANGUAGE_LINK_ALREADY)
+        } else {
+            tr_with(keys::Q_LANGUAGE_LINK_ABOUT, &[("lang_name", &title)])
+        };
+        body.child(div().text_sm().text_color(text_muted()).child(note))
+            .into_any_element()
+    }
+
+    /// Apply Language: switch to the linked pack and close the box.
+    fn apply_language_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let info = self
+            .session()
+            .and_then(|s| s.settings.language_link.as_ref())
+            .and_then(|lookup| lookup.info.clone());
+        self.close_language_box(cx);
+        self.close_kit_dialog_if_done(DialogKind::LanguageLink, window, cx);
+        if let Some(info) = info {
+            self.choose_language(info, cx);
+        }
     }
 
     pub(super) fn build_language_link_dialog(
@@ -366,24 +385,52 @@ impl QuillApp {
             let Some(lookup) = lookup else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Language"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::LANGUAGE_SWITCH_TITLE,
+                    )))
                     .on_close(on_close.clone());
             };
-            let body = Self::language_body(&lookup);
+            let current = quill::lang::current_pack_id();
+            let body = Self::language_body(&lookup, &current);
+            let can_apply = lookup
+                .info
+                .as_ref()
+                .is_some_and(|info| !info.id.eq_ignore_ascii_case(&current));
             let footer = div()
                 .flex()
                 .justify_end()
+                .gap_2()
                 .child(
                     Button::new("language-link-close")
-                        .label("Close")
+                        .label(if can_apply {
+                            tr(keys::CANCEL)
+                        } else {
+                            tr(keys::CLOSE)
+                        })
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_language_box(cx);
                             this.close_kit_dialog_if_done(DialogKind::LanguageLink, window, cx);
                         })),
                 )
+                .when(can_apply, |footer| {
+                    footer.child(
+                        Button::new("language-link-apply")
+                            .label(tr(keys::LANGUAGE_SWITCH_APPLY))
+                            .primary()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.apply_language_link(window, cx);
+                            })),
+                    )
+                })
                 .into_any_element();
-            finish(dialog, "Language", body, footer, on_close)
+            finish(
+                dialog,
+                tr(keys::LANGUAGE_SWITCH_TITLE),
+                body,
+                footer,
+                on_close,
+            )
         })
     }
 }
@@ -396,7 +443,7 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_gift_code_dialog,
     ),
 
-    /// `setlanguage` link: the pack's details; nothing is switched.
+    /// `setlanguage` link: the pack's details and Apply Language.
     LanguageLink => DialogSpec::new(
         2920,
         |app| app.session().is_some_and(|s| s.settings.language_link.is_some()),

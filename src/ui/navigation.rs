@@ -8,9 +8,10 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatKind;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum NavigationAction {
     /// `parity:platform-new-window`: the open chat in a window of its own.
     NewWindow,
@@ -64,6 +65,8 @@ pub(super) enum NavigationAction {
     ContactsSettings,
     CallSettings,
     AdvancedSettings,
+    /// Settings → Language (`parity:appearance-localization`).
+    Language,
     MarkRead,
     Settings,
     Archive,
@@ -234,7 +237,7 @@ impl QuillApp {
                     self.payments.marketplace_open = true;
                 } else {
                     self.connection.status_note =
-                        "Open a private chat or channel to choose the gift recipient.".into();
+                        tr(keys::Q_NAVIGATION_OPEN_A_PRIVATE_CHAT_OR).into();
                 }
                 cx.notify();
             }
@@ -268,6 +271,7 @@ impl QuillApp {
             NavigationAction::AdvancedSettings => {
                 self.settings.page = Some(super::advanced_ui::ADVANCED_PAGE)
             }
+            NavigationAction::Language => self.open_language_box(window, cx),
             NavigationAction::MarkRead => self.mark_all_chats_as_read(false, cx),
             NavigationAction::Archive => self.open_archive_folder(cx),
             NavigationAction::ArchiveToList => self.toggle_archive_in_main_menu(cx),
@@ -276,11 +280,11 @@ impl QuillApp {
     }
     fn settings_link(
         &self,
-        label: &'static str,
+        label: SharedString,
         action: NavigationAction,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        Button::new(SharedString::from(format!("setting-{label}")))
+        Button::new(SharedString::from(format!("setting-{action:?}")))
             .label(label)
             .ghost()
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -298,18 +302,26 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("privacy-rules")
-                    .label("Privacy rules and blocked users")
+                    .label(tr(keys::Q_NAVIGATION_PRIVACY_RULES_AND_BLOCKED_USERS))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.settings.open = false;
                         window.close_dialog(cx);
                         this.open_privacy(cx);
                     })),
             )
-            .child(self.settings_link("Local passcode", NavigationAction::Passcode, cx))
-            .child(self.settings_link("Two-step verification", NavigationAction::TwoFa, cx))
-            .child(self.settings_link("Connected websites", NavigationAction::Websites, cx))
             .child(self.settings_link(
-                "Account deletion and inactivity",
+                tr(keys::SETTINGS_PASSCODE_TITLE),
+                NavigationAction::Passcode,
+                cx,
+            ))
+            .child(self.settings_link(
+                tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE),
+                NavigationAction::TwoFa,
+                cx,
+            ))
+            .child(self.settings_link(tr(keys::SETTINGS_LOGGED_IN), NavigationAction::Websites, cx))
+            .child(self.settings_link(
+                tr(keys::Q_NAVIGATION_ACCOUNT_DELETION_AND_INACTIVITY),
                 NavigationAction::Account,
                 cx,
             ))
@@ -341,8 +353,8 @@ impl QuillApp {
         let button = Button::new("main-menu")
             .icon(gpui_kit::assets::IconName::Menu)
             .ghost()
-            .tooltip("Menu")
-            .accessibility_label("Main menu")
+            .tooltip(tr(keys::MAIN_MENU))
+            .accessibility_label(tr(keys::MAIN_MENU))
             .on_click(|event, window, cx| {
                 if matches!(event, ClickEvent::Keyboard(_)) {
                     window.dispatch_action(
@@ -353,28 +365,43 @@ impl QuillApp {
             })
             .dropdown_menu(move |mut menu, _, _| {
                 for (label, action) in [
-                    ("My Profile", NavigationAction::MyProfile),
-                    ("My Stories", NavigationAction::MyStories),
-                    (status_label, NavigationAction::EmojiStatus),
-                    ("My Groups", NavigationAction::MyGroups),
-                    ("My Channels", NavigationAction::MyChannels),
-                    ("Contacts", NavigationAction::Contacts),
-                    ("Calls", NavigationAction::Calls),
-                    ("Saved Messages", NavigationAction::Saved),
-                    ("Archived chats", NavigationAction::Archive),
-                    ("Move archive to chat list", NavigationAction::ArchiveToList),
-                    ("New story", NavigationAction::NewStory),
-                    ("New group", NavigationAction::Group),
-                    ("New supergroup", NavigationAction::Supergroup),
-                    ("New channel", NavigationAction::Channel),
-                    ("New secret chat", NavigationAction::Secret),
-                    ("Communities", NavigationAction::Communities),
-                    ("New community", NavigationAction::CommunityCreate),
-                    ("Downloads", NavigationAction::Downloads),
-                    ("Mark all as read", NavigationAction::MarkRead),
-                    ("Accounts", NavigationAction::Accounts),
-                    ("Settings", NavigationAction::Settings),
-                    ("Night Mode", NavigationAction::NightMode),
+                    (tr(keys::MENU_MY_PROFILE), NavigationAction::MyProfile),
+                    (tr(keys::MENU_MY_STORIES), NavigationAction::MyStories),
+                    (status_label.clone(), NavigationAction::EmojiStatus),
+                    (tr(keys::MENU_MY_GROUPS), NavigationAction::MyGroups),
+                    (tr(keys::MENU_MY_CHANNELS), NavigationAction::MyChannels),
+                    (tr(keys::MENU_CONTACTS), NavigationAction::Contacts),
+                    (tr(keys::MENU_CALLS), NavigationAction::Calls),
+                    (tr(keys::SAVED_MESSAGES), NavigationAction::Saved),
+                    (tr(keys::ARCHIVED_NAME), NavigationAction::Archive),
+                    (
+                        tr(keys::CONTEXT_ARCHIVE_TO_LIST),
+                        NavigationAction::ArchiveToList,
+                    ),
+                    (tr(keys::Q_NAVIGATION_NEW_STORY), NavigationAction::NewStory),
+                    (tr(keys::CREATE_GROUP_TITLE), NavigationAction::Group),
+                    (
+                        tr(keys::Q_NAVIGATION_NEW_SUPERGROUP),
+                        NavigationAction::Supergroup,
+                    ),
+                    (tr(keys::CREATE_CHANNEL_TITLE), NavigationAction::Channel),
+                    (
+                        tr(keys::Q_NAVIGATION_NEW_SECRET_CHAT),
+                        NavigationAction::Secret,
+                    ),
+                    (
+                        tr(keys::Q_NAVIGATION_COMMUNITIES),
+                        NavigationAction::Communities,
+                    ),
+                    (
+                        tr(keys::COMMUNITY_CREATE_TITLE),
+                        NavigationAction::CommunityCreate,
+                    ),
+                    (tr(keys::DOWNLOADS_SECTION), NavigationAction::Downloads),
+                    (tr(keys::CONTEXT_MARK_READ_ALL), NavigationAction::MarkRead),
+                    (tr(keys::Q_NAVIGATION_ACCOUNTS), NavigationAction::Accounts),
+                    (tr(keys::MENU_SETTINGS), NavigationAction::Settings),
+                    (tr(keys::MENU_NIGHT_MODE), NavigationAction::NightMode),
                 ] {
                     if matches!(
                         action,
@@ -412,7 +439,7 @@ impl QuillApp {
     ) -> Dialog {
         let app_c = app.clone();
         dialog
-            .title(crate::ui::shell::dialog_title("Settings"))
+            .title(crate::ui::shell::dialog_title(tr(keys::MENU_SETTINGS)))
             .width(px(520.))
             .on_close(QuillShell::on_close_kind(
                 app,
@@ -435,7 +462,7 @@ impl QuillApp {
                                 .gap_3()
                                 .child(
                                     Button::new("settings-back")
-                                        .label("Back to Settings")
+                                        .label(tr(keys::Q_NAVIGATION_BACK_TO_SETTINGS))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.settings.page = this
                                                 .settings
@@ -444,7 +471,7 @@ impl QuillApp {
                                             cx.notify();
                                         })),
                                 )
-                                .child(div().font_semibold().child(page))
+                                .child(div().font_semibold().child(settings_page_title(page)))
                                 .child(match page {
                                     "Chat settings" => div()
                                         .flex()
@@ -452,7 +479,7 @@ impl QuillApp {
                                         .gap_3()
                                         .child(this.media_settings_section(cx))
                                         .child(this.settings_link(
-                                            "Archived stickers",
+                                            tr(keys::Q_NAVIGATION_ARCHIVED_STICKERS),
                                             NavigationAction::ArchivedStickers,
                                             cx,
                                         ))
@@ -479,23 +506,42 @@ impl QuillApp {
                     let mut list = div().flex().flex_col().gap_2();
                     let connection_type = app_c.update(cx, |this, _| this.connection_type_row());
                     for (label, action) in [
-                        ("Edit profile", NavigationAction::Profile),
-                        ("Accounts", NavigationAction::Accounts),
-                        ("Notifications and sounds", NavigationAction::Notifications),
-                        ("Appearance", NavigationAction::Appearance),
-                        ("Chat settings", NavigationAction::ChatSettings),
-                        ("Privacy and security", NavigationAction::Privacy),
-                        ("Devices", NavigationAction::Sessions),
-                        ("Data and storage", NavigationAction::Storage),
-                        (connection_type.as_str(), NavigationAction::Proxy),
-                        ("Stars", NavigationAction::Stars),
-                        ("My gifts", NavigationAction::MyGifts),
-                        ("Telegram Premium", NavigationAction::Premium),
-                        ("Telegram Business", NavigationAction::Business),
-                        ("Star subscriptions", NavigationAction::Subscriptions),
-                        ("Contacts", NavigationAction::ContactsSettings),
-                        ("Calls", NavigationAction::CallSettings),
-                        ("Advanced", NavigationAction::AdvancedSettings),
+                        (tr(keys::SETTINGS_INFORMATION), NavigationAction::Profile),
+                        (tr(keys::Q_NAVIGATION_ACCOUNTS), NavigationAction::Accounts),
+                        (
+                            tr(keys::SETTINGS_SECTION_NOTIFY),
+                            NavigationAction::Notifications,
+                        ),
+                        (
+                            tr(keys::Q_NAVIGATION_APPEARANCE),
+                            NavigationAction::Appearance,
+                        ),
+                        (
+                            tr(keys::SETTINGS_SECTION_CHAT_SETTINGS),
+                            NavigationAction::ChatSettings,
+                        ),
+                        (
+                            tr(keys::SETTINGS_SECTION_PRIVACY),
+                            NavigationAction::Privacy,
+                        ),
+                        (tr(keys::Q_NAVIGATION_DEVICES), NavigationAction::Sessions),
+                        (tr(keys::SETTINGS_DATA_STORAGE), NavigationAction::Storage),
+                        (connection_type.clone().into(), NavigationAction::Proxy),
+                        (tr(keys::Q_NAVIGATION_STARS), NavigationAction::Stars),
+                        (tr(keys::GIFT_STARS_TABS_MY), NavigationAction::MyGifts),
+                        (tr(keys::PREMIUM_SUMMARY_TITLE), NavigationAction::Premium),
+                        (tr(keys::BUSINESS_TITLE), NavigationAction::Business),
+                        (
+                            tr(keys::Q_NAVIGATION_STAR_SUBSCRIPTIONS),
+                            NavigationAction::Subscriptions,
+                        ),
+                        (tr(keys::MENU_CONTACTS), NavigationAction::ContactsSettings),
+                        (tr(keys::SETTINGS_CALLS), NavigationAction::CallSettings),
+                        (
+                            tr(keys::SETTINGS_ADVANCED),
+                            NavigationAction::AdvancedSettings,
+                        ),
+                        (tr(keys::SETTINGS_LANGUAGE), NavigationAction::Language),
                     ] {
                         if matches!(action, NavigationAction::Stars) {
                             let app = app_c.clone();
@@ -515,7 +561,7 @@ impl QuillApp {
                         }
                         let app = app_c.clone();
                         list = list.child(
-                            Button::new(SharedString::from(format!("settings-{label}")))
+                            Button::new(SharedString::from(format!("settings-{action:?}")))
                                 .label(label)
                                 .ghost()
                                 .on_click(move |_, window, cx| {
@@ -543,6 +589,22 @@ impl QuillApp {
                 },
             ))
     }
+}
+
+/// The heading of a Settings page; pages are identified by their English
+/// title so deep links and demos keep working in any language.
+fn settings_page_title(page: &'static str) -> SharedString {
+    let key = match page {
+        "Chat settings" => keys::SETTINGS_SECTION_CHAT_SETTINGS,
+        "Contacts" => keys::MENU_CONTACTS,
+        "Calls" => keys::SETTINGS_CALLS,
+        "Privacy and security" => keys::SETTINGS_SECTION_PRIVACY,
+        super::advanced_ui::ADVANCED_PAGE => keys::SETTINGS_ADVANCED,
+        super::advanced_ui::EXPERIMENTAL_PAGE => keys::SETTINGS_EXPERIMENTAL,
+        super::settings_account_ui::ASK_QUESTION_PAGE => keys::SETTINGS_ASK_QUESTION,
+        _ => return SharedString::new_static(page),
+    };
+    tr(key)
 }
 
 /// Drag payload for the chat list's resize edge.

@@ -221,6 +221,8 @@ pub enum SettingsPurpose {
     /// `getLanguagePackInfo` for a `setlanguage` link. Response is
     /// `languagePackInfo`.
     GetLanguagePackInfo,
+    /// Settings → Language requests (`domains/settings/language.rs`).
+    Language(LanguagePurpose),
     /// `loadQuickReplyShortcuts`; the list arrives as updates.
     LoadQuickReplyShortcuts,
     /// `loadQuickReplyShortcutMessages`; the messages arrive as an update.

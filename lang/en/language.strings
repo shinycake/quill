@@ -1,0 +1,33 @@
+// Settings → Language (tdesktop boxes/language_box.cpp).
+"lng_languages" = "Language";
+"lng_languages_none" = "No languages found.";
+"lng_languages_count#one" = "{count} language";
+"lng_languages_count#other" = "{count} languages";
+"lng_settings_language" = "Language";
+"lng_participant_filter" = "Search";
+"lng_box_ok" = "OK";
+"lng_proxy_edit_share" = "Share";
+"lng_proxy_menu_delete" = "Delete";
+"lng_proxy_menu_restore" = "Restore";
+"lng_username_copied" = "Link copied to clipboard.";
+"lng_translate_settings_show" = "Show Translate Button";
+"lng_translate_settings_chat" = "Translate Entire Chats";
+"lng_translate_settings_choose" = "Do Not Translate";
+"lng_translate_settings_subtitle" = "Translate Messages";
+"lng_translate_settings_about" = "The 'Translate' button will appear in the context menu of messages containing text.";
+"qll_translate_chats_hint" = "Offer to translate whole conversations with a bar above the chat.";
+"qll_translate_chats_premium" = "Translating entire chats requires Telegram Premium.";
+"qll_translate_skip_label" = "Choose languages not to translate";
+
+// The t.me/setlanguage box (tdesktop lang/lang_cloud_manager.cpp).
+"lng_language_switch_title" = "Change language?";
+"lng_language_switch_apply" = "Apply Language";
+"lng_language_not_found" = "Sorry, this language pack doesn't exist.";
+"lng_cancel" = "Cancel";
+"lng_close" = "Close";
+"qll_language_link_looking_up" = "Looking up the language…";
+"qll_language_link_progress" = "Progress";
+"qll_language_link_status" = "Status";
+"qll_language_link_beta" = "Beta";
+"qll_language_link_about" = "Quill will switch its interface to {lang_name}. Strings that are not translated yet stay in English. You can switch back at any time in Settings → Language.";
+"qll_language_link_already" = "Quill already uses this language. You can pick another one at any time in Settings → Language.";

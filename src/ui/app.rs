@@ -42,6 +42,8 @@ pub struct QuillApp {
     pub(super) payments: super::payments_state::PaymentUi,
     /// Revenue pages, withdrawals and affiliate programs (`ui/earn_state.rs`).
     pub(super) earn: super::earn_state::EarnUi,
+    /// Settings → Language: the open box and recent packs (`ui/language_state.rs`).
+    pub(super) language: super::language_state::LanguageUi,
     /// Sign-in: inputs, registration, terms, recovery and the QR code (`ui/auth_state.rs`).
     pub(super) auth_ui: super::auth_state::AuthUi,
     /// Search fields: global search and search in chat (`ui/search_state.rs`).
