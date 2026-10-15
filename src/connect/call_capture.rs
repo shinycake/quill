@@ -75,9 +75,11 @@ impl CallCapture {
         self.opener = Some(opener);
     }
 
-    /// Whether Quill captures the call microphone at all.
+    /// Whether Quill captures the call microphone at all. Unit tests
+    /// never open the real microphone: there only an injected capture
+    /// turns it on.
     pub fn enabled(&self) -> bool {
-        self.opener.is_some() || external_capture_enabled()
+        self.opener.is_some() || (!cfg!(test) && external_capture_enabled())
     }
 
     /// The call the microphone feeds right now.
