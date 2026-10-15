@@ -9,6 +9,7 @@ use super::app::QuillApp;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The section, or `None` when the bot has no access to show. Like
@@ -43,7 +44,7 @@ impl QuillApp {
                         .pt_1()
                         .text_xs()
                         .text_color(muted)
-                        .child("Permissions"),
+                        .child(tr(keys::MANAGE_PEER_PERMISSIONS)),
                 )
                 .child(
                     div()
@@ -53,11 +54,15 @@ impl QuillApp {
                         .gap_3()
                         .px_2()
                         .py_1p5()
-                        .child(div().text_sm().child("Emoji Status"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(tr(keys::PROFILE_BOT_EMOJI_STATUS_ACCESS)),
+                        )
                         .child(
                             Switch::new("info-panel-bot-emoji-status")
                                 .checked(allowed)
-                                .accessibility_label("Let this bot set your emoji status")
+                                .accessibility_label(tr(keys::Q_MEDIA_LET_THIS_BOT_SET_YOUR))
                                 .on_click(cx.listener(move |this, &next: &bool, _, cx| {
                                     this.set_bot_emoji_status_access(user_id, next, cx);
                                 })),
@@ -81,7 +86,7 @@ impl QuillApp {
                 .set_bot_emoji_status_access(user_id, allowed)
                 .is_err()
             {
-                self.set_status_note("Couldn't change the emoji status access.", cx);
+                self.set_status_note(tr(keys::Q_MEDIA_COULDNT_CHANGE_THE_EMOJI_STATUS), cx);
             }
         } else if let Some(Some(info)) = self
             .demo_session

@@ -17,6 +17,7 @@ use gpui_kit::*;
 use quill::bot_verification::{
     DESCRIPTION_LIMIT_DEFAULT, VerifyTarget, description_to_send, verified_by_bot,
 };
+use quill::lang::{keys, tr, tr_with};
 use quill::state::ChatSummary;
 use quill::telegram::envelope::ChatKind;
 use quill::telegram::requests::MessageSenderRef;
@@ -72,7 +73,7 @@ impl QuillApp {
             action_row(
                 "info-panel-verify-accounts",
                 Some(IconName::BadgeCheck),
-                "Verify accounts",
+                tr(keys::MANAGE_PEER_BOT_VERIFY),
                 false,
                 cx,
             )
@@ -91,7 +92,7 @@ impl QuillApp {
             .unwrap_or_default();
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Description (optional)")
+                .placeholder(tr(keys::Q_MEDIA_DESCRIPTION_OPTIONAL))
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
@@ -189,7 +190,7 @@ impl QuillApp {
             }
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: verifying needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_VERIFYING_NEEDS_A).into();
             cx.notify();
             return true;
         };
@@ -200,9 +201,15 @@ impl QuillApp {
                 .set_bot_verification(bot_id, sender, &description)
         };
         self.connection.status_note = match (sent, remove) {
-            (Ok(_), false) => format!("Verifying {name} as a {}…", target.noun()),
-            (Ok(_), true) => format!("Removing the verification from {name}…"),
-            (Err(_), _) => "Could not send the verification request.".into(),
+            (Ok(_), false) => tr_with(
+                keys::Q_MEDIA_VERIFYING_AS_A,
+                &[("name", &name.to_string()), ("noun", (target.noun()))],
+            ),
+            (Ok(_), true) => tr_with(
+                keys::Q_MEDIA_REMOVING_THE_VERIFICATION_FROM,
+                &[("name", &name.to_string())],
+            ),
+            (Err(_), _) => tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_VERIFICATION).into(),
         };
         cx.notify();
         true
@@ -231,7 +238,7 @@ impl QuillApp {
                             .text_xs()
                             .text_color(muted)
                             .pb_1()
-                            .child("Choose a user, channel or group to verify or unverify."),
+                            .child(tr(keys::Q_MEDIA_CHOOSE_A_USER_CHANNEL_OR)),
                     );
                     let candidates = this.bot_verify_candidates(bot_id);
                     if candidates.is_empty() {
@@ -239,12 +246,12 @@ impl QuillApp {
                             div()
                                 .text_sm()
                                 .text_color(muted)
-                                .child("No chats loaded yet."),
+                                .child(tr(keys::Q_MEDIA_NO_CHATS_LOADED_YET)),
                         );
                     }
                     for (id, name, verified) in candidates {
                         let label = if verified {
-                            format!("{name} (verified)")
+                            tr_with(keys::Q_MEDIA_VERIFIED, &[("name", &name.to_string())])
                         } else {
                             name
                         };
@@ -273,14 +280,18 @@ impl QuillApp {
                     }
                     let footer = div().flex().justify_end().child(
                         Button::new("bot-verify-done")
-                            .label("Done")
+                            .label(tr(keys::BOX_DONE))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_bot_verify(cx);
                                 this.close_kit_dialog_if_done(DialogKind::BotVerify, window, cx);
                             })),
                     );
-                    ("Verify accounts", list.into_any_element(), footer)
+                    (
+                        tr(keys::MANAGE_PEER_BOT_VERIFY),
+                        list.into_any_element(),
+                        footer,
+                    )
                 }
                 Step::Add(chat_id) | Step::Remove(chat_id) => {
                     let remove = matches!(step, Step::Remove(_));
@@ -297,14 +308,17 @@ impl QuillApp {
                         .as_ref()
                         .map(|p| p.organization_name.clone())
                         .filter(|name| !name.is_empty())
-                        .unwrap_or_else(|| "your organization".into());
+                        .unwrap_or_else(|| tr(keys::Q_MEDIA_YOUR_ORGANIZATION).into());
                     let custom = params
                         .as_ref()
                         .is_some_and(|p| p.can_set_custom_description);
                     let typed_len = input.read(cx).value().chars().count();
                     let too_long = custom && typed_len > DESCRIPTION_LIMIT_DEFAULT;
                     let text = if remove {
-                        format!("Remove the verification of {name} given by {org}?")
+                        tr_with(
+                            keys::Q_MEDIA_REMOVE_THE_VERIFICATION_OF_GIVEN,
+                            &[("name", &name.to_string()), ("org", &org.to_string())],
+                        )
                     } else {
                         format!(
                             "Verify {name} as a {} on behalf of {org}? A verification mark \
@@ -319,7 +333,10 @@ impl QuillApp {
                         .child(div().text_sm().child(text));
                     if custom && !remove {
                         body = body
-                            .child(Textarea::new(&input).aria_label("Verification description"))
+                            .child(
+                                Textarea::new(&input)
+                                    .aria_label(tr(keys::Q_MEDIA_VERIFICATION_DESCRIPTION)),
+                            )
                             .child(
                                 div()
                                     .text_xs()
@@ -336,7 +353,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("bot-verify-back")
-                                .label("Back")
+                                .label(tr(keys::Q_MEDIA_BACK))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.set_bot_verify_step(Step::Pick, cx);
@@ -345,7 +362,11 @@ impl QuillApp {
                         )
                         .child({
                             let button = Button::new("bot-verify-submit")
-                                .label(if remove { "Remove" } else { target.title() })
+                                .label(if remove {
+                                    tr(keys::BOT_VERIFY_REMOVE_SUBMIT)
+                                } else {
+                                    target.title()
+                                })
                                 .disabled(too_long);
                             let button = if remove {
                                 button.danger()
@@ -361,7 +382,7 @@ impl QuillApp {
                         });
                     (
                         if remove {
-                            "Remove verification"
+                            tr(keys::BOT_VERIFY_REMOVE_TITLE)
                         } else {
                             target.title()
                         },

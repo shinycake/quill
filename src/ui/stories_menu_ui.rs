@@ -8,6 +8,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::stories_menu::{StoryMenuAction, StoryMenuFacts, story_menu};
 use quill::telegram::envelope::{ChatKind, StoryListView};
 
@@ -47,10 +48,10 @@ impl QuillApp {
                     .as_mut()
                     .map(|live| live.driver.set_chat_active_stories_list(id, hide));
                 self.connection.status_note = match sent {
-                    Some(Ok(_)) if hide => "Hiding stories…".into(),
-                    Some(Ok(_)) => "Showing stories…".into(),
-                    Some(Err(_)) => "Could not change the stories list".into(),
-                    None => "demo — setChatActiveStoriesList runs with live TDLib".into(),
+                    Some(Ok(_)) if hide => tr(keys::Q_MEDIA_HIDING_STORIES).into(),
+                    Some(Ok(_)) => tr(keys::Q_MEDIA_SHOWING_STORIES).into(),
+                    Some(Err(_)) => tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STORIES).into(),
+                    None => tr(keys::Q_MEDIA_DEMO_SETCHATACTIVESTORIESLIST_RUNS_WITH_LIVE).into(),
                 };
             }
             StoryMenuAction::ToggleMute => {

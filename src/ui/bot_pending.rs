@@ -5,6 +5,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::BotsPurpose;
 use quill::state::{RequestPurpose, unix_ms_now};
 
@@ -41,11 +42,11 @@ impl QuillApp {
                 Button::new("stop-bot-draft")
                     .icon(gpui_kit::assets::IconName::CircleStop)
                     .label(if stopping {
-                        "Stopping…"
+                        tr(keys::Q_MEDIA_STOPPING)
                     } else if stopped {
-                        "Stopped"
+                        tr(keys::Q_MEDIA_STOPPED)
                     } else {
-                        "Stop generating"
+                        tr(keys::Q_MEDIA_STOP_GENERATING)
                     })
                     .small()
                     .ghost()
@@ -60,7 +61,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Could not stop the reply. Try again."),
+                    .child(tr(keys::Q_MEDIA_COULD_NOT_STOP_THE_REPLY)),
             );
         }
         Some(row.into_any_element())
@@ -78,9 +79,9 @@ impl QuillApp {
                 .driver
                 .stop_pending_bot_message(chat_id, topic_id, draft_id)
             {
-                Ok(Some(_)) => "stopping bot reply…".into(),
-                Ok(None) => "this reply is no longer stoppable".into(),
-                Err(_) => "could not stop the bot reply".into(),
+                Ok(Some(_)) => tr(keys::Q_MEDIA_STOPPING_BOT_REPLY).into(),
+                Ok(None) => tr(keys::Q_MEDIA_THIS_REPLY_IS_NO_LONGER).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_STOP_THE_BOT).into(),
             };
         }
         cx.notify();

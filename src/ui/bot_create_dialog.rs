@@ -11,6 +11,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::owned_bots::{self, NAME_MAX, UsernameProblem};
 use quill::state::DeepLinkAction;
 use quill::telegram::envelope::UsernameCheckResult;
@@ -90,12 +91,12 @@ impl QuillApp {
         }
         let name = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Bot name")
+                .placeholder(tr(keys::CREATE_BOT_NAME_PLACEHOLDER))
                 .submit_on_enter(false)
         });
         let username = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Bot username")
+                .placeholder(tr(keys::CREATE_BOT_USERNAME_PLACEHOLDER))
                 .submit_on_enter(false)
         });
         name.update(cx, |input, cx| input.set_value(suggested_name, window, cx));
@@ -192,7 +193,7 @@ impl QuillApp {
         }
         let full = owned_bots::full_username(&typed);
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: creating a bot needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_CREATING_A_BOT).into();
             cx.notify();
             return;
         };
@@ -201,7 +202,7 @@ impl QuillApp {
             .create_managed_bot(manager_id, &name, &full, true)
             .is_err()
         {
-            self.connection.status_note = "Could not send the request.".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_REQUEST).into();
             cx.notify();
             return;
         }
@@ -260,8 +261,10 @@ impl QuillApp {
                     story_id: None,
                 });
             }
-            self.connection.status_note =
-                format!("{name} created! {manager} will manage this bot for you.");
+            self.connection.status_note = tr_with(
+                keys::Q_MEDIA_CREATED_WILL_MANAGE_THIS_BOT,
+                &[("name", name), ("manager", &manager.to_string())],
+            );
             cx.notify();
             return true;
         }
@@ -317,12 +320,21 @@ impl QuillApp {
             let (line, line_color) = match (problem, verdict) {
                 (Some(UsernameProblem::Empty), _) => (String::new(), muted),
                 (Some(problem), _) => (problem.line().to_string(), danger),
-                (None, Some(UsernameCheckResult::Available)) => {
-                    (format!("{full} is available."), success)
+                (None, Some(UsernameCheckResult::Available)) => (
+                    tr_with(
+                        keys::CREATE_BOT_USERNAME_AVAILABLE,
+                        &[("username", &full.to_string())],
+                    ),
+                    success,
+                ),
+                (None, Some(_)) => (tr(keys::CREATE_BOT_USERNAME_TAKEN).to_string(), danger),
+                (None, None) if create.check_pending.is_some() => {
+                    (tr(keys::Q_MEDIA_CHECKING).to_string(), muted)
                 }
-                (None, Some(_)) => ("This username is already taken.".to_string(), danger),
-                (None, None) if create.check_pending.is_some() => ("Checking…".to_string(), muted),
-                (None, None) => (format!("Link: t.me/{full}"), muted),
+                (None, None) => (
+                    tr_with(keys::Q_MEDIA_LINK_T_ME, &[("full", &full.to_string())]),
+                    muted,
+                ),
             };
             let taken = matches!(verdict, Some(result) if result != UsernameCheckResult::Available);
             let name_len = name_text.chars().count();
@@ -333,38 +345,60 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_sm().child(format!(
-                    "{manager} would like to create and manage a chatbot on your behalf."
+                .child(div().text_sm().child(tr_with(
+                    keys::CREATE_BOT_SUBTITLE,
+                    &[("bot", &manager.to_string())],
                 )))
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(div().text_sm().font_semibold().child("Bot name"))
-                        .child(Input::new(&name).aria_label("Bot name")),
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::CREATE_BOT_NAME_PLACEHOLDER)),
+                        )
+                        .child(Input::new(&name).aria_label(tr(keys::CREATE_BOT_NAME_PLACEHOLDER))),
                 )
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(div().text_sm().font_semibold().child("Bot username"))
-                        .child(Input::new(&username).aria_label("Bot username"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::CREATE_BOT_USERNAME_PLACEHOLDER)),
+                        )
+                        .child(
+                            Input::new(&username)
+                                .aria_label(tr(keys::CREATE_BOT_USERNAME_PLACEHOLDER)),
+                        )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(muted)
                                 .child(if suffix.is_empty() {
-                                    "The username ends with bot.".to_string()
+                                    tr(keys::Q_MEDIA_THE_USERNAME_ENDS_WITH_BOT).to_string()
                                 } else {
-                                    format!("\"{suffix}\" is added at the end.")
+                                    tr_with(
+                                        keys::Q_MEDIA_IS_ADDED_AT_THE_END,
+                                        &[("suffix", suffix)],
+                                    )
                                 }),
                         )
                         .child(div().text_xs().text_color(line_color).child(line)),
                 );
             if submitted {
-                body = body.child(div().text_xs().text_color(muted).child("Creating…"));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MEDIA_CREATING)),
+                );
             } else if let Some(error) = create.error.clone() {
                 body = body.child(div().text_xs().text_color(danger).child(error));
             }
@@ -374,7 +408,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("bot-create-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_bot_create(cx);
@@ -383,7 +417,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("bot-create-submit")
-                        .label("Create")
+                        .label(tr(keys::CREATE_BOT_BUTTON))
                         .primary()
                         .disabled(!can_create)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -400,7 +434,7 @@ impl QuillApp {
             let content = Rc::new(RefCell::new(Some(content)));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Create bot"))
+                .title(crate::ui::shell::dialog_title(tr(keys::CREATE_BOT_TITLE)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
                         let body = content

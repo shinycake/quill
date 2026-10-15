@@ -8,6 +8,7 @@ use super::super::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::state::Session;
 use quill::telegram::envelope::{ParsedFile, PollOptionMedia};
 use std::collections::HashMap;
@@ -57,12 +58,12 @@ impl ThumbKind {
 
     pub(in crate::ui) fn action_label(self) -> &'static str {
         match self {
-            Self::Photo => "Open photo",
-            Self::Video => "Play video",
-            Self::Animation => "Play animation",
-            Self::Sticker => "View sticker pack",
-            Self::Link => "Open link",
-            Self::Place => "Show on map",
+            Self::Photo => tr(keys::Q_MEDIA_OPEN_PHOTO),
+            Self::Video => tr(keys::Q_MEDIA_PLAY_VIDEO),
+            Self::Animation => tr(keys::Q_MEDIA_PLAY_ANIMATION),
+            Self::Sticker => tr(keys::Q_MEDIA_VIEW_STICKER_PACK),
+            Self::Link => tr(keys::POLLS_OPTION_OPEN_LINK_TITLE),
+            Self::Place => tr(keys::Q_MEDIA_SHOW_ON_MAP),
         }
     }
 }

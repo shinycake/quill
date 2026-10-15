@@ -1,6 +1,7 @@
 //! The row of reaction chips (or Saved Messages tags) under a message.
 
 use super::*;
+use quill::lang::{keys, tr_with};
 use quill::telegram::envelope::MessageReaction;
 
 #[allow(clippy::too_many_arguments)]
@@ -62,7 +63,9 @@ pub(super) fn reaction_chip_row(
         };
         let label = match &choice {
             quill::state::ReactionChoice::Emoji(emoji) => format!("{emoji} {count}"),
-            quill::state::ReactionChoice::CustomEmoji(_) => format!("Custom emoji {count}"),
+            quill::state::ReactionChoice::CustomEmoji(_) => {
+                tr_with(keys::Q_MEDIA_CUSTOM_EMOJI, &[("count", &count.to_string())])
+            }
         };
         let tag_type = chip.reaction_type.clone();
         // Hover names who reacted; right-click opens the full list.

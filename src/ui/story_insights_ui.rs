@@ -15,6 +15,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::stat_chart::ChartKind;
 use quill::state::{
     StorySearchQuery, StoryStatsFetch, event_log_relative_time, private_share_count,
@@ -47,10 +48,11 @@ impl QuillApp {
                 .retry_story_statistics(*chat_id, story_id, is_dark)
                 .is_err()
             {
-                self.connection.status_note = "could not load story statistics".into();
+                self.connection.status_note =
+                    tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS).into();
             }
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — story statistics run with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_STATISTICS_RUN_WITH).into();
         }
         cx.notify();
     }
@@ -73,7 +75,7 @@ impl QuillApp {
                 .fetch_story_public_forwards(item.chat_id, item.story_id, &offset)
                 .is_err()
         {
-            self.connection.status_note = "could not load public shares".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_PUBLIC_SHARES).into();
         }
         cx.notify();
     }
@@ -82,7 +84,7 @@ impl QuillApp {
         self.session()
             .and_then(|s| s.chats.get(&chat_id))
             .map(|chat| chat.title.clone())
-            .unwrap_or_else(|| format!("Chat {chat_id}"))
+            .unwrap_or_else(|| tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())]))
     }
 
     fn stat_cell(label: &'static str, value: String) -> Div {
@@ -123,7 +125,7 @@ impl QuillApp {
                     .text_sm()
                     .font_medium()
                     .text_color(text_menu())
-                    .child("Story statistics"),
+                    .child(tr(keys::Q_MEDIA_STORY_STATISTICS)),
             );
         let current = self
             .stories
@@ -140,7 +142,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Loading statistics…"),
+                        .child(tr(keys::Q_MEDIA_LOADING_STATISTICS)),
                 )
                 .into_any_element();
         };
@@ -152,11 +154,11 @@ impl QuillApp {
                         .flex()
                         .gap_2()
                         .child(Self::stat_cell(
-                            "Views",
+                            tr(keys::Q_MEDIA_VIEWS),
                             format_stat_count(f64::from(info.view_count)),
                         ))
                         .child(Self::stat_cell(
-                            "Public shares",
+                            tr(keys::Q_MEDIA_PUBLIC_SHARES),
                             format_stat_count(f64::from(state.forwards_total)),
                         )),
                 )
@@ -165,11 +167,11 @@ impl QuillApp {
                         .flex()
                         .gap_2()
                         .child(Self::stat_cell(
-                            "Reactions",
+                            tr(keys::Q_MEDIA_REACTIONS),
                             format_stat_count(f64::from(info.reaction_count)),
                         ))
                         .child(Self::stat_cell(
-                            "Private shares",
+                            tr(keys::Q_MEDIA_PRIVATE_SHARES),
                             format_stat_count(f64::from(private_share_count(
                                 info.forward_count,
                                 state.forwards_total,
@@ -183,7 +185,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Loading statistics…"),
+                        .child(tr(keys::Q_MEDIA_LOADING_STATISTICS)),
                 );
             }
             StoryStatsFetch::Failed(message) => {
@@ -191,7 +193,7 @@ impl QuillApp {
                     .child(div().text_sm().text_color(danger()).child(message.clone()))
                     .child(
                         Button::new("story-stats-retry")
-                            .label("Retry")
+                            .label(tr(keys::Q_MEDIA_RETRY))
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(item) = this.stories.viewer.current().cloned() {
@@ -206,13 +208,13 @@ impl QuillApp {
                 for (id, label, graph, kind) in [
                     (
                         "story-viewer-interactions",
-                        "Interactions",
+                        tr(keys::Q_MEDIA_INTERACTIONS),
                         &stats.interaction_graph,
                         ChartKind::DoubleLinear,
                     ),
                     (
                         "story-viewer-reactions",
-                        "Reactions",
+                        tr(keys::Q_MEDIA_REACTIONS),
                         &stats.reaction_graph,
                         ChartKind::Bar,
                     ),
@@ -228,16 +230,20 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(text_muted())
-                .child(format!("Public shares ({})", state.forwards_total)),
+                .child(tr_with(
+                    keys::Q_MEDIA_PUBLIC_SHARES_2,
+                    &[("forwards_total", &state.forwards_total.to_string())],
+                )),
         );
         for (index, forward) in state.forwards.iter().enumerate() {
             let (title, detail) = match forward.kind {
                 PublicForwardKind::Message { chat_id, .. } => {
-                    (self.chat_title_or_id(chat_id), "Message")
+                    (self.chat_title_or_id(chat_id), tr(keys::Q_MEDIA_MESSAGE))
                 }
-                PublicForwardKind::Story { chat_id, .. } => {
-                    (self.chat_title_or_id(chat_id), "Story repost")
-                }
+                PublicForwardKind::Story { chat_id, .. } => (
+                    self.chat_title_or_id(chat_id),
+                    tr(keys::Q_MEDIA_STORY_REPOST),
+                ),
             };
             let kind = forward.kind;
             let row = div()
@@ -288,12 +294,12 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("Loading public shares…"),
+                    .child(tr(keys::Q_MEDIA_LOADING_PUBLIC_SHARES)),
             );
         } else if !state.forwards_next_offset.is_empty() {
             panel = panel.child(
                 Button::new("story-forwards-more")
-                    .label("Load more")
+                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| this.load_more_story_forwards(cx))),
             );
@@ -304,7 +310,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("No public shares yet"),
+                    .child(tr(keys::Q_MEDIA_NO_PUBLIC_SHARES_YET)),
             );
         }
         panel.into_any_element()
@@ -344,10 +350,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.search_public_stories(query).is_err() {
-                self.connection.status_note = "could not search stories".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEARCH_STORIES).into();
             }
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — public story search runs with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_PUBLIC_STORY_SEARCH_RUNS).into();
         }
         cx.notify();
     }
@@ -411,10 +417,18 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_xs().font_semibold().child("Public stories"));
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child(tr(keys::Q_MEDIA_PUBLIC_STORIES)),
+            );
         let Some(search) = showing else {
             let tag = tag?;
-            let label = format!("Search public stories for {tag}");
+            let label = tr_with(
+                keys::Q_MEDIA_SEARCH_PUBLIC_STORIES_FOR,
+                &[("tag", &tag.to_string())],
+            );
             return Some(
                 block
                     .child(
@@ -431,12 +445,10 @@ impl QuillApp {
                     .into_any_element(),
             );
         };
-        block = block.child(
-            div()
-                .text_xs()
-                .text_color(text_muted())
-                .child(format!("Stories for {}", search.query.label())),
-        );
+        block = block.child(div().text_xs().text_color(text_muted()).child(tr_with(
+            keys::Q_MEDIA_STORIES_FOR,
+            &[("label", (search.query.label()))],
+        )));
         for (index, (chat_id, story_id)) in search.stories.iter().enumerate() {
             let name = self.chat_title_or_id(*chat_id);
             let date = self
@@ -484,12 +496,12 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("Searching stories…"),
+                    .child(tr(keys::Q_MEDIA_SEARCHING_STORIES)),
             );
         } else if !search.next_offset.is_empty() {
             block = block.child(
                 Button::new("found-stories-more")
-                    .label("Load more")
+                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
@@ -503,7 +515,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("No public stories found"),
+                    .child(tr(keys::Q_MEDIA_NO_PUBLIC_STORIES_FOUND)),
             );
         }
         Some(block.into_any_element())
@@ -531,7 +543,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(text_muted())
-                    .child("No further details"),
+                    .child(tr(keys::Q_MEDIA_NO_FURTHER_DETAILS)),
             );
         }
         for row in rows {

@@ -370,6 +370,16 @@ arguments or build English plurals by hand ("day{}") are still English.
 A plural sweep converts them, together with the same leftovers in the
 areas from PRs 2 to 5.
 
+## PR 7: stickers, emoji, stories, bots, mini apps and polls
+
+Sticker and emoji panels and set boxes, the sticker set creator, custom
+emoji, stories (viewer, composer, albums, insights, the strip), bots
+(creation, editing, verification, permissions, inline mode, attachment
+menu bots), mini apps, polls, quizzes and checklists are converted
+(`lang/en/media.strings`). `history/session_history_row.rs` is one large
+function sitting near the 1,000-line limit, so it stays English until a
+later PR splits it.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

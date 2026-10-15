@@ -1,6 +1,7 @@
 //! Methods moved out of `story_albums.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase 9.7: the chat story page overlay — story albums (list +
@@ -22,7 +23,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
             .map(|c| c.title.clone())
-            .unwrap_or_else(|| format!("Chat {}", chat_id.0));
+            .unwrap_or_else(|| tr_with(keys::Q_MEDIA_CHAT_3, &[("0", &chat_id.0.to_string())]));
         // Honest operation state: Checking shows as `Sending` (the load
         // already fired), mutations label their action, failures carry
         // the TDLib reason.
@@ -32,8 +33,16 @@ impl QuillApp {
             .map(|op| match op.state {
                 StoryPageOpState::Checking => format!("{}…", op.label),
                 StoryPageOpState::Sending => format!("{}…", op.label),
-                StoryPageOpState::Succeeded => format!("{} — done", op.label),
-                StoryPageOpState::Failed(reason) => format!("{} — failed: {reason}", op.label),
+                StoryPageOpState::Succeeded => {
+                    tr_with(keys::Q_MEDIA_DONE, &[("label", &op.label.to_string())])
+                }
+                StoryPageOpState::Failed(reason) => tr_with(
+                    keys::Q_MEDIA_FAILED,
+                    &[
+                        ("label", &op.label.to_string()),
+                        ("reason", &reason.to_string()),
+                    ],
+                ),
             });
         let label_for = |story_id: i32| {
             let caption = self
@@ -43,9 +52,15 @@ impl QuillApp {
                 .unwrap_or_default();
             let snippet: String = caption.chars().take(40).collect();
             if snippet.is_empty() {
-                format!("Story {story_id}")
+                tr_with(keys::Q_MEDIA_STORY, &[("story_id", &story_id.to_string())])
             } else {
-                format!("Story {story_id} — {snippet}")
+                tr_with(
+                    keys::Q_MEDIA_STORY_2,
+                    &[
+                        ("story_id", &story_id.to_string()),
+                        ("snippet", &snippet.to_string()),
+                    ],
+                )
             }
         };
 
@@ -57,7 +72,9 @@ impl QuillApp {
                 .and_then(|s| s.stories.albums.get(&chat_id.0))
                 .and_then(|albums| albums.iter().find(|a| a.id == album_id))
                 .map(|a| a.name.clone())
-                .unwrap_or_else(|| format!("Album {album_id}"));
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MEDIA_ALBUM, &[("album_id", &album_id.to_string())])
+                });
             let story_ids: Vec<i32> = self
                 .session()
                 .and_then(|s| s.stories.album_stories.get(&(chat_id.0, album_id)))
@@ -74,7 +91,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("story-page-back")
-                                .label("← Albums")
+                                .label(tr(keys::Q_MEDIA_ALBUMS))
                                 .ghost()
                                 .text_color(cx.theme().foreground)
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -95,22 +112,24 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Textarea::new(&rename_input)
-                                .aria_label("Story album name")
+                                .aria_label(tr(keys::Q_MEDIA_STORY_ALBUM_NAME))
                                 .h(px(36.))
                                 .flex_1(),
                         )
-                        .child(Button::new("story-page-rename").label("Rename").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.rename_story_album(cx);
-                            }),
-                        )),
+                        .child(
+                            Button::new("story-page-rename")
+                                .label(tr(keys::Q_MEDIA_RENAME))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.rename_story_album(cx);
+                                })),
+                        ),
                 )
                 .child(
                     Button::new("story-page-delete")
                         .label(if delete_confirm == Some(album_id) {
-                            "Confirm delete"
+                            tr(keys::Q_MEDIA_CONFIRM_DELETE)
                         } else {
-                            "Delete album"
+                            tr(keys::Q_MEDIA_DELETE_ALBUM)
                         })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.delete_story_album(album_id, cx);
@@ -140,7 +159,7 @@ impl QuillApp {
                                 .gap_1()
                                 .child(
                                     Button::new(("story-page-album-top", story_id as u64))
-                                        .label("↑ Top")
+                                        .label(tr(keys::Q_MEDIA_TOP))
                                         .ghost()
                                         .text_color(cx.theme().foreground)
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -149,7 +168,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new(("story-page-album-remove", story_id as u64))
-                                        .label("Remove")
+                                        .label(tr(keys::BOX_REMOVE))
                                         .ghost()
                                         .text_color(cx.theme().foreground)
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -166,15 +185,17 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Textarea::new(&add_story_ids)
-                            .aria_label("Story identifiers to add")
+                            .aria_label(tr(keys::Q_MEDIA_STORY_IDENTIFIERS_TO_ADD))
                             .h(px(36.))
                             .flex_1(),
                     )
-                    .child(Button::new("story-page-add-stories").label("Add").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.add_stories_to_album(cx);
-                        }),
-                    )),
+                    .child(
+                        Button::new("story-page-add-stories")
+                            .label(tr(keys::Q_MEDIA_ADD))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.add_stories_to_album(cx);
+                            })),
+                    ),
             );
             body = body.child(detail);
         } else {
@@ -188,7 +209,7 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .text_color(cx.theme().foreground)
-                    .child("Albums"),
+                    .child(tr(keys::Q_MEDIA_ALBUMS_2)),
             );
             for (index, (album_id, name)) in albums.iter().enumerate() {
                 let album_id = *album_id;
@@ -216,7 +237,7 @@ impl QuillApp {
                                 .gap_1()
                                 .child(
                                     Button::new(("story-page-open", album_id as u64))
-                                        .label("Open")
+                                        .label(tr(keys::PROFILE_OPEN_APP_SHORT))
                                         .ghost()
                                         .text_color(cx.theme().foreground)
                                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -255,21 +276,21 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("New album"),
+                            .child(tr(keys::Q_MEDIA_NEW_ALBUM)),
                     )
                     .child(
                         Textarea::new(&new_album_name)
-                            .aria_label("New story album name")
+                            .aria_label(tr(keys::Q_MEDIA_NEW_STORY_ALBUM_NAME))
                             .h(px(36.)),
                     )
                     .child(
                         Textarea::new(&new_album_story_ids)
-                            .aria_label("Story identifiers for new album")
+                            .aria_label(tr(keys::Q_MEDIA_STORY_IDENTIFIERS_FOR_NEW_ALBUM))
                             .h(px(36.)),
                     )
                     .child(
                         Button::new("story-page-create")
-                            .label("Create album")
+                            .label(tr(keys::Q_MEDIA_CREATE_ALBUM))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.create_story_album(cx);
                             })),
@@ -285,7 +306,7 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .text_color(cx.theme().foreground)
-                    .child("Chat page stories"),
+                    .child(tr(keys::Q_MEDIA_CHAT_PAGE_STORIES)),
             );
             for story_id in &chat_page_ids {
                 let story_id = *story_id;
@@ -308,7 +329,11 @@ impl QuillApp {
                         )
                         .child(
                             Button::new(("story-page-pin", story_id as u64))
-                                .label(if is_pinned { "Unpin" } else { "Pin" })
+                                .label(if is_pinned {
+                                    tr(keys::Q_MEDIA_UNPIN)
+                                } else {
+                                    tr(keys::CONTEXT_PIN_MSG)
+                                })
                                 .ghost()
                                 .text_color(cx.theme().foreground)
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -319,7 +344,7 @@ impl QuillApp {
             }
             chat_page = chat_page.child(
                 Button::new("story-page-load-chat-page")
-                    .label("Load more")
+                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
                     .ghost()
                     .text_color(cx.theme().foreground)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -336,7 +361,7 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .text_color(cx.theme().foreground)
-                    .child("Archive"),
+                    .child(tr(keys::Q_MEDIA_ARCHIVE)),
             );
             for story_id in &archived_ids {
                 let label = label_for(*story_id);
@@ -356,7 +381,7 @@ impl QuillApp {
             }
             archive = archive.child(
                 Button::new("story-page-load-archive")
-                    .label("Load more")
+                    .label(tr(keys::Q_MEDIA_LOAD_MORE))
                     .ghost()
                     .text_color(cx.theme().foreground)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -412,13 +437,16 @@ impl QuillApp {
                                 div()
                                     .font_semibold()
                                     .text_color(cx.theme().foreground)
-                                    .child(format!("{title} — Stories")),
+                                    .child(tr_with(
+                                        keys::Q_MEDIA_STORIES_2,
+                                        &[("title", &title.to_string())],
+                                    )),
                             )
                             .child(
                                 Button::new("story-page-close")
                                     .icon(gpui_kit::assets::IconName::X)
-                                    .tooltip("Close")
-                                    .accessibility_label("Close")
+                                    .tooltip(tr(keys::CLOSE))
+                                    .accessibility_label(tr(keys::CLOSE))
                                     .ghost()
                                     .text_color(cx.theme().foreground)
                                     .on_click(cx.listener(|this, _, _, cx| {

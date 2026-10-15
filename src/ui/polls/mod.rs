@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::poll::{POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, chat_allows_polls, voter_count_label};
 use quill::state::{PollStatsFetch, PollVotersFetch};
 use quill::telegram::envelope::{MessageContent, MessageSender};
@@ -38,13 +39,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.pending_stop_poll = Some((chat_id, message_id, is_quiz));
-        self.connection.status_note = "confirm stop poll".into();
+        self.connection.status_note = tr(keys::Q_MEDIA_CONFIRM_STOP_POLL).into();
         cx.notify();
     }
 
     pub(super) fn cancel_stop_poll(&mut self, cx: &mut Context<Self>) {
         self.message_ui.pending_stop_poll = None;
-        self.connection.status_note = "stop cancelled".into();
+        self.connection.status_note = tr(keys::Q_MEDIA_STOP_CANCELLED).into();
         cx.notify();
     }
 
@@ -57,8 +58,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.stop_poll(chat_id, message_id);
             self.connection.status_note = match result {
-                Ok(_) => "stopping poll…".into(),
-                Err(_) => "could not stop poll".into(),
+                Ok(_) => tr(keys::Q_MEDIA_STOPPING_POLL).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_STOP_POLL).into(),
             };
         } else if self.demo_session.is_some() {
             if let Some(history) = self
@@ -70,7 +71,7 @@ impl QuillApp {
             {
                 poll_content.poll.is_closed = true;
             }
-            self.connection.status_note = "poll stopped (demo)".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_POLL_STOPPED_DEMO).into();
         }
         cx.notify();
     }
@@ -85,7 +86,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.demo_session.is_some() {
-            self.connection.status_note = "voter lists are unavailable in demo mode".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_VOTER_LISTS_ARE_UNAVAILABLE_IN).into();
             cx.notify();
             return;
         }
@@ -108,7 +109,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.demo_session.is_some() {
-            self.connection.status_note = "poll stats are unavailable in demo mode".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_POLL_STATS_ARE_UNAVAILABLE_IN).into();
             cx.notify();
             return;
         }
@@ -119,7 +120,7 @@ impl QuillApp {
                 .fetch_poll_vote_statistics(chat_id, message_id, is_dark)
                 .is_err()
         {
-            self.connection.status_note = "could not load poll stats".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_POLL_STATS).into();
             cx.notify();
             return;
         }
@@ -165,7 +166,7 @@ impl QuillApp {
                 .fetch_poll_voters(chat_id, message_id, option_index)
                 .is_err()
         {
-            self.connection.status_note = "could not load voters".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_VOTERS).into();
         }
         cx.notify();
     }
@@ -183,7 +184,7 @@ impl QuillApp {
                 .load_more_poll_voters(chat_id, message_id, option_index)
                 .is_err()
         {
-            self.connection.status_note = "could not load more voters".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_VOTERS).into();
         }
         cx.notify();
     }
@@ -196,12 +197,16 @@ impl QuillApp {
                 .session()
                 .and_then(|session| session.user(*user_id))
                 .map(|user| user.display_name())
-                .unwrap_or_else(|| format!("User {user_id}")),
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MEDIA_USER, &[("user_id", &user_id.to_string())])
+                }),
             MessageSender::Chat { chat_id } => self
                 .session()
                 .and_then(|session| session.chats.get(chat_id))
                 .map(|chat| chat.title.clone())
-                .unwrap_or_else(|| format!("Chat {chat_id}")),
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])
+                }),
         }
     }
 
@@ -262,7 +267,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(text_muted())
-                    .child("Select an option to see its voters."),
+                    .child(tr(keys::Q_MEDIA_SELECT_AN_OPTION_TO_SEE)),
             ),
             Some(PollVotersFetch::Loading) => body.child(
                 div()
@@ -272,13 +277,13 @@ impl QuillApp {
                     .text_xs()
                     .text_color(text_muted())
                     .child(Spinner::new().small())
-                    .child("Loading voters…"),
+                    .child(tr(keys::Q_MEDIA_LOADING_VOTERS)),
             ),
             Some(PollVotersFetch::Failed(reason)) => body
                 .child(div().text_xs().text_color(danger()).child(reason))
                 .child(
                     Button::new("poll-voters-retry")
-                        .label("Retry")
+                        .label(tr(keys::Q_MEDIA_RETRY))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             let index = this
@@ -300,7 +305,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(text_muted())
-                            .child("No voters yet."),
+                            .child(tr(keys::Q_MEDIA_NO_VOTERS_YET)),
                     );
                 }
                 for voter in &voters {
@@ -316,7 +321,10 @@ impl QuillApp {
                     let left = total_count as usize - voters.len();
                     list = list.child(
                         Button::new("poll-voters-more")
-                            .label(format!("Show more ({left})"))
+                            .label(tr_with(
+                                keys::Q_MEDIA_SHOW_MORE,
+                                &[("left", &left.to_string())],
+                            ))
                             .ghost()
                             .text_color(accent())
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -352,26 +360,30 @@ impl QuillApp {
                     .text_xs()
                     .text_color(text_muted())
                     .child(Spinner::new().small())
-                    .child("Loading stats…"),
+                    .child(tr(keys::Q_MEDIA_LOADING_STATS)),
             ),
             Some(PollStatsFetch::Failed(reason)) => section
                 .child(div().text_xs().text_color(danger()).child(reason))
                 .child(
                     Button::new("poll-stats-retry")
-                        .label("Retry")
+                        .label(tr(keys::Q_MEDIA_RETRY))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_poll_stats_dialog(chat_id, message_id, cx);
                         })),
                 ),
             Some(PollStatsFetch::Loaded(graph)) => {
-                match super::statistics::stats_graph_row("Votes over time", &graph, cx) {
+                match super::statistics::stats_graph_row(
+                    tr(keys::Q_MEDIA_VOTES_OVER_TIME),
+                    &graph,
+                    cx,
+                ) {
                     Some(row) => section.child(row),
                     None => section.child(
                         div()
                             .text_xs()
                             .text_color(text_muted())
-                            .child("No vote statistics yet."),
+                            .child(tr(keys::Q_MEDIA_NO_VOTE_STATISTICS_YET)),
                     ),
                 }
             }
@@ -395,15 +407,15 @@ impl QuillApp {
                 .driver
                 .send_poll_answer(chat_id, message_id, option_index);
             self.connection.status_note = match result {
-                Ok(_) => "voting…".into(),
-                Err(_) => "could not vote".into(),
+                Ok(_) => tr(keys::Q_MEDIA_VOTING).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_VOTE).into(),
             };
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
             self.apply_demo_poll_vote(chat_id, message_id, option_index);
-            self.connection.status_note = "vote updated (demo)".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_VOTE_UPDATED_DEMO).into();
             cx.notify();
         }
     }
@@ -417,8 +429,8 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.retract_poll_vote(chat_id, message_id) {
-                Ok(_) => "vote retracted".into(),
-                Err(_) => "could not retract the vote".into(),
+                Ok(_) => tr(keys::Q_MEDIA_VOTE_RETRACTED).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_RETRACT_THE_VOTE).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(message) = session
@@ -431,7 +443,7 @@ impl QuillApp {
             for option in &mut poll_content.poll.options {
                 option.is_chosen = false;
             }
-            self.connection.status_note = "vote retracted (demo)".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_VOTE_RETRACTED_DEMO).into();
         }
         cx.notify();
     }
@@ -448,7 +460,7 @@ impl QuillApp {
                 .is_none_or(|chat| chat_allows_polls(chat.permissions.as_ref()))
         });
         if !polls_allowed {
-            self.connection.status_note = "polls are restricted in this chat".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_POLLS_ARE_RESTRICTED_IN_THIS).into();
             cx.notify();
             return;
         }
@@ -514,9 +526,9 @@ impl QuillApp {
                         .as_ref()
                         .is_some_and(|dialog| dialog.show_stats)
                     {
-                        "Poll Stats"
+                        tr(keys::POLLS_STATS_TITLE)
                     } else {
-                        "Poll voters"
+                        tr(keys::Q_MEDIA_POLL_VOTERS)
                     },
                 ))
                 .content(crate::ui::shell::scrollable_dialog_content({
@@ -545,7 +557,10 @@ impl QuillApp {
         let index = dialog.option_inputs.len();
         dialog.option_inputs.push(cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder(format!("Option {}", index + 1))
+                .placeholder(tr_with(
+                    keys::Q_MEDIA_OPTION,
+                    &[("index_1", &(index + 1).to_string())],
+                ))
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
         }));
@@ -597,7 +612,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|dialog| dialog.media_preparing())
         {
-            self.connection.status_note = "wait for the video to be ready".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_WAIT_FOR_THE_VIDEO_TO).into();
             cx.notify();
             return;
         }
@@ -607,7 +622,7 @@ impl QuillApp {
             chat.can_post().then_some(chat_id)
         });
         let Some(chat_id) = plan else {
-            self.connection.status_note = "select a chat to send".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND).into();
             cx.notify();
             return;
         };
@@ -627,10 +642,10 @@ impl QuillApp {
                 Ok(_) => {
                     self.composer_ui.poll_dialog = None;
                     self.composer_ui.pending_reply = None;
-                    self.connection.status_note = "sending poll…".into();
+                    self.connection.status_note = tr(keys::Q_MEDIA_SENDING_POLL).into();
                 }
                 Err(_) => {
-                    self.connection.status_note = "could not send poll".into();
+                    self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_POLL).into();
                 }
             }
             cx.notify();
@@ -639,7 +654,7 @@ impl QuillApp {
         // Screenshot demos have no live driver; close the dialog honestly.
         let _ = window;
         self.composer_ui.poll_dialog = None;
-        self.connection.status_note = "polls need a live connection (demo)".into();
+        self.connection.status_note = tr(keys::Q_MEDIA_POLLS_NEED_A_LIVE_CONNECTION).into();
         cx.notify();
     }
 
@@ -652,14 +667,14 @@ impl QuillApp {
             .pending_stop_poll
             .is_some_and(|(_, _, is_quiz)| is_quiz);
         let title = if is_quiz {
-            "Stop this quiz?"
+            tr(keys::Q_MEDIA_STOP_THIS_QUIZ)
         } else {
-            "Stop this poll?"
+            tr(keys::Q_MEDIA_STOP_THIS_POLL)
         };
         let warning = if is_quiz {
-            "If you stop this quiz now, nobody will be able to participate in it anymore.\n\nThis action cannot be undone."
+            tr(keys::Q_MEDIA_IF_YOU_STOP_THIS_QUIZ)
         } else {
-            "If you stop this poll now, nobody will be able to vote in it anymore.\n\nThis action cannot be undone."
+            tr(keys::POLLS_STOP_WARNING)
         };
         div()
             .id("stop-poll-confirm")
@@ -693,14 +708,18 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("cancel-stop-poll")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cancel_stop_poll(cx);
                             })),
                     )
                     .child(
                         Button::new("confirm-stop-poll")
-                            .label(if is_quiz { "Stop quiz" } else { "Stop poll" })
+                            .label(if is_quiz {
+                                tr(keys::Q_MEDIA_STOP_QUIZ)
+                            } else {
+                                tr(keys::POLLS_STOP)
+                            })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.confirm_stop_poll(cx);
                             })),
@@ -726,18 +745,18 @@ impl QuillApp {
             .border_color(accent())
             .bg(bg_canvas())
             .child(div().text_sm().font_semibold().child(if dialog.is_quiz {
-                "New quiz"
+                tr(keys::Q_MEDIA_NEW_QUIZ)
             } else {
-                "New poll"
+                tr(keys::POLLS_CREATE_TITLE)
             }))
             .child(
                 Textarea::new(&dialog.description_input)
-                    .aria_label("Poll description")
+                    .aria_label(tr(keys::Q_MEDIA_POLL_DESCRIPTION))
                     .h(px(40.)),
             )
             .child(
                 Textarea::new(&dialog.question_input)
-                    .aria_label("Poll question")
+                    .aria_label(tr(keys::Q_MEDIA_POLL_QUESTION))
                     .h(px(64.)),
             );
         let is_quiz = dialog.is_quiz;
@@ -771,7 +790,7 @@ impl QuillApp {
             row = row.child(
                 div().flex_1().child(
                     Textarea::new(input)
-                        .aria_label("Poll answer")
+                        .aria_label(tr(keys::Q_MEDIA_POLL_ANSWER))
                         .token(self.field_token_renderer(input, cx))
                         .h(px(40.)),
                 ),
@@ -783,7 +802,7 @@ impl QuillApp {
                     Button::new(format!("poll-remove-option-{index}"))
                         .label("✕")
                         .ghost()
-                        .tooltip("Remove option")
+                        .tooltip(tr(keys::Q_MEDIA_REMOVE_OPTION))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.remove_poll_option_row(index, cx);
                         })),
@@ -797,7 +816,7 @@ impl QuillApp {
         if dialog.option_inputs.len() < POLL_OPTIONS_MAX {
             panel = panel.child(
                 Button::new("poll-add-option")
-                    .label("Add option")
+                    .label(tr(keys::Q_MEDIA_ADD_OPTION))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.add_poll_option_row(window, cx);
@@ -807,7 +826,7 @@ impl QuillApp {
         if is_quiz {
             panel = panel.child(
                 Textarea::new(&dialog.explanation_input)
-                    .aria_label("Quiz explanation")
+                    .aria_label(tr(keys::Q_MEDIA_QUIZ_EXPLANATION))
                     .h(px(64.)),
             );
         }
@@ -818,68 +837,71 @@ impl QuillApp {
                     .gap_2()
                     .child(match &dialog.deadline {
                         // B15: an absolute deadline replaces the hours field.
-                        Some(picker) => div()
-                            .flex_1()
-                            .child(DatePicker::new(picker).placeholder("Pick a deadline")),
+                        Some(picker) => div().flex_1().child(
+                            DatePicker::new(picker).placeholder(tr(keys::Q_MEDIA_PICK_A_DEADLINE)),
+                        ),
                         None => div().flex_1().child(
                             Textarea::new(&dialog.duration_input)
-                                .aria_label("Poll open duration in hours")
+                                .aria_label(tr(keys::Q_MEDIA_POLL_OPEN_DURATION_IN_HOURS))
                                 .h(px(40.)),
                         ),
                     })
                     .child(
                         div().flex_1().child(
                             Textarea::new(&dialog.countries_input)
-                                .aria_label("Poll country codes")
+                                .aria_label(tr(keys::Q_MEDIA_POLL_COUNTRY_CODES))
                                 .h(px(40.)),
                         ),
                     ),
             )
             .child(self.poll_toggle_row(cx));
         if dialog.confirming_discard {
-            panel =
-                panel.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(div().text_sm().child("Discard this poll?"))
-                        .child(Button::new("poll-discard-yes").label("Discard").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.close_poll_dialog(cx);
-                            }),
-                        ))
-                        .child(
-                            Button::new("poll-discard-no")
-                                .label("Keep editing")
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
-                                        dialog.confirming_discard = false;
-                                    }
-                                    cx.notify();
-                                })),
-                        ),
-                );
-        }
-        panel =
-            panel.child(
+            panel = panel.child(
                 div()
                     .flex()
+                    .items_center()
                     .gap_2()
+                    .child(div().text_sm().child(tr(keys::Q_MEDIA_DISCARD_THIS_POLL)))
                     .child(
-                        Button::new("poll-create")
-                            .label("Create poll")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.submit_poll_dialog(window, cx);
+                        Button::new("poll-discard-yes")
+                            .label(tr(keys::Q_MEDIA_DISCARD))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_poll_dialog(cx);
                             })),
                     )
-                    .child(Button::new("poll-cancel").label("Cancel").ghost().on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.request_close_poll_dialog(cx);
-                        }),
-                    )),
+                    .child(
+                        Button::new("poll-discard-no")
+                            .label(tr(keys::Q_MEDIA_KEEP_EDITING))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
+                                    dialog.confirming_discard = false;
+                                }
+                                cx.notify();
+                            })),
+                    ),
             );
+        }
+        panel = panel.child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("poll-create")
+                        .label(tr(keys::POLLS_CREATE))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_poll_dialog(window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("poll-cancel")
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.request_close_poll_dialog(cx);
+                        })),
+                ),
+        );
         Some(panel.into_any_element())
     }
 }

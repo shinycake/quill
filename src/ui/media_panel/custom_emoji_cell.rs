@@ -1,6 +1,7 @@
 //! Methods moved out of `media_panel.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(super) fn custom_emoji_cell(
@@ -43,7 +44,10 @@ impl QuillApp {
             .cursor_pointer()
             .hover(|style| style.bg(cx.theme().accent))
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("Custom emoji {}", item.emoji))
+            .aria_label(tr_with(
+                keys::SR_MESSAGE_CUSTOM_EMOJI,
+                &[("emoji", &item.emoji.to_string())],
+            ))
             .when(!premium, |this| this.opacity(0.55))
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 let next = hovering.then_some(file_id);
@@ -131,7 +135,10 @@ impl QuillApp {
             .cursor_pointer()
             .hover(|style| style.bg(cx.theme().accent))
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("Send {} sticker", item.emoji))
+            .aria_label(tr_with(
+                keys::Q_MEDIA_SEND_STICKER,
+                &[("emoji", &item.emoji.to_string())],
+            ))
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 let next = hovering.then_some(file_id);
                 if this.pickers.media_panel.hovered != next
@@ -152,9 +159,9 @@ impl QuillApp {
                 let recent_owner = owner.clone();
                 let menu = menu.item(
                     PopupMenuItem::new(if favorite {
-                        "Remove from favorites"
+                        tr(keys::Q_MEDIA_REMOVE_FROM_FAVORITES)
                     } else {
-                        "Add to favorites"
+                        tr(keys::Q_MEDIA_ADD_TO_FAVORITES)
                     })
                     .on_click(move |_, _, cx| {
                         let _ = favorite_owner.update(cx, |this, cx| {
@@ -166,8 +173,8 @@ impl QuillApp {
                     }),
                 );
                 if in_recent {
-                    menu.item(
-                        PopupMenuItem::new("Remove from recent").on_click(move |_, _, cx| {
+                    menu.item(PopupMenuItem::new(tr(keys::EMOJI_REMOVE_RECENT)).on_click(
+                        move |_, _, cx| {
                             let _ = recent_owner.update(cx, |this, cx| {
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = live.driver.remove_recent_sticker(file_id);
@@ -180,8 +187,8 @@ impl QuillApp {
                                 }
                                 cx.notify();
                             });
-                        }),
-                    )
+                        },
+                    ))
                 } else {
                     menu
                 }
@@ -262,7 +269,8 @@ impl QuillApp {
             return;
         }
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.connection.status_note = "Custom emoji need Telegram Premium".into();
+            self.connection.status_note =
+                tr(keys::Q_MEDIA_CUSTOM_EMOJI_NEED_TELEGRAM_PREMIUM).into();
             cx.notify();
             return;
         }
@@ -314,8 +322,8 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         let tabs = div().flex().items_center().gap_1().children(
             [
-                (PanelTab::Emoji, "Emoji"),
-                (PanelTab::Stickers, "Stickers"),
+                (PanelTab::Emoji, tr(keys::SWITCH_EMOJI)),
+                (PanelTab::Stickers, tr(keys::Q_MEDIA_STICKERS_2)),
                 (PanelTab::Gifs, "GIFs"),
             ]
             .into_iter()
@@ -341,7 +349,7 @@ impl QuillApp {
                     .px_1()
                     .text_sm()
                     .font_semibold()
-                    .child("Reactions")
+                    .child(tr(keys::Q_MEDIA_REACTIONS))
                     .into_any_element()
             } else {
                 tabs.into_any_element()
@@ -351,8 +359,8 @@ impl QuillApp {
                     .icon(gpui_kit::assets::IconName::X)
                     .ghost()
                     .small()
-                    .tooltip("Close")
-                    .accessibility_label("Close")
+                    .tooltip(tr(keys::CLOSE))
+                    .accessibility_label(tr(keys::CLOSE))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.close_media_panel(cx);
                     })),
@@ -378,9 +386,9 @@ impl QuillApp {
                     &self.pickers.sticker_search_input
                 })
                 .aria_label(if tab == PanelTab::Emoji {
-                    "Search emoji"
+                    tr(keys::Q_MEDIA_SEARCH_EMOJI)
                 } else {
-                    "Search stickers"
+                    tr(keys::Q_MEDIA_SEARCH_STICKERS)
                 })
                 .h(px(34.)),
             );
@@ -508,9 +516,9 @@ impl QuillApp {
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .child(if tab == PanelTab::Stickers {
-                            "No stickers here yet."
+                            tr(keys::Q_MEDIA_NO_STICKERS_HERE_YET)
                         } else {
-                            "No emoji found."
+                            tr(keys::Q_MEDIA_NO_EMOJI_FOUND)
                         })
                         .into_any_element()
                 } else {

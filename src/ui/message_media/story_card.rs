@@ -8,6 +8,7 @@
 //! from `getStory`, fetched with the open chat's replies.
 
 use super::*;
+use quill::lang::{keys, tr};
 use quill::service_text::{Seg, ServiceText};
 use quill::state::{StoryCardState, StoryPreview};
 
@@ -49,7 +50,7 @@ pub(in crate::ui) fn expired_mention_text(mention: &ServiceText, outgoing: bool)
         .find(|seg| seg.link.is_some())
         .cloned()
         .unwrap_or(Seg {
-            text: "Someone".into(),
+            text: tr(keys::Q_MEDIA_SOMEONE).into(),
             link: None,
         });
     let plain = |text: &str| Seg {
@@ -58,15 +59,15 @@ pub(in crate::ui) fn expired_mention_text(mention: &ServiceText, outgoing: bool)
     };
     let segs = if outgoing {
         vec![
-            plain("The story where you mentioned "),
+            plain(tr(keys::Q_MEDIA_THE_STORY_WHERE_YOU_MENTIONED)),
             name,
-            plain(" is no longer available."),
+            plain(tr(keys::Q_MEDIA_IS_NO_LONGER_AVAILABLE)),
         ]
     } else {
         vec![
-            plain("The story where "),
+            plain(tr(keys::Q_MEDIA_THE_STORY_WHERE)),
             name,
-            plain(" mentioned you is no longer available."),
+            plain(tr(keys::Q_MEDIA_MENTIONED_YOU_IS_NO_LONGER)),
         ]
     };
     ServiceText { segs }
@@ -85,7 +86,7 @@ impl QuillApp {
             .session()
             .map(|s| s.story_card_state(poster.0, story_id));
         if state == Some(StoryCardState::Expired) {
-            self.set_status_note("This story has expired.", cx);
+            self.set_status_note(tr(keys::FORWARDED_STORY_EXPIRED), cx);
             return;
         }
         self.open_story_viewer(poster, story_id, cx);
@@ -109,7 +110,7 @@ pub(in crate::ui) fn story_card(
         return div()
             .id(("story-expired", row_id))
             .role(gpui_kit::Role::Label)
-            .aria_label("This story has expired.")
+            .aria_label(tr(keys::FORWARDED_STORY_EXPIRED))
             .flex()
             .items_center()
             .gap_2()
@@ -119,7 +120,7 @@ pub(in crate::ui) fn story_card(
             .bg(fill_muted())
             .text_sm()
             .text_color(text_muted())
-            .child("This story has expired.")
+            .child(tr(keys::FORWARDED_STORY_EXPIRED))
             .into_any_element();
     }
     let preview = session.and_then(|s| s.story_preview(poster.0, story_id));
@@ -133,7 +134,7 @@ pub(in crate::ui) fn story_card(
         .rounded_md()
         .bg(fill_muted())
         .role(gpui_kit::Role::Button)
-        .aria_label("Open story")
+        .aria_label(tr(keys::Q_MEDIA_OPEN_STORY))
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -171,7 +172,7 @@ pub(in crate::ui) fn story_card(
             .absolute()
             .top_2()
             .left_2()
-            .child(badge("Story".into())),
+            .child(badge(tr(keys::IN_DLG_STORY).into())),
     );
     if let Some(duration) = preview.as_ref().and_then(|p| p.duration_secs) {
         tile = tile
@@ -236,7 +237,7 @@ pub(in crate::ui) fn story_mention_extras(
         .id(("story-mention", row_id))
         .flex_none()
         .role(gpui_kit::Role::Button)
-        .aria_label("View story")
+        .aria_label(tr(keys::VIEW_BUTTON_STORY))
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -280,7 +281,7 @@ pub(in crate::ui) fn story_mention_extras(
             .child(circle)
             .child(
                 Button::new(format!("story-mention-view-{row_id}"))
-                    .label("View Story")
+                    .label(tr(keys::VIEW_BUTTON_STORY))
                     .small()
                     .primary()
                     .on_click(cx.listener(move |this, _, _, cx| {

@@ -8,6 +8,7 @@ use super::search_ui::search_result_row;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 
 /// One row of the tab.
 struct AppRow {
@@ -29,7 +30,7 @@ impl QuillApp {
             .filter(|text| !text.trim().is_empty())
             .unwrap_or_else(|| {
                 if user.username.is_empty() {
-                    "Mini app".to_string()
+                    tr(keys::Q_MEDIA_MINI_APP).to_string()
                 } else {
                     format!("@{}", user.username)
                 }
@@ -92,7 +93,7 @@ impl QuillApp {
                     let open = self.mini_app_open_for(bot_id);
                     let photo = self.chat_photo_for_row(ChatId(bot_id));
                     let subtitle = if open {
-                        "Open now".to_string()
+                        tr(keys::Q_MEDIA_OPEN_NOW).to_string()
                     } else {
                         row.subtitle
                     };
@@ -110,29 +111,37 @@ impl QuillApp {
                 section
             };
         if !used_rows.is_empty() {
-            block = block.child(section("Apps you use", used_rows, "search-app-used", cx));
+            block = block.child(section(
+                tr(keys::Q_MEDIA_APPS_YOU_USE),
+                used_rows,
+                "search-app-used",
+                cx,
+            ));
         }
         if !grossing_rows.is_empty() {
             block = block.child(section(
-                "Grossing apps",
+                tr(keys::Q_MEDIA_GROSSING_APPS),
                 grossing_rows,
                 "search-app-top",
                 cx,
             ));
         } else {
             let note = if loading || grossing.is_none() {
-                "Loading apps…".to_string()
+                tr(keys::Q_MEDIA_LOADING_APPS).to_string()
             } else if query.trim().is_empty() {
-                "No apps to show right now.".to_string()
+                tr(keys::Q_MEDIA_NO_APPS_TO_SHOW_RIGHT).to_string()
             } else {
-                format!("No apps match “{}”.", query.trim())
+                tr_with(keys::Q_MEDIA_NO_APPS_MATCH, &[("trim", (query.trim()))])
             };
             block = block.child(div().text_xs().text_color(muted).child(note));
         }
         block
-            .child(div().text_xs().text_color(muted).child(
-                "Mini apps open in their own window. Payments inside them aren't supported yet.",
-            ))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MEDIA_MINI_APPS_OPEN_IN_THEIR)),
+            )
             .into_any_element()
     }
 }

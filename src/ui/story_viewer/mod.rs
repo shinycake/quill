@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{StoryReportStage, event_log_relative_time};
 use quill::story_viewer::{StoryViewer, StoryViewerItem, StoryViewerKind, collect_story_items};
@@ -66,7 +67,7 @@ impl QuillApp {
                 let _ = live.driver.get_story(chat_id, id);
             }
         } else if !missing.is_empty() {
-            self.connection.status_note = "demo — getStory runs with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE).into();
         }
         if !self.rebuild_story_viewer(chat_id, story_id, cx) {
             self.chat_list.pending_story_open = Some((chat_id.0, story_id));
@@ -180,15 +181,16 @@ impl QuillApp {
                 {
                     Ok(_) => {
                         if emoji.is_some() {
-                            "Reacted ❤".into()
+                            tr(keys::Q_MEDIA_REACTED).into()
                         } else {
-                            "Reaction removed".into()
+                            tr(keys::Q_MEDIA_REACTION_REMOVED).into()
                         }
                     }
-                    Err(_) => "could not set story reaction".into(),
+                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION).into(),
                 };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — setStoryReaction runs with live TDLib".into();
+            self.connection.status_note =
+                tr(keys::Q_MEDIA_DEMO_SETSTORYREACTION_RUNS_WITH_LIVE).into();
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -206,11 +208,11 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.join_live_story(chat_id, story_id) {
-                Ok(_) => "joining live story…".into(),
-                Err(_) => "could not join the live story".into(),
+                Ok(_) => tr(keys::Q_MEDIA_JOINING_LIVE_STORY).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — live stories join with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_LIVE_STORIES_JOIN_WITH).into();
         }
         cx.notify();
     }
@@ -226,12 +228,14 @@ impl QuillApp {
                     match live.driver.get_story_available_reactions() {
                         Ok(_) => {}
                         Err(_) => {
-                            self.connection.status_note = "could not load story reactions".into()
+                            self.connection.status_note =
+                                tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_REACTIONS).into()
                         }
                     }
                 }
             } else if self.demo_session.is_some() {
-                self.connection.status_note = "demo — story reactions run with live TDLib".into();
+                self.connection.status_note =
+                    tr(keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH).into();
             }
         }
         cx.notify();
@@ -248,11 +252,11 @@ impl QuillApp {
                     .driver
                     .set_story_reaction(item.chat_id, item.story_id, Some(emoji))
                 {
-                    Ok(_) => format!("Reacted {emoji}"),
-                    Err(_) => "could not set story reaction".into(),
+                    Ok(_) => tr_with(keys::Q_MEDIA_REACTED_2, &[("emoji", emoji)]),
+                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION).into(),
                 };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — story reactions run with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH).into();
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -316,11 +320,11 @@ impl QuillApp {
                 item.story_id,
                 custom_emoji_id,
             ) {
-                Ok(_) => "Reacted ✨".into(),
-                Err(_) => "could not set story reaction".into(),
+                Ok(_) => tr(keys::Q_MEDIA_REACTED_3).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SET_STORY_REACTION).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — story reactions run with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REACTIONS_RUN_WITH).into();
         }
         self.stories.reaction_picker_open = false;
         cx.notify();
@@ -347,7 +351,7 @@ impl QuillApp {
                 self.connection.status_note = if quill::platform::open_external_url(&url) {
                     label
                 } else {
-                    "could not open map".into()
+                    tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP).into()
                 };
                 cx.notify();
             }
@@ -358,7 +362,7 @@ impl QuillApp {
                 ..
             } => {
                 let url = location.open_street_map_url();
-                let mut label = Self::story_area_pin_label(&[title, "Venue"]);
+                let mut label = Self::story_area_pin_label(&[title, tr(keys::Q_MEDIA_VENUE)]);
                 if !title.is_empty() && !address.is_empty() {
                     label.push_str(" — ");
                     label.push_str(address);
@@ -366,7 +370,7 @@ impl QuillApp {
                 self.connection.status_note = if quill::platform::open_external_url(&url) {
                     label
                 } else {
-                    "could not open map".into()
+                    tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP).into()
                 };
                 cx.notify();
             }
@@ -389,7 +393,10 @@ impl QuillApp {
                 cx.notify();
             }
             StoryAreaKind::Unsupported { type_name } => {
-                self.connection.status_note = format!("story area {type_name} isn't supported");
+                self.connection.status_note = tr_with(
+                    keys::Q_MEDIA_STORY_AREA_ISNT_SUPPORTED,
+                    &[("type_name", &type_name.to_string())],
+                );
                 cx.notify();
             }
         }
@@ -412,7 +419,7 @@ impl QuillApp {
                 .and_then(|_| live.driver.jump_to_replied_message(message_id))
             {
                 Ok(_) => chat_search_jump_note(&live.driver.session),
-                Err(_) => "could not open message".into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_OPEN_MESSAGE).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
@@ -449,14 +456,14 @@ impl QuillApp {
                     .driver
                     .send_story_reply(item.chat_id, item.story_id, &text)
                 {
-                    Ok(_) => "Story reply sent".into(),
-                    Err(_) => "could not send story reply".into(),
+                    Ok(_) => tr(keys::Q_MEDIA_STORY_REPLY_SENT).into(),
+                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SEND_STORY_REPLY).into(),
                 };
             self.stories
                 .reply_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — story replies run with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REPLIES_RUN_WITH).into();
         }
         self.end_story_reply(cx);
         cx.notify();
@@ -473,11 +480,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note =
                 match live.driver.delete_story(item.chat_id, item.story_id) {
-                    Ok(_) => "Deleting story…".into(),
-                    Err(_) => "could not delete story".into(),
+                    Ok(_) => tr(keys::Q_MEDIA_DELETING_STORY).into(),
+                    Err(_) => tr(keys::Q_MEDIA_COULD_NOT_DELETE_STORY).into(),
                 };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — deleteStory runs with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_DELETESTORY_RUNS_WITH_LIVE).into();
         }
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);
@@ -521,12 +528,12 @@ impl QuillApp {
                 .get_story_interactions(item.chat_id, item.story_id, offset)
                 .is_err()
             {
-                self.connection.status_note = "could not load story viewers".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_VIEWERS).into();
             }
         } else if self.demo_session.is_some() {
             // Demo seeds the panel state directly (see the
             // `ReadyStoryViewers` demo); a live fetch says so honestly.
-            self.connection.status_note = "demo — story viewers run with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_VIEWERS_RUN_WITH).into();
         }
         cx.notify();
     }
@@ -556,12 +563,16 @@ impl QuillApp {
                 .session()
                 .and_then(|session| session.users.get(user_id))
                 .map(|user| user.display_name())
-                .unwrap_or_else(|| format!("User {user_id}")),
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MEDIA_USER, &[("user_id", &user_id.to_string())])
+                }),
             MessageSender::Chat { chat_id } => self
                 .session()
                 .and_then(|session| session.chats.get(chat_id))
                 .map(|chat| chat.title.clone())
-                .unwrap_or_else(|| format!("Chat {chat_id}")),
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])
+                }),
         }
     }
 
@@ -636,7 +647,7 @@ impl QuillApp {
                     .driver
                     .report_story(item.chat_id, item.story_id, option_id, text)
                 {
-                    Ok(_) => "Reporting story…".into(),
+                    Ok(_) => tr(keys::Q_MEDIA_REPORTING_STORY).into(),
                     Err(_) => {
                         // Phase 9.5 review: the driver took the pending
                         // request back, so no answer will ever arrive —
@@ -644,13 +655,13 @@ impl QuillApp {
                         live.driver.session.fail_story_report_send(
                             item.chat_id.0,
                             item.story_id,
-                            "could not report story".into(),
+                            tr(keys::Q_MEDIA_COULD_NOT_REPORT_STORY).into(),
                         );
-                        "could not report story".into()
+                        tr(keys::Q_MEDIA_COULD_NOT_REPORT_STORY).into()
                     }
                 };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — story reports run with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STORY_REPORTS_RUN_WITH).into();
         }
         cx.notify();
     }
@@ -686,7 +697,7 @@ impl QuillApp {
         }
         let text = self.stories.report_text_input.read(cx).value().to_string();
         if text.trim().is_empty() && !is_optional {
-            self.connection.status_note = "add details or cancel the report".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_ADD_DETAILS_OR_CANCEL_THE).into();
             cx.notify();
             return;
         }
@@ -708,23 +719,22 @@ impl QuillApp {
             .map(|session| session.stories.stealth)
             .unwrap_or_default();
         if stealth.is_active(now) {
-            self.connection.status_note =
-                "Stealth mode is active — your story views are hidden".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_STEALTH_MODE_IS_ACTIVE_YOUR).into();
             cx.notify();
             return;
         }
         if stealth.is_cooling_down(now) {
-            self.connection.status_note = "Stealth mode is cooling down — try again later".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_STEALTH_MODE_IS_COOLING_DOWN).into();
             cx.notify();
             return;
         }
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.activate_story_stealth_mode() {
-                Ok(_) => "Enabling stealth mode…".into(),
-                Err(_) => "could not enable stealth mode".into(),
+                Ok(_) => tr(keys::Q_MEDIA_ENABLING_STEALTH_MODE).into(),
+                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo — stealth mode needs live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STEALTH_MODE_NEEDS_LIVE).into();
         }
         cx.notify();
     }
@@ -737,11 +747,11 @@ impl QuillApp {
             .map(|session| session.stories.stealth)
             .unwrap_or_default();
         if stealth.is_active(now) {
-            "Stealth on"
+            tr(keys::Q_MEDIA_STEALTH_ON)
         } else if stealth.is_cooling_down(now) {
-            "Stealth cooling down"
+            tr(keys::Q_MEDIA_STEALTH_COOLING_DOWN)
         } else {
-            "Stealth"
+            tr(keys::Q_MEDIA_STEALTH)
         }
     }
 

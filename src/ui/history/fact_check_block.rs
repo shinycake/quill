@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{HistoryMessage, Session};
 use std::collections::HashMap;
 
@@ -21,9 +22,7 @@ const LINE_HEIGHT: f32 = 1.4;
 
 /// tdesktop `lng_factcheck_about` / `lng_factcheck_bottom`.
 pub(crate) fn about_text(country: &str) -> String {
-    format!(
-        "This clarification was provided by a fact checking agency assigned by the department of the government of your country ({country}) responsible for combatting misinformation."
-    )
+    tr_with(keys::FACTCHECK_ABOUT, &[("country", country)])
 }
 
 /// The country's English name from the sign-in country list when it is
@@ -74,7 +73,7 @@ pub(in crate::ui) fn fact_check_block(
                 .text_size(font)
                 .font_semibold()
                 .text_color(bar)
-                .child("Fact Check"),
+                .child(tr(keys::Q_MEDIA_FACT_CHECK)),
         )
         .when(!check.country_code.is_empty(), |this| {
             let about = about_text(&country);
@@ -85,9 +84,9 @@ pub(in crate::ui) fn fact_check_block(
                     .text_color(cx.theme().muted_foreground)
                     .cursor_pointer()
                     .role(Role::Button)
-                    .aria_label("About fact checks")
+                    .aria_label(tr(keys::Q_MEDIA_ABOUT_FACT_CHECKS))
                     .tab_index(0)
-                    .child("what's this?")
+                    .child(tr(keys::Q_MEDIA_WHATS_THIS))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.connection.status_note = about.clone();
                         cx.notify();
@@ -114,9 +113,9 @@ pub(in crate::ui) fn fact_check_block(
         .cursor_pointer()
         .role(Role::Button)
         .aria_label(if expanded {
-            "Collapse fact check"
+            tr(keys::Q_MEDIA_COLLAPSE_FACT_CHECK)
         } else {
-            "Expand fact check"
+            tr(keys::Q_MEDIA_EXPAND_FACT_CHECK)
         })
         .tab_index(0)
         .hover(|style| style.bg(bar.opacity(0.12)))

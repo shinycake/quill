@@ -3,6 +3,7 @@ use gpui_kit::component::date_picker::DatePickerState;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::poll::{POLL_OPTIONS_MIN, PollDraft, PollOptionInput};
 
 /// What an option of the new poll carries beside its text.
@@ -96,13 +97,26 @@ impl PollDialog {
                     .submit_on_enter(false)
             })
         };
-        let question_input = textarea(cx, "Poll question", (1, 3));
-        let description_input = textarea(cx, "Description (optional)", (1, 2));
-        let explanation_input = textarea(cx, "Quiz explanation (optional, 200 max)", (1, 3));
-        let duration_input = textarea(cx, "Close after, hours (optional)", (1, 1));
-        let countries_input = textarea(cx, "Countries, e.g. US, GB (optional)", (1, 1));
+        let question_input = textarea(cx, tr(keys::Q_MEDIA_POLL_QUESTION), (1, 3));
+        let description_input = textarea(cx, tr(keys::Q_MEDIA_DESCRIPTION_OPTIONAL), (1, 2));
+        let explanation_input = textarea(
+            cx,
+            tr(keys::Q_MEDIA_QUIZ_EXPLANATION_OPTIONAL_200_MAX),
+            (1, 3),
+        );
+        let duration_input = textarea(cx, tr(keys::Q_MEDIA_CLOSE_AFTER_HOURS_OPTIONAL), (1, 1));
+        let countries_input = textarea(cx, tr(keys::Q_MEDIA_COUNTRIES_E_G_US_GB), (1, 1));
         let option_inputs = (0..POLL_OPTIONS_MIN)
-            .map(|index| textarea(cx, &format!("Option {}", index + 1), (1, 2)))
+            .map(|index| {
+                textarea(
+                    cx,
+                    &tr_with(
+                        keys::Q_MEDIA_OPTION,
+                        &[("index_1", &(index + 1).to_string())],
+                    ),
+                    (1, 2),
+                )
+            })
             .collect();
         Self {
             description_input,
@@ -185,7 +199,9 @@ impl PollDialog {
             .date_time()
             .start()
             .and_then(|value| {
-                quill::schedule::parse_picker_stamp(&value.format("%Y-%m-%d %H:%M").to_string())
+                quill::schedule::parse_picker_stamp(
+                    &value.format(tr(keys::Q_MEDIA_Y_M_D_H_M)).to_string(),
+                )
             })
             .map(|civil| quill::schedule::civil_to_unix(&civil))
     }

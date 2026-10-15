@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::checklist::{checklist_kind_label, completed_label};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
 use quill::telegram::envelope::{Checklist, ChecklistTask, MessageSender};
 
@@ -23,11 +24,11 @@ fn completer_name(session: Option<&Session>, sender: &MessageSender) -> String {
             .and_then(|session| session.user(*user_id))
             .map(|user| user.display_name())
             .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| format!("User {user_id}")),
+            .unwrap_or_else(|| tr_with(keys::Q_MEDIA_USER, &[("user_id", &user_id.to_string())])),
         MessageSender::Chat { chat_id } => session
             .and_then(|session| session.chats.get(chat_id))
             .map(|chat| chat.title.clone())
-            .unwrap_or_else(|| format!("Chat {chat_id}")),
+            .unwrap_or_else(|| tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])),
     }
 }
 
@@ -108,7 +109,7 @@ pub(super) fn checklist_body(
     if list.can_add_tasks {
         body = body.child(
             Button::new(format!("checklist-add-{}", message_id.0))
-                .label("Add a task")
+                .label(tr(keys::Q_MEDIA_ADD_A_TASK_2))
                 .ghost()
                 .text_color(accent())
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -169,9 +170,15 @@ fn checklist_task_row(
         row = row
             .role(gpui_kit::Role::Button)
             .aria_label(if done {
-                format!("Mark \"{}\" as not done", task.text)
+                tr_with(
+                    keys::Q_MEDIA_MARK_AS_NOT_DONE,
+                    &[("text", &task.text.to_string())],
+                )
             } else {
-                format!("Mark \"{}\" as done", task.text)
+                tr_with(
+                    keys::Q_MEDIA_MARK_AS_DONE,
+                    &[("text", &task.text.to_string())],
+                )
             })
             .tab_index(0)
             .cursor_pointer()

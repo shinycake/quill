@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The bar for the open chat, or `None` when no bot manages it.
@@ -35,15 +36,17 @@ impl QuillApp {
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
             .small()
-            .tooltip("Bot actions")
-            .accessibility_label("Bot actions")
+            .tooltip(tr(keys::Q_MEDIA_BOT_ACTIONS))
+            .accessibility_label(tr(keys::Q_MEDIA_BOT_ACTIONS))
             .dropdown_menu(move |mut menu, _, _| {
                 if !manage_url.is_empty() {
                     let (owner, url) = (owner.clone(), manage_url.clone());
-                    menu = menu.item(PopupMenuItem::new("Manage bot").on_click(move |_, _, cx| {
-                        let _ =
-                            owner.update(cx, |this, cx| this.open_business_bot_manage(&url, cx));
-                    }));
+                    menu = menu.item(PopupMenuItem::new(tr(keys::MANAGE_BOT_TITLE)).on_click(
+                        move |_, _, cx| {
+                            let _ = owner
+                                .update(cx, |this, cx| this.open_business_bot_manage(&url, cx));
+                        },
+                    ));
                 }
                 let owner = owner.clone();
                 menu.item(PopupMenuItem::new(remove_label).on_click(move |_, _, cx| {
@@ -95,7 +98,7 @@ impl QuillApp {
                 .toggle_business_bot_paused(chat_id, paused)
                 .is_err()
         {
-            self.connection.status_note = "could not change the bot".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_BOT).into();
         }
         cx.notify();
     }
@@ -104,7 +107,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.remove_business_bot_from_chat(chat_id).is_err()
         {
-            self.connection.status_note = "could not remove the bot".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_REMOVE_THE_BOT).into();
         }
         cx.notify();
     }

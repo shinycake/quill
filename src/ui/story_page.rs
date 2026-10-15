@@ -9,6 +9,7 @@ use gpui_kit::AppContext;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::gpui::{Context, Entity, Window};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 /// Phase 9.7: the chat story page overlay — story albums (list, open,
 /// create, rename, delete, add/remove/reorder stories, reorder albums),
 /// chat-page stories (pin/unpin), and the paginated archive list for one
@@ -42,10 +43,10 @@ impl StoryPage {
         Self {
             chat_id,
             open_album: None,
-            new_album_name: input("Album name (1–12 characters)"),
-            new_album_story_ids: input("Story ids, comma-separated (optional)"),
-            rename_input: input("Album name (1–12 characters)"),
-            add_story_ids: input("Story ids to add, comma-separated"),
+            new_album_name: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
+            new_album_story_ids: input(tr(keys::Q_MEDIA_STORY_IDS_COMMA_SEPARATED_OPTIONAL)),
+            rename_input: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
+            add_story_ids: input(tr(keys::Q_MEDIA_STORY_IDS_TO_ADD_COMMA)),
             delete_confirm: None,
         }
     }

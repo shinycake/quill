@@ -35,6 +35,7 @@ use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::FileId;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
@@ -366,7 +367,7 @@ fn message_corner_actions(
             corner_button(
                 format!("message-reply-{}", message_id.0),
                 gpui_kit::assets::IconName::Reply,
-                "Reply",
+                tr(keys::Q_MEDIA_REPLY),
                 cx,
             )
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -379,7 +380,7 @@ fn message_corner_actions(
             corner_button(
                 format!("message-react-{}", message_id.0),
                 gpui_kit::assets::IconName::FaceSlightlySmilingPlus,
-                "React",
+                tr(keys::Q_MEDIA_REACT_2),
                 cx,
             )
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
@@ -409,7 +410,7 @@ fn message_actions_button(
     corner_button(
         format!("message-actions-{}", message_id.0),
         gpui_kit::assets::IconName::Ellipsis,
-        "Message actions",
+        tr(keys::Q_MEDIA_MESSAGE_ACTIONS),
         cx,
     )
     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
@@ -463,7 +464,7 @@ pub(super) fn album_tile(
         .map(|this| corners.round(this))
         .overflow_hidden()
         .role(gpui_kit::Role::Button)
-        .aria_label("Open album media")
+        .aria_label(tr(keys::Q_MEDIA_OPEN_ALBUM_MEDIA))
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -497,7 +498,7 @@ pub(super) fn album_tile(
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child("Photo")
+                                .child(tr(keys::Q_MEDIA_PHOTO_2))
                                 .into_any_element()
                         }),
                     )
@@ -515,9 +516,9 @@ pub(super) fn album_tile(
                             .text_xs()
                             .text_color(text_bright())
                             .child(if downloading_now {
-                                "Photo — downloading…"
+                                tr(keys::Q_MEDIA_PHOTO_DOWNLOADING)
                             } else {
-                                "Photo"
+                                tr(keys::Q_MEDIA_PHOTO_2)
                             }),
                     )
                     .into_any_element()
@@ -568,7 +569,12 @@ pub(super) fn album_tile(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(div().text_xs().text_color(text_on_fill()).child("Video"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(text_on_fill())
+                            .child(tr(keys::Q_MEDIA_VIDEO)),
+                    )
                     .into_any_element()
             };
             frame
@@ -583,11 +589,14 @@ pub(super) fn album_tile(
                         .bg(bg_tile())
                         .text_xs()
                         .text_color(text_bright())
-                        .child(format!("Video · {duration}")),
+                        .child(tr_with(
+                            keys::Q_MEDIA_VIDEO_2,
+                            &[("duration", &duration.to_string())],
+                        )),
                 )
                 .child(
                     Button::new(format!("album-play-{row_id}"))
-                        .label("Play")
+                        .label(tr(keys::Q_MEDIA_PLAY))
                         .ghost()
                         // Kit buttons let the press bubble: without this the
                         // tile's own click also opens the viewer.

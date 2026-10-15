@@ -6,6 +6,7 @@
 use super::*;
 use gpui_kit::TestSupportExt;
 use gpui_kit::component::input::Input;
+use quill::lang::{keys, tr, tr_with};
 use quill::sticker_set_box::{MAX_EMOJIS, SET_NAME_MAX};
 
 /// The emoji grid of the "New Sticker" box: the catalog filtered by the
@@ -43,7 +44,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .w(px(380.))
-                .title(shell::dialog_title("Edit Sticker Set Name"))
+                .title(shell::dialog_title(tr(keys::STICKERS_BOX_EDIT_NAME_TITLE)))
                 .content(move |content, _, _| {
                     content.child(
                         div()
@@ -54,7 +55,7 @@ impl QuillApp {
                                 div()
                                     .text_sm()
                                     .text_color(text_muted())
-                                    .child("Choose a name for your set."),
+                                    .child(tr(keys::STICKERS_BOX_EDIT_NAME_ABOUT)),
                             )
                             .child(Input::new(&input))
                             .child(
@@ -73,7 +74,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("sticker-set-rename-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.sticker_box.rename_open = false;
@@ -87,7 +88,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("sticker-set-rename-done")
-                                .label("Done")
+                                .label(tr(keys::BOX_DONE))
                                 .primary()
                                 .disabled(length == 0 || length > SET_NAME_MAX)
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -128,8 +129,8 @@ impl QuillApp {
                 .as_ref()
                 .and_then(|item| this.panel_still(item));
             let title = match kind {
-                SetKind::Stickers => "Delete sticker",
-                SetKind::Emoji => "Delete emoji",
+                SetKind::Stickers => tr(keys::Q_MEDIA_DELETE_STICKER),
+                SetKind::Emoji => tr(keys::Q_MEDIA_DELETE_EMOJI),
             };
             dialog
                 .overlay(true)
@@ -158,7 +159,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("sticker-delete-close")
-                                .label("Close")
+                                .label(tr(keys::CLOSE))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.sticker_box.delete_sticker = None;
@@ -172,7 +173,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("sticker-delete-confirm")
-                                .label("Delete")
+                                .label(tr(keys::BOX_DELETE))
                                 .danger()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.confirm_delete_sticker(set_id, cx);
@@ -204,9 +205,9 @@ impl QuillApp {
             let set_id = this.viewed_set().map(|(id, ..)| id).unwrap_or(0);
             confirm_dialog(
                 dialog,
-                "Are you sure you want to delete this sticker set for everyone? This cannot be undone.",
+                tr(keys::STICKERS_DELETE_PACK_SURE),
                 "sticker-set-delete",
-                ("Remove", true),
+                (tr(keys::BOX_REMOVE), true),
                 cx,
                 move |this, window, cx| {
                     this.confirm_delete_set_everyone(set_id, cx);
@@ -239,7 +240,7 @@ impl QuillApp {
             let title = this.viewed_title();
             confirm_dialog(
                 dialog,
-                format!("Remove \"{title}\"?"),
+                tr_with(keys::Q_MEDIA_REMOVE, &[("title", &title.to_string())]),
                 "sticker-set-remove",
                 ("OK", false),
                 cx,
@@ -272,7 +273,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let Some(create) = this.sticker_box.create.clone() else {
                 return dialog
-                    .title(shell::dialog_title("New Sticker"))
+                    .title(shell::dialog_title(tr(keys::Q_MEDIA_NEW_STICKER)))
                     .on_close(on_close);
             };
             let kind = create.kind;
@@ -282,7 +283,7 @@ impl QuillApp {
             let query = search.read(cx).value().trim().to_string();
             let chosen = create.emojis.clone();
             let results: Vec<&'static str> = if query.is_empty() {
-                quill::emoji_catalog::search(Some("Smileys & Emotion"), "")
+                quill::emoji_catalog::search(Some(tr(keys::Q_MEDIA_SMILEYS_EMOTION)), "")
                     .map(|entry| entry.emoji)
                     .take(EMOJI_GRID)
                     .collect()
@@ -299,7 +300,7 @@ impl QuillApp {
                         .label(emoji.clone())
                         .outline()
                         .small()
-                        .tooltip("Remove")
+                        .tooltip(tr(keys::BOX_REMOVE))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_create_emoji(&emoji, cx);
                         }))
@@ -363,7 +364,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("sticker-create-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.sticker_box.discard_create();
@@ -379,7 +380,7 @@ impl QuillApp {
                             // A video encodes here (tdesktop's box does
                             // too); the button waits until it is done.
                             Button::new("sticker-create-done")
-                                .label("Done")
+                                .label(tr(keys::BOX_DONE))
                                 .primary()
                                 .loading(encoding)
                                 .disabled(encoding)
@@ -413,15 +414,15 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let Some(pick) = this.sticker_box.pick else {
                 return dialog
-                    .title(shell::dialog_title("Choose a sticker"))
+                    .title(shell::dialog_title(tr(keys::Q_MEDIA_CHOOSE_A_STICKER)))
                     .on_close(on_close);
             };
             let title = if pick.adapt {
-                "Adapt from a Sticker"
+                tr(keys::EMOJI_ADAPT_STICKER)
             } else {
                 match pick.kind {
-                    SetKind::Stickers => "Add an Existing Sticker",
-                    SetKind::Emoji => "Add an Existing Emoji",
+                    SetKind::Stickers => tr(keys::STICKERS_ADD_EXISTING),
+                    SetKind::Emoji => tr(keys::EMOJI_ADD_EXISTING),
                 }
             };
             let candidates = this.pick_candidates(pick);
@@ -503,7 +504,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(text_muted())
-                            .child("Open the sticker panel once to load stickers to choose from.")
+                            .child(tr(keys::Q_MEDIA_OPEN_THE_STICKER_PANEL_ONCE))
                             .into_any_element()
                     } else {
                         div()
@@ -526,7 +527,7 @@ impl QuillApp {
                 .footer(
                     div().flex().justify_end().child(
                         Button::new("sticker-pick-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.sticker_box.pick = None;
@@ -566,7 +567,7 @@ fn confirm_dialog(
                 .gap_2()
                 .child(
                     Button::new(format!("{id}-cancel"))
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| cancel(this, window, cx))),
                 )

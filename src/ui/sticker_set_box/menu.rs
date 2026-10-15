@@ -1,6 +1,7 @@
 //! The set box's ⋯ menu and the owned set's "+" cell (tdesktop
 //! `StickerSetBox::prepare` menu and `Inner::paintAddCell`).
 use super::*;
+use quill::lang::{keys, tr};
 use quill::sticker_set_box::{AddEntry, STICKERS_BOT_LINK};
 
 impl QuillApp {
@@ -20,8 +21,8 @@ impl QuillApp {
         Button::new("sticker-set-more")
             .icon(IconName::Ellipsis)
             .ghost()
-            .tooltip("More")
-            .accessibility_label("More")
+            .tooltip(tr(keys::Q_MEDIA_MORE))
+            .accessibility_label(tr(keys::Q_MEDIA_MORE))
             .dropdown_menu(move |menu, window, cx| {
                 let share = owner.clone();
                 let copy = owner.clone();
@@ -35,68 +36,79 @@ impl QuillApp {
                             });
                         }),
                     )
-                    .item(PopupMenuItem::new("Copy Link").on_click(move |_, _, cx| {
-                        let link = copy_link.clone();
-                        let _ = copy.update(cx, |this, cx| {
-                            this.copy_sticker_set_link(link, kind, cx);
-                        });
-                    }));
+                    .item(PopupMenuItem::new(tr(keys::CONTEXT_COPY_LINK)).on_click(
+                        move |_, _, cx| {
+                            let link = copy_link.clone();
+                            let _ = copy.update(cx, |this, cx| {
+                                this.copy_sticker_set_link(link, kind, cx);
+                            });
+                        },
+                    ));
                 if is_owned {
                     let rename = owner.clone();
                     let reorder = owner.clone();
                     menu = menu
-                        .item(
-                            PopupMenuItem::new("Edit name").on_click(move |_, window, cx| {
+                        .item(PopupMenuItem::new(tr(keys::Q_MEDIA_EDIT_NAME)).on_click(
+                            move |_, window, cx| {
                                 let _ = rename.update(cx, |this, cx| {
                                     this.open_rename_set(window, cx);
                                 });
-                            }),
-                        )
-                        .item(PopupMenuItem::new("Reorder").on_click(move |_, _, cx| {
-                            let _ = reorder.update(cx, |this, cx| {
-                                this.begin_edit_stickers(cx);
-                            });
-                        }));
+                            },
+                        ))
+                        .item(PopupMenuItem::new(tr(keys::Q_MEDIA_REORDER)).on_click(
+                            move |_, _, cx| {
+                                let _ = reorder.update(cx, |this, cx| {
+                                    this.begin_edit_stickers(cx);
+                                });
+                            },
+                        ));
                 }
                 if archivable {
                     let archive = owner.clone();
-                    menu = menu.item(PopupMenuItem::new("Archive Stickers").on_click(
-                        move |_, window, cx| {
-                            let _ = archive.update(cx, |this, cx| {
-                                this.archive_viewed_sticker_set(set_id, window, cx);
-                            });
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new(tr(keys::Q_MEDIA_ARCHIVE_STICKERS)).on_click(
+                            move |_, window, cx| {
+                                let _ = archive.update(cx, |this, cx| {
+                                    this.archive_viewed_sticker_set(set_id, window, cx);
+                                });
+                            },
+                        ),
+                    );
                 }
                 if is_owned {
                     let everyone = owner.clone();
                     let myself = owner.clone();
                     menu = menu
-                        .submenu("Delete Pack", window, cx, move |sub, _, _| {
-                            let everyone = everyone.clone();
-                            let myself = myself.clone();
-                            sub.item(PopupMenuItem::new("Delete for Everyone").on_click(
-                                move |_, _, cx| {
-                                    let _ = everyone.update(cx, |this, cx| {
-                                        this.sticker_box.delete_set_open = true;
-                                        cx.notify();
-                                    });
-                                },
-                            ))
-                            .item(
-                                PopupMenuItem::new("Delete for Myself").on_click(
-                                    move |_, _, cx| {
-                                        let _ = myself.update(cx, |this, cx| {
-                                            this.sticker_box.remove_set_open = true;
-                                            cx.notify();
-                                        });
-                                    },
-                                ),
-                            )
-                        })
+                        .submenu(
+                            tr(keys::Q_MEDIA_DELETE_PACK),
+                            window,
+                            cx,
+                            move |sub, _, _| {
+                                let everyone = everyone.clone();
+                                let myself = myself.clone();
+                                sub.item(
+                                    PopupMenuItem::new(tr(keys::Q_MEDIA_DELETE_FOR_EVERYONE))
+                                        .on_click(move |_, _, cx| {
+                                            let _ = everyone.update(cx, |this, cx| {
+                                                this.sticker_box.delete_set_open = true;
+                                                cx.notify();
+                                            });
+                                        }),
+                                )
+                                .item(
+                                    PopupMenuItem::new(tr(keys::Q_MEDIA_DELETE_FOR_MYSELF))
+                                        .on_click(move |_, _, cx| {
+                                            let _ = myself.update(cx, |this, cx| {
+                                                this.sticker_box.remove_set_open = true;
+                                                cx.notify();
+                                            });
+                                        }),
+                                )
+                            },
+                        )
                         .separator()
                         .link(
-                            "Check the @stickers bot for more options",
+                            tr(keys::Q_MEDIA_CHECK_THE_STICKERS_BOT_FOR),
                             STICKERS_BOT_LINK,
                         );
                 }

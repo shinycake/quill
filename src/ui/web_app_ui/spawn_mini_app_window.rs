@@ -1,11 +1,12 @@
 //! Methods moved out of `web_app_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(super) fn spawn_mini_app_window(&mut self, launch: WebAppLaunch, cx: &mut Context<Self>) {
         let Some(path) = helper_path() else {
-            self.set_status_note("The mini app window (quill-webview) is missing.", cx);
+            self.set_status_note(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL_2), cx);
             return;
         };
         let account = self
@@ -36,7 +37,7 @@ impl QuillApp {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(_) => {
-                self.set_status_note("The mini app window couldn't start.", cx);
+                self.set_status_note(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT), cx);
                 return;
             }
         };
@@ -186,7 +187,7 @@ impl QuillApp {
                         .session()
                         .and_then(|session| session.users.get(&bot_user_id))
                         .map(|user| user.display_name())
-                        .unwrap_or_else(|| "Mini app".into());
+                        .unwrap_or_else(|| tr(keys::Q_MEDIA_MINI_APP).into());
                     self.connection.status_note.clear();
                     self.spawn_mini_app_window(
                         WebAppLaunch {
@@ -239,9 +240,9 @@ impl QuillApp {
                 Ok((_, added)) => {
                     self.set_status_note(
                         if added {
-                            "Bot added to the menu."
+                            tr(keys::BOT_ADD_TO_MENU_DONE)
                         } else {
-                            "Bot removed from the menu."
+                            tr(keys::BOT_REMOVE_FROM_MENU_DONE)
                         },
                         cx,
                     );
@@ -284,7 +285,7 @@ impl QuillApp {
         }
         if let Some(result) = data_sent {
             match result {
-                Ok(()) => self.set_status_note("Sent to the bot.", cx),
+                Ok(()) => self.set_status_note(tr(keys::Q_MEDIA_SENT_TO_THE_BOT), cx),
                 Err(message) => self.set_status_note(&message, cx),
             }
         }
@@ -316,11 +317,14 @@ impl QuillApp {
                 window.show_popup(
                     PopupPurpose::WriteAccess,
                     popup(
-                        "Allow messaging",
-                        format!("Allow {name} to send you messages?"),
+                        tr(keys::Q_MEDIA_ALLOW_MESSAGING),
+                        tr_with(
+                            keys::Q_MEDIA_ALLOW_TO_SEND_YOU_MESSAGES,
+                            &[("name", &name.to_string())],
+                        ),
                         vec![
-                            ("cancel", "Cancel", "cancel"),
-                            ("allow", "Allow", "default"),
+                            ("cancel", tr(keys::CANCEL), "cancel"),
+                            ("allow", tr(keys::Q_MEDIA_ALLOW), "default"),
                         ],
                     ),
                 );
@@ -357,14 +361,17 @@ impl QuillApp {
             HelperEvent::Error { message } => {
                 let note = if message.contains("web view") {
                     if cfg!(target_os = "windows") {
-                        "Mini apps need the Microsoft Edge WebView2 runtime.".to_string()
+                        tr(keys::Q_MEDIA_MINI_APPS_NEED_THE_MICROSOFT).to_string()
                     } else if cfg!(target_os = "linux") {
-                        "Mini apps need WebKitGTK (libwebkit2gtk-4.1) installed.".to_string()
+                        tr(keys::Q_MEDIA_MINI_APPS_NEED_WEBKITGTK_LIBWEBKIT2GTK).to_string()
                     } else {
-                        "The mini app window couldn't create its web view.".to_string()
+                        tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT_2).to_string()
                     }
                 } else {
-                    format!("The mini app window failed: {message}")
+                    tr_with(
+                        keys::Q_MEDIA_THE_MINI_APP_WINDOW_FAILED,
+                        &[("message", &message.to_string())],
+                    )
                 };
                 self.close_mini_app_window(cx);
                 self.set_status_note(&note, cx);
@@ -444,7 +451,7 @@ impl QuillApp {
                     .as_mut()
                     .map(|live| live.driver.send_web_app_data(bot_id, &button_text, &data));
                 if !matches!(sent, Some(Ok(_))) {
-                    self.set_status_note("Couldn't send the app's data to the bot.", cx);
+                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA), cx);
                 }
                 // tdesktop closes the panel once the data is on its way.
                 self.close_mini_app_window(cx);
@@ -492,7 +499,7 @@ impl QuillApp {
             WebAppEvent::OpenInvoice { slug } => self.with_window(|window| {
                 window.emit(BridgeReply::invoice_closed(&slug, "cancelled"));
                 window.send(&HostCommand::Toast {
-                    text: "Payments inside mini apps aren't supported yet.".into(),
+                    text: tr(keys::Q_MEDIA_PAYMENTS_INSIDE_MINI_APPS_ARENT).into(),
                 });
             }),
             WebAppEvent::OpenPopup(spec) => self.with_window(|window| {
@@ -536,7 +543,7 @@ impl QuillApp {
             WebAppEvent::RequestPhone => self.with_window(|window| {
                 window.emit(BridgeReply::phone_requested(false));
                 window.send(&HostCommand::Toast {
-                    text: "Sharing your phone number with mini apps isn't supported yet.".into(),
+                    text: tr(keys::Q_MEDIA_SHARING_YOUR_PHONE_NUMBER_WITH).into(),
                 });
             }),
             WebAppEvent::RequestEmojiStatusAccess => self.request_emoji_status_access(cx),
@@ -548,11 +555,14 @@ impl QuillApp {
                 window.show_popup(
                     PopupPurpose::Clipboard { req_id },
                     popup(
-                        "Paste from the clipboard?",
-                        format!("{bot_name} asks to read what you copied."),
+                        tr(keys::Q_MEDIA_PASTE_FROM_THE_CLIPBOARD),
+                        tr_with(
+                            keys::Q_MEDIA_ASKS_TO_READ_WHAT_YOU,
+                            &[("bot_name", &bot_name.to_string())],
+                        ),
                         vec![
-                            ("cancel", "Cancel", "cancel"),
-                            ("allow", "Paste", "default"),
+                            ("cancel", tr(keys::CANCEL), "cancel"),
+                            ("allow", tr(keys::Q_MEDIA_PASTE), "default"),
                         ],
                     ),
                 );
@@ -618,11 +628,11 @@ impl QuillApp {
                         window.show_popup(
                             PopupPurpose::CloseConfirm,
                             popup(
-                                "Close the mini app?",
-                                "Changes you made may not be saved.".into(),
+                                tr(keys::Q_MEDIA_CLOSE_THE_MINI_APP),
+                                tr(keys::Q_MEDIA_CHANGES_YOU_MADE_MAY_NOT).into(),
                                 vec![
-                                    ("cancel", "Cancel", "cancel"),
-                                    ("close", "Close anyway", "destructive"),
+                                    ("cancel", tr(keys::CANCEL), "cancel"),
+                                    ("close", tr(keys::Q_MEDIA_CLOSE_ANYWAY), "destructive"),
                                 ],
                             ),
                         );

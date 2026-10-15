@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::poll::{
     can_offer_add_option, can_view_poll_voters, poll_bar_fraction, poll_ends_in_label,
@@ -33,8 +34,8 @@ pub(super) fn poll_body(
 ) -> AnyElement {
     let poll = &content.poll;
     let kind_label = match &poll.poll_type {
-        PollType::Quiz { .. } => "Quiz",
-        PollType::Regular => "Poll",
+        PollType::Quiz { .. } => tr(keys::Q_MEDIA_QUIZ),
+        PollType::Regular => tr(keys::CONTEXT_POLL_MESSAGE_TAB),
     };
     let mut body = div()
         .id(("poll", message_id.0 as u64))
@@ -73,7 +74,7 @@ pub(super) fn poll_body(
     // B15: "Restrict to Subscribers" and the absolute deadline
     // (`lng_polls_results_in_*`-style "ends in …").
     if poll.members_only {
-        meta.push_str(" · subscribers only");
+        meta.push_str(tr(keys::Q_MEDIA_SUBSCRIBERS_ONLY_2));
     }
     if let Some(ends) = poll_ends_in_label(poll, now_unix()) {
         meta.push_str(" · ");
@@ -87,7 +88,7 @@ pub(super) fn poll_body(
             div()
                 .text_xs()
                 .text_color(text_muted())
-                .child("Results will appear after the poll ends."),
+                .child(tr(keys::POLLS_ENDS_TOAST)),
         );
     }
     // B4: `pollVoteRestrictionReason*` (schema `td_api.tl:494`-`:510`) —
@@ -117,7 +118,7 @@ pub(super) fn poll_body(
     if can_offer_add_option(content.can_add_option, poll) {
         body = body.child(
             Button::new(format!("poll-add-option-{}", message_id.0))
-                .label("Add an Option")
+                .label(tr(keys::Q_MEDIA_ADD_AN_OPTION))
                 .ghost()
                 .text_color(accent())
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -142,7 +143,10 @@ pub(super) fn poll_body(
     if can_view_poll_voters(poll) {
         body = body.child(
             Button::new(format!("poll-voters-{}", message_id.0))
-                .label(format!("View Votes ({})", poll.total_voter_count))
+                .label(tr_with(
+                    keys::Q_MEDIA_VIEW_VOTES,
+                    &[("total_voter_count", &poll.total_voter_count.to_string())],
+                ))
                 .ghost()
                 .text_color(accent())
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -203,7 +207,10 @@ pub(super) fn poll_option_row(
             option.text.clone()
         };
         let option_label = if quiz_correct {
-            format!("{option_label} · correct answer")
+            tr_with(
+                keys::Q_MEDIA_CORRECT_ANSWER,
+                &[("option_label", &option_label.to_string())],
+            )
         } else {
             option_label
         };
@@ -226,7 +233,9 @@ pub(super) fn poll_option_row(
                 &media.emoji,
                 cx,
             ))
-            .when(quiz_correct, |this| this.child("· correct answer"))
+            .when(quiz_correct, |this| {
+                this.child(tr(keys::Q_MEDIA_CORRECT_ANSWER_2))
+            })
             .into_any_element()
     };
     let stats = if results_hidden {
@@ -304,7 +313,10 @@ pub(super) fn poll_option_row(
     if votable {
         row = row
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("Vote for option {}", index + 1))
+            .aria_label(tr_with(
+                keys::Q_MEDIA_VOTE_FOR_OPTION,
+                &[("index_1", &(index + 1).to_string())],
+            ))
             .tab_index(0)
             .cursor_pointer()
             .pressable(cx.theme())

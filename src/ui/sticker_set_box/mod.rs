@@ -19,6 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{TestSupportExt, *};
 use quill::ids::FileId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::StickerSetViewStage;
 use quill::sticker_set_box::{
     ARCHIVED_NOTE, SetKind, can_archive, copied_note, has_add_cell, set_link, share_label,
@@ -72,7 +73,7 @@ impl QuillApp {
             && live.driver.view_sticker_set(set_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.connection.status_note = "could not open the sticker set".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_OPEN_THE_STICKER).into();
         }
         cx.notify();
     }
@@ -91,15 +92,15 @@ impl QuillApp {
                 live.driver.session.stickers.sticker_set_view = None;
                 self.message_ui.menu_ui.sticker_set_open = false;
                 self.connection.status_note = if install {
-                    "sticker set added".into()
+                    tr(keys::Q_MEDIA_STICKER_SET_ADDED).into()
                 } else {
-                    "sticker set removed".into()
+                    tr(keys::Q_MEDIA_STICKER_SET_REMOVED).into()
                 };
             } else {
-                self.connection.status_note = "could not change the sticker set".into();
+                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER).into();
             }
         } else {
-            self.connection.status_note = "demo — sticker sets change with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKER_SETS_CHANGE_WITH).into();
         }
         cx.notify();
     }
@@ -116,7 +117,7 @@ impl QuillApp {
         self.close_sticker_set_dialog(cx);
         self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
         self.share.link_text = Some(link);
-        self.connection.status_note = "choose a chat to share to".into();
+        self.connection.status_note = tr(keys::Q_MEDIA_CHOOSE_A_CHAT_TO_SHARE).into();
         cx.notify();
     }
 
@@ -148,10 +149,13 @@ impl QuillApp {
                     self.connection.status_note = ARCHIVED_NOTE.into();
                     self.close_kit_dialog_if_done(DialogKind::StickerSet, window, cx);
                 }
-                Err(_) => self.connection.status_note = "could not archive the sticker set".into(),
+                Err(_) => {
+                    self.connection.status_note =
+                        tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER).into()
+                }
             }
         } else {
-            self.connection.status_note = "demo: sticker sets archive with live TDLib".into();
+            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKER_SETS_ARCHIVE_WITH).into();
         }
         cx.notify();
     }
@@ -270,9 +274,9 @@ impl QuillApp {
                 let favorite_owner = owner.clone();
                 menu = menu.item(
                     PopupMenuItem::new(if favorite {
-                        "Remove from Favorites"
+                        tr(keys::FAVED_STICKERS_REMOVE)
                     } else {
-                        "Add to Favorites"
+                        tr(keys::FAVED_STICKERS_ADD)
                     })
                     .on_click(move |_, _, cx| {
                         let _ = favorite_owner.update(cx, |this, cx| {
@@ -338,25 +342,25 @@ impl QuillApp {
             let dialog = dialog.overlay(true);
             let Some(view) = view else {
                 return dialog
-                    .title(shell::dialog_title("Sticker set"))
+                    .title(shell::dialog_title(tr(keys::Q_MEDIA_STICKER_SET)))
                     .on_close(on_close);
             };
             let (title, body, footer): (String, AnyElement, Option<AnyElement>) = match view.stage {
                 StickerSetViewStage::Loading => (
-                    "Sticker set".into(),
+                    tr(keys::Q_MEDIA_STICKER_SET).into(),
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Loading stickers…")
+                        .child(tr(keys::Q_MEDIA_LOADING_STICKERS))
                         .into_any_element(),
                     None,
                 ),
                 StickerSetViewStage::Failed => (
-                    "Sticker set".into(),
+                    tr(keys::Q_MEDIA_STICKER_SET).into(),
                     div()
                         .text_sm()
                         .text_color(danger())
-                        .child("Couldn't load this sticker set.")
+                        .child(tr(keys::Q_MEDIA_COULDNT_LOAD_THIS_STICKER_SET))
                         .into_any_element(),
                     None,
                 ),
@@ -399,7 +403,7 @@ impl QuillApp {
                             .child(div().flex_1())
                             .child(
                                 Button::new("sticker-set-reorder-done")
-                                    .label("Done")
+                                    .label(tr(keys::BOX_DONE))
                                     .primary()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.finish_edit_stickers(cx);
@@ -415,7 +419,7 @@ impl QuillApp {
                             .child(div().flex_1())
                             .child(
                                 Button::new("sticker-set-close")
-                                    .label("Close")
+                                    .label(tr(keys::CLOSE))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.close_sticker_set_dialog(cx);
@@ -444,9 +448,12 @@ impl QuillApp {
                                     footer.child(
                                         Button::new("sticker-set-toggle")
                                             .label(if installed {
-                                                "Remove Stickers".to_string()
+                                                tr(keys::Q_MEDIA_REMOVE_STICKERS).to_string()
                                             } else {
-                                                format!("Add {count} Stickers")
+                                                tr_with(
+                                                    keys::Q_MEDIA_ADD_STICKERS,
+                                                    &[("count", &count.to_string())],
+                                                )
                                             })
                                             .when(installed, |button| button.danger())
                                             .when(!installed, |button| button.primary())

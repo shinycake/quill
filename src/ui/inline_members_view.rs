@@ -17,6 +17,7 @@ use quill::inline_members::{
     member_badge, members_title, online_sort_value, search_available, sort_online_first,
     sorts_by_online,
 };
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{InfoPanelTarget, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChatKind, MessageSender, ParsedChatMember, UserStatusKind};
@@ -72,7 +73,7 @@ impl QuillApp {
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
                 .child(if admins_only {
-                    "Administrators".to_string()
+                    tr(keys::Q_MEDIA_ADMINISTRATORS).to_string()
                 } else {
                     members_title(group_total)
                 }),
@@ -84,7 +85,7 @@ impl QuillApp {
                     .icon(IconName::Search)
                     .ghost()
                     .xsmall()
-                    .accessibility_label("Search members")
+                    .accessibility_label(tr(keys::Q_MEDIA_SEARCH_MEMBERS))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.inline_members_search(chat_id, window, cx);
                     })),
@@ -96,7 +97,7 @@ impl QuillApp {
                     .icon(IconName::UserPlus)
                     .ghost()
                     .xsmall()
-                    .accessibility_label("Add members")
+                    .accessibility_label(tr(keys::CHANNEL_ADD_MEMBERS))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.inline_members_add(chat_id, window, cx);
                     })),
@@ -137,7 +138,7 @@ impl QuillApp {
         if let Some(message) = view.failed.clone().filter(|_| view.rows.is_empty()) {
             list = list.child(hint(message)).child(
                 Button::new("inline-members-retry")
-                    .label("Retry")
+                    .label(tr(keys::Q_MEDIA_RETRY))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.inline_members_stale(&[chat_id.0], cx);
@@ -145,16 +146,16 @@ impl QuillApp {
             );
         } else if view.rows.is_empty() {
             list = list.child(hint(if view.loading {
-                "Loading members…".to_string()
+                tr(keys::Q_MEDIA_LOADING_MEMBERS).to_string()
             } else {
-                "No members".to_string()
+                tr(keys::Q_MEDIA_NO_MEMBERS).to_string()
             }));
         }
         for row in view.rows.iter().take(shown) {
             list = list.child(self.inline_member_row(chat_id, row, &roots, cx));
         }
         if view.loading && !view.rows.is_empty() {
-            list = list.child(hint("Loading…".to_string()));
+            list = list.child(hint(tr(keys::Q_MEDIA_LOADING).to_string()));
         }
         block = block.child(list);
 
@@ -228,8 +229,12 @@ impl QuillApp {
                 let user = user_id.and_then(|id| session.user(id));
                 let name = match (user, member.member_id) {
                     (Some(user), _) => user.display_name(),
-                    (None, MessageSender::User { user_id }) => format!("User {user_id}"),
-                    (None, MessageSender::Chat { chat_id }) => format!("Channel {chat_id}"),
+                    (None, MessageSender::User { user_id }) => {
+                        tr_with(keys::Q_MEDIA_USER, &[("user_id", &user_id.to_string())])
+                    }
+                    (None, MessageSender::Chat { chat_id }) => {
+                        tr_with(keys::Q_MEDIA_CHANNEL, &[("chat_id", &chat_id.to_string())])
+                    }
                 };
                 MemberRow {
                     user_id,

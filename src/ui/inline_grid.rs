@@ -17,6 +17,7 @@ use quill::inline_grid::{
     PANEL_WIDTH, Placed, SKIP, STICKER_SIZE, button_action, content_height, grid_top,
     layout_results, scroll_to_reveal, should_load_more,
 };
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{DeepLinkAction, InlineBotResolve, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
@@ -36,7 +37,7 @@ fn list_title(result: &InlineQueryResultSummary) -> String {
         first.make_ascii_uppercase();
     }
     if kind.is_empty() {
-        "Result".to_string()
+        tr(keys::Q_MEDIA_RESULT).to_string()
     } else {
         kind
     }
@@ -424,7 +425,7 @@ impl QuillApp {
                         story_id: None,
                     });
                     if sent.is_err() {
-                        self.set_status_note("Couldn't open the bot's chat.", cx);
+                        self.set_status_note(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_BOTS_CHAT), cx);
                     }
                 }
             }

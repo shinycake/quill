@@ -12,6 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{StoryPostOutcome, StoryPostState};
 use quill::story_composer::{StoryComposer, StoryExpiry, StoryMediaKind, StoryPrivacy};
 use quill::telegram::requests::input_story_content;
@@ -168,13 +169,13 @@ impl QuillApp {
             .to_string();
         let is_edit = self.stories.composer.is_edit();
         let error = if !is_edit && path.is_empty() {
-            Some("Enter a photo or video file path")
+            Some(tr(keys::Q_MEDIA_ENTER_A_PHOTO_OR_VIDEO))
         } else if !path.is_empty() && kind == StoryMediaKind::Unknown {
-            Some("Not a photo or video file — check the extension")
+            Some(tr(keys::Q_MEDIA_NOT_A_PHOTO_OR_VIDEO))
         } else if !path.is_empty() && !std::path::Path::new(&path).is_file() {
-            Some("File not found — check the path")
+            Some(tr(keys::Q_MEDIA_FILE_NOT_FOUND_CHECK_THE))
         } else if !is_edit && self.stories.composer.needs_users() {
-            Some("Pick at least one user for \"Selected users\"")
+            Some(tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER))
         } else {
             self.stories.composer.link_url_error()
         };
@@ -200,10 +201,11 @@ impl QuillApp {
             if live.driver.check_can_post_story(target).is_err() {
                 self.stories.composer.check_sent = false;
                 self.stories.composer.local_error =
-                    Some("Could not check posting eligibility".into());
+                    Some(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY).into());
             }
         } else if self.demo_session.is_some() {
-            self.stories.composer.local_error = Some("demo — posting runs with live TDLib".into());
+            self.stories.composer.local_error =
+                Some(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE).into());
         }
         cx.notify();
     }
@@ -237,7 +239,8 @@ impl QuillApp {
         // untouched when the media is kept.
         let areas = content.as_ref().map(|_| self.stories.composer.areas_json());
         let Some(live) = self.live.as_mut() else {
-            self.stories.composer.local_error = Some("demo — editing runs with live TDLib".into());
+            self.stories.composer.local_error =
+                Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
             cx.notify();
             return;
         };
@@ -251,7 +254,8 @@ impl QuillApp {
         ) {
             Ok(_) => self.stories.composer.save_sent = true,
             Err(_) => {
-                self.stories.composer.local_error = Some("Could not send the edit request".into());
+                self.stories.composer.local_error =
+                    Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_EDIT).into());
             }
         }
         cx.notify();
@@ -324,12 +328,12 @@ impl QuillApp {
                         }
                         Err(_) => {
                             self.stories.composer.local_error =
-                                Some("Could not send the post request".into());
+                                Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST).into());
                         }
                     }
                 } else {
                     self.stories.composer.local_error =
-                        Some("demo — posting runs with live TDLib".into());
+                        Some(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE).into());
                 }
             }
         }
@@ -347,26 +351,24 @@ impl QuillApp {
         // Phase 9.5: edit-mode save state — the tick closes the
         // composer on success or moves the failure into local_error.
         if composer.is_edit() {
-            return composer.save_sent.then(|| "Saving…".into());
+            return composer.save_sent.then(|| tr(keys::Q_MEDIA_SAVING).into());
         }
         let post = self.session().map(|session| session.stories.post.clone())?;
         match &post.outcome {
-            StoryPostOutcome::Posting { .. } => Some("Posting…".into()),
-            StoryPostOutcome::Succeeded => {
-                Some("✓ Posted — it will appear in your story tray".into())
-            }
+            StoryPostOutcome::Posting { .. } => Some(tr(keys::Q_MEDIA_POSTING).into()),
+            StoryPostOutcome::Succeeded => Some(tr(keys::Q_MEDIA_POSTED_IT_WILL_APPEAR_IN).into()),
             StoryPostOutcome::Failed(message) => Some(format!("✗ {message}")),
             StoryPostOutcome::None => {
                 if composer.post_sent {
-                    Some("Sending…".into())
+                    Some(tr(keys::Q_MEDIA_SENDING).into())
                 } else if composer.check_sent {
-                    Some("Checking eligibility…".into())
+                    Some(tr(keys::Q_MEDIA_CHECKING_ELIGIBILITY).into())
                 } else if let Some(error) = &post.check_error {
                     Some(format!("✗ {error}"))
                 } else {
                     post.eligibility.as_ref().map(|result| {
                         if result.can_post() {
-                            "✓ Eligible to post".into()
+                            tr(keys::Q_MEDIA_ELIGIBLE_TO_POST).into()
                         } else {
                             format!("✗ {}", result.user_message())
                         }
@@ -406,11 +408,11 @@ impl QuillApp {
         let show_privacy = !is_edit && self.stories.composer.as_chat_id.is_none();
         let areas_editable = !is_edit || !path.is_empty();
         let title = if is_edit {
-            "Edit story"
+            tr(keys::Q_MEDIA_EDIT_STORY)
         } else if is_repost {
-            "Repost story"
+            tr(keys::Q_MEDIA_REPOST_STORY)
         } else {
-            "New story"
+            tr(keys::Q_MEDIA_NEW_STORY)
         };
 
         let preview: AnyElement = match (kind, file_exists) {
@@ -432,7 +434,7 @@ impl QuillApp {
                         .items_center()
                         .justify_center()
                         .text_color(text_bright())
-                        .child("could not render")
+                        .child(tr(keys::Q_MEDIA_COULD_NOT_RENDER))
                         .into_any_element()
                 })
                 .into_any_element(),
@@ -447,7 +449,7 @@ impl QuillApp {
                 .justify_center()
                 .text_sm()
                 .text_color(text_bright())
-                .child("Video — uploads the full file")
+                .child(tr(keys::Q_MEDIA_VIDEO_UPLOADS_THE_FULL_FILE))
                 .into_any_element(),
             _ => div()
                 .id("story-composer-preview")
@@ -460,7 +462,7 @@ impl QuillApp {
                 .justify_center()
                 .text_sm()
                 .text_color(text_muted())
-                .child("Photo/video preview")
+                .child(tr(keys::Q_MEDIA_PHOTO_VIDEO_PREVIEW))
                 .into_any_element(),
         };
 
@@ -502,7 +504,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(text_muted())
-                            .child("No contacts found"),
+                            .child(tr(keys::Q_MEDIA_NO_CONTACTS_FOUND)),
                     );
                 }
                 for row in rows.iter().take(50) {
@@ -520,7 +522,7 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         Textarea::new(&self.stories.composer_user_search)
-                            .aria_label("Search story recipients")
+                            .aria_label(tr(keys::Q_MEDIA_SEARCH_STORY_RECIPIENTS))
                             .h(px(32.)),
                     )
                     .child(list)
@@ -557,7 +559,7 @@ impl QuillApp {
                 // labels). Controlled: write the requested value, keep
                 // clearing local_error on change.
                 Checkbox::new("story-composer-post-to-chat-page")
-                    .label("Post to chat page (keep accessible after expiry)")
+                    .label(tr(keys::Q_MEDIA_POST_TO_CHAT_PAGE_KEEP))
                     .checked(self.stories.composer.post_to_chat_page)
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.stories.composer.post_to_chat_page = on;
@@ -567,7 +569,7 @@ impl QuillApp {
             )
             .child(
                 Checkbox::new("story-composer-protect-content")
-                    .label("Protect content (no forwarding)")
+                    .label(tr(keys::Q_MEDIA_PROTECT_CONTENT_NO_FORWARDING))
                     .checked(self.stories.composer.protect_content)
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.stories.composer.protect_content = on;
@@ -604,7 +606,9 @@ impl QuillApp {
                                 .chats
                                 .get(id)
                                 .map(|chat| chat.title.clone())
-                                .unwrap_or_else(|| format!("Chat {id}"));
+                                .unwrap_or_else(|| {
+                                    tr_with(keys::Q_MEDIA_CHAT, &[("id", &id.to_string())])
+                                });
                             (*id, title)
                         })
                         .collect()
@@ -624,11 +628,12 @@ impl QuillApp {
                 .selected_index(as_selected)
                 .disabled(busy)
                 .children(
-                    std::iter::once(Radio::new("story-composer-as-self").label("Myself")).chain(
-                        as_chats.iter().map(|(chat_id, title)| {
-                            Radio::new(format!("story-composer-as-{chat_id}")).label(title.clone())
-                        }),
-                    ),
+                    std::iter::once(
+                        Radio::new("story-composer-as-self").label(tr(keys::Q_MEDIA_MYSELF)),
+                    )
+                    .chain(as_chats.iter().map(|(chat_id, title)| {
+                        Radio::new(format!("story-composer-as-{chat_id}")).label(title.clone())
+                    })),
                 )
                 .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
                     let chosen = if ix == 0 {
@@ -648,7 +653,12 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(div().text_xs().text_color(text_muted()).child("Post as"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(text_muted())
+                        .child(tr(keys::Q_MEDIA_POST_AS)),
+                )
                 .child(picker)
                 .into_any_element()
         });
@@ -702,7 +712,7 @@ impl QuillApp {
                                 div()
                                     .id("story-composer-close")
                                     .role(gpui_kit::Role::Button)
-                                    .aria_label("Close story composer")
+                                    .aria_label(tr(keys::Q_MEDIA_CLOSE_STORY_COMPOSER))
                                     .tab_index(0)
                                     .cursor_pointer()
                                     .pressable(cx.theme())
@@ -710,7 +720,7 @@ impl QuillApp {
                                     .py_1()
                                     .rounded_md()
                                     .text_color(text_bright())
-                                    .child("Close")
+                                    .child(tr(keys::CLOSE))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_story_composer(cx);
                                     })),
@@ -737,7 +747,7 @@ impl QuillApp {
                                             // path is optional — empty
                                             // keeps the current media.
                                             .child(if is_edit {
-                                                "Replace media (optional — empty keeps the current)"
+                                                tr(keys::Q_MEDIA_REPLACE_MEDIA_OPTIONAL_EMPTY_KEEPS)
                                                     .to_string()
                                             } else {
                                                 format!("{} file", kind.label())
@@ -745,15 +755,18 @@ impl QuillApp {
                                     )
                                     .child(
                                         Textarea::new(&self.stories.composer_path)
-                                            .aria_label("Story media file path")
+                                            .aria_label(tr(keys::Q_MEDIA_STORY_MEDIA_FILE_PATH))
                                             .h(px(40.)),
                                     )
                                     .child(
-                                        div().text_xs().text_color(text_muted()).child("Caption"),
+                                        div()
+                                            .text_xs()
+                                            .text_color(text_muted())
+                                            .child(tr(keys::Q_MEDIA_CAPTION)),
                                     )
                                     .child(
                                         Textarea::new(&self.stories.composer_caption)
-                                            .aria_label("Story caption")
+                                            .aria_label(tr(keys::Q_MEDIA_STORY_CAPTION))
                                             .h(px(64.)),
                                     ),
                             ),
@@ -768,7 +781,7 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(text_muted())
-                                .child("Who can see it"),
+                                .child(tr(keys::Q_MEDIA_WHO_CAN_SEE_IT)),
                         )
                         .child(privacy)
                     })
@@ -785,7 +798,7 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(text_muted())
-                                .child("Expires after"),
+                                .child(tr(keys::Q_MEDIA_EXPIRES_AFTER)),
                         )
                         .child(expiry)
                     })
@@ -794,34 +807,39 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(text_muted())
-                                .child("Story stickers"),
+                                .child(tr(keys::Q_MEDIA_STORY_STICKERS)),
                         )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(text_muted())
-                                .child("Link sticker URL"),
+                                .child(tr(keys::Q_MEDIA_LINK_STICKER_URL)),
                         )
                         .child(
                             Textarea::new(&self.stories.composer_link)
-                                .aria_label("Story link")
+                                .aria_label(tr(keys::Q_MEDIA_STORY_LINK))
                                 .h(px(32.)),
                         )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(text_muted())
-                                .child("Reaction stickers (emoji, space-separated)"),
+                                .child(tr(keys::Q_MEDIA_REACTION_STICKERS_EMOJI_SPACE_SEPARATED)),
                         )
                         .child(
                             Textarea::new(&self.stories.composer_reaction)
-                                .aria_label("Story reaction emoji")
+                                .aria_label(tr(keys::Q_MEDIA_STORY_REACTION_EMOJI))
                                 .h(px(32.)),
                         )
                     })
                     .when(!is_edit, |this| {
-                        this.child(div().text_xs().text_color(text_muted()).child("Options"))
-                            .child(toggles)
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(text_muted())
+                                .child(tr(keys::Q_MEDIA_OPTIONS)),
+                        )
+                        .child(toggles)
                     })
                     .when_some(status, |this, status| {
                         this.child(div().text_sm().text_color(text_bright()).child(status))
@@ -830,13 +848,13 @@ impl QuillApp {
                         Button::new("story-composer-post")
                             // Phase 9.5: the button follows the composer mode.
                             .label(if busy {
-                                "Working…"
+                                tr(keys::Q_MEDIA_WORKING)
                             } else if is_edit {
-                                "Save story"
+                                tr(keys::Q_MEDIA_SAVE_STORY)
                             } else if is_repost {
-                                "Repost story"
+                                tr(keys::Q_MEDIA_REPOST_STORY)
                             } else {
-                                "Post story"
+                                tr(keys::Q_MEDIA_POST_STORY)
                             })
                             .disabled(busy)
                             .on_click(cx.listener(|this, _, _, cx| {

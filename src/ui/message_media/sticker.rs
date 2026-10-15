@@ -1,6 +1,7 @@
 //! Sticker attachments.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 pub(in crate::ui) fn sticker_attachment(
     row_id: u64,
@@ -76,7 +77,10 @@ pub(in crate::ui) fn sticker_attachment(
     // of the sticker itself so the row doesn't jump when it arrives.
     let downloading_now = file_is_downloading(display_id, files, downloading);
     let label = if downloading_now {
-        format!("{} — downloading", sticker_label(sticker))
+        tr_with(
+            keys::Q_MEDIA_DOWNLOADING_3,
+            &[("sticker_label", &(sticker_label(sticker)).to_string())],
+        )
     } else {
         sticker_label(sticker)
     };
@@ -124,8 +128,11 @@ pub(in crate::ui) fn sticker_box(width: i32, height: i32) -> (Pixels, Pixels) {
 
 pub(in crate::ui) fn sticker_label(sticker: &quill::telegram::envelope::StickerContent) -> String {
     if sticker.emoji.is_empty() {
-        "Sticker".into()
+        tr(keys::IN_DLG_STICKER).into()
     } else {
-        format!("Sticker {}", sticker.emoji)
+        tr_with(
+            keys::Q_MEDIA_STICKER_2,
+            &[("emoji", &sticker.emoji.to_string())],
+        )
     }
 }

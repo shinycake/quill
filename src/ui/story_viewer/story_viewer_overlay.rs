@@ -1,6 +1,7 @@
 //! Methods moved out of `story_viewer.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase 9.1: fullscreen story overlay, modeled on
@@ -40,7 +41,9 @@ impl QuillApp {
             .session()
             .and_then(|s| s.chats.get(&item.chat_id.0))
             .map(|chat| chat.title.clone())
-            .unwrap_or_else(|| format!("Chat {}", item.chat_id.0));
+            .unwrap_or_else(|| {
+                tr_with(keys::Q_MEDIA_CHAT_3, &[("0", &item.chat_id.0.to_string())])
+            });
         let files: HashMap<i32, ParsedFile> = self
             .session()
             .map(|s| s.media.files.clone())
@@ -58,7 +61,15 @@ impl QuillApp {
             .any(|id| file_is_downloading(*id, &files, &downloading));
         let kind_label = item.kind.label();
         let header_label = if total > 1 {
-            format!("{poster} · {kind_label} {position} of {total}")
+            tr_with(
+                keys::Q_MEDIA_OF,
+                &[
+                    ("poster", &poster.to_string()),
+                    ("kind_label", kind_label),
+                    ("position", &position.to_string()),
+                    ("total", &total.to_string()),
+                ],
+            )
         } else {
             format!("{poster} · {kind_label}")
         };
@@ -84,18 +95,30 @@ impl QuillApp {
                         .items_center()
                         .justify_center()
                         .text_color(text_bright())
-                        .child(format!("{kind_label} — could not render"))
+                        .child(tr_with(
+                            keys::Q_MEDIA_COULD_NOT_RENDER_2,
+                            &[("kind_label", kind_label)],
+                        ))
                         .into_any_element()
                 })
                 .into_any_element()
         } else {
             let status = if downloading_now {
-                format!("{kind_label} — downloading…")
+                tr_with(keys::Q_MEDIA_DOWNLOADING_2, &[("kind_label", kind_label)])
             } else {
-                format!("{kind_label} — not downloaded")
+                tr_with(
+                    keys::Q_MEDIA_NOT_DOWNLOADED_2,
+                    &[("kind_label", kind_label)],
+                )
             };
             let status = match (&item.duration_label, downloading_now) {
-                (Some(duration), _) => format!("Video · {duration} — {status}"),
+                (Some(duration), _) => tr_with(
+                    keys::Q_MEDIA_VIDEO_3,
+                    &[
+                        ("duration", &duration.to_string()),
+                        ("status", &status.to_string()),
+                    ],
+                ),
                 _ => status,
             };
             // stories-live-play: live stories backed by an ordinary group
@@ -104,41 +127,48 @@ impl QuillApp {
             // honest placeholder.
             let joinable = matches!(item.kind, StoryViewerKind::Live)
                 && item.live_call.is_some_and(|call| !call.is_rtmp_stream);
-            let body: AnyElement =
-                if joinable {
-                    let chat_id = item.chat_id;
-                    let story_id = item.story_id;
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_3()
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(text_bright())
-                                .child("🔴 Live story"),
-                        )
-                        .child(Button::new("story-join-live").label("Join live").on_click(
-                            cx.listener(move |this, _, _, cx| {
+            let body: AnyElement = if joinable {
+                let chat_id = item.chat_id;
+                let story_id = item.story_id;
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(text_bright())
+                            .child(tr(keys::Q_MEDIA_LIVE_STORY)),
+                    )
+                    .child(
+                        Button::new("story-join-live")
+                            .label(tr(keys::Q_MEDIA_JOIN_LIVE))
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 this.join_live_story_from_viewer(chat_id, story_id, cx);
-                            }),
-                        ))
-                        .into_any_element()
+                            })),
+                    )
+                    .into_any_element()
+            } else {
+                let status = if matches!(item.kind, StoryViewerKind::Live) {
+                    tr_with(
+                        keys::Q_MEDIA_RTMP_PLAYBACK_IS_NOT_SUPPORTED,
+                        &[("kind_label", kind_label)],
+                    )
+                } else if matches!(item.kind, StoryViewerKind::Unsupported) {
+                    tr_with(
+                        keys::Q_MEDIA_NOT_SUPPORTED_IN_THIS_SLICE,
+                        &[("kind_label", kind_label)],
+                    )
                 } else {
-                    let status = if matches!(item.kind, StoryViewerKind::Live) {
-                        format!("{kind_label} — RTMP playback is not supported yet")
-                    } else if matches!(item.kind, StoryViewerKind::Unsupported) {
-                        format!("{kind_label} — not supported in this slice")
-                    } else {
-                        status
-                    };
-                    div()
-                        .text_sm()
-                        .text_color(text_bright())
-                        .child(status)
-                        .into_any_element()
+                    status
                 };
+                div()
+                    .text_sm()
+                    .text_color(text_bright())
+                    .child(status)
+                    .into_any_element()
+            };
             div()
                 .id(("story-viewer-loading", item.story_id as u64))
                 .w(px(360.))
@@ -216,7 +246,7 @@ impl QuillApp {
                 .bg(rgba(0x00000099))
                 .text_xs()
                 .text_color(rgb(0xffffff))
-                .child("Paused")
+                .child(tr(keys::Q_MEDIA_PAUSED))
         });
         let visual: AnyElement = div()
             .id(("story-viewer-media", item.story_id as u64))
@@ -309,7 +339,7 @@ impl QuillApp {
                                 div()
                                     .id("story-viewer-close")
                                     .role(gpui_kit::Role::Button)
-                                    .aria_label("Close story viewer")
+                                    .aria_label(tr(keys::Q_MEDIA_CLOSE_STORY_VIEWER))
                                     .tab_index(0)
                                     .cursor_pointer()
                                     .pressable(cx.theme())
@@ -317,7 +347,7 @@ impl QuillApp {
                                     .py_1()
                                     .rounded_md()
                                     .text_color(text_bright())
-                                    .child("Close")
+                                    .child(tr(keys::CLOSE))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_story_viewer(cx);
                                     })),
@@ -342,7 +372,7 @@ impl QuillApp {
                             .gap_2()
                             .child(
                                 Button::new("story-viewer-prev")
-                                    .label("‹ Prev")
+                                    .label(tr(keys::Q_MEDIA_PREV))
                                     .ghost()
                                     .text_color(text_bright())
                                     .disabled(position <= 1)
@@ -352,7 +382,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new("story-viewer-next")
-                                    .label("Next ›")
+                                    .label(tr(keys::Q_MEDIA_NEXT))
                                     .ghost()
                                     .text_color(text_bright())
                                     .disabled(position >= total)
