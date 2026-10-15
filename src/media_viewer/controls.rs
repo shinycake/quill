@@ -45,10 +45,26 @@ pub fn decide_viewer_video_start(
 /// Telegram Desktop `mediaviewWaitHide` (media_view.style:279): controls
 /// hide after this long without mouse movement.
 pub const VIEWER_WAIT_HIDE_MS: u64 = 1100;
-/// `mediaviewFadeDuration` (media_view.style:282): controls fade time.
+/// `mediaviewFadeDuration` (media_view.style:282): the cross-fade of a
+/// control's hover state in tdesktop.
 pub const VIEWER_FADE_MS: u64 = 150;
-/// `mediaviewShowDuration` (media_view.style:281): overlay fade-in time.
+/// `mediaviewShowDuration` (media_view.style:281): overlay fade-in time, and
+/// the time the controls take to show again.
 pub const VIEWER_SHOW_MS: u64 = 200;
+/// `mediaviewHideDuration` (media_view.style:280): the controls fade out
+/// over this long after the idle wait.
+pub const VIEWER_HIDE_MS: u64 = 600;
+
+/// How long the viewer controls take to fade to `hidden`: out over
+/// [`VIEWER_HIDE_MS`], back in over [`VIEWER_SHOW_MS`]
+/// (`OverlayWidget::updateControlsAnimation`).
+pub fn controls_fade_ms(hidden: bool) -> u64 {
+    if hidden {
+        VIEWER_HIDE_MS
+    } else {
+        VIEWER_SHOW_MS
+    }
+}
 
 /// Whether the viewer controls should be hidden now: the pointer has been
 /// still for `VIEWER_WAIT_HIDE_MS` and is not resting on a control.
@@ -97,8 +113,14 @@ pub fn seek_target_secs(position: f64, duration: f64, delta_secs: f64) -> f64 {
 /// zoom) stay on the app's action bindings.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ViewerKeyAction {
-    /// Space / K / Enter on a playing clip.
+    /// K / Enter on a playing clip.
     TogglePlayback,
+    /// Space: a tap toggles pause on release, a hold plays at 2x until the
+    /// release (`mediaviewSpeedBoostHoldDelay`, see [`super::BoostState`]).
+    HoldSpace,
+    /// `.` (forward) / `,` (back) while paused: one frame
+    /// (`_frameStepPending`, :7346).
+    StepFrame(bool),
     /// `J` / `L` (10 s) and the arrows in full-screen video (5 s).
     SeekBy(f64),
     /// Full-screen video: `0` restarts, `1`..`9` jump to n/10 of the clip.
@@ -126,11 +148,13 @@ impl ViewerKeyMods {
 /// "5") to the clip action it triggers, for a viewer showing `kind`.
 /// `video_fullscreen` is the viewer's video full-screen mode. `None` when
 /// the key is not a playback key (it then reaches the normal bindings).
+/// `paused` is whether the clip is paused (frame step works only then).
 pub fn viewer_key_action(
     key: &str,
     mods: ViewerKeyMods,
     kind: MediaViewerKind,
     video_fullscreen: bool,
+    paused: bool,
 ) -> Option<ViewerKeyAction> {
     if !kind.is_playable() {
         return None;
@@ -142,7 +166,10 @@ pub fn viewer_key_action(
         return None;
     }
     match key {
-        "k" | "space" | "enter" | "return" => Some(ViewerKeyAction::TogglePlayback),
+        "space" => Some(ViewerKeyAction::HoldSpace),
+        "k" | "enter" | "return" => Some(ViewerKeyAction::TogglePlayback),
+        "." if paused => Some(ViewerKeyAction::StepFrame(true)),
+        "," if paused => Some(ViewerKeyAction::StepFrame(false)),
         "j" => Some(ViewerKeyAction::SeekBy(-VIEWER_SEEK_LONG_SECS)),
         "l" => Some(ViewerKeyAction::SeekBy(VIEWER_SEEK_LONG_SECS)),
         "left" if video_fullscreen => Some(ViewerKeyAction::SeekBy(-VIEWER_SEEK_SECS)),
@@ -261,14 +288,23 @@ mod tests {
     }
 
     fn keys(key: &str, kind: MediaViewerKind, fullscreen: bool) -> Option<ViewerKeyAction> {
-        viewer_key_action(key, ViewerKeyMods::default(), kind, fullscreen)
+        viewer_key_action(key, ViewerKeyMods::default(), kind, fullscreen, false)
     }
 
     #[test]
     fn playback_keys_follow_tdesktop() {
         use MediaViewerKind::{Animation, Photo, Video};
-        // Space, K and Enter pause / resume (handleKeyPress :7329, :7416).
-        for key in ["space", "k", "enter"] {
+        // Space arms the hold-to-boost timer (:7332); K and Enter pause /
+        // resume at once (:7329, :7416).
+        assert_eq!(
+            keys("space", Video, false),
+            Some(ViewerKeyAction::HoldSpace)
+        );
+        assert_eq!(
+            keys("space", Animation, true),
+            Some(ViewerKeyAction::HoldSpace)
+        );
+        for key in ["k", "enter"] {
             assert_eq!(
                 keys(key, Video, false),
                 Some(ViewerKeyAction::TogglePlayback)
@@ -329,22 +365,56 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            viewer_key_action("enter", ctrl, MediaViewerKind::Video, false),
+            viewer_key_action("enter", ctrl, MediaViewerKind::Video, false, false),
             Some(ViewerKeyAction::ToggleFullscreen)
         );
         assert_eq!(
-            viewer_key_action("enter", alt, MediaViewerKind::Video, false),
+            viewer_key_action("enter", alt, MediaViewerKind::Video, false, false),
             Some(ViewerKeyAction::ToggleFullscreen)
         );
         assert_eq!(
-            viewer_key_action("enter", alt, MediaViewerKind::Photo, false),
+            viewer_key_action("enter", alt, MediaViewerKind::Photo, false, false),
             None
         );
         // Cmd/Ctrl + K is quick switch, not play/pause.
         assert_eq!(
-            viewer_key_action("k", ctrl, MediaViewerKind::Video, false),
+            viewer_key_action("k", ctrl, MediaViewerKind::Video, false, false),
             None
         );
+    }
+
+    #[test]
+    fn frame_step_keys_work_only_while_paused() {
+        use MediaViewerKind::{Photo, Video};
+        let paused =
+            |key: &str, kind| viewer_key_action(key, ViewerKeyMods::default(), kind, false, true);
+        assert_eq!(paused(".", Video), Some(ViewerKeyAction::StepFrame(true)));
+        assert_eq!(paused(",", Video), Some(ViewerKeyAction::StepFrame(false)));
+        // Full screen too.
+        assert_eq!(
+            viewer_key_action(".", ViewerKeyMods::default(), Video, true, true),
+            Some(ViewerKeyAction::StepFrame(true))
+        );
+        // Playing: the keys pass through (tdesktop checks `paused()`).
+        assert_eq!(keys(".", Video, false), None);
+        assert_eq!(keys(",", Video, false), None);
+        // With a modifier, or on a photo: not a frame step.
+        let shift = ViewerKeyMods {
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(viewer_key_action(".", shift, Video, false, true), None);
+        assert_eq!(paused(".", Photo), None);
+        // Space and K keep their meaning while paused.
+        assert_eq!(paused("space", Video), Some(ViewerKeyAction::HoldSpace));
+        assert_eq!(paused("k", Video), Some(ViewerKeyAction::TogglePlayback));
+        assert_eq!(paused("l", Video), Some(ViewerKeyAction::SeekBy(10.0)));
+    }
+
+    #[test]
+    fn controls_show_fast_and_hide_slowly() {
+        assert_eq!(controls_fade_ms(false), 200);
+        assert_eq!(controls_fade_ms(true), 600);
     }
 
     #[test]

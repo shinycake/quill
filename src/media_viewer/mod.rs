@@ -20,6 +20,7 @@ use crate::telegram::envelope::{MessageActions, MessageContent, PhotoContent, Se
 use crate::text::TextEntity;
 use crate::voice::format_voice_duration;
 
+mod boost;
 mod controls;
 mod files;
 mod items;
@@ -28,10 +29,15 @@ mod save;
 mod transform;
 mod ttl;
 
+pub use boost::{
+    BOOST_STALE_MS, BoostPress, BoostRelease, BoostState, SPEED_BOOST_HOLD_MS, SPEED_BOOST_RATE,
+    WAITING_SHOW_DELAY_MS, waiting_shown, waiting_wait,
+};
 pub use controls::{
-    VIEWER_FADE_MS, VIEWER_SEEK_LONG_SECS, VIEWER_SEEK_SECS, VIEWER_SHOW_MS, VIEWER_WAIT_HIDE_MS,
-    ViewerKeyAction, ViewerKeyMods, ViewerVideoStart, controls_hide_wait_ms, controls_should_hide,
-    decide_viewer_video_start, seek_target_secs, viewer_delete_gate, viewer_key_action,
+    VIEWER_FADE_MS, VIEWER_HIDE_MS, VIEWER_SEEK_LONG_SECS, VIEWER_SEEK_SECS, VIEWER_SHOW_MS,
+    VIEWER_WAIT_HIDE_MS, ViewerKeyAction, ViewerKeyMods, ViewerVideoStart, controls_fade_ms,
+    controls_hide_wait_ms, controls_should_hide, decide_viewer_video_start, seek_target_secs,
+    viewer_delete_gate, viewer_key_action,
 };
 pub use files::{
     PICTURE_FILE_AUTO_DOWNLOAD_MAX, READ_BYTES_LIMIT, collect_file_items, file_viewer_item,
