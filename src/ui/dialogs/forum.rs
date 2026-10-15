@@ -2,6 +2,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 
 /// The topic being created or edited in the manage dialog (tdesktop
 /// `EditForumTopicBox`): a name, a color for the plain icon and an
@@ -34,7 +35,7 @@ impl ForumManageDialog {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>, chat_id: ChatId) -> Self {
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Topic name")
+                .placeholder(tr(keys::FORUM_TOPIC_TITLE))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

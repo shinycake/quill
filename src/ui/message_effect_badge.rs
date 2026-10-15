@@ -16,6 +16,7 @@ use super::app::QuillApp;
 use super::nested_click::SwallowPress;
 use gpui_kit::TestSupportExt;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::message_effects::MessageEffect;
 use quill::state::{HistoryMessage, Session};
@@ -313,7 +314,7 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
         .justify_center()
         .cursor_pointer()
         .role(Role::Button)
-        .aria_label("Replay the message effect")
+        .aria_label(tr(keys::Q_REST_REPLAY_THE_MESSAGE_EFFECT))
         .swallow_press()
         .on_click(move |_, _, cx| {
             REPLAYS.with(|replays| replays.borrow_mut().push(key));

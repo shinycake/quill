@@ -374,7 +374,7 @@ impl QuillApp {
         for (icon, title, text) in rows {
             body = body.child(feature_row(icon, title, text, cx));
         }
-        BoxView::new("Gift Crafting", body).footer(
+        BoxView::new(tr(keys::GIFT_CRAFT_INFO_TITLE), body).footer(
             div()
                 .flex()
                 .justify_end()
@@ -395,10 +395,10 @@ impl QuillApp {
         }
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Craft Gift", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_TITLE), div());
         };
         let Some(craft) = session.payments.gift_market.craft.as_ref() else {
-            return BoxView::new("Craft Gift", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_TITLE), div());
         };
         let name = craft
             .slots
@@ -546,7 +546,7 @@ impl QuillApp {
         )
         .disabled(!ready)
         .on_click(cx.listener(|this, _, _, cx| this.craft_now(cx)));
-        BoxView::new("Craft Gift", div().child(panel)).footer(
+        BoxView::new(tr(keys::GIFT_CRAFT_TITLE), div().child(panel)).footer(
             div()
                 .flex()
                 .justify_end()
@@ -565,10 +565,10 @@ impl QuillApp {
         self.request_animation_tick(30, cx);
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Crafting", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_PROGRESS), div());
         };
         let Some(craft) = session.payments.gift_market.craft.as_ref() else {
-            return BoxView::new("Crafting", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_PROGRESS), div());
         };
         let (_, _, glow, _) = craft_colors(craft.slots.len());
         let pulse = 0.35 + 0.25 * (elapsed * std::f32::consts::TAU / 1.5).sin();
@@ -635,16 +635,16 @@ impl QuillApp {
                     .opacity(PANEL_MUTED_ALPHA)
                     .child(tr(keys::GIFT_CRAFT_ABOUT2)),
             );
-        BoxView::new("Crafting", div().child(panel))
+        BoxView::new(tr(keys::GIFT_CRAFT_PROGRESS), div().child(panel))
     }
 
     pub(super) fn craft_result_box(&mut self, cx: &mut Context<Self>) -> BoxView {
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Crafting Failed", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_FAILED_TITLE), div());
         };
         let Some(craft) = session.payments.gift_market.craft.as_ref() else {
-            return BoxView::new("Crafting Failed", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_FAILED_TITLE), div());
         };
         let close = Button::new("craft-result-close")
             .label(tr(keys::CLOSE))
@@ -711,7 +711,7 @@ impl QuillApp {
                         text.lines()
                             .map(|line| with_bold(line.to_string(), &[lost.as_str()])),
                     );
-                BoxView::new("Crafting Failed", body)
+                BoxView::new(tr(keys::GIFT_CRAFT_FAILED_TITLE), body)
                     .footer(footer(tr(keys::GIFT_CRAFT_NEW_BUTTON), cx))
             }
         }

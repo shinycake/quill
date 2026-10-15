@@ -104,10 +104,10 @@ impl QuillApp {
     pub(super) fn resale_buy_box(&mut self, cx: &mut Context<Self>) -> BoxView {
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Buy", div());
+            return BoxView::new(tr(keys::Q_REST_BUY), div());
         };
         let Some(buy) = session.payments.gift_market.buy.as_ref() else {
-            return BoxView::new("Buy", div());
+            return BoxView::new(tr(keys::Q_REST_BUY), div());
         };
         let gift = &buy.listing.gift;
         let name = gift.full_name();

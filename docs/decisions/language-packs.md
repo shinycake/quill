@@ -437,6 +437,16 @@ auto-download kinds and the passkeys page. The strings check baseline
 drops from 293 to 204. `quill-tools/lang/table.py` does the literal
 part; call sites take `tr(key)`.
 
+## PR 14: the long tail
+
+The strings left in 89 files after the area PRs are converted
+(`lang/en/rest.strings`): gift link and crafting boxes (the tool now
+treats `BoxView::new` titles as text), auctions, resale, translation
+toasts, language link boxes and others. The baseline drops from 204 to
+148. What remains is mostly internal page ids in `navigation.rs` that look
+like text, playback files, `history/session_history_row.rs` (needs a
+split) and `security/passkeys.rs` (another thread is changing it).
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

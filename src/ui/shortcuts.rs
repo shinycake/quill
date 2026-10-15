@@ -13,6 +13,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -93,7 +94,7 @@ impl QuillApp {
             }
             let footer = div().flex().justify_end().child(
                 Button::new("close-shortcuts")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.settings.shortcuts_open = false;
@@ -103,7 +104,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Keyboard Shortcuts"))
+                .title(crate::ui::shell::dialog_title(tr(keys::SETTINGS_SHORTCUTS)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.

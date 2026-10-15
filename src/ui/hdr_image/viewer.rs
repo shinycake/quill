@@ -5,6 +5,7 @@
 use super::HdrPixels;
 use crate::ui::QuillApp;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -285,14 +286,16 @@ pub(crate) fn badge_element(badge: HdrBadge) -> AnyElement {
         HdrBadge::Shown => div()
             .id("media-viewer-hdr")
             .child(tag)
-            .tooltip(|window, cx| Tooltip::new("Shown in high dynamic range").build(window, cx))
+            .tooltip(|window, cx| {
+                Tooltip::new(tr(keys::Q_REST_SHOWN_IN_HIGH_DYNAMIC_RANGE)).build(window, cx)
+            })
             .into_any_element(),
         HdrBadge::StandardRange => div()
             .id("media-viewer-hdr")
             .opacity(0.6)
             .child(tag)
             .tooltip(|window, cx| {
-                Tooltip::new("Shown in standard range on this display").build(window, cx)
+                Tooltip::new(tr(keys::Q_REST_SHOWN_IN_STANDARD_RANGE_ON)).build(window, cx)
             })
             .into_any_element(),
     }

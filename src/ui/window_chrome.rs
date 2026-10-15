@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::window_title::{TitleChat, window_title};
 
 impl QuillApp {
@@ -44,7 +45,7 @@ impl QuillApp {
             if let Some(topic) = &topic {
                 topic.name.clone()
             } else if session.is_saved_messages(chat.id) {
-                "Saved Messages".to_string()
+                tr(keys::SAVED_MESSAGES).to_string()
             } else {
                 chat.title.clone()
             }

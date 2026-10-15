@@ -296,13 +296,13 @@ impl QuillApp {
         self.ensure_bid_slider(gift_id, cx);
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Place a Bid", div());
+            return BoxView::new(tr(keys::AUCTION_JOIN_BID), div());
         };
         let Some(state) = session.payments.gift_market.auctions.get(&gift_id) else {
-            return BoxView::new("Place a Bid", div());
+            return BoxView::new(tr(keys::AUCTION_JOIN_BID), div());
         };
         let Some(slider) = self.gift_market.slider.as_ref() else {
-            return BoxView::new("Place a Bid", div());
+            return BoxView::new(tr(keys::AUCTION_JOIN_BID), div());
         };
         self.request_animation_tick(1, cx);
         let now = now_unix();
