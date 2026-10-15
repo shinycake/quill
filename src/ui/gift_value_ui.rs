@@ -11,6 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::entity_links::OpenLinkConfirm;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::assets::IconName;
@@ -209,8 +210,23 @@ impl QuillApp {
             url: url.clone(),
             label: None,
         };
-        if let OpenDecision::Open = open_decision(&link) {
-            self.open_message_url(&url, cx);
+        match open_decision(&link) {
+            OpenDecision::Open => self.open_message_url(&url, cx),
+            // A look-alike address asks first, in the same "Open this
+            // link?" box a message link uses; its Open button opens it.
+            OpenDecision::Confirm {
+                url,
+                shown,
+                suspicious,
+            } => {
+                self.message_ui.open_link_confirm = Some(OpenLinkConfirm {
+                    url,
+                    shown,
+                    suspicious,
+                    from_poll_option: false,
+                });
+                cx.notify();
+            }
         }
     }
 
@@ -236,23 +252,22 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let theme = cx.theme();
-            let (muted, primary, on_primary) = (
-                theme.muted_foreground,
-                theme.primary,
-                theme.primary_foreground,
-            );
+            let (muted, primary) = (theme.muted_foreground, theme.primary);
 
+            // tdesktop's accent pill (`uniqueGiftValuePrice`): a kit Tag,
+            // like the change pill in the table.
             let price = div()
                 .id("gift-value-price")
                 .debug_selector(|| "gift-value-price".to_string())
-                .px_4()
-                .py_1()
-                .rounded_full()
-                .bg(primary)
-                .text_color(on_primary)
-                .text_2xl()
-                .font_semibold()
-                .child(format_value_price(info.value, &info.currency, false));
+                .child(
+                    Tag::primary()
+                        .rounded_full()
+                        .px_4()
+                        .py_1()
+                        .text_2xl()
+                        .font_semibold()
+                        .child(format_value_price(info.value, &info.currency, false)),
+                );
             let (about, bold) = about_text(&info, &lookup.title, &lookup.full_name);
             let about = div()
                 .id("gift-value-about")

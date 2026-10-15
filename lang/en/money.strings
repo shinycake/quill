@@ -307,6 +307,7 @@
 "lng_username_text_copied" = "Username copied to clipboard.";
 "lng_view_button_boost" = "Boost";
 "qll_gift_value_couldnt_load" = "Couldn't load the value: {reason}";
+"qll_gift_value_not_sent" = "Couldn't load the value. Check your connection and try again.";
 "qll_grams_could_not_load" = "Couldn't load your Grams.";
 "qll_grams_entry_payout" = "Payout";
 "qll_grams_entry_stake" = "Stake";

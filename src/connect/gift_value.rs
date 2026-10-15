@@ -41,10 +41,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.send_json_request(extra, &json) {
             if let Some(current) = self.session.payments.hub.gift_value.as_mut() {
                 current.loading = false;
-                current.error = Some(crate::lang::tr_with(
-                    crate::lang::keys::Q_GIFT_VALUE_COULDNT_LOAD,
-                    &[("reason", &format!("{err:?}"))],
-                ));
+                // The request never left (not connected): say so plainly.
+                current.error =
+                    Some(crate::lang::tr(crate::lang::keys::Q_GIFT_VALUE_NOT_SENT).to_string());
             }
             return Err(err);
         }

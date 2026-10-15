@@ -47,8 +47,8 @@ gift export PR also lands.
   one. The request is a read; nothing moves Stars, Grams or gifts.
 - `src/ui/gift_value_ui.rs`: the Value row (in the received gift box and the
   resale buy box), and the kit `Dialog` (420 px): sticker, price pill,
-  about text with the bold name, a kit `DescriptionList` table with a kit
-  `Tag` for the change and `Tooltip`s on the info marks, the links as ghost
+  about text with the bold name (the price pill is a kit `Tag`), a kit
+  `DescriptionList` table with a kit `Tag` for the change and `Tooltip`s on the info marks, the links as ghost
   `Button`s, OK.
 - Strings in `lang/en/money.strings` under tdesktop's keys (including its
   `lng_gift_vlaue_average_price` spelling) plus `lng_month_day*`;
@@ -71,8 +71,14 @@ gift export PR also lands.
   the list above the box).
 - While the value loads, the pill is inert and a kit `Spinner` shows next to
   it; a failure shows in red under the row (tdesktop shows nothing).
-- The Fragment link is offered only for an `https://` URL and opens through
-  `link_policy`.
+- The Fragment row is hidden when `fragment_url` is empty or not an
+  `https://` URL, even when `fragment_listed_gift_count` is above zero
+  (tdesktop shows it and opens whatever URL it got). A shown row opens
+  through `link_policy`: an ordinary address opens at once, a look-alike
+  one asks first in the same "Open this link?" box a message link uses.
+- When the request cannot be sent at all (not connected), the row says so
+  in plain words (`qll_gift_value_not_sent`); a TDLib error shows its
+  reason.
 - The `{emoji}` in the links is the gift's sticker drawn small, not a custom
   emoji.
 
@@ -88,8 +94,9 @@ gift export PR also lands.
   are dropped; the live answer opens the box; a known value reopens without
   a request; a failure is shown and a retry sends again.
 - GPUI UI tests (`ui/gift_value_ui_tests.rs`): the box parts, OK closing it,
-  the spinner while loading, reopening a known value, the error line, and
-  the Telegram link opening the resale list.
+  the spinner while loading, reopening a known value, the error line, the
+  Telegram link opening the resale list, and a look-alike Fragment address
+  opening the "Open this link?" box instead of the browser.
 - Screenshots of every demo view, compared against tdesktop's layout.
 
 Not verified: the request against a live account (fixtures only), and the

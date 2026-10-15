@@ -169,3 +169,38 @@ fn telegram_listings_open_the_resale_list(cx: &mut TestAppContext) {
     assert_eq!(top, Some(MarketBox::Resale));
     assert!(vcx.debug_bounds("gift-value-box").is_none());
 }
+
+#[gpui_kit::test]
+fn a_look_alike_fragment_address_asks_before_opening(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // "fragmеnt.com" with a Cyrillic "е": the link policy asks first.
+    let url = "https://fragm\u{0435}nt.com/gifts/plushpepe";
+    let link = quill::text::LinkTarget::Url {
+        url: url.into(),
+        label: None,
+    };
+    assert!(matches!(
+        quill::link_policy::open_decision(&link),
+        quill::link_policy::OpenDecision::Confirm { .. }
+    ));
+    let info = fixture(LAST).map(|info| GiftValueInfo {
+        fragment_url: url.into(),
+        ..info
+    });
+    set_lookup(&app, vcx, with_info(info, true));
+    let note_before = app.read_with(vcx, |app, _| app.connection.status_note.clone());
+    click(vcx, "gift-value-on-fragment");
+    let (confirm, note) = app.read_with(vcx, |app, _| {
+        (
+            app.message_ui.open_link_confirm.clone(),
+            app.connection.status_note.clone(),
+        )
+    });
+    let confirm = confirm.expect("the Open this link? box");
+    assert_eq!(confirm.url, url);
+    assert!(!confirm.suspicious.is_empty());
+    // Nothing was opened yet; the confirm box covers the value box.
+    assert_eq!(note, note_before);
+    assert!(vcx.debug_bounds("gift-value-box").is_none());
+}
