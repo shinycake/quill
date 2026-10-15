@@ -43,6 +43,7 @@ use quill::calls::engine::{StreamState, VideoFrame};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::ActiveGroupCall;
+use quill::telegram::envelope::MessageSender;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -75,20 +76,26 @@ const DRAG_THRESHOLD: f32 = 4.;
 /// A join that neither lands nor reports an error gives up after this.
 const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// You asked to watch a stream: the window joins it once it is tracked.
+/// You asked to watch a stream, or created a call: the window joins it
+/// once it is tracked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StreamJoinIntent {
-    /// The chat's video chat button or a stream link: this call.
+    /// The chat's video chat button or a stream link: this call, joined
+    /// when it is a stream.
     Call(i32),
-    /// A stream started here: the chat's new call.
-    Chat(i64),
+    /// You created the chat's new call (tdesktop `createGroupCall` joins
+    /// it right away): joined whatever its kind, as `join_as` when set.
+    Created {
+        chat: i64,
+        join_as: Option<MessageSender>,
+    },
 }
 
 impl StreamJoinIntent {
     fn matches(self, call: i32, chat: Option<i64>) -> bool {
         match self {
             Self::Call(id) => id == call,
-            Self::Chat(id) => chat == Some(id),
+            Self::Created { chat: id, .. } => chat == Some(id),
         }
     }
 }
@@ -313,8 +320,27 @@ impl QuillApp {
         }
         let (id, stream, joined) = (call.id, uses_stream_layout(call), call.is_joined);
         self.group_call.stream.pending_join = None;
-        if stream && !joined {
-            self.join_stream(id, cx);
+        if joined {
+            return;
+        }
+        match intent {
+            StreamJoinIntent::Call(_) if stream => self.join_stream(id, cx),
+            StreamJoinIntent::Call(_) => {}
+            StreamJoinIntent::Created { join_as, .. } => {
+                if join_as.is_some() {
+                    if let Some(live) = self.live.as_mut() {
+                        live.driver.session.set_group_call_join_as(join_as);
+                    } else if let Some(session) = self.demo_session.as_mut() {
+                        session.set_group_call_join_as(join_as);
+                    }
+                }
+                if stream {
+                    self.join_stream(id, cx);
+                } else {
+                    self.send_group_call_join();
+                    cx.notify();
+                }
+            }
         }
     }
 

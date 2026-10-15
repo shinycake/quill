@@ -40,6 +40,7 @@ pub(crate) fn parse_groups_payload(
                     .unwrap_or(false),
                 can_manage_tags: parse_manage_tags_right(group.get("status")).unwrap_or(false),
                 can_change_info: parse_change_info_right(group.get("status")),
+                can_manage_video_chats: parse_manage_video_chats_right(group.get("status")),
                 is_active: group
                     .get("is_active")
                     .and_then(Value::as_bool)
@@ -104,6 +105,7 @@ pub(crate) fn parse_groups_payload(
                 can_send_welcome_messages: parse_send_welcome_messages_right(
                     supergroup.get("status"),
                 ),
+                can_manage_video_chats: parse_manage_video_chats_right(supergroup.get("status")),
                 // Slice G1: `supergroup.join_by_request` /
                 // `supergroup.is_broadcast_group` (schema 1.8.67, lines
                 // 2733/2736/2746).
@@ -169,6 +171,7 @@ pub(crate) fn parse_groups_payload(
             can_manage_topics: parse_manage_topics_right(value.get("status")),
             can_change_info: parse_change_info_right(value.get("status")),
             can_send_welcome_messages: parse_send_welcome_messages_right(value.get("status")),
+            can_manage_video_chats: parse_manage_video_chats_right(value.get("status")),
             // Slice G1: `supergroup.join_by_request` /
             // `supergroup.is_broadcast_group` (schema 1.8.67, lines
             // 2733/2736/2746).

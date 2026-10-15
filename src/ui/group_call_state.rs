@@ -11,8 +11,11 @@ use std::time::Instant;
 pub(crate) struct GroupCallUi {
     /// Phase C3a: voice-chat title rename dialog (`setVideoChatTitle`).
     pub(super) title_dialog: Option<GroupCallTitleDialog>,
-    /// Phase C2h: `createVideoChat` start/schedule dialog.
-    pub(super) start_dialog: Option<GroupCallStartDialog>,
+    /// Starting a video chat: leave-current, create and schedule boxes
+    /// (`dialogs/group_call_create.rs`).
+    pub(super) start_dialog: Option<super::dialogs::group_call_create::GroupCallCreate>,
+    /// The last `createVideoChat` sent, to match a server failure.
+    pub(super) create_request: Option<quill::ids::RequestId>,
     /// The call window's Settings box (`group_call_settings.rs`).
     pub(super) settings_open: bool,
     /// Phase C2h: in-call chat composer (sendGroupCallMessage).
@@ -55,6 +58,8 @@ pub(crate) struct GroupCallUi {
     pub(super) video_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
     /// The live stream layout (RTMP): picture, placeholder and controls.
     pub(super) stream: super::group_call_stream_layout::StreamWindow,
+    /// The "Stream with other apps" box (`dialogs/rtmp_stream.rs`).
+    pub(super) rtmp_start: super::dialogs::rtmp_stream::RtmpStartUi,
 }
 
 impl GroupCallUi {
@@ -63,6 +68,7 @@ impl GroupCallUi {
             composer,
             title_dialog: None,
             start_dialog: None,
+            create_request: None,
             settings_open: false,
             invite_open: false,
             share_open: false,
@@ -86,6 +92,7 @@ impl GroupCallUi {
             level_seen: 0.0,
             video_images: HashMap::new(),
             stream: Default::default(),
+            rtmp_start: Default::default(),
         }
     }
 }

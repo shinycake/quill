@@ -129,6 +129,17 @@ impl Session {
                     | RequestPurpose::Calls(CallsPurpose::ReplaceVideoChatRtmpUrl { chat_id }),
                 ) = pending.map(|p| p.purpose)
                 {
+                    // "Stream with...": a chat with no call has nothing
+                    // tracked; the answer feeds its box instead.
+                    if let Some(start) = self.calls.rtmp_start.as_mut() {
+                        start.accept(
+                            extra,
+                            crate::calls::rtmp_start::RtmpInfo {
+                                url: url.clone(),
+                                key: stream_key.clone(),
+                            },
+                        );
+                    }
                     let call_id = self
                         .chats
                         .get(&chat_id)

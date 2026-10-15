@@ -26,6 +26,7 @@ mod admin;
 mod controls;
 mod join;
 mod link;
+mod rtmp_start;
 pub(crate) mod stream;
 
 impl<S: JsonSender> ConnectDriver<S> {
