@@ -8,7 +8,6 @@
 1 src/ui/appearance_power.rs
 1 src/ui/archive_row.rs
 1 src/ui/background_accounts/mod.rs
-14 src/ui/business/build.rs
 2 src/ui/business/chat_links.rs
 2 src/ui/business/chatbots.rs
 2 src/ui/business/hours.rs
@@ -50,11 +49,9 @@
 1 src/ui/giveaway_pick_ui.rs
 1 src/ui/group_admin_settings.rs
 2 src/ui/groups/build_group_confirm_dialog.rs
-34 src/ui/groups/mod.rs
 2 src/ui/hdr_image/viewer.rs
 8 src/ui/history/session_history_row.rs
 3 src/ui/inline_playback.rs
-27 src/ui/keybindings/mod.rs
 12 src/ui/link_info_boxes.rs
 1 src/ui/message_effect_badge.rs
 4 src/ui/message_media/audio.rs
@@ -79,13 +76,12 @@
 1 src/ui/profile_panels/submit_personal_photo.rs
 1 src/ui/profile_photo_sources/mod.rs
 1 src/ui/saved_sublists.rs
-15 src/ui/security/passkeys.rs
+13 src/ui/security/passkeys.rs
 1 src/ui/security_recovery.rs
 1 src/ui/send_box_options.rs
 2 src/ui/send_effects/preview.rs
 1 src/ui/sessions_extra.rs
 1 src/ui/settings_account_ui.rs
-12 src/ui/settings_ui.rs
 1 src/ui/shared_media.rs
 1 src/ui/shortcuts.rs
 2 src/ui/stars_gift_ui.rs

@@ -427,6 +427,16 @@ of them in `const` tables the conversion tool skips (admin rights, the
 Business page list, keyboard shortcut actions). The media viewer, players
 and group calls are skipped until the video player overhaul lands.
 
+## PR 13: const tables
+
+Tables of labels the conversion tool skips now hold `Key`s and are
+translated where they are shown: admin rights and chat permissions,
+keyboard shortcut actions (`RebindableAction::label`), the Business page
+list, the archive settings rows, the privacy radio labels, the
+auto-download kinds and the passkeys page. The strings check baseline
+drops from 293 to 204. `quill-tools/lang/table.py` does the literal
+part; call sites take `tr(key)`.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

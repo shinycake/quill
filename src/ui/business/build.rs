@@ -18,54 +18,54 @@ use std::rc::Rc;
 
 /// One hub row: what it opens (`None` is Quick Replies, its own dialog),
 /// icon, title and description, in tdesktop's fallback order.
-const FEATURES: [(Option<View>, IconName, &str, &str); 8] = [
+const FEATURES: [(Option<View>, IconName, quill::lang::Key, quill::lang::Key); 8] = [
     (
         Some(View::Greeting),
         IconName::Hand,
-        "Greeting Messages",
-        "Create greetings that will be automatically sent to new customers.",
+        keys::BUSINESS_SUBTITLE_GREETING_MESSAGES,
+        keys::BUSINESS_ABOUT_GREETING_MESSAGES,
     ),
     (
         Some(View::Away),
         IconName::Moon,
-        "Away Messages",
-        "Define messages that are automatically sent when you are off.",
+        keys::BUSINESS_SUBTITLE_AWAY_MESSAGES,
+        keys::BUSINESS_ABOUT_AWAY_MESSAGES,
     ),
     (
         None,
         IconName::Zap,
-        "Quick Replies",
-        "Set up shortcuts with rich text and media to respond to messages faster.",
+        keys::BUSINESS_SUBTITLE_QUICK_REPLIES,
+        keys::BUSINESS_ABOUT_QUICK_REPLIES,
     ),
     (
         Some(View::Hours),
         IconName::Clock,
-        "Opening Hours",
-        "Show to your customers when you are open for business.",
+        keys::BUSINESS_SUBTITLE_OPENING_HOURS,
+        keys::BUSINESS_ABOUT_OPENING_HOURS,
     ),
     (
         Some(View::Location),
         IconName::MapPin,
-        "Location",
-        "Display the location of your business on your account.",
+        keys::BUSINESS_SUBTITLE_LOCATION,
+        keys::BUSINESS_ABOUT_LOCATION,
     ),
     (
         Some(View::ChatLinks),
         IconName::Link,
-        "Links to Chat",
-        "Create links that start a chat with you, suggesting the first message.",
+        keys::BUSINESS_SUBTITLE_CHAT_LINKS,
+        keys::BUSINESS_ABOUT_CHAT_LINKS,
     ),
     (
         Some(View::StartPage),
         IconName::MessageSquareHeart,
-        "Custom Intro",
-        "Customize the message people see before they start a chat with you.",
+        keys::BUSINESS_SUBTITLE_CHAT_INTRO,
+        keys::BUSINESS_ABOUT_CHAT_INTRO,
     ),
     (
         Some(View::Chatbots),
         IconName::Bot,
-        "Chatbots",
-        "Add any third party chatbots that will process customer interactions.",
+        keys::BUSINESS_SUBTITLE_CHATBOTS,
+        keys::BUSINESS_ABOUT_CHATBOTS,
     ),
 ];
 
@@ -184,7 +184,7 @@ impl QuillApp {
                     .rounded_md()
                     .cursor_pointer()
                     .role(gpui_kit::Role::Button)
-                    .aria_label(title)
+                    .aria_label(tr(title))
                     .tab_index(0)
                     .hover(move |s| s.bg(hover))
                     .active(move |s| s.bg(active))
@@ -195,8 +195,8 @@ impl QuillApp {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().font_semibold().child(title))
-                            .child(div().text_xs().text_color(muted).child(about)),
+                            .child(div().text_sm().font_semibold().child(tr(title)))
+                            .child(div().text_xs().text_color(muted).child(tr(about))),
                     )
                     .child(
                         Icon::new(IconName::ChevronRight)

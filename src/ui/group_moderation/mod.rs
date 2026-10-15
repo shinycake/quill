@@ -635,7 +635,7 @@ impl QuillApp {
                     // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                     Checkbox::new(format!("g1-permission-{index}"))
                         .checked(enabled)
-                        .label(*label)
+                        .label(tr(*label))
                         .on_click(cx.listener(move |this, &on, _, cx| {
                             if on != enabled {
                                 this.toggle_permission(index, cx);
@@ -667,7 +667,7 @@ impl QuillApp {
                     // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                     Checkbox::new(format!("g1-restrict-permission-{index}"))
                         .checked(enabled)
-                        .label(*label)
+                        .label(tr(*label))
                         .on_click(cx.listener(move |this, &on, _, cx| {
                             if on != enabled {
                                 this.toggle_restrict_permission(index, cx);
@@ -731,7 +731,7 @@ impl QuillApp {
                     // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                     Checkbox::new(format!("{prefix}-{index}"))
                         .checked(enabled)
-                        .label(*label)
+                        .label(tr(*label))
                         .on_click(cx.listener(move |this, &on, _, cx| {
                             if on != enabled {
                                 this.toggle_admin_right(prefix.as_str(), index, cx);

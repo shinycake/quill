@@ -30,7 +30,7 @@ impl QuillApp {
                 .filter(|live| !live.is_empty())
                 .unwrap_or_else(|| "—".to_string());
             let id = ra.id.to_string();
-            let label = ra.label.to_string();
+            let label = tr(ra.label).to_string();
             let is_capturing = capturing.as_deref() == Some(ra.id);
             let persisted_error = row_state.and_then(|row| {
                 let conflict = row.rejected.as_ref()?;

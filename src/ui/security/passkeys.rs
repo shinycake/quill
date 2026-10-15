@@ -19,14 +19,15 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::local_time::{civil_local, now_unix};
 use quill::passkeys::{Passkey, PasskeysState, RowTarget, delete_question};
 use quill::power_saving;
 
-const TITLE: &str = "Passkeys";
-const ABOUT: &str = "Manage your passkey, stored safely in the cloud service you choose.";
-const BUTTON_ABOUT: &str = "Your passkey is stored securely in your password manager.";
+const TITLE: quill::lang::Key = keys::SETTINGS_PASSKEYS_TITLE;
+const ABOUT: quill::lang::Key = keys::SETTINGS_PASSKEYS_ABOUT;
+const BUTTON_ABOUT: quill::lang::Key = keys::Q_PREFS_YOUR_PASSKEY_IS_STORED_SECURELY;
 const ICON_SIZE: f32 = 32.;
 
 /// Which passkey surfaces are open.
@@ -64,7 +65,7 @@ impl QuillApp {
         let label = state.row_label().text();
         Some(
             Button::new("setting-Passkeys")
-                .label(TITLE)
+                .label(tr(TITLE))
                 .ghost()
                 .child(
                     div()
@@ -293,7 +294,13 @@ impl QuillApp {
                 .flex_col()
                 .gap_3()
                 .child(header_icon(IconName::UserKey, cx))
-                .child(div().text_sm().text_center().text_color(muted).child(ABOUT));
+                .child(
+                    div()
+                        .text_sm()
+                        .text_center()
+                        .text_color(muted)
+                        .child(tr(ABOUT)),
+                );
             // A confirmation whose passkey is gone (removed) is done.
             if let Some(id) = this.privacy.passkeys.confirm.as_deref()
                 && state.find(id).is_none()
@@ -313,7 +320,7 @@ impl QuillApp {
             let mut list = div()
                 .id("passkeys-list")
                 .role(Role::List)
-                .aria_label(TITLE)
+                .aria_label(tr(TITLE))
                 .flex()
                 .flex_col();
             for passkey in &state.list {
@@ -336,7 +343,7 @@ impl QuillApp {
                     .gap_1()
                     .text_xs()
                     .text_color(muted)
-                    .child(BUTTON_ABOUT)
+                    .child(tr(BUTTON_ABOUT))
                     .child(
                         Button::new("passkeys-learn-more")
                             .label("Learn more")
@@ -347,7 +354,7 @@ impl QuillApp {
             );
             let body = body.into_any_element();
             dialog
-                .title(crate::ui::shell::dialog_title(TITLE))
+                .title(crate::ui::shell::dialog_title(tr(TITLE)))
                 .width(px(440.))
                 .content(crate::ui::shell::scrollable_dialog_content(once(body)))
                 .on_close(on_close)

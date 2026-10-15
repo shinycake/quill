@@ -382,7 +382,12 @@ impl QuillApp {
                         grid = grid.child(
                             Checkbox::new(format!("add-bot-right-{index}"))
                                 .checked(enabled)
-                                .label(ADMIN_RIGHT_LABELS.get(index).copied().unwrap_or_default())
+                                .label(
+                                    ADMIN_RIGHT_LABELS
+                                        .get(index)
+                                        .map(|key| tr(*key))
+                                        .unwrap_or_default(),
+                                )
                                 .on_click(cx.listener(move |this, &on: &bool, window, cx| {
                                     if let Some(ProfileDialog::AddBot { rights, .. }) =
                                         &mut this.dialogs.profile_dialog

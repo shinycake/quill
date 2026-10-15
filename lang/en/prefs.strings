@@ -116,10 +116,14 @@
 "lng_sessions_system" = "System version";
 "lng_sessions_terminate" = "Terminate Session";
 "lng_sessions_terminate_all" = "Terminate all other sessions";
+"lng_settings_always_in_archive" = "Always keep archived";
 "lng_settings_archive_title" = "Archive Settings";
 "lng_settings_ask_ok" = "Ask a Volunteer";
 "lng_settings_auto_archive" = "Archive and Mute";
+"lng_settings_auto_archive_about" = "Automatically archive and mute new chats, groups and channels from non-contacts.";
 "lng_settings_calls" = "Calls";
+"lng_settings_chats_from_folders" = "Chats from folders";
+"lng_settings_chats_from_folders_about" = "Keep archived chats from folders in the Archive even if they are unmuted and get a new message.";
 "lng_settings_cloud_login_email_about" = "You will receive Telegram login codes via email and not SMS. Please enter an email address to which you have access.";
 "lng_settings_cloud_login_email_box_ok" = "Change email";
 "lng_settings_cloud_login_email_code_about" = "Please enter the code we have sent to your new email {email}";
@@ -164,6 +168,8 @@
 "lng_settings_notifications_display_default" = "Default";
 "lng_settings_notifications_position" = "Location on the screen";
 "lng_settings_passcode_title" = "Local passcode";
+"lng_settings_passkeys_about" = "Manage your passkey, stored safely in the cloud service you choose.";
+"lng_settings_passkeys_title" = "Passkeys";
 "lng_settings_privacy_title" = "Privacy";
 "lng_settings_quick_dialog_action_delete" = "Delete";
 "lng_settings_quick_dialog_action_title" = "Chat list quick action";
@@ -180,8 +186,11 @@
 "lng_settings_top_peers_about" = "Display people you message frequently at the top of the search section for quick access.";
 "lng_settings_ttl_after_off" = "Off";
 "lng_settings_ttl_after_subtitle" = "Self-destruct timer";
+"lng_settings_unmuted_chats" = "Unmuted chats";
+"lng_settings_unmuted_chats_about" = "Keep archived chats in the Archive even if they are unmuted and get a new message.";
 "lng_settings_use_native_notifications" = "Use native notifications";
 "lng_settings_use_windows" = "Use Windows notifications";
+"lng_shortcuts_admin_log" = "Group/Channel Recent Actions";
 "lng_shortcuts_read_chat" = "Mark chat as read";
 "lng_signin_recover_desc" = "Please enter the code from the email\n{email}";
 "lng_signin_try_password" = "Unable to access your email?";
@@ -205,6 +214,7 @@
 "qll_prefs_another_shortcut" = "another shortcut";
 "qll_prefs_app_badge_counter" = "App badge counter";
 "qll_prefs_appearance" = "Appearance";
+"qll_prefs_archive_chat" = "Archive chat";
 "qll_prefs_archive_settings_still_loading" = "archive settings still loading…";
 "qll_prefs_are_you_sure_you_want" = "Are you sure you want to disconnect all websites?";
 "qll_prefs_ask_before_placing_a_call" = "Ask before placing a call";
@@ -231,6 +241,7 @@
 "qll_prefs_bubbles" = "💬 Bubbles";
 "qll_prefs_bubbles_or_plain_rows_without" = "Bubbles or plain rows without bubble backgrounds.";
 "qll_prefs_cancel_camera_scan" = "Cancel camera scan";
+"qll_prefs_cancel_search" = "Cancel search";
 "qll_prefs_capture_round_video_notes_at" = "Capture round video notes at 480px instead of 280px";
 "qll_prefs_change" = "Change";
 "qll_prefs_changing_gift_settings_needs_telegram" = "Changing gift settings needs Telegram Premium.";
@@ -241,6 +252,7 @@
 "qll_prefs_chat_preview" = "Chat preview";
 "qll_prefs_chat_style" = "Chat style";
 "qll_prefs_chat_wallpaper" = "Chat wallpaper";
+"qll_prefs_chats_from_unknown_users" = "Chats from unknown users";
 "qll_prefs_check" = "Check";
 "qll_prefs_check_spelling" = "Check spelling";
 "qll_prefs_checking_two_step_verification_status" = "Checking two-step verification status…";
@@ -394,12 +406,16 @@
 "qll_prefs_failed_to_send_tdlib_request" = "failed to send TDLib request";
 "qll_prefs_file_open_confirmations" = "File open confirmations";
 "qll_prefs_file_open_settings_saved" = "file open settings saved";
+"qll_prefs_files" = "Files";
 "qll_prefs_find_in_chat" = "Find in chat";
 "qll_prefs_find_in_chat_2" = "Find in Chat";
 "qll_prefs_first_chat" = "First chat";
 "qll_prefs_flip_horizontally" = "Flip horizontally";
+"qll_prefs_flip_photo_horizontally" = "Flip photo horizontally";
+"qll_prefs_flip_photo_vertically" = "Flip photo vertically";
 "qll_prefs_flip_vertically" = "Flip vertically";
 "qll_prefs_focus_chat_list" = "Focus chat list";
+"qll_prefs_focus_composer" = "Focus composer";
 "qll_prefs_focus_message_composer" = "Focus message composer";
 "qll_prefs_focus_the_newer_message_while" = "Focus the newer message while selecting";
 "qll_prefs_focus_the_older_message_while" = "Focus the older message while selecting";
@@ -411,6 +427,7 @@
 "qll_prefs_from" = "From";
 "qll_prefs_from_file" = "From file…";
 "qll_prefs_general" = "General";
+"qll_prefs_gifs" = "GIFs";
 "qll_prefs_group" = "Group {chat_id}";
 "qll_prefs_hide" = "Hide";
 "qll_prefs_hint" = "Hint: {password_hint}";
@@ -437,6 +454,7 @@
 "qll_prefs_is_reserved_for_a_built" = "{chord} is reserved for a built-in shortcut and was not applied.";
 "qll_prefs_isnt_a_valid_shortcut_and" = "{chord} isn't a valid shortcut and was not applied.";
 "qll_prefs_italic" = "Italic";
+"qll_prefs_just_send" = "Just send";
 "qll_prefs_keeps_the_contacts_tab_up" = "Keeps the Contacts tab up to date with the Telegram servers.";
 "qll_prefs_keyboard_shortcuts" = "Keyboard shortcuts";
 "qll_prefs_keyboard_shortcuts_2" = "Keyboard Shortcuts";
@@ -485,12 +503,14 @@
 "qll_prefs_minimize" = "Minimize";
 "qll_prefs_minimize_window" = "Minimize window";
 "qll_prefs_monospace" = "Monospace";
+"qll_prefs_music" = "Music";
 "qll_prefs_mute_for" = "mute for…";
 "qll_prefs_mute_for_2" = "Mute for";
 "qll_prefs_mute_for_3" = "Mute for {label}";
 "qll_prefs_mute_story_notifications" = "Mute story notifications";
 "qll_prefs_muted_forever" = "Muted forever";
 "qll_prefs_muting" = "muting…";
+"qll_prefs_my_contacts" = "My Contacts";
 "qll_prefs_navigation" = "Navigation";
 "qll_prefs_new_passcode" = "New passcode";
 "qll_prefs_new_password" = "New password";
@@ -499,6 +519,7 @@
 "qll_prefs_next_chat" = "Next chat";
 "qll_prefs_next_folder" = "Next folder";
 "qll_prefs_next_item" = "Next item";
+"qll_prefs_next_media" = "Next media";
 "qll_prefs_next_search_result" = "Next search result";
 "qll_prefs_no_active_logins_you_can" = "No active logins — you can log in on websites that support signing in with Telegram.";
 "qll_prefs_no_app_data_folder_is" = "No app data folder is available.";
@@ -514,6 +535,7 @@
 "qll_prefs_no_users_or_groups_added" = "No users or groups added yet.";
 "qll_prefs_no_wallpapers_installed_on_this" = "No wallpapers installed on this account.";
 "qll_prefs_no_website_data_yet" = "No website data yet.";
+"qll_prefs_nobody" = "Nobody";
 "qll_prefs_not_muted" = "Not muted";
 "qll_prefs_not_set" = "Not set";
 "qll_prefs_not_tested" = "{kind} · not tested";
@@ -559,6 +581,7 @@
 "qll_prefs_perfect" = "Perfect!";
 "qll_prefs_permanently_delete_account" = "Permanently delete account";
 "qll_prefs_permanently_delete_the_account_and" = "Permanently delete the account, and all associated information from Telegram servers.";
+"qll_prefs_photos" = "Photos";
 "qll_prefs_place_quill_in_send_to" = "Place Quill in \"Send to\" menu";
 "qll_prefs_place_quill_in_the_send" = "Place Quill in the Send to menu";
 "qll_prefs_plain" = "📄 Plain";
@@ -571,6 +594,7 @@
 "qll_prefs_previous_chat" = "Previous chat";
 "qll_prefs_previous_folder" = "Previous folder";
 "qll_prefs_previous_item" = "Previous item";
+"qll_prefs_previous_media" = "Previous media";
 "qll_prefs_previous_search_result" = "Previous search result";
 "qll_prefs_privacy_policy" = "Privacy Policy";
 "qll_prefs_private" = "Private";
@@ -597,6 +621,7 @@
 "qll_prefs_reason_optional" = "Reason (optional)";
 "qll_prefs_rebind_the_shortcuts_below_changes" = "Rebind the shortcuts below. Changes apply immediately and are saved on this device. Window and app shortcuts (quit, close, …) can't be changed.";
 "qll_prefs_record_hq_round_videos" = "Record HQ round videos";
+"qll_prefs_record_round_message" = "Record Round Message";
 "qll_prefs_recovery_email" = "Recovery email";
 "qll_prefs_recovery_email_address" = "Recovery email address";
 "qll_prefs_recovery_email_confirmation_code" = "Recovery email confirmation code";
@@ -625,12 +650,16 @@
 "qll_prefs_route_calls_through_the_enabled" = "Route calls through the enabled proxy";
 "qll_prefs_run" = "Run";
 "qll_prefs_s" = "{title} ({max}s)";
+"qll_prefs_save_media" = "Save media";
 "qll_prefs_scales_the_whole_interface_applied" = "Scales the whole interface, applied right away.";
+"qll_prefs_schedule" = "Schedule";
+"qll_prefs_scheduled_messages" = "Scheduled messages";
 "qll_prefs_scroll_down_a_page" = "Scroll down a page";
 "qll_prefs_scroll_to_the_first_message" = "Scroll to the first message";
 "qll_prefs_scroll_to_the_latest_message" = "Scroll to the latest message";
 "qll_prefs_scroll_up_a_page" = "Scroll up a page";
 "qll_prefs_search" = "Search";
+"qll_prefs_search_in_chat" = "Search in chat";
 "qll_prefs_secret_chats" = "Secret Chats";
 "qll_prefs_security_and_content" = "Security and content";
 "qll_prefs_select_the_focused_message" = "Select the focused message";
@@ -657,6 +686,7 @@
 "qll_prefs_show_story_poster" = "Show story poster";
 "qll_prefs_sign_in_to_write_to" = "Sign in to write to Telegram Support.";
 "qll_prefs_sign_out_of_this_telegram" = "Sign out of this Telegram account on this device.";
+"qll_prefs_silent_send" = "Silent send";
 "qll_prefs_solid_color_behind_the_message" = "Solid color behind the message list — dark colors pair best with the dark theme.";
 "qll_prefs_sound" = "Sound: {sound_label}";
 "qll_prefs_sound_previews" = "{is_muted_forever} · Sound: {sound_label} · Previews: {if_preview_on_on_else_off}";
@@ -704,6 +734,7 @@
 "qll_prefs_tile_background" = "Tile background";
 "qll_prefs_to" = "To";
 "qll_prefs_toggle_fullscreen" = "Toggle fullscreen";
+"qll_prefs_toggle_link_preview" = "Toggle link preview";
 "qll_prefs_toggle_theme" = "Toggle Theme";
 "qll_prefs_too_many_tries_try_again" = "Too many tries. Try again in {div_ceil} s.";
 "qll_prefs_top_left" = "Top left";
@@ -733,7 +764,10 @@
 "qll_prefs_used_when_a_chat_keeps" = "Used when a chat keeps the default setting. Changes apply via setScopeNotificationSettings.";
 "qll_prefs_user" = "User {user_id}";
 "qll_prefs_username_optional" = "Username (optional)";
+"qll_prefs_video_messages" = "Video messages";
+"qll_prefs_videos" = "Videos";
 "qll_prefs_view" = "View";
+"qll_prefs_voice_messages" = "Voice messages";
 "qll_prefs_warn_before_quitting" = "Warn before quitting";
 "qll_prefs_warn_before_quitting_with_command" = "Warn before quitting with Command Q";
 "qll_prefs_well_send_a_code_to" = "We'll send a code to your recovery email. It is the only way to recover a forgotten password.";
@@ -750,6 +784,7 @@
 "qll_prefs_your_account_is_protected_by" = "Your account is protected by 2-Step Verification. Do you still remember your password?";
 "qll_prefs_your_contact" = "your contact";
 "qll_prefs_your_installed_wallpapers_colors_gradients" = "Your installed wallpapers: colors, gradients, patterns and photos. Pick one to preview it. Chat wallpapers and themes are set per chat from its info panel.";
+"qll_prefs_your_passkey_is_stored_securely" = "Your passkey is stored securely in your password manager.";
 "qll_prefs_your_password" = "Your password";
 "qll_prefs_your_recovery_email_is_confirmed" = "Your recovery email is confirmed.";
 "qll_prefs_your_two_step_verification_password" = "Your two-step verification password";
