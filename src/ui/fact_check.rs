@@ -11,6 +11,7 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -38,7 +39,7 @@ impl QuillApp {
     ) {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Fact check")
+                .placeholder(tr(keys::Q_MISC_FACT_CHECK))
                 .auto_grow(3, 8)
                 .submit_on_enter(false)
         });
@@ -82,9 +83,9 @@ impl QuillApp {
                         .driver
                         .set_fact_check(dialog.chat_id, dialog.message_id, &text)
                     {
-                        Ok(_) if text.is_empty() => "removing the fact check…".into(),
-                        Ok(_) => "saving the fact check…".into(),
-                        Err(_) => "could not save the fact check".into(),
+                        Ok(_) if text.is_empty() => tr(keys::Q_MISC_REMOVING_THE_FACT_CHECK).into(),
+                        Ok(_) => tr(keys::Q_MISC_SAVING_THE_FACT_CHECK).into(),
+                        Err(_) => tr(keys::Q_MISC_COULD_NOT_SAVE_THE_FACT).into(),
                     };
             }
             None => {
@@ -104,7 +105,7 @@ impl QuillApp {
                         quill::telegram::envelope::FactCheck::plain(text.clone(), country)
                     });
                 }
-                self.connection.status_note = "fact check saved (demo)".into();
+                self.connection.status_note = tr(keys::Q_MISC_FACT_CHECK_SAVED_DEMO).into();
             }
         }
         cx.notify();
@@ -133,11 +134,9 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Add a note that gives readers context. Leave it empty to remove the fact check.",
-                        ),
+                        .child(tr(keys::Q_MISC_ADD_A_NOTE_THAT_GIVES)),
                 )
-                .child(Textarea::new(&state.input).aria_label("Fact check"))
+                .child(Textarea::new(&state.input).aria_label(tr(keys::Q_MISC_FACT_CHECK)))
                 .child(
                     div()
                         .flex()
@@ -145,20 +144,28 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("fact-check-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_fact_check(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::FactCheck, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::FactCheck,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         )
                         .child(
                             Button::new("fact-check-save")
-                                .label("Save")
+                                .label(tr(keys::SETTINGS_SAVE))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.submit_fact_check(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::FactCheck, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::FactCheck,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         ),
                 )
@@ -167,9 +174,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if adding {
-                    "Add Fact Check"
+                    tr(keys::Q_MISC_ADD_FACT_CHECK)
                 } else {
-                    "Edit Fact Check"
+                    tr(keys::Q_MISC_EDIT_FACT_CHECK)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {

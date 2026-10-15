@@ -3,6 +3,7 @@ use super::chat_theme::*;
 use gpui_kit::component::message_scroller::{MessageScroller, MessageScrollerState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use std::time::Duration;
 #[derive(Clone)]
 pub enum SyntheticKind {
@@ -30,11 +31,17 @@ pub struct SyntheticChat {
 impl SyntheticChat {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let rows = vec![
-            row(1, "Ada", "Short line.", SyntheticKind::Text, false),
+            row(
+                1,
+                tr(keys::Q_MISC_ADA),
+                tr(keys::Q_MISC_SHORT_LINE),
+                SyntheticKind::Text,
+                false,
+            ),
             row(
                 2,
-                "Ada",
-                "A longer paragraph used to force a mixed-height row. Quill is an independent GPUI + TDLib Telegram client. This text should wrap across several lines in the history pane.",
+                tr(keys::Q_MISC_ADA),
+                tr(keys::Q_MISC_A_LONGER_PARAGRAPH_USED_TO),
                 SyntheticKind::Text,
                 false,
             ),
@@ -47,15 +54,15 @@ impl SyntheticChat {
             ),
             row(
                 4,
-                "You",
-                "שלום עולם — Hebrew with Latin OK and emoji 👨‍👩‍👧‍👦 👍🏽",
+                tr(keys::FROM_YOU),
+                tr(keys::Q_MISC_HEBREW_WITH_LATIN_OK_AND),
                 SyntheticKind::Emoji,
                 true,
             ),
             row(
                 5,
-                "Ada",
-                "Photo pending…",
+                tr(keys::Q_MISC_ADA),
+                tr(keys::Q_MISC_PHOTO_PENDING),
                 SyntheticKind::Image { loaded: false },
                 false,
             ),
@@ -83,7 +90,7 @@ impl SyntheticChat {
         let id = self.next_id;
         self.next_id += 1;
         self.rows
-            .push(row(id, "You", text, SyntheticKind::Text, true));
+            .push(row(id, tr(keys::FROM_YOU), text, SyntheticKind::Text, true));
         self.scroller.update(cx, |state, cx| {
             state.append(1, cx);
         });
@@ -97,8 +104,8 @@ impl SyntheticChat {
             0,
             row(
                 id,
-                "Archive",
-                "Older message prepended — the visible anchor must stay put.",
+                tr(keys::Q_MISC_ARCHIVE),
+                tr(keys::Q_MISC_OLDER_MESSAGE_PREPENDED_THE_VISIBLE),
                 SyntheticKind::Text,
                 false,
             ),
@@ -116,7 +123,7 @@ impl SyntheticChat {
             .find(|row| matches!(row.kind, SyntheticKind::Image { loaded: false }))
         {
             row.kind = SyntheticKind::Image { loaded: true };
-            row.body = "Photo loaded (height changed).".into();
+            row.body = tr(keys::Q_MISC_PHOTO_LOADED_HEIGHT_CHANGED).into();
         }
         let len = self.rows.len();
         self.scroller.update(cx, |state, cx| {
@@ -490,9 +497,9 @@ fn message_bubble_with_quote(
                     .justify_center()
                     .child(
                         if matches!(row.kind, SyntheticKind::Image { loaded: true }) {
-                            "image 4:3"
+                            tr(keys::Q_MISC_IMAGE_4_3)
                         } else {
-                            "loading image"
+                            tr(keys::Q_MISC_LOADING_IMAGE)
                         },
                     ),
             )

@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use image::RgbaImage;
+use quill::lang::{keys, tr};
 use quill::sticker_image::Corners as StickerCorners;
 use quill::sticker_set_box::SetKind;
 use smallvec::SmallVec;
@@ -311,7 +312,9 @@ impl QuillApp {
                     image.to_rgba8(),
                 ));
             }
-            Err(_) => self.connection.status_note = "Couldn't open this image for editing.".into(),
+            Err(_) => {
+                self.connection.status_note = tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
+            }
         }
         cx.notify();
     }
@@ -359,7 +362,9 @@ impl QuillApp {
                 attachment.file_name = format!("{stem}.png");
                 attachment.kind = quill::composer::AttachmentKind::Photo;
             }
-            _ => self.connection.status_note = "Couldn't save the edited photo.".into(),
+            _ => {
+                self.connection.status_note = tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO).into()
+            }
         }
         cx.notify();
     }
@@ -634,7 +639,7 @@ impl QuillApp {
                 .child(
                     Button::new("photo-editor-rotate")
                         .icon(gpui_kit::assets::IconName::RotateCcw)
-                        .label("Rotate")
+                        .label(tr(keys::Q_MISC_ROTATE))
                         .small()
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -643,7 +648,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("photo-editor-flip")
-                        .label("Flip")
+                        .label(tr(keys::PHOTO_EDITOR_MENU_FLIP))
                         .small()
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -652,7 +657,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("photo-editor-reset-crop")
-                        .label("Reset")
+                        .label(tr(keys::PROFILE_PHOTO_RESET_BUTTON))
                         .small()
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -710,7 +715,7 @@ impl QuillApp {
                     .child(
                         Button::new("photo-editor-undo")
                             .icon(gpui_kit::assets::IconName::Undo2)
-                            .label("Undo")
+                            .label(tr(keys::Q_MISC_UNDO))
                             .small()
                             .ghost()
                             .disabled(editor.strokes.is_empty())
@@ -746,16 +751,16 @@ impl QuillApp {
                         .py_2()
                         .child(
                             Button::new("photo-editor-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.close_photo_editor(cx)),
                                 ),
                         )
-                        .child(div().font_semibold().child("Edit photo"))
+                        .child(div().font_semibold().child(tr(keys::Q_MISC_EDIT_PHOTO)))
                         .child(
                             Button::new("photo-editor-done")
-                                .label("Done")
+                                .label(tr(keys::BOX_DONE))
                                 .primary()
                                 .on_click(cx.listener(|this, _, _, cx| this.save_photo_editor(cx))),
                         ),
@@ -775,19 +780,19 @@ impl QuillApp {
                                 .gap_2()
                                 .child(mode_button(
                                     "photo-editor-mode-crop",
-                                    "Crop",
+                                    tr(keys::Q_MISC_CROP),
                                     gpui_kit::assets::IconName::Crop,
                                     EditorMode::Crop,
                                 ))
                                 .child(mode_button(
                                     "photo-editor-mode-draw",
-                                    "Draw",
+                                    tr(keys::Q_MISC_DRAW),
                                     gpui_kit::assets::IconName::Pencil,
                                     EditorMode::Draw,
                                 ))
                                 .child(mode_button(
                                     "photo-editor-mode-stickers",
-                                    "Stickers",
+                                    tr(keys::Q_MISC_STICKERS),
                                     gpui_kit::assets::IconName::FaceSlightlySmiling,
                                     EditorMode::Stickers,
                                 )),

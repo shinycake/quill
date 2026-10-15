@@ -5,6 +5,7 @@ use super::*;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 
@@ -57,12 +58,12 @@ impl AuthUi {
     ) -> Self {
         let registration_first_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("First name")
+                .placeholder(tr(keys::Q_MISC_FIRST_NAME))
                 .auto_grow(1, 1)
         });
         let registration_last_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Last name (optional)")
+                .placeholder(tr(keys::Q_MISC_LAST_NAME_OPTIONAL))
                 .auto_grow(1, 1)
         });
         let signin = super::signin_ui::SignInUi::new(window, cx);

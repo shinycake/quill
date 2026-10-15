@@ -10,6 +10,7 @@
 //! cannot be bought (`PrepareStickers(skipPremium)`).
 
 use super::*;
+use quill::lang::{keys, tr};
 use quill::telegram::EmojiCategorySource;
 
 /// Side of a category chip.
@@ -28,7 +29,9 @@ impl QuillApp {
             .sticker_categories
             .get(index)?;
         Some(match &category.source {
-            EmojiCategorySource::Premium if category.name.is_empty() => "Premium".into(),
+            EmojiCategorySource::Premium if category.name.is_empty() => {
+                tr(keys::Q_MISC_PREMIUM).into()
+            }
             _ => category.name.clone().into(),
         })
     }
@@ -166,8 +169,8 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::ChevronLeft)
                 .ghost()
                 .small()
-                .tooltip("Back")
-                .accessibility_label("Back to all stickers")
+                .tooltip(tr(keys::Q_MISC_BACK))
+                .accessibility_label(tr(keys::Q_MISC_BACK_TO_ALL_STICKERS))
                 .on_click(cx.listener(|this, _, _, cx| this.choose_sticker_category(None, cx)))
         });
         Some(

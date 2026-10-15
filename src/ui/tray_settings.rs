@@ -8,6 +8,7 @@
 use super::QuillApp;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::tray::monochrome;
 use quill::tray::work_mode::{self, TrayOptions, TrayPlatform};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -57,11 +58,11 @@ impl QuillApp {
             body.push(
                 self.appearance_section(
                     cx,
-                    "Show tray icon",
-                    "Keep Quill in the system tray with the unread count.",
+                    tr(keys::SETTINGS_WORKMODE_TRAY),
+                    tr(keys::Q_MISC_KEEP_QUILL_IN_THE_SYSTEM),
                     Switch::new("general-show-tray-icon")
                         .checked(self.appearance.show_tray_icon)
-                        .accessibility_label("Show the Quill tray icon")
+                        .accessibility_label(tr(keys::Q_MISC_SHOW_THE_QUILL_TRAY_ICON))
                         .on_click(cx.listener(|this, &on, window, cx| {
                             let (tray, taskbar) =
                                 work_mode::toggle_tray(this.tray_switch_pair(), on);
@@ -79,11 +80,11 @@ impl QuillApp {
             body.push(
                 self.appearance_section(
                     cx,
-                    "Show taskbar icon",
-                    "Off keeps Quill out of the taskbar; the tray icon opens it.",
+                    tr(keys::Q_MISC_SHOW_TASKBAR_ICON),
+                    tr(keys::Q_MISC_OFF_KEEPS_QUILL_OUT_OF),
                     Switch::new("general-show-taskbar-icon")
                         .checked(self.appearance.show_taskbar_icon)
-                        .accessibility_label("Show Quill in the taskbar")
+                        .accessibility_label(tr(keys::Q_MISC_SHOW_QUILL_IN_THE_TASKBAR))
                         .on_click(cx.listener(|this, &on, window, cx| {
                             let (tray, taskbar) =
                                 work_mode::toggle_taskbar(this.tray_switch_pair(), on);
@@ -101,11 +102,11 @@ impl QuillApp {
             body.push(
                 self.appearance_section(
                     cx,
-                    "Use monochrome icon",
-                    "Draw the tray icon in one color to match the taskbar.",
+                    tr(keys::Q_MISC_USE_MONOCHROME_ICON),
+                    tr(keys::Q_MISC_DRAW_THE_TRAY_ICON_IN),
                     Switch::new("general-tray-monochrome")
                         .checked(self.appearance.tray_icon_monochrome)
-                        .accessibility_label("Use a monochrome tray icon")
+                        .accessibility_label(tr(keys::Q_MISC_USE_A_MONOCHROME_TRAY_ICON))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             this.set_appearance(cx, |a| a.tray_icon_monochrome = on)
                         }))

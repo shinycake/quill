@@ -10,6 +10,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::proxy_extras::qr_share_link;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -35,7 +36,8 @@ impl QuillApp {
         match qr {
             Some(qr) => self.settings.proxy.qr = Some(qr),
             None => {
-                self.settings.proxy.notice = Some("HTTP proxies can't be shared as a link.".into())
+                self.settings.proxy.notice =
+                    Some(tr(keys::Q_MISC_HTTP_PROXIES_CANT_BE_SHARED).into())
             }
         }
         cx.notify();
@@ -56,7 +58,7 @@ impl QuillApp {
             this.close_proxy_qr(cx);
         });
         app.update(cx, |this, cx| {
-            let title = crate::ui::shell::dialog_title("Share proxy with QR code");
+            let title = crate::ui::shell::dialog_title(tr(keys::PROXY_EDIT_SHARE_QR_BOX_TITLE));
             let Some(qr) = this.settings.proxy.qr.as_ref() else {
                 return dialog.overlay(true).title(title).on_close(on_close);
             };
@@ -78,7 +80,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Scan this code with another device to add the proxy."),
+                        .child(tr(keys::Q_MISC_SCAN_THIS_CODE_WITH_ANOTHER)),
                 );
             let footer = div()
                 .flex()
@@ -86,7 +88,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("proxy-qr-copy")
-                        .label("Copy link")
+                        .label(tr(keys::CONTEXT_COPY_LINK))
                         .ghost()
                         .on_click(cx.listener(move |_, _, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
@@ -94,7 +96,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("proxy-qr-done")
-                        .label("Done")
+                        .label(tr(keys::BOX_DONE))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_proxy_qr(cx);

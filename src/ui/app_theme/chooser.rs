@@ -15,6 +15,7 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::app_theme::{BuiltinTheme, ThemeId, store};
+use quill::lang::{keys, tr};
 use quill::settings::ThemeChoice;
 use quill::theme_colorize::Colorizer;
 
@@ -53,7 +54,11 @@ fn theme_tile(
         .role(gpui_kit::Role::Button)
         .aria_label(format!(
             "{name}{}",
-            if selected { ", selected" } else { "" }
+            if selected {
+                tr(keys::Q_MISC_SELECTED)
+            } else {
+                ""
+            }
         ))
         .tab_index(0)
         .cursor_pointer()
@@ -113,16 +118,20 @@ impl QuillApp {
             );
         }
         let hint = if self.appearance.theme == ThemeChoice::HighContrast {
-            "High contrast is on: it replaces the theme until you turn it off."
+            tr(keys::Q_MISC_HIGH_CONTRAST_IS_ON_IT)
         } else {
-            "Light themes show while night mode is off, dark ones while it is on. \
-             Auto-night switches between the two you chose last."
+            tr(keys::Q_MISC_LIGHT_THEMES_SHOW_WHILE_NIGHT)
         };
         let mut body = div()
             .flex()
             .flex_col()
             .gap_3()
-            .child(self.appearance_section(cx, "Themes", hint, tiles.into_any_element()));
+            .child(self.appearance_section(
+                cx,
+                tr(keys::Q_MISC_THEMES),
+                hint,
+                tiles.into_any_element(),
+            ));
         if self.applied_builtin_theme().is_some() {
             body = body.child(self.appearance_accent_section(cx));
         }
@@ -130,11 +139,11 @@ impl QuillApp {
         body = body.child(
             self.appearance_section(
                 cx,
-                "High contrast",
-                "Black surfaces and white text, for the most legible interface.",
+                tr(keys::Q_MISC_HIGH_CONTRAST),
+                tr(keys::Q_MISC_BLACK_SURFACES_AND_WHITE_TEXT),
                 Switch::new("appearance-high-contrast")
                     .checked(self.appearance.theme == ThemeChoice::HighContrast)
-                    .accessibility_label("High contrast")
+                    .accessibility_label(tr(keys::Q_MISC_HIGH_CONTRAST))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_appearance(cx, |a| {
                             a.theme = if on {
@@ -182,7 +191,11 @@ impl QuillApp {
                     .role(gpui_kit::Role::Button)
                     .aria_label(format!(
                         "Accent #{color:06x}{}",
-                        if selected { ", selected" } else { "" }
+                        if selected {
+                            tr(keys::Q_MISC_SELECTED)
+                        } else {
+                            ""
+                        }
                     ))
                     .tab_index(0)
                     .cursor_pointer()
@@ -201,8 +214,8 @@ impl QuillApp {
                         .map(|&c| Hsla::from(rgb(c)))
                         .collect(),
                 )
-                .placeholder("Custom")
-                .accessibility_label("Custom accent color")
+                .placeholder(tr(keys::Q_MISC_CUSTOM))
+                .accessibility_label(tr(keys::Q_MISC_CUSTOM_ACCENT_COLOR))
                 .w(px(150.)),
         );
         let mut body = div().flex().flex_col().gap_2().child(row);
@@ -215,22 +228,29 @@ impl QuillApp {
                     .child(
                         Switch::new("app-accent-system")
                             .checked(system.is_some())
-                            .accessibility_label("System accent color")
+                            .accessibility_label(tr(keys::SETTINGS_THEME_SYSTEM_ACCENT_COLOR))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_appearance(cx, |a| a.system_accent = on)
                             })),
                     )
-                    .child(div().text_sm().child("System accent color")),
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::SETTINGS_THEME_SYSTEM_ACCENT_COLOR)),
+                    ),
             );
         }
         let hint = if theme.is_quill() {
-            "Highlights, selections and links across the app. Custom colors are kept \
-             light enough on dark themes and dark enough on light ones."
+            tr(keys::Q_MISC_HIGHLIGHTS_SELECTIONS_AND_LINKS_ACROSS)
         } else {
-            "Recolors the theme around the color you pick. Custom colors are kept \
-             light enough on dark themes and dark enough on light ones."
+            tr(keys::Q_MISC_RECOLORS_THE_THEME_AROUND_THE)
         };
-        self.appearance_section(cx, "Accent color", hint, body.into_any_element())
+        self.appearance_section(
+            cx,
+            tr(keys::Q_MISC_ACCENT_COLOR),
+            hint,
+            body.into_any_element(),
+        )
     }
 
     /// Custom themes: tiles to apply one, and import / create / edit /
@@ -267,13 +287,13 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("app-theme-import")
-                    .label("Import theme file…")
+                    .label(tr(keys::Q_MISC_IMPORT_THEME_FILE))
                     .outline()
                     .on_click(cx.listener(|this, _, _, cx| this.import_theme_file(cx))),
             )
             .child(
                 Button::new("app-theme-create")
-                    .label("Create new theme")
+                    .label(tr(keys::SETTINGS_BG_THEME_CREATE))
                     .outline()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_theme_editor(EditorSource::Current, window, cx)
@@ -284,7 +304,7 @@ impl QuillApp {
             actions = actions
                 .child(
                     Button::new("app-theme-edit")
-                        .label("Edit")
+                        .label(tr(keys::THEME_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_theme_editor(EditorSource::Custom(edit.clone()), window, cx)
@@ -292,7 +312,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("app-theme-export")
-                        .label("Export…")
+                        .label(tr(keys::Q_MISC_EXPORT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             match store::load(&Self::themes_dir(), &export) {
@@ -306,7 +326,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("app-theme-delete")
-                        .label("Delete")
+                        .label(tr(keys::THEME_DELETE))
                         .ghost()
                         .danger()
                         .on_click(
@@ -324,9 +344,8 @@ impl QuillApp {
             .child(actions);
         self.appearance_section(
             cx,
-            "Custom themes",
-            "Theme files in the .tdesktop-theme or .tdesktop-palette format. Colors \
-             Quill doesn't use are kept in the file but not shown.",
+            tr(keys::Q_MISC_CUSTOM_THEMES),
+            tr(keys::Q_MISC_THEME_FILES_IN_THE_TDESKTOP),
             control.into_any_element(),
         )
     }
@@ -338,7 +357,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Import theme".into()),
+            prompt: Some(tr(keys::THEME_EDITOR_MENU_IMPORT).into()),
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picker.await else {

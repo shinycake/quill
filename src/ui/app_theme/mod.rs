@@ -18,6 +18,7 @@ use gpui_kit::*;
 use quill::app_theme::{
     BuiltinTheme, Palette, PaletteKey, ThemeBackground, ThemeFile, ThemeId, custom_palette, store,
 };
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::{BackgroundFill, ThemeSettings};
 use std::path::PathBuf;
 
@@ -336,8 +337,7 @@ impl QuillApp {
         let auto_disagrees =
             self.appearance.auto_night != AutoNight::Off && self.night_mode_now(cx) != night;
         if auto_disagrees {
-            self.connection.status_note =
-                "Auto-night mode is off now, so the chosen theme stays.".into();
+            self.connection.status_note = tr(keys::Q_MISC_AUTO_NIGHT_MODE_IS_OFF).into();
         }
         self.set_appearance(cx, |a| {
             if night {

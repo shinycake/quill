@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use image::RgbaImage;
+use quill::lang::{keys, tr};
 
 /// Emoji offered in the editor's Stickers mode (the common set Telegram
 /// Desktop's panel opens with).
@@ -226,7 +227,7 @@ impl QuillApp {
                                 }
                                 None => {
                                     this.connection.status_note =
-                                        "Couldn't draw that emoji.".into();
+                                        tr(keys::Q_MISC_COULDNT_DRAW_THAT_EMOJI).into();
                                     cx.notify();
                                 }
                             }
@@ -252,7 +253,7 @@ impl QuillApp {
                 this.child(
                     Button::new("photo-editor-delete-item")
                         .icon(gpui_kit::assets::IconName::Trash)
-                        .label("Delete")
+                        .label(tr(keys::PHOTO_EDITOR_MENU_DELETE))
                         .small()
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -287,14 +288,14 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.download_file(file_id, 16);
             }
-            self.connection.status_note = "Downloading the sticker…".into();
+            self.connection.status_note = tr(keys::Q_MISC_DOWNLOADING_THE_STICKER).into();
             cx.notify();
             return;
         };
         match super::editor_art::sticker_pixels(std::path::Path::new(&path), format) {
             Some(image) => self.photo_editor_mut(|editor| editor.place(image), cx),
             None => {
-                self.connection.status_note = "Couldn't use that sticker.".into();
+                self.connection.status_note = tr(keys::Q_MISC_COULDNT_USE_THAT_STICKER).into();
                 cx.notify();
             }
         }

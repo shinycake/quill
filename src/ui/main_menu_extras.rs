@@ -13,6 +13,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::main_menu::{
     EMOJI_STATUS_DURATIONS, EMOJI_STATUS_OTHER, emoji_status_label, is_my_created_chat,
 };
@@ -50,7 +51,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_emoji_status_choices().is_err()
         {
-            self.connection.status_note = "Could not load emoji statuses. Retry the action.".into();
+            self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_LOAD_EMOJI_STATUSES).into();
         }
         cx.notify();
     }
@@ -71,9 +72,9 @@ impl QuillApp {
     pub(super) fn change_emoji_status_for(&mut self, id: i64, secs: i32, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.change_emoji_status(Some(id), secs) {
-                Ok(Some(_)) => "Updating emoji status…".into(),
-                Ok(None) => "An emoji status is already updating.".into(),
-                Err(_) => "Could not update emoji status. Retry the action.".into(),
+                Ok(Some(_)) => tr(keys::Q_MISC_UPDATING_EMOJI_STATUS).into(),
+                Ok(None) => tr(keys::Q_MISC_AN_EMOJI_STATUS_IS_ALREADY).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_EMOJI_STATUS).into(),
             };
         }
         cx.notify();
@@ -104,7 +105,7 @@ impl QuillApp {
                     let _ = owner.update(cx, |this, cx| {
                         this.chat_list.status_other_for = Some(id);
                         this.connection.status_note =
-                            "Enter the hours below, then press Use custom duration.".into();
+                            tr(keys::Q_MISC_ENTER_THE_HOURS_BELOW_THEN).into();
                         cx.notify();
                     });
                 }),
@@ -127,9 +128,9 @@ impl QuillApp {
                 kind: match c.kind {
                     ChatKind::Supergroup {
                         is_channel: true, ..
-                    } => "Channel",
-                    ChatKind::Supergroup { .. } => "Supergroup",
-                    _ => "Group",
+                    } => tr(keys::Q_MISC_CHANNEL),
+                    ChatKind::Supergroup { .. } => tr(keys::Q_MISC_SUPERGROUP),
+                    _ => tr(keys::Q_MISC_GROUP),
                 },
             })
             .collect();
@@ -154,9 +155,9 @@ impl QuillApp {
             let mut body = div().id("my-chats").flex().flex_col().gap_1();
             if rows.is_empty() {
                 body = body.child(div().text_sm().text_color(muted).child(if channels {
-                    "You have not created any channels."
+                    tr(keys::Q_MISC_YOU_HAVE_NOT_CREATED_ANY)
                 } else {
-                    "You have not created any groups."
+                    tr(keys::Q_MISC_YOU_HAVE_NOT_CREATED_ANY_2)
                 }));
             }
             for row in rows {
@@ -174,7 +175,7 @@ impl QuillApp {
             }
             let footer = div().flex().justify_end().child(
                 Button::new("my-chats-close")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.chat_list.my_chats_open = None;
                         cx.notify();
@@ -183,7 +184,12 @@ impl QuillApp {
             );
             finish_dialog(
                 dialog,
-                if channels { "My Channels" } else { "My Groups" }.to_string(),
+                if channels {
+                    tr(keys::Q_MISC_MY_CHANNELS)
+                } else {
+                    tr(keys::Q_MISC_MY_GROUPS)
+                }
+                .to_string(),
                 body.into_any_element(),
                 Some(footer.into_any_element()),
                 on_close,

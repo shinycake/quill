@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 pub(super) fn title_bar(
     mode: PaneMode,
     live: bool,
@@ -46,14 +47,14 @@ pub(super) fn title_bar(
                             })
                             .ghost()
                             .tooltip(if search_open {
-                                "Close search"
+                                tr(keys::Q_MISC_CLOSE_SEARCH)
                             } else {
-                                "Search"
+                                tr(keys::Q_MISC_SEARCH)
                             })
                             .accessibility_label(if search_open {
-                                "Close search"
+                                tr(keys::Q_MISC_CLOSE_SEARCH)
                             } else {
-                                "Search"
+                                tr(keys::Q_MISC_SEARCH)
                             })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.search_is_open() {
@@ -69,8 +70,8 @@ pub(super) fn title_bar(
                         Button::new("cycle-auth")
                             .icon(IconName::RotateCcw)
                             .ghost()
-                            .tooltip("Cycle auth state")
-                            .accessibility_label("Cycle auth state")
+                            .tooltip(tr(keys::Q_MISC_CYCLE_AUTH_STATE))
+                            .accessibility_label(tr(keys::Q_MISC_CYCLE_AUTH_STATE))
                             .on_click(cx.listener(|this, _, _, cx| this.cycle_auth(cx))),
                     )
                 }),
@@ -392,7 +393,7 @@ where
             div()
                 .id("dialog-body-scroll")
                 .role(Role::ScrollView)
-                .aria_label("Dialog content")
+                .aria_label(tr(keys::Q_MISC_DIALOG_CONTENT))
                 .w_full()
                 .max_h(available)
                 .overflow_y_scroll()

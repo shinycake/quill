@@ -1,6 +1,7 @@
 //! Photo, GIF and video attachments.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 pub(in crate::ui) fn photo_attachment(
     row_id: u64,
@@ -54,7 +55,7 @@ pub(in crate::ui) fn photo_attachment(
         .object_fit(ObjectFit::Cover)
         .when_some(viewer, |this, (chat_id, message_id)| {
             this.role(gpui_kit::Role::Button)
-                .aria_label("Open photo")
+                .aria_label(tr(keys::Q_MISC_OPEN_PHOTO))
                 .tab_index(0)
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -70,7 +71,7 @@ pub(in crate::ui) fn photo_attachment(
                 .flex()
                 .items_center()
                 .justify_center()
-                .child("Photo")
+                .child(tr(keys::Q_MISC_PHOTO))
                 .into_any_element()
         })
         .into_any_element();
@@ -125,7 +126,7 @@ pub(in crate::ui) fn photo_attachment(
         // click-to-download placeholder, secret photos stay inert.
         .when_some(viewer_open, |this, (chat_id, message_id)| {
             this.role(gpui_kit::Role::Button)
-                .aria_label("Open photo")
+                .aria_label(tr(keys::Q_MISC_OPEN_PHOTO))
                 .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
@@ -137,7 +138,7 @@ pub(in crate::ui) fn photo_attachment(
             !has_viewer_open && photo.click_requests_download(),
             |this| {
                 this.role(gpui_kit::Role::Button)
-                    .aria_label("Download photo")
+                    .aria_label(tr(keys::Q_MISC_DOWNLOAD_PHOTO))
                     .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
@@ -198,7 +199,11 @@ pub(in crate::ui) fn animation_attachment(
     let play_id = animation.play_file_id().unwrap_or(FileId(0));
     let thumb_id = animation.thumb_file_id().unwrap_or(FileId(0));
     let mime = animation.mime_type.clone();
-    let play_label = if playing { "Pause" } else { "Play" };
+    let play_label = if playing {
+        tr(keys::Q_MISC_PAUSE)
+    } else {
+        tr(keys::Q_MISC_PLAY)
+    };
     let visual = if playing {
         frame.map(ImageSource::Render)
     } else {
@@ -295,7 +300,7 @@ pub(in crate::ui) fn animation_attachment(
                     (!blocked).then_some(viewer).flatten(),
                     |this, (chat_id, message_id)| {
                         this.role(gpui_kit::Role::Button)
-                            .aria_label("Open GIF")
+                            .aria_label(tr(keys::Q_MISC_OPEN_GIF))
                             .tab_index(0)
                             .cursor_pointer()
                             .pressable(cx.theme())
@@ -374,7 +379,11 @@ pub(in crate::ui) fn video_attachment(
     let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
     let mime = video.mime_type.clone();
     let start_timestamp = video.start_timestamp;
-    let play_label = if playing { "Pause" } else { "Play" };
+    let play_label = if playing {
+        tr(keys::Q_MISC_PAUSE)
+    } else {
+        tr(keys::Q_MISC_PLAY)
+    };
     // Autoplaying: the time left and a muted mark (Telegram Desktop).
     let live_remaining = inline.as_ref().map(|inline| inline.remaining_secs);
     let duration = match live_remaining {
@@ -457,7 +466,12 @@ pub(in crate::ui) fn video_attachment(
             .items_center()
             .justify_center()
             .when(blocked, |this| {
-                this.child(div().text_xs().text_color(text_muted()).child("Video"))
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(text_muted())
+                        .child(tr(keys::MEDIA_VIDEO)),
+                )
             })
             .into_any_element()
     };
@@ -485,7 +499,7 @@ pub(in crate::ui) fn video_attachment(
                 .relative()
                 .when_some(viewer_open, |this, (chat_id, message_id)| {
                     this.role(gpui_kit::Role::Button)
-                        .aria_label("Open video")
+                        .aria_label(tr(keys::Q_MISC_OPEN_VIDEO))
                         .tab_index(0)
                         .cursor_pointer()
                         .pressable(cx.theme())

@@ -9,6 +9,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::auth::{AuthAction, AuthView};
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::AuthorizationState;
 
 const CARD_WIDTH: f32 = 380.;
@@ -92,11 +93,11 @@ impl QuillApp {
             form = form
                 .child(
                     Textarea::new(&self.auth_ui.email_input)
-                        .aria_label("Email address")
+                        .aria_label(tr(keys::Q_MISC_EMAIL_ADDRESS))
                         .h(px(40.)),
                 )
                 .child(
-                    primary_action("submit-login-email", "Continue", busy)
+                    primary_action("submit-login-email", tr(keys::CONTINUE), busy)
                         .on_click(cx.listener(|this, _, window, cx| this.submit_email(window, cx))),
                 );
         }
@@ -146,7 +147,7 @@ impl QuillApp {
                     .justify_center()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Preparing QR code…")
+                    .child(tr(keys::Q_MISC_PREPARING_QR_CODE))
                     .into_any_element(),
             };
             form = form.child(
@@ -161,14 +162,14 @@ impl QuillApp {
                             .text_sm()
                             .text_center()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Telegram → Settings → Devices → Link Desktop Device"),
+                            .child(tr(keys::Q_MISC_TELEGRAM_SETTINGS_DEVICES_LINK_DESKTOP)),
                     ),
             );
         }
         if can_qr && !show_qr {
             form = form.child(
                 Button::new("qr-login")
-                    .label("Sign in with QR code")
+                    .label(tr(keys::Q_MISC_SIGN_IN_WITH_QR_CODE))
                     .ghost()
                     .w_full()
                     .disabled(busy)
@@ -186,7 +187,7 @@ impl QuillApp {
         {
             form = form.child(
                 Button::new("premium-support")
-                    .label("Email Telegram support")
+                    .label(tr(keys::Q_MISC_EMAIL_TELEGRAM_SUPPORT))
                     .ghost()
                     .w_full()
                     .on_click(move |_, _, cx| cx.open_url(&mailto)),
@@ -195,7 +196,7 @@ impl QuillApp {
         if matches!(auth.action, AuthAction::Closed) && retry_available {
             form = form.child(
                 Button::new("retry-connection")
-                    .label("Retry")
+                    .label(tr(keys::Q_MISC_RETRY))
                     .primary()
                     .w_full()
                     .on_click(cx.listener(|this, _, _, cx| this.restart_live_connection(cx))),
@@ -254,13 +255,13 @@ impl QuillApp {
                         .id("auth-test-mode-label")
                         .debug_selector(|| "auth-test-mode-label".into())
                         .role(Role::Label)
-                        .aria_label("Test Mode")
+                        .aria_label(tr(keys::Q_MISC_TEST_MODE))
                         .absolute()
                         .top(px(12.))
                         .right(px(16.))
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Test Mode"),
+                        .child(tr(keys::Q_MISC_TEST_MODE)),
                 )
             })
             .into_any_element()

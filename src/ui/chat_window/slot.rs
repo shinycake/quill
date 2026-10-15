@@ -24,6 +24,7 @@ use super::super::viewer_state::ViewerUi;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::SessionView;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -59,12 +60,12 @@ impl WindowSlot {
         let composer = QuillApp::new_composer_field(app.chat_prefs.send_key_mode, window, cx);
         let emoji_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search emoji")
+                .placeholder(tr(keys::Q_MISC_SEARCH_EMOJI))
                 .auto_grow(1, 1)
         });
         let reaction_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search emoji")
+                .placeholder(tr(keys::Q_MISC_SEARCH_EMOJI))
                 .auto_grow(1, 1)
         });
         for input in [&emoji_search_input, &reaction_search_input] {

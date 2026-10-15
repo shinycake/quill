@@ -4,6 +4,7 @@
 use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 pub(crate) struct PickerUi {
     /// The composer's emoji / sticker / GIF popover.
@@ -26,23 +27,23 @@ impl PickerUi {
     ) -> Self {
         let emoji_status_hours_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Custom duration in hours")
+                .placeholder(tr(keys::Q_MISC_CUSTOM_DURATION_IN_HOURS))
                 .auto_grow(1, 1)
         });
         let emoji_set_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search emoji packs")
+                .placeholder(tr(keys::Q_MISC_SEARCH_EMOJI_PACKS))
                 .auto_grow(1, 1)
         });
         let gif_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search GIFs")
+                .placeholder(tr(keys::GIFS_SEARCH))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let sticker_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search stickers and sets")
+                .placeholder(tr(keys::Q_MISC_SEARCH_STICKERS_AND_SETS))
                 .auto_grow(1, 1)
         });
         Self {

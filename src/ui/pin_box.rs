@@ -8,6 +8,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::selection_pin::{PinChoice, pin_choice, pin_question, unpin_question};
 use quill::telegram::envelope::ChatKind;
 use std::cell::Cell;
@@ -55,12 +56,17 @@ impl QuillApp {
             .is_some_and(|top| message_id.0 < top.id.0);
         let choice = pin_choice(&kind, session.is_saved_messages(chat_id), pinning_old);
         let label = match (&kind, choice) {
-            (_, PinChoice::NotifyAll) => Some("Notify all members".to_string()),
+            (_, PinChoice::NotifyAll) => Some(tr(keys::Q_MISC_NOTIFY_ALL_MEMBERS).to_string()),
             (ChatKind::Private { user_id }, PinChoice::AlsoForPeer) => Some(
                 session
                     .user(user_id.0)
-                    .map(|user| format!("Also pin for {}", user.first_name))
-                    .unwrap_or_else(|| "Also pin for the other side".into()),
+                    .map(|user| {
+                        tr_with(
+                            keys::Q_MISC_ALSO_PIN_FOR,
+                            &[("first_name", &user.first_name.to_string())],
+                        )
+                    })
+                    .unwrap_or_else(|| tr(keys::Q_MISC_ALSO_PIN_FOR_THE_OTHER).into()),
             ),
             _ => None,
         };
@@ -87,8 +93,8 @@ impl QuillApp {
                         )
                     })
                 })
-                .ok_text("Pin")
-                .cancel_text("Cancel")
+                .ok_text(tr(keys::CONTEXT_PIN_MSG))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let (silent, only_for_self) = choice.request_flags(checked.get());
@@ -114,8 +120,8 @@ impl QuillApp {
                     .driver
                     .pin_chat_message_with(chat_id, message_id, silent, only_for_self)
                 {
-                    Ok(_) => "pinning…".into(),
-                    Err(_) => "could not pin".into(),
+                    Ok(_) => tr(keys::Q_MISC_PINNING).into(),
+                    Err(_) => tr(keys::Q_MISC_COULD_NOT_PIN).into(),
                 };
         } else if self.demo_session.is_some() {
             self.apply_demo_pin_toggle(chat_id, message_id);
@@ -142,8 +148,8 @@ impl QuillApp {
             let (app, ids) = (app.clone(), ids.clone());
             alert
                 .description(question.clone())
-                .ok_text("Unpin")
-                .cancel_text("Cancel")
+                .ok_text(tr(keys::Q_MISC_UNPIN))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let ids = ids.clone();

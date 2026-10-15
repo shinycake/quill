@@ -16,6 +16,7 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::{Background, BackgroundType};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -79,7 +80,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chats_state.background_error = None;
             if live.driver.search_background(&name).is_err() {
-                self.connection.status_note = "could not open the wallpaper link".into();
+                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_OPEN_THE_WALLPAPER).into();
                 return;
             }
         }
@@ -92,7 +93,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose Wallpaper".into()),
+            prompt: Some(tr(keys::Q_MISC_CHOOSE_WALLPAPER).into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -106,8 +107,7 @@ impl QuillApp {
 
     fn preview_wallpaper_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !is_wallpaper_image(&path) {
-            self.connection.status_note =
-                "choose a JPEG, PNG or WebP image for the wallpaper".into();
+            self.connection.status_note = tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR).into();
             cx.notify();
             return;
         }
@@ -216,7 +216,7 @@ impl QuillApp {
                 .get_background_url(&background.name, &kind)
                 .is_err()
         {
-            self.connection.status_note = "could not make the wallpaper link".into();
+            self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_MAKE_THE_WALLPAPER).into();
         }
         cx.notify();
     }
@@ -231,7 +231,7 @@ impl QuillApp {
         };
         cx.write_to_clipboard(ClipboardItem::new_string(url));
         if let Some(preview) = self.dialogs.wallpaper_preview.as_mut() {
-            preview.note = Some("Link copied to clipboard.".into());
+            preview.note = Some(tr(keys::CHANNEL_PUBLIC_LINK_COPIED).into());
         }
         cx.notify();
         true
@@ -271,7 +271,7 @@ impl QuillApp {
             let Some(preview) = this.dialogs.wallpaper_preview.clone() else {
                 return dialog
                     .overlay(true)
-                    .title(super::shell::dialog_title("Wallpaper"))
+                    .title(super::shell::dialog_title(tr(keys::Q_MISC_WALLPAPER)))
                     .on_close(on_close);
             };
             let muted = cx.theme().muted_foreground;
@@ -289,12 +289,10 @@ impl QuillApp {
             let mut body = div().flex().flex_col().gap_3();
             match (&preview.source, &background, &error) {
                 (PreviewSource::Link(name), None, None) => {
-                    body = body.child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(format!("Looking up “{name}”…")),
-                    );
+                    body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                        keys::Q_MISC_LOOKING_UP,
+                        &[("name", &name.to_string())],
+                    )));
                 }
                 (PreviewSource::Link(_), None, Some(error)) => {
                     body = body.child(
@@ -311,12 +309,10 @@ impl QuillApp {
                     let paint = this.preview_paint(&preview);
                     body = body.child(this.chat_look_preview(paint.as_ref(), 0, None, cx));
                     if let PreviewSource::File(path) = &preview.source {
-                        body = body.child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .child(format!("From file: {}", file_label(path))),
-                        );
+                        body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                            keys::Q_MISC_FROM_FILE_2,
+                            &[("file_label", &(file_label(path)).to_string())],
+                        )));
                     }
                 }
             }
@@ -331,7 +327,7 @@ impl QuillApp {
                 body = body.child(
                     Checkbox::new("wallpaper-preview-blur")
                         .checked(checked)
-                        .label("Blur")
+                        .label(tr(keys::Q_MISC_BLUR))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(p) = this.dialogs.wallpaper_preview.as_mut() {
                                 p.blur = Some(on);
@@ -341,9 +337,12 @@ impl QuillApp {
                 );
             }
             if ready {
-                body = body.child(div().text_xs().text_color(muted).child(
-                    "Sets this wallpaper for your account in the current light or dark theme.",
-                ));
+                body = body.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MISC_SETS_THIS_WALLPAPER_FOR_YOUR)),
+                );
             }
             if let Some(note) = &preview.note {
                 body = body.child(div().text_xs().text_color(muted).child(note.clone()));
@@ -354,7 +353,10 @@ impl QuillApp {
                         .id("wallpaper-preview-error")
                         .text_sm()
                         .text_color(super::danger_dark())
-                        .child(format!("Couldn’t update the wallpaper: {error}")),
+                        .child(tr_with(
+                            keys::Q_MISC_COULDN_T_UPDATE_THE_WALLPAPER,
+                            &[("error", &error.to_string())],
+                        )),
                 );
             }
             let can_share = background.is_some() && this.live.is_some();
@@ -365,9 +367,9 @@ impl QuillApp {
                 .when(can_share, |row| {
                     row.child(
                         Button::new("wallpaper-preview-share")
-                            .label("Share")
+                            .label(tr(keys::Q_MISC_SHARE))
                             .ghost()
-                            .tooltip("Copy a link to this wallpaper")
+                            .tooltip(tr(keys::Q_MISC_COPY_A_LINK_TO_THIS))
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.share_wallpaper_preview(cx)),
                             ),
@@ -376,7 +378,7 @@ impl QuillApp {
                 .child(div().flex_1())
                 .child(
                     Button::new("wallpaper-preview-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_wallpaper_preview(cx);
@@ -385,7 +387,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("wallpaper-preview-apply")
-                        .label("Apply")
+                        .label(tr(keys::Q_MISC_APPLY))
                         .primary()
                         .disabled(!ready)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -398,7 +400,7 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .width(px(440.))
-                .title(super::shell::dialog_title("Wallpaper"))
+                .title(super::shell::dialog_title(tr(keys::Q_MISC_WALLPAPER)))
                 .content(super::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         let body = body

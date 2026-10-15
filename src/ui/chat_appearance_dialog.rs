@@ -22,6 +22,7 @@ use quill::chat_appearance::{
     FeatureLevels, name_color_level, profile_color_level,
 };
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{name_swatches, profile_swatches};
 use quill::state::RequestPurpose;
@@ -113,7 +114,7 @@ impl QuillApp {
             action_row(
                 "gl-appearance",
                 Some(IconName::Palette),
-                "Appearance",
+                tr(keys::Q_MISC_APPEARANCE),
                 false,
                 cx,
             )
@@ -212,7 +213,7 @@ impl QuillApp {
                     let _ = live.driver.fetch_chat_boost_status(chat_id);
                 }
                 self.connection.status_note =
-                    "Checking the boost level. Press Apply again in a moment.".into();
+                    tr(keys::Q_MISC_CHECKING_THE_BOOST_LEVEL_PRESS).into();
             }
             ApplyOutcome::NeedsBoosts { required, have } => {
                 if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
@@ -222,15 +223,15 @@ impl QuillApp {
             ApplyOutcome::Send(plan) => {
                 let Some(live) = self.live.as_mut() else {
                     self.connection.status_note =
-                        "Demo mode: appearance needs a live session.".into();
+                        tr(keys::Q_MISC_DEMO_MODE_APPEARANCE_NEEDS_A).into();
                     cx.notify();
                     return;
                 };
                 let result = live.driver.apply_chat_appearance(chat_id, plan);
                 self.connection.status_note = if result.is_err() {
-                    "Could not change the appearance. Retry the action.".into()
+                    tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_APPEARANCE).into()
                 } else {
-                    "Appearance update requested.".into()
+                    tr(keys::Q_MISC_APPEARANCE_UPDATE_REQUESTED).into()
                 };
                 if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
                     dialog.sent = result.is_ok();
@@ -269,7 +270,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Appearance"));
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_MISC_APPEARANCE)));
             if let Some(live) = this.live.as_mut() {
                 live.driver.download_background_emoji_icons();
                 live.driver.download_chat_status_choices();
@@ -283,7 +284,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("chat-appearance-close")
-                        .label("Close")
+                        .label(tr(keys::CLOSE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_chat_appearance_dialog(cx);
@@ -292,7 +293,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("chat-appearance-apply")
-                        .label("Apply")
+                        .label(tr(keys::Q_MISC_APPLY))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.apply_chat_appearance(cx);
@@ -381,16 +382,20 @@ impl QuillApp {
             .max_h(px(160.))
             .overflow_y_scroll()
             .role(Role::List)
-            .aria_label("Choices")
+            .aria_label(tr(keys::Q_MISC_CHOICES))
             .child(
                 tile(selected == 0)
                     .id((grid_id, 0usize))
                     .pressable(cx.theme())
                     .role(Role::Button)
-                    .aria_label("None")
+                    .aria_label(tr(keys::Q_MISC_NONE))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| off(this, 0, cx)))
-                    .child(div().text_sm().child("Off")),
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::SETTINGS_CHAT_AUTOMATION_OFF)),
+                    ),
             );
         let mut seen = std::collections::HashSet::new();
         for (ix, id) in ids.iter().copied().enumerate() {
@@ -403,7 +408,7 @@ impl QuillApp {
                     .id((grid_id, ix + 1))
                     .pressable(cx.theme())
                     .role(Role::Button)
-                    .aria_label("Choice")
+                    .aria_label(tr(keys::Q_MISC_CHOICE))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| pick(this, id, cx)))
                     .child(self.chat_appearance_emoji_visual(id, 28.)),
@@ -420,10 +425,10 @@ impl QuillApp {
         muted: Hsla,
     ) -> Option<Div> {
         (required > 0 && level.is_none_or(|have| have < required)).then(|| {
-            div()
-                .text_xs()
-                .text_color(muted)
-                .child(format!("Level {required} required"))
+            div().text_xs().text_color(muted).child(tr_with(
+                keys::Q_MISC_LEVEL_REQUIRED,
+                &[("required", &required.to_string())],
+            ))
         })
     }
 
@@ -499,7 +504,7 @@ impl QuillApp {
                 div()
                     .id("chat-appearance-preview-profile")
                     .role(Role::Group)
-                    .aria_label("Profile preview")
+                    .aria_label(tr(keys::Q_MISC_PROFILE_PREVIEW))
                     .w_full()
                     .h(px(112.))
                     .rounded_lg()
@@ -538,7 +543,11 @@ impl QuillApp {
                                             .text_color(name_color)
                                             .child(title.clone()),
                                     )
-                                    .child(div().text_sm().child("Replying to this post")),
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .child(tr(keys::Q_MISC_REPLYING_TO_THIS_POST)),
+                                    ),
                             ),
                     );
                 if draft.name_emoji_id != 0 {
@@ -552,7 +561,7 @@ impl QuillApp {
                 div()
                     .id("chat-appearance-preview-name")
                     .role(Role::Group)
-                    .aria_label("Reply preview")
+                    .aria_label(tr(keys::Q_MISC_REPLY_PREVIEW))
                     .w_full()
                     .rounded_lg()
                     .bg(theme.muted)
@@ -586,13 +595,13 @@ impl QuillApp {
         };
         let mut tabs = div().flex().gap_2().child(tab_button(
             "chat-appearance-tab-profile",
-            "Profile",
+            tr(keys::Q_MISC_PROFILE),
             ChatAppearanceTab::Profile,
         ));
         if kind == ChatAppearanceKind::Channel {
             tabs = tabs.child(tab_button(
                 "chat-appearance-tab-name",
-                "Name",
+                tr(keys::Q_MISC_NAME),
                 ChatAppearanceTab::Name,
             ));
         }
@@ -604,7 +613,7 @@ impl QuillApp {
                     let id = swatch.id;
                     let required = name_color_level(id, current.name_color_id, name_palette);
                     let label = if required > 0 && level.is_none_or(|have| have < required) {
-                        format!("Level {required}")
+                        tr_with(keys::Q_MISC_LEVEL, &[("required", &required.to_string())])
                     } else {
                         String::new()
                     };
@@ -624,7 +633,7 @@ impl QuillApp {
                     let required =
                         profile_color_level(id, current.profile_color_id, kind, profile_palette);
                     let label = if required > 0 && level.is_none_or(|have| have < required) {
-                        format!("Level {required}")
+                        tr_with(keys::Q_MISC_LEVEL, &[("required", &required.to_string())])
                     } else {
                         String::new()
                     };
@@ -644,18 +653,25 @@ impl QuillApp {
 
         let (about, icon_title, icon_about, icon_required, selected_icon) = match tab {
             ChatAppearanceTab::Name => (
-                format!(
-                    "This color is used for the {group_word} name, the links it shares and replies to its posts."
+                tr_with(
+                    keys::Q_MISC_THIS_COLOR_IS_USED_FOR,
+                    &[("group_word", group_word)],
                 ),
-                "Add icons to replies",
-                format!("Make replies to this {group_word} stand out with a pattern."),
+                tr(keys::SETTINGS_COLOR_EMOJI),
+                tr_with(
+                    keys::Q_MISC_MAKE_REPLIES_TO_THIS_STAND,
+                    &[("group_word", group_word)],
+                ),
                 features.reply_icon,
                 draft.name_emoji_id,
             ),
             ChatAppearanceTab::Profile => (
-                format!("This color is used for the {group_word} profile background."),
-                "Add icons to profile",
-                "Choose an icon to repeat on the profile background.".to_string(),
+                tr_with(
+                    keys::Q_MISC_THIS_COLOR_IS_USED_FOR_2,
+                    &[("group_word", group_word)],
+                ),
+                tr(keys::SETTINGS_COLOR_PROFILE_EMOJI),
+                tr(keys::Q_MISC_CHOOSE_AN_ICON_TO_REPEAT).to_string(),
                 features.profile_icon,
                 draft.profile_emoji_id,
             ),
@@ -686,8 +702,14 @@ impl QuillApp {
             .flex_col()
             .gap_3()
             .child(div().text_sm().text_color(muted).child(match level {
-                Some(level) => format!("This {group_word} is at boost level {level}."),
-                None => format!("Checking this {group_word}'s boost level…"),
+                Some(level) => tr_with(
+                    keys::Q_MISC_THIS_IS_AT_BOOST_LEVEL,
+                    &[("group_word", group_word), ("level", &level.to_string())],
+                ),
+                None => tr_with(
+                    keys::Q_MISC_CHECKING_THIS_S_BOOST_LEVEL,
+                    &[("group_word", group_word)],
+                ),
             }))
             .child(tabs)
             .child(preview)
@@ -696,7 +718,7 @@ impl QuillApp {
             panel = panel.child(
                 div().flex().child(
                     Button::new("chat-appearance-profile-reset")
-                        .label("Reset profile color")
+                        .label(tr(keys::Q_MISC_RESET_PROFILE_COLOR))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.edit_chat_appearance(cx, |d, _| {
@@ -713,7 +735,12 @@ impl QuillApp {
             .children(Self::chat_appearance_lock_note(icon_required, level, muted))
             .child(icon_grid)
             .when(icons_empty, |this| {
-                this.child(div().text_xs().text_color(muted).child("Loading icons"))
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MISC_LOADING_ICONS)),
+                )
             })
             .child(div().text_xs().text_color(muted).child(icon_about));
 
@@ -729,8 +756,8 @@ impl QuillApp {
         );
         panel = panel
             .child(div().font_semibold().child(match kind {
-                ChatAppearanceKind::Channel => "Channel emoji status",
-                ChatAppearanceKind::Supergroup => "Group emoji status",
+                ChatAppearanceKind::Channel => tr(keys::Q_MISC_CHANNEL_EMOJI_STATUS),
+                ChatAppearanceKind::Supergroup => tr(keys::Q_MISC_GROUP_EMOJI_STATUS),
             }))
             .children(Self::chat_appearance_lock_note(
                 features.status,
@@ -739,10 +766,16 @@ impl QuillApp {
             ))
             .child(status_grid)
             .when(status_empty, |this| {
-                this.child(div().text_xs().text_color(muted).child("Loading statuses"))
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MISC_LOADING_STATUSES)),
+                )
             })
-            .child(div().text_xs().text_color(muted).child(format!(
-                "The emoji status is shown next to the {group_word} name."
+            .child(div().text_xs().text_color(muted).child(tr_with(
+                keys::Q_MISC_THE_EMOJI_STATUS_IS_SHOWN,
+                &[("group_word", group_word)],
             )));
 
         if kind == ChatAppearanceKind::Supergroup {
@@ -767,7 +800,7 @@ impl QuillApp {
                     .child(
                         div().flex().child(
                             Button::new("chat-appearance-boosts")
-                                .label("Get boosts")
+                                .label(tr(keys::Q_MISC_GET_BOOSTS))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.chat_appearance_open_boosts(cx);
                                 })),
@@ -776,11 +809,11 @@ impl QuillApp {
             );
         }
         if busy {
-            panel = panel.child(div().text_sm().child("Applying…"));
+            panel = panel.child(div().text_sm().child(tr(keys::Q_MISC_APPLYING)));
         } else if let Some(error) = error {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         } else if sent {
-            panel = panel.child(div().text_sm().child("Appearance updated."));
+            panel = panel.child(div().text_sm().child(tr(keys::Q_MISC_APPEARANCE_UPDATED)));
         }
         Some(panel.into_any_element())
     }

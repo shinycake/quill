@@ -21,6 +21,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::spell_catalog::{
     ManagerRow, RowInputs, RowState, Transfer, build_rows, installed_codes, managed_dir,
     next_chosen, percent, remove,
@@ -190,7 +191,10 @@ impl QuillApp {
             return;
         };
         if let Err(err) = remove(&dir, code) {
-            self.connection.status_note = format!("Couldn't remove the dictionary: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_MISC_COULDNT_REMOVE_THE_DICTIONARY,
+                &[("err", &err.to_string())],
+            );
         }
         let chosen: Vec<String> = self
             .spell
@@ -235,10 +239,13 @@ impl QuillApp {
             .when(removable, |this| {
                 this.child(
                     Button::new(SharedString::from(format!("dict-remove-{code}")))
-                        .label("Remove")
+                        .label(tr(keys::BOX_REMOVE))
                         .ghost()
                         .small()
-                        .accessibility_label(format!("Remove the {} dictionary", row.name))
+                        .accessibility_label(tr_with(
+                            keys::Q_MISC_REMOVE_THE_DICTIONARY,
+                            &[("name", &row.name.to_string())],
+                        ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.remove_dictionary(&remove_code, cx);
                         })),
@@ -261,9 +268,9 @@ impl QuillApp {
         let mut section = div().flex().flex_col().gap_2().child(
             Button::new("spell-dictionaries-toggle")
                 .label(if open {
-                    "Hide dictionaries"
+                    tr(keys::Q_MISC_HIDE_DICTIONARIES)
                 } else {
-                    "Manage dictionaries"
+                    tr(keys::SETTINGS_MANAGE_DICTIONARIES)
                 })
                 .outline()
                 .small()
@@ -288,7 +295,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No dictionaries match."),
+                        .child(tr(keys::Q_MISC_NO_DICTIONARIES_MATCH)),
                 );
             }
             for row in &rows {
@@ -305,7 +312,7 @@ impl QuillApp {
             section = section
                 .child(
                     Textarea::new(&self.spell.dict_filter_input)
-                        .aria_label("Filter dictionaries")
+                        .aria_label(tr(keys::Q_MISC_FILTER_DICTIONARIES))
                         .w_full(),
                 )
                 .child(list)
@@ -313,9 +320,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Dictionaries come from the open wooorm/dictionaries collection and keep their own licenses.",
-                        ),
+                        .child(tr(keys::Q_MISC_DICTIONARIES_COME_FROM_THE_OPEN)),
                 );
         }
         section.into_any_element()

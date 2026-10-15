@@ -21,6 +21,7 @@ use objc2_app_kit::{
     NSTouchBarItemPriorityHigh, NSTouchPhase, NSView, NSWindow,
 };
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSet, NSSize, NSString};
+use quill::lang::{keys, tr};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -365,17 +366,32 @@ impl Host {
         let audio = NSTouchBar::new(mtm);
         audio.setCustomizationIdentifier(Some(&NSString::from_str(PLAYER)));
         audio.setTemplateItems(&NSSet::from_retained_slice(&[
-            custom_item(PLAY, &audio_play, Some("Play/Pause"), mtm),
+            custom_item(PLAY, &audio_play, Some(tr(keys::Q_MISC_PLAY_PAUSE)), mtm),
             custom_item(
                 PREVIOUS,
                 &audio_previous,
-                Some("Previous Playlist Item"),
+                Some(tr(keys::Q_MISC_PREVIOUS_PLAYLIST_ITEM)),
                 mtm,
             ),
-            custom_item(NEXT, &audio_next, Some("Next Playlist Item"), mtm),
-            custom_item(SEEK, &audio_seek, Some("Seek Bar"), mtm),
-            custom_item(CLOSE, &audio_close, Some("Close Player"), mtm),
-            custom_item(POSITION, &audio_position, Some("Track Position"), mtm),
+            custom_item(
+                NEXT,
+                &audio_next,
+                Some(tr(keys::Q_MISC_NEXT_PLAYLIST_ITEM)),
+                mtm,
+            ),
+            custom_item(SEEK, &audio_seek, Some(tr(keys::Q_MISC_SEEK_BAR)), mtm),
+            custom_item(
+                CLOSE,
+                &audio_close,
+                Some(tr(keys::Q_MISC_CLOSE_PLAYER)),
+                mtm,
+            ),
+            custom_item(
+                POSITION,
+                &audio_position,
+                Some(tr(keys::Q_MISC_TRACK_POSITION)),
+                mtm,
+            ),
         ]));
         audio.setDefaultItemIdentifiers(&ids(&[PLAY, PREVIOUS, NEXT, SEEK, CLOSE]));
         audio.setCustomizationAllowedItemIdentifiers(&ids(&[
@@ -411,20 +427,40 @@ impl Host {
         let viewer_position = position_label(mtm);
         let viewer = NSTouchBar::new(mtm);
         viewer.setTemplateItems(&NSSet::from_retained_slice(&[
-            custom_item(VIEWER_PLAY, &viewer_play, Some("Play/Pause"), mtm),
-            custom_item(VIEWER_ROTATE, &viewer_rotate, Some("Rotate"), mtm),
+            custom_item(
+                VIEWER_PLAY,
+                &viewer_play,
+                Some(tr(keys::Q_MISC_PLAY_PAUSE)),
+                mtm,
+            ),
+            custom_item(
+                VIEWER_ROTATE,
+                &viewer_rotate,
+                Some(tr(keys::Q_MISC_ROTATE)),
+                mtm,
+            ),
             custom_item(
                 VIEWER_FULLSCREEN,
                 &viewer_fullscreen,
-                Some("Fullscreen"),
+                Some(tr(keys::Q_MISC_FULLSCREEN)),
                 mtm,
             ),
-            custom_item(VIEWER_PIP, &viewer_pip, Some("Picture-in-Picture"), mtm),
-            custom_item(VIEWER_SEEK, &viewer_seek, Some("Seek Bar"), mtm),
+            custom_item(
+                VIEWER_PIP,
+                &viewer_pip,
+                Some(tr(keys::Q_MISC_PICTURE_IN_PICTURE)),
+                mtm,
+            ),
+            custom_item(
+                VIEWER_SEEK,
+                &viewer_seek,
+                Some(tr(keys::Q_MISC_SEEK_BAR)),
+                mtm,
+            ),
             custom_item(
                 VIEWER_POSITION,
                 &viewer_position,
-                Some("Track Position"),
+                Some(tr(keys::Q_MISC_TRACK_POSITION)),
                 mtm,
             ),
         ]));

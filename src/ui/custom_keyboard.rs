@@ -9,6 +9,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::ComposerReplyTo;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::state::{ForceReplyTarget, effective_preview};
 use quill::telegram::envelope::{KeyboardButton, KeyboardButtonType, ReplyKeyboard};
 impl QuillApp {
@@ -30,9 +31,9 @@ impl QuillApp {
             .collapsed_keyboards
             .contains(&(chat_id.0, message_id.0));
         let label = if hidden {
-            "Show bot keyboard"
+            tr(keys::BOT_KEYBOARD_SHOW)
         } else {
-            "Hide bot keyboard"
+            tr(keys::BOT_KEYBOARD_HIDE)
         };
         Some(
             Button::new("composer-keyboard-toggle")
@@ -227,7 +228,7 @@ impl QuillApp {
                             RequestShareKind::Phone { bot_user_id },
                             cx,
                         ),
-                        None => this.set_status_note("Only a bot can ask for your number", cx),
+                        None => this.set_status_note(tr(keys::Q_MISC_ONLY_A_BOT_CAN_ASK), cx),
                     }
                 }))
             }
@@ -261,13 +262,13 @@ impl QuillApp {
     pub(super) fn custom_keyboard_button_tooltip(kind: &KeyboardButtonType) -> &'static str {
         match kind {
             KeyboardButtonType::Text | KeyboardButtonType::WebApp { .. } => "",
-            KeyboardButtonType::RequestPhoneNumber => "Share your phone number with the bot",
-            KeyboardButtonType::RequestLocation => "Sharing your location is not supported yet",
-            KeyboardButtonType::RequestPoll => "Creating a poll is not supported yet",
-            KeyboardButtonType::RequestUsers(_) => "Choose users to share with the bot",
-            KeyboardButtonType::RequestChat(_) => "Choose a chat to share with the bot",
-            KeyboardButtonType::RequestManagedBot => "Bot setup is not supported yet",
-            KeyboardButtonType::Unknown { .. } => "Unsupported button",
+            KeyboardButtonType::RequestPhoneNumber => tr(keys::Q_MISC_SHARE_YOUR_PHONE_NUMBER_WITH),
+            KeyboardButtonType::RequestLocation => tr(keys::Q_MISC_SHARING_YOUR_LOCATION_IS_NOT),
+            KeyboardButtonType::RequestPoll => tr(keys::Q_MISC_CREATING_A_POLL_IS_NOT),
+            KeyboardButtonType::RequestUsers(_) => tr(keys::Q_MISC_CHOOSE_USERS_TO_SHARE_WITH),
+            KeyboardButtonType::RequestChat(_) => tr(keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE),
+            KeyboardButtonType::RequestManagedBot => tr(keys::Q_MISC_BOT_SETUP_IS_NOT_SUPPORTED),
+            KeyboardButtonType::Unknown { .. } => tr(keys::Q_MISC_UNSUPPORTED_BUTTON),
         }
     }
 }

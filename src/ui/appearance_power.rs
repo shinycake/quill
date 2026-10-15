@@ -8,6 +8,7 @@ use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectStat
 use gpui_kit::component::theme::{ActiveTheme, Theme};
 use gpui_kit::component::{IndexPath, StyledExt as _};
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::power_saving::{Flag, GROUPS, with_flag};
 use std::sync::OnceLock;
 
@@ -125,17 +126,17 @@ impl QuillApp {
             && quill::font_choice::resolve(&self.appearance.font_family, installed_fonts(cx))
                 .is_none();
         let hint = if missing {
-            "This font isn't installed, so the default is used.".to_string()
+            tr(keys::Q_MISC_THIS_FONT_ISNT_INSTALLED_SO).to_string()
         } else {
-            "The font for the whole interface. Code stays monospaced.".to_string()
+            tr(keys::Q_MISC_THE_FONT_FOR_THE_WHOLE).to_string()
         };
         self.appearance_section(
             cx,
-            "Font family",
+            tr(keys::Q_MISC_FONT_FAMILY),
             &hint,
             Select::new(&self.settings.font_picker)
-                .search_placeholder("Search fonts")
-                .accessibility_label("Interface font family")
+                .search_placeholder(tr(keys::Q_MISC_SEARCH_FONTS))
+                .accessibility_label(tr(keys::Q_MISC_INTERFACE_FONT_FAMILY))
                 .menu_max_h(px(280.))
                 .w(px(260.))
                 .into_any_element(),
@@ -194,13 +195,13 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .text_sm()
-                    .child("Battery and animations"),
+                    .child(tr(keys::SETTINGS_POWER_MENU)),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("Power saving options"),
+                    .child(tr(keys::SETTINGS_POWER_SUBTITLE)),
             )
             .child(groups);
         if saver.is_some() {
@@ -208,14 +209,17 @@ impl QuillApp {
                 .child(div().mt_2().child(self.appearance_switch_row(
                     cx,
                     "power-auto",
-                    "Save Power on Low Battery",
+                    tr(keys::SETTINGS_POWER_AUTO),
                     "",
                     !self.appearance.ignore_battery_saving,
                     |prefs, on| prefs.ignore_battery_saving = !on,
                 )))
-                .child(div().text_xs().text_color(muted).child(
-                    "Automatically disable all animations when your laptop is in a battery saving mode.",
-                ));
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::SETTINGS_POWER_AUTO_ABOUT)),
+                );
         }
         body.into_any_element()
     }

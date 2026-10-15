@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::MessageId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{ForwardHeader, ForwardLink, ReplyHeader, ReplyState};
 use quill::telegram::envelope::MessageSender;
 use std::path::PathBuf;
@@ -62,8 +63,11 @@ pub(super) fn reply_header_strip(
     let state = header.state;
     let text = super::search_ui::one_line_preview(&header.text);
     let aria = match &name {
-        Some(name) => format!("Reply to {name}: {text}"),
-        None => format!("Reply: {text}"),
+        Some(name) => tr_with(
+            keys::Q_MISC_REPLY_TO,
+            &[("name", &name.to_string()), ("text", &text.to_string())],
+        ),
+        None => tr_with(keys::Q_MISC_REPLY_2, &[("text", &text.to_string())]),
     };
     div()
         .id(("reply-quote", row_id.0 as u64))
@@ -194,7 +198,7 @@ pub(super) fn forward_header_line(
     let name = if known {
         header.display_name()
     } else {
-        "Forwarded message".to_string()
+        tr(keys::Q_MISC_FORWARDED_MESSAGE).to_string()
     };
     let tooltip = match (header.tooltip(), original_date) {
         (Some(note), Some(date)) => Some(format!("{note}\n{date}")),
@@ -245,7 +249,10 @@ pub(super) fn forward_header_line(
     div()
         .id(("forward-from", row_id.0 as u64))
         .role(Role::Group)
-        .aria_label(format!("Forwarded from {name}"))
+        .aria_label(tr_with(
+            keys::Q_MISC_FORWARDED_FROM,
+            &[("name", &name.to_string())],
+        ))
         .mt_1()
         .mb_1()
         .flex()
@@ -254,7 +261,11 @@ pub(super) fn forward_header_line(
         .gap_x_1()
         .text_xs()
         .when(known, |this| {
-            this.child(div().text_color(muted).child("Forwarded from"))
+            this.child(
+                div()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MISC_FORWARDED_FROM_2)),
+            )
         })
         .child(name_el)
         .when_some(via_bot, |this, bot| {

@@ -2,6 +2,7 @@
 //! (accent color, inline links, the action disc, sizes and names).
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 /// Accent color for controls drawn inside a bubble: the theme primary on
 /// incoming bubbles, white on the accent-filled outgoing ones.
@@ -164,14 +165,14 @@ pub(in crate::ui) fn document_chip(
         let done = file.map(|f| f.local.downloaded_size).unwrap_or(0);
         let mut text = match (done > 0, size_label.is_empty()) {
             (true, false) => format!("{} of {}", format_bytes(done), size_label),
-            _ => "Downloading…".to_string(),
+            _ => tr(keys::Q_MISC_DOWNLOADING).to_string(),
         };
         if paused_now {
-            text.push_str(" · paused");
+            text.push_str(tr(keys::Q_MISC_PAUSED));
         }
         text
     } else if failed_now {
-        "Download failed".to_string()
+        tr(keys::Q_MISC_DOWNLOAD_FAILED).to_string()
     } else {
         [size_label.as_str(), kind.as_str()]
             .into_iter()
@@ -180,7 +181,7 @@ pub(in crate::ui) fn document_chip(
             .join(" · ")
     };
     let name = if doc.file_name.is_empty() {
-        "Document".to_string()
+        tr(keys::ATTACH_DOCUMENT).to_string()
     } else {
         doc.file_name.clone()
     };
@@ -190,13 +191,22 @@ pub(in crate::ui) fn document_chip(
         (cx.theme().primary, gpui_kit::white())
     };
     let (disc_icon, disc_label) = if ready {
-        (gpui_kit::assets::IconName::File, "Open")
+        (gpui_kit::assets::IconName::File, tr(keys::Q_MISC_OPEN))
     } else if downloading_now {
-        (gpui_kit::assets::IconName::X, "Cancel download")
+        (
+            gpui_kit::assets::IconName::X,
+            tr(keys::Q_MISC_CANCEL_DOWNLOAD),
+        )
     } else if failed_now {
-        (gpui_kit::assets::IconName::RotateCcw, "Retry download")
+        (
+            gpui_kit::assets::IconName::RotateCcw,
+            tr(keys::Q_MISC_RETRY_DOWNLOAD),
+        )
     } else {
-        (gpui_kit::assets::IconName::ArrowDown, "Download")
+        (
+            gpui_kit::assets::IconName::ArrowDown,
+            tr(keys::MEDIA_DOWNLOAD),
+        )
     };
     let primary_action = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
         if ready {
@@ -251,7 +261,13 @@ pub(in crate::ui) fn document_chip(
     // Slice media-downloads-pause: Pause/Resume only for user-initiated
     // (listed) downloads — `None` hides it.
     let pause_label = if downloading_now {
-        paused.map(|is_paused| if is_paused { "Resume" } else { "Pause" })
+        paused.map(|is_paused| {
+            if is_paused {
+                tr(keys::Q_MISC_RESUME)
+            } else {
+                tr(keys::Q_MISC_PAUSE)
+            }
+        })
     } else {
         None
     };
@@ -277,7 +293,10 @@ pub(in crate::ui) fn document_chip(
                     div()
                         .id(("doc-chip-name", row_id))
                         .role(gpui_kit::Role::Button)
-                        .aria_label(format!("Open document {name}"))
+                        .aria_label(tr_with(
+                            keys::Q_MISC_OPEN_DOCUMENT,
+                            &[("name", &name.to_string())],
+                        ))
                         .tab_index(0)
                         .cursor_pointer()
                         .text_sm()
@@ -295,18 +314,21 @@ pub(in crate::ui) fn document_chip(
                         .text_xs()
                         .child(div().opacity(0.7).child(meta))
                         .when(ready, |this| {
-                            this.child(link(("doc-action", row_id), "Show in folder").on_click(
-                                cx.listener(move |this, _, _, cx| {
-                                    this.reveal_downloaded_file(file_id, cx);
-                                }),
-                            ))
+                            this.child(
+                                link(("doc-action", row_id), tr(keys::Q_MISC_SHOW_IN_FOLDER))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.reveal_downloaded_file(file_id, cx);
+                                    })),
+                            )
                         })
                         .when(failed_now, |this| {
-                            this.child(link(("doc-action", row_id), "Retry").on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    this.request_media_download(file_id, sponsored, cx);
-                                },
-                            )))
+                            this.child(
+                                link(("doc-action", row_id), tr(keys::Q_MISC_RETRY)).on_click(
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.request_media_download(file_id, sponsored, cx);
+                                    }),
+                                ),
+                            )
                         })
                         .when_some(pause_label, |this, label| {
                             this.child(link(("doc-pause", row_id), label).on_click(cx.listener(
@@ -355,7 +377,7 @@ pub(in crate::ui) fn download_display_name(session: &Session, file_id: i32) -> S
                 && doc.file_id.0 == file_id
             {
                 return if doc.file_name.is_empty() {
-                    "Document".to_string()
+                    tr(keys::ATTACH_DOCUMENT).to_string()
                 } else {
                     doc.file_name.clone()
                 };
@@ -369,16 +391,16 @@ pub(in crate::ui) fn download_display_name(session: &Session, file_id: i32) -> S
         .and_then(|f| f.usable_path())
         .and_then(|p| std::path::Path::new(p).file_name())
         .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| format!("File {file_id}"))
+        .unwrap_or_else(|| tr_with(keys::Q_MISC_FILE, &[("file_id", &file_id.to_string())]))
 }
 
 pub(in crate::ui) fn format_bytes(n: i64) -> String {
     if n <= 0 {
         String::new()
     } else if n < 1024 {
-        format!("{n} B")
+        tr_with(keys::Q_MISC_B, &[("n", &n.to_string())])
     } else if n < 1024 * 1024 {
-        format!("{} KB", n / 1024)
+        tr_with(keys::Q_MISC_KB, &[("n_1024", &(n / 1024).to_string())])
     } else {
         format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
     }

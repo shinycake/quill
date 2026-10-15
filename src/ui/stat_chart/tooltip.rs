@@ -9,6 +9,7 @@ use crate::ui::chat_theme::text_muted;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::stat_chart::{ChartCurrency, StatChart, format_decimal, percentages, usd_label};
 
 /// The tooltip body for `point`: each line's share too when `shares`,
@@ -68,8 +69,8 @@ pub(super) fn body(
         );
         let raw_value = raw.get(k).copied().unwrap_or(0);
         let currency = match chart.currency {
-            ChartCurrency::Ton => Some("Rewards in TON"),
-            ChartCurrency::Stars => Some("Rewards in Stars"),
+            ChartCurrency::Ton => Some(tr(keys::CHANNEL_EARN_CHART_OVERRIDEN_DETAIL_CURRENCY)),
+            ChartCurrency::Stars => Some(tr(keys::CHANNEL_EARN_CHART_OVERRIDEN_DETAIL_CREDITS)),
             ChartCurrency::None => None,
         };
         match currency.filter(|_| currency_rate > 0.0) {
@@ -81,7 +82,11 @@ pub(super) fn body(
                         chart.currency_amount(raw_value),
                     ))
                     .child(value_row(
-                        stroke(color).child(div().text_color(text_muted()).child("Rewards in USD")),
+                        stroke(color).child(
+                            div()
+                                .text_color(text_muted())
+                                .child(tr(keys::CHANNEL_EARN_CHART_OVERRIDEN_DETAIL_USD)),
+                        ),
                         usd_label(units, currency_rate),
                     ));
             }

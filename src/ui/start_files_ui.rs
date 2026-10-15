@@ -16,6 +16,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::send_rights::SendRights;
 use quill::telegram::envelope::AuthorizationState;
@@ -135,7 +136,7 @@ impl QuillApp {
         if self.open_chat_id() == Some(chat) {
             self.attach_dropped_files(&files, cx);
         } else {
-            self.connection.status_note = "Open the chat to attach the files.".into();
+            self.connection.status_note = tr(keys::Q_MISC_OPEN_THE_CHAT_TO_ATTACH).into();
         }
         cx.notify();
     }
@@ -159,7 +160,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("No chats found."),
+                        .child(tr(keys::Q_MISC_NO_CHATS_FOUND)),
                 );
             }
             for (id, title) in choices {
@@ -179,14 +180,14 @@ impl QuillApp {
                 .gap_3()
                 .child(
                     Textarea::new(&this.start_files.search)
-                        .aria_label("Search chats")
+                        .aria_label(tr(keys::Q_MISC_SEARCH_CHATS))
                         .h(px(36.)),
                 )
                 .child(list)
                 .into_any_element();
             let footer = div().flex().justify_end().gap_2().child(
                 Button::new("start-files-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_start_files(window, cx);
@@ -195,7 +196,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Forward to\u{2026}"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_MISC_FORWARD_TO)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

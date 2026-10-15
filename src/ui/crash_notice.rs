@@ -15,6 +15,7 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::{App, AppContext as _, Window};
 use quill::crash_log::PendingCrash;
+use quill::lang::{keys, tr};
 use std::path::{Path, PathBuf};
 
 /// Call once while the main window is built: arms the clean-exit marker and
@@ -104,12 +105,12 @@ fn show_crash(root: &Path, crash: &PendingCrash, window: &mut Window, cx: &mut A
 fn notice(report: std::path::PathBuf) -> Notification {
     Notification::new()
         .id::<CrashNotice>()
-        .title("Quill closed unexpectedly last time")
-        .message("A crash report was saved on this computer.")
+        .title(tr(keys::Q_MISC_QUILL_CLOSED_UNEXPECTEDLY_LAST_TIME))
+        .message(tr(keys::Q_MISC_A_CRASH_REPORT_WAS_SAVED))
         .action(move |_, _, cx| {
             let report = report.clone();
             Button::new("crash-notice-show-log")
-                .label("Show log")
+                .label(tr(keys::Q_MISC_SHOW_LOG))
                 .on_click(cx.listener(move |note, _, window, cx| {
                     let _ = quill::platform::reveal_in_file_manager(&report);
                     note.dismiss(window, cx);

@@ -15,6 +15,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::rich::RichBlock;
 use quill::state::{OutboxReceipt, Session, message_time_hhmm};
@@ -108,7 +109,7 @@ pub(super) fn apply_ready_text_entities(
     };
     let bold = r#"{"@type":"textEntityTypeBold"}"#;
     let entities = [
-        ent(body, "Bold", bold),
+        ent(body, tr(keys::Q_MISC_BOLD), bold),
         ent(body, "italic", r#"{"@type":"textEntityTypeItalic"}"#),
         // Nested: bold inside italic renders bold italic.
         ent(body, "bolditalic", bold),
@@ -136,7 +137,7 @@ pub(super) fn apply_ready_text_entities(
 
     let caption = "A captioned photo: bold caption and a link https://example.com/pic";
     let caption_entities = [
-        ent(caption, "bold caption", bold),
+        ent(caption, tr(keys::Q_MISC_BOLD_CAPTION), bold),
         ent(
             caption,
             "https://example.com/pic",
@@ -158,15 +159,19 @@ pub(super) fn apply_ready_text_entities(
         ent(links, "@durov", r#"{"@type":"textEntityTypeMention"}"#),
         ent(
             links,
-            "Ann",
+            tr(keys::Q_MISC_ANN),
             r#"{"@type":"textEntityTypeMentionName","user_id":14}"#,
         ),
         ent(links, "#news", r#"{"@type":"textEntityTypeHashtag"}"#),
-        ent(links, "$TON", r#"{"@type":"textEntityTypeCashtag"}"#),
+        ent(
+            links,
+            tr(keys::Q_MISC_TON),
+            r#"{"@type":"textEntityTypeCashtag"}"#,
+        ),
         ent(links, "/start", r#"{"@type":"textEntityTypeBotCommand"}"#),
         ent(
             links,
-            "hello@example.com",
+            tr(keys::Q_MISC_HELLO_EXAMPLE_COM),
             r#"{"@type":"textEntityTypeEmailAddress"}"#,
         ),
         ent(
@@ -186,7 +191,7 @@ pub(super) fn apply_ready_text_entities(
         ),
         ent(
             links,
-            "the docs",
+            tr(keys::Q_MISC_THE_DOCS),
             r#"{"@type":"textEntityTypeTextUrl","url":"https://docs.example.org/guide"}"#,
         ),
         ent(
@@ -605,7 +610,7 @@ fn paint_text_run(
             .id(run_id)
             .relative()
             .role(Role::Button)
-            .aria_label("Reveal spoiler")
+            .aria_label(tr(keys::Q_MISC_REVEAL_SPOILER))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.message_ui.spoiler_revealed.insert(key);
@@ -663,7 +668,7 @@ fn paint_text_run(
             return div()
                 .id(format!("{run_id}-tap"))
                 .role(Role::Button)
-                .aria_label("Custom emoji")
+                .aria_label(tr(keys::Q_MISC_CUSTOM_EMOJI))
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.tap_custom_emoji(emoji_id, cx);
@@ -764,8 +769,8 @@ fn pre_block(run: &TextRun, id: &str, font: Pixels, cx: &mut Context<QuillApp>) 
                         .icon(IconName::Copy)
                         .xsmall()
                         .ghost()
-                        .tooltip("Copy")
-                        .accessibility_label("Copy code")
+                        .tooltip(tr(keys::Q_MISC_COPY))
+                        .accessibility_label(tr(keys::Q_MISC_COPY_CODE))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.copy_entity_text(copy_text.clone(), cx);
                         })),
@@ -840,7 +845,11 @@ fn quote_block(
         .bg(bg_canvas())
         .child(runs_row);
     if collapsible {
-        let label = if expanded { "Show less" } else { "Show more" };
+        let label = if expanded {
+            tr(keys::Q_MISC_SHOW_LESS)
+        } else {
+            tr(keys::Q_MISC_SHOW_MORE)
+        };
         block = block.child(
             Button::new(format!("msg-quote-toggle-{}-{start}", msg_key.1))
                 .label(label)

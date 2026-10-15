@@ -12,6 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::MessageId;
+use quill::lang::{keys, tr};
 use quill::service_text::{ServiceLink, ServiceText};
 use quill::state::{HistoryMessage, Session};
 use quill::telegram::envelope::{MessageContent, ParsedFile, PhotoContent, ServiceAction};
@@ -117,7 +118,7 @@ fn photo_tile(
         .overflow_hidden()
         .bg(fill_muted())
         .role(gpui_kit::Role::Button)
-        .aria_label("Open photo")
+        .aria_label(tr(keys::Q_MISC_OPEN_PHOTO))
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -198,7 +199,7 @@ fn birthday_card(
         .when(!outgoing && parts.is_some(), |this| {
             this.child(
                 Button::new(format!("suggested-birthday-view-{row_id}"))
-                    .label("View")
+                    .label(tr(keys::Q_MISC_VIEW))
                     .small()
                     .primary()
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -285,7 +286,7 @@ pub(super) fn service_message_row(
             .gap_2()
             .child(
                 Button::new(format!("suggested-view-{row_id}"))
-                    .label("View Photo")
+                    .label(tr(keys::Q_MISC_VIEW_PHOTO))
                     .small()
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -295,7 +296,7 @@ pub(super) fn service_message_row(
             .when(!message.is_outgoing && photo_id != 0, |this| {
                 this.child(
                     Button::new(format!("suggested-set-{row_id}"))
-                        .label("Set as My Photo")
+                        .label(tr(keys::Q_MISC_SET_AS_MY_PHOTO))
                         .small()
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -353,7 +354,7 @@ pub(super) fn service_message_row(
                 .id(("joined-notice", row_id))
                 .cursor_pointer()
                 .role(Role::Button)
-                .aria_label("Show or hide similar channels")
+                .aria_label(tr(keys::Q_MISC_SHOW_OR_HIDE_SIMILAR_CHANNELS))
                 .tab_index(0)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.toggle_similar_strip(chat_id, cx);

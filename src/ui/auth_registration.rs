@@ -5,6 +5,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::RequestPurpose;
 use quill::telegram::envelope::AuthorizationState;
 use zeroize::Zeroize;
@@ -22,16 +23,22 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(Textarea::new(&self.auth_ui.registration_first_input).aria_label("First name"))
-            .child(Textarea::new(&self.auth_ui.registration_last_input).aria_label("Last name"));
+            .child(
+                Textarea::new(&self.auth_ui.registration_first_input)
+                    .aria_label(tr(keys::Q_MISC_FIRST_NAME)),
+            )
+            .child(
+                Textarea::new(&self.auth_ui.registration_last_input)
+                    .aria_label(tr(keys::Q_MISC_LAST_NAME)),
+            );
         if let Some(terms) = terms {
             let label = if terms.min_user_age > 0 {
-                format!(
-                    "I accept these terms and confirm I am at least {} years old",
-                    terms.min_user_age
+                tr_with(
+                    keys::Q_MISC_I_ACCEPT_THESE_TERMS_AND,
+                    &[("min_user_age", &terms.min_user_age.to_string())],
                 )
             } else {
-                "I accept these terms".into()
+                tr(keys::Q_MISC_I_ACCEPT_THESE_TERMS).into()
             };
             form = form
                 .child(
@@ -55,7 +62,7 @@ impl QuillApp {
         }
         form.child(
             Checkbox::new("registration-notify-contacts")
-                .label("Notify my contacts that I joined Telegram")
+                .label(tr(keys::Q_MISC_NOTIFY_MY_CONTACTS_THAT_I))
                 .checked(self.auth_ui.registration_notify_contacts)
                 .disabled(pending)
                 .on_click(cx.listener(|this, &on, _, cx| {
@@ -66,9 +73,9 @@ impl QuillApp {
         .child(
             Button::new("create-telegram-account")
                 .label(if pending {
-                    "Creating account…"
+                    tr(keys::Q_MISC_CREATING_ACCOUNT)
                 } else {
-                    "Create account"
+                    tr(keys::Q_MISC_CREATE_ACCOUNT)
                 })
                 .disabled(!accepted || pending)
                 .on_click(cx.listener(|this, _, window, cx| this.submit_registration(window, cx))),
@@ -109,9 +116,9 @@ impl QuillApp {
                     .registration_last_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.auth_ui.accepted_registration_terms = None;
-                "registration submitted — waiting for Telegram".into()
+                tr(keys::Q_MISC_REGISTRATION_SUBMITTED_WAITING_FOR_TELEGRAM).into()
             }
-            Err(_) => "could not register — check your name and accept the current terms".into(),
+            Err(_) => tr(keys::Q_MISC_COULD_NOT_REGISTER_CHECK_YOUR).into(),
         };
         cx.notify();
     }

@@ -23,6 +23,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::TopicBadge;
 use quill::subsection_tabs::SubsectionTabsMode;
 use quill::telegram::envelope::ForumTopic;
@@ -130,7 +131,7 @@ impl QuillApp {
                     }
                 })
                 .role(Role::TabList)
-                .aria_label("Topics")
+                .aria_label(tr(keys::Q_MISC_TOPICS))
                 .child(self.tabs_toggle(&tabs, cx))
                 .child(row)
                 .into_any_element(),
@@ -167,7 +168,7 @@ impl QuillApp {
                 .border_r_1()
                 .border_color(cx.theme().border)
                 .role(Role::TabList)
-                .aria_label("Topics")
+                .aria_label(tr(keys::Q_MISC_TOPICS))
                 .child(
                     div()
                         .flex()
@@ -205,10 +206,11 @@ impl QuillApp {
             .text_color(cx.theme().muted_foreground)
             .hover(|s| s.text_color(cx.theme().foreground))
             .role(Role::Button)
-            .aria_label("Change tab layout")
+            .aria_label(tr(keys::Q_MISC_CHANGE_TAB_LAYOUT))
             .tab_index(0)
             .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new("Change tab layout").build(window, cx)
+                gpui_kit::component::tooltip::Tooltip::new(tr(keys::Q_MISC_CHANGE_TAB_LAYOUT))
+                    .build(window, cx)
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.cycle_subsection_tabs_ui(chat_id, cx);
@@ -404,51 +406,59 @@ impl QuillApp {
                 };
                 let mut menu = menu;
                 menu = menu.item(
-                    PopupMenuItem::new("Topic info")
+                    PopupMenuItem::new(tr(keys::Q_MISC_TOPIC_INFO))
                         .icon(IconName::Info)
                         .on_click(act(TopicMenuAction::Info)),
                 );
                 if unread {
                     menu = menu.item(
-                        PopupMenuItem::new("Mark as read")
+                        PopupMenuItem::new(tr(keys::CONTEXT_MARK_READ))
                             .icon(IconName::CheckCheck)
                             .on_click(act(TopicMenuAction::MarkRead)),
                     );
                 }
                 if can_pin {
                     menu = menu.item(
-                        PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" })
-                            .icon(if pinned {
-                                IconName::PinOff
-                            } else {
-                                IconName::Pin
-                            })
-                            .on_click(act(if pinned {
-                                TopicMenuAction::Unpin
-                            } else {
-                                TopicMenuAction::Pin
-                            })),
+                        PopupMenuItem::new(if pinned {
+                            tr(keys::Q_MISC_UNPIN)
+                        } else {
+                            tr(keys::CONTEXT_PIN_MSG)
+                        })
+                        .icon(if pinned {
+                            IconName::PinOff
+                        } else {
+                            IconName::Pin
+                        })
+                        .on_click(act(if pinned {
+                            TopicMenuAction::Unpin
+                        } else {
+                            TopicMenuAction::Pin
+                        })),
                     );
                 }
                 menu = menu.item(
-                    PopupMenuItem::new(if muted { "Unmute" } else { "Mute" })
-                        .icon(if muted {
-                            IconName::Bell
-                        } else {
-                            IconName::BellOff
-                        })
-                        .on_click(act(if muted {
-                            TopicMenuAction::Unmute
-                        } else {
-                            TopicMenuAction::Mute
-                        })),
+                    PopupMenuItem::new(if muted {
+                        tr(keys::Q_MISC_UNMUTE)
+                    } else {
+                        tr(keys::Q_MISC_MUTE)
+                    })
+                    .icon(if muted {
+                        IconName::Bell
+                    } else {
+                        IconName::BellOff
+                    })
+                    .on_click(act(if muted {
+                        TopicMenuAction::Unmute
+                    } else {
+                        TopicMenuAction::Mute
+                    })),
                 );
                 if can_close {
                     menu = menu.item(
                         PopupMenuItem::new(if closed {
-                            "Reopen topic"
+                            tr(keys::Q_MISC_REOPEN_TOPIC)
                         } else {
-                            "Close topic"
+                            tr(keys::Q_MISC_CLOSE_TOPIC)
                         })
                         .icon(IconName::Lock)
                         .on_click(act(if closed {
@@ -470,7 +480,7 @@ impl QuillApp {
                 }
                 if can_delete {
                     menu = menu.separator().item(
-                        PopupMenuItem::new("Delete")
+                        PopupMenuItem::new(tr(keys::BOX_DELETE))
                             .icon(IconName::Trash)
                             .on_click(act(TopicMenuAction::Delete)),
                     );
@@ -542,7 +552,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION).into();
             cx.notify();
             return;
         };
@@ -553,7 +563,7 @@ impl QuillApp {
             _ => Ok(None),
         };
         if result.is_err() {
-            self.connection.status_note = "could not update topic".into();
+            self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_UPDATE_TOPIC).into();
         }
         cx.notify();
     }
@@ -606,21 +616,27 @@ fn is_active(tabs: &TabsSnapshot, tab: Tab) -> bool {
 /// `(label, badge, muted)` for a tab.
 fn tab_label(tabs: &TabsSnapshot, tab: Tab) -> (String, TopicBadge, bool) {
     match tab {
-        Tab::All => ("All".to_string(), TopicBadge::None, false),
+        Tab::All => (tr(keys::Q_MISC_ALL).to_string(), TopicBadge::None, false),
         Tab::Topic(id) => tabs
             .topics
             .iter()
             .find(|t| t.forum_topic_id == id)
             .map(|t| {
                 let name = if t.name.is_empty() {
-                    format!("Topic {id}")
+                    tr_with(keys::Q_MISC_TOPIC, &[("id", &id.to_string())])
                 } else {
                     t.name.clone()
                 };
                 let badge = tabs.badges.get(&id).copied().unwrap_or(TopicBadge::None);
                 (name, badge, t.notification_settings.is_muted())
             })
-            .unwrap_or_else(|| (format!("Topic {id}"), TopicBadge::None, false)),
+            .unwrap_or_else(|| {
+                (
+                    tr_with(keys::Q_MISC_TOPIC, &[("id", &id.to_string())]),
+                    TopicBadge::None,
+                    false,
+                )
+            }),
     }
 }
 

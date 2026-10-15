@@ -7,6 +7,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::composer::{SendKeyMode, should_send_on_enter};
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The "Search in chat" field: its text drives the chat search, Enter
@@ -17,7 +18,7 @@ impl QuillApp {
     ) -> Entity<TextareaState> {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search in chat")
+                .placeholder(tr(keys::Q_MISC_SEARCH_IN_CHAT))
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });
@@ -54,7 +55,7 @@ impl QuillApp {
     ) -> Entity<TextareaState> {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search chats")
+                .placeholder(tr(keys::Q_MISC_SEARCH_CHATS))
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });

@@ -389,6 +389,16 @@ accounts, secret chats, scheduled messages, the admin event log, shared
 media lists, sponsored messages and the remaining confirm and create
 dialogs are converted (`lang/en/ops.strings`).
 
+## PR 9: appearance, OS menus and the remaining screens
+
+Chat appearance and name colors, themes and the theme editor, wallpaper
+preview, power saving, spellcheck and dictionaries, translation, the GIF
+and mask panels, the photo editor, send effects, the Dock, window menu,
+tray and Touch Bar, onboarding, deep links, jump-to-date, recording, and
+the remaining message media labels are converted (`lang/en/misc.strings`).
+The Dock's playback items use tdesktop's `lng_mac_menu_player_*` keys.
+`main.rs`, audio playback and the HDR decoder are still English.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

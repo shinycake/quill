@@ -37,6 +37,7 @@ mod view;
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::state::ChatSummary;
 pub(in crate::ui) use slot::scope_probe;
 #[cfg(test)]
@@ -275,7 +276,7 @@ impl QuillApp {
             return;
         };
         if !self.can_open_chat_window(&chat) {
-            self.connection.status_note = "This chat can't open in a new window yet.".into();
+            self.connection.status_note = tr(keys::Q_MISC_THIS_CHAT_CANT_OPEN_IN).into();
             cx.notify();
             return;
         }
@@ -315,7 +316,8 @@ impl QuillApp {
                 Ok(opened) => opened,
                 Err(_) => {
                     owner.update(cx, |app, cx| {
-                        app.connection.status_note = "Couldn't open the chat window".into();
+                        app.connection.status_note =
+                            tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW).into();
                         app.chat_window_closed(chat_id, None, cx);
                     });
                     return;

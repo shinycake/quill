@@ -15,6 +15,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::state::UnreadJumpKind;
 
 /// tdesktop `historyToDownBadgeSize`.
@@ -68,7 +69,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.jump_to_unread_marker(kind) {
                 Ok(()) => String::new(),
-                Err(_) => "could not find the message".into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_FIND_THE_MESSAGE).into(),
             };
             cx.notify();
         }
@@ -85,7 +86,7 @@ impl QuillApp {
             self.connection.status_note =
                 match live.driver.read_all_chat_unread_markers(chat_id, kind) {
                     Ok(()) => String::new(),
-                    Err(_) => "could not mark as read".into(),
+                    Err(_) => tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ).into(),
                 };
         }
         cx.notify();
@@ -95,7 +96,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.read_all_unread_markers(kind) {
                 Ok(()) => String::new(),
-                Err(_) => "could not mark as read".into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_MARK_AS_READ).into(),
             };
             cx.notify();
         }
@@ -107,27 +108,27 @@ fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) 
         UnreadJumpKind::Mention => (
             "jump-mention",
             IconName::AtSign,
-            "Next unread mention",
-            "Next unread mention · right-click for more",
+            tr(keys::Q_MISC_NEXT_UNREAD_MENTION),
+            tr(keys::Q_MISC_NEXT_UNREAD_MENTION_RIGHT_CLICK),
         ),
         UnreadJumpKind::Reaction => (
             "jump-reaction",
             IconName::Heart,
-            "Next unread reaction",
-            "Next unread reaction · right-click for more",
+            tr(keys::Q_MISC_NEXT_UNREAD_REACTION),
+            tr(keys::Q_MISC_NEXT_UNREAD_REACTION_RIGHT_CLICK),
         ),
         // tdesktop `lng_jump_to_poll_votes`.
         UnreadJumpKind::PollVote => (
             "jump-poll-vote",
             IconName::ChartBar,
-            "Jump to poll votes",
-            "Jump to poll votes · right-click for more",
+            tr(keys::JUMP_TO_POLL_VOTES),
+            tr(keys::Q_MISC_JUMP_TO_POLL_VOTES_RIGHT),
         ),
     };
     // tdesktop `lng_context_mark_read_poll_votes_all` vs "Mark all as read".
     let read_all_label = match kind {
-        UnreadJumpKind::PollVote => "Read all poll votes",
-        _ => "Mark all as read",
+        UnreadJumpKind::PollVote => tr(keys::CONTEXT_MARK_READ_POLL_VOTES_ALL),
+        _ => tr(keys::Q_MISC_MARK_ALL_AS_READ),
     };
     let jump_owner = owner.clone();
     div()

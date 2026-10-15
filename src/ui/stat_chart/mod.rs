@@ -22,6 +22,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use plots::PlotInput;
+use quill::lang::{keys, tr};
 use quill::stat_chart::{ChartKind, StatChart};
 use series::{points, zoomable_point};
 use state::ChartState;
@@ -149,7 +150,7 @@ impl StatChartView {
         let on_unzoom = self.on_unzoom.clone()?;
         Some(
             Button::new(SharedString::from(format!("{id}-zoom-out")))
-                .label("Zoom out")
+                .label(tr(keys::Q_MISC_ZOOM_OUT))
                 .small()
                 .outline()
                 .on_click(move |_, window, cx| on_unzoom(window, cx))
@@ -183,7 +184,9 @@ impl RenderOnce for StatChartView {
                 .into_any_element();
             }
             // Still loading, or failed: the overview stays with a note.
-            let note: SharedString = day.error.unwrap_or_else(|| "Loading the day…".into());
+            let note: SharedString = day
+                .error
+                .unwrap_or_else(|| tr(keys::Q_MISC_LOADING_THE_DAY).into());
             let id = self.id.clone();
             return self
                 .render_chart(window, cx)
@@ -279,7 +282,7 @@ impl StatChartView {
                     .debug_selector(move || selector.clone())
                     .child(
                         Button::new(SharedString::from(format!("{}-pie-zoom-out", self.id)))
-                            .label("Zoom out")
+                            .label(tr(keys::Q_MISC_ZOOM_OUT))
                             .small()
                             .outline()
                             .on_click(move |_, _, cx| state.update(cx, |s, cx| s.exit_pie(cx))),

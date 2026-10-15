@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use zeroize::Zeroizing;
@@ -16,9 +17,10 @@ pub(super) enum ScanEvent {
 impl DeviceQrScanner {
     fn start() -> Result<Self, &'static str> {
         if !cfg!(target_os = "macos") {
-            return Err("Camera device linking is available on macOS.");
+            return Err(tr(keys::Q_MISC_CAMERA_DEVICE_LINKING_IS_AVAILABLE));
         }
-        let exe = std::env::current_exe().map_err(|_| "The camera scanner is unavailable.")?;
+        let exe = std::env::current_exe()
+            .map_err(|_| tr(keys::Q_MISC_THE_CAMERA_SCANNER_IS_UNAVAILABLE))?;
         let sibling = exe.with_file_name("quill-qr-scanner");
         let developer = exe
             .parent()
@@ -27,14 +29,14 @@ impl DeviceQrScanner {
         let path = std::iter::once(sibling)
             .chain(developer)
             .find(|p| p.is_file())
-            .ok_or("The camera scanner is missing. Rebuild the Quill app bundle.")?;
+            .ok_or(tr(keys::Q_MISC_THE_CAMERA_SCANNER_IS_MISSING))?;
         Command::new(path)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .map(Self)
-            .map_err(|_| "The camera scanner couldn't start.")
+            .map_err(|_| tr(keys::Q_MISC_THE_CAMERA_SCANNER_COULDNT_START))
     }
     fn poll(&mut self) -> Option<ScanEvent> {
         let status = match self.0.try_wait() {
@@ -104,12 +106,12 @@ impl QuillApp {
             .and_then(|live| live.driver.session.settings.device_login_result.take())
         {
             self.privacy.device_link_notice = Some(match linked {
-                quill::auth::DeviceLoginResult::Linked => "Device linked.",
+                quill::auth::DeviceLoginResult::Linked => tr(keys::Q_MISC_DEVICE_LINKED),
                 quill::auth::DeviceLoginResult::PasswordRequired => {
-                    "QR code accepted. Enter your two-step verification password on the other device to finish signing in."
+                    tr(keys::Q_MISC_QR_CODE_ACCEPTED_ENTER_YOUR)
                 }
                 quill::auth::DeviceLoginResult::Failed => {
-                    "The device couldn't be linked. Scan a fresh login QR code and try again."
+                    tr(keys::Q_MISC_THE_DEVICE_COULDNT_BE_LINKED)
                 }
             });
             cx.notify();
@@ -128,7 +130,7 @@ impl QuillApp {
             ScanEvent::Cancelled => {}
             ScanEvent::Failed => {
                 self.privacy.device_link_notice =
-                    Some("Couldn't read a Telegram login QR code. Please try again.")
+                    Some(tr(keys::Q_MISC_COULDNT_READ_A_TELEGRAM_LOGIN))
             }
         }
         cx.activate(true);
@@ -175,9 +177,9 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.confirm_device_login(&link));
         self.privacy.device_link_notice = Some(if matches!(result, Some(Ok(_))) {
-            "Waiting for Telegram to link the device…"
+            tr(keys::Q_MISC_WAITING_FOR_TELEGRAM_TO_LINK)
         } else {
-            "The device couldn't be linked. Scan a fresh login QR code and try again."
+            tr(keys::Q_MISC_THE_DEVICE_COULDNT_BE_LINKED)
         });
         cx.notify();
     }

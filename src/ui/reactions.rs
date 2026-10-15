@@ -11,6 +11,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{HistoryMessage, ReactionChoice, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -193,7 +194,10 @@ impl QuillApp {
                     .when(selected, |this| this.bg(accent().opacity(0.25)))
                     .hover(|style| style.bg(bg_subtle()))
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Quick reaction {glyph}"))
+                    .aria_label(tr_with(
+                        keys::Q_MISC_QUICK_REACTION,
+                        &[("glyph", &glyph.to_string())],
+                    ))
                     .child(
                         super::emoji_sprites::glyph(
                             &glyph,
@@ -212,13 +216,19 @@ impl QuillApp {
             .flex_col()
             .gap_1()
             .py_1()
-            .child(div().text_sm().font_medium().px_2().child("Quick reaction"))
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .px_2()
+                    .child(tr(keys::SETTINGS_CHAT_REACTIONS_TITLE)),
+            )
             .child(
                 div()
                     .text_xs()
                     .text_color(muted)
                     .px_2()
-                    .child("Used when double-click is set to react"),
+                    .child(tr(keys::Q_MISC_USED_WHEN_DOUBLE_CLICK_IS)),
             )
             .child(strip)
             .into_any_element()
@@ -243,24 +253,28 @@ impl QuillApp {
                     .child(
                         Switch::new("media-pref-corner-reply")
                             .checked(reply)
-                            .accessibility_label("Reply button on messages")
+                            .accessibility_label(tr(keys::SETTINGS_CHAT_CORNER_REPLY))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.corner_reply = on, cx);
                             })),
                     )
-                    .child(div().text_sm().child("Reply button on messages")),
+                    .child(div().text_sm().child(tr(keys::SETTINGS_CHAT_CORNER_REPLY))),
             )
             .child(
                 row()
                     .child(
                         Switch::new("media-pref-corner-reaction")
                             .checked(react)
-                            .accessibility_label("Reaction button on messages")
+                            .accessibility_label(tr(keys::SETTINGS_CHAT_CORNER_REACTION))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 this.set_media_pref(|prefs| prefs.corner_reaction = on, cx);
                             })),
                     )
-                    .child(div().text_sm().child("Reaction button on messages")),
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::SETTINGS_CHAT_CORNER_REACTION)),
+                    ),
             )
             .into_any_element()
     }
@@ -293,7 +307,8 @@ impl QuillApp {
                     .is_some_and(|m| m.chosen_reaction(&choice) || has_reaction(m, &choice))
             })
         {
-            self.connection.status_note = "Custom emoji reactions need Telegram Premium".into();
+            self.connection.status_note =
+                tr(keys::Q_MISC_CUSTOM_EMOJI_REACTIONS_NEED_TELEGRAM).into();
             cx.notify();
             return;
         }
@@ -316,8 +331,8 @@ impl QuillApp {
                 .driver
                 .toggle_reaction_choice(chat_id, message_id, &choice)
             {
-                Ok(_) => "updating reaction…".into(),
-                Err(_) => "could not update reaction".into(),
+                Ok(_) => tr(keys::Q_MISC_UPDATING_REACTION).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION).into(),
             };
             cx.notify();
             return;
@@ -327,7 +342,7 @@ impl QuillApp {
                 self.toggle_emoji_reaction(chat_id, message_id, emoji, cx)
             }
             ReactionChoice::CustomEmoji(_) => {
-                self.connection.status_note = "reaction updated".into();
+                self.connection.status_note = tr(keys::Q_MISC_REACTION_UPDATED).into();
                 cx.notify();
             }
         }
@@ -345,15 +360,15 @@ impl QuillApp {
                 .driver
                 .toggle_message_reaction(chat_id, message_id, &emoji);
             self.connection.status_note = match result {
-                Ok(_) => "updating reaction…".into(),
-                Err(_) => "could not update reaction".into(),
+                Ok(_) => tr(keys::Q_MISC_UPDATING_REACTION).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_REACTION).into(),
             };
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
             self.apply_demo_reaction_toggle(chat_id, message_id, &emoji);
-            self.connection.status_note = "reaction updated".into();
+            self.connection.status_note = tr(keys::Q_MISC_REACTION_UPDATED).into();
             cx.notify();
         }
     }
@@ -432,8 +447,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = match &choice {
-            ReactionChoice::Emoji(emoji) => format!("React {emoji}"),
-            ReactionChoice::CustomEmoji(_) => "React with custom emoji".to_string(),
+            ReactionChoice::Emoji(emoji) => {
+                tr_with(keys::Q_MISC_REACT, &[("emoji", &emoji.to_string())])
+            }
+            ReactionChoice::CustomEmoji(_) => tr(keys::Q_MISC_REACT_WITH_CUSTOM_EMOJI).to_string(),
         };
         div()
             .id(id)
@@ -521,7 +538,7 @@ impl QuillApp {
                         .text_color(text_menu())
                         .hover(|style| style.bg(bg_subtle()))
                         .role(gpui_kit::Role::Button)
-                        .aria_label("Show all reactions")
+                        .aria_label(tr(keys::Q_MISC_SHOW_ALL_REACTIONS))
                         .child(Icon::new(gpui_kit::assets::IconName::ChevronDown).size(px(16.)))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             // With custom emoji allowed, Telegram Desktop

@@ -16,6 +16,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use image::RgbaImage;
+use quill::lang::{keys, tr, tr_with};
 use quill::sticker_image::{
     CANVAS_SIDE, CORNERS_ABOUT, Corners, KEEP_RATIO_LABEL, accepts_image, fitted_width,
     keep_ratio_crop, original_ratio,
@@ -188,7 +189,10 @@ impl QuillApp {
         let keep_ratio = editor.keep_ratio;
         let offers_keep_ratio = editor.offers_keep_ratio();
         let corners_button = Button::new("photo-editor-corners")
-            .label(format!("Corners: {}", current.label()))
+            .label(tr_with(
+                keys::Q_MISC_CORNERS,
+                &[("label", (current.label()))],
+            ))
             .small()
             .ghost()
             .tooltip(CORNERS_ABOUT)
@@ -229,7 +233,7 @@ impl QuillApp {
             .child(
                 Button::new("photo-editor-rotate")
                     .icon(gpui_kit::assets::IconName::RotateCcw)
-                    .label("Rotate")
+                    .label(tr(keys::Q_MISC_ROTATE))
                     .small()
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -238,7 +242,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("photo-editor-flip")
-                    .label("Flip")
+                    .label(tr(keys::PHOTO_EDITOR_MENU_FLIP))
                     .small()
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {

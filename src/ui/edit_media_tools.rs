@@ -14,6 +14,7 @@ use quill::composer::{
     CLEAR_COVER_LABEL, ComposerEdit, EDIT_MEDIA_INVALID_FILE, EditMediaTool, cover_send_path,
     session_allows_cover,
 };
+use quill::lang::{keys, tr, tr_with};
 use std::path::{Path, PathBuf};
 
 /// The edit-media actions run from the menu.
@@ -70,11 +71,11 @@ impl QuillApp {
         let has_cover = edit.effective_cover().is_some();
         let menu_button = Button::new("composer-edit-media-tools")
             .icon(gpui_kit::assets::IconName::Pencil)
-            .label("Edit media")
+            .label(tr(keys::Q_MISC_EDIT_MEDIA))
             .ghost()
             .small()
-            .tooltip("Edit the photo or video")
-            .accessibility_label("Edit media")
+            .tooltip(tr(keys::Q_MISC_EDIT_THE_PHOTO_OR_VIDEO))
+            .accessibility_label(tr(keys::Q_MISC_EDIT_MEDIA))
             .dropdown_menu(move |mut menu, _, _| {
                 let mut actions: Vec<(&'static str, MenuAction)> = tools
                     .iter()
@@ -118,7 +119,7 @@ impl QuillApp {
                 if let Some(edit) = self.composer_ui.pending_edit.as_mut() {
                     edit.media_edit.cover = None;
                 }
-                self.connection.status_note = "cover cleared".into();
+                self.connection.status_note = tr(keys::Q_MISC_COVER_CLEARED).into();
                 cx.notify();
             }
         }
@@ -144,7 +145,9 @@ impl QuillApp {
             Ok(image) => {
                 self.viewer.photo_editor = Some(PhotoEditor::for_message_edit(image.to_rgba8()));
             }
-            Err(_) => self.connection.status_note = "Couldn't open this image for editing.".into(),
+            Err(_) => {
+                self.connection.status_note = tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
+            }
         }
         cx.notify();
     }
@@ -166,8 +169,7 @@ impl QuillApp {
         if let (Some(file_id), Some(live)) = (file_id, self.live.as_mut()) {
             let _ = live.driver.ensure_media_files(&[file_id]);
         }
-        self.connection.status_note =
-            "downloading… choose Edit Image again when it finishes".into();
+        self.connection.status_note = tr(keys::Q_MISC_DOWNLOADING_CHOOSE_EDIT_IMAGE_AGAIN).into();
         cx.notify();
     }
 
@@ -175,7 +177,7 @@ impl QuillApp {
     /// as the replacement, keeping the spoiler the photo had.
     pub(super) fn finish_edit_image(&mut self, saved: Option<PathBuf>, cx: &mut Context<Self>) {
         let Some(path) = saved else {
-            self.connection.status_note = "Couldn't save the edited photo.".into();
+            self.connection.status_note = tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO).into();
             cx.notify();
             return;
         };
@@ -207,7 +209,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose video cover".into()),
+            prompt: Some(tr(keys::Q_MISC_CHOOSE_VIDEO_COVER).into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -226,8 +228,10 @@ impl QuillApp {
         };
         match cover_send_path(path) {
             Some(cover) => {
-                self.connection.status_note =
-                    format!("Cover {} will be saved with the edit", shown_name(&cover));
+                self.connection.status_note = tr_with(
+                    keys::Q_MISC_COVER_WILL_BE_SAVED_WITH,
+                    &[("shown_name", &(shown_name(&cover)).to_string())],
+                );
                 edit.media_edit.cover = Some(cover);
             }
             None => self.connection.status_note = EDIT_MEDIA_INVALID_FILE.into(),

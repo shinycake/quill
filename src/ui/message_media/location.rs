@@ -1,6 +1,7 @@
 //! Location and venue rows with their map tile.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 /// Size the static map tile draws at: Telegram Desktop's `locationSize`
 /// (320x240; `Location::countOptimalSize`). The request asks for the same
@@ -26,7 +27,7 @@ fn map_tile(
         .rounded_md()
         .bg(fill_muted())
         .role(gpui_kit::Role::Button)
-        .aria_label("Open location in Maps")
+        .aria_label(tr(keys::Q_MISC_OPEN_LOCATION_IN_MAPS))
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -82,9 +83,9 @@ pub(in crate::ui) fn location_row(
     let url = location.open_street_map_url();
     let tile = tile.map(|path| map_tile(("location-map", row_id), path, url.clone(), cx));
     let header = if live.is_some() {
-        "📍 Live location"
+        tr(keys::Q_MISC_LIVE_LOCATION)
     } else {
-        "📍 Location"
+        tr(keys::Q_MISC_LOCATION)
     };
     let mut body = div()
         .id(("location-row", row_id))
@@ -120,18 +121,16 @@ pub(in crate::ui) fn location_row(
                 .child(live.status_label()),
         );
     } else if location.accuracy_m > 0 {
-        body = body.child(
-            div()
-                .text_xs()
-                .text_color(text_muted())
-                .child(format!("accuracy ±{} m", location.accuracy_m)),
-        );
+        body = body.child(div().text_xs().text_color(text_muted()).child(tr_with(
+            keys::Q_MISC_ACCURACY_M,
+            &[("accuracy_m", &location.accuracy_m.to_string())],
+        )));
     }
     if let Some((chat_id, message_id)) = stop {
         body = body.child(
             div().flex().child(
                 Button::new(format!("live-location-stop-{row_id}"))
-                    .label("Stop sharing")
+                    .label(tr(keys::Q_MISC_STOP_SHARING))
                     .small()
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -146,14 +145,14 @@ pub(in crate::ui) fn location_row(
             .text_sm()
             .text_color(accent())
             .role(gpui_kit::Role::Button)
-            .aria_label("Open location in Maps")
+            .aria_label(tr(keys::Q_MISC_OPEN_LOCATION_IN_MAPS))
             .tab_index(0)
             .cursor_pointer()
             .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_message_url(&url, cx);
             }))
-            .child("🗺 Open map"),
+            .child(tr(keys::Q_MISC_OPEN_MAP)),
     )
     .into_any_element()
 }
@@ -171,7 +170,7 @@ pub(in crate::ui) fn venue_row(
     let url = venue.location.open_street_map_url();
     let tile = tile.map(|path| map_tile(("venue-map", row_id), path, url.clone(), cx));
     let title = if venue.title.is_empty() {
-        "Venue".to_string()
+        tr(keys::Q_MISC_VENUE).to_string()
     } else {
         venue.title.clone()
     };
@@ -200,7 +199,13 @@ pub(in crate::ui) fn venue_row(
     let subtitle = if venue.provider.is_empty() {
         venue.location.coords_label()
     } else {
-        format!("{} · via {}", venue.location.coords_label(), venue.provider)
+        tr_with(
+            keys::Q_MISC_VIA,
+            &[
+                ("coords_label", &(venue.location.coords_label()).to_string()),
+                ("provider", &venue.provider.to_string()),
+            ],
+        )
     };
     body.child(div().text_xs().text_color(text_muted()).child(subtitle))
         .child(
@@ -209,14 +214,14 @@ pub(in crate::ui) fn venue_row(
                 .text_sm()
                 .text_color(accent())
                 .role(gpui_kit::Role::Button)
-                .aria_label("Open venue in Maps")
+                .aria_label(tr(keys::Q_MISC_OPEN_VENUE_IN_MAPS))
                 .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_message_url(&url, cx);
                 }))
-                .child("🗺 Open map"),
+                .child(tr(keys::Q_MISC_OPEN_MAP)),
         )
         .into_any_element()
 }

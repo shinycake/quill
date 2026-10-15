@@ -16,6 +16,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{
     ApplyOutcome, PeerColorDraft, PeerColorTab, name_swatches, profile_swatches,
@@ -50,10 +51,10 @@ impl QuillApp {
     pub(super) fn appearance_peer_color_section(&self, cx: &mut Context<Self>) -> AnyElement {
         self.appearance_section(
             cx,
-            "Your color",
-            "Name color, profile color and the icons on your replies and profile.",
+            tr(keys::Q_MISC_YOUR_COLOR),
+            tr(keys::Q_MISC_NAME_COLOR_PROFILE_COLOR_AND),
             Button::new("appearance-your-color")
-                .label("Your color…")
+                .label(tr(keys::Q_MISC_YOUR_COLOR_2))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.open_peer_color_dialog(PeerColorTab::Name, cx);
@@ -64,7 +65,7 @@ impl QuillApp {
 
     pub(super) fn open_peer_color_dialog(&mut self, tab: PeerColorTab, cx: &mut Context<Self>) {
         let Some(draft) = self.my_peer_colors() else {
-            self.connection.status_note = "Colors need a signed-in account.".into();
+            self.connection.status_note = tr(keys::Q_MISC_COLORS_NEED_A_SIGNED_IN).into();
             cx.notify();
             return;
         };
@@ -116,7 +117,7 @@ impl QuillApp {
             ApplyOutcome::Unchanged => self.close_peer_color_dialog(cx),
             ApplyOutcome::Send { name, profile } => {
                 let Some(live) = self.live.as_mut() else {
-                    self.connection.status_note = "Demo mode: colors need a live session.".into();
+                    self.connection.status_note = tr(keys::Q_MISC_DEMO_MODE_COLORS_NEED_A).into();
                     cx.notify();
                     return;
                 };
@@ -138,9 +139,9 @@ impl QuillApp {
                         .is_err();
                 }
                 self.connection.status_note = if failed {
-                    "Could not change the colors. Retry the action.".into()
+                    tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS).into()
                 } else {
-                    "Style update requested.".into()
+                    tr(keys::Q_MISC_STYLE_UPDATE_REQUESTED).into()
                 };
                 if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut() {
                     dialog.sent = !failed;
@@ -163,7 +164,9 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Color preview"));
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SETTINGS_COLOR_TITLE,
+                )));
             if let Some(live) = this.live.as_mut() {
                 live.driver.download_background_emoji_icons();
                 live.driver.download_wearable_gift_stickers();
@@ -178,7 +181,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("peer-color-close")
-                        .label("Close")
+                        .label(tr(keys::CLOSE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_peer_color_dialog(cx);
@@ -188,9 +191,9 @@ impl QuillApp {
                 .child(
                     Button::new("peer-color-apply")
                         .label(if premium {
-                            "Apply style"
+                            tr(keys::SETTINGS_COLOR_APPLY)
                         } else {
-                            "Apply style (Premium)"
+                            tr(keys::Q_MISC_APPLY_STYLE_PREMIUM)
                         })
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -269,13 +272,13 @@ impl QuillApp {
             .max_h(px(160.))
             .overflow_y_scroll()
             .role(Role::List)
-            .aria_label("Icons")
+            .aria_label(tr(keys::Q_MISC_ICONS))
             .child(
                 tile(selected == 0)
                     .id("peer-color-icon-off")
                     .pressable(cx.theme())
                     .role(Role::Button)
-                    .aria_label("No icon")
+                    .aria_label(tr(keys::Q_MISC_NO_ICON))
                     .tab_index(0)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.edit_peer_color(cx, |draft, tab| match tab {
@@ -283,7 +286,7 @@ impl QuillApp {
                             PeerColorTab::Profile => draft.profile_emoji_id = 0,
                         });
                     }))
-                    .child(div().text_sm().child("Off")),
+                    .child(div().text_sm().child(tr(keys::SETTINGS_COLOR_EMOJI_OFF))),
             );
         let icons: Vec<(usize, i64, String)> = self
             .session()
@@ -305,9 +308,9 @@ impl QuillApp {
                     .pressable(cx.theme())
                     .role(Role::Button)
                     .aria_label(if emoji.is_empty() {
-                        "Icon".to_string()
+                        tr(keys::Q_MISC_ICON).to_string()
                     } else {
-                        format!("Icon {emoji}")
+                        tr_with(keys::Q_MISC_ICON_2, &[("emoji", &emoji.to_string())])
                     })
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -400,7 +403,7 @@ impl QuillApp {
                 div()
                     .id("peer-color-preview-profile")
                     .role(Role::Group)
-                    .aria_label("Profile preview")
+                    .aria_label(tr(keys::Q_MISC_PROFILE_PREVIEW))
                     .w_full()
                     .h(px(112.))
                     .rounded_lg()
@@ -444,7 +447,11 @@ impl QuillApp {
                                             .text_color(name_color)
                                             .child(my_name.clone()),
                                     )
-                                    .child(div().text_sm().child("Replying to this message")),
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .child(tr(keys::Q_MISC_REPLYING_TO_THIS_MESSAGE)),
+                                    ),
                             ),
                     );
                 if draft.name_emoji_id != 0 {
@@ -458,7 +465,7 @@ impl QuillApp {
                 div()
                     .id("peer-color-preview-name")
                     .role(Role::Group)
-                    .aria_label("Reply preview")
+                    .aria_label(tr(keys::Q_MISC_REPLY_PREVIEW))
                     .w_full()
                     .rounded_lg()
                     .bg(theme.muted)
@@ -474,7 +481,7 @@ impl QuillApp {
                             .child(my_name.clone()),
                     )
                     .child(quote)
-                    .child(div().child("Looks good."))
+                    .child(div().child(tr(keys::Q_MISC_LOOKS_GOOD)))
                     .into_any_element()
             }
         };
@@ -496,12 +503,12 @@ impl QuillApp {
             .gap_2()
             .child(tab_button(
                 "peer-color-tab-profile",
-                "Profile",
+                tr(keys::SETTINGS_COLOR_TAB_PROFILE),
                 PeerColorTab::Profile,
             ))
             .child(tab_button(
                 "peer-color-tab-name",
-                "Name",
+                tr(keys::SETTINGS_COLOR_TAB_NAME),
                 PeerColorTab::Name,
             ));
 
@@ -542,25 +549,25 @@ impl QuillApp {
 
         let (about, icon_title, icon_about, selected_icon) = match tab {
             PeerColorTab::Name => (
-                "This color will be used for your name, the links you send, and replies to your messages.",
-                "Add icons to replies",
-                "Make replies to your messages stand out by adding custom patterns to them.",
+                tr(keys::SETTINGS_COLOR_ABOUT),
+                tr(keys::SETTINGS_COLOR_EMOJI),
+                tr(keys::SETTINGS_COLOR_EMOJI_ABOUT),
                 draft.name_emoji_id,
             ),
             PeerColorTab::Profile => (
-                "This color will be used for your profile background.",
-                "Add icons to profile",
-                "Choose an icon to repeat on your profile background.",
+                tr(keys::Q_MISC_THIS_COLOR_WILL_BE_USED),
+                tr(keys::SETTINGS_COLOR_PROFILE_EMOJI),
+                tr(keys::Q_MISC_CHOOSE_AN_ICON_TO_REPEAT_2),
                 draft.profile_emoji_id,
             ),
         };
 
         let status = if busy {
-            Some(("Applying style…".to_string(), false))
+            Some((tr(keys::Q_MISC_APPLYING_STYLE).to_string(), false))
         } else if let Some(error) = error {
             Some((error, true))
         } else if sent {
-            Some(("Style updated.".to_string(), false))
+            Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false))
         } else {
             None
         };
@@ -577,7 +584,7 @@ impl QuillApp {
             panel = panel.child(
                 div().flex().child(
                     Button::new("peer-color-profile-reset")
-                        .label("Reset profile color")
+                        .label(tr(keys::SETTINGS_COLOR_RESET))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.edit_peer_color(cx, |d, _| {
@@ -600,14 +607,19 @@ impl QuillApp {
             .child(div().font_semibold().child(icon_title))
             .child(self.peer_color_icon_grid(selected_icon, cx))
             .when(icons_empty && !icons_failed, |this| {
-                this.child(div().text_xs().text_color(muted).child("Loading icons"))
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MISC_LOADING_ICONS)),
+                )
             })
             .when(icons_failed, |this| {
                 this.child(
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Could not load icons. Reopen this box to retry."),
+                        .child(tr(keys::Q_MISC_COULD_NOT_LOAD_ICONS_REOPEN)),
                 )
             })
             .child(div().text_xs().text_color(muted).child(icon_about));
@@ -627,7 +639,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Changing colors needs Telegram Premium."),
+                    .child(tr(keys::Q_MISC_CHANGING_COLORS_NEEDS_TELEGRAM_PREMIUM)),
             );
         }
         if let Some((text, is_error)) = status {
@@ -653,7 +665,7 @@ impl QuillApp {
             .flex_wrap()
             .gap_2()
             .role(Role::List)
-            .aria_label("Collectible gifts");
+            .aria_label(tr(keys::Q_MISC_COLLECTIBLE_GIFTS));
         let mut count = 0;
         for (ix, gift) in session.users_state.wearable_gifts.iter().enumerate() {
             let Some(colors) = gift.gift.colors.clone() else {
@@ -690,7 +702,11 @@ impl QuillApp {
                     .aria_label(format!(
                         "Wear {}{}",
                         gift.headline(),
-                        if selected { ", selected" } else { "" }
+                        if selected {
+                            tr(keys::Q_MISC_SELECTED)
+                        } else {
+                            ""
+                        }
                     ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -724,7 +740,11 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().font_semibold().child("Wear a collectible"))
+            .child(
+                div()
+                    .font_semibold()
+                    .child(tr(keys::Q_MISC_WEAR_A_COLLECTIBLE)),
+            )
             .child(row)
             .into_any_element()
     }

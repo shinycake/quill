@@ -14,6 +14,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji_catalog::{CATEGORIES, catalog};
 use quill::ids::{ChatId, FileId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::StickerItem;
 
@@ -480,7 +481,7 @@ impl QuillApp {
         let mut sections = Vec::new();
         if !query.is_empty() {
             rows.push(PanelRow::Header {
-                label: "Search results".into(),
+                label: tr(keys::Q_MISC_SEARCH_RESULTS).into(),
                 set_id: None,
             });
             // Catalog matches first, then `getKeywordEmojis` matches the
@@ -535,12 +536,12 @@ impl QuillApp {
             .unwrap_or_default();
         if !recent.is_empty() {
             sections.push(PanelSection {
-                label: "Recently used".into(),
+                label: tr(keys::Q_MISC_RECENTLY_USED).into(),
                 icon: SectionIcon::Glyph(gpui_kit::assets::IconName::Clock),
                 first_row: rows.len(),
             });
             rows.push(PanelRow::Header {
-                label: "Recently used".into(),
+                label: tr(keys::Q_MISC_RECENTLY_USED).into(),
                 set_id: None,
             });
             push_grid(&mut rows, recent, EMOJI_COLS, false);
@@ -633,7 +634,7 @@ impl QuillApp {
             .collect();
         if !cells.is_empty() {
             sections.push(PanelSection {
-                label: "Reactions".into(),
+                label: tr(keys::Q_MISC_REACTIONS).into(),
                 icon: SectionIcon::Glyph(gpui_kit::assets::IconName::Heart),
                 first_row: rows.len(),
             });
@@ -654,7 +655,7 @@ impl QuillApp {
         let category = self.chosen_category_name();
         if !query.is_empty() || category.is_some() {
             rows.push(PanelRow::Header {
-                label: category.unwrap_or_else(|| "Search results".into()),
+                label: category.unwrap_or_else(|| tr(keys::Q_MISC_SEARCH_RESULTS).into()),
                 set_id: None,
             });
             push_grid(
@@ -673,13 +674,13 @@ impl QuillApp {
         for (source, label, icon, len) in [
             (
                 StickerSource::Favorites,
-                "Favorites",
+                tr(keys::Q_MISC_FAVORITES),
                 gpui_kit::assets::IconName::Star,
                 session.stickers.stickers.favorites.len(),
             ),
             (
                 StickerSource::Recent,
-                "Recently used",
+                tr(keys::Q_MISC_RECENTLY_USED),
                 gpui_kit::assets::IconName::Clock,
                 session.stickers.stickers.recent.len(),
             ),
@@ -890,22 +891,26 @@ impl QuillApp {
             let remove_owner = owner.clone();
             let emoji = this_emoji.clone();
             menu.item(
-                PopupMenuItem::new("Remove from recent").on_click(move |_, _, cx| {
-                    let emoji = emoji.clone();
-                    let _ = remove_owner.update(cx, |this, cx| {
-                        this.set_media_pref(
-                            move |prefs| prefs.recent_emoji.retain(|e| *e != emoji),
-                            cx,
-                        );
-                        this.pickers.media_panel.key = None;
-                        cx.notify();
-                    });
-                }),
+                PopupMenuItem::new(tr(keys::Q_MISC_REMOVE_FROM_RECENT)).on_click(
+                    move |_, _, cx| {
+                        let emoji = emoji.clone();
+                        let _ = remove_owner.update(cx, |this, cx| {
+                            this.set_media_pref(
+                                move |prefs| prefs.recent_emoji.retain(|e| *e != emoji),
+                                cx,
+                            );
+                            this.pickers.media_panel.key = None;
+                            cx.notify();
+                        });
+                    },
+                ),
             )
             .item(
-                PopupMenuItem::new("Reset recent emoji").on_click(move |_, _, cx| {
-                    let _ = reset_owner.update(cx, |this, cx| this.reset_recent_emoji(cx));
-                }),
+                PopupMenuItem::new(tr(keys::Q_MISC_RESET_RECENT_EMOJI)).on_click(
+                    move |_, _, cx| {
+                        let _ = reset_owner.update(cx, |this, cx| this.reset_recent_emoji(cx));
+                    },
+                ),
             )
         })
         .into_any_element()

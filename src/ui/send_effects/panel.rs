@@ -11,6 +11,7 @@ use super::{SendMenu, tracker};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
 use gpui_kit::{TestSupportExt, *};
+use quill::lang::{keys, tr, tr_with};
 use quill::message_effects::MessageEffect;
 use quill::message_effects_picker::{
     SEARCH_ROW, SECTION_HEADER, STRIP_IMAGE, STRIP_SIZE, STRIP_SKIP, emoji_columns, emoji_key,
@@ -115,7 +116,10 @@ impl QuillApp {
             .cursor_pointer()
             .hover(move |style| style.bg(hover_bg))
             .role(Role::Button)
-            .aria_label(format!("Effect {}", effect.emoji))
+            .aria_label(tr_with(
+                keys::Q_MISC_EFFECT,
+                &[("emoji", &effect.emoji.to_string())],
+            ))
             .child(self.effect_cell_picture(effect, picture_side, Motion::Playing(Some(flag)), cx))
             .children(corner)
             .child(tracker(move |bounds| {
@@ -186,7 +190,7 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(muted)
-                    .child("Effects from stickers"),
+                    .child(tr(keys::Q_MISC_EFFECTS_FROM_STICKERS)),
             );
             for chunk in lists.stickers.chunks(sticker_columns) {
                 let mut row = div().flex().w(px(inner));
@@ -205,7 +209,7 @@ impl QuillApp {
                     .justify_center()
                     .text_sm()
                     .text_color(muted)
-                    .child("No effects found."),
+                    .child(tr(keys::Q_MISC_NO_EFFECTS_FOUND)),
             );
         }
         let areas = open.areas.clone();
@@ -242,7 +246,7 @@ impl QuillApp {
                                         .size(px(14.))
                                         .text_color(muted),
                                 )
-                                .aria_label("Search effects"),
+                                .aria_label(tr(keys::Q_MISC_SEARCH_EFFECTS)),
                         ),
                 )
                 .child(list)

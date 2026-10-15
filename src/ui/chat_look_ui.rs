@@ -24,6 +24,7 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -216,7 +217,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose Wallpaper".into()),
+            prompt: Some(tr(keys::Q_MISC_CHOOSE_WALLPAPER).into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -224,8 +225,7 @@ impl QuillApp {
             {
                 let _ = this.update(cx, |this, cx| {
                     if !is_wallpaper_image(&path) {
-                        this.connection.status_note =
-                            "choose a JPEG, PNG or WebP image for the wallpaper".into();
+                        this.connection.status_note = tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR).into();
                     } else if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                         d.file = Some(path);
                         d.background = None;
@@ -422,7 +422,7 @@ impl QuillApp {
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().background)
-                .aria_label("Chat preview"),
+                .aria_label(tr(keys::Q_MISC_CHAT_PREVIEW)),
             wallpaper,
             dimming,
             Slot::Preview,
@@ -438,14 +438,14 @@ impl QuillApp {
                 .p_3()
                 .child(
                     div().flex().child(
-                        bubble("Good morning! Which look do you like?")
+                        bubble(tr(keys::Q_MISC_GOOD_MORNING_WHICH_LOOK_DO))
                             .bg(bg_bubble_incoming())
                             .text_color(text_bright()),
                     ),
                 )
                 .child(
                     div().flex().justify_end().child(
-                        bubble("This one, I think.")
+                        bubble(tr(keys::Q_MISC_THIS_ONE_I_THINK))
                             .bg(outgoing_bg)
                             .text_color(outgoing_text),
                     ),
@@ -479,7 +479,7 @@ impl QuillApp {
                 .text_xs()
                 .text_color(muted)
                 .role(gpui_kit::Role::Button)
-                .aria_label("No chat theme")
+                .aria_label(tr(keys::Q_MISC_NO_CHAT_THEME))
                 .tab_index(0)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -488,7 +488,7 @@ impl QuillApp {
                     }
                     cx.notify();
                 }))
-                .child("None"),
+                .child(tr(keys::Q_MISC_NONE)),
         );
         if session.chats_state.emoji_chat_themes.is_empty() {
             return div()
@@ -500,7 +500,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Chat themes load from Telegram after sign-in."),
+                        .child(tr(keys::Q_MISC_CHAT_THEMES_LOAD_FROM_TELEGRAM)),
                 )
                 .into_any_element();
         }
@@ -527,7 +527,10 @@ impl QuillApp {
                     .justify_center()
                     .gap_0p5()
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Chat theme {}", theme.name))
+                    .aria_label(tr_with(
+                        keys::Q_MISC_CHAT_THEME,
+                        &[("name", &theme.name.to_string())],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -562,14 +565,14 @@ impl QuillApp {
             return div()
                 .text_xs()
                 .text_color(muted)
-                .child("Loading wallpapers…")
+                .child(tr(keys::Q_MISC_LOADING_WALLPAPERS))
                 .into_any_element();
         };
         if list.is_empty() {
             return div()
                 .text_xs()
                 .text_color(muted)
-                .child("No wallpapers installed on this account.")
+                .child(tr(keys::Q_MISC_NO_WALLPAPERS_INSTALLED_ON_THIS))
                 .into_any_element();
         }
         let mut grid = div().flex().flex_wrap().gap_2();
@@ -623,7 +626,7 @@ impl QuillApp {
             let Some(state) = this.dialogs.chat_look_dialog.clone() else {
                 return dialog
                     .overlay(true)
-                    .title(super::shell::dialog_title("Chat look"))
+                    .title(super::shell::dialog_title(tr(keys::Q_MISC_CHAT_LOOK)))
                     .on_close(on_close);
             };
             let dark = cx.theme().is_dark();
@@ -690,21 +693,21 @@ impl QuillApp {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .child(div().font_semibold().text_sm().child("Theme"))
+                            .child(div().font_semibold().text_sm().child(tr(keys::Q_MISC_THEME)))
                             .child(this.chat_look_theme_row(&state, cx)),
                     );
                     let mut wall = div()
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(div().font_semibold().text_sm().child("Wallpaper"))
+                        .child(div().font_semibold().text_sm().child(tr(keys::Q_MISC_WALLPAPER)))
                         .child(this.chat_look_wallpaper_grid(&state, cx))
                         .child(
                             div().flex().child(
                                 Button::new("chat-look-file")
-                                    .label("From file…")
+                                    .label(tr(keys::Q_MISC_FROM_FILE))
                                     .small()
-                                    .tooltip("Use a JPEG, PNG or WebP image for this chat")
+                                    .tooltip(tr(keys::Q_MISC_USE_A_JPEG_PNG_OR))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.choose_chat_wallpaper_file(cx)
                                     })),
@@ -731,9 +734,9 @@ impl QuillApp {
                                 "chat-look-remove-wallpaper",
                                 Some(gpui_kit::assets::IconName::Trash),
                                 if state.remove_wallpaper {
-                                    "Wallpaper will be removed"
+                                    tr(keys::Q_MISC_WALLPAPER_WILL_BE_REMOVED)
                                 } else {
-                                    "Remove this chat's wallpaper"
+                                    tr(keys::Q_MISC_REMOVE_THIS_CHATS_WALLPAPER)
                                 },
                                 true,
                                 cx,
@@ -754,7 +757,7 @@ impl QuillApp {
                         wall = wall.child(if premium {
                             Checkbox::new("chat-look-both")
                                 .checked(state.both)
-                                .label(format!("Also set for {name}"))
+                                .label(tr_with(keys::Q_MISC_ALSO_SET_FOR, &[("name", &name.to_string())]))
                                 .on_click(cx.listener(|this, &on, _, cx| {
                                     if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
                                         d.both = on;
@@ -778,7 +781,7 @@ impl QuillApp {
                                 .id("chat-look-error")
                                 .text_sm()
                                 .text_color(super::danger_dark())
-                                .child(format!("Couldn't change the chat look: {error}")),
+                                .child(tr_with(keys::Q_MISC_COULDNT_CHANGE_THE_CHAT_LOOK, &[("error", &error.to_string())])),
                         );
                     }
                     let applying = state.awaiting.is_some();
@@ -794,7 +797,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("chat-look-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_chat_look_dialog(cx);
@@ -803,7 +806,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("chat-look-apply")
-                                .label(if applying { "Applying…" } else { "Apply" })
+                                .label(if applying { tr(keys::Q_MISC_APPLYING) } else { tr(keys::Q_MISC_APPLY) })
                                 .primary()
                                 .disabled(!changed || applying)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -812,7 +815,7 @@ impl QuillApp {
                                 })),
                         )
                         .into_any_element();
-                    ("Chat colors and wallpaper", body.child(wall).into_any_element(), footer)
+                    (tr(keys::Q_MISC_CHAT_COLORS_AND_WALLPAPER), body.child(wall).into_any_element(), footer)
                 }
             };
             let body = Rc::new(RefCell::new(Some(body)));
