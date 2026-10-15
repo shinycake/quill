@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::GiftRecipient;
 use quill::gift_market::{CraftGate, ResaleBuy, format_percent, listing_price, suitable_on_sale};
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::telegram::envelope::MessageSender;
 
@@ -130,10 +131,10 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("You need to add up to 3 gifts from the same collection for crafting."),
+                    .child(tr(keys::Q_MONEY_YOU_NEED_TO_ADD_UP)),
             );
         }
-        body = body.child(heading("Your gifts".into()));
+        body = body.child(heading(tr(keys::GIFT_CRAFT_SELECT_YOUR).into()));
         let mut own = div().flex().flex_wrap().gap_2();
         let mut own_count = 0;
         for gift in craft.free_candidates() {
@@ -160,13 +161,18 @@ impl QuillApp {
             );
         }
         if craft.candidates_loading && own_count == 0 {
-            body = body.child(div().text_sm().text_color(muted).child("Loading\u{2026}"));
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MONEY_LOADING)),
+            );
         } else if own_count == 0 {
             body = body.child(
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("You don't have other gifts from this collection."),
+                    .child(tr(keys::GIFT_CRAFT_SELECT_NONE)),
             );
         } else {
             body = body.child(own);
@@ -174,7 +180,7 @@ impl QuillApp {
         if !craft.candidates_loading && !craft.candidates_offset.is_empty() {
             body = body.child(
                 Button::new("craft-own-more")
-                    .label("Show more")
+                    .label(tr(keys::Q_MONEY_SHOW_MORE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.more_craft_candidates(cx))),
             );
@@ -216,13 +222,18 @@ impl QuillApp {
             );
         }
         if market.loading && market.listings.is_empty() {
-            body = body.child(div().text_sm().text_color(muted).child("Loading\u{2026}"));
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MONEY_LOADING)),
+            );
         } else if market.listings.is_empty() {
             body = body.child(
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Could not find other gifts from this collection."),
+                    .child(tr(keys::GIFT_CRAFT_SEARCH_NONE)),
             );
         } else {
             body = body.child(sale);
@@ -230,7 +241,7 @@ impl QuillApp {
         if !market.loading && market.has_more() {
             body = body.child(
                 Button::new("craft-sale-more")
-                    .label("Show more")
+                    .label(tr(keys::Q_MONEY_SHOW_MORE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.more_craft_listings(cx))),
             );
@@ -238,7 +249,7 @@ impl QuillApp {
         BoxView::new("Select Gifts", body)
             .footer(div().flex().justify_end().child(self.market_back_button(
                 "craft-select-back",
-                "Back",
+                tr(keys::Q_MONEY_BACK),
                 cx,
             )))
             .wide()

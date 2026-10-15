@@ -12,6 +12,7 @@ use gpui_kit::component::description_list::DescriptionList;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::Session;
 use quill::ton_wallet::{
@@ -37,7 +38,7 @@ pub(super) fn facts(items: impl IntoIterator<Item = (String, String)>) -> Descri
 
 fn back_button(cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("money-back")
-        .label("\u{2039} Back")
+        .label(tr(keys::Q_MONEY_BACK_2))
         .ghost()
         .small()
         .on_click(cx.listener(|this, _, _, cx| this.money_back(cx)))
@@ -76,7 +77,7 @@ pub(super) fn address_block(
                 .gap_1()
                 .child(
                     Button::new((id, 1u64))
-                        .label("Copy Address")
+                        .label(tr(keys::Q_MONEY_COPY_ADDRESS))
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -85,7 +86,7 @@ pub(super) fn address_block(
                 )
                 .child(
                     Button::new((id, 2u64))
-                        .label("View in Explorer")
+                        .label(tr(keys::Q_MONEY_VIEW_IN_EXPLORER))
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -151,7 +152,7 @@ pub(super) fn tx_lookup_state(error: Option<&str>, cx: &mut Context<QuillApp>) -
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(error.unwrap_or("Loading\u{2026}").to_string()),
+                .child(error.unwrap_or(tr(keys::Q_MONEY_LOADING)).to_string()),
         )
         .into_any_element()
 }
@@ -222,7 +223,7 @@ pub(super) fn tx_details(
                 .text_center()
                 .text_sm()
                 .text_color(cx.theme().danger)
-                .child("Failed"),
+                .child(tr(keys::Q_MONEY_FAILED)),
         );
     }
     if let Some(comment) = tx.public_comment() {
@@ -240,7 +241,7 @@ pub(super) fn tx_details(
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("The comment is visible to everyone."),
+                    .child(tr(keys::Q_MONEY_THE_COMMENT_IS_VISIBLE_TO)),
             );
     } else if tx.has_encrypted_comment() {
         col = col
@@ -253,30 +254,30 @@ pub(super) fn tx_details(
                     MediaCorners::small(),
                 )
                 .role(gpui_kit::Role::Image)
-                .aria_label("Encrypted comment")
+                .aria_label(tr(keys::Q_MONEY_ENCRYPTED_COMMENT))
                 .debug_selector(|| "money-tx-encrypted".to_string()),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("Encrypted comment. Open it in an official Telegram app to read it."),
+                    .child(tr(keys::Q_MONEY_ENCRYPTED_COMMENT_OPEN_IT_IN)),
             );
     }
     let party = super::ton_wallet_money::tx_title(session, tx);
     let has_peer = tx.peer_user_id != 0 || !tx.peer_domain.is_empty();
     if has_peer && !matches!(tx.kind, own::TxKind::OnRampDeposit { .. }) {
         let label = if tx.is_incoming() {
-            "Sender"
+            tr(keys::Q_MONEY_SENDER)
         } else {
-            "Recipient"
+            tr(keys::Q_MONEY_RECIPIENT)
         };
         col = col.child(facts([(label.to_string(), party)]));
     }
     if !tx.peer_address.is_empty() {
         col = col.child(address_block(
             "money-tx-address",
-            "Address",
+            tr(keys::CONTACT_DETAILS_ADDRESS),
             &tx.peer_address,
             cx,
         ));
@@ -291,17 +292,17 @@ pub(super) fn tx_details(
             }
         );
         let fee = if gasless {
-            "Free (paid by Telegram)".to_string()
+            tr(keys::Q_MONEY_FREE_PAID_BY_TELEGRAM).to_string()
         } else {
             format!(
                 "\u{1F48E} {}",
                 format_gram_amount_with(tx.fee_amount.saturating_abs(), 5)
             )
         };
-        rows.push(("Fee".to_string(), fee));
+        rows.push((tr(keys::Q_MONEY_FEE).to_string(), fee));
     }
     rows.push((
-        "Date".to_string(),
+        tr(keys::GIFT_RESALE_DATE).to_string(),
         format_unix_date_time(i64::from(tx.date)),
     ));
     col = col.child(facts(rows));
@@ -312,7 +313,7 @@ pub(super) fn tx_details(
     col.when_some(url, |col, url| {
         col.child(
             Button::new("money-tx-explorer")
-                .label("View in Explorer")
+                .label(tr(keys::Q_MONEY_VIEW_IN_EXPLORER))
                 .outline()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_message_url(&url, cx);
@@ -369,7 +370,7 @@ pub(super) fn nft_details(
     if !nft.address.is_empty() {
         col = col.child(address_block(
             "money-nft-address",
-            "Address",
+            tr(keys::CONTACT_DETAILS_ADDRESS),
             &nft.address,
             cx,
         ));
@@ -391,32 +392,33 @@ pub(super) fn first_grams_hint(wallet: &TonWalletState, cx: &mut Context<QuillAp
         .py_2()
         .debug_selector(|| "money-first-grams".to_string())
         .child(div().text_size(px(48.)).child("\u{1F48E}"))
-        .child(div().text_xl().font_semibold().child("Your first Grams!"))
+        .child(
+            div()
+                .text_xl()
+                .font_semibold()
+                .child(tr(keys::Q_MONEY_YOUR_FIRST_GRAMS)),
+        )
         .when_some(rate, |col, rate| {
-            col.child(
-                div()
-                    .text_sm()
-                    .text_center()
-                    .child(format!("1 Gram currently equals {rate}.")),
-            )
+            col.child(div().text_sm().text_center().child(tr_with(
+                keys::Q_MONEY_1_GRAM_CURRENTLY_EQUALS,
+                &[("rate", &rate.to_string())],
+            )))
         })
         .child(
             div()
                 .text_sm()
                 .text_center()
                 .text_color(muted)
-                .child("They're in your wallet. You can see them here, and send them from an official Telegram app."),
+                .child(tr(keys::Q_MONEY_THEYRE_IN_YOUR_WALLET_YOU)),
         )
         .child(
             div()
                 .debug_selector(|| "money-hint-got-it".to_string())
                 .child(
                     Button::new("money-hint-got-it")
-                        .label("Got it")
+                        .label(tr(keys::CHANNEL_EARN_LEARN_CLOSE))
                         .primary()
-                        .on_click(
-                            cx.listener(|this, _, _, cx| this.dismiss_first_grams_hint(cx)),
-                        ),
+                        .on_click(cx.listener(|this, _, _, cx| this.dismiss_first_grams_hint(cx))),
                 ),
         )
         .into_any_element()

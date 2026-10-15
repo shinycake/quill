@@ -22,6 +22,7 @@ use quill::collectible_info::{
     info_prefix, title_parts,
 };
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -65,7 +66,7 @@ impl QuillApp {
             && lookup.failed.as_deref() == Some(NOT_FOUND)
             && !lookup.copy_text.is_empty()
         {
-            self.copy_profile_text(&lookup.copy_text, "Link copied to clipboard.", cx);
+            self.copy_profile_text(&lookup.copy_text, tr(keys::STICKERS_COPIED), cx);
         }
         cx.notify();
     }
@@ -94,9 +95,9 @@ impl QuillApp {
             lookup.copy_text.clone()
         };
         let toast = match (lookup.kind, link) {
-            (CollectibleKind::Phone, _) => "Phone number copied to clipboard.",
-            (CollectibleKind::Username, true) => "Link copied to clipboard.",
-            (CollectibleKind::Username, false) => "Username copied to clipboard.",
+            (CollectibleKind::Phone, _) => tr(keys::COLLECTIBLE_PHONE_COPIED),
+            (CollectibleKind::Username, true) => tr(keys::STICKERS_COPIED),
+            (CollectibleKind::Username, false) => tr(keys::USERNAME_TEXT_COPIED),
         };
         self.copy_profile_text(&text, toast, cx);
     }
@@ -172,12 +173,16 @@ impl QuillApp {
             // "This username was bought on Fragment on {date} for {price}".
             let prefix = info_prefix(lookup.kind);
             let date = format_unix_date_time(info.purchase_date);
-            let sentence = format!("{prefix}Fragment on {date} for");
+            let sentence = tr_with(
+                keys::Q_MONEY_FRAGMENT_ON_FOR,
+                &[("prefix", prefix), ("date", &date.to_string())],
+            );
             let bold = HighlightStyle {
                 font_weight: Some(FontWeight::BOLD),
                 ..Default::default()
             };
-            let fragment_range = prefix.len()..prefix.len() + "Fragment".len();
+            let fragment_range = prefix.len()
+                ..prefix.len() + tr(keys::INFO_MOBILE_CONTEXT_MENU_FRAGMENT_ABOUT_LINK).len();
             let sentence = StyledText::new(sentence).with_highlights(vec![(fragment_range, bold)]);
             let price_color = cx.theme().foreground;
             let mut price = div().flex().items_center().justify_center().gap_1();
@@ -210,7 +215,7 @@ impl QuillApp {
                 .child(info_block)
                 .child(
                     Button::new("collectible-learn-more")
-                        .label("Learn More")
+                        .label(tr(keys::COLLECTIBLE_LEARN_MORE))
                         .ghost()
                         .w_full()
                         .on_click(move |_, _, cx| cx.open_url(&learn_url)),

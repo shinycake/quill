@@ -9,6 +9,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use quill::earn::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::StarAmount;
 use quill::telegram::envelope::ChatKind;
 
@@ -91,7 +92,7 @@ impl QuillApp {
             Self::earn_value_row(
                 "info-panel-balance",
                 IconName::Coins,
-                "Balance",
+                tr(keys::Q_MONEY_BALANCE),
                 balance_label(ton, stars, cx),
                 cx,
             )
@@ -134,33 +135,44 @@ impl QuillApp {
                     Self::earn_value_row(
                         "info-panel-affiliate",
                         IconName::Share2,
-                        "Affiliate Program",
-                        div().text_sm().text_color(text_muted()).child(commission.clone()),
+                        tr(keys::Q_MONEY_AFFILIATE_PROGRAM),
+                        div()
+                            .text_sm()
+                            .text_color(text_muted())
+                            .child(commission.clone()),
                         cx,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.earn_call("Couldn't open the affiliate program", cx, |driver| {
-                            driver.open_bot_affiliate_join(user_id)
-                        });
+                        this.earn_call(
+                            tr(keys::Q_MONEY_COULDNT_OPEN_THE_AFFILIATE_PROGRAM),
+                            cx,
+                            |driver| driver.open_bot_affiliate_join(user_id),
+                        );
                     })),
                 )
-                .child(about(format!(
-                    "Share a link to {name} with your friends and earn {commission} of their spending there."
-                ))
-                .px_2());
+                .child(
+                    about(tr_with(
+                        keys::MANAGE_PEER_BOT_STAR_REF_ABOUT,
+                        &[
+                            ("bot", &name.to_string()),
+                            ("amount", &commission.to_string()),
+                        ],
+                    ))
+                    .px_2(),
+                );
         }
         let peer = EarnPeer::User(user_id);
         let earn = &session.payments.earn;
         let (ton, stars) = (earn.ton_balance(peer), earn.star_balance(peer));
         if positive_ton(ton) || positive_stars(stars) {
             any = true;
-            column = column.child(header("Balance", cx).px_2());
+            column = column.child(header(tr(keys::Q_MONEY_BALANCE), cx).px_2());
             if positive_ton(ton) {
                 column = column.child(
                     Self::earn_value_row(
                         "info-panel-balance-ton",
                         IconName::Gem,
-                        "Toncoin",
+                        tr(keys::Q_MONEY_TONCOIN),
                         balance_label(ton, None, cx),
                         cx,
                     )
@@ -181,7 +193,7 @@ impl QuillApp {
                     Self::earn_value_row(
                         "info-panel-balance-stars",
                         IconName::Star,
-                        "Stars",
+                        tr(keys::Q_MONEY_STARS),
                         balance_label(None, stars, cx),
                         cx,
                     )
@@ -221,7 +233,7 @@ impl QuillApp {
                 Self::earn_value_row(
                     "bot-edit-ton",
                     IconName::Gem,
-                    "Toncoin",
+                    tr(keys::Q_MONEY_TONCOIN),
                     balance_label(ton, None, cx),
                     cx,
                 )
@@ -240,7 +252,7 @@ impl QuillApp {
                 Self::earn_value_row(
                     "bot-edit-stars",
                     IconName::Star,
-                    "Stars",
+                    tr(keys::Q_MONEY_STARS),
                     balance_label(None, stars, cx),
                     cx,
                 )
@@ -264,13 +276,13 @@ impl QuillApp {
             let value = if commission > 0 {
                 format_commission(commission)
             } else {
-                "Off".into()
+                tr(keys::Q_MONEY_OFF).into()
             };
             column = column.child(
                 Self::earn_value_row(
                     "bot-edit-affiliate",
                     IconName::Share2,
-                    "Affiliate Program",
+                    tr(keys::Q_MONEY_AFFILIATE_PROGRAM),
                     div().text_sm().text_color(text_muted()).child(value),
                     cx,
                 )
@@ -309,7 +321,7 @@ impl QuillApp {
             action_row(
                 "gl-affiliate-programs",
                 Some(IconName::Share2),
-                "Affiliate programs",
+                tr(keys::Q_MONEY_AFFILIATE_PROGRAMS_2),
                 false,
                 cx,
             )
@@ -342,7 +354,7 @@ impl QuillApp {
         }
         Some(
             Button::new("stars-view-statistics")
-                .label("View Statistics")
+                .label(tr(keys::Q_MONEY_VIEW_STATISTICS))
                 .icon(IconName::ChartColumn)
                 .small()
                 .ghost()
@@ -372,7 +384,7 @@ impl QuillApp {
         }
         Some(
             Button::new("stars-earn")
-                .label("Earn Stars from Mini Apps")
+                .label(tr(keys::CREDITS_EARN_BUTTON))
                 .icon(IconName::Share2)
                 .small()
                 .ghost()

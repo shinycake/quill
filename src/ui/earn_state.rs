@@ -8,6 +8,7 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::earn::{EarnPeer, TonTx};
+use quill::lang::{keys, tr};
 use quill::premium_hub::StarTx;
 use quill::state::InfoPanelTarget;
 use std::collections::HashSet;
@@ -58,12 +59,12 @@ impl EarnUi {
         Self {
             amount: cx.new(|cx| {
                 InputState::new(window, cx)
-                    .placeholder("Enter amount to withdraw")
+                    .placeholder(tr(keys::BOT_EARN_OUT_PH))
                     .submit_on_enter(false)
             }),
             password: cx.new(|cx| {
                 InputState::new(window, cx)
-                    .placeholder("Enter current password")
+                    .placeholder(tr(keys::Q_MONEY_ENTER_CURRENT_PASSWORD))
                     .masked(true)
                     .submit_on_enter(true)
             }),

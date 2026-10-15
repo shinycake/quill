@@ -6,6 +6,7 @@
 //! checkout (`ui/invoice_checkout.rs`); nothing is paid until Pay there.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::star_packs::StarPacksState;
 use quill::telegram::envelope::format_payment_price;
 
@@ -41,7 +42,7 @@ pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) 
     let muted = cx.theme().muted_foreground;
     let mut section = div().flex().flex_col().gap_2().child(
         Button::new("stars-buy-more")
-            .label("Buy more Stars")
+            .label(tr(keys::Q_MONEY_BUY_MORE_STARS))
             .small()
             .when(packs.open, |b| b.primary())
             .when(!packs.open, |b| b.ghost())
@@ -55,7 +56,7 @@ pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) 
             div()
                 .text_sm()
                 .text_color(muted)
-                .child("Loading options\u{2026}"),
+                .child(tr(keys::Q_MONEY_LOADING_OPTIONS)),
         );
     } else if let Some(error) = packs.error.as_ref() {
         section = section.child(div().text_sm().child(error.clone()));
@@ -64,7 +65,7 @@ pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) 
             div()
                 .text_sm()
                 .text_color(muted)
-                .child("No options available."),
+                .child(tr(keys::Q_MONEY_NO_OPTIONS_AVAILABLE)),
         );
     }
     for (ix, pack) in packs.options.iter().enumerate() {
@@ -82,10 +83,15 @@ pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) 
                 .cursor_pointer()
                 .tab_index(0)
                 .role(gpui_kit::Role::Button)
-                .aria_label(format!(
-                    "Buy {} Stars for {}",
-                    group_digits(pack.star_count),
-                    format_payment_price(&pack.currency, pack.amount)
+                .aria_label(tr_with(
+                    keys::Q_MONEY_BUY_STARS_FOR,
+                    &[
+                        ("star_count", &(group_digits(pack.star_count)).to_string()),
+                        (
+                            "amount",
+                            &(format_payment_price(&pack.currency, pack.amount)).to_string(),
+                        ),
+                    ],
                 ))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.buy_stars_pack(ix, window, cx);

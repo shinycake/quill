@@ -13,6 +13,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::suggested_posts::{
     DECLINE_REASON_MAX, DirectMessagesRole, LOW_TON_BUTTON, LOW_TON_TEXT, LOW_TON_URL, SuggestMode,
@@ -144,7 +145,7 @@ impl QuillApp {
                     .approve_suggested_post(accept.chat_id, accept.message_id, accept.send_date)
                     .is_err()
                 {
-                    self.connection.status_note = "Couldn't publish the post.".into();
+                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_PUBLISH_THE_POST).into();
                 }
             }
             None => self.set_demo_suggestion_state(
@@ -187,7 +188,7 @@ impl QuillApp {
         };
         let reason = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Add a reason (optional)")
+                .placeholder(tr(keys::SUGGEST_DECLINE_REASON))
                 .submit_on_enter(false)
         });
         cx.subscribe_in(
@@ -235,7 +236,7 @@ impl QuillApp {
                     .decline_suggested_post(decline.chat_id, decline.message_id, &reason)
                     .is_err()
                 {
-                    self.connection.status_note = "Couldn't decline the post.".into();
+                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_DECLINE_THE_POST).into();
                 }
             }
             None => self.set_demo_suggestion_state(
@@ -424,7 +425,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("suggest-accept-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_suggest_accept(cx);
@@ -437,7 +438,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("suggest-accept-publish")
-                                .label("Publish")
+                                .label(tr(keys::Q_MONEY_PUBLISH))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.confirm_suggest_accept(cx);
@@ -450,7 +451,7 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            Self::build_text_box("Accept Terms", body, dialog, on_close)
+            Self::build_text_box(tr(keys::Q_MONEY_ACCEPT_TERMS), body, dialog, on_close)
         })
     }
 
@@ -478,7 +479,7 @@ impl QuillApp {
                         .whitespace_normal()
                         .child(decline.text.clone()),
                 )
-                .child(Input::new(&decline.reason).aria_label("Add a reason (optional)"))
+                .child(Input::new(&decline.reason).aria_label(tr(keys::SUGGEST_DECLINE_REASON)))
                 .child(
                     div()
                         .flex()
@@ -486,7 +487,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("suggest-decline-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_suggest_decline(cx);
@@ -499,7 +500,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("suggest-decline-confirm")
-                                .label("Decline")
+                                .label(tr(keys::Q_MONEY_DECLINE))
                                 .danger()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.confirm_suggest_decline(cx);
@@ -512,7 +513,7 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            Self::build_text_box("Decline", body, dialog, on_close)
+            Self::build_text_box(tr(keys::Q_MONEY_DECLINE), body, dialog, on_close)
         })
     }
 

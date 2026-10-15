@@ -17,6 +17,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::premium_hub::{PremiumHub, ReceivedGift, StarTx, TxFilter, group_digits};
 use quill::state::Session;
@@ -76,7 +77,7 @@ pub(in crate::ui) fn sticker_tile(
 fn sender_name(session: &Session, sender: Option<MessageSender>) -> String {
     match sender {
         Some(sender) => session.sender_label(sender),
-        None => "Unknown".to_string(),
+        None => tr(keys::Q_MONEY_UNKNOWN).to_string(),
     }
 }
 
@@ -114,7 +115,7 @@ impl QuillApp {
             live.driver.maybe_fetch_star_transactions()
         });
         if let Some(Err(_)) = sent {
-            self.connection.status_note = "could not load Stars".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_STARS).into();
         }
         cx.notify();
     }
@@ -155,7 +156,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Stars"));
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_MONEY_STARS)));
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
@@ -172,7 +173,12 @@ impl QuillApp {
                         .items_center()
                         .gap_1()
                         .py_2()
-                        .child(div().text_xs().text_color(muted).child("Your balance"))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(keys::Q_MONEY_YOUR_BALANCE)),
+                        )
                         .child(div().text_size(px(30.)).font_semibold().child(format!(
                             "\u{2B50} {}",
                             hub.balance.map_or("\u{2013}".to_string(), |b| b.label())
@@ -202,14 +208,14 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("Loading transactions\u{2026}"),
+                            .child(tr(keys::Q_MONEY_LOADING_TRANSACTIONS)),
                     );
                 } else if hub.transactions.is_empty() && hub.tx_loaded {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("No transactions yet."),
+                            .child(tr(keys::Q_MONEY_NO_TRANSACTIONS_YET)),
                     );
                 }
                 for (ix, tx) in hub.transactions.iter().enumerate() {
@@ -219,9 +225,9 @@ impl QuillApp {
                     body = body.child(
                         Button::new("stars-load-more")
                             .label(if hub.tx_loading {
-                                "Loading\u{2026}"
+                                tr(keys::Q_MONEY_LOADING)
                             } else {
-                                "Load more"
+                                tr(keys::Q_MONEY_LOAD_MORE)
                             })
                             .ghost()
                             .disabled(hub.tx_loading)
@@ -242,7 +248,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("You pay for Stars in the checkout."),
+                        .child(tr(keys::Q_MONEY_YOU_PAY_FOR_STARS_IN)),
                 );
             }
             dialog
@@ -269,7 +275,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.open_received_gifts(owner));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = "could not load gifts".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS).into();
         }
         cx.notify();
     }
@@ -311,7 +317,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.toggle_gift_saved(&id, saved));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = "could not update the gift".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_UPDATE_THE_GIFT).into();
         }
         cx.notify();
     }
@@ -322,7 +328,7 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.convert_gift_to_stars(&id));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = "could not convert the gift".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_CONVERT_THE_GIFT).into();
         }
         if let Some(hub) = self.hub_mut() {
             hub.gift_convert_confirm = None;
@@ -348,11 +354,14 @@ impl QuillApp {
             let hub = &session.payments.hub;
             let mine = hub.gifts_are_mine(session.my_user_id);
             let title = if mine {
-                "My gifts".to_string()
+                tr(keys::Q_MONEY_MY_GIFTS).to_string()
             } else {
                 match hub.gifts_owner {
-                    Some(owner) => format!("Gifts of {}", session.sender_label(owner)),
-                    None => "Gifts".to_string(),
+                    Some(owner) => tr_with(
+                        keys::Q_MONEY_GIFTS_OF,
+                        &[("sender_label", &(session.sender_label(owner)).to_string())],
+                    ),
+                    None => tr(keys::Q_MONEY_GIFTS).to_string(),
                 }
             };
             let dialog = dialog
@@ -390,10 +399,15 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("Loading gifts\u{2026}"),
+                            .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
                 } else if hub.gifts.is_empty() && hub.gifts_loaded {
-                    body = body.child(div().text_sm().text_color(muted).child("No gifts yet."));
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(tr(keys::Q_MONEY_NO_GIFTS_YET)),
+                    );
                 }
                 if hub.gifts_total > 0 {
                     body = body.child(div().text_xs().text_color(muted).child(format!(
@@ -411,9 +425,9 @@ impl QuillApp {
                     body = body.child(
                         Button::new("gifts-load-more")
                             .label(if hub.gifts_loading {
-                                "Loading\u{2026}"
+                                tr(keys::Q_MONEY_LOADING)
                             } else {
-                                "Load more"
+                                tr(keys::Q_MONEY_LOAD_MORE)
                             })
                             .ghost()
                             .disabled(hub.gifts_loading)
@@ -473,7 +487,7 @@ pub(in crate::ui) fn star_tx_row(
     }
     sub.push(format_unix_date_time(tx.date as i64));
     if tx.is_refund {
-        sub.push("Refund".to_string());
+        sub.push(tr(keys::Q_MONEY_REFUND).to_string());
     }
     div()
         .id(id)
@@ -484,7 +498,13 @@ pub(in crate::ui) fn star_tx_row(
         .py_1p5()
         .cursor_pointer()
         .role(gpui_kit::Role::Button)
-        .aria_label(format!("{}, {} Stars", tx.title, tx.amount.signed_label()))
+        .aria_label(tr_with(
+            keys::Q_MONEY_STARS_2,
+            &[
+                ("title", &tx.title.to_string()),
+                ("signed_label", &(tx.amount.signed_label()).to_string()),
+            ],
+        ))
         .tab_index(0)
         .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
         .child(
@@ -522,7 +542,7 @@ fn tx_details(session: &Session, tx: &StarTx, cx: &mut Context<QuillApp>) -> Any
         .gap_2()
         .child(
             Button::new("stars-back")
-                .label("\u{2039} Back")
+                .label(tr(keys::Q_MONEY_BACK_2))
                 .ghost()
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| this.select_tx(None, cx))),
@@ -560,19 +580,31 @@ pub(in crate::ui) fn star_tx_facts(
             .child(div().font_semibold().child(tx.title.clone())),
     );
     if !tx.detail.is_empty() {
-        col = col.child(fact_row("Details", tx.detail.clone(), cx));
+        col = col.child(fact_row(tr(keys::Q_MONEY_DETAILS), tx.detail.clone(), cx));
     }
     if let Some(peer) = tx.peer {
-        col = col.child(fact_row("With", session.sender_label(peer), cx));
+        col = col.child(fact_row(
+            tr(keys::Q_MONEY_WITH),
+            session.sender_label(peer),
+            cx,
+        ));
     }
-    col = col.child(fact_row("Date", format_unix_date_time(tx.date as i64), cx));
+    col = col.child(fact_row(
+        tr(keys::GIFT_RESALE_DATE),
+        format_unix_date_time(tx.date as i64),
+        cx,
+    ));
     if tx.is_refund {
-        col = col.child(fact_row("Status", "Refunded".to_string(), cx));
+        col = col.child(fact_row(
+            tr(keys::Q_MONEY_STATUS),
+            tr(keys::Q_MONEY_REFUNDED).to_string(),
+            cx,
+        ));
     }
-    col.child(fact_row("Transaction ID", id.clone(), cx))
+    col.child(fact_row(tr(keys::Q_MONEY_TRANSACTION_ID), id.clone(), cx))
         .child(
             Button::new("stars-copy-id")
-                .label("Copy transaction ID")
+                .label(tr(keys::Q_MONEY_COPY_TRANSACTION_ID))
                 .ghost()
                 .small()
                 .on_click(cx.listener(move |_, _, _, cx| {
@@ -612,7 +644,10 @@ fn gift_tile(
         .gap_1()
         .cursor_pointer()
         .role(gpui_kit::Role::Button)
-        .aria_label(format!("Gift {}", gift.headline()))
+        .aria_label(tr_with(
+            keys::Q_MONEY_GIFT,
+            &[("headline", &(gift.headline()).to_string())],
+        ))
         .tab_index(0)
         .on_click(cx.listener(move |this, _, _, cx| {
             this.select_gift(Some(id.clone()), cx);
@@ -638,7 +673,7 @@ fn gift_tile(
                     .bg(gpui_kit::black().opacity(0.5))
                     .text_color(gpui_kit::white())
                     .text_xs()
-                    .child("Hidden"),
+                    .child(tr(keys::Q_MONEY_HIDDEN)),
             )
         })
         .child(sticker_tile(
@@ -677,7 +712,7 @@ fn gift_details(
     col = col
         .child(
             Button::new("gift-back")
-                .label("\u{2039} Back")
+                .label(tr(keys::Q_MONEY_BACK_2))
                 .ghost()
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| this.select_gift(None, cx))),
@@ -699,25 +734,35 @@ fn gift_details(
                 .child(div().text_lg().font_semibold().child(gift.headline())),
         );
     let from = if gift.is_private && !mine {
-        "Hidden sender".to_string()
+        tr(keys::Q_MONEY_HIDDEN_SENDER).to_string()
     } else {
         sender_name(session, gift.sender)
     };
-    col = col.child(fact_row("From", from, cx));
+    col = col.child(fact_row(tr(keys::Q_MONEY_FROM), from, cx));
     col = col.child(fact_row(
-        "Date",
+        tr(keys::GIFT_RESALE_DATE),
         format_unix_date_time(gift.date as i64),
         cx,
     ));
     if !gift.gift.upgraded && gift.gift.star_count > 0 {
         col = col.child(fact_row(
-            "Value",
-            format!("{} Stars", group_digits(gift.gift.star_count)),
+            tr(keys::Q_MONEY_VALUE),
+            tr_with(
+                keys::Q_MONEY_STARS_3,
+                &[(
+                    "star_count",
+                    &(group_digits(gift.gift.star_count)).to_string(),
+                )],
+            ),
             cx,
         ));
     }
     if gift.was_refunded {
-        col = col.child(fact_row("Status", "Refunded".to_string(), cx));
+        col = col.child(fact_row(
+            tr(keys::Q_MONEY_STATUS),
+            tr(keys::Q_MONEY_REFUNDED).to_string(),
+            cx,
+        ));
     }
     if !gift.text.is_empty() {
         col = col.child(
@@ -731,18 +776,18 @@ fn gift_details(
     }
     if mine {
         col = col.child(div().text_xs().text_color(muted).child(if gift.is_saved {
-            "Shown on your profile."
+            tr(keys::Q_MONEY_SHOWN_ON_YOUR_PROFILE)
         } else {
-            "Hidden from your profile."
+            tr(keys::Q_MONEY_HIDDEN_FROM_YOUR_PROFILE)
         }));
         let id = gift.id.clone();
         let saved = gift.is_saved;
         col = col.child(
             Button::new("gift-toggle-saved")
                 .label(if saved {
-                    "Hide from my profile"
+                    tr(keys::Q_MONEY_HIDE_FROM_MY_PROFILE)
                 } else {
-                    "Show on my profile"
+                    tr(keys::Q_MONEY_SHOW_ON_MY_PROFILE)
                 })
                 .ghost()
                 .disabled(hub.gift_mutating)
@@ -771,7 +816,7 @@ fn gift_details(
                                 .gap_2()
                                 .child(
                                     Button::new("gift-convert-yes")
-                                        .label("Convert")
+                                        .label(tr(keys::Q_MONEY_CONVERT))
                                         .danger()
                                         .disabled(hub.gift_mutating)
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -780,7 +825,7 @@ fn gift_details(
                                 )
                                 .child(
                                     Button::new("gift-convert-no")
-                                        .label("Keep gift")
+                                        .label(tr(keys::Q_MONEY_KEEP_GIFT))
                                         .ghost()
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.ask_convert_gift(None, cx);
@@ -792,7 +837,10 @@ fn gift_details(
                 let id = gift.id.clone();
                 col = col.child(
                     Button::new("gift-convert")
-                        .label(format!("Convert to {} Stars", gift.sell_star_count))
+                        .label(tr_with(
+                            keys::Q_MONEY_CONVERT_TO_STARS,
+                            &[("sell_star_count", &gift.sell_star_count.to_string())],
+                        ))
                         .ghost()
                         .disabled(hub.gift_mutating)
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -811,150 +859,8 @@ fn gift_details(
     col.into_any_element()
 }
 
-/// The inner action's (sender, receiver) of a gift card message.
-fn card_parties(action: &ServiceAction) -> (Option<MessageSender>, Option<MessageSender>) {
-    match action {
-        ServiceAction::Gift {
-            sender, receiver, ..
-        }
-        | ServiceAction::UpgradedGift {
-            sender, receiver, ..
-        } => (*sender, *receiver),
-        _ => (None, None),
-    }
-}
-
-/// The card of a gift/giveaway service message, if it has one.
-pub(super) fn gift_card_of(
-    content: &quill::telegram::envelope::MessageContent,
-) -> Option<(&ServiceAction, &GiftCard)> {
-    match content {
-        quill::telegram::envelope::MessageContent::Action(action) => match action.as_ref() {
-            ServiceAction::WithCard { action, card } => Some((action.as_ref(), card.as_ref())),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// The bubble card under a gift/giveaway pill (tdesktop service box).
-pub(super) fn gift_card_element(
-    row_id: u64,
-    inner: &ServiceAction,
-    card: &GiftCard,
-    session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
-    roots: &[PathBuf],
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let muted = cx.theme().muted_foreground;
-    let on_backdrop = card.backdrop.is_some();
-    let fg = if on_backdrop {
-        gpui_kit::white()
-    } else {
-        cx.theme().foreground
-    };
-    let sub_fg = if on_backdrop {
-        gpui_kit::white().opacity(0.8)
-    } else {
-        muted
-    };
-    let fallback = match card.kind {
-        GiftCardKind::Premium | GiftCardKind::GiftCode => "\u{2B50}",
-        GiftCardKind::Stars => "\u{2B50}",
-        GiftCardKind::Giveaway | GiftCardKind::GiveawayWinners => "\u{1F389}",
-        _ => "\u{1F381}",
-    };
-    let me = session.and_then(|s| s.my_user_id);
-    let (_, receiver) = card_parties(inner);
-    let to_me = matches!(receiver, Some(MessageSender::User { user_id }) if Some(user_id) == me);
-    let base = match card.backdrop {
-        Some((center, edge)) => div().bg(linear_gradient(
-            180.,
-            linear_color_stop(rgb(center), 0.),
-            linear_color_stop(rgb(edge), 1.),
-        )),
-        None => div().bg(cx.theme().secondary.opacity(0.85)),
-    };
-    base.id(("gift-card", row_id))
-        .w(px(250.))
-        .rounded_xl()
-        .p_3()
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap_1p5()
-        .text_color(fg)
-        .role(gpui_kit::Role::Group)
-        .aria_label(format!("{}, {}", card.title, card.subtitle))
-        .child(sticker_tile(
-            ("gift-card-sticker", row_id),
-            card.sticker.as_ref(),
-            files,
-            roots,
-            110.,
-            fallback,
-        ))
-        .child(
-            div()
-                .font_semibold()
-                .text_center()
-                .child(card.title.clone()),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_center()
-                .text_color(sub_fg)
-                .child(card.subtitle.clone()),
-        )
-        .when(!card.text.is_empty(), |t| {
-            t.child(div().text_sm().text_center().child(card.text.clone()))
-        })
-        .children(card.facts.iter().map(|(label, value)| {
-            div()
-                .w_full()
-                .flex()
-                .justify_between()
-                .text_xs()
-                .child(div().text_color(sub_fg).child(label.clone()))
-                .child(div().font_medium().child(value.clone()))
-        }))
-        .when(to_me && !card.received_gift_id.is_empty(), |t| {
-            t.child(
-                Button::new(("gift-card-view", row_id))
-                    .label("View my gifts")
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| this.open_my_gifts(cx))),
-            )
-        })
-        .into_any_element()
-}
-
-crate::ui::shell::register_dialogs! {
-    /// Stars balance and transaction history.
-    Stars => DialogSpec::new(
-        3800,
-        |app| app.session().is_some_and(|s| s.payments.hub.stars_open),
-        QuillApp::build_stars_dialog,
-    ),
-
-    /// Received gifts of a user or channel.
-    ReceivedGifts => DialogSpec::new(
-        3900,
-        |app| app.session().is_some_and(|s| s.payments.hub.gifts_open),
-        QuillApp::build_gifts_dialog,
-    ),
-
-    /// Read-only Premium features explainer.
-    PremiumFeatures => DialogSpec::new(
-        4000,
-        |app| app.session().is_some_and(|s| s.payments.hub.premium_open),
-        QuillApp::build_premium_dialog,
-    ),
-}
-
+pub(super) use gift_card::{gift_card_element, gift_card_of};
+mod gift_card;
 mod limit_box;
 mod open_premium;
 mod promo;

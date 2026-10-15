@@ -13,6 +13,7 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::suggested_posts::{
     DATE_ABOUT, PriceCheck, STARS_WARNING, SuggestBar, SuggestMode, SuggestTerms, SuggestedPrice,
@@ -35,7 +36,7 @@ impl QuillApp {
     ) {
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Price")
+                .placeholder(tr(keys::Q_MONEY_PRICE))
                 .submit_on_enter(false)
         });
         let text = field_text(terms.price);
@@ -120,10 +121,13 @@ impl QuillApp {
         match price {
             SuggestedPrice::Stars(_) => {
                 let what = match purpose {
-                    BalanceFor::Offer => "offer this price",
-                    BalanceFor::Accept => "accept this post",
+                    BalanceFor::Offer => tr(keys::Q_MONEY_OFFER_THIS_PRICE),
+                    BalanceFor::Accept => tr(keys::Q_MONEY_ACCEPT_THIS_POST),
                 };
-                self.connection.status_note = format!("You need {} to {what}.", price.label());
+                self.connection.status_note = tr_with(
+                    keys::Q_MONEY_YOU_NEED_TO,
+                    &[("label", &(price.label()).to_string()), ("what", what)],
+                );
                 self.open_stars(cx);
             }
             SuggestedPrice::TonCents(_) => {
@@ -164,9 +168,12 @@ impl QuillApp {
                 } else {
                     SuggestedPrice::Stars(limits.star_max)
                 };
-                format!("Maximum price is {}.", max.label())
+                tr_with(
+                    keys::Q_MONEY_MAXIMUM_PRICE_IS,
+                    &[("label", &(max.label()).to_string())],
+                )
             }
-            PriceCheck::Invalid => "Enter a number.".into(),
+            PriceCheck::Invalid => tr(keys::Q_MONEY_ENTER_A_NUMBER).into(),
         };
         if let Some(price_box) = self.suggested_posts.price.as_mut() {
             price_box.error = Some(error);
@@ -205,10 +212,10 @@ impl QuillApp {
             } => {
                 self.connection.status_note = match self.live.as_mut() {
                     Some(live) => match live.driver.add_offer(chat_id, message_id, terms) {
-                        Ok(_) => "sending the offer…".into(),
-                        Err(_) => "Couldn't send the offer.".into(),
+                        Ok(_) => tr(keys::Q_MONEY_SENDING_THE_OFFER).into(),
+                        Err(_) => tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER).into(),
                     },
-                    None => "offer sent (demo)".into(),
+                    None => tr(keys::Q_MONEY_OFFER_SENT_DEMO).into(),
                 };
                 cx.notify();
             }
@@ -262,7 +269,7 @@ impl QuillApp {
         } else {
             let Some(picked) = super::scheduled::picked_unix(&time_box.picker, cx) else {
                 if let Some(time_box) = self.suggested_posts.time.as_mut() {
-                    time_box.error = Some("Pick a date and time.".into());
+                    time_box.error = Some(tr(keys::Q_MONEY_PICK_A_DATE_AND_TIME).into());
                 }
                 cx.notify();
                 return;
@@ -391,13 +398,18 @@ impl QuillApp {
                 Button::new("suggest-price-time")
                     .ghost()
                     .w_full()
-                    .accessibility_label("Time")
+                    .accessibility_label(tr(keys::Q_MONEY_TIME))
                     .child(
-                        div().flex().w_full().justify_between().child("Time").child(
-                            div()
-                                .text_color(super::chat_theme::accent())
-                                .child(time_value(send_date, now_unix())),
-                        ),
+                        div()
+                            .flex()
+                            .w_full()
+                            .justify_between()
+                            .child(tr(keys::Q_MONEY_TIME))
+                            .child(
+                                div()
+                                    .text_color(super::chat_theme::accent())
+                                    .child(time_value(send_date, now_unix())),
+                            ),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_suggest_time(TimeTarget::PriceBox, mode, send_date, window, cx);
@@ -430,7 +442,7 @@ impl QuillApp {
                 .gap_1()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("Balance")
+                .child(tr(keys::Q_MONEY_BALANCE))
                 .child(price_amount(price, 13., cx))
                 .into_any_element(),
         )
@@ -489,7 +501,10 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(DatePicker::new(&time_box.picker).placeholder("Pick a date and time"))
+                .child(
+                    DatePicker::new(&time_box.picker)
+                        .placeholder(tr(keys::Q_MONEY_PICK_A_DATE_AND_TIME_2)),
+                )
                 .children(
                     time_box
                         .error

@@ -9,6 +9,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
@@ -43,15 +44,15 @@ impl QuillApp {
         let multiplier = quill::giveaway::BOOSTS_PER_PREMIUM;
         let mut section = div().flex().flex_col().gap_1().pt_2().child(
             Button::new("boosts-get-via-gifts")
-                .label("Get Boosts via Gifts")
+                .label(tr(keys::BOOSTS_GET_BOOSTS))
                 .small()
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_giveaway_form(chat_id, None, window, cx);
                 })),
         );
-        section = section.child(div().text_xs().text_color(muted).child(format!(
-            "Get more boosts for your {} by gifting Telegram Premium to your {}.",
-            place.0, place.1
+        section = section.child(div().text_xs().text_color(muted).child(tr_with(
+            keys::Q_MONEY_GET_MORE_BOOSTS_FOR_YOUR,
+            &[("0", place.0), ("1", place.1)],
         )));
         if !prepaid.is_empty() {
             section = section
@@ -61,13 +62,13 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child("Prepaid giveaways"),
+                        .child(tr(keys::BOOSTS_PREPAID_GIVEAWAY_TITLE)),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Select a giveaway you already paid for to set it up."),
+                        .child(tr(keys::BOOSTS_PREPAID_GIVEAWAY_TITLE_SUBTEXT)),
                 );
             for (index, giveaway) in prepaid.into_iter().enumerate() {
                 let boosts = if giveaway.boost_count > 0 {
@@ -75,10 +76,15 @@ impl QuillApp {
                 } else {
                     giveaway.winner_count.saturating_mul(multiplier)
                 };
-                let label = format!(
-                    "{} · {} boosts",
-                    prepaid_summary(giveaway.prize, giveaway.winner_count),
-                    boosts
+                let label = tr_with(
+                    keys::Q_MONEY_BOOSTS,
+                    &[
+                        (
+                            "winner_count",
+                            &(prepaid_summary(giveaway.prize, giveaway.winner_count)).to_string(),
+                        ),
+                        ("boosts", &boosts.to_string()),
+                    ],
                 );
                 section = section.child(
                     Button::new(("boosts-prepaid-giveaway", index as u64))

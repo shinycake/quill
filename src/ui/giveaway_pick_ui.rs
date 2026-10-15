@@ -21,6 +21,7 @@ use quill::giveaway::{
     gift_code_months, gift_code_price,
 };
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::state::{GiveawayOptions, Session};
 use quill::telegram::envelope::{ChatKind, format_payment_price};
@@ -47,16 +48,20 @@ impl QuillApp {
             .chats
             .get(&draft.boosted_chat_id)
             .map(|c| c.title.clone())
-            .unwrap_or_else(|| "this chat".into());
+            .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_CHAT).into());
         let now = now_unix() as i32;
         let boosts = draft.boost_count(&options.stars);
 
         // Channels.
         body = body
-            .child(section_title("Channels included in the giveaway"))
-            .child(div().text_sm().child(format!(
-                "{chat_name}: this {place} will receive {}",
-                boosts_text(boosts)
+            .child(section_title(tr(keys::GIVEAWAY_CHANNELS_TITLE)))
+            .child(div().text_sm().child(tr_with(
+                keys::Q_MONEY_THIS_WILL_RECEIVE,
+                &[
+                    ("chat_name", &chat_name.to_string()),
+                    ("place", place),
+                    ("boosts_text", &(boosts_text(boosts)).to_string()),
+                ],
             )));
         let mut others: Vec<(i64, String)> = session
             .chats
@@ -80,16 +85,18 @@ impl QuillApp {
                     })),
             );
         }
-        body = body.child(about_line(format!(
-            "Choose the groups and channels users need to join to take part in the giveaway. {}/{} added.",
-            draft.additional_chat_ids.len(),
-            draft.limits.chats_max
+        body = body.child(about_line(tr_with(
+            keys::Q_MONEY_CHOOSE_THE_GROUPS_AND_CHANNELS,
+            &[
+                ("len", &(draft.additional_chat_ids.len()).to_string()),
+                ("chats_max", &draft.limits.chats_max.to_string()),
+            ],
         )));
 
         // Who may take part.
         let who = if group { "members" } else { "subscribers" };
         body = body
-            .child(section_title("Users eligible for the giveaway"))
+            .child(section_title(tr(keys::GIVEAWAY_USERS_TITLE)))
             .child(
                 div()
                     .flex()
@@ -97,7 +104,7 @@ impl QuillApp {
                     .child(
                         choice(
                             "giveaway-eligible-all",
-                            format!("All {who}"),
+                            tr_with(keys::Q_MONEY_ALL, &[("who", who)]),
                             !draft.only_new_members,
                         )
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -107,7 +114,7 @@ impl QuillApp {
                     .child(
                         choice(
                             "giveaway-eligible-new",
-                            format!("Only new {who}"),
+                            tr_with(keys::Q_MONEY_ONLY_NEW, &[("who", who)]),
                             draft.only_new_members,
                         )
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -115,21 +122,22 @@ impl QuillApp {
                         })),
                     ),
             )
-            .child(about_line(format!(
-                "Choose if you want to limit the giveaway only to those who joined the {place} after the giveaway started."
+            .child(about_line(tr_with(
+                keys::Q_MONEY_CHOOSE_IF_YOU_WANT_TO,
+                &[("place", place)],
             )));
         body = self.giveaway_countries_row(body, draft, session, cx);
 
         // Additional prize.
         body = body
-            .child(section_title("Additional prizes"))
-            .child(Input::new(&form.prize_input).aria_label("Additional prize"))
+            .child(section_title(tr(keys::GIVEAWAY_ADDITIONAL_PRIZES)))
+            .child(Input::new(&form.prize_input).aria_label(tr(keys::Q_MONEY_ADDITIONAL_PRIZE)))
             .child(about_line(format!(
                 "Turn this on if you want to give the winners your own prizes in addition to {}. Up to {PRIZE_DESCRIPTION_MAX} characters.",
                 if draft.kind == GiveawayKind::Stars {
-                    "Stars"
+                    tr(keys::Q_MONEY_STARS)
                 } else {
-                    "Premium subscriptions"
+                    tr(keys::Q_MONEY_PREMIUM_SUBSCRIPTIONS)
                 }
             )));
 
@@ -137,7 +145,7 @@ impl QuillApp {
         let days = draft.days_ahead(now);
         let max_days = PERIOD_MAX_SECS / 86_400;
         body = body
-            .child(section_title("Date when giveaway ends"))
+            .child(section_title(tr(keys::GIVEAWAY_DATE_TITLE)))
             .child(
                 div()
                     .flex()
@@ -170,8 +178,9 @@ impl QuillApp {
                             })),
                     ),
             )
-            .child(about_line(format!(
-                "Choose when winners of your {place} will be randomly selected. Up to {max_days} days ahead."
+            .child(about_line(tr_with(
+                keys::Q_MONEY_CHOOSE_WHEN_WINNERS_OF_YOUR,
+                &[("place", place), ("max_days", &max_days.to_string())],
             )));
 
         // Show winners.
@@ -182,19 +191,17 @@ impl QuillApp {
                     .items_center()
                     .justify_between()
                     .pt_3()
-                    .child(div().text_sm().child("Show winners"))
+                    .child(div().text_sm().child(tr(keys::GIVEAWAY_SHOW_WINNERS)))
                     .child(
                         Switch::new("giveaway-show-winners")
                             .checked(draft.has_public_winners)
-                            .accessibility_label("Show winners")
+                            .accessibility_label(tr(keys::GIVEAWAY_SHOW_WINNERS))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 this.edit_giveaway(cx, |d| d.has_public_winners = on);
                             })),
                     ),
             )
-            .child(about_line(
-                "Choose whether to make the list of winners public when the giveaway ends.",
-            ));
+            .child(about_line(tr(keys::GIVEAWAY_SHOW_WINNERS_ABOUT)));
         body
     }
 }
@@ -209,13 +216,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Div {
         let summary = match draft.country_codes.as_slice() {
-            [] => "From all countries".to_string(),
+            [] => tr(keys::Q_MONEY_FROM_ALL_COUNTRIES).to_string(),
             codes => {
                 let names: Vec<String> = codes
                     .iter()
                     .map(|code| country_name(session, code))
                     .collect();
-                format!("From {}", names.join(", "))
+                tr_with(
+                    keys::Q_MONEY_FROM_2,
+                    &[("join", &(names.join(", ")).to_string())],
+                )
             }
         };
         body.child(
@@ -228,7 +238,7 @@ impl QuillApp {
                 .child(div().id("giveaway-countries").text_sm().child(summary))
                 .child(
                     Button::new("giveaway-countries-pick")
-                        .label("Choose countries\u{2026}")
+                        .label(tr(keys::Q_MONEY_CHOOSE_COUNTRIES))
                         .ghost()
                         .small()
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -236,9 +246,9 @@ impl QuillApp {
                         })),
                 ),
         )
-        .child(about_line(format!(
-            "Choose up to {} countries. Users with a number from Fragment can take part in any giveaway.",
-            draft.limits.countries_max
+        .child(about_line(tr_with(
+            keys::Q_MONEY_CHOOSE_UP_TO_COUNTRIES_USERS,
+            &[("countries_max", &draft.limits.countries_max.to_string())],
         )))
     }
 
@@ -264,9 +274,12 @@ impl QuillApp {
             .gap_2()
             .pt_2()
             .child(div().id("giveaway-award").text_sm().child(match count {
-                0 => "Random winners".to_string(),
-                1 => "1 member gets a gift code".to_string(),
-                n => format!("{n} members get a gift code"),
+                0 => tr(keys::Q_MONEY_RANDOM_WINNERS).to_string(),
+                1 => tr(keys::Q_MONEY_1_MEMBER_GETS_A_GIFT).to_string(),
+                n => tr_with(
+                    keys::Q_MONEY_MEMBERS_GET_A_GIFT_CODE,
+                    &[("n", &n.to_string())],
+                ),
             }))
             .child(
                 div()
@@ -275,7 +288,7 @@ impl QuillApp {
                     .when(count > 0, |row| {
                         row.child(
                             Button::new("giveaway-award-clear")
-                                .label("Pick randomly")
+                                .label(tr(keys::Q_MONEY_PICK_RANDOMLY))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -285,7 +298,7 @@ impl QuillApp {
                     })
                     .child(
                         Button::new("giveaway-award-pick")
-                            .label("Choose members\u{2026}")
+                            .label(tr(keys::Q_MONEY_CHOOSE_MEMBERS))
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -293,9 +306,8 @@ impl QuillApp {
                             })),
                     ),
             );
-        body.child(row).child(about_line(
-            "Give a Premium gift code to chosen members instead of drawing winners.",
-        ))
+        body.child(row)
+            .child(about_line(tr(keys::Q_MONEY_GIVE_A_PREMIUM_GIFT_CODE)))
     }
 
     /// The duration choices of a gift-code giveaway: one price per member.
@@ -327,7 +339,9 @@ impl QuillApp {
             );
         }
         section
-            .child(section_title("Duration of Premium subscriptions"))
+            .child(section_title(tr(
+                keys::Q_MONEY_DURATION_OF_PREMIUM_SUBSCRIPTIONS,
+            )))
             .child(months)
     }
 
@@ -456,14 +470,17 @@ impl QuillApp {
             .trim()
             .to_lowercase();
         let mut body = div().flex().flex_col().gap_1();
-        body = body.child(Input::new(&self.payments.pick_search).aria_label("Search"));
+        body =
+            body.child(Input::new(&self.payments.pick_search).aria_label(tr(keys::Q_MONEY_SEARCH)));
         match form.page {
             GiveawayPage::Users => {
                 let list = &session.payments.giveaway.award_members;
-                body = body.child(about_line(format!(
-                    "Choose up to {} members. {} chosen.",
-                    draft.limits.chats_max,
-                    draft.award_user_ids.len()
+                body = body.child(about_line(tr_with(
+                    keys::Q_MONEY_CHOOSE_UP_TO_MEMBERS_CHOSEN,
+                    &[
+                        ("chats_max", &draft.limits.chats_max.to_string()),
+                        ("len", &(draft.award_user_ids.len()).to_string()),
+                    ],
                 )));
                 let chosen_first = draft
                     .award_user_ids
@@ -474,7 +491,7 @@ impl QuillApp {
                         .users
                         .get(id)
                         .map(|u| u.display_name())
-                        .unwrap_or_else(|| format!("User {id}"));
+                        .unwrap_or_else(|| tr_with(keys::Q_MONEY_USER, &[("id", &id.to_string())]));
                     (*id, name)
                 });
                 // The chosen members stay on top when a search hides them.
@@ -497,15 +514,20 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("Loading members\u{2026}"),
+                            .child(tr(keys::Q_MONEY_LOADING_MEMBERS)),
                     );
                 } else if shown == 0 {
-                    body = body.child(div().text_sm().text_color(muted).child("No members found."));
+                    body = body.child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(tr(keys::Q_MONEY_NO_MEMBERS_FOUND)),
+                    );
                 }
                 if list.can_load_more() || list.error.is_some() {
                     body = body.child(
                         Button::new("giveaway-award-more")
-                            .label("Load more")
+                            .label(tr(keys::Q_MONEY_LOAD_MORE))
                             .ghost()
                             .small()
                             .disabled(list.loading)
@@ -514,10 +536,12 @@ impl QuillApp {
                 }
             }
             GiveawayPage::Countries => {
-                body = body.child(about_line(format!(
-                    "Choose up to {} countries. {} chosen.",
-                    draft.limits.countries_max,
-                    draft.country_codes.len()
+                body = body.child(about_line(tr_with(
+                    keys::Q_MONEY_CHOOSE_UP_TO_COUNTRIES_CHOSEN,
+                    &[
+                        ("countries_max", &draft.limits.countries_max.to_string()),
+                        ("len", &(draft.country_codes.len()).to_string()),
+                    ],
                 )));
                 match session.auth_state.countries.as_ref() {
                     Some(countries) => {
@@ -553,7 +577,7 @@ impl QuillApp {
                             div()
                                 .text_sm()
                                 .text_color(muted)
-                                .child("Loading countries\u{2026}"),
+                                .child(tr(keys::Q_MONEY_LOADING_COUNTRIES)),
                         );
                     }
                 }

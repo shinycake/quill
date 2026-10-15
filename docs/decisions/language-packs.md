@@ -352,6 +352,24 @@ with `lng_box_remove`, `lng_report_button` or Quill keys. The forum pane's
 topic count and the sticker set removal line are still formatted in
 English; a later PR moves them to plural keys.
 
+## PR 6: gifts, Premium, Stars, earn and payments
+
+Gifts (sending, upgrades, resale, auctions, crafting, collections),
+Premium and Star purchases, paid messages and reactions, giveaways,
+boosts, channel and bot earnings, affiliate programs, the TON wallet,
+suggested posts, checkout and statistics are converted
+(`lang/en/money.strings`). Boost counts use `lng_boosts_list_title`.
+Keys that had been borrowed from unrelated screens (AI compose, bot limits,
+the scheduler promo, the exe launcher, sticker copy) were replaced with
+`lng_channel_public_link_copied`, `lng_intro_next` or Quill keys.
+
+The conversion tool had skipped every `format!` with positional `{}`
+arguments (it dropped the first argument while matching placeholders). It
+is fixed. About 25 strings in this area that mix named and positional
+arguments or build English plurals by hand ("day{}") are still English.
+A plural sweep converts them, together with the same leftovers in the
+areas from PRs 2 to 5.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

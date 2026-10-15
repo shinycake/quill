@@ -9,6 +9,7 @@
 use super::super::app::QuillApp;
 use super::super::stat_chart::{StatChartView, parsed_chart};
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::stat_chart::{ChartCurrency, ChartKind};
 use quill::telegram::envelope::StatisticalGraph;
 
@@ -52,8 +53,8 @@ impl QuillApp {
             return None;
         }
         let unit = match chart.currency {
-            ChartCurrency::Ton => Some("Amounts in TON"),
-            ChartCurrency::Stars => Some("Amounts in Stars"),
+            ChartCurrency::Ton => Some(tr(keys::Q_MONEY_AMOUNTS_IN_TON)),
+            ChartCurrency::Stars => Some(tr(keys::Q_MONEY_AMOUNTS_IN_STARS)),
             ChartCurrency::None => None,
         };
         Some(

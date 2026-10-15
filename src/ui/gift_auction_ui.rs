@@ -26,6 +26,7 @@ use quill::gift_market::{
     bought_link, bought_title, change_recipient_text, info_rows, join_button, nice_countdown,
     seconds_left, send_about, set_auction_about_shown, variants_link,
 };
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::premium_hub::group_digits;
 use quill::state::Session;
@@ -38,7 +39,7 @@ pub(super) fn auction_title(session: &Session, state: &AuctionState) -> String {
     }
     session
         .gift_market_title(state.gift_id())
-        .unwrap_or_else(|| "Gift".into())
+        .unwrap_or_else(|| tr(keys::PROFILE_ACTION_SHORT_GIFT).into())
 }
 
 /// The heading block of the auction boxes: the sticker, an optional
@@ -144,23 +145,29 @@ impl QuillApp {
             .icon(IconName::EllipsisVertical)
             .ghost()
             .xsmall()
-            .accessibility_label("Auction actions")
+            .accessibility_label(tr(keys::Q_MONEY_AUCTION_ACTIONS))
             .dropdown_menu(move |mut menu, _, _| {
                 let about = owner.clone();
-                menu = menu.item(PopupMenuItem::new("About").on_click(move |_, _, cx| {
-                    let _ = about.update(cx, |this, cx| {
-                        this.market_push(MarketBox::AuctionAbout { gift_id }, cx);
-                    });
-                }));
+                menu = menu.item(PopupMenuItem::new(tr(keys::AUCTION_MENU_ABOUT)).on_click(
+                    move |_, _, cx| {
+                        let _ = about.update(cx, |this, cx| {
+                            this.market_push(MarketBox::AuctionAbout { gift_id }, cx);
+                        });
+                    },
+                ));
                 if let Some(link) = link.clone() {
                     let copy = owner.clone();
-                    menu = menu.item(PopupMenuItem::new("Copy Link").on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                        let _ = copy.update(cx, |this, cx| {
-                            this.connection.status_note = "Link copied to clipboard.".into();
-                            cx.notify();
-                        });
-                    }));
+                    menu = menu.item(
+                        PopupMenuItem::new(tr(keys::AUCTION_MENU_COPY_LINK)).on_click(
+                            move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+                                let _ = copy.update(cx, |this, cx| {
+                                    this.connection.status_note = tr(keys::STICKERS_COPIED).into();
+                                    cx.notify();
+                                });
+                            },
+                        ),
+                    );
                 }
                 menu
             });
@@ -180,7 +187,7 @@ impl QuillApp {
                 .text_sm()
                 .text_center()
                 .text_color(muted)
-                .child("Join the battle for exclusive gifts."),
+                .child(tr(keys::AUCTION_ABOUT_SUBTITLE)),
         );
         let icons = [IconName::Star, IconName::RefreshCw, IconName::Undo2];
         for ((title, text), icon) in about_features(per_round, rounds).into_iter().zip(icons) {
@@ -189,7 +196,7 @@ impl QuillApp {
         BoxView::new("Auction", body).footer(
             div().flex().justify_end().child(
                 Button::new("auction-understood")
-                    .label("Understood")
+                    .label(tr(keys::AUCTION_ABOUT_UNDERSTOOD))
                     .primary()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.understood_auction(gift_id, cx);
@@ -208,7 +215,7 @@ impl QuillApp {
             return BoxView::new("Auction", div());
         };
         let Some(state) = session.payments.gift_market.auctions.get(&gift_id) else {
-            return BoxView::new("Auction", div().child("Loading\u{2026}"));
+            return BoxView::new("Auction", div().child(tr(keys::Q_MONEY_LOADING)));
         };
         // Countdowns and the cover change every second.
         self.request_animation_tick(1, cx);
@@ -219,13 +226,13 @@ impl QuillApp {
         let mut body = div().flex().flex_col().gap_3().child(auction_cover(
             session,
             state,
-            (!started).then_some("Upcoming Auction"),
+            (!started).then_some(tr(keys::AUCTION_PREVIEW_NAME)),
             &roots,
             cx,
         ));
         body = body.child(
             Button::new("auction-learn-gifts")
-                .label("Learn more about Telegram Gifts \u{203A}")
+                .label(tr(keys::Q_MONEY_LEARN_MORE_ABOUT_TELEGRAM_GIFTS))
                 .ghost()
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| this.open_premium(cx))),
@@ -300,11 +307,14 @@ impl QuillApp {
         let now = now_unix();
         let recipient = self.gift_market.recipient.clone();
         let hide_about = match recipient.as_ref() {
-            Some(r) if !r.is_self => format!(
-                "You can hide your name and message from visitors to {}'s profile. {} will still see your name and message.",
-                r.name, r.name
+            Some(r) if !r.is_self => tr_with(
+                keys::GIFT_SEND_ANONYMOUS_ABOUT,
+                &[
+                    ("user", &r.name.to_string()),
+                    ("recipient", &r.name.to_string()),
+                ],
             ),
-            _ => "Hide my name and message from visitors to my profile.".to_string(),
+            _ => tr(keys::GIFT_SEND_ANONYMOUS_SELF).to_string(),
         };
         let mut body = div()
             .flex()
@@ -318,10 +328,13 @@ impl QuillApp {
                 96.,
                 "\u{1F381}",
             )))
-            .child(Textarea::new(&self.payments.gift_message_input).aria_label("Enter Message"))
+            .child(
+                Textarea::new(&self.payments.gift_message_input)
+                    .aria_label(tr(keys::GIFT_SEND_MESSAGE)),
+            )
             .child(
                 Checkbox::new("auction-send-hide-name")
-                    .label("Hide My Name")
+                    .label(tr(keys::GIFT_SEND_ANONYMOUS))
                     .checked(self.gift_market.hide_name)
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.gift_market.hide_name = on;
@@ -338,7 +351,7 @@ impl QuillApp {
                 .child(div().text_sm().child(send_about(state.per_round())))
                 .child(
                     Button::new("auction-send-learn")
-                        .label("Learn more \u{203A}")
+                        .label(tr(keys::Q_MONEY_LEARN_MORE))
                         .ghost()
                         .xsmall()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -359,15 +372,18 @@ impl QuillApp {
             },
         ));
         let title = match recipient {
-            Some(r) if !r.is_self => format!("Send a Gift to {}", r.name),
-            _ => "Send a Gift".to_string(),
+            Some(r) if !r.is_self => tr_with(
+                keys::Q_MONEY_SEND_A_GIFT_TO,
+                &[("name", &r.name.to_string())],
+            ),
+            _ => tr(keys::GIFT_SEND_TITLE).to_string(),
         };
         BoxView::new(title, body).footer(
             div()
                 .flex()
                 .justify_end()
                 .gap_2()
-                .child(self.market_back_button("auction-send-back", "Back", cx))
+                .child(self.market_back_button("auction-send-back", tr(keys::Q_MONEY_BACK), cx))
                 .child(action),
         )
     }
@@ -395,10 +411,10 @@ impl QuillApp {
                 .flex()
                 .justify_end()
                 .gap_2()
-                .child(self.market_back_button("auction-change-cancel", "Cancel", cx))
+                .child(self.market_back_button("auction-change-cancel", tr(keys::CANCEL), cx))
                 .child(
                     Button::new("auction-change")
-                        .label("Change")
+                        .label(tr(keys::AUCTION_CHANGE_BUTTON))
                         .primary()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.payments
@@ -416,13 +432,21 @@ impl QuillApp {
         };
         let market = &session.payments.gift_market;
         let state = market.auctions.get(&gift_id);
-        let title = state.map_or_else(|| "Gift".into(), |s| auction_title(session, s));
+        let title = state.map_or_else(
+            || tr(keys::PROFILE_ACTION_SHORT_GIFT).into(),
+            |s| auction_title(session, s),
+        );
         let count = state.map_or(0, AuctionState::acquired);
         let muted = cx.theme().muted_foreground;
         let mut body = div().flex().flex_col().gap_3();
         match market.acquired.get(&gift_id) {
             None => {
-                body = body.child(div().text_sm().text_color(muted).child("Loading\u{2026}"));
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MONEY_LOADING)),
+                );
             }
             Some(list) => {
                 for gift in list {
@@ -433,30 +457,31 @@ impl QuillApp {
                     };
                     let mut rows = vec![
                         (
-                            "To".to_string(),
+                            tr(keys::GIFT_LINK_LABEL_TO).to_string(),
                             gift.receiver
                                 .map(|r| session.sender_label(r))
                                 .unwrap_or_default(),
                         ),
                         (
-                            "Date".to_string(),
+                            tr(keys::GIFT_RESALE_DATE).to_string(),
                             format_unix_date_time(i64::from(gift.date)),
                         ),
                         (
-                            "Accepted Bid".to_string(),
+                            tr(keys::AUCTION_BOUGHT_BID).to_string(),
                             format!("\u{2605}{}  #{}", group_digits(gift.stars), gift.position),
                         ),
                     ];
                     if !gift.text.is_empty() {
-                        rows.push(("Message".to_string(), gift.text.clone()));
+                        rows.push((tr(keys::Q_MONEY_MESSAGE).to_string(), gift.text.clone()));
                     }
                     body = body
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_semibold()
-                                .child(format!("{heading} in round {}", gift.round)),
-                        )
+                        .child(div().text_sm().font_semibold().child(tr_with(
+                            keys::AUCTION_BOUGHT_IN_ROUND,
+                            &[
+                                ("name", &heading.to_string()),
+                                ("n", &gift.round.to_string()),
+                            ],
+                        )))
                         .child(super::ton_wallet_details::facts(rows).bordered(true));
                 }
             }
@@ -464,7 +489,7 @@ impl QuillApp {
         BoxView::new(bought_title(count), body).footer(
             div().flex().justify_end().child(self.market_back_button(
                 "auction-bought-close",
-                "Close",
+                tr(keys::CLOSE),
                 cx,
             )),
         )
@@ -524,7 +549,7 @@ impl QuillApp {
         BoxView::new("Models", body).wide().footer(
             div().flex().justify_end().child(self.market_back_button(
                 "variants-close",
-                "Close",
+                tr(keys::CLOSE),
                 cx,
             )),
         )
@@ -618,7 +643,10 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(("active-auction-raise", gift_id as u64))
-                            .label(format!("Raise Bid {countdown}"))
+                            .label(tr_with(
+                                keys::Q_MONEY_RAISE_BID,
+                                &[("countdown", &countdown.to_string())],
+                            ))
                             .primary()
                             .w_full()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -629,15 +657,18 @@ impl QuillApp {
         }
         BoxView::new(
             if list.len() == 1 {
-                "1 Active Auction".to_string()
+                tr(keys::Q_MONEY_1_ACTIVE_AUCTION).to_string()
             } else {
-                format!("{} Active Auctions", list.len())
+                tr_with(
+                    keys::Q_MONEY_ACTIVE_AUCTIONS,
+                    &[("len", &(list.len()).to_string())],
+                )
             },
             body,
         )
         .footer(div().flex().justify_end().child(self.market_back_button(
             "active-auctions-close",
-            "Close",
+            tr(keys::CLOSE),
             cx,
         )))
     }

@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::stat_chart::{ChartKind, chart_slots, day_month_year, percent_label};
 use quill::state::{ChatStatisticsFetch, InfoPanelTarget, StatsPage};
@@ -130,13 +131,18 @@ impl QuillApp {
                 .gap_2()
                 .py_6()
                 .child(Spinner::new())
-                .child(div().text_sm().font_semibold().child("Loading statistics…"))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(keys::Q_MONEY_LOADING_STATISTICS)),
+                )
                 .child(
                     div()
                         .text_xs()
                         .text_color(text_muted())
                         .text_center()
-                        .child("It can take a few moments to put your statistics together."),
+                        .child(tr(keys::Q_MONEY_IT_CAN_TAKE_A_FEW)),
                 )
                 .into_any_element(),
             Some(ChatStatisticsFetch::Failed(message)) => div()
@@ -146,7 +152,7 @@ impl QuillApp {
                 .child(div().text_sm().child(message))
                 .child(
                     Button::new("statistics-retry")
-                        .label("Retry")
+                        .label(tr(keys::Q_MONEY_RETRY))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.refresh_statistics(chat_id, cx);
                         })),
@@ -186,7 +192,7 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(section_title("Overview"))
+                            .child(section_title(tr(keys::Q_MONEY_OVERVIEW)))
                             .when(start > 0 && end > 0, |d| {
                                 d.child(div().text_xs().text_color(text_muted()).child(format!(
                                     "{} \u{2014} {}",
@@ -232,7 +238,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("statistics-refresh")
-                        .label("Refresh")
+                        .label(tr(keys::Q_MONEY_REFRESH))
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -260,8 +266,8 @@ impl QuillApp {
                         (s.sent_message_count, "message", "messages"),
                         (
                             s.average_character_count,
-                            "symbol per message",
-                            "symbols per message",
+                            tr(keys::Q_MONEY_SYMBOL_PER_MESSAGE),
+                            tr(keys::Q_MONEY_SYMBOLS_PER_MESSAGE),
                         ),
                     ]),
                 )
@@ -292,9 +298,9 @@ impl QuillApp {
             })
             .collect();
         [
-            ("top-members", "Top members", senders),
-            ("top-admins", "Top admins", admins),
-            ("top-inviters", "Top inviters", inviters),
+            ("top-members", tr(keys::Q_MONEY_TOP_MEMBERS), senders),
+            ("top-admins", tr(keys::Q_MONEY_TOP_ADMINS), admins),
+            ("top-inviters", tr(keys::Q_MONEY_TOP_INVITERS), inviters),
         ]
         .into_iter()
         .filter(|(_, _, rows)| !rows.is_empty())
@@ -317,7 +323,9 @@ impl QuillApp {
                 .and_then(|s| s.user(user_id))
                 .map(|u| u.display_name())
                 .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| format!("User {user_id}"));
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MONEY_USER_2, &[("user_id", &user_id.to_string())])
+                });
             let photo = session
                 .and_then(|s| s.user_photo_path(user_id))
                 .and_then(|path| sandboxed_display_path(path, &roots));
@@ -396,20 +404,24 @@ fn overview_cells(statistics: &ChatStatistics, is_channel: bool) -> Vec<Overview
         ChatStatistics::Channel(s) => vec![
             OverviewCell::stat(
                 &s.member_count,
-                if is_channel { "Followers" } else { "Members" },
+                if is_channel {
+                    tr(keys::Q_MONEY_FOLLOWERS)
+                } else {
+                    tr(keys::Q_MONEY_MEMBERS)
+                },
             ),
             OverviewCell::plain(
                 percent_label(s.enabled_notifications_percentage),
-                "Enabled notifications",
+                tr(keys::Q_MONEY_ENABLED_NOTIFICATIONS),
             ),
-            OverviewCell::stat(&s.mean_message_view_count, "Views per post"),
-            OverviewCell::stat(&s.mean_story_view_count, "Views per story"),
+            OverviewCell::stat(&s.mean_message_view_count, tr(keys::Q_MONEY_VIEWS_PER_POST)),
+            OverviewCell::stat(&s.mean_story_view_count, tr(keys::Q_MONEY_VIEWS_PER_STORY)),
         ],
         ChatStatistics::Supergroup(s) => vec![
-            OverviewCell::stat(&s.member_count, "Members"),
-            OverviewCell::stat(&s.message_count, "Messages"),
-            OverviewCell::stat(&s.viewer_count, "Viewing members"),
-            OverviewCell::stat(&s.sender_count, "Posting members"),
+            OverviewCell::stat(&s.member_count, tr(keys::Q_MONEY_MEMBERS)),
+            OverviewCell::stat(&s.message_count, tr(keys::Q_MONEY_MESSAGES)),
+            OverviewCell::stat(&s.viewer_count, tr(keys::Q_MONEY_VIEWING_MEMBERS)),
+            OverviewCell::stat(&s.sender_count, tr(keys::Q_MONEY_POSTING_MEMBERS)),
         ],
     }
 }
@@ -420,18 +432,24 @@ fn channel_story_cells(s: &ChannelStatistics) -> Vec<OverviewCell> {
     let post_reactions = s.mean_message_reaction_count.value != 0.0
         || s.mean_message_reaction_count.previous_value != 0.0;
     let mut cells = vec![
-        OverviewCell::stat(&s.mean_message_share_count, "Shares per post"),
-        OverviewCell::stat(&s.mean_story_share_count, "Shares per story"),
+        OverviewCell::stat(
+            &s.mean_message_share_count,
+            tr(keys::Q_MONEY_SHARES_PER_POST),
+        ),
+        OverviewCell::stat(
+            &s.mean_story_share_count,
+            tr(keys::Q_MONEY_SHARES_PER_STORY),
+        ),
     ];
     if post_reactions {
         cells.push(OverviewCell::stat(
             &s.mean_message_reaction_count,
-            "Reactions per post",
+            tr(keys::Q_MONEY_REACTIONS_PER_POST),
         ));
     }
     cells.push(OverviewCell::stat(
         &s.mean_story_reaction_count,
-        "Reactions per story",
+        tr(keys::Q_MONEY_REACTIONS_PER_STORY),
     ));
     cells
 }

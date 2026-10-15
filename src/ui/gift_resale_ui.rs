@@ -16,6 +16,7 @@ use quill::gift_market::{
     AttributeId, AttributeKind, ResaleFilter, ResaleSort, listing_price, resale_count_label,
 };
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::premium_hub::group_digits;
 use quill::state::Session;
@@ -93,7 +94,7 @@ impl QuillApp {
             }
             self.gift_market.push(MarketBox::Resale);
         } else {
-            self.connection.status_note = "Couldn't load the gifts on sale.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_GIFTS_ON).into();
         }
         cx.notify();
     }
@@ -194,7 +195,7 @@ impl QuillApp {
         };
         let title = session
             .gift_market_title(search.gift_id)
-            .unwrap_or_else(|| "Gifts on sale".into());
+            .unwrap_or_else(|| tr(keys::Q_MONEY_GIFTS_ON_SALE).into());
         let muted = cx.theme().muted_foreground;
         let filter = search.filter.clone();
         let mut body = div().flex().flex_col().gap_3().child(
@@ -219,7 +220,7 @@ impl QuillApp {
                     .text_sm()
                     .text_center()
                     .text_color(muted)
-                    .child("No gifts found for your search."),
+                    .child(tr(keys::GIFT_RESALE_SEARCH_NONE)),
             );
         }
         let mut grid = div().flex().flex_wrap().gap_2();
@@ -261,11 +262,16 @@ impl QuillApp {
         }
         body = body.child(grid);
         if search.loading {
-            body = body.child(div().text_sm().text_color(muted).child("Loading\u{2026}"));
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MONEY_LOADING)),
+            );
         } else if search.has_more() {
             body = body.child(
                 Button::new("resale-more")
-                    .label("Show more")
+                    .label(tr(keys::Q_MONEY_SHOW_MORE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.more_resale(cx))),
             );
@@ -278,16 +284,16 @@ impl QuillApp {
             .child(
                 Button::new("resale-stars-only")
                     .label(if stars_only {
-                        "All Listings"
+                        tr(keys::GIFT_RESALE_ALL_LISTINGS)
                     } else {
-                        "For Stars Only"
+                        tr(keys::GIFT_RESALE_STARS_ONLY)
                     })
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.edit_resale_filter(|f| f.stars_only = !stars_only, cx);
                     })),
             )
-            .child(self.market_back_button("resale-back", "Back", cx));
+            .child(self.market_back_button("resale-back", tr(keys::Q_MONEY_BACK), cx));
         BoxView::new(title, body).footer(footer).wide()
     }
 
@@ -324,7 +330,10 @@ impl QuillApp {
                     );
                 }
                 menu = menu.separator();
-                for (label, only) in [("All Listings", false), ("For Stars Only", true)] {
+                for (label, only) in [
+                    (tr(keys::GIFT_RESALE_ALL_LISTINGS), false),
+                    (tr(keys::GIFT_RESALE_STARS_ONLY), true),
+                ] {
                     let owner = sort_owner.clone();
                     menu = menu.item(
                         PopupMenuItem::new(label)
@@ -411,11 +420,15 @@ fn attribute_pill(
             if selected > 0 {
                 let owner = owner.clone();
                 menu = menu
-                    .item(PopupMenuItem::new("Select All").on_click(move |_, _, cx| {
-                        let _ = owner.update(cx, |this, cx| {
-                            this.edit_resale_filter(|f| f.select_all(kind), cx);
-                        });
-                    }))
+                    .item(
+                        PopupMenuItem::new(tr(keys::GIFT_RESALE_FILTER_ALL)).on_click(
+                            move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| {
+                                    this.edit_resale_filter(|f| f.select_all(kind), cx);
+                                });
+                            },
+                        ),
+                    )
                     .separator();
             }
             for row in &rows {

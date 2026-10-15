@@ -4,6 +4,7 @@
 use super::*;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 pub(crate) struct PaymentUi {
     /// Slice P1: the payment checkout dialog's text inputs. The dialog
@@ -37,7 +38,7 @@ impl PaymentUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let pick_search = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Search")
+                .placeholder(tr(keys::Q_MONEY_SEARCH))
                 .submit_on_enter(false)
         });
         cx.subscribe_in(
@@ -55,28 +56,28 @@ impl PaymentUi {
             marketplace_open: false,
             marketplace_name_input: cx.new(|cx| {
                 TextareaState::new(window, cx)
-                    .placeholder("Collectible gift name, e.g. PlushPepe-123")
+                    .placeholder(tr(keys::Q_MONEY_COLLECTIBLE_GIFT_NAME_E_G))
             }),
             marketplace_comment_input: cx.new(|cx| {
                 TextareaState::new(window, cx)
-                    .placeholder("Personal comment")
+                    .placeholder(tr(keys::Q_MONEY_PERSONAL_COMMENT))
                     .submit_on_enter(false)
             }),
             marketplace_private: true,
             marketplace_error: None,
             gift_price_input: cx.new(|cx| {
                 InputState::new(window, cx)
-                    .placeholder("Price in Stars")
+                    .placeholder(tr(keys::Q_MONEY_PRICE_IN_STARS))
                     .submit_on_enter(false)
             }),
             gift_collection_input: cx.new(|cx| {
                 InputState::new(window, cx)
-                    .placeholder("Collection name")
+                    .placeholder(tr(keys::Q_MONEY_COLLECTION_NAME))
                     .submit_on_enter(false)
             }),
             gift_message_input: cx.new(|cx| {
                 TextareaState::new(window, cx)
-                    .placeholder("Add a message (optional)")
+                    .placeholder(tr(keys::Q_MONEY_ADD_A_MESSAGE_OPTIONAL))
                     .submit_on_enter(false)
             }),
             gift_hide_name: false,

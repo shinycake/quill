@@ -14,6 +14,7 @@ use quill::album::{
     ALBUM_MAX_WIDTH, ALBUM_MIN_WIDTH, ALBUM_SPACING, AlbumRect, album_pixel_size, layout_bounds,
     layout_media_group,
 };
+use quill::lang::{keys, tr_with};
 use quill::payment_invoice::InputInvoice;
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::{MessageContent, PaidMediaPreview};
@@ -95,7 +96,10 @@ fn unlock_overlay(stars: i64) -> Div {
                         .text_color(gpui_kit::white())
                         .text_sm()
                         .font_medium()
-                        .child(format!("Unlock for {}", star_price(stars))),
+                        .child(tr_with(
+                            keys::PAID_PRICE,
+                            &[("price", &(star_price(stars)).to_string())],
+                        )),
                 ),
         )
 }
@@ -144,7 +148,10 @@ pub(in crate::ui) fn paid_media_card(
         .rounded_md()
         .bg(fill_muted())
         .role(gpui_kit::Role::Button)
-        .aria_label(format!("Unlock for {stars} Stars"))
+        .aria_label(tr_with(
+            keys::Q_MONEY_UNLOCK_FOR_STARS,
+            &[("stars", &stars.to_string())],
+        ))
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, window, cx| {

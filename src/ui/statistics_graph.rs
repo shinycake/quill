@@ -10,6 +10,7 @@ use super::stat_chart::{StatChartView, ZoomedDay, parsed_chart};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::stat_chart::{ChartKind, overview_delta};
 use quill::state::{GraphFetch, Session};
 use quill::telegram::envelope::{StatisticalGraph, StatisticalValue};
@@ -55,7 +56,7 @@ impl QuillApp {
                 .zoom_stat_graph(ChatId(chat_id), token, x)
                 .is_err()
             {
-                self.connection.status_note = "could not load the chart".into();
+                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_CHART).into();
             }
         } else if let Some(session) = self.stats_session_mut() {
             session.groups.stats.zoomed.insert(token.to_string(), x);
@@ -136,7 +137,7 @@ impl QuillApp {
                     Some(GraphFetch::Loaded(StatisticalGraph::Data { json_data, .. })) => {
                         match parsed_chart(json_data) {
                             Some(chart) => (Some(chart), None),
-                            None => (None, Some("This day has no chart".into())),
+                            None => (None, Some(tr(keys::Q_MONEY_THIS_DAY_HAS_NO_CHART).into())),
                         }
                     }
                     Some(GraphFetch::Loaded(StatisticalGraph::Error { error_message })) => {
@@ -184,7 +185,9 @@ pub(super) fn stat_graph_block(
                     .into_any_element(),
             );
         }
-        StatisticalGraph::Async { .. } => "Still processing. Check back later.".to_string(),
+        StatisticalGraph::Async { .. } => {
+            tr(keys::Q_MONEY_STILL_PROCESSING_CHECK_BACK_LATER).to_string()
+        }
         StatisticalGraph::Error { error_message } => error_message.clone(),
     };
     Some(

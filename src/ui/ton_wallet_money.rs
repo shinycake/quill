@@ -19,6 +19,7 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
 use quill::ton_wallet::{
     MoneyTab, TonWalletState, WalletNft, WalletTx, fiat, format_gram_amount_with, own,
@@ -42,7 +43,7 @@ impl QuillApp {
     pub(super) fn open_money(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_money_page().is_err() {
-                self.connection.status_note = "could not open Money".into();
+                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_OPEN_MONEY).into();
             }
         } else if let Some(wallet) = self.ton_wallet_mut()
             && wallet.can_use
@@ -131,7 +132,7 @@ impl QuillApp {
     fn set_money_currency(&mut self, code: &'static str, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.set_wallet_currency(code).is_err() {
-                self.connection.status_note = "could not save the currency".into();
+                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SAVE_THE_CURRENCY).into();
             }
         } else if let Some(wallet) = self.ton_wallet_mut() {
             wallet.currency = Some(code.to_string());
@@ -158,7 +159,7 @@ impl QuillApp {
             .map(|own| settings_balance(own.gram_amount));
         Some(
             Button::new("settings-Money")
-                .label("Money")
+                .label(tr(keys::Q_MONEY_MONEY))
                 .ghost()
                 .when_some(balance, |button, balance| {
                     button.child(
@@ -186,7 +187,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Money"));
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_MONEY_MONEY)));
             let roots = this.media_display_roots();
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
@@ -251,10 +252,18 @@ fn overview(
             .gap_1()
             .py_2()
             .role(gpui_kit::Role::Group)
-            .aria_label(format!(
-                "Balance {} Grams, {}",
-                format_gram_amount_with(balance.unwrap_or(0), 2),
-                wallet.fiat_text(balance.unwrap_or(0))
+            .aria_label(tr_with(
+                keys::Q_MONEY_BALANCE_GRAMS,
+                &[
+                    (
+                        "unwrap_or",
+                        &(format_gram_amount_with(balance.unwrap_or(0), 2)).to_string(),
+                    ),
+                    (
+                        "unwrap_or_2",
+                        &(wallet.fiat_text(balance.unwrap_or(0))).to_string(),
+                    ),
+                ],
             ))
             .debug_selector(|| "money-balance".to_string())
             .child(div().text_size(px(30.)).font_semibold().child(format!(
@@ -276,13 +285,18 @@ fn overview(
         Some(own) if own.exists() => {
             body = body.child(super::ton_wallet_details::address_block(
                 "money-address",
-                "Your address",
+                tr(keys::Q_MONEY_YOUR_ADDRESS),
                 &own.address,
                 cx,
             ));
             body = body.child(super::ton_wallet_details::facts([(
-                "Encrypted Backup".to_string(),
-                if own.is_backup_enabled { "On" } else { "Off" }.to_string(),
+                tr(keys::Q_MONEY_ENCRYPTED_BACKUP).to_string(),
+                if own.is_backup_enabled {
+                    tr(keys::Q_MONEY_ON)
+                } else {
+                    tr(keys::Q_MONEY_OFF)
+                }
+                .to_string(),
             )]));
         }
         Some(own) if own.is_being_created => {
@@ -290,7 +304,7 @@ fn overview(
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Your wallet is being created."),
+                    .child(tr(keys::Q_MONEY_YOUR_WALLET_IS_BEING_CREATED)),
             );
         }
         Some(_) => {
@@ -298,11 +312,16 @@ fn overview(
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("You don't have a wallet yet."),
+                    .child(tr(keys::Q_MONEY_YOU_DONT_HAVE_A_WALLET)),
             );
         }
         None => {
-            body = body.child(div().text_sm().text_color(muted).child("Loading\u{2026}"));
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MONEY_LOADING)),
+            );
         }
     }
     body = body.child(currency_row(wallet, cx));
@@ -313,8 +332,8 @@ fn overview(
         .underline()
         .children(tabs.iter().map(|tab| {
             Tab::new().label(match tab {
-                MoneyTab::Transactions => "Transactions",
-                MoneyTab::Collectibles => "Collectibles",
+                MoneyTab::Transactions => tr(keys::Q_MONEY_TRANSACTIONS),
+                MoneyTab::Collectibles => tr(keys::Q_MONEY_COLLECTIBLES),
             })
         }))
         .selected_index(tabs.iter().position(|tab| *tab == money.tab).unwrap_or(0))
@@ -344,11 +363,16 @@ fn overview(
         body = body.child(div().text_sm().child(error));
     }
     if loading && empty {
-        body = body.child(div().text_sm().text_color(muted).child("Loading\u{2026}"));
+        body = body.child(
+            div()
+                .text_sm()
+                .text_color(muted)
+                .child(tr(keys::Q_MONEY_LOADING)),
+        );
     } else if loaded && empty {
         body = body.child(div().text_sm().text_color(muted).child(match money.tab {
-            MoneyTab::Transactions => "No transactions yet.",
-            MoneyTab::Collectibles => "No collectibles yet.",
+            MoneyTab::Transactions => tr(keys::Q_MONEY_NO_TRANSACTIONS_YET),
+            MoneyTab::Collectibles => tr(keys::Q_MONEY_NO_COLLECTIBLES_YET),
         }));
     }
     match money.tab {
@@ -368,9 +392,9 @@ fn overview(
         body = body.child(
             Button::new("money-load-more")
                 .label(if loading {
-                    "Loading\u{2026}"
+                    tr(keys::Q_MONEY_LOADING)
                 } else {
-                    "Load more"
+                    tr(keys::Q_MONEY_LOAD_MORE)
                 })
                 .ghost()
                 .disabled(loading)
@@ -386,7 +410,7 @@ fn currency_row(wallet: &TonWalletState, cx: &mut Context<QuillApp>) -> AnyEleme
     let current = wallet.currency().to_string();
     let codes = fiat::available_currencies(&wallet.rates);
     let owner = cx.entity().downgrade();
-    let label = format!("Currency: {current}");
+    let label = tr_with(keys::Q_MONEY_CURRENCY, &[("current", &current.to_string())]);
     let button = Button::new("money-currency")
         .label(label)
         .ghost()
@@ -419,9 +443,9 @@ fn currency_row(wallet: &TonWalletState, cx: &mut Context<QuillApp>) -> AnyEleme
 pub(super) fn tx_title(session: &Session, tx: &WalletTx) -> String {
     if let own::TxKind::OnRampDeposit { provider, .. } = &tx.kind {
         return if provider == "MoonPay" {
-            "Card top-up".into()
+            tr(keys::Q_MONEY_CARD_TOP_UP).into()
         } else {
-            "Crypto top-up".into()
+            tr(keys::Q_MONEY_CRYPTO_TOP_UP).into()
         };
     }
     if tx.peer_user_id != 0

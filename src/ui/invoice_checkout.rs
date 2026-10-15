@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::PremiumGiftOption;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::payment_invoice::{
     InputInvoice, giveaway_invoice, invoice_link_invoice, premium_gift_invoice,
     premium_gift_stars_invoice, stars_pack_invoice,
@@ -57,7 +58,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     live.driver.session.payments.form_loading = false;
                 }
-                self.connection.status_note = "could not load the payment form".into();
+                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT).into();
             }
         }
         cx.notify();
@@ -87,7 +88,7 @@ impl QuillApp {
     ) {
         match invoice_link_invoice(name) {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
-            None => self.set_status_note("This invoice link is broken.", cx),
+            None => self.set_status_note(tr(keys::Q_MONEY_THIS_INVOICE_LINK_IS_BROKEN), cx),
         }
     }
 
@@ -103,7 +104,7 @@ impl QuillApp {
             .and_then(|s| s.payments.star_packs.options.get(index).cloned());
         match pack {
             Some(pack) => self.start_invoice_checkout(stars_pack_invoice(&pack), window, cx),
-            None => self.set_status_note("That Stars option is no longer offered.", cx),
+            None => self.set_status_note(tr(keys::Q_MONEY_THAT_STARS_OPTION_IS_NO), cx),
         }
     }
 
@@ -138,7 +139,7 @@ impl QuillApp {
         });
         match invoice {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
-            None => self.set_status_note("Premium can only be gifted to another person.", cx),
+            None => self.set_status_note(tr(keys::Q_MONEY_PREMIUM_CAN_ONLY_BE_GIFTED), cx),
         }
     }
 
@@ -160,7 +161,7 @@ impl QuillApp {
                     self.start_invoice_checkout(invoice, window, cx);
                     None
                 }
-                None => Some("Pick one of the offered options first.".to_string()),
+                None => Some(tr(keys::Q_MONEY_PICK_ONE_OF_THE_OFFERED).to_string()),
             },
         };
         if let Some(form) = self.giveaway.form.as_mut() {
@@ -201,7 +202,7 @@ impl QuillApp {
             sent
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not submit the payment".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT).into();
         }
         cx.notify();
     }
@@ -234,12 +235,10 @@ impl QuillApp {
         }
         let balance = session.payments.hub.balance.map(|b| b.stars);
         if let Some(balance) = balance {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(format!("Your balance: \u{2B50} {}", group_digits(balance))),
-            );
+            body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                keys::Q_MONEY_YOUR_BALANCE_3,
+                &[("group_digits", &(group_digits(balance)).to_string())],
+            )));
         }
         let too_poor = balance.is_some_and(|b| b < star_count);
         if too_poor {
@@ -247,16 +246,19 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(cx.theme().danger)
-                    .child("Your balance is too low. Buy more Stars from the Stars dialog."),
+                    .child(tr(keys::Q_MONEY_YOUR_BALANCE_IS_TOO_LOW_2)),
             );
         }
         let pay = Button::new("stars-payment-pay")
-            .label(format!("Pay \u{2B50} {}", group_digits(star_count)))
+            .label(tr_with(
+                keys::Q_MONEY_PAY,
+                &[("group_digits", &(group_digits(star_count)).to_string())],
+            ))
             .primary();
         body.child(if session.payments.sending {
-            pay.label("Processing\u{2026}").disabled(true)
+            pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
         } else if session.payments.form_paid {
-            pay.label("Paid").disabled(true)
+            pay.label(tr(keys::SR_MESSAGE_INVOICE_PAID)).disabled(true)
         } else if too_poor {
             pay.disabled(true)
         } else {

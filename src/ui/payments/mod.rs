@@ -13,6 +13,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{LoginUrlRequest, Session};
 use quill::telegram::envelope::{
     LoginUrlInfo, PaymentFormData, PaymentFormTypeData, PaymentProviderKind, StarSubscriptionData,
@@ -121,7 +122,7 @@ impl QuillApp {
                 .justify_between()
                 .text_sm()
                 .font_semibold()
-                .child(div().child("Total"))
+                .child(div().child(tr(keys::PAYMENTS_TOTAL_LABEL)))
                 .child(div().child(format_payment_price(&invoice.currency, total))),
         );
         body = body.child(prices);
@@ -132,7 +133,7 @@ impl QuillApp {
                 let url = url.clone();
                 body = body.child(
                     Button::new("p1-payment-provider-open")
-                        .label("Open provider payment page")
+                        .label(tr(keys::Q_MONEY_OPEN_PROVIDER_PAYMENT_PAGE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_message_url(&url, cx);
@@ -155,7 +156,10 @@ impl QuillApp {
             let title = option.title.clone();
             body = body.child(
                 Button::new(format!("p1-payment-option-{index}"))
-                    .label(format!("Pay via {title}"))
+                    .label(tr_with(
+                        keys::Q_MONEY_PAY_VIA,
+                        &[("title", &title.to_string())],
+                    ))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_message_url(&url, cx);
@@ -167,27 +171,36 @@ impl QuillApp {
             div().child(Textarea::new(input).aria_label(label).h(px(36.)))
         };
         if invoice.need_name {
-            body = body.child(field(&dialog.name_input, "Full name"));
+            body = body.child(field(&dialog.name_input, tr(keys::Q_MONEY_FULL_NAME)));
         }
         if invoice.need_phone_number {
-            body = body.child(field(&dialog.phone_input, "Phone number"));
+            body = body.child(field(&dialog.phone_input, tr(keys::Q_MONEY_PHONE_NUMBER)));
         }
         if invoice.need_email_address {
-            body = body.child(field(&dialog.email_input, "Email address"));
+            body = body.child(field(&dialog.email_input, tr(keys::Q_MONEY_EMAIL_ADDRESS)));
         }
         if invoice.need_shipping_address {
-            body = body.child(field(&dialog.street1_input, "Street address"));
-            body = body.child(field(&dialog.street2_input, "Apartment or unit"));
+            body = body.child(field(
+                &dialog.street1_input,
+                tr(keys::Q_MONEY_STREET_ADDRESS),
+            ));
+            body = body.child(field(
+                &dialog.street2_input,
+                tr(keys::Q_MONEY_APARTMENT_OR_UNIT),
+            ));
             body = body.child(
                 div()
                     .flex()
                     .gap_2()
-                    .child(div().flex_1().child(field(&dialog.city_input, "City")))
                     .child(
                         div()
                             .flex_1()
-                            .child(field(&dialog.state_input, "State or region")),
-                    ),
+                            .child(field(&dialog.city_input, tr(keys::PAYMENTS_ADDRESS_CITY))),
+                    )
+                    .child(div().flex_1().child(field(
+                        &dialog.state_input,
+                        tr(keys::Q_MONEY_STATE_OR_REGION),
+                    ))),
             );
             body = body.child(
                 div()
@@ -196,12 +209,12 @@ impl QuillApp {
                     .child(
                         div()
                             .flex_1()
-                            .child(field(&dialog.country_input, "Country code")),
+                            .child(field(&dialog.country_input, tr(keys::Q_MONEY_COUNTRY_CODE))),
                     )
                     .child(
                         div()
                             .flex_1()
-                            .child(field(&dialog.postal_input, "Postal code")),
+                            .child(field(&dialog.postal_input, tr(keys::Q_MONEY_POSTAL_CODE))),
                     ),
             );
         }
@@ -215,7 +228,7 @@ impl QuillApp {
                 // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                 Checkbox::new("p1-payment-save-order")
                     .checked(checked)
-                    .label("Remember order info")
+                    .label(tr(keys::Q_MONEY_REMEMBER_ORDER_INFO))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         if let Some(dialog) = this.payments.dialog.as_mut() {
                             dialog.allow_save_order = on;
@@ -225,7 +238,7 @@ impl QuillApp {
             );
             body = body.child(
                 Button::new("p1-payment-validate")
-                    .label("Continue")
+                    .label(tr(keys::CONTINUE))
                     .primary()
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.validate_payment_order(cx);
@@ -250,7 +263,12 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(div().text_xs().font_semibold().child("Shipping"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .child(tr(keys::Q_MONEY_SHIPPING)),
+                    )
                     .child(
                         RadioGroup::vertical("p1-payment-shipping")
                             .selected_index(shipping_selected)
@@ -294,7 +312,12 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_xs().font_semibold().child("Payment method"))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child(tr(keys::PAYMENTS_PAYMENT_METHOD)),
+            )
             .child(
                 RadioGroup::vertical("p1-payment-cred")
                     .selected_index(cred_selected)
@@ -307,7 +330,7 @@ impl QuillApp {
                             })
                             .chain(std::iter::once(
                                 Radio::new("p1-payment-cred-new")
-                                    .label("New card (provider token)"),
+                                    .label(tr(keys::Q_MONEY_NEW_CARD_PROVIDER_TOKEN)),
                             )),
                     )
                     .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
@@ -327,14 +350,14 @@ impl QuillApp {
             creds = creds.child(
                 div().child(
                     Textarea::new(&dialog.token_input)
-                        .aria_label("Payment token")
+                        .aria_label(tr(keys::Q_MONEY_PAYMENT_TOKEN))
                         .h(px(36.)),
                 ),
             );
             if can_save_credentials {
                 let checked = dialog.allow_save_credentials;
                 let caption = if need_password {
-                    " (needs a 2-step verification password)"
+                    tr(keys::Q_MONEY_NEEDS_A_2_STEP_VERIFICATION)
                 } else {
                     ""
                 };
@@ -342,7 +365,7 @@ impl QuillApp {
                     // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                     Checkbox::new("p1-payment-save-creds")
                         .checked(checked)
-                        .label(format!("Save card{caption}"))
+                        .label(tr_with(keys::Q_MONEY_SAVE_CARD, &[("caption", caption)]))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.payments.dialog.as_mut() {
                                 dialog.allow_save_credentials = on;
@@ -365,7 +388,7 @@ impl QuillApp {
                         // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
                         Checkbox::new("p1-payment-terms")
                             .checked(checked)
-                            .accessibility_label("I accept the terms of service")
+                            .accessibility_label(tr(keys::Q_MONEY_I_ACCEPT_THE_TERMS_OF))
                             .on_click(cx.listener(|this, &on, _, cx| {
                                 if let Some(dialog) = this.payments.dialog.as_mut() {
                                     dialog.terms_accepted = on;
@@ -375,7 +398,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("p1-payment-terms-open")
-                            .label("I accept the terms of service")
+                            .label(tr(keys::Q_MONEY_I_ACCEPT_THE_TERMS_OF))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_message_url(&url, cx);
@@ -387,7 +410,7 @@ impl QuillApp {
             let url = invoice.recurring_terms_url.clone();
             body = body.child(
                 Button::new("p1-payment-recurring-terms")
-                    .label("Recurring payment terms")
+                    .label(tr(keys::Q_MONEY_RECURRING_PAYMENT_TERMS))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_message_url(&url, cx);
@@ -404,15 +427,18 @@ impl QuillApp {
             terms_ok && order_ok && creds_ok
         };
         let pay = Button::new("p1-payment-pay")
-            .label(format!(
-                "Pay {}",
-                format_payment_price(&invoice.currency, total)
+            .label(tr_with(
+                keys::PAYMENTS_PAY_AMOUNT,
+                &[(
+                    "amount",
+                    &(format_payment_price(&invoice.currency, total)).to_string(),
+                )],
             ))
             .primary();
         body = body.child(if session.payments.sending {
-            pay.label("Processing…").disabled(true)
+            pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
         } else if session.payments.form_paid {
-            pay.label("Paid").disabled(true)
+            pay.label(tr(keys::PAYMENTS_DATE_LABEL)).disabled(true)
         } else if can_pay {
             pay.on_click(cx.listener(|this, _, window, cx| {
                 this.submit_payment(cx);
@@ -437,7 +463,7 @@ impl QuillApp {
             live.driver.fetch_payment_receipt(chat_id, message_id)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not load the receipt".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_RECEIPT).into();
         }
         cx.notify();
     }
@@ -456,7 +482,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|dialog| dialog.allow_save_order);
         let (Some(order), Some(request)) = (order, request) else {
-            self.connection.status_note = "payment form not loaded".into();
+            self.connection.status_note = tr(keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED).into();
             cx.notify();
             return;
         };
@@ -466,7 +492,7 @@ impl QuillApp {
                 .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not validate order info".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_VALIDATE_ORDER_INFO).into();
         }
         cx.notify();
     }
@@ -488,7 +514,7 @@ impl QuillApp {
         let (Some((Some(form), Some(request), validated, shipping_id, false)), Some(dialog)) =
             (snapshot, dialog)
         else {
-            self.connection.status_note = "payment form not loaded".into();
+            self.connection.status_note = tr(keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED).into();
             cx.notify();
             return;
         };
@@ -501,7 +527,7 @@ impl QuillApp {
             || invoice.need_email_address
             || invoice.need_shipping_address;
         if needs_order && validated.is_none() {
-            self.connection.status_note = "validate the order info first".into();
+            self.connection.status_note = tr(keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST).into();
             cx.notify();
             return;
         }
@@ -533,7 +559,7 @@ impl QuillApp {
             sent
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = "could not submit the payment".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT).into();
         }
         cx.notify();
     }
@@ -565,11 +591,11 @@ impl QuillApp {
                     });
                     cx.notify();
                 }
-                None => self.set_status_note("Login URL unavailable.", cx),
+                None => self.set_status_note(tr(keys::Q_MONEY_LOGIN_URL_UNAVAILABLE), cx),
             },
             LoginUrlInfo::Failed { fallback_url } => {
                 if fallback_url.is_empty() {
-                    self.set_status_note("Login URL unavailable.", cx);
+                    self.set_status_note(tr(keys::Q_MONEY_LOGIN_URL_UNAVAILABLE), cx);
                 } else {
                     self.open_message_url(&fallback_url, cx);
                 }
@@ -618,9 +644,13 @@ fn subscription_row(
             .get(&sub.chat_id)
             .cloned()
             .unwrap_or_else(|| match sub.sub_type {
-                StarSubscriptionTypeData::Channel { .. } => "Channel subscription".to_string(),
-                StarSubscriptionTypeData::Bot { .. } => "Bot subscription".to_string(),
-                StarSubscriptionTypeData::Unknown => "Subscription".to_string(),
+                StarSubscriptionTypeData::Channel { .. } => {
+                    tr(keys::Q_MONEY_CHANNEL_SUBSCRIPTION).to_string()
+                }
+                StarSubscriptionTypeData::Bot { .. } => {
+                    tr(keys::Q_MONEY_BOT_SUBSCRIPTION).to_string()
+                }
+                StarSubscriptionTypeData::Unknown => tr(keys::Q_MONEY_SUBSCRIPTION).to_string(),
             }),
     };
     let now = std::time::SystemTime::now()
@@ -630,13 +660,16 @@ fn subscription_row(
     let expired = (sub.expiration_date as i64) <= now;
     let date = format_unix_date_time(sub.expiration_date as i64);
     let status = if expired {
-        format!("Expired {}", date)
+        tr_with(keys::Q_MONEY_EXPIRED, &[("date", &date.to_string())])
     } else if sub.is_canceled {
-        format!("Canceled — active until {}", date)
+        tr_with(
+            keys::Q_MONEY_CANCELED_ACTIVE_UNTIL,
+            &[("date", &date.to_string())],
+        )
     } else if sub.is_expiring {
-        format!("Expiring {}", date)
+        tr_with(keys::Q_MONEY_EXPIRING, &[("date", &date.to_string())])
     } else {
-        format!("Renews {}", date)
+        tr_with(keys::Q_MONEY_RENEWS, &[("date", &date.to_string())])
     };
     let mut row = div()
         .flex()
@@ -669,10 +702,14 @@ fn subscription_row(
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(div().text_xs().child("Cancel this subscription?"))
+                .child(
+                    div()
+                        .text_xs()
+                        .child(tr(keys::Q_MONEY_CANCEL_THIS_SUBSCRIPTION)),
+                )
                 .child(
                     Button::new(format!("subs-confirm-cancel-{id}"))
-                        .label("Yes, cancel")
+                        .label(tr(keys::Q_MONEY_YES_CANCEL))
                         .danger()
                         .disabled(mutating)
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -681,7 +718,7 @@ fn subscription_row(
                 )
                 .child(
                     Button::new(format!("subs-keep-{keep_id}"))
-                        .label("Keep")
+                        .label(tr(keys::Q_MONEY_KEEP))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.dismiss_cancel_confirm(cx);
@@ -699,7 +736,7 @@ fn subscription_row(
             let id = sub.id.clone();
             row = row.child(
                 Button::new(format!("subs-renew-{id}"))
-                    .label("Renew")
+                    .label(tr(keys::Q_MONEY_RENEW))
                     .disabled(mutating)
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.open_url(&link);
@@ -710,7 +747,7 @@ fn subscription_row(
         let id = sub.id.clone();
         row = row.child(
             Button::new(format!("subs-reenable-{id}"))
-                .label("Re-enable")
+                .label(tr(keys::Q_MONEY_RE_ENABLE))
                 .disabled(mutating)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.reenable_subscription(id.clone(), cx);
@@ -726,7 +763,7 @@ fn subscription_row(
         let id = sub.id.clone();
         row = row.child(
             Button::new(format!("subs-rejoin-{id}"))
-                .label("Rejoin")
+                .label(tr(keys::Q_MONEY_REJOIN))
                 .disabled(mutating)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.rejoin_subscription(id.clone(), cx);
@@ -736,7 +773,7 @@ fn subscription_row(
         let id = sub.id.clone();
         row = row.child(
             Button::new(format!("subs-cancel-{id}"))
-                .label("Cancel")
+                .label(tr(keys::CANCEL))
                 .ghost()
                 .disabled(mutating)
                 .on_click(cx.listener(move |this, _, _, cx| {

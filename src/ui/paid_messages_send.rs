@@ -19,6 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::paid_messages::{
     PaidConfirm, SendGate, needs_confirmation, pays_bar_text, refund_label, remove_fee_text,
     stars_text,
@@ -50,10 +51,10 @@ impl QuillApp {
         if !needs_confirmation(&session.payments.paid_messages.trust, chat_id.0, stars) {
             return false;
         }
-        let name = session
-            .chats
-            .get(&chat_id.0)
-            .map_or_else(|| "This user".to_string(), |chat| chat.title.clone());
+        let name = session.chats.get(&chat_id.0).map_or_else(
+            || tr(keys::Q_MONEY_THIS_USER).to_string(),
+            |chat| chat.title.clone(),
+        );
         let messages = self.composer_ui.pending_attachments.len().max(1) as i64;
         self.paid_messages.confirm = Some(PaidConfirm {
             chat_id: chat_id.0,
@@ -79,11 +80,10 @@ impl QuillApp {
             return Some((confirm, false));
         }
         let held = self.live.as_ref()?.driver.held_paid_send()?;
-        let name = self
-            .session()?
-            .chats
-            .get(&held.chat_id)
-            .map_or_else(|| "This chat".to_string(), |chat| chat.title.clone());
+        let name = self.session()?.chats.get(&held.chat_id).map_or_else(
+            || tr(keys::Q_MONEY_THIS_CHAT_2).to_string(),
+            |chat| chat.title.clone(),
+        );
         Some((
             PaidConfirm {
                 chat_id: held.chat_id,
@@ -120,7 +120,8 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut()
                 && live.driver.release_paid_send(remember).is_err()
             {
-                self.connection.status_note = "Couldn't send the paid message.".into();
+                self.connection.status_note =
+                    tr(keys::Q_MONEY_COULDNT_SEND_THE_PAID_MESSAGE).into();
             }
             cx.notify();
             return;
@@ -195,7 +196,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("paid-messages-remove-fee")
-                        .label("Remove fee")
+                        .label(tr(keys::MESSAGES_PRIVACY_REMOVE_FEE))
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -211,10 +212,10 @@ impl QuillApp {
 
     /// Opens the Remove Fee box and asks what the user paid so far.
     pub(super) fn open_remove_fee(&mut self, user_id: i64, cx: &mut Context<Self>) {
-        let name = self
-            .session()
-            .and_then(|s| s.user(user_id))
-            .map_or_else(|| "this user".to_string(), |u| u.display_name());
+        let name = self.session().and_then(|s| s.user(user_id)).map_or_else(
+            || tr(keys::Q_MONEY_THIS_USER_2).to_string(),
+            |u| u.display_name(),
+        );
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_paid_message_revenue(user_id);
         }
@@ -255,7 +256,7 @@ impl QuillApp {
                 .allow_unpaid_messages(boxed.user_id, refund)
                 .is_err()
             {
-                self.connection.status_note = "Couldn't remove the fee. Try again.".into();
+                self.connection.status_note = tr(keys::Q_MONEY_COULDNT_REMOVE_THE_FEE_TRY).into();
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.finish_unpaid_exception(boxed.user_id);
@@ -288,15 +289,15 @@ impl QuillApp {
                 .gap_3()
                 .child(div().text_sm().child(confirm.body()));
             if let Some(stars) = short {
-                body = body.child(div().text_xs().text_color(warning()).child(format!(
-                    "Your balance is {}. Buy more Stars first.",
-                    stars_text(stars)
+                body = body.child(div().text_xs().text_color(warning()).child(tr_with(
+                    keys::Q_MONEY_YOUR_BALANCE_IS_BUY_MORE,
+                    &[("stars_text", &(stars_text(stars)).to_string())],
                 )));
             }
             let body = body
                 .child(
                     Checkbox::new("paid-send-trust")
-                        .label("Don't ask me again")
+                        .label(tr(keys::LAUNCH_EXE_DONT_ASK))
                         .checked(this.paid_messages.confirm_trust)
                         .on_click(cx.listener(|this, &on: &bool, _, cx| {
                             this.paid_messages.confirm_trust = on;
@@ -310,7 +311,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("paid-send-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.cancel_paid_confirm(cx);
@@ -394,7 +395,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("remove-fee-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_remove_fee(cx);
@@ -403,7 +404,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("remove-fee-confirm")
-                        .label("Confirm")
+                        .label(tr(keys::Q_MONEY_CONFIRM))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_remove_fee(cx);
@@ -412,7 +413,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Remove Fee"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::MESSAGES_PRIVACY_REMOVE_FEE,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

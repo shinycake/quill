@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::SendOptions;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::state::Session;
 use quill::suggested_posts::{
@@ -146,8 +147,8 @@ impl QuillApp {
             Button::new("composer-suggest-post")
                 .icon(IconName::CircleDollarSign)
                 .ghost()
-                .tooltip("Suggest a post")
-                .accessibility_label("Suggest a post")
+                .tooltip(tr(keys::Q_MONEY_SUGGEST_A_POST))
+                .accessibility_label(tr(keys::Q_MONEY_SUGGEST_A_POST))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.toggle_suggest_post(chat_id, cx);
                 })),
@@ -211,7 +212,7 @@ impl QuillApp {
                         .border_color(accent)
                         .cursor_pointer()
                         .role(Role::Button)
-                        .aria_label("Edit the offer")
+                        .aria_label(tr(keys::Q_MONEY_EDIT_THE_OFFER))
                         .child(
                             div()
                                 .text_sm()
@@ -237,8 +238,8 @@ impl QuillApp {
                         .icon(IconName::X)
                         .ghost()
                         .small()
-                        .tooltip("Cancel")
-                        .accessibility_label("Cancel the suggestion")
+                        .tooltip(tr(keys::CANCEL))
+                        .accessibility_label(tr(keys::Q_MONEY_CANCEL_THE_SUGGESTION))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.cancel_suggest_bar(chat_id, window, cx);
                         })),
@@ -322,7 +323,7 @@ impl QuillApp {
             return false;
         };
         if text.trim().is_empty() && !is_media {
-            self.connection.status_note = "type a message or attach a file".into();
+            self.connection.status_note = tr(keys::Q_MONEY_TYPE_A_MESSAGE_OR_ATTACH).into();
             cx.notify();
             return true;
         }
@@ -337,9 +338,9 @@ impl QuillApp {
             self.clear_suggest_bar_after_send(chat_id);
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
-            self.connection.status_note = "sending…".into();
+            self.connection.status_note = tr(keys::Q_MONEY_SENDING_2).into();
         } else {
-            self.connection.status_note = "Couldn't send the offer.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER).into();
         }
         cx.notify();
         true
@@ -407,7 +408,7 @@ impl QuillApp {
             SuggestedPostPurpose::Decline { .. } => (None, BalanceFor::Offer),
         };
         let Some(price) = price else {
-            self.connection.status_note = "Couldn't pay for the post: balance too low.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_PAY_FOR_THE_POST).into();
             return;
         };
         let short = self.suggest_shortfall(price).unwrap_or(price);

@@ -29,6 +29,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::earn::{EarnPanel, EarnPeer, EarnState};
+use quill::lang::{keys, tr};
 use quill::state::{InfoPanelTarget, Session};
 
 /// tdesktop's "Learn more ›" link text.
@@ -210,7 +211,7 @@ impl QuillApp {
                 }
             }
             None => {
-                self.connection.status_note = "Demo mode: this needs a live session.".into();
+                self.connection.status_note = tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A).into();
             }
         }
         cx.notify();
@@ -309,7 +310,7 @@ impl QuillApp {
             let _ = live.driver.fetch_chat_boost_features(chat_id);
         }
         if live.driver.open_earn_panel(panel, is_dark).is_err() {
-            self.connection.status_note = "Couldn't load the page".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE).into();
         }
     }
 

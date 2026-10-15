@@ -22,6 +22,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji_interaction::EmojiEffect;
 use quill::ids::{ChatId, FileId, MessageId};
+use quill::lang::{keys, tr};
 use quill::power_saving;
 use quill::telegram::envelope::{StickerContent, StickerFormat, StickerItem};
 use std::cell::RefCell;
@@ -190,9 +191,9 @@ pub(super) fn wrap(
         .cursor_pointer()
         .role(gpui_kit::Role::Button)
         .aria_label(if premium.is_some() {
-            "Play Premium sticker effect"
+            tr(keys::Q_MONEY_PLAY_PREMIUM_STICKER_EFFECT)
         } else {
-            "Open sticker set"
+            tr(keys::Q_MONEY_OPEN_STICKER_SET)
         })
         .on_click(cx.listener(move |this, _, _, cx| match premium {
             Some(animation) => this.premium_sticker_clicked(

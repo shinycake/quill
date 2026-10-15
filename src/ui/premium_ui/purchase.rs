@@ -4,6 +4,7 @@
 
 use super::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::premium_hub::promo::PromoPage;
 use quill::premium_hub::purchase::{PremiumPurchaseRoute, feature_ref, purchase_route};
 use quill::state::DeepLinkAction;
@@ -55,7 +56,10 @@ impl QuillApp {
                     });
                     if sent.is_err() {
                         live.driver.session.payments.hub.auto_start = None;
-                        self.set_status_note("Couldn't reach Telegram; try again.", cx);
+                        self.set_status_note(
+                            tr(keys::Q_MONEY_COULDNT_REACH_TELEGRAM_TRY_AGAIN),
+                            cx,
+                        );
                     }
                 }
             }
@@ -68,7 +72,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.ensure_earn_app_config();
                 }
-                self.set_status_note("Premium isn't available to buy right now.", cx);
+                self.set_status_note(tr(keys::Q_MONEY_PREMIUM_ISNT_AVAILABLE_TO_BUY), cx);
             }
         }
     }

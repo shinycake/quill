@@ -25,6 +25,7 @@ use quill::giveaway::{
     settle_gift_code_months, settle_premium, settle_stars,
 };
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_time::now_unix;
 use quill::premium_hub::group_digits;
 use quill::state::{GiveawayLaunch, GiveawayOptions, Session};
@@ -57,11 +58,7 @@ pub(super) fn prepaid_summary(prize: GiveawayPrize, winners: i32) -> String {
 
 /// "12 boosts" / "1 boost".
 pub(super) fn boosts_text(count: i32) -> String {
-    if count == 1 {
-        "1 boost".into()
-    } else {
-        format!("{count} boosts")
-    }
+    trn(keys::BOOSTS_LIST_TITLE, count)
 }
 
 pub(super) fn choice(id: impl Into<ElementId>, label: String, selected: bool) -> Button {
@@ -99,7 +96,7 @@ impl QuillApp {
         let new_giveaway = prepaid.is_none();
         let prize_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Enter your prize")
+                .placeholder(tr(keys::GIVEAWAY_ADDITIONAL_PRIZES_PH))
                 .submit_on_enter(false)
         });
         if let Some(live) = self.live.as_mut() {
@@ -227,8 +224,8 @@ impl QuillApp {
                 .driver
                 .launch_prepaid_giveaway(&draft, now_unix() as i32)
                 .err()
-                .map(|_| "Couldn't send the request. Try again.".to_string()),
-            None => Some("Starting a giveaway needs a signed-in account.".to_string()),
+                .map(|_| tr(keys::Q_MONEY_COULDNT_SEND_THE_REQUEST_TRY).to_string()),
+            None => Some(tr(keys::Q_MONEY_STARTING_A_GIVEAWAY_NEEDS_A).to_string()),
         };
         if let Some(form) = self.giveaway.form.as_mut() {
             form.confirming = false;
@@ -258,14 +255,14 @@ impl QuillApp {
         let mut section = div().flex().flex_col().gap_1();
         if let Some(prepaid) = &draft.prepaid {
             return section
-                .child(section_title("Prepaid giveaway"))
+                .child(section_title(tr(keys::BOOSTS_PREPAID_GIVEAWAY_SINGLE)))
                 .child(
                     div()
                         .id("giveaway-prepaid")
                         .text_sm()
                         .child(prepaid_summary(prepaid.prize, prepaid.winner_count)),
                 )
-                .child(about_line("You already paid for this giveaway."));
+                .child(about_line(tr(keys::Q_MONEY_YOU_ALREADY_PAID_FOR_THIS)));
         }
         let have_stars = !options.stars.is_empty();
         if have_stars {
@@ -276,7 +273,7 @@ impl QuillApp {
                     .child(
                         choice(
                             "giveaway-kind-premium",
-                            "Premium".into(),
+                            tr(keys::BOTS_CREATE_LIMIT_LINK).into(),
                             draft.kind == GiveawayKind::Premium,
                         )
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -286,7 +283,7 @@ impl QuillApp {
                     .child(
                         choice(
                             "giveaway-kind-stars",
-                            "Stars".into(),
+                            tr(keys::Q_MONEY_STARS).into(),
                             draft.kind == GiveawayKind::Stars,
                         )
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -297,19 +294,19 @@ impl QuillApp {
         }
         let loading = options.loading() && options.premium.is_empty() && options.stars.is_empty();
         if loading {
-            return section.child(about_line("Loading prices…"));
+            return section.child(about_line(tr(keys::Q_MONEY_LOADING_PRICES)));
         }
         if draft.kind == GiveawayKind::Premium {
             if options.premium.is_empty() {
                 let error = options.premium_error.clone().unwrap_or_else(|| {
-                    "Premium giveaways are not available right now.".to_string()
+                    tr(keys::Q_MONEY_PREMIUM_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string()
                 });
                 return section.child(about_line(error));
             }
             if draft.is_specific_users() {
                 return self.giveaway_gift_code_months(section, draft, options, cx);
             }
-            section = section.child(section_title("Quantity of prizes"));
+            section = section.child(section_title(tr(keys::GIVEAWAY_QUANTITY_TITLE)));
             let mut counts = div().flex().flex_wrap().gap_1();
             for winners in premium_winner_counts(&options.premium) {
                 counts = counts.child(
@@ -325,10 +322,10 @@ impl QuillApp {
             }
             section = section
                 .child(counts)
-                .child(about_line(
-                    "Choose how many Premium subscriptions to give away and boosts to receive.",
-                ))
-                .child(section_title("Duration of Premium subscriptions"));
+                .child(about_line(tr(keys::GIVEAWAY_QUANTITY_ABOUT)))
+                .child(section_title(tr(
+                    keys::Q_MONEY_DURATION_OF_PREMIUM_SUBSCRIPTIONS,
+                )));
             let mut months = div().flex().flex_col().gap_1();
             for option in premium_options_for(&options.premium, draft.premium_winners) {
                 let month_count = option.month_count;
@@ -353,10 +350,10 @@ impl QuillApp {
             let error = options
                 .stars_error
                 .clone()
-                .unwrap_or_else(|| "Stars giveaways are not available right now.".to_string());
+                .unwrap_or_else(|| tr(keys::Q_MONEY_STARS_GIVEAWAYS_ARE_NOT_AVAILABLE).to_string());
             return section.child(about_line(error));
         }
-        section = section.child(section_title("Stars to distribute"));
+        section = section.child(section_title(tr(keys::GIVEAWAY_CREDITS_OPTIONS_TITLE)));
         let mut rows = div().flex().flex_col().gap_1();
         for (index, option) in options.stars.iter().enumerate() {
             rows = rows.child(
@@ -380,7 +377,7 @@ impl QuillApp {
         }
         section = section
             .child(rows)
-            .child(section_title("Number of winners"));
+            .child(section_title(tr(keys::GIVEAWAY_CREDITS_QUANTITY_TITLE)));
         let mut winners = div().flex().flex_wrap().gap_1();
         for count in options
             .stars
@@ -399,9 +396,9 @@ impl QuillApp {
                 })),
             );
         }
-        section.child(winners).child(about_line(
-            "Choose how many winners you want to distribute stars among.",
-        ))
+        section
+            .child(winners)
+            .child(about_line(tr(keys::GIVEAWAY_CREDITS_QUANTITY_ABOUT)))
     }
 
     /// The price line of a giveaway that is not paid for yet.
@@ -437,7 +434,7 @@ impl QuillApp {
             .chats
             .get(&draft.boosted_chat_id)
             .map(|c| c.title.clone())
-            .unwrap_or_else(|| "this chat".into());
+            .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_CHAT).into());
         let boosts = draft.boost_count(&options.stars);
 
         if giveaway.launch == GiveawayLaunch::Launched {
@@ -446,9 +443,14 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(div().font_semibold().child("Giveaway created"))
-                .child(about_line(format!(
-                    "Check your {place}'s boosts to see how this giveaway boosted it."
+                .child(
+                    div()
+                        .font_semibold()
+                        .child(tr(keys::GIVEAWAY_CREATED_TITLE)),
+                )
+                .child(about_line(tr_with(
+                    keys::Q_MONEY_CHECK_YOUR_S_BOOSTS_TO,
+                    &[("place", place)],
                 )))
                 .into_any_element();
         }
@@ -456,9 +458,7 @@ impl QuillApp {
             return div()
                 .id("giveaway-confirm")
                 .text_sm()
-                .child(
-                    "Are you sure you want to start this prepaid giveaway now? This action cannot be undone.",
-                )
+                .child(tr(keys::GIVEAWAY_START_SURE))
                 .into_any_element();
         }
 
@@ -467,24 +467,22 @@ impl QuillApp {
         }
         let mut body = div().flex().flex_col().gap_1();
         body = body.child(about_line(match (draft.kind, group) {
-            (GiveawayKind::Stars, true) => {
-                "Get more boosts and members for your group by giving away prizes."
-            }
-            (GiveawayKind::Stars, false) => {
-                "Get more boosts and subscribers for your channel by giving away prizes."
-            }
-            (_, true) => "Get more boosts for your group by gifting Premium to your members.",
-            (_, false) => {
-                "Get more boosts for your channel by gifting Premium to your subscribers."
-            }
+            (GiveawayKind::Stars, true) => tr(keys::GIVEAWAY_CREDITS_NEW_ABOUT_GROUP),
+            (GiveawayKind::Stars, false) => tr(keys::GIVEAWAY_CREDITS_NEW_ABOUT),
+            (_, true) => tr(keys::GIVEAWAY_NEW_ABOUT_GROUP),
+            (_, false) => tr(keys::GIVEAWAY_NEW_ABOUT),
         }));
         body = body.child(self.giveaway_prize_section(&draft, options, cx));
         body = self.giveaway_award_row(body, &draft, options, cx);
 
         if draft.is_specific_users() {
-            body = body.child(about_line(format!(
-                "{chat_name}: this {place} will receive {}",
-                boosts_text(boosts)
+            body = body.child(about_line(tr_with(
+                keys::Q_MONEY_THIS_WILL_RECEIVE,
+                &[
+                    ("chat_name", &chat_name.to_string()),
+                    ("place", place),
+                    ("boosts_text", &(boosts_text(boosts)).to_string()),
+                ],
             )));
         } else {
             body = self.giveaway_random_sections(body, form, &draft, session, cx);
@@ -493,11 +491,11 @@ impl QuillApp {
         // Price and notes.
         if let Some(price) = Self::giveaway_price(&draft, options) {
             body = body
-                .child(section_title("Price"))
+                .child(section_title(tr(keys::Q_MONEY_PRICE)))
                 .child(div().id("giveaway-price").text_sm().child(price))
-                .child(about_line(
-                    "Start Giveaway opens the checkout. The giveaway is created once you pay there.",
-                ));
+                .child(about_line(tr(
+                    keys::Q_MONEY_START_GIVEAWAY_OPENS_THE_CHECKOUT,
+                )));
         }
         let note = form.note.clone().or_else(|| match &giveaway.launch {
             GiveawayLaunch::Failed(text) => Some(text.clone()),
@@ -557,16 +555,16 @@ impl QuillApp {
             let footer = if page != GiveawayPage::Form {
                 footer.child(
                     Button::new("giveaway-page-done")
-                        .label("Done")
+                        .label(tr(keys::BOX_DONE))
                         .on_click(cx.listener(|this, _, _, cx| this.close_giveaway_page(cx))),
                 )
             } else if launched {
-                footer.child(close("Done"))
+                footer.child(close(tr(keys::BOX_DONE)))
             } else if confirming {
                 footer
                     .child(
                         Button::new("giveaway-confirm-no")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(form) = this.giveaway.form.as_mut() {
@@ -577,7 +575,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("giveaway-confirm-yes")
-                            .label("Start Giveaway")
+                            .label(tr(keys::GIVEAWAY_START))
                             .loading(launching)
                             .disabled(launching)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -585,9 +583,9 @@ impl QuillApp {
                             })),
                     )
             } else {
-                footer.child(close("Close")).child(
+                footer.child(close(tr(keys::CLOSE))).child(
                     Button::new("giveaway-start")
-                        .label("Start Giveaway")
+                        .label(tr(keys::GIVEAWAY_START))
                         .loading(launching)
                         .disabled(launching)
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -620,10 +618,15 @@ fn price_of_premium(option: &PremiumGiveawayOption) -> String {
 }
 
 fn price_of_stars(option: &StarGiveawayOption) -> String {
-    format!(
-        "{} for {} Stars",
-        format_payment_price(&option.currency, option.amount),
-        group_digits(option.star_count)
+    tr_with(
+        keys::Q_MONEY_FOR_STARS,
+        &[
+            (
+                "amount",
+                &(format_payment_price(&option.currency, option.amount)).to_string(),
+            ),
+            ("star_count", &(group_digits(option.star_count)).to_string()),
+        ],
     )
 }
 

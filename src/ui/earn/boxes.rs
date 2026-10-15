@@ -10,6 +10,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::{Dialog, DialogContent};
 use quill::boost_box::BoostCounters;
+use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -33,9 +34,12 @@ fn one_shot(
 /// tdesktop's diamonds easter egg on the learn box's TON emoji.
 fn diamonds_toast(count: u32) -> String {
     match count {
-        100.. => "You are rich now!".into(),
-        1 => "You have earned 1 diamond!".into(),
-        n => format!("You have earned {n} diamonds!"),
+        100.. => tr(keys::Q_MONEY_YOU_ARE_RICH_NOW).into(),
+        1 => tr(keys::Q_MONEY_YOU_HAVE_EARNED_1_DIAMOND).into(),
+        n => tr_with(
+            keys::Q_MONEY_YOU_HAVE_EARNED_DIAMONDS,
+            &[("n", &n.to_string())],
+        ),
     }
 }
 
@@ -88,31 +92,31 @@ impl QuillApp {
                         .text_lg()
                         .font_semibold()
                         .child(if is_bot {
-                            "Earn From Your Bot"
+                            tr(keys::CHANNEL_EARN_BOT_LEARN_TITLE)
                         } else {
-                            "Earn From Your Channel"
+                            tr(keys::CHANNEL_EARN_LEARN_TITLE)
                         }),
                 )
                 .child(info_point(
                     IconName::Megaphone,
-                    "Telegram Ads",
+                    tr(keys::CHANNEL_EARN_LEARN_IN_SUBTITLE),
                     if is_bot {
-                        "Telegram can display ads in your bot."
+                        tr(keys::CHANNEL_EARN_LEARN_BOT_IN_ABOUT)
                     } else {
-                        "Telegram can display ads in your channel."
+                        tr(keys::CHANNEL_EARN_LEARN_IN_ABOUT)
                     },
                     cx,
                 ))
                 .child(info_point(
                     IconName::ChartPie,
-                    "50:50 revenue split",
-                    "You can receive 50% of the ad revenue as rewards in TON.",
+                    tr(keys::CHANNEL_EARN_LEARN_SPLIT_SUBTITLE),
+                    tr(keys::CHANNEL_EARN_LEARN_SPLIT_ABOUT),
                     cx,
                 ))
                 .child(info_point(
                     IconName::ArrowUpRight,
-                    "Flexible withdrawals",
-                    "You can collect your TON any time.",
+                    tr(keys::CHANNEL_EARN_LEARN_OUT_SUBTITLE),
+                    tr(keys::CHANNEL_EARN_LEARN_OUT_ABOUT),
                     cx,
                 ))
                 .child(
@@ -123,7 +127,7 @@ impl QuillApp {
                         .gap_1()
                         .text_lg()
                         .font_semibold()
-                        .child("What is")
+                        .child(tr(keys::Q_MONEY_WHAT_IS))
                         .child(
                             div()
                                 .id("earn-learn-diamond")
@@ -139,19 +143,19 @@ impl QuillApp {
                                 }))
                                 .child(ton_icon(20., primary)),
                         )
-                        .child("TON?"),
+                        .child(tr(keys::Q_MONEY_TON)),
                 )
                 .child(super::revenue::about_with_link(
                     "earn-learn-coin",
-                    "TON is a blockchain platform and cryptocurrency that Telegram uses for its high speed and low commissions on transactions.",
+                    tr(keys::Q_MONEY_TON_IS_A_BLOCKCHAIN_PLATFORM),
                     |_, cx| cx.open_url(TON_BLOG_URL),
                     cx,
                 ))
                 .into_any_element();
             let footer = div().flex().w_full().child(
                 Button::new("earn-learn-close")
-                        .debug_selector(|| "earn-learn-close".into())
-                    .label("Got it")
+                    .debug_selector(|| "earn-learn-close".into())
+                    .label(tr(keys::CHANNEL_EARN_LEARN_CLOSE))
                     .primary()
                     .w_full()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -204,9 +208,9 @@ impl QuillApp {
                         .child(date),
                 )
                 .child(div().pt_2().text_sm().font_semibold().child(if incoming {
-                    "Rewards from ads displayed in"
+                    tr(keys::CHANNEL_EARN_HISTORY_IN_ABOUT)
                 } else {
-                    "Collection"
+                    tr(keys::CHANNEL_EARN_HISTORY_OUT)
                 }));
             if incoming
                 && let Some(peer) = this
@@ -219,7 +223,7 @@ impl QuillApp {
             let explorer = tx.explorer_url().map(str::to_string);
             let button = match explorer {
                 Some(url) => Button::new("earn-tx-explorer")
-                    .label("View in Blockchain Explorer")
+                    .label(tr(keys::CHANNEL_EARN_HISTORY_OUT_BUTTON))
                     .primary()
                     .w_full()
                     .on_click(move |_, _, cx| cx.open_url(&url)),
@@ -314,15 +318,17 @@ impl QuillApp {
                         .justify_center()
                         .text_lg()
                         .font_semibold()
-                        .child("Boost Channel"),
+                        .child(tr(keys::Q_MONEY_BOOST_CHANNEL)),
                 )
-                .child(div().text_sm().text_center().child(format!(
-                    "Your channel needs to reach Level {level} to switch off ads."
+                .child(div().text_sm().text_center().child(tr_with(
+                    keys::Q_MONEY_YOUR_CHANNEL_NEEDS_TO_REACH,
+                    &[("level", &level.to_string())],
                 )))
                 .child(
-                    div().text_sm().text_center().child(
-                        "Ask your Premium subscribers to boost your channel with this link:",
-                    ),
+                    div()
+                        .text_sm()
+                        .text_center()
+                        .child(tr(keys::Q_MONEY_ASK_YOUR_PREMIUM_SUBSCRIBERS_TO)),
                 )
                 .child(
                     div()
@@ -344,13 +350,13 @@ impl QuillApp {
             }
             let footer = div().flex().w_full().child(
                 Button::new("earn-boost-copy")
-                    .label("Copy Link")
+                    .label(tr(keys::CONTEXT_COPY_LINK))
                     .primary()
                     .w_full()
                     .disabled(link.is_empty())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                        this.connection.status_note = "Link copied to clipboard.".into();
+                        this.connection.status_note = tr(keys::STICKERS_COPIED).into();
                         cx.notify();
                     })),
             );

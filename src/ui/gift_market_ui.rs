@@ -20,6 +20,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_market::{AuctionBoxChoice, GiftMarketState, auction_about_shown};
 use quill::ids::FileId;
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::marketplace::GiftPrice;
 use quill::premium_hub::group_digits;
@@ -178,7 +179,7 @@ impl QuillApp {
             Some(live) => match live.driver.fetch_gift_auction(auction_id) {
                 Ok(_) => self.gift_market.pending_auction = true,
                 Err(_) => {
-                    self.connection.status_note = "Couldn't load the auction.".into();
+                    self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION).into();
                 }
             },
             None => self.show_auction_box(gift_id, cx),
@@ -273,7 +274,7 @@ impl QuillApp {
             self.connection.status_note = note;
         }
         if low {
-            self.connection.status_note = "Your Stars balance is too low.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO).into();
             self.open_stars(cx);
         }
         for (title, text) in toasts {

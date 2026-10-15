@@ -19,6 +19,7 @@ use quill::gift_market::{
     AuctionState, BID_SLIDER_STEPS, BidAction, BidKind, BidSlider, MAX_CUSTOM_BID, TopBid,
     bid_subtitle, bid_title, nice_countdown, seconds_left, short_stars,
 };
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::premium_hub::group_digits;
 use quill::state::Session;
@@ -165,7 +166,7 @@ impl QuillApp {
     fn open_custom_bid(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let chosen = self.gift_market.slider.as_ref().map_or(0, |ui| ui.chosen);
         let input = cx.new(|cx| {
-            let mut input = InputState::new(window, cx).placeholder("Stars");
+            let mut input = InputState::new(window, cx).placeholder(tr(keys::Q_MONEY_STARS));
             input.set_value(chosen.to_string(), window, cx);
             input
         });
@@ -190,11 +191,14 @@ impl QuillApp {
         let least = state.min_bid_for_me();
         let amount = typed.parse::<i64>().unwrap_or(0);
         let error = if amount < least && amount != state.my_stars() {
-            Some(format!("The minimum bid is {}.", stars_text(least)))
+            Some(tr_with(
+                keys::Q_MONEY_THE_MINIMUM_BID_IS,
+                &[("stars_text", &(stars_text(least)).to_string())],
+            ))
         } else if amount > MAX_CUSTOM_BID {
-            Some(format!(
-                "The maximum bid is {}.",
-                stars_text(MAX_CUSTOM_BID)
+            Some(tr_with(
+                keys::Q_MONEY_THE_MAXIMUM_BID_IS,
+                &[("stars_text", &(stars_text(MAX_CUSTOM_BID)).to_string())],
             ))
         } else {
             None
@@ -241,7 +245,7 @@ impl QuillApp {
             BidAction::Place(n) | BidAction::Increase(n) => n,
         };
         let Some(MessageSender::User { user_id }) = self.auction_recipient() else {
-            self.connection.status_note = "Auction gifts can only be sent to people.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_AUCTION_GIFTS_CAN_ONLY_BE).into();
             cx.notify();
             return;
         };
@@ -251,7 +255,7 @@ impl QuillApp {
             .and_then(|s| s.payments.hub.balance)
             .is_some_and(|balance| balance.stars < add);
         if poor {
-            self.connection.status_note = "Your Stars balance is too low.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_YOUR_STARS_BALANCE_IS_TOO).into();
             self.open_stars(cx);
             cx.notify();
             return;
@@ -269,7 +273,7 @@ impl QuillApp {
                 .bid_gift_auction(gift_id, stars, user_id, &text, hide)
                 .is_ok(),
             None => {
-                self.connection.status_note = "Bids need a signed-in account.".into();
+                self.connection.status_note = tr(keys::Q_MONEY_BIDS_NEED_A_SIGNED_IN).into();
                 false
             }
         };
@@ -283,7 +287,7 @@ impl QuillApp {
                 )
             });
         } else if self.live.is_some() {
-            self.connection.status_note = "Couldn't place the bid.".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_PLACE_THE_BID).into();
         }
         cx.notify();
     }
@@ -329,7 +333,13 @@ impl QuillApp {
             .text_color(cx.theme().primary_foreground)
             .cursor_pointer()
             .role(Role::Button)
-            .aria_label(format!("Bid {}, {subtext}", stars_text(chosen)))
+            .aria_label(tr_with(
+                keys::Q_MONEY_BID,
+                &[
+                    ("stars_text", &(stars_text(chosen)).to_string()),
+                    ("subtext", &subtext.to_string()),
+                ],
+            ))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.open_custom_bid(window, cx);
             }))
@@ -379,8 +389,8 @@ impl QuillApp {
                         .icon(IconName::Plus)
                         .ghost()
                         .small()
-                        .tooltip("Custom Amount")
-                        .accessibility_label("Custom Amount")
+                        .tooltip(tr(keys::AUCTION_BID_CUSTOM_TITLE))
+                        .accessibility_label(tr(keys::AUCTION_BID_CUSTOM_TITLE))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_custom_bid(window, cx);
                         })),
@@ -396,7 +406,12 @@ impl QuillApp {
                         .p_3()
                         .rounded_lg()
                         .bg(cx.theme().secondary)
-                        .child(div().text_sm().font_semibold().child("Custom Amount"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .child(tr(keys::AUCTION_BID_CUSTOM_TITLE)),
+                        )
                         .child(Input::new(&custom.input))
                         .children(custom.error.clone().map(|error| {
                             div().text_xs().text_color(cx.theme().danger).child(error)
@@ -408,7 +423,7 @@ impl QuillApp {
                                 .gap_2()
                                 .child(
                                     Button::new("auction-custom-cancel")
-                                        .label("Cancel")
+                                        .label(tr(keys::CANCEL))
                                         .ghost()
                                         .small()
                                         .on_click(cx.listener(|this, _, _, cx| {
@@ -418,7 +433,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new("auction-custom-save")
-                                        .label("Save")
+                                        .label(tr(keys::SETTINGS_SAVE))
                                         .primary()
                                         .small()
                                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -433,12 +448,12 @@ impl QuillApp {
         let (countdown, caption) = if started {
             (
                 nice_countdown(seconds_left(state.next_round_at(), now)),
-                "until next round",
+                tr(keys::AUCTION_BID_UNTIL),
             )
         } else {
             (
                 nice_countdown(seconds_left(state.start_date(), now)),
-                "before start",
+                tr(keys::AUCTION_BID_BEFORE_START),
             )
         };
         let left = state.active().map_or(0, |active| active.left);
@@ -453,14 +468,17 @@ impl QuillApp {
                         .flex()
                         .cursor_pointer()
                         .role(Role::Button)
-                        .aria_label(format!("Minimum bid {}", stars_text(least)))
+                        .aria_label(tr_with(
+                            keys::Q_MONEY_MINIMUM_BID_2,
+                            &[("stars_text", &(stars_text(least)).to_string())],
+                        ))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.set_bid_amount(gift_id, least, window, cx);
                         }))
                         .child(info_block(
                             Some(super::earn::star_icon(14.)),
                             short_stars(least),
-                            "minimum bid",
+                            tr(keys::Q_MONEY_MINIMUM_BID),
                             cx,
                         )),
                 )
@@ -501,7 +519,12 @@ impl QuillApp {
                 ));
         }
         if !rows.top.is_empty() {
-            body = body.child(div().text_sm().font_semibold().child("Top winners"));
+            body = body.child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(tr(keys::AUCTION_BID_WINNERS_TITLE)),
+            );
             let medals = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
             for (top, medal) in rows.top.iter().zip(medals) {
                 let TopBid { user_id, stars, .. } = *top;
@@ -516,12 +539,10 @@ impl QuillApp {
             }
         }
         if let Some(balance) = session.payments.hub.balance {
-            body = body.child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(format!("Your balance is {}.", stars_text(balance.stars))),
-            );
+            body = body.child(div().text_xs().text_color(muted).child(tr_with(
+                keys::Q_MONEY_YOUR_BALANCE_IS,
+                &[("stars", &(stars_text(balance.stars)).to_string())],
+            )));
         }
         let bidding = session.payments.gift_market.bidding == Some(gift_id);
         let action = state.bid_action(chosen);

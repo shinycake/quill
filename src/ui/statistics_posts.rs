@@ -18,6 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::FileId;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::local_time::{civil_local, full_stamp};
 use quill::stat_chart::{ChartKind, format_short};
@@ -125,7 +126,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_1()
-            .child(section_title("Recent posts"));
+            .child(section_title(tr(keys::Q_MONEY_RECENT_POSTS)));
         let mut rows = 0;
         for (index, info) in stats.recent_interactions.iter().take(shown).enumerate() {
             let (text, date, open, thumbs): (String, i32, StatsPage, Vec<FileId>) =
@@ -150,7 +151,7 @@ impl QuillApp {
                         match session.stories.stories.get(&(chat_id, story_id)) {
                             Some(story) => (
                                 if story.caption.is_empty() {
-                                    "Story".to_string()
+                                    tr(keys::Q_MONEY_STORY).to_string()
                                 } else {
                                     story.caption.clone()
                                 },
@@ -164,13 +165,16 @@ impl QuillApp {
                 };
             rows += 1;
             let title = if text.is_empty() {
-                "Post".to_string()
+                tr(keys::Q_MONEY_POST).to_string()
             } else {
                 text
             };
             list = list.child(
                 stats_row(format!("recent-post-{index}").into(), cx)
-                    .aria_label(SharedString::from(format!("Statistics of {title}")))
+                    .aria_label(SharedString::from(tr_with(
+                        keys::Q_MONEY_STATISTICS_OF,
+                        &[("title", &title.to_string())],
+                    )))
                     .child(self.post_thumb(&thumbs, matches!(open, StatsPage::Story(_)), cx))
                     .child(row_text(title, stamp(date)))
                     .child(post_counts(
@@ -190,7 +194,7 @@ impl QuillApp {
         if shown < total {
             list = list.child(
                 Button::new("recent-posts-more")
-                    .label("Show more")
+                    .label(tr(keys::Q_MONEY_SHOW_MORE))
                     .ghost()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -285,7 +289,7 @@ impl QuillApp {
                 .fetch_message_statistics(ChatId(chat_id), MessageId(message_id), is_dark)
                 .is_err()
             {
-                self.connection.status_note = "could not load statistics".into();
+                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_message_stats_page(chat_id, message_id);
@@ -307,7 +311,7 @@ impl QuillApp {
                 .fetch_story_insights(ChatId(chat_id), story_id, is_dark)
                 .is_err()
         {
-            self.connection.status_note = "could not load story statistics".into();
+            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_STORY_STATISTICS).into();
         }
         cx.notify();
     }
@@ -329,8 +333,8 @@ impl QuillApp {
                     .icon(IconName::ChevronLeft)
                     .ghost()
                     .small()
-                    .accessibility_label("Back to statistics")
-                    .tooltip("Back to statistics")
+                    .accessibility_label(tr(keys::Q_MONEY_BACK_TO_STATISTICS))
+                    .tooltip(tr(keys::Q_MONEY_BACK_TO_STATISTICS))
                     .on_click(cx.listener(move |this, _, _, cx| this.stats_back(chat_id, cx))),
             )
             .child(section_title(title))
@@ -349,7 +353,7 @@ impl QuillApp {
         };
         let mut page = div().flex().flex_col().gap_4().child(self.page_header(
             chat_id,
-            "Message statistics",
+            tr(keys::Q_MONEY_MESSAGE_STATISTICS),
             cx,
         ));
         let post = match session.stats_post(chat_id, message_id) {
@@ -376,7 +380,7 @@ impl QuillApp {
         let state = session.groups.stats.message_for(chat_id, message_id);
         if let Some(post) = post.as_ref() {
             let title = if post.text.is_empty() {
-                "Post".to_string()
+                tr(keys::Q_MONEY_POST).to_string()
             } else {
                 post.text.clone()
             };
@@ -391,7 +395,7 @@ impl QuillApp {
                     .child(row_text(title, stamp(post.date)))
                     .child(
                         Button::new("stats-go-to-message")
-                            .label("Go to message")
+                            .label(tr(keys::Q_MONEY_GO_TO_MESSAGE))
                             .small()
                             .outline()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -413,35 +417,38 @@ impl QuillApp {
         let public = state.map_or(0, |s| s.forwards.total);
         let mut cells = Vec::new();
         if let Some(views) = views {
-            cells.push(OverviewCell::plain(format_short(i64::from(views)), "Views"));
+            cells.push(OverviewCell::plain(
+                format_short(i64::from(views)),
+                tr(keys::Q_MONEY_VIEWS),
+            ));
         }
         cells.push(OverviewCell::plain(
             format_short(i64::from(public)),
-            "Public shares",
+            tr(keys::Q_MONEY_PUBLIC_SHARES),
         ));
         if let Some(reactions) = recent.map(|r| r.reaction_count) {
             cells.push(OverviewCell::plain(
                 format_short(i64::from(reactions)),
-                "Reactions",
+                tr(keys::Q_MONEY_REACTIONS),
             ));
         }
         if let Some(forwards) = forwards {
             cells.push(OverviewCell::plain(
                 format_short(i64::from(private_share_count(forwards, public))),
-                "Private shares",
+                tr(keys::Q_MONEY_PRIVATE_SHARES),
             ));
         }
         page = page.child(overview_grid(cells));
         match state.map(|s| &s.statistics) {
             None | Some(MessageStatsFetch::Loading) => {
-                page = page.child(loading_line("Loading statistics…"));
+                page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)));
             }
             Some(MessageStatsFetch::Failed(message)) => {
                 page = page
                     .child(div().text_sm().text_color(danger()).child(message.clone()))
                     .child(
                         Button::new("message-stats-retry")
-                            .label("Retry")
+                            .label(tr(keys::Q_MONEY_RETRY))
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let is_dark = super::chat_theme::is_dark_palette();
@@ -460,13 +467,13 @@ impl QuillApp {
                 for (id, title, graph, kind) in [
                     (
                         "interactions",
-                        "Interactions",
+                        tr(keys::Q_MONEY_INTERACTIONS),
                         &stats.interaction_graph,
                         ChartKind::DoubleLinear,
                     ),
                     (
                         "reactions",
-                        "Reactions",
+                        tr(keys::Q_MONEY_REACTIONS),
                         &stats.reaction_graph,
                         ChartKind::Bar,
                     ),
@@ -489,7 +496,7 @@ impl QuillApp {
                     if let Some(section) = self.stat_graph_section(
                         chat_id,
                         &id,
-                        "Poll votes",
+                        tr(keys::Q_MONEY_POLL_VOTES),
                         graph,
                         ChartKind::Linear,
                         cx,
@@ -504,7 +511,7 @@ impl QuillApp {
             let forwards = &state.forwards;
             let more = (!forwards.next_offset.is_empty()).then(|| {
                 Button::new("message-forwards-more")
-                    .label("Show more")
+                    .label(tr(keys::Q_MONEY_SHOW_MORE))
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -546,13 +553,13 @@ impl QuillApp {
         };
         let mut page = div().flex().flex_col().gap_4().child(self.page_header(
             chat_id,
-            "Story statistics",
+            tr(keys::Q_MONEY_STORY_STATISTICS),
             cx,
         ));
         let story = session.stories.stories.get(&(chat_id, story_id));
         if let Some(story) = story {
             let title = if story.caption.is_empty() {
-                "Story".to_string()
+                tr(keys::Q_MONEY_STORY).to_string()
             } else {
                 story.caption.clone()
             };
@@ -573,22 +580,33 @@ impl QuillApp {
         let public = state.map_or(0, |s| s.forwards_total);
         if let Some(info) = story.and_then(|s| s.interaction_info) {
             page = page.child(overview_grid(vec![
-                OverviewCell::plain(format_short(i64::from(info.view_count)), "Views"),
-                OverviewCell::plain(format_short(i64::from(public)), "Public shares"),
-                OverviewCell::plain(format_short(i64::from(info.reaction_count)), "Reactions"),
+                OverviewCell::plain(
+                    format_short(i64::from(info.view_count)),
+                    tr(keys::Q_MONEY_VIEWS),
+                ),
+                OverviewCell::plain(
+                    format_short(i64::from(public)),
+                    tr(keys::Q_MONEY_PUBLIC_SHARES),
+                ),
+                OverviewCell::plain(
+                    format_short(i64::from(info.reaction_count)),
+                    tr(keys::Q_MONEY_REACTIONS),
+                ),
                 OverviewCell::plain(
                     format_short(i64::from(private_share_count(info.forward_count, public))),
-                    "Private shares",
+                    tr(keys::Q_MONEY_PRIVATE_SHARES),
                 ),
             ]));
         }
         let Some(state) = state else {
             return page
-                .child(loading_line("Loading statistics…"))
+                .child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)))
                 .into_any_element();
         };
         match &state.statistics {
-            StoryStatsFetch::Loading => page = page.child(loading_line("Loading statistics…")),
+            StoryStatsFetch::Loading => {
+                page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)))
+            }
             StoryStatsFetch::Failed(message) => {
                 page = page.child(div().text_sm().text_color(danger()).child(message.clone()));
             }
@@ -596,13 +614,13 @@ impl QuillApp {
                 for (id, title, graph, kind) in [
                     (
                         "interactions",
-                        "Interactions",
+                        tr(keys::Q_MONEY_INTERACTIONS),
                         &stats.interaction_graph,
                         ChartKind::DoubleLinear,
                     ),
                     (
                         "reactions",
-                        "Reactions",
+                        tr(keys::Q_MONEY_REACTIONS),
                         &stats.reaction_graph,
                         ChartKind::Bar,
                     ),
@@ -619,7 +637,7 @@ impl QuillApp {
         let more = (!state.forwards_next_offset.is_empty()).then(|| {
             let offset = state.forwards_next_offset.clone();
             Button::new("story-page-forwards-more")
-                .label("Show more")
+                .label(tr(keys::Q_MONEY_SHOW_MORE))
                 .ghost()
                 .small()
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -668,8 +686,8 @@ impl QuillApp {
         if total > 0 {
             list = list.child(section_title(super::statistics::plural(
                 total,
-                "public share",
-                "public shares",
+                tr(keys::Q_MONEY_PUBLIC_SHARE),
+                tr(keys::Q_MONEY_PUBLIC_SHARES_2),
             )));
         }
         for (index, forward) in forwards.iter().enumerate() {
@@ -680,7 +698,7 @@ impl QuillApp {
             let chat = session.and_then(|s| s.chats.get(&source));
             let title = chat
                 .map(|c| c.title.clone())
-                .unwrap_or_else(|| format!("Chat {source}"));
+                .unwrap_or_else(|| tr_with(keys::Q_MONEY_CHAT, &[("source", &source.to_string())]));
             let photo = session
                 .and_then(|s| s.chat_photo_path(ChatId(source)))
                 .and_then(|path| sandboxed_display_path(path, &roots));
@@ -709,7 +727,7 @@ impl QuillApp {
             let status = match (members_text, views_text) {
                 (Some(m), Some(v)) => format!("{m}, {v}"),
                 (Some(text), None) | (None, Some(text)) => text,
-                (None, None) => "No views".to_string(),
+                (None, None) => tr(keys::Q_MONEY_NO_VIEWS).to_string(),
             };
             let row = stats_row(format!("{id}-{index}").into(), cx)
                 .aria_label(SharedString::from(title.clone()))
@@ -731,7 +749,7 @@ impl QuillApp {
             list = list.child(div().text_sm().text_color(danger()).child(error));
         }
         if loading {
-            list = list.child(loading_line("Loading public shares…"));
+            list = list.child(loading_line(tr(keys::Q_MONEY_LOADING_PUBLIC_SHARES)));
         } else if let Some(more) = more {
             list = list.child(more);
         }
