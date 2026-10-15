@@ -1,3 +1,0 @@
-# macOS screen capture: source chooser, privacy box, pause (docs/decisions/call-capture.md)
-parity:calls-screen-source-chooser
-parity:calls-screen-share-pause

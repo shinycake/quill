@@ -726,8 +726,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Noise suppression toggle in group calls (designed: ntgcalls 3 accepts external microphone frames, so Quill can denoise the mic itself; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-noise-suppression -->
 - [x] Join a group call as a channel and set a default participant <!-- parity:calls-join-as -->
 - [x] Pin a participant's camera or screen tile and show it fullscreen <!-- parity:calls-pin-tile -->
-- [ ] Screen source chooser with window and screen thumbnails (designed: Quill captures screens and windows itself and feeds ntgcalls external frames; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-screen-source-chooser -->
-- [ ] Pause screen sharing (designed: with Quill's own capturer, a hidden or minimized window pauses through toggleGroupCallScreenSharingIsPaused; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-screen-share-pause -->
+- [x] Screen source chooser with window and screen thumbnails (designed: Quill captures screens and windows itself and feeds ntgcalls external frames; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-screen-source-chooser -->
+- [x] Pause screen sharing (designed: with Quill's own capturer, a hidden or minimized window pauses through toggleGroupCallScreenSharingIsPaused; quill-tools/designs/call-media-capture.md, queued) <!-- parity:calls-screen-share-pause -->
 - [ ] Conference calls: add people to a 1:1 call, call links, end-to-end group calls (blocked: TDLib keeps the call's blockchain internal and exposes only encrypt/decryptGroupCallData, while ntgcalls 3 conference mode needs the raw blocks via ntg_init_conference/ntg_apply_blocks and has no external-encryption hook) <!-- parity:calls-conference -->
 - [x] Detect when you speak in a group call and show it to others <!-- parity:calls-speaking-detection -->
 - [x] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
