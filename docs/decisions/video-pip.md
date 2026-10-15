@@ -44,8 +44,8 @@ Colors are from lib_ui `colors.palette:544–547` and `radialBg` (`:71`).
 | Clicks | release over the same control acts; a moved press never does (`handleMouseRelease` 1125–1157); a click on the picture pauses or resumes, an ended clip starts over, a failed one closes (`playbackPauseResume` 1734–1748); a double click undoes the first click and goes back (`handleDoubleClick` 1159–1167) | `layout::Presses`, `VideoPip::toggle_pause` |
 | Waiting | radial in a 50 px `radialBg` disc (`paintRadialLoadingContent` 1838–1863) | kit `Spinner` in the same disc after 500 ms (`WaitingGate`) |
 | Errors | a streaming error closes the window (`handleStreamingError` 1730–1732) | `Failed` closes it |
-| Ends | the session changing (948–951), the message deleted, the app locking (`switchToPip`, `media_view_overlay_widget.cpp:5806–5820`), a viewer clip with sound starting (`startStreamingPlayer`, `:5024–5031`) | `check_video_pip` (root render), `play_viewer_video` |
-| Handoff | the viewer gives PiP its shared streaming document and closes (`switchToPip`, `:5776–5830`); "enlarge" reopens the viewer on the message with `continueStreaming`, which keeps the same player (`:4996–5013`) | the `VideoPlayer` itself moves (`open_video_pip`, `pip_enlarged`, `take_pip_handoff`) |
+| Ends | its account's session changing (948–951), the message removed (`itemRemoved`), the app locking (`switchToPip`, `media_view_overlay_widget.cpp:5806–5820`), a viewer clip with sound starting (`startStreamingPlayer`, `:5024–5031`) | `lock_by_passcode`, the update poll (`video_pip_account_ended`, `check_video_pip` on a tombstone) with the root render as a backstop, `sound_starts` |
+| Handoff | the viewer gives PiP its shared streaming document and closes (`switchToPip`, `:5776–5830`); "enlarge" reopens the viewer on the document in its message with `continueStreaming`, which keeps the same player (`:4996–5013`), and so does opening that clip again | the `VideoPlayer` itself moves (`open_video_pip`; back through `pip_enlarge_requested` → `take_pip_player_for`) |
 
 ## What changed
 
@@ -53,22 +53,43 @@ Colors are from lib_ui `colors.palette:544–547` and `radialBg` (`:71`).
   - `panel.rs` ports `PipPanel`'s geometry.
   - `layout.rs` ports `Pip`'s layout, hit states and press rules, plus the
     two keys.
+  - `reopen.rs`: where back-to-viewer lands (the album item at its offset
+    when it is still the same file, else the item with that file).
 - `src/settings/video_pip.rs`: the saved position.
 - `src/ui/video_player/controls/pip/` (new):
-  - `mod.rs`: the window and its view (`VideoPip`), input, drag, slide and
-    handoff hooks.
+  - `mod.rs`: the view (`VideoPip`), its actions and the owner hooks.
+  - `open.rs`: opening the window and the saved position.
+  - `input.rs`: the pointer, drag, slide and system resizes.
   - `chrome.rs`: drawing.
   - `place.rs`: moving the native window.
 - `src/ui/media_viewer/pip.rs`: the viewer's side:
   - `open_video_pip` takes the viewer's player, closes the viewer and opens
     the window.
-  - `pip_enlarged` puts the player in `viewer.handoff`, reopens the viewer
-    on the message, and `play_viewer_video` adopts it
-    (`adopt_viewer_player`): no reopen, no seek, the same play state, rate
-    and volume.
-  - `check_video_pip` (each root render) closes the window when its
-    message is deleted, the app locks or the account changes.
-  - A viewer clip with sound, a voice message or music closes it.
+  - Back to the viewer (`pip_enlarge_requested`) reopens the viewer on the
+    clip: the album item at its offset if it is still the same file,
+    else the item holding that file, else (the message no longer
+    loaded) the saved item alone. `play_viewer_video` then takes the
+    window's player (`take_pip_player_for`, `adopt_viewer_player`): no
+    reopen, no seek, the same play state, rate and volume; the window
+    detaches. If nothing takes it (another account is active, the file
+    is gone), the viewer closes again and the window keeps playing.
+  - Opening the clip again from the chat takes the window's player the
+    same way instead of restarting.
+  - It closes on a real deletion only: a tombstone, not the message
+    leaving the loaded history window. The viewer's own
+    `prune_deleted_viewer_items` follows the same rule now; it used to
+    drop items whose message was paged out.
+  - Lock (`lock_by_passcode`), its own account's logout or removal
+    (`video_pip_account_ended` from the update poll and
+    `remove_account_key`) and deletions (`check_video_pip` from the
+    update poll) close it without a main-window render, so a minimized
+    or tray-hidden Quill does not leave it playing. The root render
+    check stays as a backstop. Switching to another account keeps it.
+  - Every sound start goes through `sound_starts`, which closes it: a
+    viewer clip with sound, a story with sound (opened or unmuted), a
+    voice message or music (started, or resumed from the player bar or
+    its row), a recording preview, a round video played with sound and
+    the legacy video path.
 - `ViewerUi.pip_window` became `pip: Option<PipLink>`; the viewer is closed
   while PiP plays, so the `pip_window.is_none()` checks in the root render,
   the viewer slice and chat windows are gone.
@@ -76,7 +97,7 @@ Colors are from lib_ui `colors.palette:544–547` and `radialBg` (`:71`).
   - `clear_watchers`: each surface watches the player it holds, so the
     closed viewer's panel is no longer redrawn.
   - `picture_size`: the aspect.
-  - `same_as`: tests only.
+  - `same_as`: whether two handles are the same player.
 - The PiP button shows on every platform when the viewer has a player. The
   `cfg!(target_os = "macos")` gate is gone. The Touch Bar and the
   `ready-video-pip` demo call the same `open_video_pip`.
@@ -92,7 +113,11 @@ GPUI places a window when it opens but cannot move or resize it later.
 already does:
 
 - macOS: `setFrame:display:`.
-- Windows: `SetWindowPos`.
+- Windows: `SetWindowPos` with the client frame grown by the window's
+  own borders. A top-level window keeps a left, right and bottom frame
+  even with GPUI's titlebar hidden (`WM_NCCALCSIZE`), so the borders
+  are read from `GetWindowInfo` (window and client rectangles) on each
+  move; `frame()` reads the client rectangle the same way.
 - X11: `ConfigureWindow`. The frame and the pointer are also read from the
   server, because GPUI's X11 bounds follow `ConfigureNotify`, which is
   relative to the window manager's frame.
@@ -104,13 +129,29 @@ that callback while the app is borrowed, so a frame is set from a
 foreground task after the event that asked for it has returned. GPUI's
 own `Window::resize` does the same on macOS.
 
+Resizes the window system makes (a Wayland compositor, an X11 window
+manager) are brought back to the aspect and its limits
+(`fit_system_resize`). GPUI sets a window's minimum size only when it
+opens, so it is 120 × 120 (the smallest minimum of any aspect) and the
+aspect's own minimum is kept this way. A pixel of rounding is left alone
+so the window's own frames and this never fight.
+
+macOS: GPUI gave a floating window only `acceptsMouseMovedEvents`, which
+reports moves to the key window alone; PiP opens unfocused, so it saw
+no hover, cursor or exit events. The vendored `gpui-pre-macos` now gives
+floating windows the always-active `NSTrackingArea` normal windows have
+(`QUILL-CHANGES.md`).
+
 ### Why the lines are composed
 
 tdesktop's PiP lines are a 2 px bar with no thumb that grows to 4 px. The
 kit `Slider` has a fixed 6 px track and a 16 px thumb. So the lines are
 built from the base slider parts (`Slider`, `SliderTrack`,
-`SliderIndicator`), like the viewer's `VideoScrubber`. They keep the kit's
-drag, keyboard and accessibility behavior.
+`SliderIndicator`), like the viewer's `VideoScrubber`, and keep the kit's
+drag. The base slider's keyboard and screen-reader steps set its value
+without an event, so the window observes the value: a step that did not
+come from the window's own sync seeks or sets the volume. A step on the
+progress line is 0.1 % of the clip, the drag resolution.
 
 The buttons are kit `Button`s in a custom variant with no background or
 wash. tdesktop only brightens the icon, and the foreground follows the
@@ -179,10 +220,16 @@ the transport itself.
 - **Window kind on Linux and Windows.** It is a plain window kept on top.
   GPUI makes a floating window transient for the focused one, which
   tdesktop explicitly undoes (`ClearTransientParent`).
-- **Voice messages and music close PiP.** Quill's existing rule is that one
-  sound plays at a time, and it closed the old PiP the same way. tdesktop
-  closes PiP only for another viewer clip with sound, which Quill also
-  does.
+- **Other sounds close PiP.** tdesktop drops PiP for another viewer or
+  story clip with sound (`startStreamingPlayer`) and pauses video when
+  audio plays. Quill closes it for every sound (`sound_starts`), its
+  existing one-sound rule, which also closed the old PiP.
+- **Back to the viewer after an account switch.** The window keeps
+  playing, but going back does nothing until its account is active
+  again: Quill runs one account's session at a time, where tdesktop can
+  open the viewer in the other session.
+- **A slide finishes after the release.** tdesktop's `finishDrag` stops
+  a running snap slide where it is; Quill lets it reach the snap line.
 - **Not in Quill's PiP:**
   - Automatic quality switching (`applyVideoQuality`). PiP plays the
     rendition the viewer chose.
@@ -215,11 +262,13 @@ the transport itself.
   player rather than borrowing the viewer's.
 - **`codex-gpui-window-controls.md`, the Picture-in-picture bullet:** still
   holds (`set_always_on_top` after the window opens, `Floating` on macOS).
-  Windows and X11 also leave the taskbar now (tdesktop's `Qt::Tool`).
+  PiP also leaves the taskbar (tdesktop's `Qt::Tool`): `WS_EX_TOOLWINDOW`
+  without `WS_EX_APPWINDOW` on Windows (`ITaskbarList::DeleteTab` can
+  return on activation), `_NET_WM_STATE_SKIP_TASKBAR` on X11.
 
 ## How verified
 
-- **Unit tests** (`cargo test --no-default-features --lib pip`, 19 tests):
+- **Unit tests** (`cargo test --no-default-features --lib pip`):
   - `panel_tests.rs`:
     - Qt's `scaled`.
     - The default placement, including tdesktop's pull-up to a lower usable
@@ -232,6 +281,9 @@ the transport itself.
     - The resize bands skipping snapped sides.
     - Counting positions, and a move or Wayland counting none.
     - `finishDrag`, the easing and the Wayland aspect fix.
+    - System resizes kept to the aspect and its limits.
+  - `reopen.rs`: the album item at its offset, a changed album matched by
+    file, a moved file, a missing one.
   - `layout.rs`:
     - Both control layouts at 320 × 180.
     - The volume line dropped when narrow.
@@ -258,6 +310,19 @@ the transport itself.
     - A move to within 16 px of the left snap line slides onto it (test
       clock, `background_executor().now()`).
     - The release neither pauses nor moves again.
+- **GPUI UI tests** (`video_player/tests/pip_lifetime.rs`):
+  - The chat's history window is unloaded (paging): PiP keeps playing;
+    then a real deletion of the (not loaded) message closes it and drops
+    the player.
+  - With the message unloaded, back to the viewer still reopens it, alone,
+    with the same player and no seek.
+  - Locking closes PiP and drops the player with no main-window refresh.
+  - Switching the session to another account keeps PiP; another
+    account's logout does nothing; its own closes it.
+  - A two-video paid album opened on its second video comes back to that
+    item (offset 1, file 99) with the same player.
+  - Opening the clip again from the chat takes the window's player: the
+    window closes, nothing restarts.
 - **Real window on X11** (Xvfb, no window manager; the shim built against
   system FFmpeg, driven with XTest):
   - The window opens over the chat and plays.
@@ -267,16 +332,22 @@ the transport itself.
   - A move near the left edge slides it onto the 20 px line.
   - The enlarge button reopens the viewer on the same clip, still playing
     to its end.
-  - The screenshots were reviewed and not committed.
+  - The screenshots were reviewed and not committed. Drag, snap and
+    back-to-viewer were checked again after the review fixes.
 - **Gate:** the full gate command in the brief.
 
 ## Not verified
 
-- macOS and Windows: this container compiles Linux only. The macOS
-  (`setFrame:display:`, hidden traffic lights, collection behavior) and
-  Windows (`SetWindowPos`) code is modelled on the
-  already-shipped `notify_windows::position` and `window_control` calls but
-  first compiles in CI.
+- macOS and Windows: this container compiles Linux only. The macOS code
+  (`setFrame:display:`, hidden traffic lights, collection behavior, the
+  vendored tracking-area change) and the Windows code (`GetWindowInfo`
+  border math, `WS_EX_TOOLWINDOW`, `SetWindowPos`) was checked against
+  the crates' signatures and is modelled on the already-shipped
+  `notify_windows::position` and `window_control` calls, but first
+  compiles and runs in CI and the packaging builds. Hover on an unfocused
+  macOS panel, the client frame staying put through Windows moves and
+  the taskbar staying clear after activation are the things to check
+  there.
 - Real always-on-top behavior: Xvfb has no window manager, so
   `_NET_WM_STATE_ABOVE`, `HWND_TOPMOST` and the macOS floating level were
   not observed. Wayland was not run; there the window is a normal one the
@@ -285,4 +356,17 @@ the transport itself.
   position across runs on a real desktop.
 - Frame pacing on real hardware: the before/after numbers above are from a
   software renderer.
-- A live Telegram account.
+- A live Telegram account: logout through `LoggingOut` and deletions
+  arriving through the update poll were exercised only through the
+  demo session's apply path and the hook the poll calls.
+- The story, recording-preview, player-bar resume and round-video sound
+  routes to `sound_starts` are covered by reading the code, not by a
+  test of each.
+
+## Parity
+
+No parity fragment. `parity:media-video-pip` is already checked in the
+README (from the macOS-only window). This PR makes it cross-platform,
+but it is not declared again: macOS and Windows have not been run, the
+display-sleep blocker and automatic quality switching are missing, and
+an adversarial check of those would fail.
