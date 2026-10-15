@@ -188,10 +188,10 @@ impl QuillApp {
     pub(super) fn resale_box(&mut self, cx: &mut Context<Self>) -> BoxView {
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Gifts on sale", div());
+            return BoxView::new(tr(keys::Q_REST_GIFTS_ON_SALE), div());
         };
         let Some(search) = session.payments.gift_market.resale.as_ref() else {
-            return BoxView::new("Gifts on sale", div());
+            return BoxView::new(tr(keys::Q_REST_GIFTS_ON_SALE), div());
         };
         let title = session
             .gift_market_title(search.gift_id)

@@ -10,6 +10,7 @@
 use super::layout::{MediaDisc, download_fraction, media_disc};
 use super::*;
 use crate::ui::image_budget::{Fit, sized_media};
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::DocumentContent;
 
 #[allow(clippy::too_many_arguments)]
@@ -39,7 +40,7 @@ pub(in crate::ui) fn picture_file_attachment(
     let downloading_now = full_path.is_none() && file_is_downloading(file_id, files, downloading);
     let size = file.map(ParsedFile::display_size).unwrap_or(doc.size);
     let name = if doc.file_name.is_empty() {
-        "Picture".to_string()
+        tr(keys::Q_REST_PICTURE).to_string()
     } else {
         doc.file_name.clone()
     };
@@ -105,7 +106,10 @@ pub(in crate::ui) fn picture_file_attachment(
         .map(|this| corners.round(this))
         .bg(fill_muted())
         .role(gpui_kit::Role::Button)
-        .aria_label(format!("Open picture file {name}"))
+        .aria_label(tr_with(
+            keys::Q_REST_OPEN_PICTURE_FILE,
+            &[("name", &name.to_string())],
+        ))
         .tab_index(0)
         .cursor_pointer()
         .children(preview)

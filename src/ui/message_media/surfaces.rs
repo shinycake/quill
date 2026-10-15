@@ -2,6 +2,7 @@
 //! spoiler covers and blurred previews.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 /// An autoplaying clip's current frame, cropped to the media frame.
 pub(super) fn inline_surface(
@@ -203,7 +204,7 @@ pub(in crate::ui) fn spoiler_cover(
     let key = (chat_id.0, message_id.0 as u64, u64::MAX, false);
     spoiler_surface(row_id, minithumbnail, frame_w, frame_h, corners)
         .role(gpui_kit::Role::Button)
-        .aria_label("Reveal spoiler")
+        .aria_label(tr(keys::Q_REST_REVEAL_SPOILER))
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {

@@ -1,7 +1,7 @@
 //! Methods moved out of `translate_ui.rs` to keep files under 1000 lines.
 
 use super::*;
-use quill::lang::{keys, tr, trn};
+use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
     pub(super) fn translate_bar_view(
@@ -20,7 +20,7 @@ impl QuillApp {
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
             .small()
-            .accessibility_label("Translation options")
+            .accessibility_label(tr(keys::Q_REST_TRANSLATION_OPTIONS))
             .on_click(|event, window, cx| {
                 if matches!(event, ClickEvent::Keyboard(_)) {
                     window.dispatch_action(
@@ -33,29 +33,37 @@ impl QuillApp {
                 let chooser = owner.clone();
                 menu = menu
                     .item(
-                        PopupMenuItem::new(format!("Translate To: {}", language_name(to)))
-                            .on_click(move |_, window, cx| {
-                                let _ = chooser.update(cx, |this, cx| {
-                                    this.open_translate_chooser(to, window, cx);
-                                });
-                            }),
+                        PopupMenuItem::new(tr_with(
+                            keys::Q_REST_TRANSLATE_TO,
+                            &[("language_name", &(language_name(to)).to_string())],
+                        ))
+                        .on_click(move |_, window, cx| {
+                            let _ = chooser.update(cx, |this, cx| {
+                                this.open_translate_chooser(to, window, cx);
+                            });
+                        }),
                     )
                     .separator();
                 if let Some(from) = from {
                     let skip = owner.clone();
                     menu = menu.item(
-                        PopupMenuItem::new(format!("Don't translate {}", language_name(from)))
-                            .on_click(move |_, _, cx| {
-                                let _ = skip.update(cx, |this, cx| {
-                                    this.skip_translating(chat_id, from, cx);
-                                });
-                            }),
+                        PopupMenuItem::new(tr_with(
+                            keys::TRANSLATE_MENU_DONT,
+                            &[("name", &(language_name(from)).to_string())],
+                        ))
+                        .on_click(move |_, _, cx| {
+                            let _ = skip.update(cx, |this, cx| {
+                                this.skip_translating(chat_id, from, cx);
+                            });
+                        }),
                     );
                 }
                 let hide = owner.clone();
-                menu.item(PopupMenuItem::new("Hide").on_click(move |_, _, cx| {
-                    let _ = hide.update(cx, |this, cx| this.hide_translate_bar(chat_id, cx));
-                }))
+                menu.item(PopupMenuItem::new(tr(keys::TRANSLATE_MENU_HIDE)).on_click(
+                    move |_, _, cx| {
+                        let _ = hide.update(cx, |this, cx| this.hide_translate_bar(chat_id, cx));
+                    },
+                ))
             });
         Some(
             div()
@@ -214,11 +222,11 @@ impl QuillApp {
         self.set_translate_prefs(cx, |prefs| prefs.add_skip(language, &ui));
         self.show_translate_toast(
             chat_id,
-            format!(
-                "{} added to the Do Not Translate list.",
-                language_name(language)
+            tr_with(
+                keys::TRANSLATE_DONT_ADDED,
+                &[("name", &(language_name(language)).to_string())],
             ),
-            "Settings",
+            tr(keys::MENU_SETTINGS),
             ToastAction::OpenSkipList,
             cx,
         );
@@ -254,17 +262,17 @@ impl QuillApp {
         let phrase = match kind {
             Some(ChatKind::Supergroup {
                 is_channel: true, ..
-            }) => "Translation bar is now hidden for this channel.",
+            }) => tr(keys::TRANSLATE_HIDDEN_CHANNEL),
             Some(ChatKind::Private { .. } | ChatKind::Secret { .. }) | None => {
-                "Translation bar hidden for this chat."
+                tr(keys::TRANSLATE_HIDDEN_USER)
             }
-            _ => "Translation bar is now hidden for this group.",
+            _ => tr(keys::TRANSLATE_HIDDEN_GROUP),
         };
         self.set_translate_bar_hidden(chat_id, true, cx);
         self.show_translate_toast(
             chat_id,
             phrase.to_string(),
-            "Undo",
+            tr(keys::TRANSLATE_UNDO),
             ToastAction::ShowBar,
             cx,
         );

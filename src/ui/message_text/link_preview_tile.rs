@@ -13,6 +13,7 @@
 use super::*;
 use crate::ui::wallpaper::{Wallpaper, background_wallpaper, paint_wallpaper};
 use crate::ui::wallpaper_cache::Slot;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::{
     BackgroundType, LinkPreview, LinkPreviewKind, PreviewTheme, PreviewWallpaper, format_size_text,
 };
@@ -129,7 +130,7 @@ fn wallpaper_picture(
         .rounded_md()
         .overflow_hidden()
         .role(Role::Image)
-        .aria_label("Wallpaper preview");
+        .aria_label(tr(keys::Q_REST_WALLPAPER_PREVIEW));
     let painted = match card_wallpaper(wallpaper, files, media_roots) {
         Some(paint) => paint_wallpaper(frame, Some(&paint), 0, Slot::Thumb),
         None => frame.child(empty_picture()),
@@ -161,7 +162,7 @@ fn theme_picture(
         .overflow_hidden()
         .bg(fill_muted())
         .role(Role::Image)
-        .aria_label("Theme preview");
+        .aria_label(tr(keys::THEME_PREVIEW_TITLE));
     let path = theme
         .thumbnail
         .as_ref()

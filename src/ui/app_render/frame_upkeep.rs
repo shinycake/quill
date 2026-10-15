@@ -3,6 +3,7 @@
 //! payment follow-ups) or keep timers ticking.
 
 use super::*;
+use quill::lang::{keys, tr};
 use quill::state::StoryPostOutcome;
 
 impl QuillApp {
@@ -68,7 +69,7 @@ impl QuillApp {
             && open_chat == Some(chat_id)
         {
             self.set_composer_markup(&text, window, cx);
-            self.connection.status_note = "AI updated the draft".into();
+            self.connection.status_note = tr(keys::Q_REST_AI_UPDATED_THE_DRAFT).into();
         }
         if let Some((chat_id, rich, note)) = ai_blocks
             && open_chat == Some(chat_id)
@@ -208,7 +209,7 @@ impl QuillApp {
             self.stories.viewer.close();
             self.stories.reaction_picker_open = false;
             self.stories.reply_open = false;
-            self.connection.status_note = "Story deleted".into();
+            self.connection.status_note = tr(keys::Q_REST_STORY_DELETED).into();
         }
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).

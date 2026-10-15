@@ -193,7 +193,7 @@ impl QuillApp {
         for ((title, text), icon) in about_features(per_round, rounds).into_iter().zip(icons) {
             body = body.child(feature_row(icon, title, text, cx));
         }
-        BoxView::new("Auction", body).footer(
+        BoxView::new(tr(keys::AUCTION_ABOUT_TITLE), body).footer(
             div().flex().justify_end().child(
                 Button::new("auction-understood")
                     .label(tr(keys::AUCTION_ABOUT_UNDERSTOOD))
@@ -212,10 +212,13 @@ impl QuillApp {
         }
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Auction", div());
+            return BoxView::new(tr(keys::AUCTION_ABOUT_TITLE), div());
         };
         let Some(state) = session.payments.gift_market.auctions.get(&gift_id) else {
-            return BoxView::new("Auction", div().child(tr(keys::Q_MONEY_LOADING)));
+            return BoxView::new(
+                tr(keys::AUCTION_ABOUT_TITLE),
+                div().child(tr(keys::Q_MONEY_LOADING)),
+            );
         };
         // Countdowns and the cover change every second.
         self.request_animation_tick(1, cx);
@@ -298,10 +301,10 @@ impl QuillApp {
     pub(super) fn auction_send_box(&mut self, gift_id: i64, cx: &mut Context<Self>) -> BoxView {
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Send a Gift", div());
+            return BoxView::new(tr(keys::GIFT_SEND_TITLE), div());
         };
         let Some(state) = session.payments.gift_market.auctions.get(&gift_id) else {
-            return BoxView::new("Send a Gift", div());
+            return BoxView::new(tr(keys::GIFT_SEND_TITLE), div());
         };
         self.request_animation_tick(1, cx);
         let now = now_unix();
@@ -390,7 +393,7 @@ impl QuillApp {
 
     pub(super) fn change_recipient_box(&mut self, gift_id: i64, cx: &mut Context<Self>) -> BoxView {
         let Some(session) = self.session() else {
-            return BoxView::new("Change Recipient", div());
+            return BoxView::new(tr(keys::AUCTION_CHANGE_TITLE), div());
         };
         let me = session.my_user_id;
         let name_of = |sender: Option<MessageSender>| -> Option<String> {
@@ -406,7 +409,7 @@ impl QuillApp {
             .and_then(|my| name_of(my.owner));
         let to = name_of(self.auction_recipient());
         let text = change_recipient_text(from.as_deref(), to.as_deref());
-        BoxView::new("Change Recipient", div().text_sm().child(text)).footer(
+        BoxView::new(tr(keys::AUCTION_CHANGE_TITLE), div().text_sm().child(text)).footer(
             div()
                 .flex()
                 .justify_end()
@@ -428,7 +431,7 @@ impl QuillApp {
 
     pub(super) fn auction_bought_box(&mut self, gift_id: i64, cx: &mut Context<Self>) -> BoxView {
         let Some(session) = self.session() else {
-            return BoxView::new("Items Bought", div());
+            return BoxView::new(tr(keys::Q_REST_ITEMS_BOUGHT), div());
         };
         let market = &session.payments.gift_market;
         let state = market.auctions.get(&gift_id);
@@ -498,7 +501,7 @@ impl QuillApp {
     pub(super) fn variants_box(&mut self, gift_id: i64, cx: &mut Context<Self>) -> BoxView {
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Models", div());
+            return BoxView::new(tr(keys::AUCTION_PREVIEW_MODELS_BUTTON), div());
         };
         let muted = cx.theme().muted_foreground;
         let mut body = div().flex().flex_col().gap_3();
@@ -546,13 +549,13 @@ impl QuillApp {
             }
             body = body.child(grid);
         }
-        BoxView::new("Models", body).wide().footer(
-            div().flex().justify_end().child(self.market_back_button(
+        BoxView::new(tr(keys::AUCTION_PREVIEW_MODELS_BUTTON), body)
+            .wide()
+            .footer(div().flex().justify_end().child(self.market_back_button(
                 "variants-close",
                 tr(keys::CLOSE),
                 cx,
-            )),
-        )
+            )))
     }
 
     /// Raise the bid of one of the active auctions.
@@ -583,7 +586,7 @@ impl QuillApp {
     pub(super) fn active_auctions_box(&mut self, cx: &mut Context<Self>) -> BoxView {
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Active Auctions", div());
+            return BoxView::new(tr(keys::Q_REST_ACTIVE_AUCTIONS), div());
         };
         self.request_animation_tick(1, cx);
         let now = now_unix();

@@ -21,6 +21,7 @@ use gpui_kit::*;
 use quill::connect::{CLIENT_CLOSE_TIMEOUT, LiveConnect, start_background_live_connect};
 use quill::diagnostics::MemorySink;
 use quill::ids::{AccountKey, ChatId};
+use quill::lang::{keys, tr};
 use quill::notify::NotificationAction;
 use quill::notify_accounts::{
     AccountUnread, BackgroundDrain, BackgroundStatus, background_status, drain_background,
@@ -365,7 +366,9 @@ impl QuillApp {
             busy |= ingested;
             let mut status = background_status(&live.driver.session.auth);
             if live.bridge.stopped_unexpectedly() {
-                status = BackgroundStatus::Failed("Connection to Telegram was closed".into());
+                status = BackgroundStatus::Failed(
+                    tr(keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into(),
+                );
             }
             if ingested {
                 let unread = AccountUnread::of(&live.driver.session);

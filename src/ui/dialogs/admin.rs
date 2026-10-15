@@ -2,6 +2,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatAdminRights;
 /// Phase D3b: admin-management dialog above the composer. Three flows
 /// share one slot:
@@ -41,7 +42,7 @@ impl AdminDialog {
     ) -> Self {
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search members")
+                .placeholder(tr(keys::Q_REST_SEARCH_MEMBERS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

@@ -30,12 +30,12 @@ fn sender_name(session: Option<&Session>, sender: MessageSender) -> String {
             .and_then(|s| s.users.get(&user_id))
             .map(|u| u.display_name())
             .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| "A Telegram user".into()),
+            .unwrap_or_else(|| tr(keys::Q_REST_A_TELEGRAM_USER).into()),
         MessageSender::Chat { chat_id } => session
             .and_then(|s| s.chats.get(&chat_id))
             .map(|c| c.title.clone())
             .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| "A channel".into()),
+            .unwrap_or_else(|| tr(keys::Q_REST_A_CHANNEL).into()),
     }
 }
 
@@ -88,7 +88,7 @@ pub(super) fn gift_code_open_button(
     let code = card.gift_code.0.clone();
     Some(
         Button::new(("gift-code-open", row_id))
-            .label("Open Gift Link")
+            .label(tr(keys::Q_REST_OPEN_GIFT_LINK))
             .small()
             .ghost()
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -111,11 +111,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.request_gift_code_info(&code).is_err() {
-                    self.connection.status_note = "could not check the gift code".into();
+                    self.connection.status_note = tr(keys::Q_REST_COULD_NOT_CHECK_THE_GIFT).into();
                 }
             }
             None => {
-                self.connection.status_note = "gift codes need a signed-in account".into();
+                self.connection.status_note = tr(keys::Q_REST_GIFT_CODES_NEED_A_SIGNED).into();
             }
         }
         cx.notify();
@@ -126,11 +126,11 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.request_language_pack_info(&id).is_err() {
-                    self.connection.status_note = "could not look up the language".into();
+                    self.connection.status_note = tr(keys::Q_REST_COULD_NOT_LOOK_UP_THE).into();
                 }
             }
             None => {
-                self.connection.status_note = "language links need a signed-in account".into();
+                self.connection.status_note = tr(keys::Q_REST_LANGUAGE_LINKS_NEED_A_SIGNED).into();
             }
         }
         cx.notify();
@@ -155,7 +155,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.apply_gift_code().is_err()
         {
-            self.connection.status_note = "could not use the gift code".into();
+            self.connection.status_note = tr(keys::Q_REST_COULD_NOT_USE_THE_GIFT).into();
         }
         cx.notify();
     }
@@ -168,7 +168,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("Checking the gift code…"),
+                        .child(tr(keys::Q_REST_CHECKING_THE_GIFT_CODE)),
                 )
                 .into_any_element();
         }
@@ -176,21 +176,24 @@ impl QuillApp {
             let reason = lookup
                 .error
                 .clone()
-                .unwrap_or_else(|| "This gift code link has expired.".into());
+                .unwrap_or_else(|| tr(keys::Q_REST_THIS_GIFT_CODE_LINK_HAS).into());
             return body
                 .child(div().id("gift-code-error").text_sm().child(reason))
                 .into_any_element();
         };
         let used = info.is_used();
         body = body.child(div().text_sm().text_color(text_muted()).child(if used {
-            "This link was used to activate a Telegram Premium subscription."
+            tr(keys::Q_REST_THIS_LINK_WAS_USED_TO)
         } else {
-            "This link activates a Telegram Premium subscription."
+            tr(keys::Q_REST_THIS_LINK_ACTIVATES_A_TELEGRAM)
         }));
         if let Some(creator) = info.creator {
-            body = body.child(info_row("From", sender_name(session, creator)));
             body = body.child(info_row(
-                "To",
+                tr(keys::GIFT_LINK_LABEL_FROM),
+                sender_name(session, creator),
+            ));
+            body = body.child(info_row(
+                tr(keys::GIFT_LINK_LABEL_TO),
                 if info.user_id > 0 {
                     sender_name(
                         session,
@@ -199,41 +202,52 @@ impl QuillApp {
                         },
                     )
                 } else {
-                    "No recipient".into()
+                    tr(keys::GIFT_LINK_LABEL_TO_UNCLAIMED).into()
                 },
             ));
         }
         body = body.child(info_row(
-            "Gift",
-            format!(
-                "Telegram Premium for {}",
-                gift_duration(info.month_count, info.day_count)
+            tr(keys::GIFT_LINK_LABEL_GIFT),
+            tr_with(
+                keys::Q_REST_TELEGRAM_PREMIUM_FOR,
+                &[(
+                    "day_count",
+                    &(gift_duration(info.month_count, info.day_count)).to_string(),
+                )],
             ),
         ));
         if info.creator.is_some() {
             body = body.child(info_row(
-                "Reason",
+                tr(keys::GIFT_LINK_LABEL_REASON),
                 gift_reason(info.is_from_giveaway, info.user_id > 0 || used).into(),
             ));
         }
         if info.creation_date > 0 {
             body = body.child(info_row(
-                "Date",
+                tr(keys::GIFT_LINK_LABEL_DATE),
                 quill::local_time::full_stamp(&quill::local_time::civil_local(info.creation_date)),
             ));
         }
         if used {
-            body = body.child(div().id("gift-code-used").text_sm().child(format!(
-                "This link was used on {}.",
-                quill::local_time::full_stamp(&quill::local_time::civil_local(info.use_date))
-            )));
+            body = body.child(
+                div().id("gift-code-used").text_sm().child(tr_with(
+                    keys::GIFT_LINK_USED_FOOTER,
+                    &[(
+                        "date",
+                        &(quill::local_time::full_stamp(&quill::local_time::civil_local(
+                            info.use_date,
+                        )))
+                        .to_string(),
+                    )],
+                )),
+            );
         }
         if lookup.applied {
             body = body.child(
                 div()
                     .id("gift-code-applied")
                     .text_sm()
-                    .child("Telegram Premium is now active on your account."),
+                    .child(tr(keys::Q_REST_TELEGRAM_PREMIUM_IS_NOW_ACTIVE)),
             );
         }
         if let Some(error) = lookup.error.clone() {
@@ -264,7 +278,7 @@ impl QuillApp {
             let Some(lookup) = lookup else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Gift Link"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::GIFT_LINK_TITLE)))
                     .on_close(on_close.clone());
             };
             let body = Self::gift_code_body(session, &lookup);
@@ -278,7 +292,11 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("gift-code-close")
-                        .label(if lookup.applied { "Done" } else { "Close" })
+                        .label(if lookup.applied {
+                            tr(keys::BOX_DONE)
+                        } else {
+                            tr(keys::CLOSE)
+                        })
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_gift_code_box(cx);
@@ -288,7 +306,7 @@ impl QuillApp {
                 .when(can_apply, |footer| {
                     footer.child(
                         Button::new("gift-code-apply")
-                            .label("Use Link")
+                            .label(tr(keys::GIFT_LINK_USE))
                             .loading(applying)
                             .disabled(applying)
                             .on_click(
@@ -297,7 +315,7 @@ impl QuillApp {
                     )
                 })
                 .into_any_element();
-            finish(dialog, "Gift Link", body, footer, on_close)
+            finish(dialog, tr(keys::GIFT_LINK_TITLE), body, footer, on_close)
         })
     }
 

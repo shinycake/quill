@@ -15,6 +15,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatKind;
 
 /// Capture is blocked while a secret chat is open, or while the media
@@ -115,7 +116,7 @@ impl QuillApp {
                 .child(div().flex_1().child(CAPTURE_BLOCK_UNSUPPORTED_NOTE))
                 .child(
                     gpui_kit::component::button::Button::new("capture-block-notice-dismiss")
-                        .label("Got it")
+                        .label(tr(keys::Q_REST_GOT_IT))
                         .xsmall()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.frame.capture_notice_dismissed = true;

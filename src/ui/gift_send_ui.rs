@@ -455,7 +455,12 @@ fn selected_gift_panel(
                 (
                     "unwrap_or_default",
                     &(balance
-                        .map(|b| format!(" ({} left after)", stars((b.stars - total).max(0))))
+                        .map(|b| {
+                            tr_with(
+                                keys::Q_REST_LEFT_AFTER,
+                                &[("max", &(stars((b.stars - total).max(0))).to_string())],
+                            )
+                        })
                         .unwrap_or_default())
                     .to_string(),
                 ),

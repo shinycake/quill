@@ -118,10 +118,10 @@ impl QuillApp {
     pub(super) fn craft_select_box(&mut self, cx: &mut Context<Self>) -> BoxView {
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
-            return BoxView::new("Select Gifts", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_SELECT_TITLE), div());
         };
         let Some(craft) = session.payments.gift_market.craft.as_ref() else {
-            return BoxView::new("Select Gifts", div());
+            return BoxView::new(tr(keys::GIFT_CRAFT_SELECT_TITLE), div());
         };
         let muted = cx.theme().muted_foreground;
         let heading = |text: String| div().text_sm().font_semibold().child(text);
@@ -246,7 +246,7 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.more_craft_listings(cx))),
             );
         }
-        BoxView::new("Select Gifts", body)
+        BoxView::new(tr(keys::GIFT_CRAFT_SELECT_TITLE), body)
             .footer(div().flex().justify_end().child(self.market_back_button(
                 "craft-select-back",
                 tr(keys::Q_MONEY_BACK),

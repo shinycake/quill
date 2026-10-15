@@ -13,6 +13,7 @@ use super::bubble_theme::{OutgoingFill, note_history_area};
 use super::wallpaper_cache::{Slot, wallpaper_layer};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr_with};
 use quill::telegram::envelope::{Background, BackgroundFill, BackgroundType};
 use std::path::PathBuf;
 
@@ -322,7 +323,10 @@ impl QuillApp {
                 cx.theme().border
             })
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("Wallpaper {}", background.name))
+            .aria_label(tr_with(
+                keys::Q_REST_WALLPAPER,
+                &[("name", &background.name.to_string())],
+            ))
             .tab_index(0)
             .cursor_pointer()
             .bg(cx.theme().muted);

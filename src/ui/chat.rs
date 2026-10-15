@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::unix_ms_now;
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
 use std::time::Duration;
@@ -32,7 +33,10 @@ impl QuillApp {
         let Some(wait) = self.slow_mode_wait_secs_for(chat_id) else {
             return false;
         };
-        self.connection.status_note = format!("Slow mode: wait {wait}s before sending");
+        self.connection.status_note = tr_with(
+            keys::Q_REST_SLOW_MODE_WAIT_S_BEFORE,
+            &[("wait", &wait.to_string())],
+        );
         if self.live.is_some() {
             let supergroup_id = self.live.as_ref().and_then(|live| {
                 let session = &live.driver.session;
@@ -130,7 +134,7 @@ impl QuillApp {
                 _ => None,
             });
         if supergroup_id.is_none_or(|id| !self.can_change_slow_mode(id)) {
-            self.connection.status_note = "slow mode needs the restrict-members admin right".into();
+            self.connection.status_note = tr(keys::Q_REST_SLOW_MODE_NEEDS_THE_RESTRICT).into();
             cx.notify();
             return;
         }
@@ -139,11 +143,13 @@ impl QuillApp {
                 .driver
                 .set_chat_slow_mode_delay(chat_id, slow_mode_delay)
             {
-                Ok(_) => self.connection.status_note = "slow mode updated".into(),
-                Err(_) => self.connection.status_note = "could not change slow mode".into(),
+                Ok(_) => self.connection.status_note = tr(keys::Q_REST_SLOW_MODE_UPDATED).into(),
+                Err(_) => {
+                    self.connection.status_note = tr(keys::Q_REST_COULD_NOT_CHANGE_SLOW_MODE).into()
+                }
             }
         } else {
-            self.connection.status_note = "slow mode needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_REST_SLOW_MODE_NEEDS_A_LIVE).into();
         }
         cx.notify();
     }
