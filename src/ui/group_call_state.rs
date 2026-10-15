@@ -13,6 +13,8 @@ pub(crate) struct GroupCallUi {
     pub(super) title_dialog: Option<GroupCallTitleDialog>,
     /// Phase C2h: `createVideoChat` start/schedule dialog.
     pub(super) start_dialog: Option<GroupCallStartDialog>,
+    /// The call window's Settings box (`group_call_settings.rs`).
+    pub(super) settings_open: bool,
     /// Phase C2h: in-call chat composer (sendGroupCallMessage).
     pub(super) composer: Entity<TextareaState>,
     /// Phase C2f: voice-chat invite picker overlay (contacts list).
@@ -59,6 +61,7 @@ impl GroupCallUi {
             composer,
             title_dialog: None,
             start_dialog: None,
+            settings_open: false,
             invite_open: false,
             share_open: false,
             share_speaker: true,

@@ -555,6 +555,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(active_group_call_before)?;
+        self.pump_call_capture();
         self.pump_call_audio()?;
         self.maybe_send_parameters()?;
         self.maybe_probe_channel_membership()?;

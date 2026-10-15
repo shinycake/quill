@@ -1,5 +1,6 @@
 //! Phase C2b: call-engine abstraction plus the runtime-loaded ntgcalls adapter.
 mod api;
+mod external;
 mod mock;
 mod native;
 mod ntgcalls;
@@ -8,6 +9,7 @@ mod stream_feeder;
 mod types;
 
 pub use api::*;
+pub use external::*;
 pub use mock::*;
 pub use native::*;
 pub use ntgcalls::*;

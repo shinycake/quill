@@ -255,6 +255,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) audio_state_outbox: Arc<Mutex<VecDeque<(i32, bool)>>>,
     /// Your own microphone level in a group call (`connect::call_audio`).
     pub(crate) call_audio: super::call_audio::CallAudio,
+    /// The call microphone Quill captures (`connect::call_capture`).
+    pub(crate) call_capture: super::call_capture::CallCapture,
     /// Phase C2e: latest decoded video frame per (call id, is_local,
     /// is_screen).
     pub(crate) video_frame_slots: VideoFrameSlots,

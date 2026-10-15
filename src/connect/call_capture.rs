@@ -1,0 +1,314 @@
+//! The call microphone captured by Quill (`calls::capture`): while a 1:1
+//! call has a transport or you are joined to a group call whose
+//! transport is up, the chosen microphone runs through cpal, noise
+//! suppression and the feeder into the call's external source
+//! (`CallEngine::external_frame_sender`). Muting keeps the stream open
+//! and sends silence. 1:1 calls always denoise; group calls follow the
+//! "Enable Noise Suppression" switch, which applies to the running
+//! stream at once. The same stream feeds your level
+//! (`call_audio`), so the microphone is opened once.
+//!
+//! `QUILL_CALL_CAPTURE=native` turns this off: ntgcalls opens the device
+//! itself, as before (`calls::engine::external_capture_enabled`).
+
+use super::*;
+use crate::calls::capture::feeder::AUDIO_SINK_FRAMES;
+use crate::calls::capture::{
+    AudioFrame, CaptureError, CaptureEvent, CaptureFeeder, FrameSink, LevelCell, MicCapture,
+    MicControls,
+};
+use crate::calls::engine::{
+    CaptureTarget, MediaDeviceKind, TransportState, external_capture_enabled,
+};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// Opens a microphone backend: `(device name, controls, sink)`. The
+/// driver uses cpal; tests inject a fake.
+pub type MicOpener = Box<
+    dyn FnMut(
+        Option<&str>,
+        Arc<MicControls>,
+        FrameSink<AudioFrame>,
+    ) -> Result<Box<dyn MicCapture>, CaptureError>,
+>;
+
+/// After a failed open or a lost device, open the microphone again after
+/// this long (the design's 2 s).
+const REOPEN_AFTER: Duration = Duration::from_secs(2);
+
+/// Driver-side state of the call microphone.
+#[derive(Default)]
+pub struct CallCapture {
+    active: Option<ActiveCapture>,
+    /// Your level, written by whichever capture runs; the level reader
+    /// (`call_audio`) keeps this across restarts.
+    level: Arc<LevelCell>,
+    opener: Option<MicOpener>,
+    failed_at: Option<Instant>,
+    /// Why the microphone could not be opened or stopped, for the call
+    /// window's note.
+    pub error: Option<String>,
+}
+
+struct ActiveCapture {
+    target: CaptureTarget,
+    device: Option<String>,
+    controls: Arc<MicControls>,
+    sink: FrameSink<AudioFrame>,
+    feeder: CaptureFeeder,
+    mic: Box<dyn MicCapture>,
+}
+
+impl Drop for ActiveCapture {
+    fn drop(&mut self) {
+        // Close the device first; the feeder then drains nothing more and
+        // joins when its field drops.
+        self.mic.stop();
+    }
+}
+
+impl CallCapture {
+    /// Use `opener` instead of cpal (tests, demos). Also turns capture
+    /// on in builds and modes where it would be off.
+    pub fn inject_opener(&mut self, opener: MicOpener) {
+        self.opener = Some(opener);
+    }
+
+    /// Whether Quill captures the call microphone at all.
+    pub fn enabled(&self) -> bool {
+        self.opener.is_some() || external_capture_enabled()
+    }
+
+    /// The call the microphone feeds right now.
+    pub fn target(&self) -> Option<CaptureTarget> {
+        self.active.as_ref().map(|active| active.target)
+    }
+
+    /// The level written by the running capture.
+    pub fn level(&self) -> Arc<LevelCell> {
+        self.level.clone()
+    }
+
+    /// Frames the engine accepted from the running capture.
+    pub fn frames_sent(&self) -> u64 {
+        self.active
+            .as_ref()
+            .map_or(0, |active| active.feeder.stats().sent())
+    }
+
+    /// Whether the running capture sends silence.
+    pub fn muted(&self) -> Option<bool> {
+        self.active.as_ref().map(|active| active.controls.muted())
+    }
+
+    /// Whether the running capture denoises.
+    pub fn noise_suppression(&self) -> Option<bool> {
+        self.active
+            .as_ref()
+            .map(|active| active.controls.noise_suppression())
+    }
+
+    fn stop(&mut self) {
+        self.active = None;
+    }
+
+    fn open(
+        &mut self,
+        target: CaptureTarget,
+        device: Option<String>,
+        noise_suppression: bool,
+        muted: bool,
+        sender: Arc<dyn crate::calls::engine::ExternalFrameSender>,
+    ) {
+        let controls = Arc::new(MicControls::new(noise_suppression, self.level.clone()));
+        controls.set_muted(muted);
+        let sink = FrameSink::new(AUDIO_SINK_FRAMES);
+        let opened = match self.opener.as_mut() {
+            Some(opener) => opener(device.as_deref(), controls.clone(), sink.clone()),
+            None => open_cpal(device.as_deref(), controls.clone(), sink.clone()),
+        };
+        let mic = match opened {
+            Ok(mic) => mic,
+            Err(err) => {
+                self.failed_at = Some(Instant::now());
+                self.error = Some(err.to_string());
+                return;
+            }
+        };
+        match CaptureFeeder::start(sink.clone(), sender) {
+            Ok(feeder) => {
+                self.failed_at = None;
+                self.error = None;
+                self.active = Some(ActiveCapture {
+                    target,
+                    device,
+                    controls,
+                    sink,
+                    feeder,
+                    mic,
+                });
+            }
+            Err(err) => {
+                let mut mic = mic;
+                mic.stop();
+                self.failed_at = Some(Instant::now());
+                self.error = Some(format!("Couldn't start the call microphone: {err}"));
+            }
+        }
+    }
+}
+
+#[cfg(feature = "ui")]
+fn open_cpal(
+    device: Option<&str>,
+    controls: Arc<MicControls>,
+    sink: FrameSink<AudioFrame>,
+) -> Result<Box<dyn MicCapture>, CaptureError> {
+    let mut mic = crate::calls::capture::mic_cpal::CpalMic::new(controls);
+    mic.start(device, sink)?;
+    Ok(Box::new(mic))
+}
+
+#[cfg(not(feature = "ui"))]
+fn open_cpal(
+    _device: Option<&str>,
+    _controls: Arc<MicControls>,
+    _sink: FrameSink<AudioFrame>,
+) -> Result<Box<dyn MicCapture>, CaptureError> {
+    Err(CaptureError::Unsupported(
+        "No microphone support in this build.".into(),
+    ))
+}
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// Which call the microphone should feed, and whether it is muted:
+    /// a 1:1 call with a transport, else a joined group call whose
+    /// transport is up.
+    fn capture_wanted(&self) -> Option<(CaptureTarget, bool)> {
+        if let Some(call) = self.session.calls.active_call.as_ref()
+            && matches!(
+                call.transport,
+                Some(
+                    TransportState::Connecting
+                        | TransportState::Connected
+                        | TransportState::Reconnecting
+                )
+            )
+        {
+            return Some((CaptureTarget::Private(call.id), call.muted));
+        }
+        let call = self.session.calls.active_group_call.as_ref()?;
+        if !call.is_joined || !call.transport_ready {
+            return None;
+        }
+        let forced = call
+            .participants
+            .iter()
+            .find(|p| p.is_current_user)
+            .is_some_and(|me| me.is_muted_for_all_users && !me.can_unmute_self);
+        Some((CaptureTarget::Group(call.id), call.is_muted_self || forced))
+    }
+
+    /// The chosen microphone's name as the engine lists it (`None`: the
+    /// system default).
+    fn capture_device_name(&self) -> Option<String> {
+        let id = self.selected_devices.0.as_deref()?;
+        self.call_devices_cache
+            .iter()
+            .find(|device| device.kind == MediaDeviceKind::Microphone && device.id == id)
+            .map(|device| device.name.clone())
+    }
+
+    /// Start, follow and stop the call microphone. Called from the
+    /// driver pump.
+    pub(crate) fn pump_call_capture(&mut self) {
+        let wanted = self.capture_wanted();
+        let device = self.capture_device_name();
+        let group_pref = self.session.calls.prefs.call_noise_suppression;
+        let capture = &mut self.call_capture;
+        // A different call or microphone: close the old stream first.
+        if capture.active.as_ref().is_some_and(|active| {
+            !wanted.is_some_and(|(target, _)| target == active.target) || active.device != device
+        }) {
+            capture.stop();
+        }
+        // A device that failed or went away: report it and retry later.
+        let failure = capture.active.as_ref().and_then(|active| {
+            active
+                .sink
+                .take_events()
+                .into_iter()
+                .find_map(|event| match event {
+                    CaptureEvent::Failed(err) => Some(err.to_string()),
+                    CaptureEvent::Ended => Some("The microphone was disconnected.".to_string()),
+                    CaptureEvent::Paused | CaptureEvent::Resumed => None,
+                })
+        });
+        if let Some(err) = failure {
+            capture.stop();
+            capture.failed_at = Some(Instant::now());
+            capture.error = Some(err);
+        }
+        let Some((target, muted)) = wanted else {
+            capture.failed_at = None;
+            capture.error = None;
+            return;
+        };
+        let noise_suppression = denoises(target, group_pref);
+        if let Some(active) = capture.active.as_ref() {
+            active.controls.set_muted(muted);
+            active.controls.set_noise_suppression(noise_suppression);
+            return;
+        }
+        if !capture.enabled()
+            || capture
+                .failed_at
+                .is_some_and(|at| at.elapsed() < REOPEN_AFTER)
+        {
+            return;
+        }
+        // The engine hands out a sender once the call's sources exist.
+        let Some(sender) = self
+            .call_engine
+            .as_deref_mut()
+            .filter(|engine| engine.is_available())
+            .and_then(|engine| engine.external_frame_sender(target))
+        else {
+            return;
+        };
+        capture.open(target, device, noise_suppression, muted, sender);
+    }
+
+    /// Apply the noise suppression switch (the voice chat window's
+    /// Settings box) to the running group call microphone now.
+    pub fn apply_call_noise_suppression(&mut self) {
+        let pref = self.session.calls.prefs.call_noise_suppression;
+        if let Some(active) = self.call_capture.active.as_ref() {
+            active
+                .controls
+                .set_noise_suppression(denoises(active.target, pref));
+        }
+    }
+
+    /// The call microphone's state, for tests and diagnostics.
+    pub fn call_capture(&self) -> &CallCapture {
+        &self.call_capture
+    }
+
+    /// Use a fake microphone (tests, demos).
+    pub fn inject_call_microphone(&mut self, opener: MicOpener) {
+        self.call_capture.inject_opener(opener);
+    }
+}
+
+/// Whether a call's microphone runs through noise suppression. As in
+/// tdesktop, 1:1 calls always do (`calls_call.cpp` sets `enableNS = true`
+/// on its config), and group calls follow the switch in the voice chat
+/// window's Settings box (`calls_group_settings.cpp`).
+fn denoises(target: CaptureTarget, group_pref: bool) -> bool {
+    match target {
+        CaptureTarget::Private(_) => true,
+        CaptureTarget::Group(_) => group_pref,
+    }
+}

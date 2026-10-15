@@ -224,6 +224,34 @@ pub trait CallEngine {
     /// Phase C2b: app -> engine; set microphone mute state for a tracked call.
     fn set_muted(&mut self, call_id: i32, muted: bool) -> Result<(), EngineError>;
 
+    /// app -> engine; a sender for `target`'s external sources, for a
+    /// feeder thread (`calls::capture`). `None` until the call's sources
+    /// are issued (1:1 connected, group transport connected) or when the
+    /// engine has no external sources. Frames sent before the sources
+    /// exist are rejected by ntgcalls, so callers wait for `Some`.
+    fn external_frame_sender(
+        &mut self,
+        target: CaptureTarget,
+    ) -> Option<std::sync::Arc<dyn ExternalFrameSender>> {
+        let _ = target;
+        None
+    }
+
+    /// app -> engine; push one frame into `target`'s external source
+    /// (`ntg_send_external_frame`). The feeder uses the sender from
+    /// [`Self::external_frame_sender`] directly; this is the one-shot form.
+    fn send_external_frame(
+        &mut self,
+        target: CaptureTarget,
+        device: ExternalDevice,
+        data: &[u8],
+        meta: ExternalFrameMeta,
+    ) -> Result<(), EngineError> {
+        self.external_frame_sender(target)
+            .ok_or(EngineError::Unavailable)?
+            .send(device, data, meta)
+    }
+
     /// Phase C2b: engine -> app; enumerate capture and playback devices.
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError>;
 

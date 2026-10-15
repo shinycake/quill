@@ -15,6 +15,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 mod call_engine;
+mod external;
 
 /// Phase C2b: safe driver-thread adapter over the runtime-loaded C ABI.
 ///
@@ -29,6 +30,8 @@ pub struct NtgcallsEngine {
     /// Phase C2g: native group transport per TDLib group call id.
     group_calls: HashMap<i32, GroupCallMedia>,
     callback: Arc<CallbackShared>,
+    /// Feeder threads' access to the native instance (`external.rs`).
+    external_gate: Arc<external::ExternalGate>,
     _driver_thread_only: PhantomData<Rc<()>>,
 }
 
@@ -69,6 +72,7 @@ impl NtgcallsEngine {
             call_media: HashMap::new(),
             group_calls: HashMap::new(),
             callback: Arc::new(CallbackShared::new()),
+            external_gate: Arc::default(),
             _driver_thread_only: PhantomData,
         })
     }
@@ -92,6 +96,8 @@ impl NtgcallsEngine {
             }
             return Err(err);
         }
+        self.external_gate
+            .attach(instance, self.api.ntg_send_external_frame);
         self.instance = Some(instance);
         Ok(instance)
     }
@@ -250,9 +256,10 @@ impl NtgcallsEngine {
         let camera = native_input(media.camera.as_deref())?;
         // The system's default microphone and output, as for 1:1 calls:
         // without them a voice chat is silent both ways.
-        let mic = self.device_input(None, MediaDeviceKind::Microphone)?;
+        let mic = self.capture_microphone_input(None)?;
         let speaker = self.device_input(None, MediaDeviceKind::Speaker)?;
-        let mut mic_audio = audio_description(mic.as_ref());
+        let mut mic_audio =
+            external::capture_microphone_description(external_capture_enabled(), mic.as_ref());
         let mut camera_video = ntg_video_description {
             media_source: NTG_MEDIA_SOURCE_DEVICE,
             // Telegram's group video default.
@@ -404,7 +411,7 @@ impl NtgcallsEngine {
             .ok_or(EngineError::NoSuchCall(call_id))?;
         let user_id = self.user_id(call_id)?;
         let instance = self.instance.ok_or(EngineError::NullInstance)?;
-        let mic = self.device_input(config.mic.as_deref(), MediaDeviceKind::Microphone)?;
+        let mic = self.capture_microphone_input(config.mic.as_deref())?;
         let speaker = self.device_input(config.speaker.as_deref(), MediaDeviceKind::Speaker)?;
         let camera = native_input(config.camera.as_deref())?;
         let screen = if config.screen_share_on {
@@ -413,7 +420,8 @@ impl NtgcallsEngine {
             None
         };
 
-        let mut mic_audio = audio_description(mic.as_ref());
+        let mut mic_audio =
+            external::capture_microphone_description(external_capture_enabled(), mic.as_ref());
         let mut camera_video = ntg_video_description {
             media_source: NTG_MEDIA_SOURCE_DEVICE,
             // Conventional tgvoip P2P default: 640x480@30.
@@ -588,6 +596,8 @@ impl Drop for NtgcallsEngine {
         let Some(instance) = self.instance.take() else {
             return;
         };
+        // Feeder threads stop reaching the instance before it goes away.
+        self.external_gate.detach();
         // SAFETY: unregister the callbacks before destroying the instance,
         // so no new native callbacks can fire after teardown begins; the
         // Arc field keeps `CallbackShared` alive until the struct is fully

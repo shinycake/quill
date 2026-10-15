@@ -98,7 +98,7 @@ where
 }
 
 /// The backend's message, with a Settings hint when the OS refused access.
-fn friendly(raw: &str) -> String {
+pub(crate) fn friendly(raw: &str) -> String {
     let lower = raw.to_ascii_lowercase();
     if lower.contains("access") && lower.contains("denied")
         || lower.contains("permission")

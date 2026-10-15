@@ -10,6 +10,8 @@ mod business_bot_bar;
 mod business_extra;
 mod business_settings;
 mod call_audio;
+mod call_capture;
+pub use call_capture::{CallCapture, MicOpener};
 mod owned_bots;
 mod quick_replies;
 pub use call_audio::{CallAudio, LevelSource, tap_wanted};

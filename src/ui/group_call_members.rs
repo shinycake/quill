@@ -11,6 +11,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenu, Po
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 
@@ -73,6 +74,8 @@ impl QuillApp {
                 if share_link {
                     menu = menu.item(item("Share Invite Link", |this, _, cx| this.open_group_call_share_links(cx)));
                 }
+                // tdesktop's menu: "Settings" opens the call settings box.
+                menu = menu.item(item(tr(keys::GROUP_CALL_SETTINGS), |this, _, cx| this.open_group_call_settings(cx)));
                 if call.can_be_managed {
                     if call.share_links.listener.is_some() {
                         menu = menu.item(item("Revoke Invite Link", |this, _, cx| this.revoke_group_call_invite_link(cx)));
