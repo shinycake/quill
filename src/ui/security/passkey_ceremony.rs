@@ -45,6 +45,16 @@ pub(in crate::ui) enum CeremonySheet {
     /// Windows: the system's Windows Security dialog runs the ceremony;
     /// Quill shows a spinner row and Cancel until it returns.
     System,
+    /// A phone ceremony probes Bluetooth before anything shows (tdesktop
+    /// waits up to 1.5 s for the scanner before `ShowCableBox`).
+    Probing,
+    /// The QR code and "Use a security key"; `bluetooth: false` says
+    /// Bluetooth is unavailable instead of the code.
+    Choose { bluetooth: bool },
+    /// The phone was seen; the tunnel opens.
+    Connecting,
+    /// The request is on the phone.
+    Continue,
 }
 
 /// What the ceremony is for.
@@ -64,6 +74,8 @@ pub(in crate::ui) struct CeremonyUi {
     ceremony: Option<Ceremony>,
     /// Focus the PIN field on the next render.
     focus_pin: bool,
+    /// The phone sheet's QR code, rendered once.
+    qr: Option<hybrid::CableQr>,
 }
 
 impl std::fmt::Debug for CeremonyUi {
@@ -82,6 +94,7 @@ fn register_error(error: &CeremonyError) -> Key {
     match error {
         CeremonyError::NoDevice => keys::PASSKEY_ERROR_NO_DEVICE,
         CeremonyError::PinBlocked => keys::PASSKEY_PIN_BLOCKED,
+        CeremonyError::Phone => keys::PASSKEY_CABLE_ERROR,
         CeremonyError::Cancelled | CeremonyError::NoCredentials | CeremonyError::Other(_) => {
             keys::PASSKEY_ERROR_REGISTER
         }
@@ -94,15 +107,18 @@ fn login_error(error: &CeremonyError) -> Key {
         CeremonyError::NoDevice => keys::PASSKEY_ERROR_NO_DEVICE,
         CeremonyError::NoCredentials => keys::PASSKEY_ERROR_NO_CREDENTIALS,
         CeremonyError::PinBlocked => keys::PASSKEY_PIN_BLOCKED,
+        CeremonyError::Phone => keys::PASSKEY_CABLE_ERROR,
         CeremonyError::Cancelled | CeremonyError::Other(_) => keys::PASSKEY_ERROR_LOGIN,
     }
 }
 
-/// The sheet a new ceremony opens on: Windows Security's own dialog, or
-/// the security key sheet.
+/// The sheet a new ceremony opens on: Windows Security's own dialog, the
+/// Bluetooth probe of a phone ceremony, or the security key sheet.
 fn first_sheet() -> CeremonySheet {
     if webauthn::system_dialog() {
         CeremonySheet::System
+    } else if webauthn::starts_with_phone() {
+        CeremonySheet::Probing
     } else {
         CeremonySheet::Key
     }
@@ -137,6 +153,7 @@ impl CeremonyUi {
             sheet,
             ceremony,
             focus_pin: false,
+            qr: None,
         }
     }
 }
@@ -303,6 +320,22 @@ impl QuillApp {
                     ui.focus_pin = true;
                 }
             }
+            CeremonyEvent::Hybrid { qr } => {
+                if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {
+                    ui.qr = qr.and_then(|qr| hybrid::render_cable_qr(&qr.0));
+                    ui.sheet = CeremonySheet::Choose {
+                        bluetooth: ui.qr.is_some(),
+                    };
+                }
+            }
+            CeremonyEvent::PhoneConnecting => self.set_ceremony_sheet(CeremonySheet::Connecting),
+            CeremonyEvent::PhoneContinue => self.set_ceremony_sheet(CeremonySheet::Continue),
+            // tdesktop closes the phone box and shows the touch box.
+            CeremonyEvent::UseKey => self.set_ceremony_sheet(CeremonySheet::Key),
+            CeremonyEvent::NoKey => {
+                // tdesktop `ShowCableToast`; the QR stays.
+                self.connection.status_note = tr(keys::PASSKEY_ERROR_NO_DEVICE).into();
+            }
             CeremonyEvent::Registered(registration) => {
                 // The dialog closes; the server gets the result.
                 let ui = self.privacy.passkeys.ceremony.take();
@@ -326,22 +359,23 @@ impl QuillApp {
                 self.privacy.passkeys.ceremony = None;
             }
             CeremonyEvent::Failed(error)
-                if self
-                    .privacy
-                    .passkeys
-                    .ceremony
-                    .as_ref()
-                    .is_some_and(|ui| ui.sheet == CeremonySheet::System) =>
+                if self.privacy.passkeys.ceremony.as_ref().is_some_and(|ui| {
+                    matches!(ui.sheet, CeremonySheet::System | CeremonySheet::Probing)
+                }) =>
             {
                 // tdesktop `ShowNativeError`: no error sheet over the
-                // system dialog, a toast with the generic reason.
+                // system dialog, a toast with the generic reason; a phone
+                // ceremony that fails before its box shows toasts its
+                // reason (`cable_ceremony.cpp` `finish`).
                 let Some(ui) = self.privacy.passkeys.ceremony.take() else {
                     return;
                 };
                 quill::webauthn::log(&format!("{:?} failed: {error:?}", ui.mode));
-                self.connection.status_note = tr(match ui.mode {
-                    CeremonyMode::Register => keys::PASSKEY_ERROR_REGISTER,
-                    CeremonyMode::Login => keys::PASSKEY_ERROR_LOGIN,
+                self.connection.status_note = tr(match (ui.sheet, ui.mode) {
+                    (CeremonySheet::Probing, CeremonyMode::Register) => register_error(&error),
+                    (CeremonySheet::Probing, CeremonyMode::Login) => login_error(&error),
+                    (_, CeremonyMode::Register) => keys::PASSKEY_ERROR_REGISTER,
+                    (_, CeremonyMode::Login) => keys::PASSKEY_ERROR_LOGIN,
                 })
                 .into();
             }
@@ -354,8 +388,16 @@ impl QuillApp {
                     quill::webauthn::log(&format!("{:?} failed: {error:?}", ui.mode));
                     ui.sheet = CeremonySheet::Error(reason);
                     ui.ceremony = None;
+                    ui.qr = None;
                 }
             }
+        }
+    }
+
+    fn set_ceremony_sheet(&mut self, sheet: CeremonySheet) {
+        if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {
+            ui.sheet = sheet;
+            ui.qr = None;
         }
     }
 
@@ -431,6 +473,11 @@ impl QuillApp {
                     (ui.mode, ui.sheet)
                 });
             let pin_input = this.privacy.passkeys.pin_input.clone();
+            let bottom = hybrid::bottom_button(sheet, cx);
+            if let Some((title, body)) = this.cable_sheet(mode, sheet, cx) {
+                let footer = div().flex().w_full().children(bottom);
+                return Self::ceremony_dialog(dialog, title, body, footer, on_close);
+            }
             let (title, about) = match sheet {
                 CeremonySheet::Key => (keys::PASSKEY_TOUCH, keys::PASSKEY_INSERT),
                 CeremonySheet::Pin { invalid: false } => {
@@ -440,7 +487,12 @@ impl QuillApp {
                     (keys::PASSKEY_PIN_TITLE, keys::PASSKEY_PIN_INVALID)
                 }
                 CeremonySheet::Error(reason) => (keys::PASSKEY_CABLE_ERROR_TITLE, reason),
-                CeremonySheet::System => (
+                // The phone sheets were built above; Probing never shows.
+                CeremonySheet::Probing
+                | CeremonySheet::Choose { .. }
+                | CeremonySheet::Connecting
+                | CeremonySheet::Continue
+                | CeremonySheet::System => (
                     match mode {
                         CeremonyMode::Register => keys::PASSKEY_CABLE_REGISTER_TITLE,
                         CeremonyMode::Login => keys::PASSKEY_CABLE_LOGIN_TITLE,
@@ -489,23 +541,14 @@ impl QuillApp {
                         .aria_label(tr(keys::PASSKEY_PIN_PLACEHOLDER)),
                 );
             }
+            if bottom.is_some() {
+                let body = body.into_any_element();
+                let footer = div().flex().w_full().children(bottom);
+                return Self::ceremony_dialog(dialog, title, body, footer, on_close);
+            }
             let mut footer = div().flex().justify_end().gap_2();
-            match sheet {
-                CeremonySheet::Error(_) => {
-                    footer = footer.child(
-                        Button::new("passkey-ceremony-close")
-                            .label(tr(keys::CLOSE))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.close_passkey_ceremony(window, cx);
-                                this.close_kit_dialog_if_done(
-                                    DialogKind::PasskeyCeremony,
-                                    window,
-                                    cx,
-                                );
-                            })),
-                    );
-                }
-                _ => {
+            {
+                {
                     footer = footer.child(
                         Button::new("passkey-ceremony-cancel")
                             .label(tr(keys::CANCEL))
@@ -531,15 +574,25 @@ impl QuillApp {
                     }
                 }
             }
-            dialog
-                .title(crate::ui::shell::dialog_title(tr(title)))
-                .width(px(360.))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    super::passkeys::once(body.into_any_element()),
-                ))
-                .footer(footer)
-                .on_close(on_close)
+            Self::ceremony_dialog(dialog, title, body.into_any_element(), footer, on_close)
         })
+    }
+
+    fn ceremony_dialog(
+        dialog: Dialog,
+        title: Key,
+        body: AnyElement,
+        footer: impl IntoElement,
+        on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Dialog {
+        dialog
+            .title(crate::ui::shell::dialog_title(tr(title)))
+            .width(px(360.))
+            .content(crate::ui::shell::scrollable_dialog_content(
+                super::passkeys::once(body),
+            ))
+            .footer(footer)
+            .on_close(on_close)
     }
 }
 
@@ -547,7 +600,12 @@ crate::ui::shell::register_dialogs! {
     /// The ceremony over the "Protect your account" box.
     PasskeyCeremony => DialogSpec::new(
         605,
-        |app| app.privacy.passkeys.ceremony.is_some(),
+        |app| app
+            .privacy
+            .passkeys
+            .ceremony
+            .as_ref()
+            .is_some_and(|ui| ui.sheet != CeremonySheet::Probing),
         QuillApp::build_passkey_ceremony_dialog,
     ),
 }
@@ -560,8 +618,9 @@ crate::ui::screenshot_demo::register_demos![
 impl QuillApp {
     /// `ready-passkey-ceremony`: the ceremony dialog over the box, with
     /// `QUILL_DEMO_PASSKEY_CEREMONY` set to `key` (default), `pin`,
-    /// `pin-invalid`, `error` or `windows` (the Windows Security waiting
-    /// row). No worker runs.
+    /// `pin-invalid`, `error`, `windows` (the Windows Security waiting
+    /// row), or the phone sheets `choose`, `bluetooth-off`, `connecting`,
+    /// `continue` and `phone-error`. No worker runs.
     fn demo_passkey_ceremony(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.seed_demo_passkeys();
         let _ = self.passkey_pin_input(window, cx);
@@ -575,9 +634,18 @@ impl QuillApp {
             "pin-invalid" => CeremonySheet::Pin { invalid: true },
             "error" => CeremonySheet::Error(keys::PASSKEY_ERROR_NO_DEVICE),
             "windows" => CeremonySheet::System,
+            "choose" => CeremonySheet::Choose { bluetooth: true },
+            "bluetooth-off" => CeremonySheet::Choose { bluetooth: false },
+            "connecting" => CeremonySheet::Connecting,
+            "continue" => CeremonySheet::Continue,
+            "phone-error" => CeremonySheet::Error(keys::PASSKEY_CABLE_ERROR),
             _ => CeremonySheet::Key,
         };
-        self.privacy.passkeys.ceremony = Some(CeremonyUi::new(CeremonyMode::Register, sheet, None));
+        let mut ui = CeremonyUi::new(CeremonyMode::Register, sheet, None);
+        if sheet == (CeremonySheet::Choose { bluetooth: true }) {
+            ui.qr = hybrid::render_cable_qr(&hybrid::demo_qr());
+        }
+        self.privacy.passkeys.ceremony = Some(ui);
         cx.notify();
     }
 
@@ -612,7 +680,15 @@ impl QuillApp {
     }
 }
 
+#[path = "passkey_hybrid.rs"]
+mod hybrid;
+
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 #[path = "passkey_ceremony_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "passkey_hybrid_tests.rs"]
+mod hybrid_tests;

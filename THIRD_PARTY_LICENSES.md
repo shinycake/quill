@@ -11,7 +11,7 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 681
+- MIT License: 693
 - Apache License 2.0: 44
 - Unicode License v3: 24
 - ISC License: 22
@@ -6043,6 +6043,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
+- [sha1 0.11.0](https://github.com/RustCrypto/hashes)
 - [sha2 0.11.0](https://github.com/RustCrypto/hashes)
 
 ````text
@@ -6074,6 +6075,35 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+````
+
+### MIT License
+
+Used by:
+- [tungstenite 0.30.0](https://github.com/snapview/tungstenite-rs)
+
+````text
+Copyright (c) 2017 Alexey Galakhov
+Copyright (c) 2016 Jason Housley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ````
 
@@ -6937,6 +6967,7 @@ SOFTWARE.
 Used by:
 - [cbc 0.1.2](https://github.com/RustCrypto/block-modes)
 - [cbc 0.2.1](https://github.com/RustCrypto/block-modes)
+- [ctr 0.10.1](https://github.com/RustCrypto/block-modes)
 
 ````text
 Copyright (c) 2018-2022 RustCrypto Developers
@@ -7688,6 +7719,40 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
+- [universal-hash 0.6.1](https://github.com/RustCrypto/traits)
+
+````text
+Copyright (c) 2019-2025 RustCrypto Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+````
+
+### MIT License
+
+Used by:
 - [http-body 1.1.0](https://github.com/hyperium/http-body)
 
 ````text
@@ -7722,10 +7787,49 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
+- [aes-gcm 0.11.1](https://github.com/RustCrypto/AEADs)
+- [chacha20 0.10.2](https://github.com/RustCrypto/stream-ciphers)
+- [ghash 0.6.0](https://github.com/RustCrypto/universal-hashes)
+- [polyval 0.7.3](https://github.com/RustCrypto/universal-hashes)
 - [zeroize_derive 1.5.0](https://github.com/RustCrypto/utils)
 
 ````text
 Copyright (c) 2019-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+````
+
+### MIT License
+
+Used by:
+- [aead 0.6.1](https://github.com/RustCrypto/traits)
+
+````text
+Copyright (c) 2019-2026 The RustCrypto Project Developers
+Copyright (c) 2019 MobileCoin, LLC
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -9349,6 +9453,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
+- [rand 0.10.3](https://github.com/rust-random/rand)
 - [rand 0.8.8](https://github.com/rust-random/rand)
 - [rand 0.9.5](https://github.com/rust-random/rand)
 - [rand_chacha 0.3.1](https://github.com/rust-random/rand)
@@ -10934,6 +11039,7 @@ Used by:
 - [objc2-cloud-kit 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-core-audio-types 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-core-audio 0.3.2](https://github.com/madsmtm/objc2)
+- [objc2-core-bluetooth 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-core-data 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-core-foundation 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-core-graphics 0.3.2](https://github.com/madsmtm/objc2)
@@ -12086,6 +12192,37 @@ Used by:
 The MIT License (MIT)
 
 Copyright (c) 2015 nwin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+````
+
+### MIT License
+
+Used by:
+- [data-encoding 2.11.1](https://github.com/ia0/data-encoding)
+
+````text
+The MIT License (MIT)
+
+Copyright (c) 2015-2020 Julien Cretin
+Copyright (c) 2017-2020 Google Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
