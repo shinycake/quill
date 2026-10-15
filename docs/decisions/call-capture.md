@@ -162,3 +162,200 @@ the level tap opened the microphone a second time to measure your level.
 - cpal capture on Windows and Linux, and device matching by name there
   (ntgcalls' and cpal's names for the same device are expected to match;
   an unmatched name falls back to the system default).
+
+
+# Slice 2: macOS screen capture, the source chooser, pause
+
+Slice 2 of 4. Closes `parity:calls-screen-source-chooser` and
+`parity:calls-screen-share-pause` on macOS. Windows and Linux keep ntgcalls'
+own desktop capture and the direct share button until slices 3 and 4 add
+their backends.
+
+## What tdesktop does
+
+- **Chooser** (`calls/group/ui/desktop_capture_choose_source.cpp`):
+  - It is a window of its own that stays on top, with an empty title. It is
+    sized for 2.5 rows of a 3-column grid. Sources are 235 × 165 with skips
+    of 2 / 10 and margins of 12 / 8 / 12 / 6. The picture sits inside a
+    7 / 7 / 7 / 33 padding, with a semibold white label 7 px from the
+    bottom. The background is `groupCallMembersBg` and the title strip is
+    `groupCallMembersBgOver`.
+  - It lists screens first ("Screen {index}", `lng_group_call_screen_title`),
+    then windows by title, or "Window N" for untitled windows (a literal in
+    tdesktop).
+  - Each source gets one picture. A 1 fps capture runs until the first
+    frame, then is dropped (`clearHelper`), so the pictures are not live.
+  - A click selects a source (`groupCallMuted1` background; hover
+    `groupCallMembersBgOver`). There is no double-click, no tabs and no
+    Escape handling.
+  - When you are not sharing, the first screen starts selected. When you
+    are, the shared source starts selected. The bottom bar shows Cancel and
+    Share Screen, or Stop Sharing (`groupCallMemberMutedIcon` text) when the
+    selection is the shared source. Buttons are 34 px, uppercase, 19 px from
+    the edges.
+  - "Share System Audio" shows only where loopback audio exists, which is
+    Windows only.
+  - With no sources the chooser does not open. Share Screen and Stop Sharing
+    close it.
+- **Access** (`calls_group_common.cpp:49`, `ScreenSharingPrivacyRequestBox`):
+  without screen recording access a box replaces the chooser. It shows
+  `lng_group_call_mac_screencast_access`, a blank line, then
+  `lng_group_call_mac_recording` with "Screen Recording" in bold, plus
+  "Open Settings" and Cancel. The same box is used in group and 1:1 calls.
+- **Entry points:** the voice chat's share button and the 1:1 call's
+  screencast button always open the chooser, sharing or not
+  (`calls_group_panel.cpp:1589`, `calls_panel.cpp:413`). The voice chat
+  menu's "Stop Sharing" stops directly (`calls_group_menu.cpp:587`).
+- **Pause:** when the captured window is hidden, a group call sends
+  `toggleGroupCallScreenSharingIsPaused` (`setOnPause`,
+  `SendUpdateType::ScreenPaused`). 1:1 calls do not send it ("Paused not
+  supported right now", `calls_call.cpp:578`).
+- **Paused tile** (`calls_group_viewport_raster.cpp:105-280`): the last
+  frame is scaled into 90 × 90 and blurred with radius 15
+  (`BlurLargeImage`), under a black shadow of alpha 80 with the
+  `groupCallPaused` icon. "Video is paused" (`lng_group_call_video_paused`)
+  shows only in wide mode. Camera and screen tiles use the same text.
+
+## What changed
+
+- **`src/calls/capture/screen.rs`** (new): `ScreenBackend` (access, privacy
+  settings, sources, one thumbnail, start) and `ScreenCapture`. It also has
+  tdesktop's labels (`source_labels`), `fit_capture_size`, `nv12_to_i420`,
+  the I420 → RGBA preview and `PreviewSlot` (your own tile's picture,
+  480 px wide, at most 4 per second). `native_backend()` returns `None` off
+  macOS.
+- **`src/calls/capture/screen_mac.rs`** (new, macOS + `ui`) uses
+  ScreenCaptureKit through `objc2-screen-capture-kit` 0.3.2:
+  - Sources come from `SCShareableContent`: displays, then on-screen layer-0
+    windows of other apps that are at least 100 × 100.
+  - Thumbnails come from `SCScreenshotManager`.
+  - Capture is an `SCStream` delivering NV12 (`420v`) at up to 1920 × 1080
+    and 15 fps on a dispatch queue. Each frame is converted to I420 into
+    the sink, with the preview offered alongside.
+  - Access is checked with `CGPreflightScreenCaptureAccess`.
+    `CGRequestScreenCaptureAccess` and the Privacy & Security
+    "Screen Recording" pane handle "Open Settings".
+  - A shared window is polled every 500 ms (`CGWindowListCopyWindowInfo`).
+    Off screen pauses, back on screen resumes, gone ends the share. A
+    stream stopped by the system ends it too.
+- **Engine** (kept small): `external_screen_capture_enabled()` (macOS
+  build, `QUILL_CALL_CAPTURE` not `native`).
+  `capture_screen_description` sends an `NTG_MEDIA_SOURCE_EXTERNAL` screen
+  description (1920 × 1080 @ 15; each frame carries its own size) in place
+  of the desktop one, in both `issue_presentation_sources` (group) and
+  `set_media_sources` (1:1).
+- **Request:** `toggle_group_call_screen_sharing_is_paused`, sent under the
+  existing `CallsPurpose::ToggleGroupCallVideo` purpose.
+- **Driver** (`src/connect/call_screen.rs`, new):
+  - It holds the chooser's pick and opens the capture once the call's
+    screen stream is set up: a joined group call that is sharing, or a 1:1
+    call that is sharing with a transport.
+  - It feeds frames through the feeder into `external_frame_sender`.
+  - It follows pause edges both ways: the feeder stops forwarding, and
+    group calls send the request once per edge and set
+    `ActiveGroupCall::screen_share_paused`.
+  - A closed window or a failed capture ends the share and keeps the
+    error.
+  - It publishes your preview into your own screen tile's frame slot.
+  - It switches source when the pick changes.
+  - Stopping no longer needs a source: the group gate moved after the stop
+    branch.
+- **UI:**
+  - `screen_chooser.rs` holds the chooser window and the privacy box over
+    the call window, with Escape closing the box as it closes every box.
+  - `group_call_paused.rs` holds the paused tile, using the blurred last
+    frame (`wallpaper_raster::blur`).
+  - `screen_share_state.rs` holds the state.
+  - The voice chat menu's Share Screen and the 1:1 share button open the
+    chooser when there is a backend; otherwise they share directly as
+    before.
+- **Strings:** tdesktop keys `lng_group_call_screen_share_start`,
+  `lng_group_call_screen_title`, `lng_group_call_video_paused` and
+  `lng_group_call_mac_settings`. Quill keys are used for the two privacy
+  lines (tdesktop's say "Telegram Desktop") and for "Window {index}".
+- **Demo** `ready-call-screen-share`: a voice chat where your shared window
+  is hidden (paused tile) and the chooser is open over four made-up
+  sources. `QUILL_DEMO_SCREEN_DENIED=1` shows the privacy box instead.
+- Unit tests no longer open the real microphone. `CallCapture::enabled()`
+  and `CallScreen::enabled()` turn on in `cfg(test)` only with an injected
+  capture. Before this, driver tests without one opened the default input
+  through cpal and could hang in CoreAudio for minutes.
+
+## Deviations
+
+- The brief asked for tabs, double-click to share, live 1 s thumbnails and
+  Escape in the chooser. tdesktop has none of them, so none were built.
+  The chooser has one grid, click selects, one picture per source, and
+  Cancel closes it.
+- The brief asked for a permission empty state inside the chooser. tdesktop
+  shows a separate box over the call window instead, so that is what Quill
+  does.
+- The privacy box text says Quill (the app-name rule). Its buttons are the
+  kit's.
+- Wide mode: tdesktop shows "Video is paused" only when the voice chat
+  window is wide (600 px and more). Quill's window has no wide layout, so
+  the text shows on the full-screen stage and the strip tiles show the
+  icon.
+- tdesktop asks "{user} is sharing their screen…" before you share over
+  someone else's screen (`lng_group_call_sure_screencast`). That is not in
+  this slice.
+- The chooser window's picture size comes from the backend's thumbnail
+  (twice the 221 × 125 picture area). tdesktop asks tgcalls for 235 × 165
+  at the device pixel ratio.
+
+## Cost
+
+Measured in the debug test build (`cargo test`, unoptimised) on this Mac,
+for a 1920 × 1080 frame:
+
+| Step | Per frame | At its rate |
+|---|---|---|
+| NV12 → I420 | 5.2 ms | 15 fps: about 78 ms of one core per second |
+| I420 → 480 px RGBA preview | 7.5 ms | 4 per second: about 30 ms per second |
+
+- Memory: one 1080p I420 frame is 3.1 MB. The sink holds at most 4 (12.4
+  MB at worst) and the preview slot one 480 × 270 RGBA picture (0.5 MB).
+  Each chooser thumbnail is at most 442 × 250 RGBA (0.44 MB), taken once.
+  The paused tile keeps one 90 × 90 picture per paused stream.
+- With no share running, nothing captures. The pause poll runs only while a
+  window is shared (one `CGWindowListCopyWindowInfo` call every 500 ms).
+- No release build was measured (rules: no release builds unless asked).
+  An optimised build should be several times faster.
+
+## Verified
+
+- Unit tests:
+  - labels, fit sizes, NV12 split and its rejects, preview colours and
+    throttling;
+  - the external or desktop screen description, and the request JSON;
+  - the paused picture fitting 90 px and keeping its shape;
+  - the chooser's first selection (the first screen, or the shared source,
+    or nothing when that source is gone) and the Stop Sharing rule;
+  - the privacy text's bold run.
+- Driver tests (mock engine, fake capture):
+  - the chosen window feeds the group presentation;
+  - a hidden window pauses once per edge, both ways, with the requests;
+  - a closed window ends the share;
+  - a refused capture ends it with its error;
+  - starting needs a pick and stopping does not;
+  - your shared screen shows in your tile;
+  - a 1:1 call shares without pause requests.
+- GPUI tests:
+  - Share Screen opens the chooser with the four labels, every picture
+    loaded and the first screen selected, and shares the pick and closes;
+  - the chooser of a running share selects it, Cancel changes nothing and
+    Stop Sharing stops;
+  - without access the box shows only over the voice chat window and
+    Escape closes it;
+  - without a backend the share stays direct.
+- Demo captures (in-process, scratch only): the chooser window, the paused
+  tile, and the privacy box.
+
+## Not verified
+
+- ScreenCaptureKit on a real screen: this session has no screen recording
+  permission and must not start a real call. Listing, thumbnails, the
+  stream, the window poll and the remote side seeing the frames need the
+  owner's manual check on macOS 14+.
+- A real voice chat receiving `toggleGroupCallScreenSharingIsPaused` and
+  other members seeing the paused tile.

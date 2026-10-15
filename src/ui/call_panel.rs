@@ -992,6 +992,7 @@ impl Render for CallPanel {
                     .children(buttons),
             )
             .children(device_menu)
+            .children(owner.update(cx, |app, cx| app.screen_privacy_overlay(false, cx)))
             .into_any_element()
     }
 }

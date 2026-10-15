@@ -43,7 +43,8 @@ impl QuillApp {
         let screen_source = self
             .live
             .as_ref()
-            .is_some_and(|live| live.driver.group_call_screen_source_available());
+            .is_some_and(|live| live.driver.group_call_screen_source_available())
+            || self.uses_screen_chooser();
         Button::new("group-call-menu")
             .icon(IconName::EllipsisVertical)
             .ghost()

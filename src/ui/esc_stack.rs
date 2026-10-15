@@ -113,6 +113,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // The voice-chat rename box sits on the group-call panel; the panel
     // itself is a live call and never closes on Escape.
     layer!(
+        "screen-privacy",
+        |app| app.screen_share.privacy_for.is_some(),
+        |app, _, cx| app.close_screen_privacy(cx)
+    ),
+    layer!(
         "group-call-settings",
         |app| app.group_call.settings_open,
         |app, _, cx| app.close_group_call_settings(cx)

@@ -257,6 +257,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_audio: super::call_audio::CallAudio,
     /// The call microphone Quill captures (`connect::call_capture`).
     pub(crate) call_capture: super::call_capture::CallCapture,
+    /// The shared screen Quill captures (`connect::call_screen`).
+    pub(crate) call_screen: super::call_screen::CallScreen,
     /// Phase C2e: latest decoded video frame per (call id, is_local,
     /// is_screen).
     pub(crate) video_frame_slots: VideoFrameSlots,

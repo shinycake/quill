@@ -270,6 +270,7 @@ impl QuillApp {
             history: super::history_state::HistoryUi::new(cx),
             frame: super::frame_state::FrameUi::new(cx),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
+            screen_share: Default::default(),
             composer_ui: super::composer_state::ComposerUi::new(pending_attachments),
             pickers: super::pickers_state::PickerUi::new(
                 window,

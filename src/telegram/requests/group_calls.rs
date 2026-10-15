@@ -376,6 +376,24 @@ pub fn toggle_group_call_is_my_video_paused(
     .to_string()
 }
 
+/// `toggleGroupCallScreenSharingIsPaused` (`schema/td_api.tl:14700`):
+/// `toggleGroupCallScreenSharingIsPaused group_call_id:int32
+/// is_paused:Bool = Ok;`, sent when the shared window is hidden or comes
+/// back (tdesktop `SendUpdateType::ScreenPaused`).
+pub fn toggle_group_call_screen_sharing_is_paused(
+    extra: RequestId,
+    group_call_id: i32,
+    is_paused: bool,
+) -> String {
+    json!({
+        "@type": "toggleGroupCallScreenSharingIsPaused",
+        "@extra": extra.as_extra(),
+        "group_call_id": group_call_id,
+        "is_paused": is_paused,
+    })
+    .to_string()
+}
+
 /// Phase C3a: `toggleGroupCallParticipantIsMuted` (TDLib 1.8.67,
 /// `schema/td_api.tl:14431`):
 /// `toggleGroupCallParticipantIsMuted group_call_id:int32

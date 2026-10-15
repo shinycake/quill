@@ -69,6 +69,8 @@ ui = [
     "dep:objc2-image-io",
     "dep:objc2-core-graphics",
     "dep:objc2-core-foundation",
+    "dep:objc2-screen-capture-kit",
+    "dep:dispatch2",
     "dep:jxl-oxide",
 ]
 # Development only: `--screenshot-demo` also rasterizes the window in-process
@@ -206,14 +208,18 @@ objc2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSProcessInfo", "NSString", "NSURL", "NSDictionary", "NSValue", "NSObject", "NSError", "NSArray", "NSData", "NSGeometry", "NSAttributedString", "NSRange", "NSLocale", "NSTimer", "NSDate", "NSSet", "NSIndexSet", "NSEnumerator", "block2"] }
 objc2-av-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2-core-media", "objc2-core-video", "objc2-core-graphics", "AVPlayer", "AVPlayerItem", "AVPlayerItemOutput", "AVAsset", "AVAssetImageGenerator", "AVAudioProcessingSettings", "AVTime", "AVMediaFormat", "AVCaptureDevice", "block2"] }
 block2 = { version = "0.6", optional = true }
-objc2-core-media = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CMTime", "CMTimeRange"] }
-objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn"] }
+objc2-core-media = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CMTime", "CMTimeRange", "CMSampleBuffer", "objc2-core-video"] }
+objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "bitflags"] }
+# Screen sharing in calls (src/calls/capture/screen_mac.rs): sources,
+# thumbnails and the NV12 stream from ScreenCaptureKit.
+objc2-screen-capture-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "SCShareableContent", "SCStream", "SCScreenshotManager", "SCError", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics", "objc2-core-foundation"] }
+dispatch2 = { version = "0.3.1", optional = true, default-features = false, features = ["std", "objc2"] }
 core-video = { version = "0.5.2", optional = true }
 core-foundation = { version = "0.10.1", optional = true }
 # Image files (HEIC, AVIF, JPEG XL and the rest) decoded and colour-managed
 # with ImageIO (src/ui/image_decode/macos.rs).
 objc2-image-io = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
-objc2-core-graphics = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace", "CGGeometry"] }
+objc2-core-graphics = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CGImage", "CGContext", "CGBitmapContext", "CGColorSpace", "CGGeometry", "CGWindow", "CGDirectDisplay"] }
 objc2-core-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CFData", "CFDictionary", "CFNumber", "CFString", "CFBase", "CFCGTypes", "CFURL"] }
 # Badge authorization (the Dock draws badges only for apps allowed to badge).
 objc2-user-notifications = { version = "0.3", optional = true }

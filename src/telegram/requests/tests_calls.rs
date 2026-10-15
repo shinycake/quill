@@ -318,6 +318,16 @@ fn group_call_request_shapes() {
     assert_eq!(v["@type"], "toggleGroupCallIsMyVideoPaused");
     assert_eq!(v["is_my_video_paused"], true);
 
+    let v: serde_json::Value = serde_json::from_str(&toggle_group_call_screen_sharing_is_paused(
+        RequestId(15),
+        555,
+        true,
+    ))
+    .unwrap();
+    assert_eq!(v["@type"], "toggleGroupCallScreenSharingIsPaused");
+    assert_eq!(v["group_call_id"], 555);
+    assert_eq!(v["is_paused"], true);
+
     let v: serde_json::Value = serde_json::from_str(&toggle_group_call_participant_is_muted(
         RequestId(14),
         555,

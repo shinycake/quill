@@ -111,8 +111,9 @@ pub enum CallsPurpose {
     /// `ok`; the new flag arrives as `updateGroupCall`.
     ToggleGroupCallAreMessagesAllowed { group_call_id: i32 },
     /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` /
-    /// `toggleGroupCallIsMyVideoPaused`. Response is `ok`; state
-    /// refreshes via `updateGroupCall`.
+    /// `toggleGroupCallIsMyVideoPaused`, and
+    /// `toggleGroupCallScreenSharingIsPaused`. Response is `ok`; state
+    /// refreshes via `updateGroupCall` and participant updates.
     ToggleGroupCallVideo { group_call_id: i32 },
     /// Phase C3a: `toggleGroupCallParticipantIsMuted`. Response is
     /// `ok`; state refreshes via updates.

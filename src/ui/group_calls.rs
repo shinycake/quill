@@ -285,7 +285,24 @@ impl QuillApp {
     /// (`ntg_init_presentation` + `startGroupCallScreenSharing`);
     /// stopping pairs `endGroupCallScreenSharing` with
     /// `ntg_stop_presentation`.
+    ///
+    /// Where Quill captures the screen itself, starting opens the chooser
+    /// first (tdesktop `chooseShareScreenSource`); the menu's Stop Sharing
+    /// stops at once.
     pub(super) fn toggle_group_call_screen_share(&mut self, cx: &mut Context<Self>) {
+        let sharing = self
+            .session()
+            .and_then(|session| session.calls.active_group_call.as_ref())
+            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+        if !sharing && self.open_screen_chooser(super::screen_share_state::ScreenFor::Group, cx) {
+            return;
+        }
+        self.share_group_call_screen(cx);
+    }
+
+    /// Start or stop sharing the screen in the voice chat (the driver
+    /// toggles).
+    pub(super) fn share_group_call_screen(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.toggle_group_call_screen_share() {
                 Ok(_) => "Toggling screen sharing…".into(),

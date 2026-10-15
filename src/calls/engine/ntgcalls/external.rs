@@ -1,4 +1,4 @@
-//! External sources on the ntgcalls engine: the microphone description
+//! External sources on the ntgcalls engine: the microphone and screen descriptions
 //! for Quill's own capture, and the `Send` frame sender a feeder thread
 //! drives (`ntg_send_external_frame`).
 //!
@@ -132,6 +132,15 @@ impl NtgcallsEngine {
         self.device_input(selected, MediaDeviceKind::Microphone)
     }
 
+    /// The screen input for ntgcalls' own desktop capture; none when
+    /// Quill sends its own screen frames.
+    pub(super) fn capture_screen_input(&self) -> Result<Option<CString>, EngineError> {
+        if external_screen_capture_enabled() {
+            return Ok(None);
+        }
+        self.device_input(None, MediaDeviceKind::Screen)
+    }
+
     /// A sender for `target`, once its sources are issued.
     pub(super) fn external_sender_for(
         &self,
@@ -178,9 +187,40 @@ pub(super) fn capture_microphone_description(
     }
 }
 
+/// The capture-side screen description: Quill's I420 frames when it
+/// captures the screen (`external`; each frame carries its own size, the
+/// description gives the default), ntgcalls' desktop capture otherwise.
+pub(super) fn capture_screen_description(
+    external: bool,
+    input: Option<&CString>,
+) -> ntg_video_description {
+    if external {
+        ntg_video_description {
+            media_source: NTG_MEDIA_SOURCE_EXTERNAL,
+            input: null_mut(),
+            ..NtgcallsEngine::screen_video_description(None)
+        }
+    } else {
+        NtgcallsEngine::screen_video_description(input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screen_description_is_external_or_desktop() {
+        let external = capture_screen_description(true, None);
+        assert_eq!(external.media_source, NTG_MEDIA_SOURCE_EXTERNAL);
+        assert_eq!(
+            (external.width, external.height, external.fps),
+            (1920, 1080, 15)
+        );
+        assert!(external.input.is_null());
+        let desktop = capture_screen_description(false, None);
+        assert_eq!(desktop.media_source, NTG_MEDIA_SOURCE_DESKTOP);
+    }
 
     #[test]
     fn microphone_description_is_external_unless_native() {

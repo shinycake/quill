@@ -7,6 +7,8 @@
 //! - `feeder`: the bounded drop-oldest sink and the thread that pushes
 //!   frames into the engine (`CallEngine::external_frame_sender`).
 //! - `mic_cpal` (UI builds): the microphone through cpal.
+//! - `screen`: screen sources, the I420 conversions and the per-OS
+//!   [`screen::ScreenBackend`]; `screen_mac` is ScreenCaptureKit.
 //!
 //! Design: `docs/decisions/call-capture.md`.
 #![deny(clippy::indexing_slicing)]
@@ -19,6 +21,9 @@ pub mod denoise;
 pub mod feeder;
 #[cfg(feature = "ui")]
 pub mod mic_cpal;
+pub mod screen;
+#[cfg(all(feature = "ui", target_os = "macos"))]
+pub mod screen_mac;
 
 pub use denoise::MicProcessor;
 pub use feeder::{CaptureClock, CaptureFeeder, FeedFrame, FrameSink};
