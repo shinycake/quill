@@ -11,10 +11,11 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::owned_bots::{self, NAME_MAX, UsernameProblem};
 use quill::state::DeepLinkAction;
-use quill::telegram::envelope::UsernameCheckResult;
+use quill::telegram::envelope::{RequestManagedBotSpec, UsernameCheckResult};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -22,8 +23,21 @@ use std::time::Duration;
 /// Wait after the last keystroke before asking the server.
 const CHECK_DELAY: Duration = Duration::from_millis(350);
 
+/// The keyboard button a dialog answers: after `createBot` the new bot is
+/// handed to the requesting bot with `shareUsersWithBot`.
+#[derive(Clone, Copy)]
+struct ManagedBotShare {
+    chat_id: ChatId,
+    message_id: MessageId,
+    button_id: i32,
+}
+
 pub(super) struct BotCreateDialog {
     manager_id: i64,
+    /// `createBot via_link`: true from a `tg://newbot` link, false from the
+    /// keyboard button (tdesktop sets `f_via_deeplink` only for links).
+    via_link: bool,
+    share: Option<ManagedBotShare>,
     name: Entity<InputState>,
     username: Entity<InputState>,
     /// Counts keystrokes, so only the last one starts a check.
@@ -72,10 +86,47 @@ impl QuillApp {
             manager_id,
             suggested_name.clone(),
             suggested_username.clone(),
+            true,
+            None,
             window,
             cx,
         );
         true
+    }
+
+    /// A `keyboardButtonTypeRequestManagedBot` button was pressed (tdesktop
+    /// `ButtonType::CreateBot`): a one-time keyboard hides, then the create
+    /// dialog opens prefilled, managed by the keyboard's bot.
+    pub(super) fn press_request_managed_bot(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        spec: &RequestManagedBotSpec,
+        one_time: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(manager_id) = self.session().and_then(|s| s.bot_user_id_for_chat(chat_id)) else {
+            self.set_status_note(tr(keys::Q_MISC_ONLY_A_BOT_CAN_ASK), cx);
+            return;
+        };
+        if one_time {
+            self.dismiss_custom_keyboard(chat_id, message_id, cx);
+        }
+        let share = ManagedBotShare {
+            chat_id,
+            message_id,
+            button_id: spec.id,
+        };
+        self.open_bot_create(
+            manager_id,
+            spec.suggested_name.clone(),
+            spec.suggested_username.clone(),
+            false,
+            Some(share),
+            window,
+            cx,
+        );
     }
 
     fn open_bot_create(
@@ -83,6 +134,8 @@ impl QuillApp {
         manager_id: i64,
         suggested_name: String,
         suggested_username: String,
+        via_link: bool,
+        share: Option<ManagedBotShare>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -111,6 +164,8 @@ impl QuillApp {
         );
         self.dialogs.bot_create_dialog = Some(BotCreateDialog {
             manager_id,
+            via_link,
+            share,
             name,
             username: username.clone(),
             version: 0,
@@ -185,6 +240,7 @@ impl QuillApp {
         let name = dialog.name.read(cx).value().trim().to_string();
         let typed = dialog.username.read(cx).value().to_string();
         let manager_id = dialog.manager_id;
+        let via_link = dialog.via_link;
         if name.is_empty()
             || name.chars().count() > NAME_MAX
             || owned_bots::username_problem(&typed).is_some()
@@ -199,7 +255,7 @@ impl QuillApp {
         };
         if live
             .driver
-            .create_managed_bot(manager_id, &name, &full, true)
+            .create_managed_bot(manager_id, &name, &full, via_link)
             .is_err()
         {
             self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_REQUEST).into();
@@ -240,7 +296,12 @@ impl QuillApp {
         let Some(create) = self.session().map(|s| s.bots.owned.create.clone()) else {
             return true;
         };
-        if create.created.is_some() {
+        if let Some(new_bot_id) = create.created {
+            let share = self
+                .dialogs
+                .bot_create_dialog
+                .as_ref()
+                .and_then(|d| d.share);
             let manager_id = self
                 .dialogs
                 .bot_create_dialog
@@ -252,6 +313,15 @@ impl QuillApp {
                 .unwrap_or_default();
             self.close_bot_create(cx);
             window.close_dialog(cx);
+            // tdesktop reports the new bot to the requesting bot.
+            if let (Some(share), Some(live)) = (share, self.live.as_mut()) {
+                let _ = live.driver.share_users_with_bot(
+                    share.chat_id,
+                    share.message_id,
+                    share.button_id,
+                    &[new_bot_id],
+                );
+            }
             // tdesktop opens the new bot's chat and toasts.
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
