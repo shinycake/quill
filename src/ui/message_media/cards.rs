@@ -1,6 +1,7 @@
 //! Contact cards and dice.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 /// What the viewer knows about a shared contact's Telegram account, which
 /// picks the card's buttons (tdesktop `HistoryView::Contact`).
@@ -38,8 +39,8 @@ impl ContactCardState {
     pub(in crate::ui) fn second_action(self) -> Option<&'static str> {
         match self {
             Self::SelfCard => None,
-            Self::Known => Some("View contact"),
-            Self::Unknown | Self::PhoneOnly => Some("Add contact"),
+            Self::Known => Some(tr(keys::Q_MISC_VIEW_CONTACT)),
+            Self::Unknown | Self::PhoneOnly => Some(tr(keys::Q_MISC_ADD_CONTACT_2)),
         }
     }
 }
@@ -60,7 +61,11 @@ pub(in crate::ui) fn contact_row(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let name = contact.display_name();
-    let shown = if name.is_empty() { "Contact" } else { &name };
+    let shown = if name.is_empty() {
+        tr(keys::Q_MISC_CONTACT)
+    } else {
+        &name
+    };
     let user_id = contact.user_id;
     let (phone, first, last) = (
         contact.phone_number.clone(),
@@ -100,7 +105,7 @@ pub(in crate::ui) fn contact_row(
         );
     let message_button = state.can_message().then(|| {
         Button::new(format!("contact-message-{row_id}"))
-            .label("Message")
+            .label(tr(keys::PROFILE_ACTION_SHORT_MESSAGE))
             .small()
             .primary()
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -228,7 +233,10 @@ fn slot_machine(
     let stack = div()
         .id(("slot-machine", row_id))
         .role(Role::Image)
-        .aria_label(format!("Slot machine, {}", dice.result_line()))
+        .aria_label(tr_with(
+            keys::Q_MISC_SLOT_MACHINE,
+            &[("result_line", &(dice.result_line()).to_string())],
+        ))
         .relative()
         .mt_2()
         .flex_none()

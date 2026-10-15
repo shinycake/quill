@@ -13,6 +13,7 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::deep_link_types::{DeepLinkUi, SettingsTarget};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::state::DeepLinkAction;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -60,11 +61,12 @@ impl QuillApp {
             DeepLinkUi::StickerSet { set_id } => self.view_message_sticker_set(set_id, cx),
             DeepLinkUi::Share { text } => {
                 self.share.link_text = Some(text);
-                self.connection.status_note = "choose a chat to share to".into();
+                self.connection.status_note = tr(keys::Q_MISC_CHOOSE_A_CHAT_TO_SHARE_2).into();
             }
             DeepLinkUi::Proxy { link } => {
                 if !self.handle_proxy_link(&link, cx) {
-                    self.links.deep_link_dialog = Some("This proxy link is not valid.".into());
+                    self.links.deep_link_dialog =
+                        Some(tr(keys::Q_MISC_THIS_PROXY_LINK_IS_NOT).into());
                 }
             }
             DeepLinkUi::FolderInvite { link } => self.open_folder_invite(link, cx),
@@ -86,7 +88,7 @@ impl QuillApp {
                 }
                 if target == SettingsTarget::Unsupported {
                     self.connection.status_note =
-                        "that settings page isn't supported by Quill yet".into();
+                        tr(keys::Q_MISC_THAT_SETTINGS_PAGE_ISNT_SUPPORTED).into();
                 }
             }
         }
@@ -218,7 +220,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("No chats loaded yet."),
+                        .child(tr(keys::Q_MISC_NO_CHATS_LOADED_YET)),
                 );
             }
             for (id, title) in choices {
@@ -248,13 +250,13 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(text_muted())
-                        .child("The text goes into the message box. Nothing is sent."),
+                        .child(tr(keys::Q_MISC_THE_TEXT_GOES_INTO_THE)),
                 )
                 .child(list)
                 .into_any_element();
             let footer = div().flex().justify_end().gap_2().child(
                 Button::new("share-link-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_share_link(cx);
@@ -263,7 +265,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Share to…"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_MISC_SHARE_TO)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

@@ -17,6 +17,7 @@ use quill::drop_modes::{
     plan_drop, zones,
 };
 use quill::folder_archive::{ARCHIVE_SIZE_LIMIT, ArchiveError, build_archive};
+use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
 
 impl QuillApp {
@@ -87,7 +88,10 @@ impl QuillApp {
                     &mut self.composer_ui.pending_attachments,
                     &planned,
                 ) {
-                    Ok(count) => format!("Attached {count} files. Send to upload."),
+                    Ok(count) => tr_with(
+                        keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD,
+                        &[("count", &count.to_string())],
+                    ),
                     Err(note) => note.into(),
                 };
                 cx.notify();
@@ -100,7 +104,7 @@ impl QuillApp {
                 let Some(chat) = self.open_chat_id() else {
                     return;
                 };
-                self.connection.status_note = "Preparing the archive…".into();
+                self.connection.status_note = tr(keys::Q_MISC_PREPARING_THE_ARCHIVE).into();
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
                 quill::local_path::ensure_private_dir(&dir);
@@ -136,7 +140,7 @@ impl QuillApp {
                     &mut self.composer_ui.pending_attachments,
                     &[(path, AttachmentKind::Document)],
                 ) {
-                    Ok(_) => "Attached the archive. Send to upload.".into(),
+                    Ok(_) => tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO).into(),
                     Err(note) => note.into(),
                 };
             }

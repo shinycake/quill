@@ -4,6 +4,7 @@
 //! instead of panicking.
 #![deny(clippy::indexing_slicing)]
 
+use quill::lang::{keys, tr};
 /// Report `error` from opening the main window and end the process.
 #[expect(
     clippy::exit,
@@ -12,7 +13,7 @@
 pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     let detail = error.to_string();
     eprintln!("quill: could not open a window: {detail}");
-    show_alert("Quill could not open a window", &detail);
+    show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &detail);
     std::process::exit(1)
 }
 
@@ -38,7 +39,7 @@ fn show_alert(title: &str, detail: &str) {
     };
     let wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(std::iter::once(0)).collect() };
     let text = wide(&format!("{title}.\n\n{detail}"));
-    let caption = wide("Quill");
+    let caption = wide(tr(keys::Q_MISC_QUILL));
     // SAFETY: both buffers are NUL-terminated UTF-16 that outlive the call,
     // and a null owner window is allowed; MessageBoxW only reads them.
     unsafe {
@@ -58,7 +59,12 @@ fn show_alert(title: &str, detail: &str) {
     use std::process::{Command, Stdio};
     let text = format!("{title}.\n\n{detail}");
     let zenity = Command::new("zenity")
-        .args(["--error", "--no-markup", "--title=Quill", "--text"])
+        .args([
+            "--error",
+            "--no-markup",
+            tr(keys::Q_MISC_TITLE_QUILL),
+            "--text",
+        ])
         .arg(&text)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -67,7 +73,7 @@ fn show_alert(title: &str, detail: &str) {
         return;
     }
     let _ = Command::new("kdialog")
-        .args(["--title", "Quill", "--error"])
+        .args(["--title", tr(keys::Q_MISC_QUILL), "--error"])
         .arg(&text)
         .stdout(Stdio::null())
         .stderr(Stdio::null())

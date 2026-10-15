@@ -7,6 +7,7 @@ use super::app::QuillApp;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::*;
 use quill::chat_wide::{ChatLayout, WIDE_CHAT_WIDTH, is_chat_wide};
+use quill::lang::{keys, tr};
 
 /// The scroller's row inset (`MessageScroller` wraps each row in `px_3`):
 /// rows start this far from the history's left edge, so a column that is
@@ -76,7 +77,7 @@ impl QuillApp {
         (self.history.chat_layout.get() == ChatLayout::Wide).then(|| {
             Checkbox::new("appearance-adaptive-wide")
                 .checked(self.appearance.adaptive_for_wide)
-                .label("Adaptive layout for wide screens")
+                .label(tr(keys::SETTINGS_ADAPTIVE_WIDE))
                 .on_click(cx.listener(|this, &on, _, cx| {
                     this.set_appearance(cx, |a| a.adaptive_for_wide = on);
                     this.history.rows_key = None;

@@ -10,6 +10,7 @@ use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::notify::custom::{MIN_HEIGHT, PHOTO_POS, PHOTO_SIZE};
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -131,7 +132,7 @@ impl NotifyView {
         }
         let state = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Write a message…")
+                .placeholder(tr(keys::Q_MISC_WRITE_A_MESSAGE))
                 .auto_grow(1, 5)
                 .submit_on_enter(true)
         });
@@ -178,7 +179,7 @@ impl NotifyView {
                 .into_any_element()
         };
         let title = if hide_sender {
-            SharedString::from("Quill")
+            SharedString::from(tr(keys::Q_MISC_QUILL))
         } else {
             title
         };
@@ -226,7 +227,7 @@ impl NotifyView {
                         .ghost()
                         .xsmall()
                         .icon(gpui_kit::assets::IconName::X)
-                        .tooltip("Close")
+                        .tooltip(tr(keys::CLOSE))
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
                             this.send(ViewEvent::Close, cx);
@@ -243,7 +244,7 @@ impl NotifyView {
                             Button::new("notify-reply")
                                 .small()
                                 .outline()
-                                .label("Reply")
+                                .label(tr(keys::Q_MISC_REPLY))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     cx.stop_propagation();
                                     this.open_reply(window, cx);
@@ -272,7 +273,7 @@ impl NotifyView {
                     .ghost()
                     .small()
                     .icon(gpui_kit::assets::IconName::Send)
-                    .tooltip("Send")
+                    .tooltip(tr(keys::Q_MISC_SEND))
                     .on_click(cx.listener(|this, _, _, cx| {
                         cx.stop_propagation();
                         this.send_reply(cx);
@@ -367,13 +368,13 @@ impl Render for NotifyView {
                 .hover(|style| style.bg(cx.theme().secondary_hover))
                 .text_sm()
                 .text_color(theme.primary)
-                .child("Hide all")
+                .child(tr(keys::Q_MISC_HIDE_ALL))
                 .on_click(cx.listener(|this, _, _, cx| this.send(ViewEvent::HideAll, cx)))
                 .into_any_element(),
             Content::Sample => root
                 .child(self.render_message(
-                    "Quill".into(),
-                    "This is a sample notification".into(),
+                    tr(keys::Q_MISC_QUILL).into(),
+                    tr(keys::NOTIFICATION_SAMPLE).into(),
                     None,
                     true,
                     cx,

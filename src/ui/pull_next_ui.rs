@@ -15,6 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::pull_next::{
     self as metrics, HintState, IndicatorLayout, IndicatorState, Mode, Phase, PullMachine, Step,
@@ -727,12 +728,16 @@ impl QuillApp {
             .child(
                 Switch::new("media-pref-pull-next")
                     .checked(on)
-                    .accessibility_label("Swipe to the next unread channel")
+                    .accessibility_label(tr(keys::SETTINGS_PULL_TO_NEXT_CHANNEL))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_media_pref(|prefs| prefs.pull_to_next_channel = on, cx);
                     })),
             )
-            .child(div().text_sm().child("Swipe to the next unread channel"))
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr(keys::SETTINGS_PULL_TO_NEXT_CHANNEL)),
+            )
             .into_any_element()
     }
 }

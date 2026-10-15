@@ -14,6 +14,7 @@
 
 use quill::emoji_catalog::{CATEGORIES, RECENT_LIMIT, catalog};
 use quill::ids::{ChatId, FileId};
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::StickerItem;
 use std::path::PathBuf;
 
@@ -180,7 +181,7 @@ pub(crate) fn pinned_panel(archive: bool, saved: Option<Pin>, pinned: Vec<Pin>) 
         pins.push(Pin {
             kind: PinKind::Archive,
             chat_id: None,
-            title: "Archived Chats".into(),
+            title: tr(keys::Q_MISC_ARCHIVED_CHATS).into(),
             photo: None,
             badge: None,
             online: false,
@@ -309,7 +310,7 @@ pub(crate) fn sticker_items(
     let mut items = Vec::new();
     let favorites: Vec<&StickerItem> = favorites.iter().filter(listed).collect();
     if !favorites.is_empty() {
-        items.push(PickerItem::Title("Favorite stickers".into()));
+        items.push(PickerItem::Title(tr(keys::Q_MISC_FAVORITE_STICKERS).into()));
         items.extend(
             favorites
                 .iter()
@@ -322,7 +323,7 @@ pub(crate) fn sticker_items(
         .filter(|item| !favorites.iter().any(|fav| fav.id == item.id))
         .collect();
     if !recent.is_empty() {
-        items.push(PickerItem::Title("Recently used".into()));
+        items.push(PickerItem::Title(tr(keys::Q_MISC_RECENTLY_USED).into()));
         items.extend(
             recent
                 .iter()
@@ -342,7 +343,7 @@ pub(crate) fn sticker_items(
         );
     }
     if items.is_empty() {
-        items.push(PickerItem::Title("No stickers found".into()));
+        items.push(PickerItem::Title(tr(keys::Q_MISC_NO_STICKERS_FOUND).into()));
     }
     items
 }
@@ -351,7 +352,7 @@ pub(crate) fn sticker_items(
 /// category under its title (Quill's catalog and categories, without the
 /// skin tone variants, as in the emoji panel).
 pub(crate) fn emoji_items(recent: &[String]) -> Vec<PickerItem> {
-    let mut items = vec![PickerItem::Title("Recently used".into())];
+    let mut items = vec![PickerItem::Title(tr(keys::Q_MISC_RECENTLY_USED).into())];
     items.extend(
         recent
             .iter()
@@ -403,14 +404,14 @@ impl FormatCommand {
     /// tdesktop `lng_menu_formatting_*` and `lng_info_link_label`.
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Bold => "Bold",
-            Self::Italic => "Italic",
-            Self::Underline => "Underline",
-            Self::Strikethrough => "Strikethrough",
-            Self::Quote => "Quote",
-            Self::Monospace => "Monospace",
-            Self::Clear => "Clear formatting",
-            Self::Link => "Link",
+            Self::Bold => tr(keys::Q_MISC_BOLD),
+            Self::Italic => tr(keys::Q_MISC_ITALIC),
+            Self::Underline => tr(keys::Q_MISC_UNDERLINE),
+            Self::Strikethrough => tr(keys::Q_MISC_STRIKETHROUGH),
+            Self::Quote => tr(keys::Q_MISC_QUOTE),
+            Self::Monospace => tr(keys::Q_MISC_MONOSPACE),
+            Self::Clear => tr(keys::Q_MISC_CLEAR_FORMATTING),
+            Self::Link => tr(keys::Q_MISC_LINK),
         }
     }
 }

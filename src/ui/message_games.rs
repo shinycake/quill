@@ -9,6 +9,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
 use quill::telegram::envelope::{GameContent, ParsedFile};
 use std::collections::{HashMap, HashSet};
@@ -60,7 +61,7 @@ pub(super) fn game_card(
     }
     let title = game.title.trim();
     card = card.child(div().text_sm().font_semibold().child(if title.is_empty() {
-        "Game".to_string()
+        tr(keys::Q_MISC_GAME).to_string()
     } else {
         title.to_string()
     }));
@@ -92,7 +93,7 @@ pub(super) fn game_card(
         .gap_2()
         .child(
             Button::new(format!("game-play-{row_id}"))
-                .label("▶ Play")
+                .label(tr(keys::Q_MISC_PLAY_2))
                 .primary()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.press_game_button(chat_id, message_id, Some(short_name.clone()), cx);
@@ -100,7 +101,7 @@ pub(super) fn game_card(
         )
         .child(
             Button::new(format!("game-scores-{row_id}"))
-                .label("Scores")
+                .label(tr(keys::Q_MISC_SCORES))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.press_scores_button(chat_id, message_id, cx);
@@ -138,7 +139,7 @@ fn game_scores_panel(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Loading scores…"),
+                    .child(tr(keys::Q_MISC_LOADING_SCORES)),
             );
         }
         Some(rows) if rows.is_empty() => {
@@ -146,7 +147,7 @@ fn game_scores_panel(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No scores yet — be the first to play!"),
+                    .child(tr(keys::Q_MISC_NO_SCORES_YET_BE_THE)),
             );
         }
         Some(rows) => {
@@ -155,7 +156,9 @@ fn game_scores_panel(
                     .users
                     .get(&row.user_id)
                     .map(|user| user.display_name())
-                    .unwrap_or_else(|| format!("User {}", row.user_id));
+                    .unwrap_or_else(|| {
+                        tr_with(keys::Q_MISC_USER, &[("user_id", &row.user_id.to_string())])
+                    });
                 panel = panel.child(
                     div()
                         .flex()
@@ -199,7 +202,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|live| live.driver.session.my_user_id);
         let Some(user_id) = user_id else {
-            self.set_status_note("Couldn't load the scores.", cx);
+            self.set_status_note(tr(keys::Q_MISC_COULDNT_LOAD_THE_SCORES), cx);
             return;
         };
         let sent = self.live.as_mut().map(|live| {
@@ -211,7 +214,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.bots.game_scores.remove(&key);
             }
-            self.set_status_note("Couldn't reach Telegram; try again.", cx);
+            self.set_status_note(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
         }
         cx.notify();
     }
@@ -231,7 +234,7 @@ impl QuillApp {
                 .send_game_message(chat_id, bot_user_id, game_short_name)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.set_status_note("Couldn't reach Telegram; try again.", cx);
+            self.set_status_note(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
         }
         cx.notify();
     }

@@ -14,6 +14,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::chat_appearance::{ChatAppearanceKind, FeatureLevels, WallpaperGate, WallpaperLevels};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Whether the chat look dialog may open for a channel or supergroup the
@@ -68,11 +69,15 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.refresh_chat_boost_level(ChatId(chat_id));
                 }
-                "Checking the boost level. Press Apply again in a moment.".to_string()
+                tr(keys::Q_MISC_CHECKING_THE_BOOST_LEVEL_PRESS).to_string()
             }
-            WallpaperGate::NeedsBoosts { required, have } => {
-                format!("Level {required} required. This chat is at level {have}.")
-            }
+            WallpaperGate::NeedsBoosts { required, have } => tr_with(
+                keys::Q_MISC_LEVEL_REQUIRED_THIS_CHAT_IS,
+                &[
+                    ("required", &required.to_string()),
+                    ("have", &have.to_string()),
+                ],
+            ),
         };
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chats_state.background_error = Some(message);
@@ -99,8 +104,8 @@ impl QuillApp {
             .flex_col()
             .gap_1()
             .child(div().font_semibold().child(match kind {
-                ChatAppearanceKind::Channel => "Channel wallpaper",
-                ChatAppearanceKind::Supergroup => "Group wallpaper",
+                ChatAppearanceKind::Channel => tr(keys::Q_MISC_CHANNEL_WALLPAPER),
+                ChatAppearanceKind::Supergroup => tr(keys::Q_MISC_GROUP_WALLPAPER),
             }))
             .children(Self::chat_appearance_lock_note(
                 levels.custom_background,
@@ -110,15 +115,18 @@ impl QuillApp {
             .child(
                 div().flex().child(
                     Button::new("chat-appearance-wallpaper")
-                        .label("Choose wallpaper…")
+                        .label(tr(keys::Q_MISC_CHOOSE_WALLPAPER_2))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_chat_look_dialog(chat_id.0, cx);
                         })),
                 ),
             )
-            .child(div().text_xs().text_color(muted).child(format!(
-                "Choose a chat theme or a wallpaper for everyone in this {word}. Chat themes need level {}.",
-                levels.theme_background
+            .child(div().text_xs().text_color(muted).child(tr_with(
+                keys::Q_MISC_CHOOSE_A_CHAT_THEME_OR,
+                &[
+                    ("word", word),
+                    ("theme_background", &levels.theme_background.to_string()),
+                ],
             )))
             .into_any_element()
     }
@@ -151,7 +159,7 @@ impl QuillApp {
             .gap_1()
             .max_h(px(160.))
             .overflow_y_scroll();
-        for (id, label) in std::iter::once((0, "No pack".to_string())).chain(sets) {
+        for (id, label) in std::iter::once((0, tr(keys::Q_MISC_NO_PACK).to_string())).chain(sets) {
             choices = choices.child(
                 Button::new(format!("chat-appearance-pack-{id}"))
                     .label(label)
@@ -166,7 +174,11 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().font_semibold().child("Group emoji pack"))
+            .child(
+                div()
+                    .font_semibold()
+                    .child(tr(keys::Q_MISC_GROUP_EMOJI_PACK)),
+            )
             .children(Self::chat_appearance_lock_note(
                 features.emoji_pack,
                 level,
@@ -178,14 +190,14 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Loading your emoji packs"),
+                        .child(tr(keys::Q_MISC_LOADING_YOUR_EMOJI_PACKS)),
                 )
             })
             .child(
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("Members can use these emoji in the group even without Premium."),
+                    .child(tr(keys::Q_MISC_MEMBERS_CAN_USE_THESE_EMOJI)),
             )
             .into_any_element()
     }

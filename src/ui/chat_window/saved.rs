@@ -7,6 +7,7 @@ use super::super::app::QuillApp;
 use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::settings::{ChatWindowsState, SavedChatWindow, load_chat_windows, save_chat_windows};
 
 /// Where the windows from last time stand.
@@ -184,12 +185,10 @@ impl QuillApp {
             let yes = app.clone();
             let no = app.clone();
             alert
-                .title("Restore chat windows?")
-                .description(
-                    "Quill can bring back the chat windows that were open last time, now and on every launch.",
-                )
-                .ok_text("Restore")
-                .cancel_text("Not now")
+                .title(tr(keys::Q_MISC_RESTORE_CHAT_WINDOWS))
+                .description(tr(keys::Q_MISC_QUILL_CAN_BRING_BACK_THE))
+                .ok_text(tr(keys::RESTORE_WINDOW))
+                .cancel_text(tr(keys::Q_MISC_NOT_NOW))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = yes.update(cx, |this, cx| this.answer_restore(true, cx));

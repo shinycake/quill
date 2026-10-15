@@ -7,6 +7,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::should_send_on_enter;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::AuthorizationState;
 use zeroize::Zeroize;
 /// Slice A10: 2FA password recovery UI. "Forgot password?" on the auth
@@ -74,10 +75,10 @@ impl QuillApp {
                 self.auth_ui
                     .recovery_code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.connection.status_note = "recovery code sent — check your email".into();
+                self.connection.status_note = tr(keys::Q_MISC_RECOVERY_CODE_SENT_CHECK_YOUR).into();
             }
             Err(_) => {
-                self.connection.status_note = "could not request a recovery code".into();
+                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_REQUEST_A_RECOVERY).into();
             }
         }
         cx.notify();
@@ -108,11 +109,11 @@ impl QuillApp {
                     .recovery_code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.connection.status_note =
-                    "recovery code submitted — 2FA will be removed; re-enable it in Settings"
-                        .into();
+                    tr(keys::Q_MISC_RECOVERY_CODE_SUBMITTED_2FA_WILL).into();
             }
             Err(_) => {
-                self.connection.status_note = "could not submit recovery code".into();
+                self.connection.status_note =
+                    tr(keys::Q_MISC_COULD_NOT_SUBMIT_RECOVERY_CODE).into();
             }
         }
         cx.notify();
@@ -142,18 +143,18 @@ impl QuillApp {
                         .mt_2()
                         .font_semibold()
                         .text_sm()
-                        .child("Recovery code"),
+                        .child(tr(keys::Q_MISC_RECOVERY_CODE)),
                 )
                 .child(
                     Textarea::new(&self.auth_ui.recovery_code_input)
-                        .aria_label("Password recovery code")
+                        .aria_label(tr(keys::Q_MISC_PASSWORD_RECOVERY_CODE))
                         .h(px(40.)),
                 )
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Sent securely to Telegram."),
+                        .child(tr(keys::Q_MISC_SENT_SECURELY_TO_TELEGRAM)),
                 )
                 .child(
                     div()
@@ -163,7 +164,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("submit-recovery-code")
-                                .label("Continue")
+                                .label(tr(keys::CONTINUE))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.submit_recovery_code(window, cx);
@@ -171,7 +172,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("resend-recovery-code")
-                                .label("Resend code")
+                                .label(tr(keys::Q_MISC_RESEND_CODE))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.request_password_recovery(window, cx);
@@ -179,7 +180,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("cancel-recovery")
-                                .label("Back")
+                                .label(tr(keys::Q_MISC_BACK))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.cancel_password_recovery(cx);
@@ -193,13 +194,13 @@ impl QuillApp {
                 .gap_3()
                 .child(
                     Input::new(&self.auth_ui.password_input)
-                        .aria_label("Two-step verification password")
+                        .aria_label(tr(keys::Q_MISC_TWO_STEP_VERIFICATION_PASSWORD))
                         .content_type(InputContentType::Password)
                         .h(px(40.)),
                 )
                 .child(
                     Button::new("submit-password")
-                        .label("Continue")
+                        .label(tr(keys::CONTINUE))
                         .primary()
                         .w_full()
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -209,7 +210,7 @@ impl QuillApp {
                 .when(has_recovery_email, |this| {
                     this.child(
                         Button::new("forgot-password")
-                            .label("Forgot password?")
+                            .label(tr(keys::Q_MISC_FORGOT_PASSWORD))
                             .ghost()
                             .w_full()
                             .on_click(cx.listener(|this, _, window, cx| {

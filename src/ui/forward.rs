@@ -9,6 +9,7 @@ use gpui_kit::*;
 use quill::composer::{ForwardDraft, cancel_forward_draft};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{ForwardResult, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -67,7 +68,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(single) = ForwardDraft::from_message(chat_id, message_id, pending) else {
-            self.connection.status_note = "cannot forward this message".into();
+            self.connection.status_note = tr(keys::Q_MISC_CANNOT_FORWARD_THIS_MESSAGE).into();
             cx.notify();
             return;
         };
@@ -108,9 +109,9 @@ impl QuillApp {
             }
         }
         self.connection.status_note = match self.share.pending_forward.as_ref().map(|d| d.count()) {
-            Some(1) => "1 message selected".into(),
-            Some(n) => format!("{n} messages selected"),
-            None => "selection cleared".into(),
+            Some(1) => tr(keys::Q_MISC_1_MESSAGE_SELECTED).into(),
+            Some(n) => tr_with(keys::Q_MISC_MESSAGES_SELECTED, &[("n", &n.to_string())]),
+            None => tr(keys::Q_MISC_SELECTION_CLEARED).into(),
         };
         cx.notify();
     }
@@ -133,7 +134,7 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.connection.status_note = "forward to…".into();
+        self.connection.status_note = tr(keys::Q_MISC_FORWARD_TO_2).into();
         cx.notify();
     }
 
@@ -143,7 +144,7 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.connection.status_note = "forward picker closed".into();
+        self.connection.status_note = tr(keys::Q_MISC_FORWARD_PICKER_CLOSED).into();
         cx.notify();
     }
 
@@ -156,7 +157,7 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.connection.status_note = "forward cancelled".into();
+        self.connection.status_note = tr(keys::Q_MISC_FORWARD_CANCELLED).into();
         cx.notify();
     }
 
@@ -199,16 +200,22 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let label = result.success_label();
-        let detail = format!(
-            "{} → {} (ids {})",
-            result.from_chat_id.0,
-            result.dest_title,
-            result
-                .forwarded_ids
-                .iter()
-                .map(|id| id.0.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+        let detail = tr_with(
+            keys::Q_MISC_IDS,
+            &[
+                ("0", &result.from_chat_id.0.to_string()),
+                ("dest_title", &result.dest_title.to_string()),
+                (
+                    "join",
+                    &(result
+                        .forwarded_ids
+                        .iter()
+                        .map(|id| id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "))
+                    .to_string(),
+                ),
+            ],
         );
         div()
             .id("forward-success")
@@ -244,7 +251,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("dismiss-forward-success")
-                    .label("Dismiss")
+                    .label(tr(keys::Q_MISC_DISMISS))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.share.forward_result = None;
                         cx.notify();
@@ -259,9 +266,12 @@ impl QuillApp {
     ) -> impl IntoElement {
         let count = draft.count();
         let label = if count == 1 {
-            "1 message selected".to_string()
+            tr(keys::Q_MISC_1_MESSAGE_SELECTED).to_string()
         } else {
-            format!("{count} messages selected")
+            tr_with(
+                keys::Q_MISC_MESSAGES_SELECTED_2,
+                &[("count", &count.to_string())],
+            )
         };
         div()
             .id("forward-selection")
@@ -282,21 +292,21 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("clear-forward-selection")
-                            .label("Clear")
+                            .label(tr(keys::Q_MISC_CLEAR))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.clear_forward(window, cx);
                             })),
                     )
                     .child(
                         Button::new("delete-selection")
-                            .label("Delete")
+                            .label(tr(keys::BOX_DELETE))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.confirm_delete_selection(window, cx);
                             })),
                     )
                     .child(
                         Button::new("open-forward-picker")
-                            .label("Forward")
+                            .label(tr(keys::CONTEXT_FORWARD_MSG))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_forward_picker(window, cx);
                             })),

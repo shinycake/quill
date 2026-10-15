@@ -28,6 +28,7 @@ use gpui_kit::*;
 use quill::auth::{AuthAction, view_for};
 use quill::composer::ComposerShortcut;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, connection_indicator};
 impl Render for QuillApp {
@@ -607,7 +608,10 @@ impl Render for QuillApp {
             // states get a presence dot plus their per-state label
             // (slice parity:platform-reconnect-states).
             .when(connection == Some(ConnectionIndicator::Offline), |this| {
-                this.child(Alert::warning("connection-indicator", "Waiting for network…").banner())
+                this.child(
+                    Alert::warning("connection-indicator", tr(keys::Q_MISC_WAITING_FOR_NETWORK))
+                        .banner(),
+                )
             })
             .when_some(
                 connection.and_then(|c| match c {

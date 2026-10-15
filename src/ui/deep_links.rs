@@ -14,6 +14,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::state::{DeepLinkAction, DeepLinkState};
 use quill::telegram::envelope::AuthorizationState;
 use std::cell::RefCell;
@@ -162,8 +163,8 @@ impl QuillApp {
                 .driver
                 .select_search_chat(chat_id, &text, reply, now_ms)
             {
-                Ok(_) => "opened link".into(),
-                Err(_) => "couldn't open the chat".into(),
+                Ok(_) => tr(keys::Q_MISC_OPENED_LINK).into(),
+                Err(_) => tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT).into(),
             };
             // Jump to the linked message / post once the chat is open.
             let jump_to = match action {
@@ -184,7 +185,7 @@ impl QuillApp {
                     .jump_to_replied_message(MessageId::from_server_id(message_id))
                     .is_err()
             {
-                self.connection.status_note = "opened chat, couldn't jump to the message".into();
+                self.connection.status_note = tr(keys::Q_MISC_OPENED_CHAT_COULDNT_JUMP_TO).into();
             }
         }
         self.dismiss_cross_chat_state(chat_id, cx);
@@ -262,9 +263,12 @@ impl QuillApp {
                     if channel { "subscribers" } else { "members" }
                 )));
             if request {
-                body = body.child(div().text_sm().text_color(text_muted()).child(
-                    "Joining sends a request. An admin must approve it before you can enter.",
-                ));
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(text_muted())
+                        .child(tr(keys::Q_MISC_JOINING_SENDS_A_REQUEST_AN)),
+                );
             }
             let footer = div()
                 .flex()
@@ -272,7 +276,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("deep-link-invite-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.cancel_deep_link_invite(cx);
@@ -281,7 +285,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("deep-link-invite-join")
-                        .label("Join")
+                        .label(tr(keys::Q_MISC_JOIN))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             if let Some(DeepLinkState::InvitePreview { generation, .. }) =
@@ -297,9 +301,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if channel {
-                    "Join channel?"
+                    tr(keys::Q_MISC_JOIN_CHANNEL)
                 } else {
-                    "Join group?"
+                    tr(keys::Q_MISC_JOIN_GROUP)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -349,7 +353,9 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Telegram link"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_MISC_TELEGRAM_LINK,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {

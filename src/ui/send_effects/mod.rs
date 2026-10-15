@@ -31,6 +31,7 @@ use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::message_effects_picker::picker_offered;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -212,7 +213,7 @@ impl QuillApp {
     pub(super) fn expand_send_effects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let search = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Search")
+                .placeholder(tr(keys::Q_MISC_SEARCH))
                 .submit_on_enter(false)
         });
         let changed = cx.subscribe_in(&search, window, |this, state, event: &InputEvent, _, cx| {
@@ -336,7 +337,7 @@ impl QuillApp {
             } else {
                 let silent = silent.clone();
                 menu.item(
-                    PopupMenuItem::new("Send without sound")
+                    PopupMenuItem::new(tr(keys::SEND_SILENT_MESSAGE))
                         .on_click(move |_, window, cx| silent(window, cx)),
                 )
             };

@@ -6,6 +6,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use std::time::Duration;
 
 /// Where macOS stands on one kind of capture device.
@@ -87,23 +88,31 @@ fn request(_camera: bool, done: std::sync::mpsc::Sender<bool>) {
 #[cfg(windows)]
 fn denied_note(camera: bool) -> String {
     let (device, pane) = if camera {
-        ("camera", "Camera")
+        ("camera", tr(keys::Q_MISC_CAMERA))
     } else {
-        ("microphone", "Microphone")
+        ("microphone", tr(keys::Q_MISC_MICROPHONE))
     };
-    format!(
-        "Quill needs access to your {device} to record. Turn on \"Let desktop apps access \
-         your {device}\" in Settings › Privacy & security › {pane}."
+    tr_with(
+        keys::Q_MISC_QUILL_NEEDS_ACCESS_TO_YOUR,
+        &[
+            ("device", &device.to_string()),
+            ("device_2", &device.to_string()),
+            ("pane", &pane.to_string()),
+        ],
     )
 }
 
 #[cfg(not(windows))]
 fn denied_note(camera: bool) -> String {
     let device = if camera { "camera" } else { "microphone" };
-    let pane = if camera { "Camera" } else { "Microphone" };
-    format!(
-        "Quill needs access to your {device} to record. \
-         Allow it in System Settings → Privacy & Security → {pane}."
+    let pane = if camera {
+        tr(keys::Q_MISC_CAMERA)
+    } else {
+        tr(keys::Q_MISC_MICROPHONE)
+    };
+    tr_with(
+        keys::Q_MISC_QUILL_NEEDS_ACCESS_TO_YOUR_2,
+        &[("device", device), ("pane", pane)],
     )
 }
 

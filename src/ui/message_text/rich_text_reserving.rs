@@ -1,6 +1,7 @@
 //! Methods moved out of `message_text.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 /// `rich_text_line`, optionally ending the last paragraph with `reserve`
 /// of invisible trailing space. The bubble paints its time/receipt footer
@@ -622,7 +623,7 @@ pub(in crate::ui) fn link_preview_card(
     div()
         .id(("link-preview", row_id))
         .role(Role::Link)
-        .aria_label("Open link preview")
+        .aria_label(tr(keys::Q_MISC_OPEN_LINK_PREVIEW))
         .tab_index(0)
         .mt_2()
         .px_2()
@@ -743,14 +744,18 @@ pub(in crate::ui) fn message_rich_block(
     if !rich.is_full {
         stack = stack.child(
             Button::new(format!("rich-load-full-{row_id}"))
-                .label("Load full message")
+                .label(tr(keys::Q_MISC_LOAD_FULL_MESSAGE))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
                         match live.driver.fetch_full_rich_message(chat_id, message_id) {
-                            Ok(_) => this.connection.status_note = "loading full message…".into(),
+                            Ok(_) => {
+                                this.connection.status_note =
+                                    tr(keys::Q_MISC_LOADING_FULL_MESSAGE).into()
+                            }
                             Err(_) => {
-                                this.connection.status_note = "could not load full message".into()
+                                this.connection.status_note =
+                                    tr(keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE).into()
                             }
                         }
                         cx.notify();
@@ -773,8 +778,8 @@ pub(super) fn rich_media_tile(
     // No caption → label the tile with the media kind instead of an empty row.
     let label = if caption.is_empty() {
         match kind {
-            "photo" => "Photo",
-            "video" => "Video",
+            "photo" => tr(keys::Q_MISC_PHOTO),
+            "video" => tr(keys::MEDIA_VIDEO),
             _ => kind,
         }
         .to_string()

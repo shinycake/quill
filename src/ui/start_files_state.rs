@@ -6,6 +6,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::composer::{SendKeyMode, should_send_on_enter};
+use quill::lang::{keys, tr};
 use std::path::PathBuf;
 
 pub(crate) struct StartFilesUi {
@@ -20,7 +21,7 @@ impl StartFilesUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search chats")
+                .placeholder(tr(keys::Q_MISC_SEARCH_CHATS))
                 .auto_grow(1, 1)
                 .submit_on_enter(true)
         });

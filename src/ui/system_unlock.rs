@@ -5,6 +5,7 @@
 //! so the switch is not offered (docs/decisions/codex-local-passcode.md).
 #![deny(clippy::indexing_slicing)]
 
+use quill::lang::{keys, tr};
 use std::sync::mpsc::{Receiver, channel};
 
 #[cfg(target_os = "macos")]
@@ -80,10 +81,10 @@ pub fn label() -> &'static str {
     #[cfg(target_os = "macos")]
     {
         if mac::biometrics() {
-            return "Unlock with Touch ID";
+            return tr(keys::SETTINGS_USE_TOUCHID);
         }
     }
-    "Unlock with system password"
+    tr(keys::SETTINGS_USE_SYSTEMPWD)
 }
 
 /// Show the prompt; the answer arrives on the receiver.

@@ -18,6 +18,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{HistoryMessage, Session, Translation};
 use quill::telegram::envelope::ChatKind;
 use quill::text::TextEntity;
@@ -163,7 +164,10 @@ impl QuillApp {
             &Self::appearance_paths(),
             &self.settings.translate.prefs,
         ) {
-            self.connection.status_note = format!("Couldn't save translation settings: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_MISC_COULDNT_SAVE_TRANSLATION_SETTINGS,
+                &[("err", &err.to_string())],
+            );
         }
         cx.notify();
     }
@@ -248,7 +252,7 @@ impl QuillApp {
     ) {
         let search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search")
+                .placeholder(tr(keys::Q_MISC_SEARCH))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -426,10 +430,7 @@ impl QuillApp {
         let mut accepted = true;
         self.set_translate_prefs(cx, |prefs| accepted = prefs.toggle_skip(code, &ui));
         if let Some(dialog) = self.settings.translate.dialog.as_mut() {
-            dialog.note = (!accepted).then(|| {
-                "Please choose at least one language so that it can be used as the \"Translate to\" language."
-                    .to_string()
-            });
+            dialog.note = (!accepted).then(|| tr(keys::TRANSLATE_SETTINGS_ONE).to_string());
         }
         cx.notify();
     }
@@ -452,24 +453,24 @@ impl QuillApp {
             let Some(view) = this.settings.translate.dialog.as_ref().map(|d| d.view) else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Translate"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::CONTEXT_TRANSLATE)))
                     .on_close(on_close);
             };
             let (title, body, footer) = match view {
                 TranslateView::Box => (
-                    "Translate",
+                    tr(keys::CONTEXT_TRANSLATE),
                     this.translate_box_body(cx),
                     this.translate_box_footer(cx),
                 ),
                 TranslateView::ChooseTo => (
-                    "Language",
+                    tr(keys::Q_MISC_LANGUAGE),
                     this.translate_language_list(false, cx),
-                    this.translate_back_footer("Cancel", cx),
+                    this.translate_back_footer(tr(keys::CANCEL), cx),
                 ),
                 TranslateView::SkipList => (
-                    "Do Not Translate",
+                    tr(keys::TRANSLATE_SETTINGS_CHOOSE),
                     this.translate_language_list(true, cx),
-                    this.translate_back_footer("Done", cx),
+                    this.translate_back_footer(tr(keys::BOX_DONE), cx),
                 ),
             };
             dialog
@@ -526,7 +527,7 @@ impl QuillApp {
             .justify_between()
             .child(
                 Button::new("translate-language")
-                    .label("Language")
+                    .label(tr(keys::Q_MISC_LANGUAGE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(dialog) = this.settings.translate.dialog.as_mut() {
@@ -621,7 +622,7 @@ impl QuillApp {
             .when(collapsed, |row| {
                 row.child(
                     Button::new("translate-show-original")
-                        .label("Show")
+                        .label(tr(keys::Q_MISC_SHOW))
                         .ghost()
                         .small()
                         .text_color(accent())
@@ -657,10 +658,11 @@ impl QuillApp {
                         .icon(gpui_kit::assets::IconName::Copy)
                         .ghost()
                         .small()
-                        .accessibility_label("Copy translation")
+                        .accessibility_label(tr(keys::Q_MISC_COPY_TRANSLATION))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                            this.connection.status_note = "translation copied".into();
+                            this.connection.status_note =
+                                tr(keys::Q_MISC_TRANSLATION_COPIED).into();
                             cx.notify();
                         })),
                 )
@@ -686,7 +688,7 @@ impl QuillApp {
                 .italic()
                 .text_sm()
                 .text_color(muted)
-                .child("Translate failed.")
+                .child(tr(keys::TRANSLATE_BOX_ERROR))
                 .into_any_element(),
             // Pending, or the request could not be sent (demo, offline):
             // tdesktop's placeholder is a few grey lines.
@@ -755,7 +757,11 @@ impl QuillApp {
                     .role(gpui_kit::Role::Button)
                     .aria_label(format!(
                         "{english}{}",
-                        if selected { ", selected" } else { "" }
+                        if selected {
+                            tr(keys::Q_MISC_SELECTED)
+                        } else {
+                            ""
+                        }
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if multi {
@@ -782,7 +788,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 Textarea::new(&dialog.search)
-                    .aria_label("Search languages")
+                    .aria_label(tr(keys::Q_MISC_SEARCH_LANGUAGES))
                     .h(px(40.)),
             )
             .when_some(dialog.note.clone(), |column, note| {

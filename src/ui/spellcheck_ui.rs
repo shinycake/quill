@@ -25,6 +25,7 @@ use super::chat_theme::danger;
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::spell_dict::EngineKind;
 use quill::spellcheck::{
     LearnedIn, MAX_SUGGESTIONS, Misspelling, SpellChecker, is_typing_word, shift_misspellings,
@@ -55,18 +56,21 @@ impl SpellInfo {
     pub(super) fn hint(&self) -> String {
         let engine = match self.kind {
             EngineKind::System if cfg!(target_os = "macos") => {
-                "using the macOS spelling languages and dictionary"
+                tr(keys::Q_MISC_USING_THE_MACOS_SPELLING_LANGUAGES)
             }
-            EngineKind::System => "using the Windows spelling languages",
-            EngineKind::Hunspell => "using Hunspell dictionaries",
+            EngineKind::System => tr(keys::Q_MISC_USING_THE_WINDOWS_SPELLING_LANGUAGES),
+            EngineKind::Hunspell => tr(keys::Q_MISC_USING_HUNSPELL_DICTIONARIES),
             EngineKind::None if cfg!(windows) => {
-                return "Windows spell checking isn't available for your languages. Add a language with spelling support in Settings > Time & language.".to_string();
+                return tr(keys::Q_MISC_WINDOWS_SPELL_CHECKING_ISNT_AVAILABLE).to_string();
             }
             EngineKind::None => {
-                return "No spelling dictionaries found. Install Hunspell dictionaries (for example hunspell-en-us) or put .dic and .aff files in ~/.local/share/hunspell.".to_string();
+                return tr(keys::Q_MISC_NO_SPELLING_DICTIONARIES_FOUND_INSTALL).to_string();
             }
         };
-        format!("Underline misspelled words in the composer, {engine}.")
+        tr_with(
+            keys::Q_MISC_UNDERLINE_MISSPELLED_WORDS_IN_THE,
+            &[("engine", engine)],
+        )
     }
 }
 
@@ -166,7 +170,10 @@ impl QuillApp {
         if let Err(err) =
             quill::settings::save_spellcheck_languages(&Self::appearance_paths(), &prefs)
         {
-            self.connection.status_note = format!("Couldn't save spelling languages: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_MISC_COULDNT_SAVE_SPELLING_LANGUAGES,
+                &[("err", &err.to_string())],
+            );
         }
         let (checker, info) = Self::build_spell_engine(&chosen);
         checker.set_app_words(self.spell.checker.app_words());
@@ -358,7 +365,10 @@ impl QuillApp {
         };
         if let Err(err) = quill::settings::save_spellcheck_words(&Self::appearance_paths(), &prefs)
         {
-            self.connection.status_note = format!("Couldn't save dictionary: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_MISC_COULDNT_SAVE_DICTIONARY,
+                &[("err", &err.to_string())],
+            );
         }
     }
 
@@ -456,7 +466,10 @@ fn spelling_menu_items(
     if checker.is_correct(&word) {
         if checker.is_learned(&word) {
             menu = menu
-                .menu("Remove from Dictionary", Box::new(SpellingUnlearn { word }))
+                .menu(
+                    tr(keys::Q_MISC_REMOVE_FROM_DICTIONARY),
+                    Box::new(SpellingUnlearn { word }),
+                )
                 .separator();
         }
         return menu;
@@ -464,7 +477,7 @@ fn spelling_menu_items(
     let suggestions = checker.suggestions(&word, MAX_SUGGESTIONS);
     if suggestions.is_empty() {
         menu = menu.menu_with_disabled(
-            "No Guesses Found",
+            tr(keys::Q_MISC_NO_GUESSES_FOUND),
             true,
             Box::new(SpellingIgnore { word: word.clone() }),
         );
@@ -482,25 +495,26 @@ fn spelling_menu_items(
     }
     menu.separator()
         .menu(
-            "Add to Dictionary",
+            tr(keys::Q_MISC_ADD_TO_DICTIONARY),
             Box::new(SpellingLearn { word: word.clone() }),
         )
-        .menu("Ignore", Box::new(SpellingIgnore { word }))
+        .menu(tr(keys::Q_MISC_IGNORE), Box::new(SpellingIgnore { word }))
         .separator()
 }
 
 /// The kit's default input menu items (a custom builder replaces them).
 fn edit_menu_items(menu: NativeMenu, has_selection: bool, plain_paste: bool) -> NativeMenu {
     let menu = menu
-        .menu_with_disabled("Cut", !has_selection, Box::new(Cut))
-        .menu_with_disabled("Copy", !has_selection, Box::new(Copy))
-        .menu("Paste", Box::new(Paste));
+        .menu_with_disabled(tr(keys::Q_MISC_CUT), !has_selection, Box::new(Cut))
+        .menu_with_disabled(tr(keys::Q_MISC_COPY), !has_selection, Box::new(Copy))
+        .menu(tr(keys::Q_MISC_PASTE), Box::new(Paste));
     let menu = if plain_paste {
         QuillApp::paste_plain_menu_item(menu)
     } else {
         menu
     };
-    menu.separator().menu("Select All", Box::new(SelectAll))
+    menu.separator()
+        .menu(tr(keys::MAC_MENU_SELECT_ALL), Box::new(SelectAll))
 }
 
 /// One underline per visual line a word occupies (a word longer than the

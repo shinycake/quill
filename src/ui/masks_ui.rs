@@ -14,6 +14,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{MasksTab, StickersPurpose};
 use quill::telegram::envelope::StickerSetInfo;
@@ -26,7 +27,7 @@ const STRIP_LIMIT: usize = 24;
 /// "1 mask", "3 masks" (tdesktop `lng_masks_count`).
 fn masks_count_label(count: i32) -> String {
     if count == 1 {
-        "1 mask".into()
+        tr(keys::Q_MISC_1_MASK).into()
     } else {
         format!("{count} masks")
     }
@@ -46,7 +47,7 @@ impl QuillApp {
     pub(super) fn open_mask_sets(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_mask_sets().is_err() {
-                self.connection.status_note = "Could not load masks.".into();
+                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS).into();
             }
         } else if let Some(masks) = self.masks_panel_mut() {
             masks.open = true;
@@ -65,7 +66,7 @@ impl QuillApp {
     fn select_mask_tab(&mut self, tab: MasksTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.select_mask_tab(tab).is_err() {
-                self.connection.status_note = "Could not load masks.".into();
+                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS).into();
             }
         } else if let Some(masks) = self.masks_panel_mut() {
             masks.tab = tab;
@@ -89,9 +90,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note =
                 match live.driver.change_mask_set(set_id, installed, archived) {
-                    Ok(Some(_)) => "Updating masks…".into(),
-                    Ok(None) => "A mask update is already in progress.".into(),
-                    Err(_) => "Could not update masks.".into(),
+                    Ok(Some(_)) => tr(keys::Q_MISC_UPDATING_MASKS).into(),
+                    Ok(None) => tr(keys::Q_MISC_A_MASK_UPDATE_IS_ALREADY).into(),
+                    Err(_) => tr(keys::Q_MISC_COULD_NOT_UPDATE_MASKS).into(),
                 };
         }
         cx.notify();
@@ -100,9 +101,9 @@ impl QuillApp {
     fn reorder_mask_set(&mut self, source: i64, target: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.reorder_mask_set(source, target) {
-                Ok(Some(_)) => "Saving mask order…".into(),
-                Ok(None) => "Mask order unchanged or an update is in progress.".into(),
-                Err(_) => "Could not reorder masks.".into(),
+                Ok(Some(_)) => tr(keys::Q_MISC_SAVING_MASK_ORDER).into(),
+                Ok(None) => tr(keys::Q_MISC_MASK_ORDER_UNCHANGED_OR_AN).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_REORDER_MASKS).into(),
             };
         }
         cx.notify();
@@ -128,7 +129,7 @@ impl QuillApp {
                 actions = actions
                     .child(
                         Button::new(format!("mask-remove-confirm-{set_id}"))
-                            .label("Remove")
+                            .label(tr(keys::BOX_REMOVE))
                             .small()
                             .disabled(busy)
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -137,7 +138,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("mask-remove-cancel-{set_id}"))
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .small()
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -152,7 +153,7 @@ impl QuillApp {
                 actions = actions
                     .child(
                         Button::new(format!("mask-archive-{set_id}"))
-                            .label("Archive")
+                            .label(tr(keys::Q_MISC_ARCHIVE))
                             .small()
                             .ghost()
                             .disabled(busy)
@@ -162,7 +163,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(format!("mask-remove-{set_id}"))
-                            .label("Remove")
+                            .label(tr(keys::BOX_REMOVE))
                             .small()
                             .ghost()
                             .disabled(busy)
@@ -177,7 +178,7 @@ impl QuillApp {
             MasksTab::Archived => {
                 actions = actions.child(
                     Button::new(format!("mask-restore-{set_id}"))
-                        .label("Restore")
+                        .label(tr(keys::Q_MISC_RESTORE))
                         .small()
                         .disabled(busy)
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -206,7 +207,7 @@ impl QuillApp {
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(if set.size == 0 {
-                                "Loading…".to_string()
+                                tr(keys::Q_MISC_LOADING).to_string()
                             } else {
                                 masks_count_label(set.size)
                             }),
@@ -243,8 +244,8 @@ impl QuillApp {
         });
         let mut tabs = div().flex().gap_2();
         for (title, tab) in [
-            ("Masks", MasksTab::Installed),
-            ("Archived", MasksTab::Archived),
+            (tr(keys::SWITCH_MASKS), MasksTab::Installed),
+            (tr(keys::Q_MISC_ARCHIVED), MasksTab::Archived),
         ] {
             tabs = tabs.child(
                 Button::new(format!("mask-sets-tab-{title}"))
@@ -271,29 +272,30 @@ impl QuillApp {
         if panel.tab == MasksTab::Archived && panel.archived_has_more {
             rows = rows.child(
                 Button::new("more-archived-masks")
-                    .label("More archived masks")
+                    .label(tr(keys::Q_MISC_MORE_ARCHIVED_MASKS))
                     .ghost()
                     .disabled(loading)
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut()
                             && live.driver.more_archived_masks().is_err()
                         {
-                            this.connection.status_note = "Could not load more masks.".into();
+                            this.connection.status_note =
+                                tr(keys::Q_MISC_COULD_NOT_LOAD_MORE_MASKS).into();
                         }
                         cx.notify();
                     })),
             );
         }
         let status = if panel.failed {
-            Some("Could not load masks. Switch tabs to retry.")
+            Some(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS_SWITCH))
         } else if busy {
-            Some("Updating masks…")
+            Some(tr(keys::Q_MISC_UPDATING_MASKS))
         } else if loading || !loaded {
-            Some("Loading masks…")
+            Some(tr(keys::Q_MISC_LOADING_MASKS))
         } else if sets.is_empty() {
             Some(match panel.tab {
-                MasksTab::Installed => "No masks yet. Add some from a mask link.",
-                MasksTab::Archived => "No archived masks.",
+                MasksTab::Installed => tr(keys::Q_MISC_NO_MASKS_YET_ADD_SOME),
+                MasksTab::Archived => tr(keys::Q_MISC_NO_ARCHIVED_MASKS),
             })
         } else {
             None
@@ -327,7 +329,7 @@ impl QuillApp {
             let body = Rc::new(RefCell::new(Some(this.mask_sets_panel(cx))));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Masks"))
+                .title(crate::ui::shell::dialog_title(tr(keys::SWITCH_MASKS)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         content.child(
@@ -367,9 +369,9 @@ impl QuillApp {
             .take(STRIP_LIMIT)
             .collect();
         let empty_note = if panel.failed {
-            Some("Could not load masks.")
+            Some(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS))
         } else if panel.installed_loaded && panel.installed.is_empty() {
-            Some("No masks installed.")
+            Some(tr(keys::Q_MISC_NO_MASKS_INSTALLED))
         } else {
             None
         };
@@ -383,10 +385,15 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().text_xs().font_semibold().child("Masks"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .child(tr(keys::SWITCH_MASKS)),
+                    )
                     .child(
                         Button::new("photo-editor-manage-masks")
-                            .label("Manage masks")
+                            .label(tr(keys::Q_MISC_MANAGE_MASKS))
                             .small()
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| this.open_mask_sets(cx))),

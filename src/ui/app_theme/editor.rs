@@ -16,6 +16,7 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::app_theme::{KeyGroup, Palette, PaletteKey, ThemeFile, ThemeId, hex_string, store};
+use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -67,7 +68,9 @@ pub(crate) fn rows_matching(query: &str) -> Vec<(KeyGroup, Vec<EditorRow>)> {
         .iter()
         .filter_map(|&group| {
             let mut rows = Vec::new();
-            if group == KeyGroup::Window && (matches("chat background") || matches("background")) {
+            if group == KeyGroup::Window
+                && (matches(tr(keys::Q_MISC_CHAT_BACKGROUND)) || matches("background"))
+            {
                 rows.push(EditorRow::Background);
             }
             rows.extend(
@@ -132,13 +135,13 @@ impl QuillApp {
         let taken = self.custom_theme_names();
         let initial_name = editing
             .clone()
-            .unwrap_or_else(|| store::unique_name("My theme", &taken));
+            .unwrap_or_else(|| store::unique_name(tr(keys::Q_MISC_MY_THEME), &taken));
         let name = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Theme name")
+                .placeholder(tr(keys::THEME_EDITOR_NAME))
                 .default_value(initial_name)
         });
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MISC_SEARCH)));
         let selected = EditorRow::Key(PaletteKey::WindowBgActive);
         let picker = cx.new(|cx| {
             ColorPickerState::new(window, cx)
@@ -272,8 +275,11 @@ impl QuillApp {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.connection.status_note = match written {
-                    Ok(()) => "Theme exported.".into(),
-                    Err(err) => format!("Couldn't export the theme: {err}"),
+                    Ok(()) => tr(keys::Q_MISC_THEME_EXPORTED).into(),
+                    Err(err) => tr_with(
+                        keys::Q_MISC_COULDNT_EXPORT_THE_THEME,
+                        &[("err", &err.to_string())],
+                    ),
                 };
                 cx.notify();
             });
@@ -292,7 +298,7 @@ impl QuillApp {
         let rgba = editor.color(row);
         let (label, key) = match row {
             EditorRow::Key(key) => (key.label(), key.name()),
-            EditorRow::Background => ("Chat background", "background"),
+            EditorRow::Background => (tr(keys::Q_MISC_CHAT_BACKGROUND_2), "background"),
         };
         let id = match row {
             EditorRow::Key(key) => SharedString::from(format!("theme-key-{}", key.name())),
@@ -359,18 +365,25 @@ impl QuillApp {
         let query = editor.search.read(cx).value().to_string();
         let groups = rows_matching(&query);
         let muted = cx.theme().muted_foreground;
-        let mut body =
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(div().text_xs().text_color(muted).child(
-                    "Pick a row, then its color. Changes show across Quill as you make them.",
-                ))
-                .child(Input::new(&editor.name).aria_label("Theme name"))
-                .child(Input::new(&editor.search).aria_label("Search colors"));
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MISC_PICK_A_ROW_THEN_ITS)),
+            )
+            .child(Input::new(&editor.name).aria_label(tr(keys::THEME_EDITOR_NAME)))
+            .child(Input::new(&editor.search).aria_label(tr(keys::Q_MISC_SEARCH_COLORS)));
         if groups.is_empty() {
-            body = body.child(div().text_sm().text_color(muted).child("No colors match."));
+            body = body.child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(keys::Q_MISC_NO_COLORS_MATCH)),
+            );
         }
         for (group, rows) in groups {
             let mut list = div().flex().flex_col().gap_0p5();
@@ -407,7 +420,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("theme-editor-export")
-                        .label("Export…")
+                        .label(tr(keys::Q_MISC_EXPORT))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             let Some(editor) = this.settings.app_theme.editor.as_ref() else {
@@ -421,7 +434,7 @@ impl QuillApp {
                 .child(div().flex_1())
                 .child(
                     Button::new("theme-editor-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_theme_editor(cx);
@@ -430,7 +443,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("theme-editor-save")
-                        .label("Save theme")
+                        .label(tr(keys::THEME_EDITOR_SAVE_TITLE))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             if this.save_theme_editor(cx) {
@@ -443,7 +456,7 @@ impl QuillApp {
                 // No dim: the app behind shows the changes live.
                 .overlay(false)
                 .width(px(460.))
-                .title(crate::ui::shell::dialog_title("Edit color palette"))
+                .title(crate::ui::shell::dialog_title(tr(keys::THEME_EDITOR_TITLE)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         let body = body

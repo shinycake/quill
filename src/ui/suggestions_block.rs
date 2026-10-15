@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::chatlist_suggestions::{Suggestion, copy, pick};
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     fn current_suggestion(&self) -> Option<Suggestion> {
@@ -23,7 +24,8 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.hide_suggestion(suggestion).is_err() {
-                    self.connection.status_note = "Could not hide the suggestion".into();
+                    self.connection.status_note =
+                        tr(keys::Q_MISC_COULD_NOT_HIDE_THE_SUGGESTION).into();
                 }
             }
             None => {
@@ -93,7 +95,9 @@ impl QuillApp {
             let name = session
                 .user(user_id)
                 .map(|user| user.display_name())
-                .unwrap_or_else(|| format!("User {user_id}"));
+                .unwrap_or_else(|| {
+                    tr_with(keys::Q_MISC_USER, &[("user_id", &user_id.to_string())])
+                });
             let when = quill::chatlist_suggestions::birthday_label(entry, today.month, today.day);
             block = block.child(
                 div()
@@ -121,7 +125,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child("Contacts celebrating yesterday, today or tomorrow."),
+                        .child(tr(keys::Q_MISC_CONTACTS_CELEBRATING_YESTERDAY_TODAY_OR)),
                 )
                 .into_any_element(),
         )
@@ -182,7 +186,7 @@ impl QuillApp {
                         .pt_1()
                         .child(
                             Button::new("suggestion-phone-yes")
-                                .label("Yes")
+                                .label(tr(keys::BOX_YES))
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.dismiss_suggestion(&keep, cx);
@@ -190,7 +194,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("suggestion-phone-no")
-                                .label("No")
+                                .label(tr(keys::BOX_NO))
                                 .small()
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -219,8 +223,8 @@ impl QuillApp {
                         .icon(IconName::X)
                         .ghost()
                         .small()
-                        .tooltip("Hide")
-                        .accessibility_label("Hide suggestion")
+                        .tooltip(tr(keys::Q_MISC_HIDE))
+                        .accessibility_label(tr(keys::Q_MISC_HIDE_SUGGESTION))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.dismiss_suggestion(&dismiss, cx);
                         })),

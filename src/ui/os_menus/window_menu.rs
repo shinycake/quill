@@ -16,6 +16,7 @@ use super::{
 };
 use crate::ui::actions::ToggleFullscreen;
 use gpui_kit::{Action, MenuItem};
+use quill::lang::{keys, tr};
 
 /// What the Window menu's enabled items depend on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -40,12 +41,12 @@ pub(crate) enum WindowCommand {
 impl WindowCommand {
     pub(crate) fn title(self) -> &'static str {
         match self {
-            Self::FullScreen => "Toggle Full Screen",
-            Self::Contacts => "Contacts",
-            Self::AddContact => "Add Contact",
-            Self::NewGroup => "New Group",
-            Self::NewChannel => "New Channel",
-            Self::ShowMain => "Show Quill",
+            Self::FullScreen => tr(keys::Q_MISC_TOGGLE_FULL_SCREEN),
+            Self::Contacts => tr(keys::MENU_CONTACTS),
+            Self::AddContact => tr(keys::Q_MISC_ADD_CONTACT),
+            Self::NewGroup => tr(keys::Q_MISC_NEW_GROUP),
+            Self::NewChannel => tr(keys::Q_MISC_NEW_CHANNEL),
+            Self::ShowMain => tr(keys::Q_MISC_SHOW_QUILL),
         }
     }
 

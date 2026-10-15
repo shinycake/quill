@@ -8,6 +8,7 @@
 use super::document::DocOrigin;
 use super::*;
 use crate::ui::image_budget::{Fit, sized_media};
+use quill::lang::{keys, tr, tr_with};
 
 /// `msgFileThumbLayout.thumbSize`.
 const THUMB: f32 = 72.0;
@@ -41,25 +42,25 @@ pub(in crate::ui) fn thumbed_document_chip(
         let done = file.map(|f| f.local.downloaded_size).unwrap_or(0);
         match (done > 0, size > 0) {
             (true, true) => format!("{} of {}", format_bytes(done), format_bytes(size)),
-            _ => "Downloading…".to_string(),
+            _ => tr(keys::Q_MISC_DOWNLOADING).to_string(),
         }
     } else if failed_now {
-        "Download failed".to_string()
+        tr(keys::Q_MISC_DOWNLOAD_FAILED).to_string()
     } else {
         format_bytes(size)
     };
     let name = if doc.file_name.is_empty() {
-        "Document".to_string()
+        tr(keys::ATTACH_DOCUMENT).to_string()
     } else {
         doc.file_name.clone()
     };
     // `lng_media_open_with` / `lng_media_download` / `lng_media_cancel`.
     let link_label = if downloading_now {
-        "Cancel"
+        tr(keys::MEDIA_CANCEL)
     } else if ready {
-        "Open with"
+        tr(keys::MEDIA_OPEN_WITH)
     } else {
-        "Download"
+        tr(keys::MEDIA_DOWNLOAD)
     };
     let open = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
         if downloading_now {
@@ -144,11 +145,14 @@ pub(in crate::ui) fn thumbed_document_chip(
             .child(Icon::new(icon).size(px(20.)).text_color(gpui_kit::white()))
     });
     let open_label = if ready {
-        format!("Open {name}")
+        tr_with(keys::Q_MISC_OPEN_2, &[("name", &name.to_string())])
     } else if downloading_now {
-        format!("Cancel download of {name}")
+        tr_with(
+            keys::Q_MISC_CANCEL_DOWNLOAD_OF,
+            &[("name", &name.to_string())],
+        )
     } else {
-        format!("Download {name}")
+        tr_with(keys::Q_MISC_DOWNLOAD, &[("name", &name.to_string())])
     };
     let picture_box = div()
         .id(("doc-thumb", row_id))

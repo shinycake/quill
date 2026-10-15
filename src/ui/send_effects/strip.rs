@@ -6,6 +6,7 @@ use super::super::app::QuillApp;
 use super::{SendMenu, tracker};
 use gpui_kit::component::*;
 use gpui_kit::{TestSupportExt, *};
+use quill::lang::{keys, tr, tr_with};
 use quill::message_effects::MessageEffect;
 use quill::message_effects_picker::{
     STRIP_HEIGHT, STRIP_IMAGE, STRIP_SIZE, STRIP_SKIP, cell_sticker, picker_lists, strip_layout,
@@ -111,7 +112,10 @@ impl QuillApp {
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover_bg))
                     .role(Role::Button)
-                    .aria_label(format!("Effect {}", effect.emoji))
+                    .aria_label(tr_with(
+                        keys::Q_MISC_EFFECT,
+                        &[("emoji", &effect.emoji.to_string())],
+                    ))
                     .child(self.effect_cell_picture(effect, STRIP_IMAGE, motion, cx))
                     .child(tracker(move |bounds| {
                         cells.cells.borrow_mut().insert(id, bounds);
@@ -146,7 +150,7 @@ impl QuillApp {
                     .text_color(muted)
                     .hover(move |style| style.bg(hover_bg))
                     .role(Role::Button)
-                    .aria_label("Show all effects")
+                    .aria_label(tr(keys::Q_MISC_SHOW_ALL_EFFECTS))
                     .child(Icon::new(gpui_kit::assets::IconName::ChevronDown).size(px(16.)))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.expand_send_effects(window, cx);
@@ -171,7 +175,7 @@ impl QuillApp {
                         .text_xs()
                         .text_center()
                         .text_color(muted)
-                        .child("Add an animated effect"),
+                        .child(tr(keys::EFFECT_ADD_TITLE)),
                 )
                 .child(row)
                 .child(tracker(move |bounds| areas.strip.set(Some(bounds))))

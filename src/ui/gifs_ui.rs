@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::RequestPurpose;
 
@@ -18,8 +19,8 @@ impl QuillApp {
         let query = self.pickers.gif_search_input.read(cx).value().to_string();
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.search_gifs(&query) {
-                Ok(_) => "searching GIFs…".into(),
-                Err(_) => "could not search GIFs".into(),
+                Ok(_) => tr(keys::Q_MISC_SEARCHING_GIFS).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS).into(),
             };
         }
         cx.notify();
@@ -35,8 +36,8 @@ impl QuillApp {
     fn more_gif_search_results(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.more_gif_search_results() {
-                Ok(_) => "loading more GIFs…".into(),
-                Err(_) => "could not load more GIFs".into(),
+                Ok(_) => tr(keys::Q_MISC_LOADING_MORE_GIFS).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_LOAD_MORE_GIFS).into(),
             };
         }
         cx.notify();
@@ -44,8 +45,8 @@ impl QuillApp {
     fn save_gif_pick(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.set_gif_saved(file_id, true) {
-                Ok(_) => "saving GIF…".into(),
-                Err(_) => "could not save GIF".into(),
+                Ok(_) => tr(keys::Q_MISC_SAVING_GIF).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_SAVE_GIF).into(),
             };
         }
         cx.notify();
@@ -89,7 +90,10 @@ impl QuillApp {
                     .rounded_md()
                     .object_fit(ObjectFit::Cover)
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Send GIF {}", index + 1))
+                    .aria_label(tr_with(
+                        keys::Q_MISC_SEND_GIF,
+                        &[("index_1", &(index + 1).to_string())],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -125,7 +129,10 @@ impl QuillApp {
                     .items_center()
                     .justify_center()
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Send GIF {}", index + 1))
+                    .aria_label(tr_with(
+                        keys::Q_MISC_SEND_GIF,
+                        &[("index_1", &(index + 1).to_string())],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
@@ -154,9 +161,9 @@ impl QuillApp {
                         let owner = owner.clone();
                         menu.item(
                             PopupMenuItem::new(if saved {
-                                "Remove from saved GIFs"
+                                tr(keys::Q_MISC_REMOVE_FROM_SAVED_GIFS)
                             } else {
-                                "Save GIF"
+                                tr(keys::Q_MISC_SAVE_GIF)
                             })
                             .disabled(pending)
                             .on_click(move |_, _, cx| {
@@ -179,7 +186,7 @@ impl QuillApp {
         if panel.search_mode && !panel.search_next_offset.is_empty() {
             grid = grid.child(
                 Button::new("gif-search-more")
-                    .label("More GIFs")
+                    .label(tr(keys::Q_MISC_MORE_GIFS))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.more_gif_search_results(cx))),
             );
@@ -200,15 +207,15 @@ impl QuillApp {
             );
         }
         let status = if panel.loading || panel.search_loading {
-            Some("Loading GIFs…")
+            Some(tr(keys::Q_MISC_LOADING_GIFS))
         } else if panel.search_failed && panel.search_mode && panel.search_bot_username.is_empty() {
-            Some("GIF search is not available yet. Try again after connecting.")
+            Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
         } else if panel.failed || panel.search_mode && panel.search_failed {
-            Some("Could not update GIFs. Try the action again.")
+            Some(tr(keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY))
         } else if panel.visible_animations().is_empty() && panel.search_mode {
-            Some("No GIFs found.")
+            Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else if panel.animations.is_empty() && !panel.search_mode {
-            Some("No saved GIFs yet. Right-click a GIF to save it.")
+            Some(tr(keys::Q_MISC_NO_SAVED_GIFS_YET_RIGHT))
         } else {
             None
         };
@@ -239,8 +246,8 @@ impl QuillApp {
                         .child(
                             Button::new("close-gif-picker")
                                 .icon(gpui_kit::assets::IconName::X)
-                                .tooltip("Close")
-                                .accessibility_label("Close")
+                                .tooltip(tr(keys::CLOSE))
+                                .accessibility_label(tr(keys::CLOSE))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.close_gif_panel(cx);
@@ -255,7 +262,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Textarea::new(&self.pickers.gif_search_input)
-                            .aria_label("Search GIFs")
+                            .aria_label(tr(keys::GIFS_SEARCH))
                             .flex_1()
                             .min_w_0(),
                     )
@@ -263,8 +270,8 @@ impl QuillApp {
                         Button::new("gif-search-submit")
                             .icon(gpui_kit::assets::IconName::Search)
                             .ghost()
-                            .tooltip("Search GIFs")
-                            .accessibility_label("Search GIFs")
+                            .tooltip(tr(keys::GIFS_SEARCH))
+                            .accessibility_label(tr(keys::GIFS_SEARCH))
                             .on_click(cx.listener(|this, _, _, cx| this.search_gif_picker(cx))),
                     ),
             )
@@ -274,7 +281,7 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         Button::new("gif-saved-tab")
-                            .label("Saved")
+                            .label(tr(keys::Q_MISC_SAVED))
                             .ghost()
                             .small()
                             .selected(!searching)
@@ -282,7 +289,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("gif-trending-tab")
-                            .label("Trending")
+                            .label(tr(keys::Q_MISC_TRENDING))
                             .ghost()
                             .small()
                             .selected(searching)
@@ -295,11 +302,10 @@ impl QuillApp {
                     ),
             )
             .when(!panel.search_provider.is_empty(), |body| {
-                body.child(
-                    div()
-                        .text_xs()
-                        .child(format!("GIF search: {}", panel.search_provider)),
-                )
+                body.child(div().text_xs().child(tr_with(
+                    keys::Q_MISC_GIF_SEARCH,
+                    &[("search_provider", &panel.search_provider.to_string())],
+                )))
             })
             .when_some(status, |body, status| {
                 body.child(

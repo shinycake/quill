@@ -19,6 +19,7 @@ use super::{Preview, SendMenu, tracker};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
 use gpui_kit::{TestSupportExt, *};
+use quill::lang::{keys, tr};
 use quill::message_effects_picker::{
     PREVIEW_BUTTON, PREVIEW_SIDE, PREVIEW_TOGGLE_MS, can_send, preview_origin,
 };
@@ -289,16 +290,22 @@ fn sample_bubble(badge_cell: Div) -> AnyElement {
                                 .font_semibold()
                                 .text_color(accent())
                                 .truncate()
-                                .child("Bob Harris"),
+                                .child(tr(keys::Q_MISC_BOB_HARRIS)),
                         )
-                        .child(div().truncate().child("Do you know what time it is?")),
+                        .child(div().truncate().child(tr(keys::SETTINGS_CHAT_MESSAGE))),
                 ),
         )
         .child(
             div()
                 .flex()
                 .items_end()
-                .child(div().flex_1().min_w_0().truncate().child("Good morning"))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(tr(keys::Q_MISC_GOOD_MORNING)),
+                )
                 .child(
                     div()
                         .flex()
@@ -338,7 +345,7 @@ fn send_button(effect_id: i64, cx: &mut Context<QuillApp>) -> AnyElement {
         .text_color(accent())
         .hover(move |style| style.bg(hover_bg))
         .role(Role::Button)
-        .child("Send with Effect")
+        .child(tr(keys::EFFECT_SEND))
         .swallow_press()
         .on_click(cx.listener(move |this, _, window, cx| {
             this.send_with_effect(effect_id, false, window, cx);

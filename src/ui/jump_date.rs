@@ -11,6 +11,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{now_unix, weekday_name};
 use quill::search_filters::{SearchMediaKind, YearMonth, day_number, local_day_number};
 use std::cell::RefCell;
@@ -27,7 +28,7 @@ impl QuillApp {
     pub(super) fn open_jump_date_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_history_calendar().is_err() {
-                self.connection.status_note = "open a chat to jump to a date".into();
+                self.connection.status_note = tr(keys::Q_MISC_OPEN_A_CHAT_TO_JUMP).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_history_calendar(now_unix());
@@ -60,8 +61,8 @@ impl QuillApp {
     fn jump_date_pick(&mut self, day: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.jump_to_date(day) {
-                Ok(_) => "jumping to date…".into(),
-                Err(_) => "could not jump to that date".into(),
+                Ok(_) => tr(keys::Q_MISC_JUMPING_TO_DATE).into(),
+                Err(_) => tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_history_calendar();
@@ -84,7 +85,9 @@ impl QuillApp {
             let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Jump to date"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::Q_MISC_JUMP_TO_DATE,
+                )))
                 .content(move |content, _, _| {
                     let body = body
                         .borrow_mut()
@@ -119,8 +122,8 @@ impl QuillApp {
                     .icon(gpui_kit::assets::IconName::ChevronLeft)
                     .ghost()
                     .disabled(!can_prev)
-                    .tooltip("Previous month")
-                    .accessibility_label("Previous month")
+                    .tooltip(tr(keys::Q_MISC_PREVIOUS_MONTH))
+                    .accessibility_label(tr(keys::Q_MISC_PREVIOUS_MONTH))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.jump_date_month(month.prev(), cx);
                     })),
@@ -138,8 +141,8 @@ impl QuillApp {
                     .icon(gpui_kit::assets::IconName::ChevronRight)
                     .ghost()
                     .disabled(!can_next)
-                    .tooltip("Next month")
-                    .accessibility_label("Next month")
+                    .tooltip(tr(keys::Q_MISC_NEXT_MONTH))
+                    .accessibility_label(tr(keys::Q_MISC_NEXT_MONTH))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.jump_date_month(month.next(), cx);
                     })),
@@ -175,7 +178,7 @@ impl QuillApp {
                 let future = dn > today;
                 let marked = calendar.day(dn).is_some();
                 let label = if marked {
-                    format!("{day} (has messages)")
+                    tr_with(keys::Q_MISC_HAS_MESSAGES, &[("day", &day.to_string())])
                 } else {
                     day.to_string()
                 };
@@ -216,13 +219,16 @@ impl QuillApp {
         }
 
         let hint = if calendar.loading {
-            "Loading days…".to_string()
+            tr(keys::Q_MISC_LOADING_DAYS).to_string()
         } else if calendar.media == SearchMediaKind::All {
-            "Pick a day to see its first message.".to_string()
+            tr(keys::Q_MISC_PICK_A_DAY_TO_SEE).to_string()
         } else {
-            format!(
-                "Days with {} are highlighted.",
-                calendar.media.label().to_lowercase()
+            tr_with(
+                keys::Q_MISC_DAYS_WITH_ARE_HIGHLIGHTED,
+                &[(
+                    "to_lowercase",
+                    &(calendar.media.label().to_lowercase()).to_string(),
+                )],
             )
         };
         let note = self.session().and_then(|s| s.search.date_jump_note.clone());

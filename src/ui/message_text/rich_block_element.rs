@@ -1,6 +1,7 @@
 //! Methods moved out of `message_text.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 /// M2: one `RichBlock` as an element. `None` for invisible/unsupported
 /// blocks (`pageBlockAnchor`, unknown types) — parsed, never rendered as
@@ -318,7 +319,7 @@ pub(in crate::ui) fn preview_thumb(
     let label = if file_is_downloading(file_id, files, downloading) {
         "…"
     } else {
-        "Preview"
+        tr(keys::Q_MISC_PREVIEW)
     };
     frame
         .apply(div().id(("link-preview-ph", row_id)))
@@ -346,7 +347,10 @@ pub(in crate::ui) fn reply_quote_strip(
     div()
         .id(("reply-quote", row_id.0 as u64))
         .role(Role::Button)
-        .aria_label(format!("Go to replied message: {preview}"))
+        .aria_label(tr_with(
+            keys::Q_MISC_GO_TO_REPLIED_MESSAGE,
+            &[("preview", &preview.to_string())],
+        ))
         .tab_index(0)
         .mt_1()
         .mb_1()
@@ -366,7 +370,7 @@ pub(in crate::ui) fn reply_quote_strip(
                 .text_xs()
                 .font_medium()
                 .text_color(accent())
-                .child("Reply"),
+                .child(tr(keys::Q_MISC_REPLY)),
         )
         .child(div().text_xs().truncate().text_color(text_primary()).child(
             super::super::bidi_line::one_line_plain(super::super::search_ui::one_line_preview(

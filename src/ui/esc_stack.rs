@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 /// One dismissible layer: how to tell it is open, and how to close it.
 pub(super) struct EscLayer {
@@ -135,7 +136,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.story_reply_recording_active(),
         |app, _, cx| {
             if app.recording.locked {
-                app.connection.status_note = "recording is locked — unlock it or use Cancel".into();
+                app.connection.status_note = tr(keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT).into();
                 cx.notify();
             } else {
                 app.request_discard_recording(cx);
@@ -212,7 +213,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!("recording", |app| app.recording_active(), |app, _, cx| {
         if app.recording.locked {
-            app.connection.status_note = "recording is locked — unlock it or use Cancel".into();
+            app.connection.status_note = tr(keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT).into();
             cx.notify();
         } else {
             app.request_discard_recording(cx);
@@ -362,7 +363,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.share.forward_result.is_some(),
         |app, _, cx| {
             app.share.forward_result = None;
-            app.connection.status_note = "forward result dismissed".into();
+            app.connection.status_note = tr(keys::Q_MISC_FORWARD_RESULT_DISMISSED).into();
             cx.notify();
         }
     ),

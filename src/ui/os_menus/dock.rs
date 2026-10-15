@@ -8,6 +8,7 @@
 //! `MenuItem`s and their actions are built in `super`.
 
 use quill::ids::AccountKey;
+use quill::lang::{keys, tr};
 
 /// tdesktop `kMaxLength`: longer account names are cut and get an ellipsis.
 pub(crate) const MAX_NAME_UTF16: usize = 30;
@@ -72,14 +73,14 @@ impl DockEntry {
     pub(crate) fn label(&self) -> String {
         match self {
             Self::Separator => String::new(),
-            Self::ProfilesHeader => "Profiles".into(),
+            Self::ProfilesHeader => tr(keys::Q_MISC_PROFILES).into(),
             Self::Account { label, .. } => label.clone(),
-            Self::ToggleNotifications { on: true } => "Disable notifications".into(),
-            Self::ToggleNotifications { on: false } => "Enable notifications".into(),
-            Self::Previous { .. } => "Previous".into(),
-            Self::PlayPause { paused: true } => "Resume".into(),
-            Self::PlayPause { paused: false } => "Pause".into(),
-            Self::Next { .. } => "Next".into(),
+            Self::ToggleNotifications { on: true } => tr(keys::Q_MISC_DISABLE_NOTIFICATIONS).into(),
+            Self::ToggleNotifications { on: false } => tr(keys::Q_MISC_ENABLE_NOTIFICATIONS).into(),
+            Self::Previous { .. } => tr(keys::MAC_MENU_PLAYER_PREVIOUS).into(),
+            Self::PlayPause { paused: true } => tr(keys::MAC_MENU_PLAYER_RESUME).into(),
+            Self::PlayPause { paused: false } => tr(keys::MAC_MENU_PLAYER_PAUSE).into(),
+            Self::Next { .. } => tr(keys::MAC_MENU_PLAYER_NEXT).into(),
         }
     }
 }

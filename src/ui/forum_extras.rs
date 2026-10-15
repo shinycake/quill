@@ -9,6 +9,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::ForumTopic;
 
 /// One extra topic action.
@@ -91,43 +92,43 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "topics need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION).into();
             cx.notify();
             return;
         };
         let (result, done, failed) = match extra {
             TopicExtra::CopyLink => (
                 live.driver.copy_forum_topic_link(chat_id, topic_id),
-                "fetching topic link…",
-                "could not get the topic link",
+                tr(keys::Q_MISC_FETCHING_TOPIC_LINK),
+                tr(keys::Q_MISC_COULD_NOT_GET_THE_TOPIC),
             ),
             TopicExtra::MovePinnedUp => (
                 live.driver.move_pinned_forum_topic(chat_id, topic_id, true),
-                "pinned topics reordered",
-                "could not reorder pinned topics",
+                tr(keys::Q_MISC_PINNED_TOPICS_REORDERED),
+                tr(keys::Q_MISC_COULD_NOT_REORDER_PINNED_TOPICS),
             ),
             TopicExtra::MovePinnedDown => (
                 live.driver
                     .move_pinned_forum_topic(chat_id, topic_id, false),
-                "pinned topics reordered",
-                "could not reorder pinned topics",
+                tr(keys::Q_MISC_PINNED_TOPICS_REORDERED),
+                tr(keys::Q_MISC_COULD_NOT_REORDER_PINNED_TOPICS),
             ),
             TopicExtra::ReadMentions => (
                 live.driver.read_all_forum_topic_mentions(chat_id, topic_id),
-                "mentions marked as read",
-                "could not mark mentions as read",
+                tr(keys::Q_MISC_MENTIONS_MARKED_AS_READ),
+                tr(keys::Q_MISC_COULD_NOT_MARK_MENTIONS_AS),
             ),
             TopicExtra::ReadReactions => (
                 live.driver
                     .read_all_forum_topic_reactions(chat_id, topic_id),
-                "reactions marked as read",
-                "could not mark reactions as read",
+                tr(keys::Q_MISC_REACTIONS_MARKED_AS_READ),
+                tr(keys::Q_MISC_COULD_NOT_MARK_REACTIONS_AS),
             ),
             TopicExtra::UnpinMessages => (
                 live.driver
                     .unpin_all_forum_topic_messages(chat_id, topic_id),
-                "unpinning messages…",
-                "could not unpin messages",
+                tr(keys::Q_MISC_UNPINNING_MESSAGES),
+                tr(keys::Q_MISC_COULD_NOT_UNPIN_MESSAGES),
             ),
             TopicExtra::Edit => return,
         };
@@ -155,42 +156,50 @@ pub(super) fn add_topic_extras(
             })
     };
     if extras.edit {
-        menu = menu.item(item("Edit Topic", IconName::Pencil, TopicExtra::Edit));
+        menu = menu.item(item(
+            tr(keys::FORUM_TOPIC_EDIT),
+            IconName::Pencil,
+            TopicExtra::Edit,
+        ));
     }
     if extras.link {
         menu = menu.item(item(
-            "Copy Topic Link",
+            tr(keys::Q_MISC_COPY_TOPIC_LINK),
             IconName::Link,
             TopicExtra::CopyLink,
         ));
     }
     if extras.up {
-        menu = menu.item(item("Move Up", IconName::ArrowUp, TopicExtra::MovePinnedUp));
+        menu = menu.item(item(
+            tr(keys::Q_MISC_MOVE_UP),
+            IconName::ArrowUp,
+            TopicExtra::MovePinnedUp,
+        ));
     }
     if extras.down {
         menu = menu.item(item(
-            "Move Down",
+            tr(keys::Q_MISC_MOVE_DOWN),
             IconName::ArrowDown,
             TopicExtra::MovePinnedDown,
         ));
     }
     if extras.mentions {
         menu = menu.item(item(
-            "Mark all mentions as read",
+            tr(keys::CONTEXT_MARK_READ_MENTIONS_ALL),
             IconName::AtSign,
             TopicExtra::ReadMentions,
         ));
     }
     if extras.reactions {
         menu = menu.item(item(
-            "Read all reactions",
+            tr(keys::Q_MISC_READ_ALL_REACTIONS),
             IconName::Heart,
             TopicExtra::ReadReactions,
         ));
     }
     if extras.unpin_messages {
         menu = menu.item(item(
-            "Unpin all messages",
+            tr(keys::Q_MISC_UNPIN_ALL_MESSAGES),
             IconName::PinOff,
             TopicExtra::UnpinMessages,
         ));

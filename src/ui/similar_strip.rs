@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{InfoPanelTarget, SIMILAR_CHANNELS_PREMIUM_LIMIT, Session, SimilarTile};
 use quill::telegram::envelope::ChatKind;
@@ -119,7 +120,7 @@ pub(super) fn similar_channels_strip(
                             format!("+{}", compact_count(*count)),
                             cx,
                         )),
-                        "More Channels".to_string(),
+                        tr(keys::SIMILAR_CHANNELS_MORE).to_string(),
                         true,
                         cx,
                     )
@@ -137,13 +138,18 @@ pub(super) fn similar_channels_strip(
             .px_3()
             .pt_2()
             .pb_1()
-            .child(div().text_sm().font_semibold().child("Similar channels"))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(tr(keys::SIMILAR_CHANNELS_TITLE)),
+            )
             .when(overflows, |this| {
                 this.child(
                     Button::new(("similar-view-all", row_id))
                         .ghost()
                         .xsmall()
-                        .label("View all")
+                        .label(tr(keys::SIMILAR_CHANNELS_VIEW_ALL))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_more_similar_channels(chat_id, false, window, cx);
                         })),
@@ -209,8 +215,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if locked {
-            self.connection.status_note = format!(
-                "Subscribe to Telegram Premium to unlock up to {SIMILAR_CHANNELS_PREMIUM_LIMIT} similar channels."
+            self.connection.status_note = tr_with(
+                keys::Q_MISC_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO,
+                &[(
+                    "similar_channels_premium_limit",
+                    &SIMILAR_CHANNELS_PREMIUM_LIMIT.to_string(),
+                )],
             );
             cx.notify();
             return;

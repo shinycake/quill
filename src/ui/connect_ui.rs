@@ -5,6 +5,7 @@ use quill::auth::view_for;
 use quill::connect::{ConnectBlocker, ConnectGate, evaluate_gate, start_prepared_live_connect};
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
+use quill::lang::{keys, tr};
 use quill::platform::live_secret_store;
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
@@ -45,19 +46,21 @@ fn prepare_startup(
 
 pub(super) fn live_status_for(auth: &AuthorizationState) -> String {
     match auth {
-        AuthorizationState::WaitTdlibParameters => "Connecting to Telegram…".into(),
-        AuthorizationState::WaitPhoneNumber => "enter phone number".into(),
-        AuthorizationState::WaitCode { .. } => "enter the verification code from Telegram".into(),
+        AuthorizationState::WaitTdlibParameters => tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM).into(),
+        AuthorizationState::WaitPhoneNumber => tr(keys::Q_MISC_ENTER_PHONE_NUMBER).into(),
+        AuthorizationState::WaitCode { .. } => {
+            tr(keys::Q_MISC_ENTER_THE_VERIFICATION_CODE_FROM).into()
+        }
         AuthorizationState::WaitPassword { .. } => {
-            "enter your two-step verification password".into()
+            tr(keys::Q_MISC_ENTER_YOUR_TWO_STEP_VERIFICATION).into()
         }
         AuthorizationState::Ready => "".into(),
         AuthorizationState::WaitOtherDeviceConfirmation { .. } => {
-            "Confirm the sign-in on another device.".into()
+            tr(keys::Q_MISC_CONFIRM_THE_SIGN_IN_ON).into()
         }
-        AuthorizationState::LoggingOut => "signing out".into(),
-        AuthorizationState::Closing => "Closing…".into(),
-        AuthorizationState::Closed => "session closed".into(),
+        AuthorizationState::LoggingOut => tr(keys::Q_MISC_SIGNING_OUT).into(),
+        AuthorizationState::Closing => tr(keys::Q_MISC_CLOSING).into(),
+        AuthorizationState::Closed => tr(keys::Q_MISC_SESSION_CLOSED).into(),
         other => view_for(other).body,
     }
 }
@@ -69,7 +72,7 @@ impl super::app::QuillApp {
         let credentials = self.credentials.clone();
         self.connection.status = ConnectUiStatus::Live;
         self.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
-        self.connection.status_note = "Connecting to Telegram…".into();
+        self.connection.status_note = tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM).into();
         let connect = cx
             .background_executor()
             .spawn(async move { prepare_startup(credentials) });

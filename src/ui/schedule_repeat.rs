@@ -16,6 +16,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::schedule::{repeat_choice_for, repeat_choices};
 
 impl QuillApp {
@@ -52,7 +53,7 @@ impl QuillApp {
         let shown = repeat_choice_for(if premium { repeat } else { 0 }, test_dc);
         let owner = cx.entity().downgrade();
         let button = Button::new("schedule-repeat")
-            .label(format!("Repeat: {}", shown.label))
+            .label(tr_with(keys::Q_MISC_REPEAT, &[("label", shown.label)]))
             .icon(if premium {
                 gpui_kit::assets::IconName::ChevronDown
             } else {
@@ -60,7 +61,7 @@ impl QuillApp {
             })
             .ghost()
             .small()
-            .accessibility_label(format!("Repeat: {}", shown.label));
+            .accessibility_label(tr_with(keys::Q_MISC_REPEAT, &[("label", shown.label)]));
         let button = if premium {
             button
                 .dropdown_menu(move |mut menu, _, _| {
@@ -89,7 +90,7 @@ impl QuillApp {
             button
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.connection.status_note =
-                        "Subscribe to Telegram Premium to schedule repeating messages.".into();
+                        tr(keys::Q_MISC_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO_2).into();
                     cx.notify();
                 }))
                 .into_any_element()

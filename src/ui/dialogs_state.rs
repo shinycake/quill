@@ -4,6 +4,7 @@
 use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 pub(crate) struct DialogUi {
     /// Profile layer opened from a sender avatar (tdesktop's
@@ -77,7 +78,7 @@ impl DialogUi {
         // Phase C2i: comment field for the call-rating detail card.
         let rating_comment_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("What went wrong? (optional)")
+                .placeholder(tr(keys::Q_MISC_WHAT_WENT_WRONG_OPTIONAL))
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
