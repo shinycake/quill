@@ -101,6 +101,7 @@ mod session_drafts;
 mod session_files;
 mod session_forum;
 mod session_main_profile_tab;
+mod session_video_chat_caps;
 pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;
