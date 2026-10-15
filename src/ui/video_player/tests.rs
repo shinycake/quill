@@ -9,7 +9,7 @@ use super::{
     WATCH_INTERVAL, trace_line,
 };
 use gpui_kit::{EntityId, RenderImage};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -19,6 +19,9 @@ thread_local! {
     /// order.
     static NEXT_BACKEND: RefCell<std::collections::VecDeque<Box<dyn Backend>>> =
         const { RefCell::new(std::collections::VecDeque::new()) };
+    /// A test on this thread queued a scripted backend: clips count as
+    /// playable (`supported`) even without the FFmpeg shim.
+    static SCRIPTED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Take the next scripted backend a test installed, if any (`open_backend`).
@@ -26,9 +29,15 @@ pub(super) fn take_scripted_backend() -> Option<Box<dyn Backend>> {
     NEXT_BACKEND.with(|next| next.borrow_mut().pop_front())
 }
 
+/// Whether this test (its thread) plays on scripted backends.
+pub(super) fn scripted_backends() -> bool {
+    SCRIPTED.with(Cell::get)
+}
+
 /// Hand `script` to the next `VideoPlayer::open` on this thread.
 #[cfg(feature = "demo-capture")]
 fn queue_backend(script: &Rc<RefCell<Script>>) {
+    SCRIPTED.with(|scripted| scripted.set(true));
     NEXT_BACKEND.with(|next| {
         next.borrow_mut()
             .push_back(Box::new(Scripted(script.clone())))

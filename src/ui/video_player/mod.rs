@@ -713,8 +713,13 @@ fn open_backend(path: &Path, purpose: Purpose) -> Result<Box<dyn Backend>, Playe
 }
 
 /// Whether clips can play in this process: always on macOS (AVPlayer);
-/// elsewhere once the bundled FFmpeg shim loads.
+/// elsewhere once the bundled FFmpeg shim loads. In tests, also once the
+/// test scripted a backend (CI has no shim).
 pub(crate) fn supported() -> bool {
+    #[cfg(test)]
+    if tests::scripted_backends() {
+        return true;
+    }
     cfg!(target_os = "macos") || quill::video_decode::available()
 }
 
