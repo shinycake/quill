@@ -10,28 +10,38 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, day_label, now_unix};
 use quill::state::{InviteLinkFetch, InviteLinkList};
 
 /// "requested to join October 6" for a pending request row.
 pub(crate) fn link_request_label(date: i32) -> String {
     if date <= 0 {
-        return "requested to join".into();
+        return tr(keys::Q_OPS_REQUESTED_TO_JOIN).into();
     }
     let at = civil_local(i64::from(date));
     let now = civil_local(now_unix());
-    format!("requested to join {}", day_label(&at, &now))
+    tr_with(
+        keys::Q_OPS_REQUESTED_TO_JOIN_2,
+        &[("day_label", &(day_label(&at, &now)).to_string())],
+    )
 }
 
 /// "3 pending" style count for the Requests button.
 pub(crate) fn requests_button_label(count: i32) -> String {
-    format!("Requests ({count})")
+    tr_with(keys::Q_OPS_REQUESTS, &[("count", &count.to_string())])
 }
 
 /// Uses line of a link row: "4 uses" or "4/10 uses".
 pub(crate) fn link_uses_label(member_count: i32, member_limit: i32) -> String {
     if member_limit > 0 {
-        format!("{member_count}/{member_limit} uses")
+        tr_with(
+            keys::Q_OPS_USES,
+            &[
+                ("member_count", &member_count.to_string()),
+                ("member_limit", &member_limit.to_string()),
+            ],
+        )
     } else {
         format!("{member_count} uses")
     }
@@ -42,9 +52,9 @@ impl QuillApp {
         self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.open_admin_invite_links(chat_id, admin) {
                 Ok(_) => String::new(),
-                Err(_) => "could not load invite links".into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_LOAD_INVITE_LINKS).into(),
             },
-            None => "invite links need a live connection (demo)".into(),
+            None => tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).into(),
         };
         cx.notify();
     }
@@ -69,20 +79,23 @@ impl QuillApp {
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
-                .title(format!("Delete revoked links by {name}?"))
-                .description("This can't be undone.")
-                .ok_text("Delete")
-                .cancel_text("Cancel")
+                .title(tr_with(
+                    keys::Q_OPS_DELETE_REVOKED_LINKS_BY,
+                    &[("name", &name.to_string())],
+                ))
+                .description(tr(keys::Q_OPS_THIS_CANT_BE_UNDONE))
+                .ok_text(tr(keys::GROUP_INVITE_CONTEXT_DELETE))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
                         this.connection.status_note = match this.live.as_mut() {
                             Some(live) => match live.driver.delete_all_revoked_admin_links(chat_id)
                             {
-                                Ok(_) => "deleting revoked links…".into(),
-                                Err(_) => "could not delete revoked links".into(),
+                                Ok(_) => tr(keys::Q_OPS_DELETING_REVOKED_LINKS).into(),
+                                Err(_) => tr(keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS).into(),
                             },
-                            None => "invite links need a live connection (demo)".into(),
+                            None => tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).into(),
                         };
                         cx.notify();
                     });
@@ -133,7 +146,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new((id, 1000 + index as u64))
-                            .label("Copy")
+                            .label(tr(keys::GROUP_INVITE_CONTEXT_COPY))
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -172,8 +185,8 @@ impl QuillApp {
                         .icon(gpui_kit::assets::IconName::ChevronLeft)
                         .ghost()
                         .xsmall()
-                        .tooltip("Back")
-                        .accessibility_label("Back")
+                        .tooltip(tr(keys::Q_OPS_BACK))
+                        .accessibility_label(tr(keys::Q_OPS_BACK))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.close_admin_links(chat_id, cx);
                         })),
@@ -186,19 +199,28 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child(format!("Links by {name}")),
+                        .child(tr_with(
+                            keys::Q_OPS_LINKS_BY,
+                            &[("name", &name.to_string())],
+                        )),
                 ),
         );
         block = match &state.active {
-            InviteLinkFetch::Loading => {
-                block.child(div().text_xs().text_color(muted).child("Loading…"))
-            }
+            InviteLinkFetch::Loading => block.child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::Q_OPS_LOADING)),
+            ),
             InviteLinkFetch::Failed(message) => {
                 block.child(div().text_xs().text_color(muted).child(message.clone()))
             }
-            InviteLinkFetch::Loaded(list) => {
-                block.child(self.admin_link_rows("admin-link", list, "No active links.", cx))
-            }
+            InviteLinkFetch::Loaded(list) => block.child(self.admin_link_rows(
+                "admin-link",
+                list,
+                tr(keys::Q_OPS_NO_ACTIVE_LINKS),
+                cx,
+            )),
         };
         if let InviteLinkFetch::Loaded(list) = &state.revoked
             && !list.links.is_empty()
@@ -216,12 +238,12 @@ impl QuillApp {
                                 .text_xs()
                                 .font_semibold()
                                 .text_color(muted)
-                                .child("Revoked links"),
+                                .child(tr(keys::GROUP_INVITE_REVOKED_TITLE)),
                         )
                         .child(div().flex_1())
                         .child(
                             Button::new("admin-links-delete-revoked")
-                                .label("Delete all")
+                                .label(tr(keys::GROUP_INVITE_CONTEXT_DELETE_ALL))
                                 .ghost()
                                 .small()
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -262,9 +284,9 @@ impl QuillApp {
         self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.process_link_join_requests(chat_id, approve) {
                 Ok(_) => String::new(),
-                Err(_) => "could not process join requests".into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_PROCESS_JOIN_REQUESTS).into(),
             },
-            None => "join requests need a live connection (demo)".into(),
+            None => tr(keys::Q_OPS_JOIN_REQUESTS_NEED_A_LIVE).into(),
         };
         cx.notify();
     }
@@ -301,7 +323,12 @@ impl QuillApp {
         if state.requests.is_empty() && state.loading {
             return Some(
                 block
-                    .child(div().text_xs().text_color(muted).child("Loading…"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_OPS_LOADING)),
+                    )
                     .into_any_element(),
             );
         }
@@ -313,7 +340,7 @@ impl QuillApp {
                             state
                                 .error
                                 .clone()
-                                .unwrap_or_else(|| "No pending requests".into()),
+                                .unwrap_or_else(|| tr(keys::Q_OPS_NO_PENDING_REQUESTS).into()),
                         ),
                     )
                     .into_any_element(),
@@ -335,7 +362,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("link-requests-approve-all")
-                        .label("Add all")
+                        .label(tr(keys::Q_OPS_ADD_ALL))
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -344,7 +371,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("link-requests-dismiss-all")
-                        .label("Dismiss all")
+                        .label(tr(keys::Q_OPS_DISMISS_ALL))
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -382,7 +409,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(("link-request-add", uid as u64))
-                            .label("Add")
+                            .label(tr(keys::PARTICIPANT_INVITE))
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -391,7 +418,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(("link-request-dismiss", uid as u64))
-                            .label("Dismiss")
+                            .label(tr(keys::Q_OPS_DISMISS))
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -404,11 +431,16 @@ impl QuillApp {
             block = block.child(div().text_xs().text_color(muted).child(error));
         }
         if state.loading {
-            block = block.child(div().text_xs().text_color(muted).child("Loading…"));
+            block = block.child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::Q_OPS_LOADING)),
+            );
         } else if (state.requests.len() as i32) < state.total_count {
             block = block.child(
                 Button::new("link-requests-more")
-                    .label("Show more")
+                    .label(tr(keys::CHANNELS_YOUR_MORE))
                     .ghost()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -470,7 +502,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Scan to join"),
+                        .child(tr(keys::Q_OPS_SCAN_TO_JOIN)),
                 )
                 .into_any_element(),
         )

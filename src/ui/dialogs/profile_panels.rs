@@ -1,6 +1,7 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 fn field(
     window: &mut Window,
@@ -93,9 +94,9 @@ impl EditContactDialog {
     ) -> Self {
         Self {
             user_id,
-            first_name_input: field(window, cx, "First name", first_name),
-            last_name_input: field(window, cx, "Last name", last_name),
-            note_input: field(window, cx, "Note (only visible to you)", note),
+            first_name_input: field(window, cx, tr(keys::Q_OPS_FIRST_NAME), first_name),
+            last_name_input: field(window, cx, tr(keys::Q_OPS_LAST_NAME), last_name),
+            note_input: field(window, cx, tr(keys::Q_OPS_NOTE_ONLY_VISIBLE_TO_YOU), note),
             share_phone: false,
         }
     }
@@ -115,9 +116,9 @@ impl BirthdayDialog {
             )
         });
         Self {
-            day_input: field(window, cx, "Day", &day),
-            month_input: field(window, cx, "Month (1-12)", &month),
-            year_input: field(window, cx, "Year (optional)", &year),
+            day_input: field(window, cx, tr(keys::Q_OPS_DAY), &day),
+            month_input: field(window, cx, tr(keys::Q_OPS_MONTH_1_12), &month),
+            year_input: field(window, cx, tr(keys::Q_OPS_YEAR_OPTIONAL), &year),
             error: None,
         }
     }

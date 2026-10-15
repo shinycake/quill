@@ -1,6 +1,7 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 /// A5: edit-profile dialog — the profile edit UI entry point
 /// (`parity:auth-edit-name`). One dialog with per-section saves, mirroring
 /// TGX's edit-profile rows: name (`setName`), bio (`setBio`), username
@@ -43,9 +44,9 @@ impl EditProfileDialog {
             })
         }
         Self {
-            first_name_input: field(window, cx, "First name", first_name),
-            last_name_input: field(window, cx, "Last name", last_name),
-            bio_input: field(window, cx, "Bio", bio),
+            first_name_input: field(window, cx, tr(keys::Q_OPS_FIRST_NAME), first_name),
+            last_name_input: field(window, cx, tr(keys::Q_OPS_LAST_NAME), last_name),
+            bio_input: field(window, cx, tr(keys::INFO_BIO_LABEL), bio),
             username_input: field(window, cx, "username", username),
             photo_path_input: field(window, cx, "/path/to/photo.jpg", ""),
             sources: Default::default(),

@@ -12,6 +12,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::business_info::BusinessLocation;
 use quill::business_settings::{ADDRESS_MAX, location_to_save};
+use quill::lang::{keys, tr};
 
 const ABOUT: &str = "Display the location of your business on your account.";
 const MAP_FALLBACK: &str = "You can set your location on the map from your mobile device.";
@@ -23,7 +24,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> LocationDraft {
         let saved = self.my_business().location.unwrap_or_default();
-        let address = super::live_input(window, cx, "Enter Address");
+        let address = super::live_input(window, cx, tr(keys::LOCATION_ADDRESS));
         address.update(cx, |input, cx| {
             input.set_value(saved.address.clone(), window, cx)
         });
@@ -50,7 +51,7 @@ impl QuillApp {
             .flex_col()
             .gap_3()
             .child(div().text_sm().text_color(muted).child(ABOUT))
-            .child(Input::new(&address).aria_label("Address"))
+            .child(Input::new(&address).aria_label(tr(keys::Q_OPS_ADDRESS)))
             .child(
                 div()
                     .text_xs()
@@ -78,20 +79,20 @@ impl QuillApp {
                         div()
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().child("Set Location on Map"))
+                            .child(div().text_sm().child(tr(keys::LOCATION_SET_MAP)))
                             .child(
                                 gpui_kit::component::link::Link::new("business-location-map")
                                     .on_click(move |_, _, _| {
                                         quill::platform::open_external_url(&map_url);
                                     })
                                     .text_xs()
-                                    .child("Open on map"),
+                                    .child(tr(keys::Q_OPS_OPEN_ON_MAP)),
                             ),
                     )
                     .child(
                         Switch::new("business-location-point")
                             .checked(true)
-                            .accessibility_label("Set Location on Map")
+                            .accessibility_label(tr(keys::LOCATION_SET_MAP))
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 if !on
                                     && let Some(l) =

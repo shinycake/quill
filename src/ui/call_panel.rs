@@ -23,6 +23,7 @@ use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::engine::{RemoteVideoState, TransportState};
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::CallState;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -71,7 +72,7 @@ pub(super) struct CallSnap {
 
 /// tdesktop `lng_call_microphone_off`.
 pub(super) fn microphone_off_line(name: &str) -> String {
-    format!("{name}'s microphone is off")
+    tr_with(keys::CALL_MICROPHONE_OFF, &[("user", name)])
 }
 
 /// tdesktop `Ui::FormatDurationText`: `m:ss`, or `h:mm:ss`.
@@ -92,7 +93,7 @@ pub(super) fn call_status(
     connected_secs: i64,
 ) -> (String, bool) {
     match state {
-        CallState::Pending { .. } if !is_outgoing => ("is calling you...".into(), false),
+        CallState::Pending { .. } if !is_outgoing => (tr(keys::CALL_STATUS_INCOMING).into(), false),
         CallState::Pending {
             is_created,
             is_received,
@@ -107,14 +108,14 @@ pub(super) fn call_status(
             .into(),
             true,
         ),
-        CallState::ExchangingKeys => ("exchanging encryption keys...".into(), true),
+        CallState::ExchangingKeys => (tr(keys::CALL_STATUS_EXCHANGING).into(), true),
         CallState::Ready => match transport {
             Some(TransportState::Connected) => (duration_text(connected_secs), false),
-            Some(TransportState::Failed) => ("failed to connect".into(), false),
+            Some(TransportState::Failed) => (tr(keys::CALL_STATUS_FAILED).into(), false),
             _ => ("connecting...".into(), true),
         },
-        CallState::HangingUp => ("hanging up...".into(), false),
-        _ => ("call ended".into(), false),
+        CallState::HangingUp => (tr(keys::CALL_STATUS_HANGING).into(), false),
+        _ => (tr(keys::CALL_STATUS_ENDED).into(), false),
     }
 }
 
@@ -133,7 +134,7 @@ impl QuillApp {
         let user = session.user(user_id);
         let name = user
             .map(|u| u.display_name())
-            .unwrap_or_else(|| "Telegram user".into());
+            .unwrap_or_else(|| tr(keys::Q_OPS_TELEGRAM_USER).into());
         let photo = session.user_photo_path(user_id).and_then(|path| {
             quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
         });
@@ -162,7 +163,12 @@ impl QuillApp {
                 } else {
                     CallPhase::Ended
                 },
-                status: if busy { "line busy" } else { "call ended" }.into(),
+                status: if busy {
+                    tr(keys::CALL_STATUS_BUSY)
+                } else {
+                    tr(keys::CALL_STATUS_ENDED)
+                }
+                .into(),
                 connecting: false,
                 muted: false,
                 camera_on: false,
@@ -317,7 +323,7 @@ impl QuillApp {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(380.), px(520.))),
                     titlebar: Some(TitlebarOptions {
-                        title: Some("Call".into()),
+                        title: Some(tr(keys::PROFILE_ACTION_SHORT_CALL).into()),
                         appears_transparent: true,
                         traffic_light_position: Some(point(px(12.), px(12.))),
                     }),
@@ -348,7 +354,10 @@ impl QuillApp {
                 app.calls.window_opening = false;
                 match result {
                     Ok(handle) => app.calls.window = Some(handle.into()),
-                    Err(_) => app.connection.status_note = "Couldn't open the call window".into(),
+                    Err(_) => {
+                        app.connection.status_note =
+                            tr(keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW).into()
+                    }
                 }
                 cx.notify();
             });
@@ -364,7 +373,7 @@ impl QuillApp {
         let name = session
             .user(call.user_id)
             .map(|u| u.display_name())
-            .unwrap_or_else(|| "Telegram user".into());
+            .unwrap_or_else(|| tr(keys::Q_OPS_TELEGRAM_USER).into());
         let (status, _) = call_status(
             &call.state,
             call.is_outgoing,
@@ -415,7 +424,11 @@ impl QuillApp {
                         } else {
                             IconName::Mic
                         },
-                        if muted { "Unmute" } else { "Mute" },
+                        if muted {
+                            tr(keys::CALL_UNMUTE_AUDIO)
+                        } else {
+                            tr(keys::CALL_MUTE_AUDIO)
+                        },
                         0.,
                     )
                     .swallow_press()
@@ -443,7 +456,7 @@ impl QuillApp {
                     icon_button(
                         "call-bar-hangup",
                         IconName::Phone,
-                        "End Call",
+                        tr(keys::CALL_END_CALL),
                         std::f32::consts::PI * 0.75,
                     )
                     .swallow_press()
@@ -612,9 +625,9 @@ impl Render for CallPanel {
                         IconName::VideoOff
                     },
                     if snap.camera_on {
-                        "Stop Video"
+                        tr(keys::CALL_STOP_VIDEO)
                     } else {
-                        "Start Video"
+                        tr(keys::CALL_START_VIDEO)
                     },
                     if snap.camera_on {
                         ButtonLook::Plain
@@ -627,7 +640,7 @@ impl Render for CallPanel {
                 call_button(
                     "call-decline",
                     IconName::Phone,
-                    "Decline",
+                    tr(keys::CALL_DECLINE),
                     ButtonLook::Hangup,
                     act(QuillApp::hang_up_call),
                 )
@@ -635,7 +648,7 @@ impl Render for CallPanel {
                 call_button(
                     "call-accept",
                     IconName::Phone,
-                    "Accept",
+                    tr(keys::CALL_ACCEPT),
                     ButtonLook::Answer,
                     act(QuillApp::accept_incoming_call),
                 )
@@ -651,9 +664,9 @@ impl Render for CallPanel {
                             IconName::VideoOff
                         },
                         if snap.camera_on {
-                            "Stop Video"
+                            tr(keys::CALL_STOP_VIDEO)
                         } else {
-                            "Start Video"
+                            tr(keys::CALL_START_VIDEO)
                         },
                         if snap.camera_on {
                             ButtonLook::Plain
@@ -676,7 +689,7 @@ impl Render for CallPanel {
                         call_button(
                             "call-screen",
                             IconName::ScreenShare,
-                            "Screencast",
+                            tr(keys::CALL_SCREENCAST),
                             if snap.screen_sharing {
                                 ButtonLook::Plain
                             } else {
@@ -695,7 +708,11 @@ impl Render for CallPanel {
                         } else {
                             IconName::Mic
                         },
-                        if snap.muted { "Unmute" } else { "Mute" },
+                        if snap.muted {
+                            tr(keys::CALL_UNMUTE_AUDIO)
+                        } else {
+                            tr(keys::CALL_MUTE_AUDIO)
+                        },
                         if snap.muted {
                             ButtonLook::Active
                         } else {
@@ -716,7 +733,7 @@ impl Render for CallPanel {
                     call_button(
                         "call-end",
                         IconName::Phone,
-                        "End Call",
+                        tr(keys::CALL_END_CALL),
                         ButtonLook::Hangup,
                         act(QuillApp::hang_up_call),
                     )
@@ -731,7 +748,7 @@ impl Render for CallPanel {
                     call_button(
                         "call-cancel",
                         IconName::Close,
-                        "Cancel",
+                        tr(keys::CALL_CANCEL),
                         ButtonLook::Active,
                         act(QuillApp::dismiss_call_summary),
                     )
@@ -739,7 +756,7 @@ impl Render for CallPanel {
                     call_button(
                         "call-redial",
                         IconName::Phone,
-                        "Redial",
+                        tr(keys::CALL_REDIAL),
                         ButtonLook::Answer,
                         move |cx| {
                             let _ = redial_app.update(cx, |app, cx| {
@@ -921,7 +938,7 @@ impl Render for CallPanel {
             .relative()
             .overflow_hidden()
             .bg(rgb(BG))
-            .font_family(".SystemUIFont")
+            .font_family(tr(keys::Q_OPS_SYSTEMUIFONT))
             .child(backdrop)
             // Shades under the overlays when the peer's video fills it.
             .when(video, |this| {

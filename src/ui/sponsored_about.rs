@@ -11,6 +11,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::SponsoredMessage;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -90,29 +91,29 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_sm().text_color(muted).child(
-                    "Telegram Ads are very different from ads on other platforms. \
-                     Ads such as this one:",
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(tr(keys::SPONSORED_REVENUED_SUBTITLE)),
+                )
+                .child(point(
+                    tr(keys::SPONSORED_REVENUED_INFO1_TITLE),
+                    tr(keys::SPONSORED_REVENUED_INFO1_DESCRIPTION),
                 ))
                 .child(point(
-                    "Respect Your Privacy",
-                    "Ads on Telegram do not use your personal information and are \
-                     based on the channel in which you see them.",
-                ))
-                .child(point(
-                    "Help the Channel Creator",
-                    "50% of the revenue from Telegram Ads goes to the owner of the \
-                     channel where they are displayed.",
+                    tr(keys::SPONSORED_REVENUED_INFO2_TITLE),
+                    tr(keys::SPONSORED_REVENUED_INFO2_DESCRIPTION),
                 ))
                 .child(
                     point(
-                        "Can Be Removed",
-                        "You can turn off ads by subscribing to Telegram Premium.",
+                        tr(keys::SPONSORED_REVENUED_INFO3_TITLE),
+                        tr(keys::Q_OPS_YOU_CAN_TURN_OFF_ADS),
                     )
                     .child(
                         div().flex().child(
                             Button::new("sponsored-about-premium")
-                                .label("Telegram Premium")
+                                .label(tr(keys::Q_OPS_TELEGRAM_PREMIUM))
                                 .link()
                                 .on_click(|_, _, cx| cx.open_url(PREMIUM_URL)),
                         ),
@@ -120,14 +121,13 @@ impl QuillApp {
                 )
                 .child(
                     point(
-                        "Can I Launch an Ad?",
-                        "Anyone can create an ad to display in this channel, with \
-                         minimal budgets. Check out the Telegram Ad Platform for details.",
+                        tr(keys::SPONSORED_REVENUED_FOOTER_TITLE),
+                        tr(keys::Q_OPS_ANYONE_CAN_CREATE_AN_AD),
                     )
                     .child(
                         div().flex().child(
                             Button::new("sponsored-about-learn-more")
-                                .label("Learn more")
+                                .label(tr(keys::Q_OPS_LEARN_MORE))
                                 .link()
                                 .on_click(|_, _, cx| cx.open_url(ADS_PLATFORM_URL)),
                         ),
@@ -144,7 +144,12 @@ impl QuillApp {
                     .rounded_md()
                     .border_1()
                     .border_color(border)
-                    .child(div().text_sm().font_semibold().child("Advertiser info"));
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(keys::SPONSORED_INFO_MENU)),
+                    );
                 for line in &about.advertiser {
                     info = info.child(div().text_sm().text_color(muted).child(line.clone()));
                 }
@@ -152,7 +157,7 @@ impl QuillApp {
                     info.child(
                         div().flex().child(
                             Button::new("sponsored-about-copy")
-                                .label("Copy")
+                                .label(tr(keys::GROUP_INVITE_CONTEXT_COPY))
                                 .ghost()
                                 .on_click(move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(
@@ -183,7 +188,9 @@ impl QuillApp {
             let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("About These Ads"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::SPONSORED_MENU_REVENUED_ABOUT,
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         let body = body

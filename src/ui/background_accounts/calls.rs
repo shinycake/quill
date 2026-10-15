@@ -10,6 +10,7 @@ use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
+use quill::lang::{keys, tr, tr_with};
 use quill::notify_accounts::{BackgroundCallPlan, plan_background_call, ringing_incoming_call};
 use quill::notify_call::{CallNotificationAction, CallNotifyInput, decide_call_notify};
 
@@ -89,7 +90,9 @@ impl QuillApp {
                     let caller = session
                         .user(user_id)
                         .map(|user| user.display_name())
-                        .unwrap_or_else(|| format!("User {user_id}"));
+                        .unwrap_or_else(|| {
+                            tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())])
+                        });
                     let account_name = session
                         .my_user_id
                         .and_then(|me| session.user(me))
@@ -172,7 +175,7 @@ impl QuillApp {
         if ready {
             self.accept_incoming_call(cx);
         } else {
-            self.connection.status_note = "The call ended before it could be answered".into();
+            self.connection.status_note = tr(keys::Q_OPS_THE_CALL_ENDED_BEFORE_IT).into();
         }
         cx.notify();
     }
@@ -249,13 +252,19 @@ impl QuillApp {
                 .as_ref()
                 .map(|ring| {
                     let kind = if ring.is_video {
-                        "Incoming video call"
+                        tr(keys::Q_OPS_INCOMING_VIDEO_CALL)
                     } else {
-                        "Incoming voice call"
+                        tr(keys::Q_OPS_INCOMING_VOICE_CALL)
                     };
                     (
                         kind.to_string(),
-                        format!("{} is calling {}.", ring.caller, ring.account_name),
+                        tr_with(
+                            keys::Q_OPS_IS_CALLING_2,
+                            &[
+                                ("caller", &ring.caller.to_string()),
+                                ("account_name", &ring.account_name.to_string()),
+                            ],
+                        ),
                     )
                 })
                 .unwrap_or_default();
@@ -265,7 +274,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("background-call-decline")
-                        .label("Decline")
+                        .label(tr(keys::CALL_DECLINE))
                         .danger()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.decline_background_call(cx);
@@ -274,7 +283,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("background-call-answer")
-                        .label("Answer")
+                        .label(tr(keys::Q_OPS_ANSWER))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.answer_background_call(window, cx);

@@ -9,25 +9,35 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, day_label, now_unix};
 use quill::state::{InviteLinkCountsFetch, InviteLinkFetch};
 use quill::telegram::envelope::StarSubscriptionPricing;
 
 /// "250 Stars / month" for a subscription link's pricing.
 pub(crate) fn subscription_price_label(pricing: &StarSubscriptionPricing) -> String {
-    format!("{} Stars / month", pricing.star_count)
+    tr_with(
+        keys::Q_OPS_STARS_MONTH,
+        &[("star_count", &pricing.star_count.to_string())],
+    )
 }
 
 /// "3 invite links" / "1 invite link", with revoked links appended
 /// (tdesktop `lng_group_invite_other_count`).
 pub(crate) fn invite_link_count_label(active: i32, revoked: i32) -> String {
     let base = if active == 1 {
-        "1 invite link".to_string()
+        tr(keys::Q_OPS_1_INVITE_LINK).to_string()
     } else {
-        format!("{active} invite links")
+        tr_with(keys::Q_OPS_INVITE_LINKS, &[("active", &active.to_string())])
     };
     if revoked > 0 {
-        format!("{base}, {revoked} revoked")
+        tr_with(
+            keys::Q_OPS_REVOKED,
+            &[
+                ("base", &base.to_string()),
+                ("revoked", &revoked.to_string()),
+            ],
+        )
     } else {
         base
     }
@@ -36,7 +46,7 @@ pub(crate) fn invite_link_count_label(active: i32, revoked: i32) -> String {
 /// "joined today" / "joined 12 Sep" for a member row.
 pub(crate) fn joined_label(date: i32, via_folder: bool) -> String {
     if via_folder {
-        return "joined via a folder invite link".into();
+        return tr(keys::GROUP_INVITE_JOINED_VIA_FILTER).into();
     }
     if date <= 0 {
         return "joined".into();
@@ -100,10 +110,10 @@ impl QuillApp {
                 .driver
                 .delete_revoked_chat_invite_link(chat_id, invite_link)
             {
-                Ok(_) => "deleting invite link…".into(),
-                Err(_) => "could not delete invite link".into(),
+                Ok(_) => tr(keys::Q_OPS_DELETING_INVITE_LINK).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_DELETE_INVITE_LINK).into(),
             },
-            None => "invite links need a live connection (demo)".into(),
+            None => tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).into(),
         };
         cx.notify();
     }
@@ -118,23 +128,21 @@ impl QuillApp {
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
-                .title("Delete all revoked links")
-                .description(
-                    "Are you sure you want to delete all revoked links? This action cannot be undone.",
-                )
-                .ok_text("Delete")
-                .cancel_text("Cancel")
+                .title(tr(keys::Q_OPS_DELETE_ALL_REVOKED_LINKS))
+                .description(tr(keys::GROUP_INVITE_DELETE_ALL_SURE))
+                .ok_text(tr(keys::GROUP_INVITE_CONTEXT_DELETE))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
                         this.connection.status_note = match this.live.as_mut() {
                             Some(live) => {
                                 match live.driver.delete_all_revoked_chat_invite_links(chat_id) {
-                                    Ok(_) => "deleting revoked links…".into(),
-                                    Err(_) => "could not delete revoked links".into(),
+                                    Ok(_) => tr(keys::Q_OPS_DELETING_REVOKED_LINKS).into(),
+                                    Err(_) => tr(keys::Q_OPS_COULD_NOT_DELETE_REVOKED_LINKS).into(),
                                 }
                             }
-                            None => "invite links need a live connection (demo)".into(),
+                            None => tr(keys::Q_OPS_INVITE_LINKS_NEED_A_LIVE).into(),
                         };
                         cx.notify();
                     });
@@ -182,15 +190,20 @@ impl QuillApp {
         let Some(state) = state else {
             return Some(
                 block
-                    .child(div().text_xs().text_color(muted).child("Loading…"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_OPS_LOADING)),
+                    )
                     .into_any_element(),
             );
         };
         block = block.child(self.invite_block_title(
             &if state.total_count == 0 && !state.loading {
-                "No one joined yet".to_string()
+                tr(keys::GROUP_INVITE_NO_JOINED).to_string()
             } else if state.total_count == 1 {
-                "1 joined".to_string()
+                tr(keys::Q_OPS_1_JOINED).to_string()
             } else {
                 format!("{} joined", state.total_count)
             },
@@ -217,11 +230,16 @@ impl QuillApp {
             block = block.child(div().text_xs().text_color(muted).child(error));
         }
         if state.loading {
-            block = block.child(div().text_xs().text_color(muted).child("Loading…"));
+            block = block.child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(keys::Q_OPS_LOADING)),
+            );
         } else if (state.members.len() as i32) < state.total_count {
             block = block.child(
                 Button::new("invite-link-members-more")
-                    .label("Show more")
+                    .label(tr(keys::CHANNELS_YOUR_MORE))
                     .ghost()
                     .small()
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -258,7 +276,7 @@ impl QuillApp {
         }
         let muted = cx.theme().muted_foreground;
         let mut block = div().flex().flex_col().w_full().gap_1().pt_1();
-        block = block.child(self.invite_block_title("Links created by other admins", cx));
+        block = block.child(self.invite_block_title(tr(keys::GROUP_INVITE_OTHER_TITLE), cx));
         for count in others {
             let uid = count.user_id;
             block = block.child(
@@ -287,7 +305,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new(("invite-link-count-open", uid as u64))
-                            .label("View")
+                            .label(tr(keys::Q_OPS_VIEW))
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -314,11 +332,15 @@ impl QuillApp {
                 .items_center()
                 .w_full()
                 .gap_1()
-                .child(self.invite_block_title("Revoked links", cx))
+                .child(self.invite_block_title(tr(keys::GROUP_INVITE_REVOKED_TITLE), cx))
                 .child(div().flex_1())
                 .child(
                     Button::new("revoked-links-toggle")
-                        .label(if open { "Hide" } else { "Show" })
+                        .label(if open {
+                            tr(keys::Q_OPS_HIDE)
+                        } else {
+                            tr(keys::Q_OPS_SHOW)
+                        })
                         .ghost()
                         .small()
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -335,19 +357,28 @@ impl QuillApp {
             .cloned();
         match fetch {
             None | Some(InviteLinkFetch::Loading) => {
-                block = block.child(div().text_xs().text_color(muted).child("Loading…"));
+                block = block.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_OPS_LOADING)),
+                );
             }
             Some(InviteLinkFetch::Failed(message)) => {
                 block = block.child(div().text_xs().text_color(muted).child(message));
             }
             Some(InviteLinkFetch::Loaded(list)) => {
                 if list.links.is_empty() {
-                    block =
-                        block.child(div().text_xs().text_color(muted).child("No revoked links."));
+                    block = block.child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_OPS_NO_REVOKED_LINKS)),
+                    );
                 } else {
                     block = block.child(
                         Button::new("revoked-links-delete-all")
-                            .label("Delete all revoked links")
+                            .label(tr(keys::Q_OPS_DELETE_ALL_REVOKED_LINKS))
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -385,7 +416,7 @@ impl QuillApp {
                             )
                             .child(
                                 Button::new(format!("revoked-link-delete-{index}"))
-                                    .label("Delete")
+                                    .label(tr(keys::GROUP_INVITE_CONTEXT_DELETE))
                                     .ghost()
                                     .small()
                                     .on_click(cx.listener(move |this, _, _, cx| {

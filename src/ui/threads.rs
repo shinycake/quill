@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{
     Session, ThreadStatus, comments_bar_label, effective_preview, replies_link_label,
@@ -127,7 +128,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.open_thread(chat_id, message_id).is_err()
         {
-            self.connection.status_note = "could not open comments".into();
+            self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS).into();
         }
         cx.notify();
     }
@@ -280,8 +281,8 @@ impl QuillApp {
         Button::new("thread-back")
             .icon(gpui_kit::assets::IconName::ChevronLeft)
             .ghost()
-            .tooltip("Back")
-            .accessibility_label("Back")
+            .tooltip(tr(keys::Q_OPS_BACK))
+            .accessibility_label(tr(keys::Q_OPS_BACK))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.leave_thread_view(window, cx);
             }))
@@ -294,9 +295,9 @@ impl QuillApp {
         let thread = session.thread_for_chat(session.open_chat?)?;
         let root = thread.root_message()?;
         let title = if thread.is_comments() {
-            "Original post"
+            tr(keys::Q_OPS_ORIGINAL_POST)
         } else {
-            "Original message"
+            tr(keys::Q_OPS_ORIGINAL_MESSAGE)
         };
         let preview = effective_preview(root);
         Some(
@@ -312,7 +313,7 @@ impl QuillApp {
                 .bg(bg_canvas())
                 .cursor_pointer()
                 .role(gpui_kit::Role::Button)
-                .aria_label("Go to the original post")
+                .aria_label(tr(keys::Q_OPS_GO_TO_THE_ORIGINAL_POST))
                 .tab_index(0)
                 .on_click(cx.listener(|this, _, _, cx| this.jump_to_thread_root(cx)))
                 .child(div().w(px(2.)).h(px(32.)).rounded_full().bg(accent()))
@@ -339,8 +340,8 @@ impl QuillApp {
                     Button::new("thread-info-toggle")
                         .icon(gpui_kit::assets::IconName::Info)
                         .ghost()
-                        .tooltip("Thread info")
-                        .accessibility_label("Thread info")
+                        .tooltip(tr(keys::Q_OPS_THREAD_INFO))
+                        .accessibility_label(tr(keys::Q_OPS_THREAD_INFO))
                         // Keep the root bar's own click (jump to the original) out of it.
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -370,8 +371,8 @@ impl QuillApp {
             .p_6()
             .gap_3()
             .child(div().font_semibold().child(match &failed {
-                Some(_) => "Could not open the thread",
-                None => "Opening the thread…",
+                Some(_) => tr(keys::Q_OPS_COULD_NOT_OPEN_THE_THREAD),
+                None => tr(keys::Q_OPS_OPENING_THE_THREAD),
             }))
             .when_some(failed.clone(), |this, message| {
                 this.child(
@@ -387,21 +388,23 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("thread-pane-back")
-                            .label("Back")
+                            .label(tr(keys::Q_OPS_BACK))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.leave_thread_view(window, cx);
                             })),
                     )
                     .when(failed.is_some(), |this| {
-                        this.child(Button::new("thread-pane-retry").label("Retry").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.retry_thread();
-                                }
-                                cx.notify();
-                            }),
-                        ))
+                        this.child(
+                            Button::new("thread-pane-retry")
+                                .label(tr(keys::Q_OPS_RETRY))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(live) = this.live.as_mut() {
+                                        let _ = live.driver.retry_thread();
+                                    }
+                                    cx.notify();
+                                })),
+                        )
                     }),
             )
             .into_any_element()

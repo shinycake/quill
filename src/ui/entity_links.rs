@@ -22,6 +22,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::ComposerSnapshot;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender};
 use quill::text::LinkTarget;
@@ -111,10 +112,11 @@ impl QuillApp {
                 let username = name.trim_start_matches('@');
                 if self.live.is_some() {
                     self.pending_deep_link = Some(format!("https://t.me/{username}"));
-                    self.connection.status_note = format!("opening @{username}…");
+                    self.connection.status_note =
+                        tr_with(keys::Q_OPS_OPENING, &[("username", username)]);
                 } else {
                     self.connection.status_note =
-                        "can't open @mentions without a Telegram connection".into();
+                        tr(keys::Q_OPS_CANT_OPEN_MENTIONS_WITHOUT_A).into();
                 }
             }
             LinkTarget::MentionName { user_id, .. } => {
@@ -128,9 +130,9 @@ impl QuillApp {
             }
             LinkTarget::Email(address) => {
                 self.connection.status_note = if quill::platform::open_mailto(&address) {
-                    "opened mail".into()
+                    tr(keys::Q_OPS_OPENED_MAIL).into()
                 } else {
-                    "could not open the mail app".into()
+                    tr(keys::Q_OPS_COULD_NOT_OPEN_THE_MAIL).into()
                 };
             }
             LinkTarget::Phone(_) | LinkTarget::BankCard(_) | LinkTarget::DateTime { .. } => {
@@ -158,7 +160,7 @@ impl QuillApp {
     /// Copy `text` and say so (Telegram Desktop's "Text copied" toast).
     pub(super) fn copy_entity_text(&mut self, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.connection.status_note = "text copied to clipboard".into();
+        self.connection.status_note = tr(keys::Q_OPS_TEXT_COPIED_TO_CLIPBOARD).into();
         cx.notify();
     }
 
@@ -243,12 +245,12 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, &text);
             self.connection.status_note = match live.driver.send_snapshot(&snapshot) {
-                Ok(_) => "sending…".into(),
-                Err(_) => "could not send the command".into(),
+                Ok(_) => tr(keys::Q_OPS_SENDING).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND).into(),
             };
         } else {
             self.apply_demo_outgoing(&text, None, None);
-            self.connection.status_note = "demo send applied locally (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_SEND_APPLIED_LOCALLY_NO).into();
         }
     }
 
@@ -278,7 +280,7 @@ impl QuillApp {
             .flatten()
             .find_map(|message| Some((message, seek_target(&message.content, seconds)?)));
         let Some((target, kind)) = target else {
-            self.connection.status_note = "nothing to seek".into();
+            self.connection.status_note = tr(keys::Q_OPS_NOTHING_TO_SEEK).into();
             return;
         };
         let target_id = target.id;
@@ -412,11 +414,11 @@ impl QuillApp {
     pub(super) fn link_popup_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let popup = self.message_ui.link_popup.clone()?;
         let (label, text) = match &popup.link {
-            LinkTarget::Phone(number) => ("Copy Phone Number", number.clone()),
-            LinkTarget::BankCard(number) => ("Copy Card Number", number.clone()),
-            LinkTarget::TonAddress(address) => ("Copy Address", address.clone()),
+            LinkTarget::Phone(number) => (tr(keys::Q_OPS_COPY_PHONE_NUMBER), number.clone()),
+            LinkTarget::BankCard(number) => (tr(keys::Q_OPS_COPY_CARD_NUMBER), number.clone()),
+            LinkTarget::TonAddress(address) => (tr(keys::Q_OPS_COPY_ADDRESS), address.clone()),
             LinkTarget::DateTime { unix_time, label } => (
-                "Copy Date",
+                tr(keys::Q_OPS_COPY_DATE),
                 if label.trim().is_empty() {
                     super::message_text::format_unix_date_time(i64::from(*unix_time))
                 } else {
@@ -621,10 +623,12 @@ impl QuillApp {
                         .child(StyledText::new(confirm.shown.clone()).with_highlights(highlights)),
                 )
                 .when(marked, |this| {
-                    this.child(div().text_sm().text_color(text_muted()).child(
-                        "Highlighted characters are from a different alphabet than the \
-                         rest of the address.",
-                    ))
+                    this.child(
+                        div()
+                            .text_sm()
+                            .text_color(text_muted())
+                            .child(tr(keys::OPEN_LINK_SUSPICIOUS_CHARS)),
+                    )
                 })
                 .into_any_element();
             let footer = div()
@@ -634,7 +638,7 @@ impl QuillApp {
                 .when(!from_poll_option, |this| {
                     this.child(
                         Button::new("open-link-copy")
-                            .label("Copy Link")
+                            .label(tr(keys::CONTEXT_COPY_LINK))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.copy_entity_text(shown.clone(), cx);
@@ -643,7 +647,7 @@ impl QuillApp {
                 })
                 .child(
                     Button::new("open-link-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.message_ui.open_link_confirm = None;
@@ -653,7 +657,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("open-link-open")
-                        .label("Open")
+                        .label(tr(keys::Q_OPS_OPEN))
                         .primary()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.message_ui.open_link_confirm = None;
@@ -664,9 +668,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if from_poll_option {
-                    "Open Link"
+                    tr(keys::Q_OPS_OPEN_LINK)
                 } else {
-                    "Open this link?"
+                    tr(keys::Q_OPS_OPEN_THIS_LINK)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body)));

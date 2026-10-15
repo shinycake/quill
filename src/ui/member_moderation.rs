@@ -12,6 +12,7 @@ use super::shell::DialogKind;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::moderation::{
     GroupFlavor, MemberAction, MemberMenuContext, append_mention, member_menu_actions, mention_text,
 };
@@ -31,27 +32,27 @@ fn action_label(
     flavor: GroupFlavor,
 ) -> &'static str {
     match action {
-        MemberAction::Mention => "Mention",
-        MemberAction::SearchMessages => "Search messages",
+        MemberAction::Mention => tr(keys::Q_OPS_MENTION),
+        MemberAction::SearchMessages => tr(keys::Q_OPS_SEARCH_MESSAGES),
         MemberAction::EditTag => match (is_self, tag.is_empty()) {
-            (true, true) => "Add my tag",
-            (true, false) => "Edit my tag",
-            (false, true) => "Add member tag",
-            (false, false) => "Edit member tag",
+            (true, true) => tr(keys::Q_OPS_ADD_MY_TAG),
+            (true, false) => tr(keys::Q_OPS_EDIT_MY_TAG),
+            (false, true) => tr(keys::CONTEXT_ADD_MEMBER_TAG),
+            (false, false) => tr(keys::CONTEXT_EDIT_MEMBER_TAG),
         },
-        MemberAction::Promote => "Promote to admin",
-        MemberAction::EditAdminRights => "Edit admin rights",
-        MemberAction::Restrict => "Restrict user",
-        MemberAction::Ban => "Ban",
+        MemberAction::Promote => tr(keys::RIGHTS_PROMOTE_MEMBER),
+        MemberAction::EditAdminRights => tr(keys::Q_OPS_EDIT_ADMIN_RIGHTS),
+        MemberAction::Restrict => tr(keys::Q_OPS_RESTRICT_USER),
+        MemberAction::Ban => tr(keys::Q_OPS_BAN),
         MemberAction::Remove => {
             if flavor == GroupFlavor::Channel {
-                "Remove from channel"
+                tr(keys::Q_OPS_REMOVE_FROM_CHANNEL)
             } else {
-                "Remove from group"
+                tr(keys::RIGHTS_REMOVE_MEMBER)
             }
         }
-        MemberAction::Unban => "Unban",
-        MemberAction::Unrestrict => "Unrestrict",
+        MemberAction::Unban => tr(keys::Q_OPS_UNBAN),
+        MemberAction::Unrestrict => tr(keys::Q_OPS_UNRESTRICT),
     }
 }
 
@@ -208,7 +209,7 @@ impl QuillApp {
             .and_then(|s| s.user(user_id))
             .map(|user| (user.username.clone(), user.display_name()))
         else {
-            self.connection.status_note = "can't mention this member yet".into();
+            self.connection.status_note = tr(keys::Q_OPS_CANT_MENTION_THIS_MEMBER_YET).into();
             cx.notify();
             return;
         };

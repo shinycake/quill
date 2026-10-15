@@ -10,6 +10,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{ActiveCall, CallSummary};
 use quill::telegram::envelope::CallState;
 use std::sync::Arc;
@@ -44,7 +45,7 @@ impl QuillApp {
         self.session()
             .and_then(|s| s.user(user_id))
             .map(|u| u.display_name())
-            .unwrap_or_else(|| format!("User {user_id}"))
+            .unwrap_or_else(|| tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())]))
     }
 
     pub(super) fn call_card(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -71,19 +72,26 @@ impl QuillApp {
         } else if let Some(summary) = summary {
             card = self.call_summary_card(card, &summary, cx);
         } else if let Some(error) = error {
-            card =
-                card.child(div().text_sm().font_semibold().child("Call failed"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(error),
-                    )
-                    .child(Button::new("call-error-dismiss").label("Dismiss").on_click(
-                        cx.listener(|this, _, _, cx| {
+            card = card
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(keys::Q_OPS_CALL_FAILED)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(error),
+                )
+                .child(
+                    Button::new("call-error-dismiss")
+                        .label(tr(keys::Q_OPS_DISMISS))
+                        .on_click(cx.listener(|this, _, _, cx| {
                             this.dismiss_call_error(cx);
-                        }),
-                    ));
+                        })),
+                );
         }
 
         div()
@@ -182,7 +190,7 @@ impl QuillApp {
             (Some(_), _, _)
                 if call.remote_screen == quill::calls::engine::RemoteVideoState::Paused =>
             {
-                status_text("Screen share paused by peer").into_any_element()
+                status_text(tr(keys::Q_OPS_SCREEN_SHARE_PAUSED_BY_PEER)).into_any_element()
             }
             // Phase C2l: the peer's screen share takes the main tile
             // while the share is Active (same preference as the group
@@ -198,22 +206,25 @@ impl QuillApp {
                             .absolute()
                             .top_2()
                             .left_2()
-                            .child(Tag::info().child("🖥 Peer's screen")),
+                            .child(Tag::info().child(tr(keys::Q_OPS_PEERS_SCREEN))),
                     )
                     .into_any_element(),
-                None => status_text("Couldn't decode the peer's screen").into_any_element(),
+                None => {
+                    status_text(tr(keys::Q_OPS_COULDNT_DECODE_THE_PEERS_SCREEN)).into_any_element()
+                }
             },
             (None, quill::calls::engine::RemoteVideoState::Active, Some(frame)) => {
                 match self.cached_video_image(false, frame) {
                     Some(image) => video_img(image).into_any_element(),
-                    None => status_text("Couldn't decode the peer's video").into_any_element(),
+                    None => status_text(tr(keys::Q_OPS_COULDNT_DECODE_THE_PEERS_VIDEO))
+                        .into_any_element(),
                 }
             }
             (None, quill::calls::engine::RemoteVideoState::Active, None) => {
-                status_text("Connecting video…").into_any_element()
+                status_text(tr(keys::Q_OPS_CONNECTING_VIDEO)).into_any_element()
             }
             (None, quill::calls::engine::RemoteVideoState::Paused, _) => {
-                status_text("Video paused by peer").into_any_element()
+                status_text(tr(keys::Q_OPS_VIDEO_PAUSED_BY_PEER)).into_any_element()
             }
             (None, quill::calls::engine::RemoteVideoState::Inactive, _) => div()
                 .flex()
@@ -233,7 +244,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(text_faint())
-                        .child("Peer's camera is off"),
+                        .child(tr(keys::Q_OPS_PEERS_CAMERA_IS_OFF)),
                 )
                 .into_any_element(),
         };
@@ -242,15 +253,16 @@ impl QuillApp {
         let local: AnyElement = match (camera_on, local_frame.as_ref()) {
             (true, Some(frame)) => match self.cached_video_image(true, frame) {
                 Some(image) => video_img(image).into_any_element(),
-                None => status_text("Couldn't decode the camera preview").into_any_element(),
+                None => status_text(tr(keys::Q_OPS_COULDNT_DECODE_THE_CAMERA_PREVIEW))
+                    .into_any_element(),
             },
-            (true, None) => status_text("Starting camera…").into_any_element(),
+            (true, None) => status_text(tr(keys::Q_OPS_STARTING_CAMERA)).into_any_element(),
             // Phase C2i: screen share replaces the camera track, so the
             // local preview honestly says what's being sent.
             (false, _) => status_text(if call.screen_sharing {
-                "Sharing screen"
+                tr(keys::Q_OPS_SHARING_SCREEN)
             } else {
-                "Camera off"
+                tr(keys::Q_OPS_CAMERA_OFF)
             })
             .into_any_element(),
         };
@@ -295,47 +307,67 @@ impl QuillApp {
     ) -> Stateful<Div> {
         let name = self.call_peer_name(call.user_id);
         let kind_line = if call.is_video {
-            "📹 Video call"
+            tr(keys::Q_OPS_VIDEO_CALL)
         } else {
-            "Voice call"
+            tr(keys::Q_OPS_VOICE_CALL)
         };
         let (status, clock): (String, Option<String>) = match &call.state {
             CallState::Pending { .. } => {
                 let elapsed = call.started_at.elapsed().as_secs();
                 if call.is_outgoing {
-                    ("Calling…".to_string(), Some(Self::call_clock(elapsed)))
+                    (
+                        tr(keys::Q_OPS_CALLING).to_string(),
+                        Some(Self::call_clock(elapsed)),
+                    )
                 } else {
-                    ("Incoming call".to_string(), Some(Self::call_clock(elapsed)))
+                    (
+                        tr(keys::CALL_INCOMING).to_string(),
+                        Some(Self::call_clock(elapsed)),
+                    )
                 }
             }
-            CallState::ExchangingKeys => ("Connecting…".to_string(), None),
+            CallState::ExchangingKeys => (tr(keys::GROUP_CALL_CONNECTING).to_string(), None),
             CallState::Ready => {
                 use quill::calls::engine::TransportState;
                 let status = match call.transport {
                     Some(TransportState::Connected) if call.muted => {
-                        "Muted - microphone off".to_string()
+                        tr(keys::Q_OPS_MUTED_MICROPHONE_OFF).to_string()
                     }
-                    Some(TransportState::Connected) => "Connected".to_string(),
-                    Some(TransportState::Reconnecting) => "Reconnecting audio…".to_string(),
+                    Some(TransportState::Connected) => tr(keys::Q_OPS_CONNECTED).to_string(),
+                    Some(TransportState::Reconnecting) => {
+                        tr(keys::Q_OPS_RECONNECTING_AUDIO).to_string()
+                    }
                     Some(TransportState::Failed) => format!(
                         "Couldn't start audio: {}. The call is up but carries no sound.",
-                        call.transport_error.as_deref().unwrap_or("unknown error")
+                        call.transport_error
+                            .as_deref()
+                            .unwrap_or(tr(keys::Q_OPS_UNKNOWN_ERROR))
                     ),
-                    Some(TransportState::Closed) => "Audio disconnected.".to_string(),
-                    None | Some(TransportState::Connecting) => "Connecting audio...".to_string(),
+                    Some(TransportState::Closed) => tr(keys::Q_OPS_AUDIO_DISCONNECTED).to_string(),
+                    None | Some(TransportState::Connecting) => {
+                        tr(keys::Q_OPS_CONNECTING_AUDIO).to_string()
+                    }
                 };
                 (
                     status,
                     Some(Self::call_clock(call.connected_secs().max(0) as u64)),
                 )
             }
-            CallState::HangingUp => ("Hanging up…".to_string(), None),
+            CallState::HangingUp => (tr(keys::Q_OPS_HANGING_UP).to_string(), None),
             // A future state the pinned schema doesn't know: label it
             // honestly instead of pretending it means something else.
-            CallState::Unknown(type_name) => (format!("Call state: {type_name}"), None),
+            CallState::Unknown(type_name) => (
+                tr_with(
+                    keys::Q_OPS_CALL_STATE,
+                    &[("type_name", &type_name.to_string())],
+                ),
+                None,
+            ),
             // Terminal states end the call in the reducer, so this arm
             // is unreachable — but never crash the overlay on it.
-            CallState::Discarded { .. } | CallState::Error { .. } => ("Ending…".to_string(), None),
+            CallState::Discarded { .. } | CallState::Error { .. } => {
+                (tr(keys::Q_OPS_ENDING).to_string(), None)
+            }
         };
         let mut card = card;
         // Phase C2e: a connected video call shows the video stage
@@ -373,7 +405,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("End-to-end verification:"),
+                            .child(tr(keys::Q_OPS_END_TO_END_VERIFICATION)),
                     )
                     .child(div().text_2xl().child(ready.emojis.join(" "))),
             );
@@ -399,14 +431,14 @@ impl QuillApp {
                 || self.live.is_none();
             let note = if call.is_video {
                 if video_ready {
-                    "Video connecting — tiles fill in as cameras stream."
+                    tr(keys::Q_OPS_VIDEO_CONNECTING_TILES_FILL_IN)
                 } else {
-                    "Video unavailable — no camera found."
+                    tr(keys::Q_OPS_VIDEO_UNAVAILABLE_NO_CAMERA_FOUND)
                 }
             } else if call.transport == Some(quill::calls::engine::TransportState::Connected) {
-                "Audio connected"
+                tr(keys::Q_OPS_AUDIO_CONNECTED)
             } else {
-                "Waiting for audio transport"
+                tr(keys::Q_OPS_WAITING_FOR_AUDIO_TRANSPORT)
             };
             card = card.child(
                 div()
@@ -424,7 +456,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Microphone muted"),
+                    .child(tr(keys::Q_OPS_MICROPHONE_MUTED)),
             );
         }
         // Phase C2i: local screen-share send state — the engine sends
@@ -437,7 +469,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Sharing your screen"),
+                    .child(tr(keys::Q_OPS_SHARING_YOUR_SCREEN)),
             );
         }
         if let Some(error) = error {
@@ -485,26 +517,26 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No audio - call engine unavailable."),
+                        .child(tr(keys::Q_OPS_NO_AUDIO_CALL_ENGINE_UNAVAILABLE)),
                 );
             } else if devices.is_empty() {
                 card = card.child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No audio devices found - the engine reported none."),
+                        .child(tr(keys::Q_OPS_NO_AUDIO_DEVICES_FOUND_THE)),
                 );
             } else {
                 let mut pickers = div().w_full().flex().flex_col().gap_1();
                 for (kind, label, selected) in [
                     (
                         quill::calls::engine::MediaDeviceKind::Microphone,
-                        "Microphone",
+                        tr(keys::SETTINGS_CALL_SECTION_INPUT),
                         selected.0.as_deref(),
                     ),
                     (
                         quill::calls::engine::MediaDeviceKind::Speaker,
-                        "Speaker",
+                        tr(keys::Q_OPS_SPEAKER),
                         selected.1.as_deref(),
                     ),
                 ] {
@@ -542,8 +574,12 @@ impl QuillApp {
                     } else {
                         self.demo_ui.selected_camera.as_deref()
                     };
-                    pickers =
-                        pickers.child(div().text_xs().font_semibold().child("Camera".to_string()));
+                    pickers = pickers.child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .child(tr(keys::SETTINGS_CALL_CAMERA).to_string()),
+                    );
                     // Phase 6: kit RadioGroup (was: buttons with a ●/○
                     // prefix). Controlled: the chosen index writes the value.
                     let camera_choices: Vec<(String, String)> = devices
@@ -558,18 +594,21 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No camera found."),
+                                .child(tr(keys::Q_OPS_NO_CAMERA_FOUND)),
                         );
                     } else {
                         let camera_active = camera_choices
                             .iter()
                             .position(|(id, _)| Some(id.as_str()) == camera_selected);
                         pickers = pickers.child(
-                            RadioGroup::vertical("call-device-Camera")
+                            RadioGroup::vertical(tr(keys::Q_OPS_CALL_DEVICE_CAMERA))
                                 .selected_index(camera_active)
                                 .children(camera_choices.iter().map(|(id, name)| {
-                                    Radio::new(format!("call-device-Camera-{id}"))
-                                        .label(name.clone())
+                                    Radio::new(tr_with(
+                                        keys::Q_OPS_CALL_DEVICE_CAMERA_2,
+                                        &[("id", &id.to_string())],
+                                    ))
+                                    .label(name.clone())
                                 }))
                                 .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
                                     if let Some(choice) = camera_choices.get(ix) {
@@ -592,7 +631,7 @@ impl QuillApp {
                 buttons = buttons
                     .child(
                         Button::new("call-accept")
-                            .label("Accept")
+                            .label(tr(keys::CALL_ACCEPT))
                             .success()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.accept_incoming_call(cx);
@@ -600,7 +639,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("call-decline")
-                            .label("Decline")
+                            .label(tr(keys::CALL_DECLINE))
                             .danger()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.hang_up_call(cx);
@@ -608,19 +647,25 @@ impl QuillApp {
                     );
             }
             CallState::Pending { .. } | CallState::ExchangingKeys => {
-                buttons =
-                    buttons.child(Button::new("call-cancel").label("Cancel").ghost().on_click(
-                        cx.listener(|this, _, _, cx| {
+                buttons = buttons.child(
+                    Button::new("call-cancel")
+                        .label(tr(keys::CALL_CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, _, cx| {
                             this.hang_up_call(cx);
-                        }),
-                    ));
+                        })),
+                );
             }
             CallState::Ready | CallState::Unknown(_) => {
                 // Phase C1b: mute toggle — local-only state, no-op
                 // without media transport (the card says so above).
                 buttons = buttons.child(
                     Button::new("call-mute")
-                        .label(if call.muted { "Unmute" } else { "Mute" })
+                        .label(if call.muted {
+                            tr(keys::CALL_UNMUTE_AUDIO)
+                        } else {
+                            tr(keys::CALL_MUTE_AUDIO)
+                        })
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.toggle_call_mute(cx);
@@ -639,9 +684,9 @@ impl QuillApp {
                         buttons = buttons.child(
                             Button::new("call-camera")
                                 .label(if call.camera_on {
-                                    "Camera off"
+                                    tr(keys::Q_OPS_CAMERA_OFF)
                                 } else {
-                                    "Camera on"
+                                    tr(keys::Q_OPS_CAMERA_ON)
                                 })
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -653,7 +698,7 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No camera available"),
+                                .child(tr(keys::Q_OPS_NO_CAMERA_AVAILABLE)),
                         );
                     }
                     // Phase C2i: screen-share send toggle for video
@@ -670,9 +715,9 @@ impl QuillApp {
                         buttons = buttons.child(
                             Button::new("call-screenshare")
                                 .label(if call.screen_sharing {
-                                    "Stop sharing"
+                                    tr(keys::GROUP_CALL_SCREEN_SHARE_STOP)
                                 } else {
-                                    "Share screen"
+                                    tr(keys::GROUP_CALL_TOOLTIP_SCREEN)
                                 })
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -684,13 +729,13 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No screen source available"),
+                                .child(tr(keys::Q_OPS_NO_SCREEN_SOURCE_AVAILABLE)),
                         );
                     }
                 }
                 buttons = buttons.child(
                     Button::new("call-hangup")
-                        .label("Hang up")
+                        .label(tr(keys::Q_OPS_HANG_UP))
                         .danger()
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.hang_up_call(cx);
@@ -735,15 +780,15 @@ impl QuillApp {
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .child(if summary.had_audio {
-                    "Audio was connected for this call."
+                    tr(keys::Q_OPS_AUDIO_WAS_CONNECTED_FOR_THIS)
                 } else {
-                    "No audio was carried."
+                    tr(keys::Q_OPS_NO_AUDIO_WAS_CARRIED)
                 }),
         );
         if summary.need_debug_information && !summary.debug_information_sent {
             card = card.child(
                 Button::new("call-upload-diagnostics")
-                    .label("Upload diagnostics")
+                    .label(tr(keys::Q_OPS_UPLOAD_DIAGNOSTICS))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.upload_call_diagnostics(cx);
                     })),
@@ -754,7 +799,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Diagnostics sent."),
+                    .child(tr(keys::Q_OPS_DIAGNOSTICS_SENT)),
             );
         }
         if let Some(error) = &summary.debug_information_error {
@@ -768,7 +813,7 @@ impl QuillApp {
         if summary.need_log && !summary.log_sent {
             card = card.child(
                 Button::new("call-upload-log")
-                    .label("Upload call log")
+                    .label(tr(keys::Q_OPS_UPLOAD_CALL_LOG))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.upload_call_log(cx);
                     })),
@@ -779,7 +824,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Call log sent."),
+                    .child(tr(keys::Q_OPS_CALL_LOG_SENT)),
             );
         }
         if let Some(error) = &summary.log_error {
@@ -791,7 +836,11 @@ impl QuillApp {
             );
         }
         if summary.need_rating && !summary.rating_sent {
-            card = card.child(div().text_sm().child("How was the call quality?"));
+            card = card.child(
+                div()
+                    .text_sm()
+                    .child(tr(keys::Q_OPS_HOW_WAS_THE_CALL_QUALITY)),
+            );
             match &self.dialogs.rating_detail {
                 // Phase C2i: star tap opens the detail editor (problems
                 // + comment) — nothing is sent until Submit.
@@ -808,7 +857,7 @@ impl QuillApp {
                     }
                     card = card.child(stars).child(
                         Button::new("call-rate-skip")
-                            .label("Skip")
+                            .label(tr(keys::Q_OPS_SKIP))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.dismiss_call_summary(cx);
@@ -825,14 +874,16 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Thanks for your feedback"),
+                        .child(tr(keys::Q_OPS_THANKS_FOR_YOUR_FEEDBACK)),
                 );
             }
-            card = card.child(Button::new("call-summary-close").label("Close").on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.dismiss_call_summary(cx);
-                }),
-            ));
+            card = card.child(
+                Button::new("call-summary-close")
+                    .label(tr(keys::GROUP_CALL_CLOSE))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.dismiss_call_summary(cx);
+                    })),
+            );
         }
         // Phase C2i: call again from the call-end card (honours the
         // confirm-before-calling pref).
@@ -841,7 +892,7 @@ impl QuillApp {
             let was_video = summary.is_video;
             card = card.child(
                 Button::new("call-summary-again")
-                    .label("Call again")
+                    .label(tr(keys::Q_OPS_CALL_AGAIN))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.dismiss_call_summary(cx);
                         this.call_again(user_id, was_video, cx);
@@ -896,7 +947,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("What went wrong? (optional)"),
+                    .child(tr(keys::Q_OPS_WHAT_WENT_WRONG_OPTIONAL)),
             )
             .child(chips)
             .child(self.dialogs.rating_comment_input.clone())
@@ -906,14 +957,14 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("call-rate-submit")
-                            .label("Submit rating")
+                            .label(tr(keys::Q_OPS_SUBMIT_RATING))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.submit_call_rating(cx);
                             })),
                     )
                     .child(
                         Button::new("call-rate-skip")
-                            .label("Skip")
+                            .label(tr(keys::Q_OPS_SKIP))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.dismiss_call_summary(cx);

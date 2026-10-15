@@ -14,6 +14,7 @@ use quill::calls::audio_level::{
     MIC_TEST_ANIMATION_MS, MIC_TEST_UPDATE_MS, meter_lit_lines, peak_from_level,
 };
 use quill::calls::level_tap::{LevelSource, LevelTap};
+use quill::lang::{keys, tr};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
@@ -89,9 +90,9 @@ impl QuillApp {
                     .child(
                         Button::new("call-mic-test-toggle")
                             .label(if test.is_some() {
-                                "Stop test"
+                                tr(keys::Q_OPS_STOP_TEST)
                             } else {
-                                "Test microphone"
+                                tr(keys::Q_OPS_TEST_MICROPHONE)
                             })
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_mic_test(cx))),
@@ -100,7 +101,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Speak to see your microphone's level"),
+                            .child(tr(keys::Q_OPS_SPEAK_TO_SEE_YOUR_MICROPHONES)),
                     ),
             );
         let Some(test) = test else {

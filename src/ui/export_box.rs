@@ -21,6 +21,7 @@ use quill::export::settings::{
 };
 use quill::export::{ExportFormat, ExportSettings, MediaKind};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
 use quill::search_filters::{YearMonth, day_number, local_day_number};
 use std::path::PathBuf;
@@ -108,7 +109,9 @@ impl QuillApp {
         let settings = draft.settings.clone();
         let started = match self.live.as_mut() {
             Some(live) => live.driver.start_chat_export(settings),
-            None => Err(std::io::Error::other("Connect to export a chat")),
+            None => Err(std::io::Error::other(tr(
+                keys::Q_OPS_CONNECT_TO_EXPORT_A_CHAT,
+            ))),
         };
         match started {
             Ok(()) => {
@@ -125,7 +128,7 @@ impl QuillApp {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Export here".into()),
+            prompt: Some(tr(keys::Q_OPS_EXPORT_HERE).into()),
         });
         cx.spawn(async move |this, cx| {
             let result = picker.await;
@@ -160,7 +163,7 @@ impl QuillApp {
                 let (body, footer) = this.chat_export_progress(cx);
                 return finish_dialog(
                     dialog,
-                    "Export chat history".into(),
+                    tr(keys::PROFILE_EXPORT_CHAT).into(),
                     body,
                     Some(footer),
                     on_close,
@@ -207,7 +210,7 @@ impl QuillApp {
         let size = div()
             .id("chat-export-size")
             .role(Role::Group)
-            .aria_label("Media size limit")
+            .aria_label(tr(keys::Q_OPS_MEDIA_SIZE_LIMIT))
             .flex()
             .items_center()
             .gap_3()
@@ -259,7 +262,10 @@ impl QuillApp {
                         .label(text)
                         .outline()
                         .small()
-                        .accessibility_label(format!("Choose the {} date", label.to_lowercase()))
+                        .accessibility_label(tr_with(
+                            keys::Q_OPS_CHOOSE_THE_DATE,
+                            &[("to_lowercase", &(label.to_lowercase()).to_string())],
+                        ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
                                 let shown = match field {
@@ -276,7 +282,7 @@ impl QuillApp {
                 .when(value > 0, |row| {
                     row.child(
                         Button::new(("chat-export-date-clear", field as usize))
-                            .label("Clear")
+                            .label(tr(keys::Q_OPS_CLEAR))
                             .ghost()
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -298,7 +304,7 @@ impl QuillApp {
             .child(
                 Switch::new("chat-export-only-mine")
                     .checked(settings.only_mine)
-                    .accessibility_label("Only my messages")
+                    .accessibility_label(tr(keys::EXPORT_OPTION_ONLY_MY))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
                             draft.settings.only_mine = on;
@@ -306,7 +312,7 @@ impl QuillApp {
                         cx.notify();
                     })),
             )
-            .child(div().text_sm().child("Only my messages"));
+            .child(div().text_sm().child(tr(keys::EXPORT_OPTION_ONLY_MY)));
         let folder = div()
             .flex()
             .items_center()
@@ -321,7 +327,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("chat-export-folder")
-                    .label("Change…")
+                    .label(tr(keys::Q_OPS_CHANGE))
                     .outline()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| this.choose_chat_export_folder(cx))),
@@ -331,25 +337,30 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_sm().text_color(muted).child(format!(
-                "Save the history of {} as files you can open and keep.",
-                settings.title
+            .child(div().text_sm().text_color(muted).child(tr_with(
+                keys::Q_OPS_SAVE_THE_HISTORY_OF_AS,
+                &[("title", &settings.title.to_string())],
             )))
-            .child(heading("Media"))
+            .child(heading(tr(keys::Q_OPS_MEDIA)))
             .child(media)
             .child(size)
-            .child(heading("Format"))
+            .child(heading(tr(keys::Q_OPS_FORMAT)))
             .child(format)
-            .child(heading("Folder"))
+            .child(heading(tr(keys::Q_OPS_FOLDER)))
             .child(folder)
-            .child(heading("Period"))
+            .child(heading(tr(keys::Q_OPS_PERIOD)))
             .child(date_row(
                 DateField::From,
-                "From",
+                tr(keys::Q_OPS_FROM),
                 settings.from,
-                "Beginning",
+                tr(keys::Q_OPS_BEGINNING),
             ))
-            .child(date_row(DateField::Till, "To", settings.till, "Now"))
+            .child(date_row(
+                DateField::Till,
+                tr(keys::Q_OPS_TO),
+                settings.till,
+                tr(keys::Q_OPS_NOW),
+            ))
             .child(only_mine);
         if let Some(error) = &draft.error {
             body = body.child(
@@ -368,7 +379,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("chat-export-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.dialogs.chat_export_dialog = None;
@@ -378,11 +389,11 @@ impl QuillApp {
             )
             .child(
                 Button::new("chat-export-start")
-                    .label("Export")
+                    .label(tr(keys::EXPORT_START))
                     .on_click(cx.listener(|this, _, _, cx| this.run_chat_export(cx))),
             );
         (
-            "Export chat history".into(),
+            tr(keys::PROFILE_EXPORT_CHAT).into(),
             body.into_any_element(),
             footer.into_any_element(),
         )
@@ -413,8 +424,8 @@ impl QuillApp {
                     .icon(gpui_kit::assets::IconName::ChevronLeft)
                     .ghost()
                     .disabled(month <= EARLIEST)
-                    .tooltip("Previous month")
-                    .accessibility_label("Previous month")
+                    .tooltip(tr(keys::Q_OPS_PREVIOUS_MONTH))
+                    .accessibility_label(tr(keys::Q_OPS_PREVIOUS_MONTH))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
                             draft.month = month.prev();
@@ -435,8 +446,8 @@ impl QuillApp {
                     .icon(gpui_kit::assets::IconName::ChevronRight)
                     .ghost()
                     .disabled(month >= current)
-                    .tooltip("Next month")
-                    .accessibility_label("Next month")
+                    .tooltip(tr(keys::Q_OPS_NEXT_MONTH))
+                    .accessibility_label(tr(keys::Q_OPS_NEXT_MONTH))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
                             draft.month = month.next();
@@ -524,7 +535,7 @@ impl QuillApp {
             .child(grid);
         let footer = div().flex().justify_end().child(
             Button::new("chat-export-calendar-back")
-                .label("Back")
+                .label(tr(keys::Q_OPS_BACK))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(draft) = this.dialogs.chat_export_dialog.as_mut() {
@@ -534,8 +545,8 @@ impl QuillApp {
                 })),
         );
         let title = match field {
-            DateField::From => "Export from",
-            DateField::Till => "Export until",
+            DateField::From => tr(keys::Q_OPS_EXPORT_FROM),
+            DateField::Till => tr(keys::Q_OPS_EXPORT_UNTIL),
         };
         (
             title.into(),

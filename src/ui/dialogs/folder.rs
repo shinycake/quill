@@ -3,6 +3,7 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::folder_picker::PickerMode;
 use quill::folders::FolderEditor;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatFolderSpec;
 use std::collections::HashSet;
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
@@ -29,13 +30,13 @@ impl FolderEditorDialog {
     ) -> Self {
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Folder name (1–12 characters)")
+                .placeholder(tr(keys::Q_OPS_FOLDER_NAME_1_12_CHARACTERS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let picker_search = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search")
+                .placeholder(tr(keys::Q_OPS_SEARCH))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -108,7 +109,7 @@ impl FolderShareDialog {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>, folder_id: i32) -> Self {
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Link name (optional)")
+                .placeholder(tr(keys::Q_OPS_LINK_NAME_OPTIONAL))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

@@ -11,6 +11,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::business_start_page::StartPage;
 use quill::ids::FileId;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::StickerTab;
 use quill::telegram::envelope::StickerItem;
@@ -26,8 +27,20 @@ impl QuillApp {
         let saved = self.my_business().start_page.unwrap_or_default();
         let (title_max, message_max) = self.business_start_page_limits();
         StartPageDraft {
-            title: super::limited_input(window, cx, "Enter Title", &saved.title, title_max),
-            message: super::limited_input(window, cx, "Enter Message", &saved.message, message_max),
+            title: super::limited_input(
+                window,
+                cx,
+                tr(keys::Q_OPS_ENTER_TITLE),
+                &saved.title,
+                title_max,
+            ),
+            message: super::limited_input(
+                window,
+                cx,
+                tr(keys::Q_OPS_ENTER_MESSAGE),
+                &saved.message,
+                message_max,
+            ),
             sticker: saved.sticker,
         }
     }
@@ -112,7 +125,7 @@ impl QuillApp {
             .map(ImageSource::Render)
             .or_else(|| path.map(ImageSource::from));
         let label = if sticker.emoji.is_empty() {
-            "Sticker".to_string()
+            tr(keys::Q_OPS_STICKER).to_string()
         } else {
             sticker.emoji.clone()
         };
@@ -213,7 +226,7 @@ impl QuillApp {
             Some(sticker) => self.business_sticker_still(sticker, 28., cx),
             None => div()
                 .text_color(cx.theme().primary)
-                .child("Random")
+                .child(tr(keys::Q_OPS_RANDOM))
                 .into_any_element(),
         };
         div()
@@ -229,15 +242,15 @@ impl QuillApp {
                     .bg(cx.theme().muted)
                     .child(preview),
             )
-            .child(Input::new(&title).aria_label("Title"))
+            .child(Input::new(&title).aria_label(tr(keys::Q_OPS_TITLE)))
             .child(counter(page.title.chars().count(), title_max))
-            .child(Input::new(&message).aria_label("Message"))
+            .child(Input::new(&message).aria_label(tr(keys::Q_OPS_MESSAGE)))
             .child(counter(page.message.chars().count(), message_max))
             .child(
                 crate::ui::pressable::action_row(
                     "business-intro-sticker",
                     None,
-                    "Choose Sticker",
+                    tr(keys::Q_OPS_CHOOSE_STICKER),
                     false,
                     cx,
                 )
@@ -254,7 +267,7 @@ impl QuillApp {
                     crate::ui::pressable::action_row(
                         "business-intro-reset",
                         None,
-                        "Reset to Default",
+                        tr(keys::Q_OPS_RESET_TO_DEFAULT),
                         true,
                         cx,
                     )
@@ -305,7 +318,7 @@ impl QuillApp {
             return Leave::Go(None);
         }
         let file = sticker.map(|s| s.file_id.0);
-        self.business_send("start page", |driver| {
+        self.business_send(tr(keys::Q_OPS_START_PAGE_2), |driver| {
             driver
                 .save_business_start_page(&title, &message, file)
                 .is_ok()

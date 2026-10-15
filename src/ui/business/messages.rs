@@ -15,6 +15,7 @@ use gpui_kit::*;
 use quill::business_settings::{
     self as bs, AwaySchedule, AwaySettings, BusinessRecipients, GreetingSettings,
 };
+use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::quick_replies::count_label;
 
@@ -181,9 +182,9 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let (_, count) = self.business_shortcut(kind);
         let label = match (count > 0, kind) {
-            (true, _) => "Edit messages",
-            (false, MessageKind::Greeting) => "Create a Greeting Message",
-            (false, MessageKind::Away) => "Create an Away Message",
+            (true, _) => tr(keys::BUSINESS_EDIT_MESSAGES),
+            (false, MessageKind::Greeting) => tr(keys::GREETING_CREATE),
+            (false, MessageKind::Away) => tr(keys::AWAY_CREATE),
         };
         crate::ui::pressable::action_row(
             match kind {
@@ -224,7 +225,7 @@ impl QuillApp {
             .child(div().text_sm().text_color(muted).child(GREETING_ABOUT))
             .child(self.business_switch_row(
                 "business-greeting-enable",
-                "Send Greeting Message",
+                tr(keys::Q_OPS_SEND_GREETING_MESSAGE),
                 enabled,
                 cx,
                 |this, on, cx| this.set_business_enabled(MessageKind::Greeting, on, cx),
@@ -245,7 +246,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .font_semibold()
-                        .child("Period of no activity"),
+                        .child(tr(keys::GREETING_PERIOD_TITLE)),
                 )
                 .child(
                     RadioGroup::horizontal("business-greeting-period")
@@ -293,7 +294,7 @@ impl QuillApp {
             .child(div().text_sm().text_color(muted).child(AWAY_ABOUT))
             .child(self.business_switch_row(
                 "business-away-enable",
-                "Send Away Message",
+                tr(keys::Q_OPS_SEND_AWAY_MESSAGE),
                 enabled,
                 cx,
                 |this, on, cx| this.set_business_enabled(MessageKind::Away, on, cx),
@@ -302,16 +303,24 @@ impl QuillApp {
             return body;
         }
         let choices = [
-            (ScheduleChoice::Always, "Send Always"),
-            (ScheduleChoice::OutsideHours, "Outside of Business Hours"),
-            (ScheduleChoice::Custom, "Custom Schedule"),
+            (ScheduleChoice::Always, tr(keys::Q_OPS_SEND_ALWAYS)),
+            (
+                ScheduleChoice::OutsideHours,
+                tr(keys::AWAY_SCHEDULE_OUTSIDE),
+            ),
+            (ScheduleChoice::Custom, tr(keys::Q_OPS_CUSTOM_SCHEDULE)),
         ];
         let selected = choices.iter().position(|(c, _)| *c == schedule);
         let mut schedule_section = div()
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_sm().font_semibold().child("Schedule"))
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(tr(keys::Q_OPS_SCHEDULE)),
+            )
             .child(
                 RadioGroup::vertical("business-away-schedule")
                     .selected_index(selected)
@@ -329,19 +338,24 @@ impl QuillApp {
                     })),
             );
         if schedule == ScheduleChoice::Custom {
-            for (label, state) in [("Start Time", start), ("End Time", end)] {
-                schedule_section =
-                    schedule_section.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_3()
-                            .child(div().text_sm().child(label))
-                            .child(div().w(px(240.)).child(
-                                DatePicker::new(&state).placeholder("Pick a date and time"),
-                            )),
-                    );
+            for (label, state) in [
+                (tr(keys::Q_OPS_START_TIME), start),
+                (tr(keys::Q_OPS_END_TIME), end),
+            ] {
+                schedule_section = schedule_section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(div().text_sm().child(label))
+                        .child(
+                            div().w(px(240.)).child(
+                                DatePicker::new(&state)
+                                    .placeholder(tr(keys::Q_OPS_PICK_A_DATE_AND_TIME)),
+                            ),
+                        ),
+                );
             }
         }
         body.child(self.business_messages_row(MessageKind::Away, cx))
@@ -352,7 +366,7 @@ impl QuillApp {
                     .flex_col()
                     .child(self.business_switch_row(
                         "business-away-offline",
-                        "Only if Offline",
+                        tr(keys::Q_OPS_ONLY_IF_OFFLINE),
                         offline_only,
                         cx,
                         |this, on, cx| {
@@ -386,15 +400,13 @@ impl QuillApp {
                 inactivity_days: draft.days,
             }),
             (true, _) => {
-                return Leave::Go(Some(
-                    "The greeting message stays off until it has messages.".into(),
-                ));
+                return Leave::Go(Some(tr(keys::Q_OPS_THE_GREETING_MESSAGE_STAYS_OFF).into()));
             }
         };
         if wanted == self.my_business().greeting {
             return Leave::Go(None);
         }
-        self.business_send("greeting message settings", |driver| {
+        self.business_send(tr(keys::Q_OPS_GREETING_MESSAGE_SETTINGS), |driver| {
             driver.save_business_greeting(wanted.as_ref()).is_ok()
         })
     }
@@ -422,7 +434,7 @@ impl QuillApp {
                     }
                     _ if !draft.enabled => AwaySchedule::Always,
                     _ => {
-                        self.business_error("The end time must be after the start time.", cx);
+                        self.business_error(tr(keys::Q_OPS_THE_END_TIME_MUST_BE), cx);
                         return Leave::Stay;
                     }
                 }
@@ -438,15 +450,13 @@ impl QuillApp {
                 offline_only: draft.offline_only,
             }),
             (true, _) => {
-                return Leave::Go(Some(
-                    "The away message stays off until it has messages.".into(),
-                ));
+                return Leave::Go(Some(tr(keys::Q_OPS_THE_AWAY_MESSAGE_STAYS_OFF).into()));
             }
         };
         if wanted == self.my_business().away {
             return Leave::Go(None);
         }
-        self.business_send("away message settings", |driver| {
+        self.business_send(tr(keys::Q_OPS_AWAY_MESSAGE_SETTINGS), |driver| {
             driver.save_business_away(wanted.as_ref()).is_ok()
         })
     }

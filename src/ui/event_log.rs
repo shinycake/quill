@@ -7,6 +7,7 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{AdminListFetch, ChatEventLogFetch, event_log_relative_time};
 use quill::telegram::envelope::{
     ChannelMemberStatus, ChatEventAction, MessageSender, ParsedChatEvent,
@@ -25,7 +26,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.set_chat_event_log_query(chat_id, &query);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.connection.status_note = "could not search recent actions".into();
+                self.connection.status_note =
+                    tr(keys::Q_OPS_COULD_NOT_SEARCH_RECENT_ACTIONS).into();
             }
         }
         cx.notify();
@@ -41,7 +43,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.toggle_chat_event_log_filter(chat_id, toggle);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.connection.status_note = "could not filter recent actions".into();
+                self.connection.status_note =
+                    tr(keys::Q_OPS_COULD_NOT_FILTER_RECENT_ACTIONS).into();
             }
         }
         cx.notify();
@@ -52,11 +55,12 @@ impl QuillApp {
             match live.driver.refresh_chat_event_log(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note = "could not refresh recent actions".into();
+                    self.connection.status_note =
+                        tr(keys::Q_OPS_COULD_NOT_REFRESH_RECENT_ACTIONS).into();
                 }
             }
         } else {
-            self.connection.status_note = "recent actions need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -67,11 +71,12 @@ impl QuillApp {
             match live.driver.fetch_chat_event_log_more(chat_id) {
                 Ok(_) => {}
                 Err(_) => {
-                    self.connection.status_note = "could not load more actions".into();
+                    self.connection.status_note =
+                        tr(keys::Q_OPS_COULD_NOT_LOAD_MORE_ACTIONS).into();
                 }
             }
         } else {
-            self.connection.status_note = "recent actions need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_OPS_RECENT_ACTIONS_NEED_A_LIVE).into();
         }
         cx.notify();
     }
@@ -112,12 +117,12 @@ impl QuillApp {
                             .text_xs()
                             .font_semibold()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Recent actions"),
+                            .child(tr(keys::Q_OPS_RECENT_ACTIONS)),
                     )
                     .child(div().flex_1())
                     .child(
                         Button::new("event-log-refresh")
-                            .label("Refresh")
+                            .label(tr(keys::Q_OPS_REFRESH))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.refresh_event_log(chat_id, cx);
@@ -144,14 +149,14 @@ impl QuillApp {
             controls = controls.child(
                 div().flex_1().child(
                     Textarea::new(&input)
-                        .aria_label("Filter event log")
+                        .aria_label(tr(keys::Q_OPS_FILTER_EVENT_LOG))
                         .h(px(32.)),
                 ),
             );
         }
         controls = controls.child(
             Button::new("event-log-search")
-                .label("Search")
+                .label(tr(keys::Q_OPS_SEARCH))
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.apply_event_log_search(chat_id, cx);
@@ -181,7 +186,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading recent actions…"),
+                        .child(tr(keys::Q_OPS_LOADING_RECENT_ACTIONS)),
                 );
             }
             Some(ChatEventLogFetch::Failed(message)) => {
@@ -200,7 +205,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("event-log-retry")
-                                .label("Retry")
+                                .label(tr(keys::Q_OPS_RETRY))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.refresh_event_log(chat_id, cx);
@@ -215,9 +220,9 @@ impl QuillApp {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(if filtered_by_admin {
-                                "No recent actions by the selected admins."
+                                tr(keys::Q_OPS_NO_RECENT_ACTIONS_BY_THE)
                             } else {
-                                "No recent actions."
+                                tr(keys::Q_OPS_NO_RECENT_ACTIONS)
                             }),
                     );
                 } else {
@@ -227,7 +232,7 @@ impl QuillApp {
                     if page.has_more {
                         section = section.child(
                             Button::new("event-log-load-more")
-                                .label("Load more")
+                                .label(tr(keys::Q_OPS_LOAD_MORE))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.load_more_event_log(chat_id, cx);
@@ -282,9 +287,9 @@ impl QuillApp {
             .w_full()
             .gap_1();
         let all_label = if selected.is_empty() {
-            "✓ All admins".to_string()
+            tr(keys::Q_OPS_ALL_ADMINS).to_string()
         } else {
-            "All admins".to_string()
+            tr(keys::Q_OPS_ALL_ADMINS_2).to_string()
         };
         chips = chips.child(
             Button::new("event-log-admin-all")
@@ -330,69 +335,93 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let categories: Vec<(&str, &str, bool, fn(&mut ChatEventLogFilterSet))> = vec![
-            ("message-edits", "Edits", active.message_edits, |f| {
-                f.message_edits = !f.message_edits
-            }),
+            (
+                "message-edits",
+                tr(keys::Q_OPS_EDITS),
+                active.message_edits,
+                |f| f.message_edits = !f.message_edits,
+            ),
             (
                 "message-deletions",
-                "Deletions",
+                tr(keys::Q_OPS_DELETIONS),
                 active.message_deletions,
                 |f| f.message_deletions = !f.message_deletions,
             ),
-            ("message-pins", "Pins", active.message_pins, |f| {
-                f.message_pins = !f.message_pins
-            }),
-            ("member-joins", "Joins", active.member_joins, |f| {
-                f.member_joins = !f.member_joins
-            }),
-            ("member-leaves", "Leaves", active.member_leaves, |f| {
-                f.member_leaves = !f.member_leaves
-            }),
-            ("member-invites", "Invites", active.member_invites, |f| {
-                f.member_invites = !f.member_invites
-            }),
+            (
+                "message-pins",
+                tr(keys::Q_OPS_PINS),
+                active.message_pins,
+                |f| f.message_pins = !f.message_pins,
+            ),
+            (
+                "member-joins",
+                tr(keys::Q_OPS_JOINS),
+                active.member_joins,
+                |f| f.member_joins = !f.member_joins,
+            ),
+            (
+                "member-leaves",
+                tr(keys::Q_OPS_LEAVES),
+                active.member_leaves,
+                |f| f.member_leaves = !f.member_leaves,
+            ),
+            (
+                "member-invites",
+                tr(keys::Q_OPS_INVITES),
+                active.member_invites,
+                |f| f.member_invites = !f.member_invites,
+            ),
             (
                 "member-promotions",
-                "Promotions",
+                tr(keys::Q_OPS_PROMOTIONS),
                 active.member_promotions,
                 |f| f.member_promotions = !f.member_promotions,
             ),
             (
                 "member-restrictions",
-                "Restrictions",
+                tr(keys::Q_OPS_RESTRICTIONS),
                 active.member_restrictions,
                 |f| f.member_restrictions = !f.member_restrictions,
             ),
             (
                 "member-tag-changes",
-                "Tags",
+                tr(keys::Q_OPS_TAGS),
                 active.member_tag_changes,
                 |f| f.member_tag_changes = !f.member_tag_changes,
             ),
-            ("info-changes", "Info", active.info_changes, |f| {
-                f.info_changes = !f.info_changes
-            }),
-            ("setting-changes", "Settings", active.setting_changes, |f| {
-                f.setting_changes = !f.setting_changes
-            }),
+            (
+                "info-changes",
+                tr(keys::Q_OPS_INFO),
+                active.info_changes,
+                |f| f.info_changes = !f.info_changes,
+            ),
+            (
+                "setting-changes",
+                tr(keys::MENU_SETTINGS),
+                active.setting_changes,
+                |f| f.setting_changes = !f.setting_changes,
+            ),
             (
                 "invite-link-changes",
-                "Invite links",
+                tr(keys::ADMIN_LOG_FILTER_INVITE_LINKS),
                 active.invite_link_changes,
                 |f| f.invite_link_changes = !f.invite_link_changes,
             ),
             (
                 "video-chat-changes",
-                "Video chats",
+                tr(keys::ADMIN_LOG_FILTER_VOICE_CHATS),
                 active.video_chat_changes,
                 |f| f.video_chat_changes = !f.video_chat_changes,
             ),
-            ("forum-changes", "Forum", active.forum_changes, |f| {
-                f.forum_changes = !f.forum_changes
-            }),
+            (
+                "forum-changes",
+                tr(keys::Q_OPS_FORUM),
+                active.forum_changes,
+                |f| f.forum_changes = !f.forum_changes,
+            ),
             (
                 "subscription-extensions",
-                "Stars",
+                tr(keys::Q_OPS_STARS),
                 active.subscription_extensions,
                 |f| f.subscription_extensions = !f.subscription_extensions,
             ),
@@ -421,7 +450,7 @@ impl QuillApp {
         if active.any_enabled() {
             chips = chips.child(
                 Button::new("event-log-filter-clear")
-                    .label("Clear")
+                    .label(tr(keys::Q_OPS_CLEAR))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.clear_event_log_filters(chat_id, cx);
@@ -441,7 +470,7 @@ impl QuillApp {
                 .event_log_filters
                 .remove(&chat_id.0);
             if live.driver.refresh_chat_event_log(chat_id).is_err() {
-                self.connection.status_note = "could not clear filters".into();
+                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_CLEAR_FILTERS).into();
             }
         }
         cx.notify();
@@ -497,7 +526,7 @@ impl QuillApp {
             self.session()
                 .and_then(|session| session.user(user_id))
                 .map(|user| user.display_name())
-                .unwrap_or_else(|| format!("User {user_id}"))
+                .unwrap_or_else(|| tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())]))
         };
         let sender_name = |sender: &MessageSender| match sender {
             MessageSender::User { user_id } => user_name(*user_id),
@@ -505,7 +534,7 @@ impl QuillApp {
                 .session()
                 .and_then(|session| session.chats.get(chat_id))
                 .map(|chat| chat.title.clone())
-                .unwrap_or_else(|| format!("Chat {chat_id}")),
+                .unwrap_or_else(|| tr_with(keys::Q_OPS_CHAT, &[("chat_id", &chat_id.to_string())])),
         };
         // Short quoted excerpt; long titles/descriptions are cut rather
         // than wrapping the row.
@@ -524,36 +553,50 @@ impl QuillApp {
             }
         };
         match &event.action {
-            ChatEventAction::MessageEdited { text, .. } => with_text("edited a message", text),
-            ChatEventAction::MessageDeleted { text, .. } => with_text("deleted a message", text),
-            ChatEventAction::MessagePinned { text, .. } => with_text("pinned a message", text),
-            ChatEventAction::MessageUnpinned { text, .. } => with_text("unpinned a message", text),
-            ChatEventAction::MemberJoined => "joined the chat".to_owned(),
+            ChatEventAction::MessageEdited { text, .. } => {
+                with_text(tr(keys::Q_OPS_EDITED_A_MESSAGE), text)
+            }
+            ChatEventAction::MessageDeleted { text, .. } => {
+                with_text(tr(keys::Q_OPS_DELETED_A_MESSAGE), text)
+            }
+            ChatEventAction::MessagePinned { text, .. } => {
+                with_text(tr(keys::Q_OPS_PINNED_A_MESSAGE), text)
+            }
+            ChatEventAction::MessageUnpinned { text, .. } => {
+                with_text(tr(keys::Q_OPS_UNPINNED_A_MESSAGE), text)
+            }
+            ChatEventAction::MemberJoined => tr(keys::Q_OPS_JOINED_THE_CHAT).to_owned(),
             // B4: `chatEventPollStopped` (schema 1.8.67 line 7776) — TGX
             // `EventLogPollStopped` / `EventLogQuizStopped` copy.
             ChatEventAction::PollStopped { is_quiz } => {
                 if *is_quiz {
-                    "stopped the quiz".to_owned()
+                    tr(keys::Q_OPS_STOPPED_THE_QUIZ).to_owned()
                 } else {
-                    "stopped the poll".to_owned()
+                    tr(keys::Q_OPS_STOPPED_THE_POLL).to_owned()
                 }
             }
             ChatEventAction::MemberJoinedByInviteLink {
                 invite_link_name, ..
             } => {
                 if invite_link_name.is_empty() {
-                    "joined via an invite link".to_owned()
+                    tr(keys::Q_OPS_JOINED_VIA_AN_INVITE_LINK).to_owned()
                 } else {
-                    format!("joined via invite link {}", quote(invite_link_name))
+                    tr_with(
+                        keys::Q_OPS_JOINED_VIA_INVITE_LINK,
+                        &[("quote", &(quote(invite_link_name)).to_string())],
+                    )
                 }
             }
             ChatEventAction::MemberJoinedByRequest {
                 approver_user_id, ..
             } => {
                 if *approver_user_id == 0 {
-                    "joined via an approved join request".to_owned()
+                    tr(keys::Q_OPS_JOINED_VIA_AN_APPROVED_JOIN).to_owned()
                 } else {
-                    format!("join request approved by {}", user_name(*approver_user_id))
+                    tr_with(
+                        keys::Q_OPS_JOIN_REQUEST_APPROVED_BY,
+                        &[("user_name", &(user_name(*approver_user_id)).to_string())],
+                    )
                 }
             }
             ChatEventAction::MemberInvited { user_id, .. } => {
@@ -567,15 +610,17 @@ impl QuillApp {
                 let name = user_name(*user_id);
                 match (old_status, new_status) {
                     (_, ChannelMemberStatus::Creator) => {
-                        format!("transferred ownership to {name}")
+                        tr_with(keys::ADMIN_LOG_TRANSFERRED, &[("user", &name.to_string())])
                     }
-                    (_, ChannelMemberStatus::Administrator) => {
-                        format!("promoted {name} to administrator")
-                    }
-                    (ChannelMemberStatus::Administrator, ChannelMemberStatus::Member) => {
-                        format!("removed {name} as administrator")
-                    }
-                    _ => format!("changed {name}'s role"),
+                    (_, ChannelMemberStatus::Administrator) => tr_with(
+                        keys::Q_OPS_PROMOTED_TO_ADMINISTRATOR,
+                        &[("name", &name.to_string())],
+                    ),
+                    (ChannelMemberStatus::Administrator, ChannelMemberStatus::Member) => tr_with(
+                        keys::Q_OPS_REMOVED_AS_ADMINISTRATOR,
+                        &[("name", &name.to_string())],
+                    ),
+                    _ => tr_with(keys::Q_OPS_CHANGED_S_ROLE, &[("name", &name.to_string())]),
                 }
             }
             ChatEventAction::MemberRestricted {
@@ -588,25 +633,33 @@ impl QuillApp {
                     (_, ChannelMemberStatus::Banned) => format!("banned {name}"),
                     (_, ChannelMemberStatus::Restricted) => format!("restricted {name}"),
                     (ChannelMemberStatus::Banned, _) => format!("unbanned {name}"),
-                    (ChannelMemberStatus::Restricted, _) => {
-                        format!("lifted restrictions on {name}")
-                    }
-                    _ => format!("changed {name}'s restrictions"),
+                    (ChannelMemberStatus::Restricted, _) => tr_with(
+                        keys::Q_OPS_LIFTED_RESTRICTIONS_ON,
+                        &[("name", &name.to_string())],
+                    ),
+                    _ => tr_with(
+                        keys::Q_OPS_CHANGED_S_RESTRICTIONS,
+                        &[("name", &name.to_string())],
+                    ),
                 }
             }
             ChatEventAction::DescriptionChanged {
                 new_description, ..
             } => {
                 if new_description.is_empty() {
-                    "cleared the description".to_owned()
+                    tr(keys::Q_OPS_CLEARED_THE_DESCRIPTION).to_owned()
                 } else {
-                    format!("changed the description to {}", quote(new_description))
+                    tr_with(
+                        keys::Q_OPS_CHANGED_THE_DESCRIPTION_TO,
+                        &[("quote", &(quote(new_description)).to_string())],
+                    )
                 }
             }
-            ChatEventAction::PhotoChanged => "changed the chat photo".to_owned(),
-            ChatEventAction::TitleChanged { new_title, .. } => {
-                format!("changed the title to {}", quote(new_title))
-            }
+            ChatEventAction::PhotoChanged => tr(keys::Q_OPS_CHANGED_THE_CHAT_PHOTO).to_owned(),
+            ChatEventAction::TitleChanged { new_title, .. } => tr_with(
+                keys::Q_OPS_CHANGED_THE_TITLE_TO,
+                &[("quote", &(quote(new_title)).to_string())],
+            ),
             ChatEventAction::InviteLinkEdited {
                 old_name, new_name, ..
             } => {
@@ -616,26 +669,35 @@ impl QuillApp {
                     new_name
                 };
                 if name.is_empty() {
-                    "edited an invite link".to_owned()
+                    tr(keys::Q_OPS_EDITED_AN_INVITE_LINK).to_owned()
                 } else {
-                    format!("edited invite link {}", quote(name))
+                    tr_with(
+                        keys::ADMIN_LOG_EDITED_INVITE_LINK,
+                        &[("link", &(quote(name)).to_string())],
+                    )
                 }
             }
             ChatEventAction::InviteLinkRevoked { name, .. } => {
                 if name.is_empty() {
-                    "revoked an invite link".to_owned()
+                    tr(keys::Q_OPS_REVOKED_AN_INVITE_LINK).to_owned()
                 } else {
-                    format!("revoked invite link {}", quote(name))
+                    tr_with(
+                        keys::Q_OPS_REVOKED_INVITE_LINK,
+                        &[("quote", &(quote(name)).to_string())],
+                    )
                 }
             }
             ChatEventAction::InviteLinkDeleted { name, .. } => {
                 if name.is_empty() {
-                    "deleted an invite link".to_owned()
+                    tr(keys::Q_OPS_DELETED_AN_INVITE_LINK).to_owned()
                 } else {
-                    format!("deleted invite link {}", quote(name))
+                    tr_with(
+                        keys::Q_OPS_DELETED_INVITE_LINK,
+                        &[("quote", &(quote(name)).to_string())],
+                    )
                 }
             }
-            ChatEventAction::Unsupported { .. } => "performed an action".to_owned(),
+            ChatEventAction::Unsupported { .. } => tr(keys::Q_OPS_PERFORMED_AN_ACTION).to_owned(),
         }
     }
 }

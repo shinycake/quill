@@ -20,6 +20,7 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::AccountKey;
+use quill::lang::{keys, tr, tr_with};
 use quill::platform::live_secret_store;
 use quill::settings::{
     AccountRecord, active_account, add_account, list_accounts, remove_account, safe_app_root,
@@ -44,7 +45,7 @@ impl AccountsUiState {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let add_name = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Name for the new account")
+                .placeholder(tr(keys::Q_OPS_NAME_FOR_THE_NEW_ACCOUNT))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -104,16 +105,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(root) = safe_app_root() else {
-            self.fail_account_switch(
-                "Could not switch account: no app data directory",
-                window,
-                cx,
-            );
+            self.fail_account_switch(tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_NO), window, cx);
             return;
         };
         let Some(_) = self.credentials.as_ref() else {
             self.fail_account_switch(
-                "Could not switch account: Telegram credentials are not available",
+                tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_TELEGRAM),
                 window,
                 cx,
             );
@@ -169,7 +166,14 @@ impl QuillApp {
         // forward as it is instead of restarting.
         self.retire_live_to_background();
         if let Err(e) = set_active_account(&root, key) {
-            self.fail_account_switch(format!("Could not switch account: {e}"), window, cx);
+            self.fail_account_switch(
+                tr_with(
+                    keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT,
+                    &[("e", &e.to_string())],
+                ),
+                window,
+                cx,
+            );
             return;
         }
         self.refresh_test_environment();
@@ -193,13 +197,13 @@ impl QuillApp {
             .trim()
             .to_string();
         if name.is_empty() {
-            self.account.accounts.error = Some("Give the new account a name first.".into());
+            self.account.accounts.error = Some(tr(keys::Q_OPS_GIVE_THE_NEW_ACCOUNT_A).into());
             cx.notify();
             return;
         }
         let Some(root) = safe_app_root() else {
             self.account.accounts.error =
-                Some("Accounts are unavailable: no app data directory.".into());
+                Some(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
             cx.notify();
             return;
         };
@@ -222,7 +226,10 @@ impl QuillApp {
                 self.switch_account(&key, &name, window, cx);
             }
             Err(e) => {
-                self.account.accounts.error = Some(format!("Could not add the account: {e}"));
+                self.account.accounts.error = Some(tr_with(
+                    keys::Q_OPS_COULD_NOT_ADD_THE_ACCOUNT,
+                    &[("e", &e.to_string())],
+                ));
                 cx.notify();
             }
         }
@@ -233,7 +240,7 @@ impl QuillApp {
     pub(crate) fn remove_account_key(&mut self, key: &AccountKey, cx: &mut Context<Self>) {
         let Some(root) = safe_app_root() else {
             self.account.accounts.error =
-                Some("Accounts are unavailable: no app data directory.".into());
+                Some(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
             cx.notify();
             return;
         };
@@ -252,7 +259,10 @@ impl QuillApp {
                 self.account.accounts.error = None;
             }
             Err(e) => {
-                self.account.accounts.error = Some(format!("Could not remove the account: {e}"));
+                self.account.accounts.error = Some(tr_with(
+                    keys::Q_OPS_COULD_NOT_REMOVE_THE_ACCOUNT,
+                    &[("e", &e.to_string())],
+                ));
             }
         }
         cx.notify();
@@ -277,7 +287,7 @@ impl QuillApp {
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child("✓ Active")
+                .child(tr(keys::Q_OPS_ACTIVE_2))
                 .into_any_element()
         } else {
             let key_switch = record.key.clone();
@@ -288,14 +298,14 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new(format!("accounts-switch-{key_switch}"))
-                        .label("Switch")
+                        .label(tr(keys::Q_OPS_SWITCH))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.switch_account(&key_switch, &name_c, window, cx);
                         })),
                 )
                 .child(
                     Button::new(format!("accounts-remove-{key_remove_arm}"))
-                        .label("Remove")
+                        .label(tr(keys::BOX_REMOVE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.account.accounts.remove_confirm = Some(key_remove_arm.clone());
@@ -355,14 +365,14 @@ impl QuillApp {
                             .gap_2()
                             .child(
                                 Button::new(format!("accounts-remove-confirm-{key_confirm}"))
-                                    .label("Remove")
+                                    .label(tr(keys::BOX_REMOVE))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.remove_account_key(&key_confirm, cx);
                                     })),
                             )
                             .child(
                                 Button::new(format!("accounts-remove-cancel-{key_cancel}"))
-                                    .label("Cancel")
+                                    .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.account.accounts.remove_confirm = None;
@@ -403,7 +413,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(danger())
-                        .child(format!("Error: {line}")),
+                        .child(tr_with(keys::Q_OPS_ERROR_2, &[("line", &line.to_string())])),
                 );
             }
             for record in &accounts {
@@ -420,9 +430,9 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Accounts you are not using stay connected and keep their unread counts."),
+                        .child(tr(keys::Q_OPS_ACCOUNTS_YOU_ARE_NOT_USING)),
                 )
-                .child(div().font_semibold().text_sm().child("Add another account"))
+                .child(div().font_semibold().text_sm().child(tr(keys::Q_OPS_ADD_ANOTHER_ACCOUNT)))
                 .child(
                     div()
                         .text_xs()
@@ -435,19 +445,19 @@ impl QuillApp {
                 )
                 .child(
                     Textarea::new(&this.account.accounts.add_name)
-                        .aria_label("Account display name")
+                        .aria_label(tr(keys::Q_OPS_ACCOUNT_DISPLAY_NAME))
                         .h(px(40.)),
                 )
                 .child(
                     Button::new("accounts-add")
-                        .label("Add account")
+                        .label(tr(keys::Q_OPS_ADD_ACCOUNT))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.add_account_named(window, cx);
                         })),
                 );
             let footer = div().flex().justify_end().child(
                 Button::new("close-accounts")
-                    .label("Close")
+                    .label(tr(keys::CLOSE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_accounts(window, cx);
@@ -456,7 +466,7 @@ impl QuillApp {
             );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Accounts"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_ACCOUNTS)))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.

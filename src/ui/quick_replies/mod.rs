@@ -12,6 +12,7 @@ use super::app::QuillApp;
 use gpui_kit::component::input::{InputState, TextareaState};
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::quick_replies::{self as qr, NAME_TAKEN_LINE};
 use std::time::Duration;
 
@@ -46,12 +47,12 @@ impl QuillApp {
     pub(super) fn open_quick_replies(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Shortcut")
+                .placeholder(tr(keys::REPLIES_ADD_PLACEHOLDER))
                 .submit_on_enter(false)
         });
         let text_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Add a Quick Reply")
+                .placeholder(tr(keys::REPLIES_MESSAGE_PLACEHOLDER))
                 .auto_grow(2, 6)
                 .submit_on_enter(false)
         });
@@ -122,7 +123,7 @@ impl QuillApp {
         if self.live.is_some() {
             return true;
         }
-        self.quick_replies_error("Quick replies need a live session.", cx);
+        self.quick_replies_error(tr(keys::Q_OPS_QUICK_REPLIES_NEED_A_LIVE), cx);
         false
     }
 
@@ -215,7 +216,7 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut()
                     && live.driver.rename_quick_reply(id, &name).is_err()
                 {
-                    self.quick_replies_error("Could not send the new name.", cx);
+                    self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_NEW), cx);
                     return;
                 }
                 self.quick_replies_go(View::Shortcut { name, id: Some(id) }, window, cx);
@@ -234,7 +235,7 @@ impl QuillApp {
         let editing = dialog.editing;
         let text = dialog.text_input.read(cx).value().trim().to_string();
         if text.is_empty() {
-            self.quick_replies_error("Write the message first.", cx);
+            self.quick_replies_error(tr(keys::Q_OPS_WRITE_THE_MESSAGE_FIRST), cx);
             return;
         }
         if !self.quick_replies_live(cx) {
@@ -252,7 +253,7 @@ impl QuillApp {
             _ => None,
         };
         if !matches!(sent, Some(Ok(()))) {
-            self.quick_replies_error("Could not send the message.", cx);
+            self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_MESSAGE_2), cx);
             return;
         }
         if let Some(dialog) = self.quick_replies_mut() {
@@ -306,7 +307,7 @@ impl QuillApp {
                 .delete_quick_reply_message(shortcut_id, message_id)
                 .is_err()
         {
-            self.quick_replies_error("Could not delete the message.", cx);
+            self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_MESSAGE), cx);
         }
         cx.notify();
     }
@@ -345,7 +346,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.delete_quick_reply_shortcut(id).is_err()
         {
-            self.quick_replies_error("Could not delete the shortcut.", cx);
+            self.quick_replies_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_SHORTCUT), cx);
             return;
         }
         self.quick_replies_go(View::List, window, cx);
@@ -389,10 +390,10 @@ impl QuillApp {
     fn send_quick_reply_to(&mut self, chat_id: ChatId, shortcut_id: i32, cx: &mut Context<Self>) {
         self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.send_quick_reply(chat_id, shortcut_id) {
-                Ok(()) => "Sending quick reply…".into(),
-                Err(_) => "Could not send the quick reply.".into(),
+                Ok(()) => tr(keys::Q_OPS_SENDING_QUICK_REPLY).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_THE_QUICK).into(),
             },
-            None => "Demo mode: sending a quick reply needs a live session.".into(),
+            None => tr(keys::Q_OPS_DEMO_MODE_SENDING_A_QUICK).into(),
         };
         cx.notify();
     }

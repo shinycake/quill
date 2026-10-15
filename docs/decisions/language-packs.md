@@ -380,6 +380,15 @@ menu bots), mini apps, polls, quizzes and checklists are converted
 function sitting near the 1,000-line limit, so it stays English until a
 later PR splits it.
 
+## PR 8: calls, business, sign-in, sharing and dialogs
+
+Calls (outside group calls), Telegram Business (chat links, quick replies,
+hours, location, away and greeting messages, recipients), sign-in, the
+share box, export and data storage dialogs, accounts and background
+accounts, secret chats, scheduled messages, the admin event log, shared
+media lists, sponsored messages and the remaining confirm and create
+dialogs are converted (`lang/en/ops.strings`).
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

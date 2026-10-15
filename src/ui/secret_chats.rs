@@ -7,6 +7,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{Session, unix_ms_now};
 use quill::telegram::envelope::{ChatKind, SecretChatState, format_ttl_setting};
 use std::time::Duration;
@@ -25,7 +26,8 @@ impl QuillApp {
             .users_state
             .secret_chat_states
             .get(&secret_chat_id)?;
-        let name = Self::secret_peer_name(Some(session), record.user_id, "Your contact");
+        let name =
+            Self::secret_peer_name(Some(session), record.user_id, tr(keys::Q_OPS_YOUR_CONTACT));
         Some((name, record.layer))
     }
 
@@ -48,14 +50,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.chat_list.pending_close_secret_chat = Some(chat_id);
-        self.connection.status_note = "confirm close secret chat".into();
+        self.connection.status_note = tr(keys::Q_OPS_CONFIRM_CLOSE_SECRET_CHAT).into();
         cx.notify();
     }
 
     /// Phase B1: cancel the "Close secret chat" confirm.
     pub(super) fn cancel_close_secret_chat(&mut self, cx: &mut Context<Self>) {
         self.chat_list.pending_close_secret_chat = None;
-        self.connection.status_note = "close cancelled".into();
+        self.connection.status_note = tr(keys::Q_OPS_CLOSE_CANCELLED).into();
         cx.notify();
     }
 
@@ -69,11 +71,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.close_secret_chat(chat_id);
             self.connection.status_note = match result {
-                Ok(_) => "closing secret chat…".into(),
-                Err(_) => "could not close secret chat".into(),
+                Ok(_) => tr(keys::Q_OPS_CLOSING_SECRET_CHAT).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_CLOSE_SECRET_CHAT).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo: secret chat close (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_SECRET_CHAT_CLOSE_NO).into();
         }
         cx.notify();
     }
@@ -93,11 +95,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.start_secret_chat(user_id);
             self.connection.status_note = match result {
-                Ok(_) => "creating secret chat…".into(),
-                Err(_) => "could not start secret chat".into(),
+                Ok(_) => tr(keys::Q_OPS_CREATING_SECRET_CHAT).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_START_SECRET_CHAT).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo: secret chat create (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_SECRET_CHAT_CREATE_NO).into();
         }
         cx.notify();
     }
@@ -165,9 +167,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_message_auto_delete_time(chat_id, secs);
             self.connection.status_note = match result {
-                Ok(_) if secs == 0 => "turning off timer…".into(),
-                Ok(_) => "setting timer…".into(),
-                Err(_) => "could not change timer".into(),
+                Ok(_) if secs == 0 => tr(keys::Q_OPS_TURNING_OFF_TIMER).into(),
+                Ok(_) => tr(keys::Q_OPS_SETTING_TIMER).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_CHANGE_TIMER).into(),
             };
             cx.notify();
             return;
@@ -177,7 +179,7 @@ impl QuillApp {
                 chat.message_auto_delete_time = secs;
             }
             self.connection.status_note = if secs == 0 {
-                "timer off".into()
+                tr(keys::Q_OPS_TIMER_OFF).into()
             } else {
                 format!("timer {}", format_ttl_setting(secs))
             };
@@ -195,9 +197,10 @@ impl QuillApp {
         let ChatKind::Secret { user_id, .. } = &chat.kind else {
             return None;
         };
-        let name = Self::secret_peer_name(Some(session), user_id.0, "your contact");
-        Some(format!(
-            "Custom notification settings for the Secret Chat with {name}."
+        let name = Self::secret_peer_name(Some(session), user_id.0, tr(keys::Q_OPS_YOUR_CONTACT_2));
+        Some(tr_with(
+            keys::Q_OPS_CUSTOM_NOTIFICATION_SETTINGS_FOR_THE,
+            &[("name", &name.to_string())],
         ))
     }
 
@@ -243,11 +246,13 @@ impl QuillApp {
                 div()
                     .flex()
                     .gap_2()
-                    .child(Button::new("cancel-close-secret").label("Cancel").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.cancel_close_secret_chat(cx);
-                        }),
-                    ))
+                    .child(
+                        Button::new("cancel-close-secret")
+                            .label(tr(keys::CANCEL))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_close_secret_chat(cx);
+                            })),
+                    )
                     .child(
                         Button::new("confirm-close-secret")
                             .label(confirm_label)
@@ -272,8 +277,8 @@ impl QuillApp {
                 _ => None,
             });
         let name = user_id.map_or_else(
-            || "your contact".to_string(),
-            |id| Self::secret_peer_name(session, id, "your contact"),
+            || tr(keys::Q_OPS_YOUR_CONTACT_2).to_string(),
+            |id| Self::secret_peer_name(session, id, tr(keys::Q_OPS_YOUR_CONTACT_2)),
         );
         let state = self
             .chat_list
@@ -282,25 +287,28 @@ impl QuillApp {
             .and_then(|chat| chat.secret_state.clone());
         match state {
             Some(SecretChatState::Pending) => (
-                "Cancel this secret chat?".to_string(),
-                format!("Are you sure you want to cancel the secret chat with {name}?"),
-                "Cancel chat",
+                tr(keys::Q_OPS_CANCEL_THIS_SECRET_CHAT).to_string(),
+                tr_with(
+                    keys::Q_OPS_ARE_YOU_SURE_YOU_WANT,
+                    &[("name", &name.to_string())],
+                ),
+                tr(keys::Q_OPS_CANCEL_CHAT),
             ),
             Some(SecretChatState::Closed) => (
-                "Delete this secret chat?".to_string(),
-                format!(
-                    "Are you sure you want to delete the secret chat with {name}? \
-                     This action cannot be undone."
+                tr(keys::Q_OPS_DELETE_THIS_SECRET_CHAT).to_string(),
+                tr_with(
+                    keys::Q_OPS_ARE_YOU_SURE_YOU_WANT_2,
+                    &[("name", &name.to_string())],
                 ),
-                "Delete",
+                tr(keys::BOX_DELETE),
             ),
             _ => (
-                "Close this secret chat?".to_string(),
-                format!(
-                    "Are you sure you want to delete the secret chat with {name}? \
-                     All chat history will be deleted forever. This action cannot be undone."
+                tr(keys::Q_OPS_CLOSE_THIS_SECRET_CHAT).to_string(),
+                tr_with(
+                    keys::Q_OPS_ARE_YOU_SURE_YOU_WANT_3,
+                    &[("name", &name.to_string())],
                 ),
-                "Close chat",
+                tr(keys::Q_OPS_CLOSE_CHAT),
             ),
         }
     }
@@ -333,8 +341,11 @@ impl QuillApp {
         if chat.secret_state != Some(SecretChatState::Pending) {
             return None;
         }
-        let name = Self::secret_peer_name(Some(session), user_id.0, "your contact");
-        Some(format!("Waiting for {name} to get online…"))
+        let name = Self::secret_peer_name(Some(session), user_id.0, tr(keys::Q_OPS_YOUR_CONTACT_2));
+        Some(tr_with(
+            keys::Q_OPS_WAITING_FOR_TO_GET_ONLINE,
+            &[("name", &name.to_string())],
+        ))
     }
 
     /// Phase B1: the composer note for a secret chat that can't send —
@@ -353,11 +364,20 @@ impl QuillApp {
         match &chat.secret_state {
             Some(SecretChatState::Ready) => None,
             Some(SecretChatState::Pending) => {
-                let name = Self::secret_peer_name(Some(session), user_id.0, "your contact");
-                Some(format!("🔒 Waiting for {name} to come online…"))
+                let name = Self::secret_peer_name(
+                    Some(session),
+                    user_id.0,
+                    tr(keys::Q_OPS_YOUR_CONTACT_2),
+                );
+                Some(tr_with(
+                    keys::Q_OPS_WAITING_FOR_TO_COME_ONLINE,
+                    &[("name", &name.to_string())],
+                ))
             }
-            Some(SecretChatState::Closed) => Some("🔒 Secret chat closed".to_string()),
-            Some(SecretChatState::Unknown(_)) | None => Some("🔒 Loading secret chat…".to_string()),
+            Some(SecretChatState::Closed) => Some(tr(keys::Q_OPS_SECRET_CHAT_CLOSED).to_string()),
+            Some(SecretChatState::Unknown(_)) | None => {
+                Some(tr(keys::Q_OPS_LOADING_SECRET_CHAT).to_string())
+            }
         }
     }
 
@@ -366,10 +386,10 @@ impl QuillApp {
     /// the four `EncryptedDescription` bullets).
     pub(super) fn secret_empty_explainer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let bullets = [
-            "Use end-to-end encryption",
-            "Leave no trace on our servers",
-            "Have a self-destruct timer",
-            "Do not allow forwarding",
+            tr(keys::Q_OPS_USE_END_TO_END_ENCRYPTION),
+            tr(keys::Q_OPS_LEAVE_NO_TRACE_ON_OUR),
+            tr(keys::Q_OPS_HAVE_A_SELF_DESTRUCT_TIMER),
+            tr(keys::Q_OPS_DO_NOT_ALLOW_FORWARDING),
         ];
         let mut list = div().flex().flex_col().gap_1();
         for bullet in bullets {
@@ -389,7 +409,12 @@ impl QuillApp {
             .justify_center()
             .gap_3()
             .p_6()
-            .child(div().text_lg().font_semibold().child("🔒 Secret chats"))
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .child(tr(keys::Q_OPS_SECRET_CHATS)),
+            )
             .child(list)
     }
 }

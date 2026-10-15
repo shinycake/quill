@@ -14,6 +14,7 @@ use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::engine::{MediaDevice, MediaDeviceKind};
+use quill::lang::{keys, tr, tr_with};
 use std::rc::Rc;
 
 /// Which button's menu is open.
@@ -46,10 +47,10 @@ pub(super) fn toggled(
 
 fn kind_title(kind: MediaDeviceKind) -> &'static str {
     match kind {
-        MediaDeviceKind::Microphone => "Microphone",
-        MediaDeviceKind::Speaker => "Speaker",
-        MediaDeviceKind::Camera => "Camera",
-        MediaDeviceKind::Screen => "Screen",
+        MediaDeviceKind::Microphone => tr(keys::SETTINGS_CALL_SECTION_INPUT),
+        MediaDeviceKind::Speaker => tr(keys::Q_OPS_SPEAKER),
+        MediaDeviceKind::Camera => tr(keys::SETTINGS_CALL_CAMERA),
+        MediaDeviceKind::Screen => tr(keys::Q_OPS_SCREEN),
     }
 }
 
@@ -145,8 +146,8 @@ pub(super) fn with_corner<V: 'static>(
     on_toggle: impl Fn(&mut V, DeviceMenuTarget, &mut Window, &mut Context<V>) + 'static,
 ) -> AnyElement {
     let label = match target {
-        DeviceMenuTarget::Audio => "Audio devices",
-        DeviceMenuTarget::Camera => "Camera devices",
+        DeviceMenuTarget::Audio => tr(keys::Q_OPS_AUDIO_DEVICES),
+        DeviceMenuTarget::Camera => tr(keys::Q_OPS_CAMERA_DEVICES),
     };
     div()
         .relative()
@@ -227,7 +228,10 @@ pub(super) fn menu_overlay<V: 'static>(
                     .py(px(6.))
                     .text_size(px(13.))
                     .text_color(rgb(0xaaabac))
-                    .child(format!("No {} found.", section.title.to_lowercase())),
+                    .child(tr_with(
+                        keys::Q_OPS_NO_FOUND,
+                        &[("to_lowercase", &(section.title.to_lowercase()).to_string())],
+                    )),
             );
         }
         for item in section.items {

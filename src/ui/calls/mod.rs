@@ -10,6 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::settings::CallPrefs;
 use quill::state::{ActiveCall, Session};
 use quill::telegram::envelope::{
@@ -36,7 +37,7 @@ pub(super) fn call_message_peer(
     let name = session
         .user(user_id)
         .map(|user| user.display_name())
-        .unwrap_or_else(|| format!("User {user_id}"));
+        .unwrap_or_else(|| tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())]));
     Some((user_id, name))
 }
 
@@ -63,8 +64,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| !live.driver.has_call_engine())
         {
-            self.connection.status_note =
-                "Calls are unavailable. The audio component could not start.".into();
+            self.connection.status_note = tr(keys::Q_OPS_CALLS_ARE_UNAVAILABLE_THE_AUDIO).into();
             cx.notify();
             return;
         }
@@ -75,7 +75,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline())
         {
-            self.connection.status_note = "You're offline — can't start a call".into();
+            self.connection.status_note = tr(keys::Q_OPS_YOURE_OFFLINE_CANT_START_A).into();
             cx.notify();
             return;
         }
@@ -96,7 +96,7 @@ impl QuillApp {
     pub(super) fn dial_user(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.session.is_offline() {
-                self.connection.status_note = "You're offline — can't start a call".into();
+                self.connection.status_note = tr(keys::Q_OPS_YOURE_OFFLINE_CANT_START_A).into();
                 cx.notify();
                 return;
             }
@@ -104,15 +104,15 @@ impl QuillApp {
             self.connection.status_note = match result {
                 Ok(_) => {
                     if is_video {
-                        "starting video call…".into()
+                        tr(keys::Q_OPS_STARTING_VIDEO_CALL).into()
                     } else {
-                        "calling…".into()
+                        tr(keys::Q_OPS_CALLING_2).into()
                     }
                 }
-                Err(_) => "could not start the call".into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_START_THE_CALL).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo: call start (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_START_NO_LIVE).into();
         }
         cx.notify();
     }
@@ -149,11 +149,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.calls.prefs = prefs;
             if let Err(err) = live.driver.save_call_prefs() {
-                self.connection.status_note = format!("couldn’t save call settings: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_OPS_COULDN_T_SAVE_CALL_SETTINGS,
+                    &[("err", &err.to_string())],
+                );
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.calls.prefs = prefs;
-            self.connection.status_note = "demo: call settings are not saved".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_SETTINGS_ARE_NOT).into();
         }
         self.sync_ptt_with_call(cx);
         cx.notify();
@@ -171,12 +174,15 @@ impl QuillApp {
             self.connection.status_note = match live.driver.set_call_muted(muted) {
                 Ok(()) => {
                     if muted {
-                        "microphone muted".into()
+                        tr(keys::Q_OPS_MICROPHONE_MUTED_2).into()
                     } else {
-                        "microphone unmuted".into()
+                        tr(keys::Q_OPS_MICROPHONE_UNMUTED).into()
                     }
                 }
-                Err(err) => format!("could not change mute state: {err}"),
+                Err(err) => tr_with(
+                    keys::Q_OPS_COULD_NOT_CHANGE_MUTE_STATE,
+                    &[("err", &err.to_string())],
+                ),
             };
         } else if let Some(call) = self
             .demo_session
@@ -203,12 +209,15 @@ impl QuillApp {
                 match live.driver.set_call_camera(call_id, camera_on && ready) {
                     Ok(()) => {
                         if camera_on {
-                            "camera on".into()
+                            tr(keys::Q_OPS_CAMERA_ON_2).into()
                         } else {
-                            "camera off".into()
+                            tr(keys::Q_OPS_CAMERA_OFF_2).into()
                         }
                     }
-                    Err(err) => format!("could not change camera state: {err}"),
+                    Err(err) => tr_with(
+                        keys::Q_OPS_COULD_NOT_CHANGE_CAMERA_STATE,
+                        &[("err", &err.to_string())],
+                    ),
                 };
         } else if let Some(call) = self
             .demo_session
@@ -216,7 +225,7 @@ impl QuillApp {
             .and_then(|session| session.calls.active_call.as_mut())
         {
             call.camera_on = !call.camera_on;
-            self.connection.status_note = "demo: camera toggle (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_CAMERA_TOGGLE_NO_LIVE).into();
         }
         cx.notify();
     }
@@ -236,12 +245,15 @@ impl QuillApp {
             {
                 Ok(()) => {
                     if sharing {
-                        "screen share on".into()
+                        tr(keys::Q_OPS_SCREEN_SHARE_ON).into()
                     } else {
-                        "screen share off".into()
+                        tr(keys::Q_OPS_SCREEN_SHARE_OFF).into()
                     }
                 }
-                Err(err) => format!("could not change screen share state: {err}"),
+                Err(err) => tr_with(
+                    keys::Q_OPS_COULD_NOT_CHANGE_SCREEN_SHARE,
+                    &[("err", &err.to_string())],
+                ),
             };
         } else if let Some(call) = self
             .demo_session
@@ -249,7 +261,7 @@ impl QuillApp {
             .and_then(|session| session.calls.active_call.as_mut())
         {
             call.screen_sharing = !call.screen_sharing;
-            self.connection.status_note = "demo: screen share toggle (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_SCREEN_SHARE_TOGGLE_NO).into();
         }
         cx.notify();
     }
@@ -266,8 +278,11 @@ impl QuillApp {
             if kind == quill::calls::engine::MediaDeviceKind::Camera {
                 self.connection.status_note =
                     match live.driver.select_call_camera(Some(device_id.to_string())) {
-                        Ok(()) => "camera selected".into(),
-                        Err(err) => format!("could not select camera: {err}"),
+                        Ok(()) => tr(keys::Q_OPS_CAMERA_SELECTED).into(),
+                        Err(err) => tr_with(
+                            keys::Q_OPS_COULD_NOT_SELECT_CAMERA,
+                            &[("err", &err.to_string())],
+                        ),
                     };
                 cx.notify();
                 return;
@@ -284,8 +299,11 @@ impl QuillApp {
             };
             self.connection.status_note = match live.driver.select_call_devices(microphone, speaker)
             {
-                Ok(()) => "audio device selected".into(),
-                Err(err) => format!("could not select audio device: {err}"),
+                Ok(()) => tr(keys::Q_OPS_AUDIO_DEVICE_SELECTED).into(),
+                Err(err) => tr_with(
+                    keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
+                    &[("err", &err.to_string())],
+                ),
             };
         } else {
             match kind {
@@ -309,11 +327,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.accept_call();
             self.connection.status_note = match result {
-                Ok(_) => "answering…".into(),
-                Err(_) => "could not answer the call".into(),
+                Ok(_) => tr(keys::Q_OPS_ANSWERING).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo: call accept (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_ACCEPT_NO_LIVE).into();
         }
         cx.notify();
     }
@@ -324,11 +342,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.discard_call();
             self.connection.status_note = match result {
-                Ok(_) => "hanging up…".into(),
-                Err(_) => "could not hang up the call".into(),
+                Ok(_) => tr(keys::Q_OPS_HANGING_UP_2).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_HANG_UP_THE).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo: call hang up (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_HANG_UP_NO).into();
         }
         cx.notify();
     }
@@ -388,11 +406,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_call_rating(stars, &comment, &problems);
             self.connection.status_note = match result {
-                Ok(_) => "thanks for your feedback".into(),
-                Err(_) => "could not send the rating".into(),
+                Ok(_) => tr(keys::Q_OPS_THANKS_FOR_YOUR_FEEDBACK_2).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_THE_RATING).into(),
             };
         } else if self.demo_session.is_some() {
-            self.connection.status_note = "demo: call rating (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_RATING_NO_LIVE).into();
             if let Some(session) = self.demo_session.as_mut()
                 && let Some(summary) = session.calls.summary.as_mut()
             {
@@ -405,8 +423,8 @@ impl QuillApp {
     pub(super) fn upload_call_diagnostics(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.send_call_debug_information() {
-                Ok(_) => "diagnostics upload sent".into(),
-                Err(_) => "could not upload diagnostics".into(),
+                Ok(_) => tr(keys::Q_OPS_DIAGNOSTICS_UPLOAD_SENT).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_UPLOAD_DIAGNOSTICS).into(),
             };
         } else if let Some(summary) = self
             .demo_session
@@ -415,7 +433,7 @@ impl QuillApp {
         {
             summary.debug_information_sent = true;
             summary.debug_information_error = None;
-            self.connection.status_note = "demo: diagnostics upload (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_DIAGNOSTICS_UPLOAD_NO_LIVE).into();
         }
         cx.notify();
     }
@@ -425,8 +443,8 @@ impl QuillApp {
     pub(super) fn upload_call_log(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.send_call_log() {
-                Ok(_) => "call log upload sent".into(),
-                Err(_) => "could not upload the call log".into(),
+                Ok(_) => tr(keys::Q_OPS_CALL_LOG_UPLOAD_SENT).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_UPLOAD_THE_CALL).into(),
             };
         } else if let Some(summary) = self
             .demo_session
@@ -435,7 +453,7 @@ impl QuillApp {
         {
             summary.log_sent = true;
             summary.log_error = None;
-            self.connection.status_note = "demo: call log upload (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_CALL_LOG_UPLOAD_NO).into();
         }
         cx.notify();
     }
@@ -561,15 +579,19 @@ impl QuillApp {
             let Some((user_id, is_video)) = this.calls.confirm else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Confirm call"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_CONFIRM_CALL)))
                     .on_close(on_close.clone());
             };
             let name = this
                 .session()
                 .and_then(|session| session.user(user_id))
                 .map(|user| user.display_name())
-                .unwrap_or_else(|| format!("User {user_id}"));
-            let kind = if is_video { "video call" } else { "call" };
+                .unwrap_or_else(|| tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())]));
+            let kind = if is_video {
+                tr(keys::Q_OPS_VIDEO_CALL_2)
+            } else {
+                "call"
+            };
             let body = div()
                 .flex()
                 .flex_col()
@@ -578,7 +600,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("You asked to confirm before calling."),
+                        .child(tr(keys::Q_OPS_YOU_ASKED_TO_CONFIRM_BEFORE)),
                 )
                 .into_any_element();
             let footer = div()
@@ -587,7 +609,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("call-confirm-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.cancel_pending_call(cx);
@@ -596,7 +618,11 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("call-confirm-ok")
-                        .label(if is_video { "Video call" } else { "Call" })
+                        .label(if is_video {
+                            tr(keys::Q_OPS_VIDEO_CALL_3)
+                        } else {
+                            tr(keys::Q_OPS_CALL)
+                        })
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_pending_call(cx);
                             this.close_kit_dialog_if_done(DialogKind::CallConfirm, window, cx);
@@ -604,8 +630,9 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(format!(
-                    "Start {kind} with {name}?"
+                .title(crate::ui::shell::dialog_title(tr_with(
+                    keys::Q_OPS_START_WITH,
+                    &[("kind", kind), ("name", &name.to_string())],
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
@@ -629,8 +656,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.accept_swap_call();
             self.connection.status_note = match result {
-                Ok(_) => "ending current call, answering…".into(),
-                Err(_) => "could not answer the call".into(),
+                Ok(_) => tr(keys::Q_OPS_ENDING_CURRENT_CALL_ANSWERING).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             if let Some((call_id, user_id, is_video)) = session.calls.swap_pending.take() {
@@ -660,7 +687,7 @@ impl QuillApp {
                     remote_audio_muted: false,
                 });
             }
-            self.connection.status_note = "demo: swap accepted (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_SWAP_ACCEPTED_NO_LIVE).into();
         }
         cx.notify();
     }
@@ -670,12 +697,12 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.decline_swap_call();
             self.connection.status_note = match result {
-                Ok(_) => "incoming call declined".into(),
-                Err(_) => "could not decline the call".into(),
+                Ok(_) => tr(keys::Q_OPS_INCOMING_CALL_DECLINED).into(),
+                Err(_) => tr(keys::Q_OPS_COULD_NOT_DECLINE_THE_CALL).into(),
             };
         } else if let Some(session) = self.demo_session.as_mut() {
             session.calls.swap_pending = None;
-            self.connection.status_note = "demo: swap declined (no live Telegram)".into();
+            self.connection.status_note = tr(keys::Q_OPS_DEMO_SWAP_DECLINED_NO_LIVE).into();
         }
         cx.notify();
     }
@@ -700,15 +727,19 @@ impl QuillApp {
             else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Incoming call"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::CALL_INCOMING)))
                     .on_close(on_close.clone());
             };
             let name = this
                 .session()
                 .and_then(|session| session.user(user_id))
                 .map(|user| user.display_name())
-                .unwrap_or_else(|| format!("User {user_id}"));
-            let kind = if is_video { "video call" } else { "call" };
+                .unwrap_or_else(|| tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())]));
+            let kind = if is_video {
+                tr(keys::Q_OPS_VIDEO_CALL_2)
+            } else {
+                "call"
+            };
             let body = div()
                 .flex()
                 .flex_col()
@@ -717,7 +748,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("You're already in a call. Telegram doesn't support putting a call on hold — answering ends the current one."),
+                        .child(tr(keys::Q_OPS_YOURE_ALREADY_IN_A_CALL)),
                 )
                 .into_any_element();
             let footer = div()
@@ -726,7 +757,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("call-swap-decline")
-                        .label("Decline")
+                        .label(tr(keys::CALL_DECLINE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.decline_swap_call(cx);
@@ -735,7 +766,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("call-swap-answer")
-                        .label("End & answer")
+                        .label(tr(keys::Q_OPS_END_ANSWER))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.answer_swap_call(cx);
                             this.close_kit_dialog_if_done(DialogKind::CallSwap, window, cx);
@@ -743,7 +774,10 @@ impl QuillApp {
                 );
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title(format!("{name} is calling ({kind})")))
+                .title(crate::ui::shell::dialog_title(tr_with(
+                    keys::Q_OPS_IS_CALLING,
+                    &[("name", &name.to_string()), ("kind", kind)],
+                )))
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(RefCell::new(Some(body.into_any_element())));
                     move |content, _, _| {
@@ -780,7 +814,9 @@ impl QuillApp {
                     .session()
                     .and_then(|session| session.user(*user_id))
                     .map(|user| user.display_name())
-                    .unwrap_or_else(|| format!("User {user_id}"));
+                    .unwrap_or_else(|| {
+                        tr_with(keys::Q_OPS_USER, &[("user_id", &user_id.to_string())])
+                    });
                 format!("{name} ({})", if *is_video { "video" } else { "voice" })
             })
             .collect();
@@ -802,7 +838,7 @@ impl QuillApp {
                 )))
                 .child(
                     Button::new("call-busy-dismiss")
-                        .label("Dismiss")
+                        .label(tr(keys::Q_OPS_DISMISS))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(live) = this.live.as_mut() {

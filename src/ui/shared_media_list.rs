@@ -10,6 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaAction, SharedMediaTab, calendar_media, month_sections};
 
 impl QuillApp {
@@ -67,7 +68,10 @@ impl QuillApp {
                 .py_2()
                 .role(gpui_kit::Role::Button)
                 .aria_label(if is_message {
-                    format!("Open shared media message {}", message_id.0)
+                    tr_with(
+                        keys::Q_OPS_OPEN_SHARED_MEDIA_MESSAGE,
+                        &[("0", &message_id.0.to_string())],
+                    )
                 } else {
                     item.label.clone()
                 })
@@ -92,13 +96,13 @@ impl QuillApp {
                     let owner = cx.entity().downgrade();
                     move |menu, _, _| {
                         let owner = owner.clone();
-                        menu.item(
-                            PopupMenuItem::new("Go To Message").on_click(move |_, _, cx| {
+                        menu.item(PopupMenuItem::new(tr(keys::Q_OPS_GO_TO_MESSAGE)).on_click(
+                            move |_, _, cx| {
                                 let _ = owner.update(cx, |this, cx| {
                                     this.jump_to_shared_media_item_ui(message_id, cx);
                                 });
-                            }),
-                        )
+                            },
+                        ))
                     }
                 })
                 .into_any_element()
@@ -111,8 +115,8 @@ impl QuillApp {
                 div().flex().justify_center().py_2().child(
                     Button::new(("shared-media-load-more", tab.index() as u64))
                         .ghost()
-                        .label("Load more")
-                        .accessibility_label("Load more shared media")
+                        .label(tr(keys::Q_OPS_LOAD_MORE))
+                        .accessibility_label(tr(keys::Q_OPS_LOAD_MORE_SHARED_MEDIA))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.load_more_shared_media_ui(tab, cx);
                         })),
@@ -144,12 +148,15 @@ impl QuillApp {
                 .py_1()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(format!("Showing from {title}"))
+                .child(tr_with(
+                    keys::Q_OPS_SHOWING_FROM,
+                    &[("title", &title.to_string())],
+                ))
                 .child(
                     Button::new("shared-media-show-latest")
                         .ghost()
-                        .label("Show latest")
-                        .accessibility_label("Show the latest shared media")
+                        .label(tr(keys::Q_OPS_SHOW_LATEST))
+                        .accessibility_label(tr(keys::Q_OPS_SHOW_THE_LATEST_SHARED_MEDIA))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.retry_shared_media_ui(cx);
                         })),
@@ -170,8 +177,8 @@ impl QuillApp {
             Button::new("shared-media-calendar")
                 .icon(gpui_kit::assets::IconName::Calendar)
                 .ghost()
-                .tooltip("Show calendar")
-                .accessibility_label("Show calendar")
+                .tooltip(tr(keys::Q_OPS_SHOW_CALENDAR))
+                .accessibility_label(tr(keys::Q_OPS_SHOW_CALENDAR))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.open_shared_media_calendar_ui(cx);
                 }))
@@ -182,7 +189,7 @@ impl QuillApp {
     pub(super) fn open_shared_media_calendar_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_shared_media_calendar().is_err() {
-                self.connection.status_note = "could not open the calendar".into();
+                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_THE_CALENDAR).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_shared_media_calendar(quill::local_time::now_unix());

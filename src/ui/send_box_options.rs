@@ -21,6 +21,7 @@ use quill::composer::{
     cover_send_path, is_gif_path, paid_media_fits, parse_paid_price, session_allows_cover,
     session_allows_paid_media,
 };
+use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
@@ -168,14 +169,14 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Checking the video…")
+                    .child(tr(keys::Q_OPS_CHECKING_THE_VIDEO))
                     .into_any_element(),
             );
         }
         if self.tray_has_large_photo() {
             controls.push(
                 gpui_kit::component::checkbox::Checkbox::new("composer-high-quality")
-                    .label("High quality")
+                    .label(tr(keys::SEND_HIGH_QUALITY))
                     .checked(self.composer_ui.send_box.hd_photos)
                     .on_click(cx.listener(|this, _, _, cx| {
                         let send_box = &mut this.composer_ui.send_box;
@@ -191,17 +192,20 @@ impl QuillApp {
                 Button::new("composer-paid-media")
                     .icon(gpui_kit::assets::IconName::Star)
                     .label(if stars > 0 {
-                        format!("Unlock for {stars} Stars")
+                        tr_with(
+                            keys::Q_OPS_UNLOCK_FOR_STARS,
+                            &[("stars", &stars.to_string())],
+                        )
                     } else {
-                        "Make paid".to_string()
+                        tr(keys::Q_OPS_MAKE_PAID).to_string()
                     })
                     .ghost()
                     .small()
                     .selected(stars > 0)
                     .tooltip(if stars > 0 {
-                        "Change the price"
+                        tr(keys::Q_OPS_CHANGE_THE_PRICE)
                     } else {
-                        "Ask for Stars to see the media"
+                        tr(keys::Q_OPS_ASK_FOR_STARS_TO_SEE)
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_price_dialog(window, cx);
@@ -234,7 +238,7 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::Pencil)
                 .xsmall()
                 .ghost()
-                .tooltip("Edit video")
+                .tooltip(tr(keys::Q_OPS_EDIT_VIDEO))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_tray_video_editor(index, window, cx);
                 }))
@@ -260,10 +264,10 @@ impl QuillApp {
                     .xsmall()
                     .ghost()
                     .selected(has_cover)
-                    .tooltip("Cover")
+                    .tooltip(tr(keys::Q_OPS_COVER))
                     .dropdown_menu(move |mut menu, _, _| {
                         let edit = owner.clone();
-                        menu = menu.item(PopupMenuItem::new("Edit Cover").on_click(
+                        menu = menu.item(PopupMenuItem::new(tr(keys::Q_OPS_EDIT_COVER)).on_click(
                             move |_, _, cx| {
                                 let _ = edit
                                     .update(cx, |this, cx| this.pick_attachment_cover(index, cx));
@@ -271,13 +275,15 @@ impl QuillApp {
                         ));
                         if has_cover {
                             let clear = owner.clone();
-                            menu = menu.item(PopupMenuItem::new("Clear Cover").on_click(
-                                move |_, _, cx| {
-                                    let _ = clear.update(cx, |this, cx| {
-                                        this.clear_attachment_cover(index, cx)
-                                    });
-                                },
-                            ));
+                            menu = menu.item(
+                                PopupMenuItem::new(tr(keys::Q_OPS_CLEAR_COVER)).on_click(
+                                    move |_, _, cx| {
+                                        let _ = clear.update(cx, |this, cx| {
+                                            this.clear_attachment_cover(index, cx)
+                                        });
+                                    },
+                                ),
+                            );
                         }
                         menu
                     })
@@ -294,7 +300,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose video cover".into()),
+            prompt: Some(tr(keys::Q_OPS_CHOOSE_VIDEO_COVER).into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -318,12 +324,15 @@ impl QuillApp {
         };
         match cover_send_path(path) {
             Some(cover) => {
-                self.connection.status_note = format!(
-                    "Cover {} will be sent with the video",
-                    cover
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("image")
+                self.connection.status_note = tr_with(
+                    keys::Q_OPS_COVER_WILL_BE_SENT_WITH,
+                    &[(
+                        "unwrap_or",
+                        (cover
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("image")),
+                    )],
                 );
                 attachment.extras.cover = Some(cover);
             }
@@ -335,7 +344,7 @@ impl QuillApp {
     fn clear_attachment_cover(&mut self, index: usize, cx: &mut Context<Self>) {
         if let Some(attachment) = self.composer_ui.pending_attachments.get_mut(index) {
             attachment.extras.cover = None;
-            self.connection.status_note = "cover cleared".into();
+            self.connection.status_note = tr(keys::Q_OPS_COVER_CLEARED).into();
             cx.notify();
         }
     }
@@ -346,7 +355,7 @@ impl QuillApp {
         let stars = self.composer_ui.send_box.paid_stars;
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Stars to Unlock")
+                .placeholder(tr(keys::Q_OPS_STARS_TO_UNLOCK))
                 .submit_on_enter(false)
         });
         if stars > 0 {
@@ -391,9 +400,12 @@ impl QuillApp {
                 self.composer_ui.send_box.price = None;
                 self.composer_ui.send_box.paid_stars = price;
                 self.connection.status_note = if price > 0 {
-                    format!("The media will unlock for {price} Stars")
+                    tr_with(
+                        keys::Q_OPS_THE_MEDIA_WILL_UNLOCK_FOR,
+                        &[("price", &price.to_string())],
+                    )
                 } else {
-                    "paid media off".into()
+                    tr(keys::Q_OPS_PAID_MEDIA_OFF).into()
                 };
                 cx.notify();
                 true
@@ -421,18 +433,25 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_sm().font_semibold().child("Enter Unlock Cost"))
-                .child(Input::new(&state.input).aria_label("Stars to unlock"))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(keys::Q_OPS_ENTER_UNLOCK_COST)),
+                )
+                .child(Input::new(&state.input).aria_label(tr(keys::Q_OPS_STARS_TO_UNLOCK_2)))
                 .when(state.too_high, |body| {
                     body.child(div().text_sm().text_color(danger).child(format!(
                         "The price can be up to {} Stars.",
                         this.paid_media_star_max()
                     )))
                 })
-                .child(div().text_sm().text_color(muted).child(
-                    "People will have to transfer this amount of Stars to your channel \
-                     to view this media.",
-                ))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(tr(keys::Q_OPS_PEOPLE_WILL_HAVE_TO_TRANSFER)),
+                )
                 .child(
                     div()
                         .flex()
@@ -440,7 +459,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("paid-price-cancel")
-                                .label("Cancel")
+                                .label(tr(keys::CANCEL))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_price_dialog(cx);
@@ -453,7 +472,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("paid-price-save")
-                                .label("Save")
+                                .label(tr(keys::SETTINGS_SAVE))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     if this.submit_price_dialog(cx) {
@@ -470,7 +489,7 @@ impl QuillApp {
             let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)
-                .title(crate::ui::shell::dialog_title("Paid Content"))
+                .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_PAID_CONTENT)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
                         let body = body

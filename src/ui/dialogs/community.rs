@@ -10,6 +10,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{InfoPanelTarget, Session};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -47,13 +48,13 @@ impl CreateCommunityDialog {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let name_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Community name")
+                .placeholder(tr(keys::COMMUNITY_CREATE_NAME))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search chats")
+                .placeholder(tr(keys::Q_OPS_SEARCH_CHATS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -101,7 +102,9 @@ pub fn build_create_community_dialog(
         let dialog = dialog.overlay(true);
         let Some(dialog_state) = this.admin.community.create_dialog.as_ref() else {
             return dialog
-                .title(crate::ui::shell::dialog_title("New community"))
+                .title(crate::ui::shell::dialog_title(tr(
+                    keys::COMMUNITY_CREATE_TITLE,
+                )))
                 .on_close(on_close);
         };
         let query = EditProfileDialog::text(&dialog_state.search_input, cx);
@@ -118,14 +121,14 @@ pub fn build_create_community_dialog(
             .child(
                 div().flex_1().child(
                     Textarea::new(&dialog_state.name_input)
-                        .aria_label("Community name")
+                        .aria_label(tr(keys::COMMUNITY_CREATE_NAME))
                         .h(px(40.)),
                 ),
             )
             .child(
                 div().flex_1().child(
                     Textarea::new(&dialog_state.search_input)
-                        .aria_label("Search chats to add to community")
+                        .aria_label(tr(keys::Q_OPS_SEARCH_CHATS_TO_ADD_TO))
                         .h(px(40.)),
                 ),
             );
@@ -141,7 +144,7 @@ pub fn build_create_community_dialog(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No chats found"),
+                    .child(tr(keys::Q_OPS_NO_CHATS_FOUND)),
             );
         }
         for (chat_id, title) in rows.iter().take(50) {
@@ -177,7 +180,7 @@ pub fn build_create_community_dialog(
                 .child(
                     Checkbox::new("g10-create-hide-toggle")
                         .checked(hide_chat)
-                        .label("Hide the community chat (visible to admins only)")
+                        .label(tr(keys::Q_OPS_HIDE_THE_COMMUNITY_CHAT_VISIBLE))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(dialog) = this.admin.community.create_dialog.as_mut() {
                                 dialog.hide_chat = on;
@@ -192,7 +195,7 @@ pub fn build_create_community_dialog(
             .gap_2()
             .child(
                 Button::new("g10-create-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_create_community_dialog(cx);
@@ -201,7 +204,7 @@ pub fn build_create_community_dialog(
             )
             .child(
                 Button::new("g10-create-submit")
-                    .label("Create community")
+                    .label(tr(keys::COMMUNITY_CREATE))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_create_community_dialog(cx);
                         this.close_kit_dialog_if_done(DialogKind::CommunityCreate, window, cx);
@@ -209,7 +212,9 @@ pub fn build_create_community_dialog(
             );
         let body = body.into_any_element();
         dialog
-            .title(crate::ui::shell::dialog_title("New community"))
+            .title(crate::ui::shell::dialog_title(tr(
+                keys::COMMUNITY_CREATE_TITLE,
+            )))
             .content(crate::ui::shell::scrollable_dialog_content({
                 // `content` needs an `Fn` closure, but the body is built once
                 // per dialog render — hand it over through a one-shot cell.
@@ -266,7 +271,7 @@ pub fn build_community_hub_dialog(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No communities yet — create one from the side menu."),
+                    .child(tr(keys::Q_OPS_NO_COMMUNITIES_YET_CREATE_ONE)),
             );
         }
         for (community_id, name) in communities {
@@ -285,7 +290,7 @@ pub fn build_community_hub_dialog(
                         // community's chats, and fires
                         // `getCommunityFullInfo` so membership resolves.
                         Button::new(format!("cm-hub-view-chats-{community_id}"))
-                            .label("💬 View chats")
+                            .label(tr(keys::Q_OPS_VIEW_CHATS))
                             .ghost()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.close_community_hub(cx);
@@ -295,7 +300,7 @@ pub fn build_community_hub_dialog(
                     )
                     .child(
                         Button::new(format!("g10-hub-info-{community_id}"))
-                            .label("ℹ Info")
+                            .label(tr(keys::Q_OPS_INFO_2))
                             .ghost()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.close_community_hub(cx);
@@ -311,7 +316,7 @@ pub fn build_community_hub_dialog(
         }
         let body = body.into_any_element();
         dialog
-            .title(crate::ui::shell::dialog_title("Communities"))
+            .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_COMMUNITIES)))
             .content(crate::ui::shell::scrollable_dialog_content({
                 let body = Rc::new(RefCell::new(Some(body)));
                 move |content, _, _| {
@@ -344,7 +349,7 @@ pub fn render_community_info_panel(
         return div()
             .text_sm()
             .text_color(cx.theme().muted_foreground)
-            .child("Community not found")
+            .child(tr(keys::Q_OPS_COMMUNITY_NOT_FOUND))
             .into_any_element();
     };
     let full_info = session
@@ -365,7 +370,7 @@ pub fn render_community_info_panel(
         .when(community.can_change_info, |body| {
             body.child(
                 Button::new(format!("g10-info-edit-name-{community_id}"))
-                    .label("✏️ Edit name")
+                    .label(tr(keys::Q_OPS_EDIT_NAME))
                     .ghost()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_community_name_dialog(community_id, window, cx);
@@ -377,22 +382,34 @@ pub fn render_community_info_panel(
             let stats = div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(format!(
-                    "{} admins · {} banned · {} pending requests",
-                    info.administrator_count, info.banned_count, info.add_chat_request_count
+                .child(tr_with(
+                    keys::Q_OPS_ADMINS_BANNED_PENDING_REQUESTS,
+                    &[
+                        ("administrator_count", &info.administrator_count.to_string()),
+                        ("banned_count", &info.banned_count.to_string()),
+                        (
+                            "add_chat_request_count",
+                            &info.add_chat_request_count.to_string(),
+                        ),
+                    ],
                 ));
             let mut chats = div().flex().flex_col().gap_1().w_full();
             chats = chats.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("Chats ({})", info.chats.len())),
+                    .child(tr_with(
+                        keys::Q_OPS_CHATS,
+                        &[("len", &(info.chats.len()).to_string())],
+                    )),
             );
             for chat in &info.chats {
                 let title = session
                     .and_then(|s| s.chats.get(&chat.chat_id))
                     .map(|c| c.title.clone())
-                    .unwrap_or_else(|| format!("Chat {}", chat.chat_id));
+                    .unwrap_or_else(|| {
+                        tr_with(keys::Q_OPS_CHAT, &[("chat_id", &chat.chat_id.to_string())])
+                    });
                 let mut row = div()
                     .flex()
                     .items_center()
@@ -420,7 +437,7 @@ pub fn render_community_info_panel(
         None => div()
             .text_sm()
             .text_color(cx.theme().muted_foreground)
-            .child("Loading…"),
+            .child(tr(keys::COMMUNITY_CHAT_LOADING)),
     });
     // TDLib 1.8.68 `setCommunityPermissions` (needs `can_ban_members`):
     // the community's single member permission. Not optimistic — the
@@ -440,19 +457,23 @@ pub fn render_community_info_panel(
                         .flex_col()
                         .flex_1()
                         .min_w_0()
-                        .child(div().text_sm().child("Members can edit the chat list"))
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(tr(keys::Q_OPS_MEMBERS_CAN_EDIT_THE_CHAT)),
+                        )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Let members add and remove community chats"),
+                                .child(tr(keys::Q_OPS_LET_MEMBERS_ADD_AND_REMOVE)),
                         ),
                 )
                 .child(
                     div().flex_none().child(
                         Switch::new(format!("community-members-edit-chats-{community_id}"))
                             .checked(allowed)
-                            .accessibility_label("Members can edit the chat list")
+                            .accessibility_label(tr(keys::Q_OPS_MEMBERS_CAN_EDIT_THE_CHAT))
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 this.set_community_members_can_edit_chat_list(community_id, on, cx);
                             })),
@@ -466,7 +487,7 @@ pub fn render_community_info_panel(
             action_row(
                 format!("community-delete-{community_id}"),
                 Some(gpui_kit::assets::IconName::Trash),
-                "Delete community",
+                tr(keys::COMMUNITY_DELETE),
                 true,
                 cx,
             )

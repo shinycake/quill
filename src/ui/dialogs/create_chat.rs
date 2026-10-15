@@ -1,6 +1,7 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 /// Slice G1: which chat to create. Basic groups use
 /// `createNewBasicGroupChat` (schema 1.8.67, line 13327); supergroups
 /// and channels use `createNewSupergroupChat` (line 13337) with the
@@ -15,9 +16,9 @@ pub enum CreateChatKind {
 impl CreateChatKind {
     pub(crate) fn title(self) -> &'static str {
         match self {
-            Self::BasicGroup => "New group",
-            Self::Supergroup => "New supergroup",
-            Self::Channel => "New channel",
+            Self::BasicGroup => tr(keys::CREATE_GROUP_TITLE),
+            Self::Supergroup => tr(keys::Q_OPS_NEW_SUPERGROUP),
+            Self::Channel => tr(keys::CREATE_CHANNEL_TITLE),
         }
     }
 
@@ -49,19 +50,19 @@ impl CreateChatDialog {
     ) -> Self {
         let title_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Name")
+                .placeholder(tr(keys::Q_OPS_NAME))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
         let description_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Description (optional)")
+                .placeholder(tr(keys::CREATE_GROUP_DESCRIPTION))
                 .auto_grow(1, 3)
                 .submit_on_enter(false)
         });
         let search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Search contacts")
+                .placeholder(tr(keys::Q_OPS_SEARCH_CONTACTS))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

@@ -11,6 +11,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::auth::AuthView;
+use quill::lang::{keys, tr};
 use quill::phone::{self, Country};
 use quill::signin;
 use quill::state::AuthRequestError;
@@ -45,7 +46,7 @@ pub(super) struct SignInUi {
 
 impl SignInUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_OPS_SEARCH)));
         cx.subscribe(&search, |_this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
@@ -83,19 +84,34 @@ pub(super) fn demo_country_fixtures() -> Vec<Country> {
         hidden: false,
     };
     vec![
-        row("AU", "Australia", "\u{1F1E6}\u{1F1FA}", "61"),
-        row("BR", "Brazil", "\u{1F1E7}\u{1F1F7}", "55"),
-        row("CA", "Canada", "\u{1F1E8}\u{1F1E6}", "1"),
-        row("FR", "France", "\u{1F1EB}\u{1F1F7}", "33"),
-        row("DE", "Germany", "\u{1F1E9}\u{1F1EA}", "49"),
-        row("IN", "India", "\u{1F1EE}\u{1F1F3}", "91"),
-        row("IL", "Israel", "\u{1F1EE}\u{1F1F1}", "972"),
-        row("JP", "Japan", "\u{1F1EF}\u{1F1F5}", "81"),
-        row("NL", "Netherlands", "\u{1F1F3}\u{1F1F1}", "31"),
-        row("ES", "Spain", "\u{1F1EA}\u{1F1F8}", "34"),
-        row("UA", "Ukraine", "\u{1F1FA}\u{1F1E6}", "380"),
-        row("GB", "United Kingdom", "\u{1F1EC}\u{1F1E7}", "44"),
-        row("US", "United States", "\u{1F1FA}\u{1F1F8}", "1"),
+        row("AU", tr(keys::Q_OPS_AUSTRALIA), "\u{1F1E6}\u{1F1FA}", "61"),
+        row("BR", tr(keys::Q_OPS_BRAZIL), "\u{1F1E7}\u{1F1F7}", "55"),
+        row("CA", tr(keys::Q_OPS_CANADA), "\u{1F1E8}\u{1F1E6}", "1"),
+        row("FR", tr(keys::Q_OPS_FRANCE), "\u{1F1EB}\u{1F1F7}", "33"),
+        row("DE", tr(keys::Q_OPS_GERMANY), "\u{1F1E9}\u{1F1EA}", "49"),
+        row("IN", tr(keys::Q_OPS_INDIA), "\u{1F1EE}\u{1F1F3}", "91"),
+        row("IL", tr(keys::Q_OPS_ISRAEL), "\u{1F1EE}\u{1F1F1}", "972"),
+        row("JP", tr(keys::Q_OPS_JAPAN), "\u{1F1EF}\u{1F1F5}", "81"),
+        row(
+            "NL",
+            tr(keys::Q_OPS_NETHERLANDS),
+            "\u{1F1F3}\u{1F1F1}",
+            "31",
+        ),
+        row("ES", tr(keys::Q_OPS_SPAIN), "\u{1F1EA}\u{1F1F8}", "34"),
+        row("UA", tr(keys::Q_OPS_UKRAINE), "\u{1F1FA}\u{1F1E6}", "380"),
+        row(
+            "GB",
+            tr(keys::Q_OPS_UNITED_KINGDOM),
+            "\u{1F1EC}\u{1F1E7}",
+            "44",
+        ),
+        row(
+            "US",
+            tr(keys::Q_OPS_UNITED_STATES),
+            "\u{1F1FA}\u{1F1F8}",
+            "1",
+        ),
     ]
 }
 
@@ -283,7 +299,7 @@ impl QuillApp {
             None => {
                 self.auth_ui.signin.hint = phone::validate(&formatted)
                     .message()
-                    .or(Some("Invalid phone number. Please try again."));
+                    .or(Some(tr(keys::BAD_PHONE)));
                 cx.notify();
                 None
             }
@@ -342,9 +358,8 @@ impl QuillApp {
         match state {
             AuthorizationState::WaitCode { delivery, .. } if self.auth_ui.signin.editing_phone => {
                 let _ = delivery;
-                view.title = "Your phone number";
-                view.body =
-                    "Please confirm your country code and enter your phone number.".to_string();
+                view.title = tr(keys::Q_OPS_YOUR_PHONE_NUMBER);
+                view.body = tr(keys::PHONE_DESC).to_string();
             }
             AuthorizationState::WaitCode {
                 code_length,
@@ -358,8 +373,7 @@ impl QuillApp {
                 );
             }
             AuthorizationState::WaitPhoneNumber => {
-                view.body =
-                    "Please confirm your country code and enter your phone number.".to_string();
+                view.body = tr(keys::PHONE_DESC).to_string();
             }
             _ => {}
         }
@@ -413,7 +427,7 @@ impl QuillApp {
         div()
             .id("phone-banned-box")
             .role(Role::AlertDialog)
-            .aria_label("This phone number is banned.")
+            .aria_label(tr(keys::SIGNIN_BANNED_TEXT))
             .w_full()
             .p_4()
             .gap_3()
@@ -428,7 +442,7 @@ impl QuillApp {
                 div()
                     .text_base()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("This phone number is banned."),
+                    .child(tr(keys::SIGNIN_BANNED_TEXT)),
             )
             .child(
                 div()
@@ -436,7 +450,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("banned-help")
-                            .label("Help")
+                            .label(tr(keys::SIGNIN_BANNED_HELP))
                             .ghost()
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 let url = signin::banned_help_mailto(
@@ -487,7 +501,7 @@ impl QuillApp {
                 country.name,
                 country.display_code()
             ),
-            None => "Select country".to_string(),
+            None => tr(keys::Q_OPS_SELECT_COUNTRY).to_string(),
         };
         let mut out: Vec<AnyElement> = Vec::new();
         out.push(
@@ -503,7 +517,7 @@ impl QuillApp {
         }
         out.push(
             Textarea::new(&self.auth_ui.phone_input)
-                .aria_label("Phone number")
+                .aria_label(tr(keys::Q_OPS_PHONE_NUMBER))
                 .h(px(40.))
                 .into_any_element(),
         );
@@ -520,7 +534,7 @@ impl QuillApp {
         }
         out.push(
             Button::new("submit-phone")
-                .label("Continue")
+                .label(tr(keys::CONTINUE))
                 .primary()
                 .w_full()
                 .loading(busy)
@@ -531,7 +545,7 @@ impl QuillApp {
         if self.auth_ui.signin.editing_phone {
             out.push(
                 Button::new("phone-edit-back")
-                    .label("Back")
+                    .label(tr(keys::Q_OPS_BACK))
                     .ghost()
                     .w_full()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -562,7 +576,7 @@ impl QuillApp {
                     .p_3()
                     .text_sm()
                     .text_color(muted)
-                    .child("Country not found"),
+                    .child(tr(keys::Q_OPS_COUNTRY_NOT_FOUND)),
             );
         }
         for (index, country) in hits.iter().enumerate() {
@@ -602,7 +616,10 @@ impl QuillApp {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .child(Input::new(&self.auth_ui.signin.search).aria_label("Search countries"))
+            .child(
+                Input::new(&self.auth_ui.signin.search)
+                    .aria_label(tr(keys::Q_OPS_SEARCH_COUNTRIES)),
+            )
             .child(list)
             .into_any_element()
     }
@@ -616,11 +633,11 @@ impl QuillApp {
     ) -> Vec<AnyElement> {
         let mut out: Vec<AnyElement> = vec![
             Textarea::new(&self.auth_ui.code_input)
-                .aria_label("Sign-in code")
+                .aria_label(tr(keys::Q_OPS_SIGN_IN_CODE))
                 .h(px(40.))
                 .into_any_element(),
             Button::new("submit-code")
-                .label("Continue")
+                .label(tr(keys::CONTINUE))
                 .primary()
                 .w_full()
                 .loading(busy)
@@ -645,7 +662,7 @@ impl QuillApp {
                     out.insert(
                         0,
                         Button::new("open-fragment")
-                            .label("Open Fragment")
+                            .label(tr(keys::Q_OPS_OPEN_FRAGMENT))
                             .primary()
                             .w_full()
                             .on_click(move |_, _, cx| cx.open_url(&url))
@@ -666,7 +683,7 @@ impl QuillApp {
                 }
                 out.push(
                     Button::new("wrong-number")
-                        .label("Wrong number?")
+                        .label(tr(keys::Q_OPS_WRONG_NUMBER))
                         .ghost()
                         .w_full()
                         .on_click(cx.listener(|this, _, _, cx| this.signin_wrong_number(cx)))
@@ -676,7 +693,7 @@ impl QuillApp {
             AuthorizationState::WaitEmailCode { reset, .. } => {
                 out.push(
                     Button::new("resend-code")
-                        .label("Send the code again")
+                        .label(tr(keys::Q_OPS_SEND_THE_CODE_AGAIN))
                         .ghost()
                         .w_full()
                         .on_click(cx.listener(|this, _, _, cx| this.resend_code(cx)))
@@ -730,8 +747,8 @@ impl QuillApp {
             return;
         };
         self.connection.status_note = match live.driver.reset_login_email() {
-            Ok(_) => "email reset requested — waiting for Telegram".into(),
-            Err(_) => "could not reset the email".into(),
+            Ok(_) => tr(keys::Q_OPS_EMAIL_RESET_REQUESTED_WAITING_FOR).into(),
+            Err(_) => tr(keys::Q_OPS_COULD_NOT_RESET_THE_EMAIL).into(),
         };
         cx.notify();
     }

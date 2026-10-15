@@ -7,6 +7,7 @@ use super::*;
 use crate::ui::{accent_strong, text_on_fill};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::notify_accounts::notify_from_all_setting_visible;
 
 impl QuillApp {
@@ -41,7 +42,7 @@ impl QuillApp {
         if !notify_from_all_setting_visible(count) {
             return None;
         }
-        let label = "All accounts";
+        let label = tr(keys::Q_OPS_ALL_ACCOUNTS);
         Some(
             div()
                 .id("notify-from-all-section")
@@ -63,7 +64,7 @@ impl QuillApp {
                             div()
                                 .font_semibold()
                                 .text_sm()
-                                .child("Show notifications from"),
+                                .child(tr(keys::Q_OPS_SHOW_NOTIFICATIONS_FROM)),
                         )
                         .child(
                             Switch::new("notify-from-all-toggle")
@@ -79,10 +80,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(
-                            "Turn this off to get notifications only from the account \
-                             you are using.",
-                        ),
+                        .child(tr(keys::Q_OPS_TURN_THIS_OFF_TO_GET)),
                 )
                 .into_any_element(),
         )
@@ -94,7 +92,10 @@ impl QuillApp {
         if let Some(root) = safe_app_root()
             && let Err(err) = quill::settings::set_notify_from_all(&root, on)
         {
-            self.connection.status_note = format!("couldn’t save the notification setting: {err}");
+            self.connection.status_note = tr_with(
+                keys::Q_OPS_COULDN_T_SAVE_THE_NOTIFICATION,
+                &[("err", &err.to_string())],
+            );
         }
         self.background.notify_from_all = on;
         if !on {

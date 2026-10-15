@@ -1,6 +1,7 @@
 use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 /// Phase 6: add-contact dialog opened from the user info panel or the chat
 /// action bar. A first name or a phone number is required — `addContact`
 /// needs an `importedContact`; the phone may stay empty for a known user
@@ -36,7 +37,7 @@ impl AddContactDialog {
     ) -> Self {
         let phone_input = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
-                .placeholder("Phone number")
+                .placeholder(tr(keys::NEW_CONTACT_PHONE_NUMBER))
                 .auto_grow(1, 1)
                 .submit_on_enter(false);
             state.set_value(phone, window, cx);
@@ -44,7 +45,7 @@ impl AddContactDialog {
         });
         let first_name_input = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
-                .placeholder("First name")
+                .placeholder(tr(keys::Q_OPS_FIRST_NAME))
                 .auto_grow(1, 1)
                 .submit_on_enter(false);
             state.set_value(first_name, window, cx);
@@ -52,7 +53,7 @@ impl AddContactDialog {
         });
         let last_name_input = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
-                .placeholder("Last name")
+                .placeholder(tr(keys::Q_OPS_LAST_NAME))
                 .auto_grow(1, 1)
                 .submit_on_enter(false);
             state.set_value(last_name, window, cx);

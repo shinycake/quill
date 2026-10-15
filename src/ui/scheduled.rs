@@ -22,6 +22,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerScheduling};
 use quill::ids::MessageId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, now_unix};
 use quill::schedule::{
     MAX_SCHEDULE_SECS, ScheduleError, ScheduleKind, civil_to_unix, default_schedule_time,
@@ -48,12 +49,21 @@ pub(super) fn scheduled_message_label(message: &ParsedMessage, kind: ScheduleKin
             let when = format_unix_date_time(send_date as i64);
             if repeat_period > 0 {
                 // tdesktop puts the period before the time ("daily 12:30").
-                format!("{noun} for {when}, {}", repeat_period_text(repeat_period))
+                tr_with(
+                    keys::Q_OPS_FOR,
+                    &[
+                        ("noun", noun),
+                        ("when", &when.to_string()),
+                        ("repeat_period_text", (repeat_period_text(repeat_period))),
+                    ],
+                )
             } else {
                 format!("{noun} for {when}")
             }
         }
-        Some(MessageSchedulingState::SendWhenOnline) => "send when online".to_string(),
+        Some(MessageSchedulingState::SendWhenOnline) => {
+            tr(keys::Q_OPS_SEND_WHEN_ONLINE).to_string()
+        }
         None => noun.to_string(),
     }
 }
@@ -133,7 +143,7 @@ pub(super) fn new_date_time_picker(
             .time_precision(TimePrecision::Minute)
             .hour_cycle(HourCycle::H23)
             .disabled_matcher(Matcher::custom(move |day| {
-                let day = day.format("%Y-%m-%d").to_string();
+                let day = day.format(tr(keys::Q_OPS_Y_M_D)).to_string();
                 day < first_day || day > last_day
             }))
     });
@@ -149,7 +159,7 @@ pub(super) fn picked_unix(date: &Entity<DatePickerState>, cx: &App) -> Option<i6
     date.read(cx)
         .date_time()
         .start()
-        .and_then(|value| parse_picker_stamp(&value.format("%Y-%m-%d %H:%M").to_string()))
+        .and_then(|value| parse_picker_stamp(&value.format(tr(keys::Q_OPS_Y_M_D_H_M)).to_string()))
         .map(|civil| civil_to_unix(&civil))
 }
 
@@ -329,13 +339,21 @@ impl QuillApp {
                 self.composer_ui.scheduling = scheduling;
                 self.composer_ui.schedule_repeat = repeat;
                 self.connection.status_note = match (scheduling, kind) {
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
-                        format!("reminder set for {}", format_unix_date_time(date))
-                    }
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Schedule) => {
-                        format!("scheduled for {}", format_unix_date_time(date))
-                    }
-                    _ => "will send when the contact is online".into(),
+                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => tr_with(
+                        keys::Q_OPS_REMINDER_SET_FOR,
+                        &[(
+                            "format_unix_date_time",
+                            &(format_unix_date_time(date)).to_string(),
+                        )],
+                    ),
+                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Schedule) => tr_with(
+                        keys::Q_OPS_SCHEDULED_FOR,
+                        &[(
+                            "format_unix_date_time",
+                            &(format_unix_date_time(date)).to_string(),
+                        )],
+                    ),
+                    _ => tr(keys::Q_OPS_WILL_SEND_WHEN_THE_CONTACT).into(),
                 };
                 cx.notify();
                 if send_after {
@@ -384,16 +402,16 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.connection.status_note = if sending_now {
-                    "sending…".into()
+                    tr(keys::Q_OPS_SENDING).into()
                 } else {
-                    "rescheduling…".into()
+                    tr(keys::Q_OPS_RESCHEDULING).into()
                 };
             }
             Err(_) => {
                 self.connection.status_note = if sending_now {
-                    "could not send the message now".into()
+                    tr(keys::Q_OPS_COULD_NOT_SEND_THE_MESSAGE).into()
                 } else {
-                    "could not reschedule the message".into()
+                    tr(keys::Q_OPS_COULD_NOT_RESCHEDULE_THE_MESSAGE).into()
                 };
             }
         }
@@ -410,9 +428,9 @@ impl QuillApp {
         let kind = self.schedule_kind();
         let now = now_unix();
         let presets: Vec<DateRangePreset> = [
-            ("In 1 hour", 3600),
-            ("In 8 hours", 8 * 3600),
-            ("In 24 hours", 24 * 3600),
+            (tr(keys::Q_OPS_IN_1_HOUR), 3600),
+            (tr(keys::Q_OPS_IN_8_HOURS), 8 * 3600),
+            (tr(keys::Q_OPS_IN_24_HOURS), 24 * 3600),
         ]
         .into_iter()
         .filter_map(|(label, secs)| {
@@ -424,7 +442,7 @@ impl QuillApp {
         if self.can_send_when_online() {
             footer = footer.child(
                 Button::new("schedule-when-online")
-                    .label("Send when online")
+                    .label(tr(keys::SCHEDULED_SEND_UNTIL_ONLINE))
                     .ghost()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.apply_schedule(target, ComposerScheduling::SendWhenOnline, window, cx);
@@ -435,7 +453,7 @@ impl QuillApp {
             .child(div().flex_1())
             .child(
                 Button::new("schedule-cancel")
-                    .label("Cancel")
+                    .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.close_schedule_picker(cx))),
             )
@@ -462,7 +480,7 @@ impl QuillApp {
             .child(
                 DatePicker::new(&picker.date)
                     .presets(presets)
-                    .placeholder("Pick a date and time"),
+                    .placeholder(tr(keys::Q_OPS_PICK_A_DATE_AND_TIME)),
             )
             .children(self.schedule_repeat_row(picker.repeat, cx))
             .when_some(picker.error, |this, error| {
@@ -488,8 +506,8 @@ impl QuillApp {
             return None;
         }
         let title = match self.schedule_kind() {
-            ScheduleKind::Reminder => "Reminders",
-            ScheduleKind::Schedule => "Scheduled messages",
+            ScheduleKind::Reminder => tr(keys::Q_OPS_REMINDERS),
+            ScheduleKind::Schedule => tr(keys::SCHEDULED_MESSAGES),
         };
         Some(
             Button::new("composer-scheduled")
@@ -566,8 +584,8 @@ impl QuillApp {
             let (app, ids) = (app.clone(), ids.clone());
             alert
                 .description(question.clone())
-                .ok_text("Send")
-                .cancel_text("Cancel")
+                .ok_text(tr(keys::SHARE_CONFIRM))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let ids = ids.clone();
@@ -596,8 +614,8 @@ impl QuillApp {
             let (app, ids) = (app.clone(), ids.clone());
             alert
                 .description(question.clone())
-                .ok_text("Delete")
-                .cancel_text("Cancel")
+                .ok_text(tr(keys::BOX_DELETE))
+                .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let ids = ids.clone();
@@ -635,7 +653,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("scheduled-selection-send")
-                    .label("Send now")
+                    .label(tr(keys::Q_OPS_SEND_NOW))
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -644,7 +662,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("scheduled-selection-reschedule")
-                    .label("Reschedule")
+                    .label(tr(keys::Q_OPS_RESCHEDULE))
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -655,7 +673,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("scheduled-selection-delete")
-                    .label("Delete")
+                    .label(tr(keys::BOX_DELETE))
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -664,7 +682,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("scheduled-selection-clear")
-                    .label("Clear")
+                    .label(tr(keys::LOCAL_STORAGE_CLEAR_SOME))
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -722,7 +740,7 @@ impl QuillApp {
             actions = actions
                 .child(
                     Button::new(format!("scheduled-send-now-{}", id.0))
-                        .label("Send now")
+                        .label(tr(keys::Q_OPS_SEND_NOW))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.edit_scheduled_state(id, ComposerScheduling::None, cx);
@@ -730,7 +748,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new(format!("scheduled-reschedule-{}", id.0))
-                        .label("Reschedule")
+                        .label(tr(keys::Q_OPS_RESCHEDULE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.composer_ui.scheduled_dialog_open = false;
@@ -741,7 +759,7 @@ impl QuillApp {
             if let Some(edit) = edit {
                 actions = actions.child(
                     Button::new(format!("scheduled-edit-{}", id.0))
-                        .label("Edit")
+                        .label(tr(keys::Q_OPS_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.composer_ui.scheduled_dialog_open = false;
@@ -752,7 +770,7 @@ impl QuillApp {
             }
             actions = actions.child(
                 Button::new(format!("scheduled-delete-{}", id.0))
-                    .label("Delete")
+                    .label(tr(keys::BOX_DELETE))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.delete_scheduled_message(id, cx);
