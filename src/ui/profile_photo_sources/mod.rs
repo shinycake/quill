@@ -16,6 +16,7 @@ use super::app::QuillApp;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -54,7 +55,9 @@ fn work_dir() -> PathBuf {
 /// Run ffmpeg to completion; the error is a short sentence for the panel.
 fn run_ffmpeg(args: &[String], log: &Path) -> Result<(), String> {
     if !quill::media_tools::is_installed("ffmpeg") {
-        return Err(quill::media_tools::ffmpeg_missing_message("Video avatars"));
+        return Err(quill::media_tools::ffmpeg_missing_message(tr(
+            keys::Q_PEOPLE_VIDEO_AVATARS,
+        )));
     }
     let log_file = std::fs::File::create(log).map_err(|e| e.to_string())?;
     let status = quill::media_tools::command("ffmpeg")
@@ -168,13 +171,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.photo_source_note("Profile edits need a signed-in account.", cx);
+            self.photo_source_note(tr(keys::Q_PEOPLE_PROFILE_EDITS_NEED_A_SIGNED), cx);
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match send(&mut live.driver) {
             Ok(_) => {
-                self.connection.status_note = "Photo update requested.".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED).into();
                 self.close_photo_source(cx);
             }
             Err(err) => self.photo_source_note(format!("Couldn't set the photo: {err:?}"), cx),
@@ -221,7 +224,7 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new("profile-photo-source-back")
-                    .label("Back")
+                    .label(tr(keys::CREATE_GROUP_BACK))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| this.close_photo_source(cx))),
             )
@@ -268,13 +271,13 @@ impl QuillApp {
             .gap_2()
             .child(button(
                 "edit-profile-camera",
-                "Camera…",
+                tr(keys::Q_PEOPLE_CAMERA),
                 SourceMode::Camera,
                 cx,
             ))
             .child(button(
                 "edit-profile-emoji",
-                "Use an emoji…",
+                tr(keys::Q_PEOPLE_USE_AN_EMOJI),
                 SourceMode::Emoji,
                 cx,
             ))
@@ -282,7 +285,7 @@ impl QuillApp {
             // `PrepareProfileVideo`).
             .child(
                 Button::new("edit-profile-video")
-                    .label("Video…")
+                    .label(tr(keys::Q_PEOPLE_VIDEO_2))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.choose_avatar_video(window, cx);

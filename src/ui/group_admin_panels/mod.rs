@@ -9,6 +9,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{AdminListFetch, InviteLinkFetch, JoinRequestFetch, RequestPurpose};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatAdministratorEntry, ChatKind};
 impl QuillApp {
@@ -38,9 +39,9 @@ impl QuillApp {
         let mut section = div().flex().flex_col().gap_1().child(
             Button::new("group-load-sticker-packs")
                 .label(if loading {
-                    "Loading packs…"
+                    tr(keys::Q_PEOPLE_LOADING_PACKS)
                 } else {
-                    "Load / refresh group packs"
+                    tr(keys::Q_PEOPLE_LOAD_REFRESH_GROUP_PACKS)
                 })
                 .ghost()
                 .disabled(loading)
@@ -49,7 +50,7 @@ impl QuillApp {
                         && live.driver.load_group_sticker_choices(chat_id).is_err()
                     {
                         this.connection.status_note =
-                            "Could not load group packs. Retry the action.".into();
+                            tr(keys::Q_PEOPLE_COULD_NOT_LOAD_GROUP_PACKS).into();
                     }
                     cx.notify();
                 })),
@@ -58,30 +59,32 @@ impl QuillApp {
             section = section.child(
                 div()
                     .text_sm()
-                    .child("Could not load packs. Retry Load / refresh."),
+                    .child(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_PACKS_RETRY)),
             );
         }
         for (custom, title, current, sets) in [
             (
                 false,
-                "Group stickers",
+                tr(keys::GROUP_STICKERS),
                 info.map_or(0, |i| i.sticker_set_id),
                 &session.stickers.stickers.sets,
             ),
             (
                 true,
-                "Group emoji",
+                tr(keys::EMOJI_GROUP_BADGE),
                 info.map_or(0, |i| i.custom_emoji_sticker_set_id),
                 &session.stickers.emoji.installed_sets,
             ),
         ] {
             let current_label = if current == 0 {
-                "None".to_string()
+                tr(keys::Q_PEOPLE_NONE).to_string()
             } else {
                 sets.iter()
                     .find(|s| s.id == current)
                     .map(|s| s.title.clone())
-                    .unwrap_or_else(|| format!("Pack {current}"))
+                    .unwrap_or_else(|| {
+                        tr_with(keys::Q_PEOPLE_PACK, &[("current", &current.to_string())])
+                    })
             };
             let mut choices = div()
                 .id(if custom {
@@ -95,7 +98,7 @@ impl QuillApp {
                 .max_h(px(160.))
                 .overflow_y_scroll()
                 .child(div().text_sm().child(format!("{title}: {current_label}")));
-            for (id, label) in std::iter::once((0, "Remove pack".to_string()))
+            for (id, label) in std::iter::once((0, tr(keys::Q_PEOPLE_REMOVE_PACK).to_string()))
                 .chain(sets.iter().map(|s| (s.id, s.title.clone())))
             {
                 choices = choices.child(
@@ -113,14 +116,13 @@ impl QuillApp {
                                     live.driver.set_supergroup_sticker_set(chat_id, id)
                                 };
                                 this.connection.status_note = match result {
-                                    Ok(Some(_)) => "Group pack change requested.".into(),
+                                    Ok(Some(_)) => {
+                                        tr(keys::Q_PEOPLE_GROUP_PACK_CHANGE_REQUESTED).into()
+                                    }
                                     Ok(None) => {
-                                        "Group pack change is unavailable or already pending."
-                                            .into()
+                                        tr(keys::Q_PEOPLE_GROUP_PACK_CHANGE_IS_UNAVAILABLE).into()
                                     }
-                                    Err(_) => {
-                                        "Could not change group pack. Retry the action.".into()
-                                    }
+                                    Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_GROUP_PACK).into(),
                                 };
                             }
                             cx.notify();
@@ -166,7 +168,7 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
-                .child("Channel boosts"),
+                .child(tr(keys::Q_PEOPLE_CHANNEL_BOOSTS)),
         );
         match status {
             Some((level, boost_count)) => {
@@ -181,11 +183,17 @@ impl QuillApp {
                                 .flex_1()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!("Level {level} · {boost_count} boosts")),
+                                .child(tr_with(
+                                    keys::Q_PEOPLE_LEVEL_BOOSTS,
+                                    &[
+                                        ("level", &level.to_string()),
+                                        ("boost_count", &boost_count.to_string()),
+                                    ],
+                                )),
                         )
                         .child(
                             Button::new("g2-boost-channel")
-                                .label("Boost channel")
+                                .label(tr(keys::Q_PEOPLE_BOOST_CHANNEL))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.boost_channel(chat_id, cx);
@@ -198,7 +206,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading boost status…"),
+                        .child(tr(keys::Q_PEOPLE_LOADING_BOOST_STATUS)),
                 );
             }
             None => {
@@ -213,11 +221,11 @@ impl QuillApp {
                                 .flex_1()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("Boost status unavailable."),
+                                .child(tr(keys::Q_PEOPLE_BOOST_STATUS_UNAVAILABLE)),
                         )
                         .child(
                             Button::new("g2-boost-retry")
-                                .label("Retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.refresh_boost_status(chat_id, cx);
@@ -238,7 +246,7 @@ impl QuillApp {
                 .chat_boost_status
                 .remove(&chat_id.0);
             if live.driver.fetch_chat_boost_status(chat_id).is_err() {
-                self.connection.status_note = "could not load boost status".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_BOOST_STATUS).into();
             }
         }
         cx.notify();
@@ -317,9 +325,9 @@ impl QuillApp {
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
                 .child(if is_channel {
-                    "Manage channel"
+                    tr(keys::Q_PEOPLE_MANAGE_CHANNEL)
                 } else {
-                    "Manage group"
+                    tr(keys::MANAGE_GROUP_TITLE)
                 }),
         );
         use gpui_kit::assets::IconName as I;
@@ -378,7 +386,7 @@ impl QuillApp {
             row!(
                 "g8-edit-title",
                 I::Pencil,
-                "Edit title",
+                tr(keys::Q_PEOPLE_EDIT_TITLE),
                 |this, window, cx| {
                     this.open_group_title_dialog(chat_id, window, cx);
                 }
@@ -386,7 +394,7 @@ impl QuillApp {
             row!(
                 "g8-edit-description",
                 I::FileText,
-                "Edit description",
+                tr(keys::Q_PEOPLE_EDIT_DESCRIPTION),
                 |this, window, cx| {
                     this.open_group_description_dialog(chat_id, window, cx);
                 }
@@ -394,7 +402,7 @@ impl QuillApp {
             row!(
                 "g8-edit-photo",
                 I::Camera,
-                "Change photo",
+                tr(keys::Q_PEOPLE_CHANGE_PHOTO),
                 |this, window, cx| {
                     this.open_group_photo_dialog(chat_id, window, cx);
                 }
@@ -407,9 +415,9 @@ impl QuillApp {
                 "b7-open-settings",
                 I::Settings,
                 if is_channel {
-                    "Channel settings"
+                    tr(keys::ADMIN_LOG_FILTER_ACTIONS_CHANNEL_SETTINGS_SECTION)
                 } else {
-                    "Group settings"
+                    tr(keys::ADMIN_LOG_FILTER_ACTIONS_SETTINGS_SECTION)
                 },
                 |this, _window, cx| {
                     this.open_group_settings_dialog(chat_id, cx);
@@ -420,7 +428,11 @@ impl QuillApp {
         // add or restrict may manage; plain members get a read-only
         // list through the dialog's All tab.
         if can_add || can_restrict || is_member {
-            let label = if is_channel { "Subscribers" } else { "Members" };
+            let label = if is_channel {
+                tr(keys::Q_PEOPLE_SUBSCRIBERS)
+            } else {
+                tr(keys::Q_PEOPLE_MEMBERS)
+            };
             row!("g1-open-members", I::Users, label, |this, window, cx| {
                 this.open_member_dialog(chat_id, window, cx);
             });
@@ -429,7 +441,7 @@ impl QuillApp {
             row!(
                 "g1-open-permissions",
                 I::Shield,
-                "Default permissions",
+                tr(keys::Q_PEOPLE_DEFAULT_PERMISSIONS),
                 |this, _window, cx| {
                     this.open_permissions_dialog(chat_id, cx);
                 }
@@ -445,7 +457,7 @@ impl QuillApp {
             row!(
                 "g1-replace-invite-link",
                 I::Link,
-                "Replace primary invite link",
+                tr(keys::Q_PEOPLE_REPLACE_PRIMARY_INVITE_LINK),
                 |this, _window, cx| {
                     this.replace_primary_invite_link(chat_id, cx);
                 }
@@ -460,7 +472,7 @@ impl QuillApp {
                 toggle_row!(
                     "g1-toggle-join-request",
                     I::UserCheck,
-                    "Approve new members",
+                    tr(keys::GROUP_INVITE_REQUEST_APPROVE),
                     enabled,
                     |this, _window, cx| {
                         this.toggle_join_by_request(chat_id, cx);
@@ -470,9 +482,12 @@ impl QuillApp {
             if is_owner {
                 let username = self.chat_username(chat_id);
                 let label = if username.is_empty() {
-                    "Set public username".to_string()
+                    tr(keys::Q_PEOPLE_SET_PUBLIC_USERNAME).to_string()
                 } else {
-                    format!("Public username (@{username})")
+                    tr_with(
+                        keys::Q_PEOPLE_PUBLIC_USERNAME,
+                        &[("username", &username.to_string())],
+                    )
                 };
                 row!("g1-open-username", I::AtSign, label, |this, window, cx| {
                     this.open_username_dialog(chat_id, window, cx);
@@ -481,7 +496,7 @@ impl QuillApp {
                     row!(
                         "g1-broadcast-upgrade",
                         I::Megaphone,
-                        "Convert to broadcast group",
+                        tr(keys::RIGHTS_GIGAGROUP_CONVERT),
                         |this, _window, cx| {
                             this.open_group_confirm(
                                 chat_id,
@@ -508,7 +523,7 @@ impl QuillApp {
             toggle_row!(
                 "g2-toggle-sign-messages",
                 I::PenLine,
-                "Sign messages",
+                tr(keys::Q_PEOPLE_SIGN_MESSAGES),
                 sign,
                 |this, _window, cx| {
                     let (sign, show) = this.sign_flags(chat_id);
@@ -518,7 +533,7 @@ impl QuillApp {
             toggle_row!(
                 "g2-toggle-show-authors",
                 I::Eye,
-                "Show message authors",
+                tr(keys::Q_PEOPLE_SHOW_MESSAGE_AUTHORS),
                 show && sign,
                 |this, _window, cx| {
                     let (_, show) = this.sign_flags(chat_id);
@@ -536,7 +551,7 @@ impl QuillApp {
             toggle_row!(
                 "tr-toggle-auto-translate",
                 I::Languages,
-                "Auto-translate messages",
+                tr(keys::Q_PEOPLE_AUTO_TRANSLATE_MESSAGES),
                 auto,
                 |this, _window, cx| {
                     this.set_auto_translate(chat_id, cx);
@@ -568,7 +583,7 @@ impl QuillApp {
             toggle_row!(
                 "g2-toggle-anti-spam",
                 I::ShieldCheck,
-                "Aggressive anti-spam",
+                tr(keys::Q_PEOPLE_AGGRESSIVE_ANTI_SPAM),
                 enabled,
                 |this, _window, cx| {
                     let enabled = this
@@ -606,7 +621,7 @@ impl QuillApp {
             row!(
                 "g2-open-forum-manage",
                 I::MessagesSquare,
-                "Manage topics",
+                tr(keys::RIGHTS_GROUP_TOPICS),
                 |this, window, cx| {
                     this.open_forum_manage_dialog(chat_id, window, cx);
                 }
@@ -630,7 +645,7 @@ impl QuillApp {
                 action_row(
                     "g2-open-welcome",
                     Some(I::Hand),
-                    "Welcome message",
+                    tr(keys::Q_PEOPLE_WELCOME_MESSAGE),
                     false,
                     cx,
                 )
@@ -640,7 +655,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("On"),
+                            .child(tr(keys::Q_PEOPLE_ON)),
                     )
                 })
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -655,9 +670,9 @@ impl QuillApp {
                 "g1-transfer-ownership",
                 I::Crown,
                 if is_channel {
-                    "Transfer channel ownership"
+                    tr(keys::Q_PEOPLE_TRANSFER_CHANNEL_OWNERSHIP)
                 } else {
-                    "Transfer group ownership"
+                    tr(keys::RIGHTS_TRANSFER_GROUP)
                 },
                 |this, window, cx| {
                     this.open_transfer_ownership(chat_id, window, cx);
@@ -666,9 +681,9 @@ impl QuillApp {
         }
         if is_member {
             let label = if is_channel {
-                "Leave channel"
+                tr(keys::Q_PEOPLE_LEAVE_CHANNEL)
             } else {
-                "Leave group"
+                tr(keys::PROFILE_LEAVE_GROUP)
             };
             danger_row!("g1-leave-chat", I::LogOut, label, |this, window, cx| {
                 // An owner sees who inherits first (tdesktop
@@ -683,9 +698,9 @@ impl QuillApp {
         // creator of a group/channel, or any private chat.
         if can_delete {
             let label = if is_channel {
-                "Delete channel"
+                tr(keys::Q_PEOPLE_DELETE_CHANNEL)
             } else {
-                "Delete group"
+                tr(keys::PROFILE_DELETE_GROUP)
             };
             danger_row!("g1-delete-chat", I::Trash, label, |this, _window, cx| {
                 this.open_group_confirm(chat_id, GroupConfirmAction::DeleteChat, cx);
@@ -698,7 +713,7 @@ impl QuillApp {
     /// unix timestamp; 0 = never expires).
     pub(super) fn invite_link_expiry(expiration_date: i32) -> String {
         if expiration_date == 0 {
-            return "Never expires".into();
+            return tr(keys::Q_PEOPLE_NEVER_EXPIRES).into();
         }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -706,11 +721,11 @@ impl QuillApp {
             .unwrap_or(0);
         let remaining = i64::from(expiration_date) - now;
         if remaining <= 0 {
-            "Expired".into()
+            tr(keys::GROUP_INVITE_LINK_EXPIRED).into()
         } else if remaining < 86_400 {
-            "Expires today".into()
+            tr(keys::Q_PEOPLE_EXPIRES_TODAY).into()
         } else if remaining < 172_800 {
-            "Expires tomorrow".into()
+            tr(keys::Q_PEOPLE_EXPIRES_TOMORROW).into()
         } else {
             format!("Expires in {} days", remaining / 86_400)
         }

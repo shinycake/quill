@@ -1,6 +1,7 @@
 //! Methods moved out of `group_moderation.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase D3b: the promote member picker — search field, member rows
@@ -53,7 +54,7 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .text_color(text_bright())
-                    .child("Promote member"),
+                    .child(tr(keys::Q_PEOPLE_PROMOTE_MEMBER)),
             )
             .child(
                 div()
@@ -61,13 +62,15 @@ impl QuillApp {
                     .items_center()
                     .gap_2()
                     .child(
-                        div()
-                            .flex_1()
-                            .child(Textarea::new(search_input).aria_label("Search").h(px(40.))),
+                        div().flex_1().child(
+                            Textarea::new(search_input)
+                                .aria_label(tr(keys::Q_PEOPLE_SEARCH))
+                                .h(px(40.)),
+                        ),
                     )
                     .child(
                         Button::new("admin-promote-search")
-                            .label("Search")
+                            .label(tr(keys::Q_PEOPLE_SEARCH))
                             .ghost()
                             .text_color(text_bright())
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -81,7 +84,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading members…"),
+                        .child(tr(keys::Q_PEOPLE_LOADING_MEMBERS)),
                 );
             }
             Some(SupergroupMembersFetch::Failed(message)) => {
@@ -99,7 +102,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("admin-promote-retry")
-                                .label("Retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.search_promote_members(cx);
@@ -123,7 +126,9 @@ impl QuillApp {
                             .session()
                             .and_then(|session| session.user(user_id))
                             .map(|user| user.display_name())
-                            .unwrap_or_else(|| format!("User {user_id}"));
+                            .unwrap_or_else(|| {
+                                tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())])
+                            });
                         (user_id, name)
                     })
                     .collect();
@@ -132,7 +137,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No members found."),
+                            .child(tr(keys::Q_PEOPLE_NO_MEMBERS_FOUND)),
                     );
                 } else {
                     let selected_ix = candidates
@@ -169,7 +174,10 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("Rights ({summary})")),
+                    .child(tr_with(
+                        keys::Q_PEOPLE_RIGHTS,
+                        &[("summary", &summary.to_string())],
+                    )),
             )
             .child(self.rights_checkboxes(rights, "admin-right", cx))
             .child(
@@ -178,14 +186,14 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("admin-promote-submit")
-                            .label("Promote")
+                            .label(tr(keys::COMMUNITY_ADMIN_PROMOTE))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.submit_admin_dialog(cx);
                             })),
                     )
                     .child(
                         Button::new("admin-promote-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .text_color(text_bright())
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -212,7 +220,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.user(user_id))
             .map(|user| user.display_name())
-            .unwrap_or_else(|| format!("User {user_id}"));
+            .unwrap_or_else(|| tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())]));
         let cached = self
             .session()
             .and_then(|session| session.groups.admin_rights.get(&(chat_id.0, user_id)))
@@ -236,7 +244,10 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .text_color(text_bright())
-                    .child(format!("Edit rights — {name}")),
+                    .child(tr_with(
+                        keys::Q_PEOPLE_EDIT_RIGHTS,
+                        &[("name", &name.to_string())],
+                    )),
             );
         match rights {
             None => {
@@ -244,7 +255,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading rights…"),
+                        .child(tr(keys::Q_PEOPLE_LOADING_RIGHTS)),
                 );
             }
             Some(rights) => {
@@ -264,14 +275,14 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("admin-rights-save")
-                        .label("Save")
+                        .label(tr(keys::SETTINGS_SAVE))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.submit_admin_dialog(cx);
                         })),
                 )
                 .child(
                     Button::new("admin-rights-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .ghost()
                         .text_color(text_bright())
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -292,7 +303,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.user(user_id))
             .map(|user| user.display_name())
-            .unwrap_or_else(|| format!("User {user_id}"));
+            .unwrap_or_else(|| tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())]));
         div()
             .id("admin-demote-dialog")
             .flex()
@@ -308,26 +319,31 @@ impl QuillApp {
                     .text_sm()
                     .font_semibold()
                     .text_color(text_bright())
-                    .child(format!("Demote {name}?")),
+                    .child(tr_with(
+                        keys::Q_PEOPLE_DEMOTE,
+                        &[("name", &name.to_string())],
+                    )),
             )
             .child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("They will become a regular member and lose all admin rights."),
+                    .child(tr(keys::Q_PEOPLE_THEY_WILL_BECOME_A_REGULAR)),
             )
             .child(
                 div()
                     .flex()
                     .gap_2()
-                    .child(Button::new("admin-demote-submit").label("Demote").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.submit_admin_dialog(cx);
-                        }),
-                    ))
+                    .child(
+                        Button::new("admin-demote-submit")
+                            .label(tr(keys::Q_PEOPLE_DEMOTE_2))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_admin_dialog(cx);
+                            })),
+                    )
                     .child(
                         Button::new("admin-demote-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .text_color(text_bright())
                             .on_click(cx.listener(|this, _, _, cx| {

@@ -16,6 +16,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::ProfileChatsKind;
 use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
@@ -86,14 +87,14 @@ impl QuillApp {
                     .text_xs()
                     .font_semibold()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Start a secret chat with:"),
+                    .child(tr(keys::Q_PEOPLE_START_A_SECRET_CHAT_WITH)),
             );
         if rows.is_empty() {
             panel = panel.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No eligible contacts."),
+                    .child(tr(keys::Q_PEOPLE_NO_ELIGIBLE_CONTACTS)),
             );
         }
         for row in rows {
@@ -111,7 +112,10 @@ impl QuillApp {
                     .py_2()
                     .rounded_md()
                     .role(gpui_kit::Role::Button)
-                    .aria_label(format!("Start secret chat with {name}"))
+                    .aria_label(tr_with(
+                        keys::Q_PEOPLE_START_SECRET_CHAT_WITH,
+                        &[("name", &name.to_string())],
+                    ))
                     .tab_index(0)
                     .cursor_pointer()
                     .pressable(cx.theme())
@@ -317,7 +321,7 @@ impl QuillApp {
         if self.admin.event_log_search.is_none() {
             self.admin.event_log_search = Some(cx.new(|cx| {
                 TextareaState::new(window, cx)
-                    .placeholder("Search recent actions")
+                    .placeholder(tr(keys::Q_PEOPLE_SEARCH_RECENT_ACTIONS))
                     .auto_grow(1, 1)
                     .submit_on_enter(false)
             }));
@@ -486,10 +490,10 @@ impl QuillApp {
                         .child(div().font_semibold().child(title))
                         .child(
                             Button::new("info-panel-close")
-                                .accessibility_label("Close information panel")
+                                .accessibility_label(tr(keys::Q_PEOPLE_CLOSE_INFORMATION_PANEL))
                                 .icon(IconName::X)
                                 .ghost()
-                                .tooltip("Close panel")
+                                .tooltip(tr(keys::Q_PEOPLE_CLOSE_PANEL))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.close_info_panel(cx);
                                 })),
@@ -518,23 +522,28 @@ impl QuillApp {
     ) -> Option<(&'static str, AnyElement)> {
         let target = self.session()?.users_state.open_info_panel?;
         let (title, content) = match target {
-            InfoPanelTarget::User(user_id) => ("Contact info", self.user_info_panel(user_id, cx)),
-            InfoPanelTarget::Supergroup(supergroup_id) => {
-                ("Group info", self.supergroup_info_panel(supergroup_id, cx))
-            }
+            InfoPanelTarget::User(user_id) => (
+                tr(keys::Q_PEOPLE_CONTACT_INFO),
+                self.user_info_panel(user_id, cx),
+            ),
+            InfoPanelTarget::Supergroup(supergroup_id) => (
+                tr(keys::INFO_GROUP_TITLE),
+                self.supergroup_info_panel(supergroup_id, cx),
+            ),
             // Slice G1: basic-group info panel (members, permissions,
             // invite link, leave/delete).
             InfoPanelTarget::BasicGroup(basic_group_id) => (
-                "Group info",
+                tr(keys::INFO_GROUP_TITLE),
                 self.basic_group_info_panel(basic_group_id, cx),
             ),
             // Phase D2: channel/group statistics view.
-            InfoPanelTarget::Statistics(chat_id) => {
-                ("Statistics", self.chat_statistics_panel(chat_id, cx))
-            }
+            InfoPanelTarget::Statistics(chat_id) => (
+                tr(keys::Q_PEOPLE_STATISTICS),
+                self.chat_statistics_panel(chat_id, cx),
+            ),
             // Slice G10: community info (name edit, counts, chats).
             InfoPanelTarget::Community(community_id) => (
-                "Community info",
+                tr(keys::Q_PEOPLE_COMMUNITY_INFO),
                 self.community_info_panel(community_id, cx),
             ),
             InfoPanelTarget::Earn(panel) => (

@@ -1,6 +1,7 @@
 //! Methods moved out of `group_admin_panels.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase D3a: invite-link management section for the channel/group
@@ -37,7 +38,7 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Invite links"),
+                        .child(tr(keys::ADMIN_LOG_FILTER_INVITE_LINKS)),
                 )
                 .child(div().flex_1())
                 .child(
@@ -45,8 +46,8 @@ impl QuillApp {
                         .icon(gpui_kit::assets::IconName::RotateCcw)
                         .ghost()
                         .xsmall()
-                        .tooltip("Refresh")
-                        .accessibility_label("Refresh")
+                        .tooltip(tr(keys::Q_PEOPLE_REFRESH))
+                        .accessibility_label(tr(keys::Q_PEOPLE_REFRESH))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.refresh_invite_links(chat_id, cx);
                         })),
@@ -55,8 +56,8 @@ impl QuillApp {
                     Button::new("invite-link-create")
                         .icon(gpui_kit::assets::IconName::Plus)
                         .xsmall()
-                        .tooltip("Create invite link")
-                        .accessibility_label("Create invite link")
+                        .tooltip(tr(keys::Q_PEOPLE_CREATE_INVITE_LINK))
+                        .accessibility_label(tr(keys::Q_PEOPLE_CREATE_INVITE_LINK))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_invite_link_dialog(chat_id, window, cx);
@@ -69,7 +70,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading invite links…"),
+                        .child(tr(keys::Q_PEOPLE_LOADING_INVITE_LINKS)),
                 );
             }
             Some(InviteLinkFetch::Failed(message)) => {
@@ -88,7 +89,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("invite-links-retry")
-                                .label("Retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.refresh_invite_links(chat_id, cx);
@@ -102,16 +103,16 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No invite links."),
+                            .child(tr(keys::Q_PEOPLE_NO_INVITE_LINKS)),
                     );
                 } else {
                     for (index, link) in list.links.into_iter().enumerate() {
                         let name = if !link.name.is_empty() {
                             link.name.clone()
                         } else if link.is_primary {
-                            "Primary link".into()
+                            tr(keys::Q_PEOPLE_PRIMARY_LINK).into()
                         } else {
-                            "Invite link".into()
+                            tr(keys::CREATE_GROUP_INVITE_LINK).into()
                         };
                         let uses = if link.member_limit > 0 {
                             format!("{}/{} uses", link.member_count, link.member_limit)
@@ -191,7 +192,7 @@ impl QuillApp {
                                 .gap_1()
                                 .child(
                                     Button::new(format!("invite-link-copy-{index}"))
-                                        .label("Copy")
+                                        .label(tr(keys::GROUP_INVITE_CONTEXT_COPY))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.copy_invite_link(&copy_link, cx);
@@ -200,7 +201,10 @@ impl QuillApp {
                                 .when(joined_count > 0, |actions| {
                                     actions.child(
                                         Button::new(format!("invite-link-joined-{index}"))
-                                            .label(format!("Joined ({joined_count})"))
+                                            .label(tr_with(
+                                                keys::Q_PEOPLE_JOINED,
+                                                &[("joined_count", &joined_count.to_string())],
+                                            ))
                                             .ghost()
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.toggle_invite_link_details(
@@ -231,7 +235,7 @@ impl QuillApp {
                                 })
                                 .child(
                                     Button::new(format!("invite-link-qr-{index}"))
-                                        .label("QR code")
+                                        .label(tr(keys::Q_PEOPLE_QR_CODE))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.toggle_invite_link_qr(chat_id, &qr_link, cx);
@@ -240,7 +244,7 @@ impl QuillApp {
                                 .when(subscription.is_some(), |actions| {
                                     actions.child(
                                         Button::new(format!("invite-link-rename-{index}"))
-                                            .label("Rename")
+                                            .label(tr(keys::Q_PEOPLE_RENAME))
                                             .ghost()
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 this.open_subscription_link_rename(
@@ -255,7 +259,7 @@ impl QuillApp {
                                 })
                                 .child(
                                     Button::new(format!("invite-link-revoke-{index}"))
-                                        .label("Revoke")
+                                        .label(tr(keys::GROUP_INVITE_CONTEXT_REVOKE))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.revoke_invite_link(chat_id, &revoke_link, cx);
@@ -318,7 +322,7 @@ impl QuillApp {
                 .text_xs()
                 .font_semibold()
                 .text_color(cx.theme().muted_foreground)
-                .child("Join requests"),
+                .child(tr(keys::Q_PEOPLE_JOIN_REQUESTS)),
         );
         if pending_count > 0 {
             header = header.child(
@@ -334,8 +338,8 @@ impl QuillApp {
                 .icon(gpui_kit::assets::IconName::RotateCcw)
                 .ghost()
                 .xsmall()
-                .tooltip("Refresh")
-                .accessibility_label("Refresh")
+                .tooltip(tr(keys::Q_PEOPLE_REFRESH))
+                .accessibility_label(tr(keys::Q_PEOPLE_REFRESH))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.refresh_join_requests(chat_id, cx);
                 })),
@@ -347,7 +351,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading join requests…"),
+                        .child(tr(keys::Q_PEOPLE_LOADING_JOIN_REQUESTS)),
                 );
             }
             Some(JoinRequestFetch::Failed(message)) => {
@@ -366,7 +370,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("join-requests-retry")
-                                .label("Retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.refresh_join_requests(chat_id, cx);
@@ -380,7 +384,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No pending join requests."),
+                            .child(tr(keys::Q_PEOPLE_NO_PENDING_JOIN_REQUESTS)),
                     );
                 } else {
                     for request in list.requests {
@@ -394,7 +398,9 @@ impl QuillApp {
                                     .to_owned()
                             })
                             .filter(|name| !name.is_empty())
-                            .unwrap_or_else(|| format!("User {user_id}"));
+                            .unwrap_or_else(|| {
+                                tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())])
+                            });
                         let mut details = div()
                             .flex()
                             .flex_col()
@@ -419,7 +425,7 @@ impl QuillApp {
                                 .child(details)
                                 .child(
                                     Button::new(format!("join-request-approve-{user_id}"))
-                                        .label("Approve")
+                                        .label(tr(keys::Q_PEOPLE_APPROVE))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.process_join_request(chat_id, user_id, true, cx);
@@ -427,7 +433,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new(format!("join-request-decline-{user_id}"))
-                                        .label("Decline")
+                                        .label(tr(keys::Q_PEOPLE_DECLINE))
                                         .ghost()
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.process_join_request(chat_id, user_id, false, cx);
@@ -476,7 +482,7 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Administrators"),
+                        .child(tr(keys::Q_PEOPLE_ADMINISTRATORS)),
                 )
                 .child(div().flex_1())
                 .child(
@@ -484,8 +490,8 @@ impl QuillApp {
                         .icon(gpui_kit::assets::IconName::RotateCcw)
                         .ghost()
                         .xsmall()
-                        .tooltip("Refresh")
-                        .accessibility_label("Refresh")
+                        .tooltip(tr(keys::Q_PEOPLE_REFRESH))
+                        .accessibility_label(tr(keys::Q_PEOPLE_REFRESH))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.refresh_administrators(chat_id, cx);
                         })),
@@ -494,8 +500,8 @@ impl QuillApp {
                     Button::new("admin-promote-open")
                         .icon(gpui_kit::assets::IconName::Plus)
                         .xsmall()
-                        .tooltip("Add administrator")
-                        .accessibility_label("Add administrator")
+                        .tooltip(tr(keys::CHANNEL_ADD_ADMIN))
+                        .accessibility_label(tr(keys::CHANNEL_ADD_ADMIN))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.open_promote_picker(chat_id, window, cx);
@@ -508,7 +514,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Loading administrators…"),
+                        .child(tr(keys::Q_PEOPLE_LOADING_ADMINISTRATORS)),
                 );
             }
             Some(AdminListFetch::Failed(message)) => {
@@ -527,7 +533,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("admin-list-retry")
-                                .label("Retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.refresh_administrators(chat_id, cx);
@@ -541,7 +547,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No administrators."),
+                            .child(tr(keys::Q_PEOPLE_NO_ADMINISTRATORS)),
                     );
                 } else {
                     for entry in &list {
@@ -567,9 +573,9 @@ impl QuillApp {
             .map(|user| user.display_name())
             .unwrap_or_else(|| format!("User {}", entry.user_id));
         let role = if entry.is_owner {
-            "👑 Owner".to_string()
+            tr(keys::Q_PEOPLE_OWNER).to_string()
         } else if entry.custom_title.is_empty() {
-            "Admin".to_string()
+            tr(keys::Q_PEOPLE_ADMIN).to_string()
         } else {
             entry.custom_title.clone()
         };
@@ -600,7 +606,7 @@ impl QuillApp {
             row = row
                 .child(
                     Button::new(format!("admin-edit-{user_id}"))
-                        .label("Edit")
+                        .label(tr(keys::GROUP_INVITE_CONTEXT_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_rights_editor(chat_id, user_id, cx);
@@ -608,7 +614,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new(format!("admin-demote-{user_id}"))
-                        .label("Remove")
+                        .label(tr(keys::BOX_REMOVE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_demote_confirm(chat_id, user_id, cx);

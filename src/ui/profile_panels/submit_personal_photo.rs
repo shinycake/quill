@@ -1,6 +1,7 @@
 //! Methods moved out of `profile_panels.rs` to keep files under 1000 lines.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(super) fn submit_personal_photo(
@@ -11,7 +12,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: photo changes need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PHOTO_CHANGES_NEED).into();
             cx.notify();
             return;
         };
@@ -27,7 +28,7 @@ impl QuillApp {
         };
         self.connection.status_note = match sent {
             Ok(_) => mode.done_note().into(),
-            Err(_) => "Couldn't reach Telegram; try again.".into(),
+            Err(_) => tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into(),
         };
         cx.notify();
     }
@@ -86,7 +87,7 @@ impl QuillApp {
             dialog.share_phone,
         );
         if first.is_empty() && last.is_empty() {
-            self.connection.status_note = "Enter a name for the contact.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_NAME_FOR_THE).into();
             cx.notify();
             return false;
         }
@@ -102,7 +103,7 @@ impl QuillApp {
             return false;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: contact edits need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_CONTACT_EDITS_NEED).into();
             cx.notify();
             return true;
         };
@@ -116,11 +117,12 @@ impl QuillApp {
         };
         match sent {
             Ok(()) => {
-                self.connection.status_note = "Contact saved".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_CONTACT_SAVED).into();
                 true
             }
             Err(_) => {
-                self.connection.status_note = "Couldn't reach Telegram; try again.".into();
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
                 cx.notify();
                 false
             }
@@ -208,21 +210,22 @@ impl QuillApp {
             }
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: birthday changes need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_BIRTHDAY_CHANGES_NEED).into();
             cx.notify();
             return true;
         };
         match live.driver.set_birthdate(parts) {
             Ok(_) => {
                 self.connection.status_note = if remove {
-                    "Birthday removed".into()
+                    tr(keys::Q_PEOPLE_BIRTHDAY_REMOVED).into()
                 } else {
-                    "Birthday saved".into()
+                    tr(keys::Q_PEOPLE_BIRTHDAY_SAVED).into()
                 };
                 true
             }
             Err(_) => {
-                self.connection.status_note = "Couldn't reach Telegram; try again.".into();
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
                 cx.notify();
                 false
             }
@@ -239,21 +242,22 @@ impl QuillApp {
 
     pub(super) fn choose_personal_channel(&mut self, chat_id: i64, cx: &mut Context<Self>) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: this needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into();
             cx.notify();
             return true;
         };
         match live.driver.set_personal_chat(chat_id) {
             Ok(_) => {
                 self.connection.status_note = if chat_id == 0 {
-                    "Personal channel removed".into()
+                    tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_REMOVED).into()
                 } else {
-                    "Personal channel saved".into()
+                    tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_SAVED).into()
                 };
                 true
             }
             Err(_) => {
-                self.connection.status_note = "Couldn't reach Telegram; try again.".into();
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
                 cx.notify();
                 false
             }
@@ -279,7 +283,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: sharing needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_SHARING_NEEDS_A).into();
             cx.notify();
             return true;
         };
@@ -292,11 +296,15 @@ impl QuillApp {
             .unwrap_or_default();
         match live.driver.send_contact_message(ChatId(chat_id), user_id) {
             Ok(_) => {
-                self.connection.status_note = format!("Contact shared with {title}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PEOPLE_CONTACT_SHARED_WITH,
+                    &[("title", &title.to_string())],
+                );
                 true
             }
             Err(_) => {
-                self.connection.status_note = "Couldn't share the contact here.".into();
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_SHARE_THE_CONTACT_HERE).into();
                 cx.notify();
                 false
             }
@@ -361,21 +369,27 @@ impl QuillApp {
                         .text_sm()
                         .text_color(muted)
                         .child(if phone.is_empty() {
-                            "Phone number hidden".to_string()
+                            tr(keys::Q_PEOPLE_PHONE_NUMBER_HIDDEN).to_string()
                         } else {
                             format_phone(&phone)
                         }),
                 );
                 body = body
-                    .child(labeled("First name", &dialog.first_name_input))
-                    .child(labeled("Last name", &dialog.last_name_input))
-                    .child(labeled("Note", &dialog.note_input));
+                    .child(labeled(
+                        tr(keys::Q_PEOPLE_FIRST_NAME),
+                        &dialog.first_name_input,
+                    ))
+                    .child(labeled(
+                        tr(keys::Q_PEOPLE_LAST_NAME),
+                        &dialog.last_name_input,
+                    ))
+                    .child(labeled(tr(keys::Q_PEOPLE_NOTE), &dialog.note_input));
                 if show_share {
                     body = body
                         .child(
                             Checkbox::new("edit-contact-share-phone")
                                 .checked(share_phone)
-                                .label("Share my phone number")
+                                .label(tr(keys::NEW_CONTACT_SHARE))
                                 .on_click(cx.listener(|this, &on, window, cx| {
                                     if let Some(ProfileDialog::EditContact(dialog)) =
                                         &mut this.dialogs.profile_dialog
@@ -389,27 +403,28 @@ impl QuillApp {
                         .child(div().text_xs().text_color(muted).child(format!(
                             "{} will be able to see your phone number.",
                             if name.is_empty() {
-                                "The contact"
+                                tr(keys::Q_PEOPLE_THE_CONTACT)
                             } else {
                                 &name
                             }
                         )));
                 }
-                let footer =
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(Button::new("edit-contact-save").label("Save").on_click(
-                            cx.listener(|this, _, window, cx| {
+                let footer = div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("edit-contact-save")
+                            .label(tr(keys::SETTINGS_SAVE))
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 if this.submit_edit_contact(cx) {
                                     this.close_profile_dialog(cx);
                                 }
                                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
-                            }),
-                        ))
-                        .child(cancel("edit-contact-cancel", "Cancel", cx));
+                            })),
+                    )
+                    .child(cancel("edit-contact-cancel", tr(keys::CANCEL), cx));
                 Some((
-                    "Edit contact".into(),
+                    tr(keys::INFO_EDIT_CONTACT).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                 ))
@@ -427,23 +442,38 @@ impl QuillApp {
                         div()
                             .flex()
                             .gap_2()
-                            .child(div().flex_1().child(labeled("Day", &dialog.day_input)))
-                            .child(div().flex_1().child(labeled("Month", &dialog.month_input)))
-                            .child(div().flex_1().child(labeled("Year", &dialog.year_input))),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(labeled(tr(keys::Q_PEOPLE_DAY), &dialog.day_input)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(labeled(tr(keys::Q_PEOPLE_MONTH), &dialog.month_input)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(labeled(tr(keys::Q_PEOPLE_YEAR), &dialog.year_input)),
+                            ),
                     )
-                    .child(div().text_xs().text_color(muted).child(
-                        "The year is optional. Your contacts see your birthday on your profile.",
-                    ))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_PEOPLE_THE_YEAR_IS_OPTIONAL_YOUR)),
+                    )
                     .child(
                         div()
                             .id("birthday-privacy-link")
                             .role(gpui_kit::Role::Button)
-                            .aria_label("Change who can see your birthday")
+                            .aria_label(tr(keys::Q_PEOPLE_CHANGE_WHO_CAN_SEE_YOUR))
                             .tab_index(0)
                             .cursor_pointer()
                             .text_sm()
                             .text_color(accent())
-                            .child("Choose who can see your birthday")
+                            .child(tr(keys::Q_PEOPLE_CHOOSE_WHO_CAN_SEE_YOUR))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_birthday_privacy(cx);
                                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
@@ -463,7 +493,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("birthday-save")
-                            .label("Save")
+                            .label(tr(keys::SETTINGS_SAVE))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.submit_birthday(false, cx) {
                                     this.close_profile_dialog(cx);
@@ -471,11 +501,11 @@ impl QuillApp {
                                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
                             })),
                     )
-                    .child(cancel("birthday-cancel", "Cancel", cx));
+                    .child(cancel("birthday-cancel", tr(keys::CANCEL), cx));
                 if has_birthday {
                     footer = footer.child(
                         Button::new("birthday-remove")
-                            .label("Remove birthday")
+                            .label(tr(keys::Q_PEOPLE_REMOVE_BIRTHDAY))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.submit_birthday(true, cx) {
@@ -486,7 +516,7 @@ impl QuillApp {
                     );
                 }
                 Some((
-                    "Your birthday".into(),
+                    tr(keys::Q_PEOPLE_YOUR_BIRTHDAY).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                 ))
@@ -502,22 +532,28 @@ impl QuillApp {
                     .profile_chat_lists
                     .get(&(ProfileChatsKind::SuitablePersonalChats, 0))
                     .cloned();
-                let mut body =
-                    div().flex().flex_col().gap_1().child(
-                        div().text_xs().text_color(muted).pb_1().child(
-                            "Show a channel on your profile. Only channels you own are listed.",
-                        ),
-                    );
+                let mut body = div().flex().flex_col().gap_1().child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .pb_1()
+                        .child(tr(keys::Q_PEOPLE_SHOW_A_CHANNEL_ON_YOUR)),
+                );
                 match fetch {
                     None | Some(ProfileChatsFetch::Loading) => {
-                        body = body.child(div().text_sm().text_color(muted).child("Loading…"));
+                        body = body.child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(tr(keys::PROFILE_LOADING)),
+                        );
                     }
                     Some(ProfileChatsFetch::Failed(_)) => {
                         body = body.child(
                             action_row(
                                 "personal-channel-retry",
                                 Some(IconName::RotateCw),
-                                "Couldn't load channels. Retry",
+                                tr(keys::Q_PEOPLE_COULDNT_LOAD_CHANNELS_RETRY),
                                 false,
                                 cx,
                             )
@@ -535,7 +571,7 @@ impl QuillApp {
                             div()
                                 .text_sm()
                                 .text_color(muted)
-                                .child("You don't have any channels to show yet."),
+                                .child(tr(keys::Q_PEOPLE_YOU_DONT_HAVE_ANY_CHANNELS)),
                         );
                     }
                     Some(ProfileChatsFetch::Loaded(ids)) => {
@@ -573,7 +609,7 @@ impl QuillApp {
                 if current != 0 {
                     footer = footer.child(
                         Button::new("personal-channel-remove")
-                            .label("Remove personal channel")
+                            .label(tr(keys::Q_PEOPLE_REMOVE_PERSONAL_CHANNEL))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.choose_personal_channel(0, cx) {
                                     this.close_profile_dialog(cx);
@@ -582,9 +618,9 @@ impl QuillApp {
                             })),
                     );
                 }
-                footer = footer.child(cancel("personal-channel-cancel", "Close", cx));
+                footer = footer.child(cancel("personal-channel-cancel", tr(keys::CLOSE), cx));
                 Some((
-                    "Personal channel".into(),
+                    tr(keys::Q_PEOPLE_PERSONAL_CHANNEL).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                 ))
@@ -613,17 +649,23 @@ impl QuillApp {
                     let footer = div()
                         .flex()
                         .gap_2()
-                        .child(Button::new("share-contact-send").label("Send").on_click(
-                            cx.listener(move |this, _, window, cx| {
-                                if this.send_shared_contact(user_id, chat_id, cx) {
-                                    this.close_profile_dialog(cx);
-                                }
-                                this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
-                            }),
-                        ))
+                        .child(
+                            Button::new("share-contact-send")
+                                .label(tr(keys::Q_PEOPLE_SEND))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    if this.send_shared_contact(user_id, chat_id, cx) {
+                                        this.close_profile_dialog(cx);
+                                    }
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::ProfilePanel,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        )
                         .child(
                             Button::new("share-contact-back")
-                                .label("Back")
+                                .label(tr(keys::CREATE_GROUP_BACK))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.dialogs.profile_dialog =
@@ -636,7 +678,7 @@ impl QuillApp {
                                 })),
                         );
                     return Some((
-                        "Share contact".into(),
+                        tr(keys::Q_PEOPLE_SHARE_CONTACT).into(),
                         body.into_any_element(),
                         footer.into_any_element(),
                     ));
@@ -649,18 +691,17 @@ impl QuillApp {
                     .map(|chat| (chat.id.0, chat.title.clone()))
                     .collect();
                 let mut body = div().flex().flex_col().gap_1().child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .pb_1()
-                        .child(format!("Choose where to send {name}'s contact.")),
+                    div().text_xs().text_color(muted).pb_1().child(tr_with(
+                        keys::Q_PEOPLE_CHOOSE_WHERE_TO_SEND_S,
+                        &[("name", &name.to_string())],
+                    )),
                 );
                 if chats.is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child("No chats loaded yet."),
+                            .child(tr(keys::Q_PEOPLE_NO_CHATS_LOADED_YET)),
                     );
                 }
                 for (id, title) in chats {
@@ -684,13 +725,13 @@ impl QuillApp {
                         )),
                     );
                 }
-                let footer =
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(cancel("share-contact-cancel", "Cancel", cx));
+                let footer = div().flex().gap_2().child(cancel(
+                    "share-contact-cancel",
+                    tr(keys::CANCEL),
+                    cx,
+                ));
                 Some((
-                    "Share contact".into(),
+                    tr(keys::Q_PEOPLE_SHARE_CONTACT).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                 ))
@@ -719,7 +760,7 @@ impl QuillApp {
                                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
                             })),
                     )
-                    .child(cancel("personal-photo-cancel", "Cancel", cx));
+                    .child(cancel("personal-photo-cancel", tr(keys::CANCEL), cx));
                 Some((
                     mode.title().into(),
                     body.into_any_element(),
@@ -733,7 +774,7 @@ impl QuillApp {
                         .text_xs()
                         .text_color(muted)
                         .pb_1()
-                        .child("Why are you reporting this photo?"),
+                        .child(tr(keys::Q_PEOPLE_WHY_ARE_YOU_REPORTING_THIS)),
                 );
                 for reason in PhotoReportReason::ALL {
                     body = body.child(
@@ -757,9 +798,9 @@ impl QuillApp {
                     div()
                         .flex()
                         .gap_2()
-                        .child(cancel("report-photo-cancel", "Cancel", cx));
+                        .child(cancel("report-photo-cancel", tr(keys::CANCEL), cx));
                 Some((
-                    "Report".into(),
+                    tr(keys::REPORT_BUTTON).into(),
                     body.into_any_element(),
                     footer.into_any_element(),
                 ))
@@ -782,7 +823,9 @@ impl QuillApp {
             let Some((title, body, footer)) = this.profile_dialog_parts(cx) else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Profile"))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::SETTINGS_COLOR_TAB_PROFILE,
+                    )))
                     .on_close(on_close);
             };
             dialog

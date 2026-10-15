@@ -5,6 +5,7 @@ use super::{PhotoSources, QuillApp, render_rgba, replace_image, work_dir};
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::profile_photo_camera::{CameraStream, LIVE_FPS, LIVE_SIDE};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -102,7 +103,7 @@ impl QuillApp {
             sources.note = Some(message);
         } else if ended {
             camera.stream = None;
-            sources.note = Some("The camera stopped.".into());
+            sources.note = Some(tr(keys::Q_PEOPLE_THE_CAMERA_STOPPED).into());
         } else {
             self.request_animation_tick(LIVE_FPS, cx);
         }
@@ -128,7 +129,7 @@ impl QuillApp {
         let target = output.clone();
         let worker = cx.background_spawn(async move {
             let frame = image::RgbImage::from_raw(LIVE_SIDE, LIVE_SIDE, rgb)
-                .ok_or("The camera picture was damaged.")?;
+                .ok_or(tr(keys::Q_PEOPLE_THE_CAMERA_PICTURE_WAS_DAMAGED))?;
             frame
                 .save_with_format(&target, image::ImageFormat::Jpeg)
                 .map_err(|e| e.to_string())
@@ -186,9 +187,9 @@ impl QuillApp {
         let status = if picture.is_some() {
             None
         } else if camera.starting || camera.stream.is_some() {
-            Some("Opening the camera…")
+            Some(tr(keys::Q_PEOPLE_OPENING_THE_CAMERA))
         } else {
-            Some("No camera picture")
+            Some(tr(keys::Q_PEOPLE_NO_CAMERA_PICTURE))
         };
         let circle = self
             .round_picture(200., picture, cx)
@@ -207,23 +208,23 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().font_semibold().child("Take a photo"))
+            .child(div().font_semibold().child(tr(keys::Q_PEOPLE_TAKE_A_PHOTO)))
             .child(div().flex().justify_center().child(circle))
             .child(div().flex().justify_center().child(if taken {
                 Button::new("profile-photo-retake")
-                    .label("Retake")
+                    .label(tr(keys::Q_PEOPLE_RETAKE))
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.start_camera(window, cx);
                     }))
             } else {
                 Button::new("profile-photo-snap")
-                    .label("Take photo")
+                    .label(tr(keys::Q_PEOPLE_TAKE_PHOTO))
                     .disabled(!can_take)
                     .on_click(cx.listener(|this, _, _, cx| this.take_camera_photo(cx)))
             }))
             .child(self.source_buttons(
-                "Set photo",
+                tr(keys::PROFILE_SET_PHOTO_BUTTON),
                 taken && !sources.busy,
                 |this, cx| this.use_camera_photo(cx),
                 cx,

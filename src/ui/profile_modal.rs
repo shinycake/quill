@@ -16,6 +16,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::state::InfoPanelTarget;
 use quill::telegram::envelope::MessageSender;
 use std::time::{Duration, Instant};
@@ -159,10 +160,10 @@ impl QuillApp {
                     .child(div().font_semibold().child(title))
                     .child(
                         Button::new("profile-modal-close")
-                            .accessibility_label("Close profile")
+                            .accessibility_label(tr(keys::Q_PEOPLE_CLOSE_PROFILE))
                             .icon(IconName::X)
                             .ghost()
-                            .tooltip("Close")
+                            .tooltip(tr(keys::CLOSE))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_profile_modal(cx);
                             })),

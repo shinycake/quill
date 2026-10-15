@@ -22,6 +22,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{MediaViewer, profile_photo_items};
 use quill::profile_forms::{
@@ -127,11 +128,11 @@ impl QuillApp {
                 id: "info-bio",
                 copy: Some(CopyAction {
                     text: bio.clone(),
-                    menu: "Copy Bio",
-                    toast: "Bio copied to clipboard",
+                    menu: tr(keys::Q_PEOPLE_COPY_BIO),
+                    toast: tr(keys::Q_PEOPLE_BIO_COPIED_TO_CLIPBOARD),
                 }),
                 value: bio,
-                label: "Bio".into(),
+                label: tr(keys::INFO_BIO_LABEL).into(),
                 action: RowAction::None,
                 hint: false,
                 extra_copy: None,
@@ -148,11 +149,11 @@ impl QuillApp {
             rows.push(DetailRow {
                 id: "info-phone",
                 value: format_phone(&user.phone_number),
-                label: "Mobile".into(),
+                label: tr(keys::INFO_MOBILE_LABEL).into(),
                 copy: Some(CopyAction {
                     text: copyable_phone(&user.phone_number),
-                    menu: "Copy Phone Number",
-                    toast: "Phone number copied to clipboard",
+                    menu: tr(keys::PROFILE_COPY_PHONE),
+                    toast: tr(keys::Q_PEOPLE_PHONE_NUMBER_COPIED_TO_CLIPBOARD),
                 }),
                 action: if collectible_phone {
                     RowAction::Collectible {
@@ -170,11 +171,11 @@ impl QuillApp {
             rows.push(DetailRow {
                 id: "info-username",
                 value: format!("@{}", user.username),
-                label: "Username".into(),
+                label: tr(keys::INFO_USERNAME_LABEL).into(),
                 copy: Some(CopyAction {
                     text: format!("@{}", user.username),
-                    menu: "Copy Username",
-                    toast: "Username copied to clipboard",
+                    menu: tr(keys::Q_PEOPLE_COPY_USERNAME),
+                    toast: tr(keys::Q_PEOPLE_USERNAME_COPIED_TO_CLIPBOARD),
                 }),
                 action: if user.collectible_usernames.contains(&user.username) {
                     RowAction::Collectible {
@@ -187,19 +188,19 @@ impl QuillApp {
                 hint: false,
                 extra_copy: Some(CopyAction {
                     text: profile_link(&user.username),
-                    menu: "Copy Link",
-                    toast: "Link copied to clipboard",
+                    menu: tr(keys::CONTEXT_COPY_LINK),
+                    toast: tr(keys::STAR_REF_LINK_COPIED_TITLE),
                 }),
             });
             let link = profile_link(&user.username);
             rows.push(DetailRow {
                 id: "info-link",
                 value: link.trim_start_matches("https://").to_string(),
-                label: "Link".into(),
+                label: tr(keys::INFO_LINK_LABEL).into(),
                 copy: Some(CopyAction {
                     text: link,
-                    menu: "Copy Link",
-                    toast: "Link copied to clipboard",
+                    menu: tr(keys::CONTEXT_COPY_LINK),
+                    toast: tr(keys::STAR_REF_LINK_COPIED_TITLE),
                 }),
                 action: RowAction::None,
                 hint: false,
@@ -210,7 +211,7 @@ impl QuillApp {
             Some(birthday) => rows.push(DetailRow {
                 id: "info-birthday",
                 value: super::group_panels::format_birthday(birthday),
-                label: "Birthday".into(),
+                label: tr(keys::Q_PEOPLE_BIRTHDAY).into(),
                 copy: None,
                 action: if is_self {
                     RowAction::EditBirthday
@@ -222,8 +223,8 @@ impl QuillApp {
             }),
             None if is_self => rows.push(DetailRow {
                 id: "info-birthday",
-                value: "Add your birthday".into(),
-                label: "Birthday".into(),
+                value: tr(keys::Q_PEOPLE_ADD_YOUR_BIRTHDAY).into(),
+                label: tr(keys::Q_PEOPLE_BIRTHDAY).into(),
                 copy: None,
                 action: RowAction::EditBirthday,
                 hint: true,
@@ -257,8 +258,8 @@ impl QuillApp {
             }),
             None if is_self => rows.push(DetailRow {
                 id: "info-personal-channel",
-                value: "Add a personal channel".into(),
-                label: "Personal channel".into(),
+                value: tr(keys::Q_PEOPLE_ADD_A_PERSONAL_CHANNEL).into(),
+                label: tr(keys::Q_PEOPLE_PERSONAL_CHANNEL).into(),
                 copy: None,
                 action: RowAction::PickPersonalChannel,
                 hint: true,
@@ -270,8 +271,10 @@ impl QuillApp {
             let current = info.and_then(|i| i.extras.main_profile_tab);
             rows.push(DetailRow {
                 id: "info-main-tab",
-                value: current.map_or("Default", |tab| tab.label()).into(),
-                label: "Main tab".into(),
+                value: current
+                    .map_or(tr(keys::Q_PEOPLE_DEFAULT), |tab| tab.label())
+                    .into(),
+                label: tr(keys::Q_PEOPLE_MAIN_TAB).into(),
                 copy: None,
                 action: RowAction::PickMainTab,
                 hint: current.is_none(),
@@ -286,11 +289,11 @@ impl QuillApp {
                 id: "info-note",
                 copy: Some(CopyAction {
                     text: note.clone(),
-                    menu: "Copy Note",
-                    toast: "Note copied to clipboard",
+                    menu: tr(keys::Q_PEOPLE_COPY_NOTE),
+                    toast: tr(keys::Q_PEOPLE_NOTE_COPIED_TO_CLIPBOARD),
                 }),
                 value: note,
-                label: "Note (only visible to you)".into(),
+                label: tr(keys::Q_PEOPLE_NOTE_ONLY_VISIBLE_TO_YOU).into(),
                 action: if user.is_contact {
                     RowAction::EditNote(user_id)
                 } else {
@@ -418,7 +421,7 @@ impl QuillApp {
                 action_row(
                     "info-panel-edit-contact",
                     Some(gpui_kit::assets::IconName::Pencil),
-                    "Edit contact",
+                    tr(keys::INFO_EDIT_CONTACT),
                     false,
                     cx,
                 )
@@ -481,7 +484,7 @@ impl QuillApp {
                 action_row(
                     "info-panel-share-contact",
                     Some(gpui_kit::assets::IconName::Share2),
-                    "Share this contact",
+                    tr(keys::INFO_SHARE_CONTACT),
                     false,
                     cx,
                 )
@@ -635,7 +638,7 @@ impl QuillApp {
                         action_row(
                             retry_id,
                             Some(IconName::RotateCw),
-                            "Couldn't load. Retry",
+                            tr(keys::Q_PEOPLE_COULDNT_LOAD_RETRY),
                             false,
                             cx,
                         )
@@ -682,7 +685,7 @@ impl QuillApp {
         self.profile_chat_list_section(
             ProfileChatsKind::SimilarChats,
             chat_id.0,
-            "Similar channels".into(),
+            tr(keys::Q_PEOPLE_SIMILAR_CHANNELS).into(),
             "info-similar-channel",
             "info-similar-channels-retry",
             cx,
@@ -731,7 +734,7 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "profile photos need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTOS_NEED_A_LIVE).into();
             cx.notify();
             return;
         };
@@ -752,7 +755,10 @@ impl QuillApp {
         }
         match live.driver.fetch_user_profile_photos(user_id) {
             Ok(_) => self.dialogs.pending_profile_gallery = Some(user_id),
-            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
+            Err(_) => {
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
+            }
         }
         cx.notify();
     }
@@ -782,11 +788,14 @@ impl QuillApp {
             }
             ProfilePhotosFetch::Loaded { .. } => {
                 self.dialogs.pending_profile_gallery = None;
-                self.connection.status_note = "No profile photos".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_NO_PROFILE_PHOTOS).into();
             }
             ProfilePhotosFetch::Failed(reason) => {
                 self.dialogs.pending_profile_gallery = None;
-                self.connection.status_note = format!("Couldn't load profile photos: {reason}");
+                self.connection.status_note = tr_with(
+                    keys::Q_PEOPLE_COULDNT_LOAD_PROFILE_PHOTOS,
+                    &[("reason", &reason.to_string())],
+                );
             }
         }
         true
@@ -814,14 +823,16 @@ impl QuillApp {
     /// (`setProfilePhoto` with the suggestion's `chatPhoto.id`).
     pub(super) fn accept_suggested_photo(&mut self, photo_id: i64, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note =
-                "profile photo changes need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A).into();
             cx.notify();
             return;
         };
         match live.driver.set_profile_photo_previous(photo_id) {
-            Ok(_) => self.connection.status_note = "Profile photo updated".into(),
-            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
+            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTO_UPDATED).into(),
+            Err(_) => {
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
+            }
         }
         cx.notify();
     }
@@ -832,17 +843,19 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note =
-                "profile photo changes need a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_PROFILE_PHOTO_CHANGES_NEED_A).into();
             cx.notify();
             return;
         };
         match live.driver.set_profile_photo_previous(photo_id) {
             Ok(_) => {
-                self.connection.status_note = "Main profile photo updated".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_MAIN_PROFILE_PHOTO_UPDATED).into();
                 self.close_media_viewer(cx);
             }
-            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
+            Err(_) => {
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
+            }
         }
         cx.notify();
     }
@@ -874,7 +887,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: reports need a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_REPORTS_NEED_A).into();
             cx.notify();
             return;
         };
@@ -882,8 +895,11 @@ impl QuillApp {
             .driver
             .report_profile_photo(user_id, file_id, reason.td_type())
         {
-            Ok(_) => self.connection.status_note = "Report sent".into(),
-            Err(_) => self.connection.status_note = "Couldn't reach Telegram; try again.".into(),
+            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_REPORT_SENT).into(),
+            Err(_) => {
+                self.connection.status_note =
+                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into()
+            }
         }
         cx.notify();
     }
@@ -917,7 +933,8 @@ impl QuillApp {
             {
                 let _ = this.update(cx, |this, cx| {
                     if !is_profile_photo_file(&path) {
-                        this.connection.status_note = "Choose a JPEG, PNG or WebP image.".into();
+                        this.connection.status_note =
+                            tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR).into();
                         cx.notify();
                         return;
                     }

@@ -20,6 +20,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{
     DiscussionControl, FORUM_MIN_MEMBERS, GroupAdminControls, ProfileChatsFetch, ProfileChatsKind,
     Session, TopicsLock,
@@ -32,9 +33,9 @@ use std::rc::Rc;
 pub(super) fn reactions_summary(setting: Option<&ChatAvailableReactions>) -> String {
     match setting {
         None => "…".into(),
-        Some(ChatAvailableReactions::All { .. }) => "All".into(),
+        Some(ChatAvailableReactions::All { .. }) => tr(keys::Q_PEOPLE_ALL).into(),
         Some(ChatAvailableReactions::Some { reactions, .. }) if reactions.is_empty() => {
-            "Off".into()
+            tr(keys::Q_PEOPLE_OFF).into()
         }
         Some(ChatAvailableReactions::Some { reactions, .. }) => reactions.len().to_string(),
     }
@@ -105,7 +106,7 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "Demo mode: this needs a live session.".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into();
             cx.notify();
             return;
         };
@@ -190,10 +191,10 @@ impl QuillApp {
             Ok(Some(_)) => {}
             Ok(None) => {
                 self.connection.status_note =
-                    "That setting isn't available for you, or it's already being saved.".into();
+                    tr(keys::Q_PEOPLE_THAT_SETTING_ISNT_AVAILABLE_FOR).into();
             }
             Err(_) => {
-                self.connection.status_note = "Couldn't send the change. Try again.".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY).into();
             }
         }
         cx.notify();
@@ -317,26 +318,19 @@ impl QuillApp {
         };
         if let Some(topics) = controls.topics {
             let about = match topics.locked {
-                Some(TopicsLock::TooFewMembers) => format!(
-                    "Only groups with more than {FORUM_MIN_MEMBERS} members can have topics enabled."
+                Some(TopicsLock::TooFewMembers) => tr_with(
+                    keys::Q_PEOPLE_ONLY_GROUPS_WITH_MORE_THAN,
+                    &[("forum_min_members", &FORUM_MIN_MEMBERS.to_string())],
                 ),
-                Some(TopicsLock::LinkedDiscussion) => {
-                    "Topics are not yet available in the discussion groups of channels.".into()
-                }
-                None if topics.needs_upgrade => {
-                    "The group chat will be divided into topics created by admins or users. \
-                     The group is upgraded to a supergroup first."
-                        .into()
-                }
-                None => {
-                    "The group chat will be divided into topics created by admins or users.".into()
-                }
+                Some(TopicsLock::LinkedDiscussion) => tr(keys::FORUM_TOPICS_NO_DISCUSSION).into(),
+                None if topics.needs_upgrade => tr(keys::Q_PEOPLE_THE_GROUP_CHAT_WILL_BE).into(),
+                None => tr(keys::EDIT_TOPICS_ABOUT).into(),
             };
             let can_toggle = !busy && (topics.enabled || topics.locked.is_none());
             body = body.child(self.settings_switch(
                 "b7-topics",
                 IconName::MessagesSquare,
-                "Topics",
+                tr(keys::ADMIN_LOG_FILTER_TOPICS),
                 topics.enabled,
                 can_toggle,
                 about,
@@ -346,16 +340,16 @@ impl QuillApp {
         }
         if let Some(history) = controls.history {
             let about = if history.visible {
-                "New members will see messages that were sent before they joined."
+                tr(keys::MANAGE_HISTORY_VISIBILITY_SHOWN_ABOUT)
             } else if history.needs_upgrade {
-                "New members won't see earlier messages. Showing them upgrades the group to a supergroup."
+                tr(keys::Q_PEOPLE_NEW_MEMBERS_WONT_SEE_EARLIER)
             } else {
-                "New members won't see earlier messages."
+                tr(keys::MANAGE_HISTORY_VISIBILITY_HIDDEN_ABOUT)
             };
             body = body.child(self.settings_switch(
                 "b7-history",
                 IconName::Clock,
-                "Chat history for new members",
+                tr(keys::MANAGE_HISTORY_VISIBILITY_TITLE),
                 history.visible,
                 !busy,
                 about.into(),
@@ -365,22 +359,21 @@ impl QuillApp {
         }
         if controls.join_to_send {
             let on = session.is_some_and(|s| s.chat_join_to_send(chat_id));
-            body = body.child(heading("Who can send messages?")).child(
-                self.settings_switch(
-                    "b7-join-to-send",
-                    IconName::UserCheck,
-                    "Only members",
-                    on,
-                    !busy,
-                    "Turn this on if you expect users to join your group before being able to send messages."
-                        .into(),
-                    GroupSettingsAction::JoinToSend(!on),
-                    cx,
-                ),
-            );
+            body =
+                body.child(heading(tr(keys::MANAGE_PEER_SEND_TITLE)))
+                    .child(self.settings_switch(
+                        "b7-join-to-send",
+                        IconName::UserCheck,
+                        tr(keys::Q_PEOPLE_ONLY_MEMBERS),
+                        on,
+                        !busy,
+                        tr(keys::MANAGE_PEER_SEND_ONLY_MEMBERS_ABOUT).into(),
+                        GroupSettingsAction::JoinToSend(!on),
+                        cx,
+                    ));
             if self.chat_join_by_request(chat_id) {
                 body = body.child(Self::settings_note(
-                    "Admins must approve anyone who wants to send a message in the group.",
+                    tr(keys::MANAGE_PEER_SEND_APPROVE_MEMBERS_ABOUT),
                     muted,
                 ));
             }
@@ -396,48 +389,53 @@ impl QuillApp {
             body = body.child(self.settings_switch(
                 "b7-hide-members",
                 IconName::EyeOff,
-                "Hide Members",
+                tr(keys::Q_PEOPLE_HIDE_MEMBERS),
                 on,
                 !busy,
-                "Switch this on to hide the list of members in this group. Admins will remain visible."
-                    .into(),
+                tr(keys::PROFILE_HIDE_PARTICIPANTS_ABOUT).into(),
                 GroupSettingsAction::HiddenMembers(!on),
                 cx,
             ));
         }
         if controls.protected_content {
             let on = session.is_some_and(|s| s.chat_has_protected_content(chat_id));
-            body = body.child(heading("Content protection")).child(
-                self.settings_switch(
-                    "b7-protected",
-                    IconName::Lock,
-                    "Restrict saving content",
-                    on,
-                    !busy,
-                    if is_channel {
-                        "Subscribers won't be able to copy, save or forward content from this channel."
-                    } else {
-                        "Members won't be able to copy, save or forward content from this group."
-                    }
-                    .into(),
-                    GroupSettingsAction::ProtectedContent(!on),
-                    cx,
-                ),
-            );
+            body = body
+                .child(heading(tr(keys::Q_PEOPLE_CONTENT_PROTECTION)))
+                .child(
+                    self.settings_switch(
+                        "b7-protected",
+                        IconName::Lock,
+                        tr(keys::Q_PEOPLE_RESTRICT_SAVING_CONTENT),
+                        on,
+                        !busy,
+                        if is_channel {
+                            tr(keys::MANAGE_PEER_NO_FORWARDS_ABOUT_CHANNEL)
+                        } else {
+                            tr(keys::MANAGE_PEER_NO_FORWARDS_ABOUT)
+                        }
+                        .into(),
+                        GroupSettingsAction::ProtectedContent(!on),
+                        cx,
+                    ),
+                );
         }
         if let Some(discussion) = controls.discussion {
             let (label, value) = match discussion {
                 DiscussionControl::Channel { linked } => (
-                    "Discussion",
+                    tr(keys::MANAGE_DISCUSSION_GROUP),
                     linked
                         .and_then(|id| session.and_then(|s| s.chats.get(&id.0)))
-                        .map_or_else(|| "Add a group".to_string(), |chat| chat.title.clone()),
+                        .map_or_else(
+                            || tr(keys::MANAGE_DISCUSSION_GROUP_ADD).to_string(),
+                            |chat| chat.title.clone(),
+                        ),
                 ),
                 DiscussionControl::Group { channel } => (
-                    "Linked channel",
-                    session
-                        .and_then(|s| s.chats.get(&channel.0))
-                        .map_or_else(|| "Channel".to_string(), |chat| chat.title.clone()),
+                    tr(keys::Q_PEOPLE_LINKED_CHANNEL),
+                    session.and_then(|s| s.chats.get(&channel.0)).map_or_else(
+                        || tr(keys::Q_PEOPLE_CHANNEL).to_string(),
+                        |chat| chat.title.clone(),
+                    ),
                 ),
             };
             body = body.child(self.settings_link_row(
@@ -455,7 +453,7 @@ impl QuillApp {
             body = body.child(self.settings_link_row(
                 "b7-reactions",
                 IconName::Heart,
-                "Reactions",
+                tr(keys::Q_PEOPLE_REACTIONS),
                 summary,
                 GroupSettingsView::Reactions,
                 cx,
@@ -468,7 +466,7 @@ impl QuillApp {
             body = body.child(self.settings_link_row(
                 "gl-usernames",
                 IconName::Link,
-                "Link order",
+                tr(keys::Q_PEOPLE_LINK_ORDER),
                 format!("{count} active"),
                 GroupSettingsView::Usernames,
                 cx,
@@ -478,7 +476,7 @@ impl QuillApp {
             body = body.child(self.settings_link_row(
                 "gl-boosts",
                 IconName::Zap,
-                "Boosts",
+                tr(keys::Q_PEOPLE_BOOSTS),
                 String::new(),
                 GroupSettingsView::Boosts,
                 cx,
@@ -498,7 +496,7 @@ impl QuillApp {
                 action_row(
                     "b7-upgrade",
                     Some(IconName::ArrowUp),
-                    "Upgrade to supergroup",
+                    tr(keys::Q_PEOPLE_UPGRADE_TO_SUPERGROUP),
                     false,
                     cx,
                 )
@@ -513,7 +511,7 @@ impl QuillApp {
                     .px_2()
                     .text_sm()
                     .text_color(muted)
-                    .child("You don't have any settings to change here."),
+                    .child(tr(keys::Q_PEOPLE_YOU_DONT_HAVE_ANY_SETTINGS)),
             );
         }
         body.into_any_element()
@@ -566,15 +564,15 @@ impl QuillApp {
         };
         let (all_about, some_about, none_about) = if is_channel {
             (
-                "Subscribers can use any emoji as reactions to posts.",
-                "Subscribers can use only certain approved emoji as reactions to posts.",
-                "Subscribers can't add any reactions to posts.",
+                tr(keys::Q_PEOPLE_SUBSCRIBERS_CAN_USE_ANY_EMOJI),
+                tr(keys::Q_PEOPLE_SUBSCRIBERS_CAN_USE_ONLY_CERTAIN),
+                tr(keys::Q_PEOPLE_SUBSCRIBERS_CANT_ADD_ANY_REACTIONS),
             )
         } else {
             (
-                "Members of the group can use any emoji as reactions to messages.",
-                "Members of the group can use only certain approved emoji as reactions to messages.",
-                "Members of the group can't add any reactions to messages.",
+                tr(keys::MANAGE_PEER_REACTIONS_ALL_ABOUT),
+                tr(keys::MANAGE_PEER_REACTIONS_SOME_ABOUT),
+                tr(keys::MANAGE_PEER_REACTIONS_NONE_ABOUT),
             )
         };
         let mut body = div()
@@ -583,7 +581,7 @@ impl QuillApp {
             .gap_1()
             .child(option(
                 "b7-reactions-all",
-                "All reactions",
+                tr(keys::Q_PEOPLE_ALL_REACTIONS),
                 all_about,
                 all,
                 GroupSettingsAction::ReactionsAll,
@@ -591,7 +589,7 @@ impl QuillApp {
             ))
             .child(option(
                 "b7-reactions-some",
-                "Some reactions",
+                tr(keys::Q_PEOPLE_SOME_REACTIONS),
                 some_about,
                 some,
                 GroupSettingsAction::ReactionsSome,
@@ -599,7 +597,7 @@ impl QuillApp {
             ))
             .child(option(
                 "b7-reactions-none",
-                "No reactions",
+                tr(keys::Q_PEOPLE_NO_REACTIONS),
                 none_about,
                 none,
                 GroupSettingsAction::ReactionsNone,
@@ -636,7 +634,7 @@ impl QuillApp {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child("Only allow these reactions"),
+                        .child(tr(keys::MANAGE_PEER_REACTIONS_SOME_TITLE)),
                 )
                 .child(grid);
         }
@@ -653,10 +651,10 @@ impl QuillApp {
             body = body.child(self.settings_switch(
                 "b7-paid-reactions",
                 IconName::Star,
-                "Enable Paid Reactions",
+                tr(keys::Q_PEOPLE_ENABLE_PAID_REACTIONS),
                 paid_on,
                 !busy,
-                "Switch this on to let your subscribers react to posts with Telegram Stars.".into(),
+                tr(keys::Q_PEOPLE_SWITCH_THIS_ON_TO_LET).into(),
                 GroupSettingsAction::PaidReaction(!paid_on),
                 cx,
             ));
@@ -672,10 +670,10 @@ impl QuillApp {
         let busy = session.group_admin_busy(chat_id);
         let controls = session.group_admin_controls(chat_id);
         let title_of = |id: ChatId| {
-            session
-                .chats
-                .get(&id.0)
-                .map_or_else(|| "this chat".to_string(), |c| c.title.clone())
+            session.chats.get(&id.0).map_or_else(
+                || tr(keys::Q_PEOPLE_THIS_CHAT).to_string(),
+                |c| c.title.clone(),
+            )
         };
         let mut body = div().flex().flex_col().gap_1();
         match controls.discussion {
@@ -690,7 +688,7 @@ impl QuillApp {
                             muted,
                         ))
                         .child(
-                            action_row("b7-unlink", Some(IconName::Ban), "Unlink group", true, cx)
+                            action_row("b7-unlink", Some(IconName::Ban), tr(keys::MANAGE_DISCUSSION_GROUP_UNLINK), true, cx)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.set_group_settings_view(
                                         GroupSettingsView::ConfirmUnlink,
@@ -700,7 +698,7 @@ impl QuillApp {
                         );
                 } else {
                     body = body.child(Self::settings_note(
-                        "Select a group chat for discussion that will be displayed in your channel.",
+                        tr(keys::MANAGE_DISCUSSION_GROUP_ABOUT),
                         muted,
                     ));
                     match session
@@ -710,15 +708,20 @@ impl QuillApp {
                         .cloned()
                     {
                         None | Some(ProfileChatsFetch::Loading) => {
-                            body = body
-                                .child(div().px_2().text_sm().text_color(muted).child("Loading…"));
+                            body = body.child(
+                                div()
+                                    .px_2()
+                                    .text_sm()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_PEOPLE_LOADING)),
+                            );
                         }
                         Some(ProfileChatsFetch::Failed(_)) => {
                             body = body.child(
                                 action_row(
                                     "b7-discussion-retry",
                                     Some(IconName::RotateCw),
-                                    "Couldn't load groups. Retry",
+                                    tr(keys::Q_PEOPLE_COULDNT_LOAD_GROUPS_RETRY),
                                     false,
                                     cx,
                                 )
@@ -739,7 +742,7 @@ impl QuillApp {
                                     .px_2()
                                     .text_sm()
                                     .text_color(muted)
-                                    .child("You don't have any groups that can be linked."),
+                                    .child(tr(keys::Q_PEOPLE_YOU_DONT_HAVE_ANY_GROUPS)),
                             );
                         }
                         Some(ProfileChatsFetch::Loaded(ids)) => {
@@ -784,7 +787,7 @@ impl QuillApp {
                         action_row(
                             "b7-unlink",
                             Some(IconName::Ban),
-                            "Unlink channel",
+                            tr(keys::Q_PEOPLE_UNLINK_CHANNEL),
                             true,
                             cx,
                         )
@@ -795,7 +798,7 @@ impl QuillApp {
             }
             None => {
                 body = body.child(Self::settings_note(
-                    "You can't change the discussion group here.",
+                    tr(keys::Q_PEOPLE_YOU_CANT_CHANGE_THE_DISCUSSION),
                     muted,
                 ));
             }
@@ -815,55 +818,54 @@ impl QuillApp {
         let busy = session.group_admin_busy(chat_id);
         let channel = self.is_channel_chat(chat_id);
         let back = Button::new("b7-back")
-            .label("Back")
+            .label(tr(keys::CREATE_GROUP_BACK))
             .ghost()
             .on_click(cx.listener(|this, _, _, cx| {
                 this.set_group_settings_view(GroupSettingsView::Main, cx);
             }));
-        let close =
-            Button::new("b7-close")
-                .label("Done")
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.close_group_settings_dialog(cx);
-                    this.close_kit_dialog_if_done(DialogKind::GroupSettings, window, cx);
-                }));
+        let close = Button::new("b7-close")
+            .label(tr(keys::BOX_DONE))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.close_group_settings_dialog(cx);
+                this.close_kit_dialog_if_done(DialogKind::GroupSettings, window, cx);
+            }));
         let title = self.chat_title_for_settings(chat_id);
         Some(match view {
             GroupSettingsView::Main => (
                 if channel {
-                    "Channel settings".to_string()
+                    tr(keys::ADMIN_LOG_FILTER_ACTIONS_CHANNEL_SETTINGS_SECTION).to_string()
                 } else {
-                    "Group settings".to_string()
+                    tr(keys::ADMIN_LOG_FILTER_ACTIONS_SETTINGS_SECTION).to_string()
                 },
                 self.settings_main(chat_id, controls, busy, cx),
                 div().flex().gap_2().child(close).into_any_element(),
             ),
             GroupSettingsView::Reactions => (
-                "Reactions".to_string(),
+                tr(keys::Q_PEOPLE_REACTIONS).to_string(),
                 self.settings_reactions(chat_id, cx),
                 div().flex().gap_2().child(back).into_any_element(),
             ),
             GroupSettingsView::Discussion => (
                 if matches!(controls.discussion, Some(DiscussionControl::Group { .. })) {
-                    "Linked channel".to_string()
+                    tr(keys::Q_PEOPLE_LINKED_CHANNEL).to_string()
                 } else {
-                    "Discussion".to_string()
+                    tr(keys::MANAGE_DISCUSSION_GROUP).to_string()
                 },
                 self.settings_discussion(chat_id, cx),
                 div().flex().gap_2().child(back).into_any_element(),
             ),
             GroupSettingsView::Usernames => (
-                "Link order".to_string(),
+                tr(keys::Q_PEOPLE_LINK_ORDER).to_string(),
                 self.settings_usernames(chat_id, cx),
                 div().flex().gap_2().child(back).into_any_element(),
             ),
             GroupSettingsView::Boosts => (
-                "Boosts".to_string(),
+                tr(keys::Q_PEOPLE_BOOSTS).to_string(),
                 self.settings_boosts(chat_id, cx),
                 div().flex().gap_2().child(back).into_any_element(),
             ),
             GroupSettingsView::ConfirmUpgrade => (
-                "Upgrade to supergroup".to_string(),
+                tr(keys::Q_PEOPLE_UPGRADE_TO_SUPERGROUP).to_string(),
                 div()
                     .text_sm()
                     .child(format!(
@@ -875,7 +877,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("b7-upgrade-confirm")
-                            .label("Upgrade")
+                            .label(tr(keys::Q_PEOPLE_UPGRADE))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.group_settings_action(GroupSettingsAction::Upgrade, cx);
                                 this.set_group_settings_view(GroupSettingsView::Main, cx);
@@ -888,19 +890,19 @@ impl QuillApp {
                 let text = match controls.discussion {
                     Some(DiscussionControl::Group { channel }) => {
                         let name = self.chat_title_for_settings(channel);
-                        format!("Unlink \"{name}\" from this group? Comments on its posts stop appearing here.")
+                        tr_with(keys::Q_PEOPLE_UNLINK_FROM_THIS_GROUP_COMMENTS, &[("name", &name.to_string())])
                     }
                     _ => {
                         let linked = self
                             .session()
                             .and_then(|s| s.chat_linked_chat(chat_id))
                             .map(|id| self.chat_title_for_settings(id))
-                            .unwrap_or_else(|| "the group".into());
-                        format!("Unlink \"{linked}\" from \"{title}\"? Posts will no longer have comments.")
+                            .unwrap_or_else(|| tr(keys::Q_PEOPLE_THE_GROUP).into());
+                        tr_with(keys::Q_PEOPLE_UNLINK_FROM_POSTS_WILL_NO, &[("linked", &linked.to_string()), ("title", &title.to_string())])
                     }
                 };
                 (
-                    "Unlink".to_string(),
+                    tr(keys::Q_PEOPLE_UNLINK).to_string(),
                     div()
                         .text_sm()
                         .text_color(cx.theme().foreground)
@@ -911,7 +913,7 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new("b7-unlink-confirm")
-                                .label("Unlink")
+                                .label(tr(keys::Q_PEOPLE_UNLINK))
                                 .danger()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.group_settings_action(GroupSettingsAction::Unlink, cx);
@@ -928,7 +930,10 @@ impl QuillApp {
     fn chat_title_for_settings(&self, chat_id: ChatId) -> String {
         self.session()
             .and_then(|s| s.chats.get(&chat_id.0))
-            .map_or_else(|| "this chat".to_string(), |chat| chat.title.clone())
+            .map_or_else(
+                || tr(keys::Q_PEOPLE_THIS_CHAT).to_string(),
+                |chat| chat.title.clone(),
+            )
     }
 
     pub(super) fn build_group_settings_dialog(
@@ -945,7 +950,7 @@ impl QuillApp {
             let Some((title, body, footer)) = this.group_settings_parts(cx) else {
                 return dialog
                     .overlay(true)
-                    .title(crate::ui::shell::dialog_title("Settings"))
+                    .title(crate::ui::shell::dialog_title(tr(keys::MENU_SETTINGS)))
                     .on_close(on_close);
             };
             dialog

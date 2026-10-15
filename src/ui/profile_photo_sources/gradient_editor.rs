@@ -8,6 +8,7 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::profile_photo_gradient::{
     MAX_COLORS, format_hex, from_hsl, next_color, parse_hex, render_background, to_hsl,
 };
@@ -324,7 +325,11 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().font_semibold().child("Custom background"))
+            .child(
+                div()
+                    .font_semibold()
+                    .child(tr(keys::Q_PEOPLE_CUSTOM_BACKGROUND)),
+            )
             .child(
                 div().flex().justify_center().child(
                     div()
@@ -341,25 +346,25 @@ impl QuillApp {
             .child(swatches)
             .child(
                 input::Textarea::new(&editor.hex)
-                    .aria_label("Color in hex")
+                    .aria_label(tr(keys::Q_PEOPLE_COLOR_IN_HEX))
                     .h(px(40.)),
             )
-            .child(row("Hue", &editor.hue))
-            .child(row("Saturation", &editor.saturation))
-            .child(row("Lightness", &editor.lightness))
+            .child(row(tr(keys::Q_PEOPLE_HUE), &editor.hue))
+            .child(row(tr(keys::Q_PEOPLE_SATURATION), &editor.saturation))
+            .child(row(tr(keys::Q_PEOPLE_LIGHTNESS), &editor.lightness))
             .child(
                 div()
                     .flex()
                     .gap_2()
                     .child(
                         Button::new("profile-photo-editor-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| this.editor_cancel(cx))),
                     )
                     .child(
                         Button::new("profile-photo-editor-save")
-                            .label("Save")
+                            .label(tr(keys::SETTINGS_SAVE))
                             .on_click(cx.listener(|this, _, _, cx| this.editor_apply(cx))),
                     ),
             )

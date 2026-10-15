@@ -19,6 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{HistoryMessage, SAVED_TAG_LABEL_MAX, clean_tag_label};
 use quill::telegram::envelope::{
@@ -68,7 +69,7 @@ pub(super) fn tag_chip_menu(chip: Stateful<Div>, menu: TagChipMenu) -> AnyElemen
         let (chat_id, message_id) = (menu.chat_id, menu.message_id);
         popup
             .item(
-                PopupMenuItem::new("Filter by Tag")
+                PopupMenuItem::new(tr(keys::Q_PEOPLE_FILTER_BY_TAG))
                     .icon(IconName::Tag)
                     .on_click(move |_, _, cx| {
                         let _ = filter_owner.update(cx, |this, cx| {
@@ -77,17 +78,21 @@ pub(super) fn tag_chip_menu(chip: Stateful<Div>, menu: TagChipMenu) -> AnyElemen
                     }),
             )
             .item(
-                PopupMenuItem::new(if menu.named { "Edit Name" } else { "Add Name" })
-                    .icon(IconName::Pencil)
-                    .disabled(!menu.premium)
-                    .on_click(move |_, window, cx| {
-                        let _ = name_owner.update(cx, |this, cx| {
-                            this.open_saved_tag_name(name_tag.clone(), window, cx);
-                        });
-                    }),
+                PopupMenuItem::new(if menu.named {
+                    tr(keys::Q_PEOPLE_EDIT_NAME)
+                } else {
+                    tr(keys::Q_PEOPLE_ADD_NAME)
+                })
+                .icon(IconName::Pencil)
+                .disabled(!menu.premium)
+                .on_click(move |_, window, cx| {
+                    let _ = name_owner.update(cx, |this, cx| {
+                        this.open_saved_tag_name(name_tag.clone(), window, cx);
+                    });
+                }),
             )
             .item(
-                PopupMenuItem::new("Remove Tag")
+                PopupMenuItem::new(tr(keys::Q_PEOPLE_REMOVE_TAG))
                     .icon(IconName::TagX)
                     .disabled(choice.is_none())
                     .on_click(move |_, _, cx| {
@@ -140,7 +145,10 @@ impl QuillApp {
                     .saved
                     .topics
                     .get(&view.topic_id)
-                    .map_or_else(|| "Saved chat".to_owned(), |t| session.saved_topic_title(t));
+                    .map_or_else(
+                        || tr(keys::Q_PEOPLE_SAVED_CHAT).to_owned(),
+                        |t| session.saved_topic_title(t),
+                    );
                 Some((title, count_line(view.history.messages.len() as i32)))
             }
             SavedMode::Tag => {
@@ -151,7 +159,7 @@ impl QuillApp {
                     &search.tag,
                 );
                 Some((
-                    "Saved Messages".to_owned(),
+                    tr(keys::SAVED_MESSAGES).to_owned(),
                     format!("Tag {label} · {}", count_line(search.history.total_count)),
                 ))
             }
@@ -200,8 +208,8 @@ impl QuillApp {
         Button::new("saved-back")
             .icon(IconName::ChevronLeft)
             .ghost()
-            .tooltip("Back")
-            .accessibility_label("Back")
+            .tooltip(tr(keys::CREATE_GROUP_BACK))
+            .accessibility_label(tr(keys::CREATE_GROUP_BACK))
             .on_click(cx.listener(|this, _, _, cx| this.saved_back(cx)))
     }
 
@@ -238,7 +246,7 @@ impl QuillApp {
                 .toggle_view_as_topics(chat_id, view_as_topics)
                 .is_err()
             {
-                self.connection.status_note = "could not change the view".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_THE_VIEW).into();
             } else if view_as_topics && live.driver.session.is_saved_messages(chat_id) {
                 let _ = live.driver.load_saved_topics();
             }
@@ -251,7 +259,7 @@ impl QuillApp {
     pub(super) fn open_saved_sublist_ui(&mut self, topic_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_saved_sublist(topic_id).is_err() {
-                self.connection.status_note = "could not open the saved chat".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_OPEN_THE_SAVED).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_saved_sublist(topic_id);
@@ -266,10 +274,10 @@ impl QuillApp {
                 .toggle_saved_topic_pinned(topic_id, pinned)
                 .is_err()
             {
-                self.connection.status_note = "could not pin the saved chat".into();
+                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_PIN_THE_SAVED).into();
             }
         } else {
-            self.connection.status_note = "pinning needs a live connection (demo)".into();
+            self.connection.status_note = tr(keys::Q_PEOPLE_PINNING_NEEDS_A_LIVE_CONNECTION).into();
         }
         cx.notify();
     }
@@ -282,7 +290,7 @@ impl QuillApp {
         match (self.live.as_mut(), tag) {
             (Some(live), Some(tag)) => {
                 if live.driver.filter_saved_by_tag(tag).is_err() {
-                    self.connection.status_note = "could not filter by tag".into();
+                    self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_FILTER_BY_TAG).into();
                 }
             }
             (Some(live), None) => live.driver.clear_saved_tag_filter(),
@@ -348,14 +356,14 @@ impl QuillApp {
             let loading = !session.threads.saved.topics_exhausted;
             return pane_placeholder(
                 if loading {
-                    "Loading saved chats"
+                    tr(keys::Q_PEOPLE_LOADING_SAVED_CHATS)
                 } else {
-                    "No saved chats yet"
+                    tr(keys::Q_PEOPLE_NO_SAVED_CHATS_YET)
                 },
                 if loading {
-                    "Your saved messages are being grouped by chat."
+                    tr(keys::Q_PEOPLE_YOUR_SAVED_MESSAGES_ARE_BEING)
                 } else {
-                    "You can save messages from other chats here."
+                    tr(keys::NO_SAVED_SUBLISTS)
                 },
                 cx,
             )
@@ -373,7 +381,7 @@ impl QuillApp {
             .p_2()
             .gap_0p5()
             .role(Role::List)
-            .aria_label("Saved chats");
+            .aria_label(tr(keys::Q_PEOPLE_SAVED_CHATS));
         for topic in topics {
             let title = session.saved_topic_title(topic);
             let photo = match topic.kind {
@@ -390,7 +398,7 @@ impl QuillApp {
         if more {
             list = list.child(
                 Button::new("saved-sublists-more")
-                    .label("Load more")
+                    .label(tr(keys::Q_PEOPLE_LOAD_MORE))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
@@ -424,7 +432,7 @@ impl QuillApp {
             )
         });
         let preview = if topic.last_message_preview.is_empty() {
-            "No messages".to_owned()
+            tr(keys::Q_PEOPLE_NO_MESSAGES).to_owned()
         } else {
             topic.last_message_preview.clone()
         };
@@ -489,21 +497,25 @@ impl QuillApp {
                 let pin_owner = owner.clone();
                 let delete_owner = owner.clone();
                 menu.item(
-                    PopupMenuItem::new(if pinned { "Unpin" } else { "Pin" })
-                        .icon(if pinned {
-                            IconName::PinOff
-                        } else {
-                            IconName::Pin
-                        })
-                        .on_click(move |_, _, cx| {
-                            let _ = pin_owner.update(cx, |this, cx| {
-                                this.pin_saved_sublist_ui(id, !pinned, cx);
-                            });
-                        }),
+                    PopupMenuItem::new(if pinned {
+                        tr(keys::Q_PEOPLE_UNPIN)
+                    } else {
+                        tr(keys::CONTEXT_PIN_MSG)
+                    })
+                    .icon(if pinned {
+                        IconName::PinOff
+                    } else {
+                        IconName::Pin
+                    })
+                    .on_click(move |_, _, cx| {
+                        let _ = pin_owner.update(cx, |this, cx| {
+                            this.pin_saved_sublist_ui(id, !pinned, cx);
+                        });
+                    }),
                 )
                 .separator()
                 .item(
-                    PopupMenuItem::new("Delete chat")
+                    PopupMenuItem::new(tr(keys::Q_PEOPLE_DELETE_CHAT))
                         .icon(IconName::Trash)
                         .on_click(move |_, _, cx| {
                             let _ = delete_owner.update(cx, |this, cx| {
@@ -559,7 +571,7 @@ impl QuillApp {
             .overflow_x_scroll()
             .child(
                 Button::new("saved-tag-all")
-                    .label("All")
+                    .label(tr(keys::Q_PEOPLE_ALL))
                     .ghost()
                     .selected(active.is_none())
                     .on_click(cx.listener(|this, _, _, cx| this.filter_saved_tag_ui(None, cx))),
@@ -580,7 +592,7 @@ impl QuillApp {
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .role(Role::TabList)
-                .aria_label("Tags")
+                .aria_label(tr(keys::Q_PEOPLE_TAGS))
                 .child(row)
                 .into_any_element(),
         )
@@ -609,7 +621,7 @@ impl QuillApp {
         let mut button = Button::new(("saved-tag", ix))
             .ghost()
             .selected(selected)
-            .accessibility_label(format!("Tag {name}"));
+            .accessibility_label(tr_with(keys::Q_PEOPLE_TAG, &[("name", &name.to_string())]));
         button = match glyph {
             Some(glyph) => button.label(format!("{glyph} {name}")),
             None => button.icon(IconName::Tag).label(name),
@@ -626,7 +638,7 @@ impl QuillApp {
                 let filter_tag = filter_tag.clone();
                 let edit_tag = edit_tag.clone();
                 menu.item(
-                    PopupMenuItem::new("Filter by Tag")
+                    PopupMenuItem::new(tr(keys::Q_PEOPLE_FILTER_BY_TAG))
                         .icon(IconName::Tag)
                         .on_click(move |_, _, cx| {
                             let _ = filter_owner.update(cx, |this, cx| {
@@ -635,14 +647,18 @@ impl QuillApp {
                         }),
                 )
                 .item(
-                    PopupMenuItem::new(if named { "Edit Name" } else { "Add Name" })
-                        .icon(IconName::Pencil)
-                        .disabled(!premium)
-                        .on_click(move |_, window, cx| {
-                            let _ = edit_owner.update(cx, |this, cx| {
-                                this.open_saved_tag_name(edit_tag.clone(), window, cx);
-                            });
-                        }),
+                    PopupMenuItem::new(if named {
+                        tr(keys::Q_PEOPLE_EDIT_NAME)
+                    } else {
+                        tr(keys::Q_PEOPLE_ADD_NAME)
+                    })
+                    .icon(IconName::Pencil)
+                    .disabled(!premium)
+                    .on_click(move |_, window, cx| {
+                        let _ = edit_owner.update(cx, |this, cx| {
+                            this.open_saved_tag_name(edit_tag.clone(), window, cx);
+                        });
+                    }),
                 )
             })
             .into_any_element()
@@ -669,7 +685,7 @@ impl QuillApp {
             .unwrap_or_default();
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Name")
+                .placeholder(tr(keys::Q_PEOPLE_NAME))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });
@@ -692,12 +708,12 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 self.connection.status_note = match live.driver.set_saved_tag_label(&tag, &label) {
-                    Ok(_) => "tag name saved".into(),
-                    Err(_) => "could not rename the tag".into(),
+                    Ok(_) => tr(keys::Q_PEOPLE_TAG_NAME_SAVED).into(),
+                    Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_RENAME_THE_TAG).into(),
                 };
             }
             None => {
-                self.connection.status_note = "naming tags needs a live connection (demo)".into()
+                self.connection.status_note = tr(keys::Q_PEOPLE_NAMING_TAGS_NEEDS_A_LIVE).into()
             }
         }
         self.dialogs.saved_tag_dialog = None;
@@ -728,7 +744,7 @@ impl QuillApp {
                     .iter()
                     .any(|entry| entry.tag == state.tag && !entry.label.is_empty())
             });
-            let glyph = tag_glyph(&state.tag).unwrap_or_else(|| "Tag".to_owned());
+            let glyph = tag_glyph(&state.tag).unwrap_or_else(|| tr(keys::Q_PEOPLE_TAG_2).to_owned());
             let body = div()
                 .flex()
                 .flex_col()
@@ -741,13 +757,13 @@ impl QuillApp {
                             "You can label your {glyph} tag with a text name. Up to {SAVED_TAG_LABEL_MAX} characters."
                         )),
                 )
-                .child(Textarea::new(&state.input).aria_label("Tag name").h(px(36.)))
+                .child(Textarea::new(&state.input).aria_label(tr(keys::Q_PEOPLE_TAG_NAME)).h(px(36.)))
                 .when(!premium, |this| {
                     this.child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Naming tags needs Telegram Premium."),
+                            .child(tr(keys::Q_PEOPLE_NAMING_TAGS_NEEDS_TELEGRAM_PREMIUM)),
                     )
                 })
                 .child(
@@ -755,7 +771,7 @@ impl QuillApp {
                         .flex()
                         .justify_end()
                         .gap_2()
-                        .child(Button::new("saved-tag-cancel").label("Cancel").ghost().on_click(
+                        .child(Button::new("saved-tag-cancel").label(tr(keys::CANCEL)).ghost().on_click(
                             cx.listener(|this, _, window, cx| {
                                 this.close_saved_tag_dialog(cx);
                                 this.close_kit_dialog_if_done(DialogKind::SavedTagName, window, cx);
@@ -763,7 +779,7 @@ impl QuillApp {
                         ))
                         .child(
                             Button::new("saved-tag-save")
-                                .label("Save")
+                                .label(tr(keys::SAVED_SHORT))
                                 .primary()
                                 .disabled(!premium)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -781,9 +797,9 @@ impl QuillApp {
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if named {
-                    "Edit Name"
+                    tr(keys::Q_PEOPLE_EDIT_NAME)
                 } else {
-                    "Add Name"
+                    tr(keys::Q_PEOPLE_ADD_NAME)
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
@@ -800,10 +816,7 @@ impl QuillApp {
 }
 
 fn count_line(count: i32) -> String {
-    match count {
-        1 => "1 message".to_owned(),
-        n => format!("{n} messages"),
-    }
+    trn(keys::FORUM_MESSAGES, count)
 }
 
 /// The tag's name for the header: its label, else the emoji.

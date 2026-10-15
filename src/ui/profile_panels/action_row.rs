@@ -10,6 +10,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::MUTE_FOREVER;
 
 /// One tile of the profile action row.
@@ -101,9 +102,9 @@ impl QuillApp {
             .map(|i| &i.extras);
         let call_off = extras.and_then(|e| {
             if e.calls_private {
-                Some("This user's privacy settings don't allow calls.")
+                Some(tr(keys::Q_PEOPLE_THIS_USERS_PRIVACY_SETTINGS_DONT))
             } else if e.calls_blocked {
-                Some("This user can't be called.")
+                Some(tr(keys::Q_PEOPLE_THIS_USER_CANT_BE_CALLED))
             } else {
                 None
             }
@@ -111,7 +112,7 @@ impl QuillApp {
         let video_off = call_off.or_else(|| {
             extras
                 .is_some_and(|e| e.video_calls_unsupported)
-                .then_some("This user doesn't support video calls.")
+                .then_some(tr(keys::Q_PEOPLE_THIS_USER_DOESNT_SUPPORT_VIDEO))
         });
         let muted = session
             .zip(open_chat)
@@ -123,7 +124,7 @@ impl QuillApp {
                 ProfileAction::Message => info_tile(
                     "info-panel-message",
                     IconName::MessageSquare,
-                    "Message",
+                    tr(keys::PROFILE_ACTION_SHORT_MESSAGE),
                     cx.listener(move |this, _, window, cx| {
                         this.dismiss_profile_modal();
                         this.open_user_chat(user_id, window, cx);
@@ -138,7 +139,11 @@ impl QuillApp {
                     } else {
                         IconName::BellOff
                     },
-                    if muted { "Unmute" } else { "Mute" },
+                    if muted {
+                        tr(keys::PROFILE_ACTION_SHORT_UNMUTE)
+                    } else {
+                        tr(keys::PROFILE_ACTION_SHORT_MUTE)
+                    },
                     cx.listener(move |this, _, _, cx| {
                         if let Some(chat) = this.session().and_then(|s| s.open_chat) {
                             this.apply_chat_mute(chat, if muted { 0 } else { MUTE_FOREVER }, cx);
@@ -147,20 +152,24 @@ impl QuillApp {
                     cx,
                 )
                 .into_any_element(),
-                ProfileAction::Call if call_off.is_some() => {
-                    disabled_tile("info-panel-call", IconName::Phone, "Call", call_off, cx)
-                }
+                ProfileAction::Call if call_off.is_some() => disabled_tile(
+                    "info-panel-call",
+                    IconName::Phone,
+                    tr(keys::PROFILE_ACTION_SHORT_CALL),
+                    call_off,
+                    cx,
+                ),
                 ProfileAction::Video if video_off.is_some() => disabled_tile(
                     "info-panel-video-call",
                     IconName::Video,
-                    "Video",
+                    tr(keys::Q_PEOPLE_VIDEO),
                     video_off,
                     cx,
                 ),
                 ProfileAction::Call => info_tile(
                     "info-panel-call",
                     IconName::Phone,
-                    "Call",
+                    tr(keys::PROFILE_ACTION_SHORT_CALL),
                     cx.listener(move |this, _, _, cx| this.start_call_for_user(user_id, false, cx)),
                     cx,
                 )
@@ -168,7 +177,7 @@ impl QuillApp {
                 ProfileAction::Video => info_tile(
                     "info-panel-video-call",
                     IconName::Video,
-                    "Video",
+                    tr(keys::Q_PEOPLE_VIDEO),
                     cx.listener(move |this, _, _, cx| this.start_call_for_user(user_id, true, cx)),
                     cx,
                 )
@@ -176,7 +185,7 @@ impl QuillApp {
                 ProfileAction::Gift => info_tile(
                     "info-panel-gift",
                     IconName::Gift,
-                    "Gift",
+                    tr(keys::PROFILE_ACTION_SHORT_GIFT),
                     cx.listener(|this, _, window, cx| {
                         this.navigate(NavigationAction::SendGift, window, cx)
                     }),
@@ -186,7 +195,7 @@ impl QuillApp {
                 ProfileAction::SecretChat => info_tile(
                     "info-panel-start-secret",
                     IconName::Lock,
-                    "Secret chat",
+                    tr(keys::Q_PEOPLE_SECRET_CHAT),
                     cx.listener(move |this, _, _, cx| this.start_secret_chat_for_user(user_id, cx)),
                     cx,
                 )
@@ -194,7 +203,7 @@ impl QuillApp {
                 ProfileAction::AddContact => info_tile(
                     "info-panel-add-contact",
                     IconName::UserPlus,
-                    "Add contact",
+                    tr(keys::PROFILE_ADD_CONTACT),
                     cx.listener(move |this, _, window, cx| {
                         this.open_add_contact_dialog(user_id, window, cx)
                     }),
@@ -204,7 +213,7 @@ impl QuillApp {
                 ProfileAction::EditProfile => info_tile(
                     "info-panel-edit-profile",
                     IconName::Pencil,
-                    "Edit profile",
+                    tr(keys::Q_PEOPLE_EDIT_PROFILE),
                     cx.listener(|this, _, window, cx| this.open_edit_profile_dialog(window, cx)),
                     cx,
                 )
@@ -222,7 +231,7 @@ impl QuillApp {
                     .rounded_lg()
                     .bg(cx.theme().secondary)
                     .child(self.chat_navigation_menu(cx))
-                    .child(div().text_xs().child("More"))
+                    .child(div().text_xs().child(tr(keys::PROFILE_ACTION_SHORT_MORE)))
                     .into_any_element(),
             });
         }

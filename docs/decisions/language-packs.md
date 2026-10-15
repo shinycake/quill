@@ -340,6 +340,18 @@ generic plural keys (`lng_hours`, `lng_days`, `lng_months`, `lng_years`,
 lines. `REBINDABLE_ACTIONS` is a `const` table, so its labels stay English
 for now (a later PR turns them into keys looked up at render time).
 
+## PR 5: groups, profiles and contacts
+
+Group and channel settings, members, admins and moderation, invite links,
+boosts, forum topics, profiles (including business details and personal
+photos), contacts and Saved Messages sublists are converted
+(`lang/en/people.strings`). Boost and message counts use tdesktop's
+`lng_boosts_list_title` and `lng_forum_messages` plurals. Keys borrowed from
+unrelated screens (payments, group calls, the media viewer) were replaced
+with `lng_box_remove`, `lng_report_button` or Quill keys. The forum pane's
+topic count and the sticker set removal line are still formatted in
+English; a later PR moves them to plural keys.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),
