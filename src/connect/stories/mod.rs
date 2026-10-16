@@ -1,8 +1,8 @@
 //! Connect driver: stories.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::state::LiveStoryJoinIntent;
 use crate::state::RequestPurpose;
+use crate::state::{ActiveGroupCall, LiveStoryJoinIntent};
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
 use crate::story_page::{StoryPageOp, StoryPageOpState, story_page_op_label};
 use crate::telegram::envelope::StoryContentView;
@@ -125,12 +125,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
+        let failed = self
             .session
-            .stories
-            .live
+            .calls
+            .story_stream
             .as_ref()
-            .is_some_and(|live| live.group_call_id != group_call_id)
+            .is_some_and(ActiveGroupCall::join_failed);
+        if failed
+            || self
+                .session
+                .stories
+                .live
+                .as_ref()
+                .is_some_and(|live| live.group_call_id != group_call_id)
         {
             self.leave_live_story()?;
         }

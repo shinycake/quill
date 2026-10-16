@@ -552,8 +552,24 @@ impl QuillApp {
     /// The live overlay's Retry: join the watched story's call again.
     pub(super) fn retry_live_story(&mut self, cx: &mut Context<Self>) {
         if let Some((chat_id, story_id)) = self.stories.live.watching {
+            // The failed slot is left and joined afresh: until the new
+            // one shows, its absence is not the stream's end.
+            self.stories.live.seen_call = false;
             self.join_live_story_from_viewer(chat_id, story_id, cx);
         }
+    }
+
+    /// An account switch leaves the live story: the outgoing account goes
+    /// on in the background, where nothing could close the stream or stop
+    /// its sound. A story in the PiP goes with it.
+    pub(in crate::ui) fn leave_live_story_for_switch(&mut self, cx: &mut Context<Self>) {
+        if self.live_pip_story().is_some() {
+            self.close_live_pip(cx);
+        }
+        if self.stories.viewer.is_open() {
+            self.close_story_viewer(cx);
+        }
+        self.leave_live_story_view(cx);
     }
 
     /// The emoji button opens the shared panel for the comment field

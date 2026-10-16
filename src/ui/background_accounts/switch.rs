@@ -11,6 +11,7 @@ impl QuillApp {
     /// inactive accounts are. A client in the sign-in flow, or in a call
     /// (which would go on with no window to hang it up), is closed instead.
     pub(in crate::ui) fn retire_live_to_background(&mut self, cx: &mut Context<Self>) {
+        self.leave_live_story_for_switch(cx);
         let Some(mut live) = self.live.take() else {
             return;
         };

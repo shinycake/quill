@@ -571,3 +571,52 @@ fn the_header_is_the_live_controller(cx: &mut TestAppContext) {
     assert!(find(vcx, "live-spinner").is_none());
     assert!(find(vcx, "live-stalled").is_none());
 }
+
+#[gpui_kit::test]
+fn a_story_stream_that_failed_offers_retry(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    assert!(find(vcx, "live-failed").is_none());
+    app.update(vcx, |app, cx| {
+        if let Some(call) = app
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.calls.story_stream.as_mut())
+        {
+            call.transport_error = Some("another call needs it".into());
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(find(vcx, "live-failed").is_some(), "Failed, with Retry");
+}
+
+#[gpui_kit::test]
+fn an_account_switch_leaves_the_live_story(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story-in-call");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| app.retire_live_to_background(cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(!app.stories.viewer.is_open());
+        assert!(app.stories.live.watching.is_none());
+        let calls = &app.demo_session.as_ref().expect("the demo session").calls;
+        assert!(calls.story_stream.is_none(), "the story slot is left");
+        assert!(calls.active_call.is_some(), "the call is not the story's");
+    });
+}
+
+#[gpui_kit::test]
+fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| app.open_story_pip(window, cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.live_pip_story().is_some()));
+    app.update(vcx, |app, cx| app.retire_live_to_background(cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.group_call.live_pip.is_none());
+        assert!(app.stories.live.watching.is_none());
+    });
+}

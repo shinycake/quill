@@ -51,10 +51,6 @@ pub enum CallsPurpose {
     JoinVideoChat { group_call_id: i32 },
     /// Phase C3a: `leaveGroupCall`. Response is `ok`.
     LeaveGroupCall { group_call_id: i32 },
-    /// `leaveGroupCall` for the live story's stream, whose slot is
-    /// already dropped: neither its answer nor its error touches the
-    /// current call.
-    LeaveStoryStream { group_call_id: i32 },
     /// Phase C3a: `endGroupCall`. Response is `ok`.
     EndGroupCall { group_call_id: i32 },
     /// Phase C2g: `startGroupCallScreenSharing` (schema 1.8.67, :14303).

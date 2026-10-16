@@ -270,6 +270,13 @@ impl ActiveGroupCall {
             && (self.rejoin_attempts < MAX_GROUP_CALL_REJOIN_ATTEMPTS || !self.reconnecting)
     }
 
+    /// The join or its transport failed, or the rejoins are spent: only a
+    /// manual retry brings it back.
+    pub fn join_failed(&self) -> bool {
+        self.transport_error.is_some()
+            || (self.reconnecting && self.rejoin_attempts >= MAX_GROUP_CALL_REJOIN_ATTEMPTS)
+    }
+
     /// Blank tracked call for a newly seen call id. Participant state
     /// repopulates from updates.
     pub fn fresh(id: i32) -> Self {

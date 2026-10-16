@@ -246,23 +246,6 @@ impl NtgcallsEngine {
         GroupCallMode::from_native(raw).unwrap_or(GroupCallMode::Rtc)
     }
 
-    /// ntgcalls keys a connection by chat id, a 1:1 call by the peer's
-    /// user id, so a story stream can hold the key a real call needs
-    /// (the peer's own story, or the video chat's channel). The real call
-    /// wins: the story's connection is stopped first.
-    fn yield_viewer_key(&mut self, key: i64) {
-        let viewer = self
-            .group_calls
-            .iter()
-            .find(|(_, media)| media.role == GroupCallRole::Viewer && media.chat_id == key)
-            .map(|(id, _)| *id);
-        if let Some(group_call_id) = viewer
-            && let Err(err) = self.leave_group_call(group_call_id)
-        {
-            eprintln!("quill: stopping story stream {group_call_id} for a call failed: {err}");
-        }
-    }
-
     fn issue_group_sources(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let media = self
             .group_calls

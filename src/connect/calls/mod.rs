@@ -39,6 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
+        self.yield_story_stream_key(user_id);
         let Some(engine) = self.call_engine.as_deref_mut() else {
             return;
         };
@@ -350,6 +351,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.reconnect_attempts = 0;
         }
 
+        if let Some((_, user_id, _, _)) = &active_call_after
+            && tracked_call_id != active_call_before
+        {
+            self.yield_story_stream_key(*user_id);
+        }
         if let Some((call_id, user_id, is_outgoing, _)) = &active_call_after
             && Some(*call_id) != active_call_before
             && let Some(engine) = self.call_engine.as_deref_mut()

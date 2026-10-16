@@ -25,6 +25,7 @@ use quill::calls::live_video::LiveSink;
 use quill::lang::{trn, trn_with};
 use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
+use quill::state::ActiveGroupCall;
 use quill::state::{Session, unix_ms_now};
 use quill::telegram::envelope::{GroupCallMessageLevel, ParsedGroupCallMessage};
 use std::rc::Rc;
@@ -93,10 +94,14 @@ impl QuillApp {
         row_id: u64,
         cx: &mut Context<Self>,
     ) -> Option<PictureOverlay> {
+        let failed = self
+            .session()
+            .and_then(|s| s.calls.story_stream.as_ref())
+            .is_some_and(ActiveGroupCall::join_failed);
         let input = LiveInput {
             state: player.map(VideoPlayer::state),
             idle: unsupported,
-            failed: false,
+            failed,
         };
         let now = cx.background_executor().now();
         let (overlay, due) = self.stories.live.overlay.observe(input, now);

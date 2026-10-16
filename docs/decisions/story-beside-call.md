@@ -42,21 +42,36 @@ plays mixed with the call's audio.
   (`check_story_ended_before_call`).
 - The live PiP for a story reads the story's slot for its viewer count, its
   mute state and its end.
+- A story stream that gave up shows Failed with Retry in the viewer
+  (`ActiveGroupCall::join_failed`). It gives up when its transport failed, its
+  first `joinLiveStory` failed, or its rejoins ran out. Retry leaves the failed
+  slot and joins the story again. None of these failures reach the call
+  window's error line. The story's leave reuses `LeaveGroupCall`: an error for
+  an id that is neither the current call nor `left_group_call` is the story's,
+  and it is dropped. A join that is still pending when you leave is
+  forgotten, so its late answer cannot land in a new slot for the same
+  story.
+- Switching accounts leaves the live story first: the viewer and a story PiP
+  close, and the story's stream is left. The outgoing account then goes to the
+  background, or is closed if it is in a real call.
 
 ## Limits
 
 - ntgcalls keys each connection by chat id, and a 1:1 call by the peer's user
   id. A story can hold the key that a real call needs, for example the peer's
   own story or the channel of a video chat you join. Whichever comes first, the
-  real call wins.
-  - If the call comes first, `ntg_create_call` fails for the story and the call
-    keeps playing.
-  - If the story comes first, the engine stops the story's connection before
-    it creates the call (`yield_viewer_key`). The story's picture then stops.
+  real call wins, and the story shows Failed with Retry. Retry fails again for
+  as long as the call holds the key.
+  - If the call comes first, the story's `create_group_call` fails and the
+    error lands on the story's slot.
+  - If the story comes first, the driver checks before it starts the call or
+    creates the video chat's connection (`yield_story_stream_key`). It tears
+    down the story's transport and marks the slot failed.
   - None of this has been tried on a live account.
+- A live story and a stream (an RTMP or MTProto video chat) on the same channel
+  share one feed key, `LiveKey::Stream { chat_id }`, and would fight over one
+  feed. That case is already a key collision above, so the story is marked
+  failed first. Feeds keyed by call rather than by chat would be needed to show
+  both.
 - No one has heard two real streams mixing through WebRTC's audio device
   module.
-- If a story leave or a story join fails, the call window's error line does
-  not show it. A story leave has its own purpose (`LeaveStoryStream`). A join
-  that is still pending when you leave is forgotten, so its late answer can
-  never land in a new slot for the same story.

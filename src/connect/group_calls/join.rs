@@ -505,6 +505,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             GroupCallRole::Member
         };
+        if role == GroupCallRole::Member
+            && let Some(chat_id) = chat_id
+        {
+            self.yield_story_stream_key(chat_id);
+        }
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {
                 let offer = engine.create_group_call(group_call_id, chat_id, role);

@@ -4,8 +4,8 @@
 //! paid and pinned) and a paid comment price; the same with your Stars
 //! waiting under the Undo toast and their effect rising; the Stars box for
 //! a comment; a portrait stream that fills the frame (the landscape one is
-//! shown whole over its blurred copy); and the live story playing beside a
-//! 1:1 call.
+//! shown whole over its blurred copy); the live story playing beside a
+//! 1:1 call; and one that gave way to the call, showing Failed with Retry.
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::StarsBoxMode;
@@ -64,6 +64,11 @@ register_demos![
         "screenshot demo — live story playing beside a 1:1 call"
     )
     .setup(QuillApp::demo_live_story_in_call),
+    DemoSpec::chats(
+        "ready-live-story-key-taken",
+        "screenshot demo — live story that gave way to a 1:1 call"
+    )
+    .setup(QuillApp::demo_live_story_key_taken),
 ];
 
 impl QuillApp {
@@ -109,6 +114,18 @@ impl QuillApp {
             );
         }
         self.seed_demo_live_story(cx);
+    }
+
+    fn demo_live_story_key_taken(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.demo_live_story_in_call(window, cx);
+        if let Some(call) = self
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.calls.story_stream.as_mut())
+        {
+            call.transport_error = Some("another call needs this stream's connection".into());
+        }
+        cx.notify();
     }
 
     fn seed_demo_live_story(&mut self, cx: &mut Context<Self>) {

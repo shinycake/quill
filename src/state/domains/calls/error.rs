@@ -134,8 +134,18 @@ impl Session {
                         err,
                         "Could not join the voice chat",
                     ));
+                } else {
+                    call.transport_error = Some(call_request_error_line(
+                        err,
+                        "Could not join the live story",
+                    ));
                 }
             }
+            // The live story's own leave (its slot is already gone, and it
+            // never sets `left_group_call`): nothing to show on the call.
+            Some(RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }))
+                if !self.calls.is_current_group_call(group_call_id)
+                    && self.calls.left_group_call != Some(group_call_id) => {}
             // Phase C2g: a failed screen-sharing handshake must
             // not leave the call stuck "sharing" — clear the
             // pending/active flags and surface an honest error.
