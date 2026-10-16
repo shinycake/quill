@@ -76,6 +76,14 @@ pub enum ScreenAccess {
 /// capture starts (see [`ScreenBackend::system_picker`]).
 pub const SYSTEM_PICKER_SOURCE: &str = "system-picker";
 
+/// Whether calls can share a screen here: ntgcalls' desktop capture on
+/// macOS and Windows, and on Linux only Quill's own capture (the portal or
+/// X11), so not under `QUILL_CALL_CAPTURE=native`.
+pub fn can_share() -> bool {
+    cfg!(any(target_os = "macos", windows))
+        || crate::calls::engine::external_screen_capture_enabled()
+}
+
 /// The per-OS screen capture. Listing and thumbnails run on a background
 /// thread of the UI; captures are started by the connect driver.
 pub trait ScreenBackend: Send + Sync {
