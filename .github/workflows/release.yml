@@ -247,6 +247,8 @@ jobs:
           [ -n "$PREV" ] && args+=(-f previous_tag_name="$PREV")
           gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${args[@]}" --jq .body > changes.md
           wc -l changes.md
+      - name: release-assemble unit tests
+        run: python3 -m unittest discover -s scripts -p 'test_release_assemble.py'
       - name: notes, checksums and latest.json
         env:
           PREV: ${{ steps.prev.outputs.tag }}

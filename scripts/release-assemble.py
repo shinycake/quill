@@ -4,6 +4,12 @@
     scripts/release-assemble.py --assets DIR --version X.Y.Z --repo OWNER/NAME \
         --changes CHANGES.md [--curated release-notes/vX.Y.Z.md] \
         [--previous-tag vA.B.C] --credentials embedded|none --notes-out NOTES.md
+    scripts/release-assemble.py --defuse NOTES.md
+
+--defuse rewrites a hand-written release body in place so that Telegram
+@usernames (@gif, @vote) become code spans; run it before `gh release edit
+--notes-file`. GitHub turns every bare @name in a release body into a mention
+and lists that account under the release's Contributors.
 
 DIR holds every file that will be uploaded to the release. This script adds
 two more to it: latest.json (the machine-readable manifest the product page
@@ -92,6 +98,35 @@ def human(size: int) -> str:
     return str(size)
 
 
+# A bare @name that GitHub would link: not part of an email or URL, not already in code.
+MENTION = re.compile(r"(?<![\w@/.`-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)(?![\w-])")
+# GitHub's generated changelog credits authors as "by @login in https://...": keep those.
+CREDIT = re.compile(r" by @[A-Za-z0-9-]+ in https://\S+$")
+FIRST_CONTRIBUTION = re.compile(r"^\* @[A-Za-z0-9-]+ made their first contribution in https://\S+$")
+
+
+def defuse_mentions(text: str) -> str:
+    """Wrap bare @names outside code in backticks, keeping changelog author credits."""
+    out = []
+    fenced = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append(line)
+            continue
+        if fenced or FIRST_CONTRIBUTION.match(line):
+            out.append(line)
+            continue
+        credit = CREDIT.search(line)
+        head, tail = (line[: credit.start()], line[credit.start():]) if credit else (line, "")
+        # Odd segments of a backtick split are inline code.
+        parts = head.split("`")
+        for i in range(0, len(parts), 2):
+            parts[i] = MENTION.sub(r"`@\1`", parts[i])
+        out.append("`".join(parts) + tail)
+    return "\n".join(out)
+
+
 def changes_section(changes: str, previous_tag: str | None) -> str:
     text = changes.strip()
     # GitHub's generated notes start with "## What's Changed"; we supply our own heading.
@@ -135,7 +170,9 @@ def build(args: argparse.Namespace) -> None:
     changes = changes_section(
         Path(args.changes).read_text(encoding="utf-8"), args.previous_tag
     )
-    whats_new = "## What's new\n\n" + (curated + "\n\n" if curated else "") + changes
+    whats_new = defuse_mentions(
+        "## What's new\n\n" + (curated + "\n\n" if curated else "") + changes
+    )
 
     embedded = args.credentials == "embedded"
     manifest = {
@@ -227,6 +264,10 @@ written offer for the corresponding source.
 
 
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[1] == "--defuse":
+        path = Path(sys.argv[2])
+        path.write_text(defuse_mentions(path.read_text(encoding="utf-8")), encoding="utf-8")
+        return
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--assets", required=True)
     ap.add_argument("--version", required=True)
