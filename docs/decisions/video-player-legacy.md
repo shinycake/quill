@@ -125,7 +125,7 @@ three.
   player's still backend shows the first frame and the GIF shows its first
   picture.
 
-The diff against main is about 1,960 lines deleted and 730 added.
+The diff against main is about 2,110 lines deleted and 2,280 added (the review fixes added the GIF bounds, clips on demand and their tests).
 
 ## What the superseded decision docs are replaced by
 
