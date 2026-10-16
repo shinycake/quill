@@ -566,10 +566,17 @@ pub fn set_system_unlock(root: &Path, on: bool) -> Result<(), PasscodeError> {
 /// cannot be opened any more. Delete every account's local data and the
 /// passcode (tdesktop does the same when the passcode is forgotten).
 pub fn wipe_local_data(root: &Path, accounts: &[AccountKey], state: &UnlockState) {
-    state.clear();
     for account in accounts {
         let _ = std::fs::remove_dir_all(AccountPaths::for_root(root, account).root);
     }
+    forget_passcode(root, state);
+}
+
+/// Drop the passcode and the master key: the next start does not lock.
+/// The lock-screen log out does this at once and deletes the account
+/// folders once their TDLib clients have closed.
+pub fn forget_passcode(root: &Path, state: &UnlockState) {
+    state.clear();
     let _ = std::fs::remove_file(config_path(root));
 }
 

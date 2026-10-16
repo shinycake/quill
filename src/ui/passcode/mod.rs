@@ -667,23 +667,12 @@ impl QuillApp {
         if !self.account.passcode.demo
             && let Some(root) = self.passcode_root()
         {
-            let accounts = account_keys(&root);
-            // Close every client first so TDLib is not writing while the
-            // database folders are removed: the wipe and the fresh
-            // connection wait for the close without freezing the window.
-            if let Some(live) = self.live.take() {
-                self.close_live_later(live, false);
-            }
-            self.stop_background_accounts();
+            // Every client closes first so TDLib is not writing while the
+            // database folders are removed; the wipe and the fresh
+            // connection wait for the close without freezing the window,
+            // and a quit before then finishes the wipe on the next start.
+            self.begin_local_wipe(root, cx);
             wiping = true;
-            self.after_closing(cx, quill::connect::ClosingSet::is_empty, move |this, cx| {
-                let store = os_secret_store();
-                for account in &accounts {
-                    let _ = store.delete(account);
-                }
-                passcode::wipe_local_data(&root, &accounts, &global_unlock());
-                this.start_connection(cx);
-            });
         }
         self.account.passcode.enabled = false;
         self.account.passcode.system_unlock = false;
