@@ -494,3 +494,8 @@ mod tests {
         assert_eq!(selected_slot(&slots, ChatListFilter::All, Some(77)), 0);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "folder_tabs_tests.rs"]
+mod indicator_tests;

@@ -206,8 +206,8 @@ impl TabBar {
         let init_key = format!("{}-tab-init", self.id);
 
         let prev_selected = window.use_keyed_state(prev_key, cx, |_, _| selected_ix);
-        // (to_left, to_width, epoch)
-        let anim_params = window.use_keyed_state(anim_key, cx, |_, _| (px(0.), px(0.), 0u64));
+        // (to_left, to_width, epoch, jumps)
+        let anim_params = window.use_keyed_state(anim_key, cx, |_, _| (px(0.), px(0.), 0u64, 0u64));
         let initialized = window.use_keyed_state(init_key, cx, |_, _| false);
 
         // First frame: trigger re-render to capture bounds via on_prepaint
@@ -217,7 +217,7 @@ impl TabBar {
 
         self.update_anim_params(selected_ix, bounds_rc, &prev_selected, &anim_params, cx);
 
-        let (to_left, to_width, epoch) = *anim_params.read(cx);
+        let (to_left, to_width, epoch, jumps) = *anim_params.read(cx);
         if to_width <= px(0.) {
             return None;
         }
@@ -225,7 +225,11 @@ impl TabBar {
         // The springs hold the indicator's own position and velocity, so a tab
         // switched again mid-slide is redirected from where the indicator
         // actually is rather than restarted from the tab it left.
-        let indicator_key = format!("{}-tab-indicator", self.id);
+        //
+        // Quill: `jumps` counts bounds-only changes (a badge changing a tab's
+        // width). It is part of the spring key, and a spring adopts its first
+        // value immediately, so those changes jump instead of animating.
+        let indicator_key = format!("{}-tab-indicator-{}", self.id, jumps);
         let left = spring(
             (indicator_key.clone(), "left"),
             to_left,
@@ -279,6 +283,10 @@ impl TabBar {
                 _ => el,
             });
 
+        // Quill: lets the tests read where the indicator is drawn.
+        #[cfg(any(test, all(debug_assertions, feature = "test-support")))]
+        let indicator = indicator.debug_selector(|| "tab-indicator".into());
+
         Some((indicator.into_any_element(), epoch))
     }
 
@@ -288,7 +296,7 @@ impl TabBar {
         selected_ix: usize,
         bounds_rc: &Option<Rc<RefCell<TabIndicatorBounds>>>,
         prev_selected: &gpui::Entity<usize>,
-        anim_params: &gpui::Entity<(Pixels, Pixels, u64)>,
+        anim_params: &gpui::Entity<(Pixels, Pixels, u64, u64)>,
         cx: &mut App,
     ) {
         let rc = match bounds_rc {
@@ -326,7 +334,8 @@ impl TabBar {
                     Some(_) => epoch + 1,
                     None => epoch,
                 };
-                anim_params.update(cx, |v, _| *v = (left, width, epoch));
+                let jumps = anim_params.read(cx).3;
+                anim_params.update(cx, |v, _| *v = (left, width, epoch, jumps));
             }
             drop(bounds);
             prev_selected.update(cx, |v, _| *v = selected_ix);
@@ -336,10 +345,15 @@ impl TabBar {
         if let Some(to_b) = bounds.tabs.get(selected_ix) {
             let left = to_b.origin.x - first_tab_origin;
             let width = to_b.size.width;
-            let (to_left, to_width, epoch) = *anim_params.read(cx);
+            let (to_left, to_width, epoch, jumps) = *anim_params.read(cx);
 
             if left != to_left || width != to_width {
-                anim_params.update(cx, |v, _| *v = (left, width, epoch));
+                // Quill: the selection did not change, only the tab's bounds
+                // did, so move the indicator without a spring (tdesktop
+                // animates only on selection change). The first measurement
+                // (to_width == 0) keeps its key: nothing to animate from.
+                let jumps = if to_width > px(0.) { jumps + 1 } else { jumps };
+                anim_params.update(cx, |v, _| *v = (left, width, epoch, jumps));
             }
         }
     }
@@ -1390,5 +1404,47 @@ mod tests {
             next_frame(cx);
         }
         assert_eq!(scroll_handle.offset().x, px(-52.));
+    }
+
+    struct JumpHarness {
+        wide: bool,
+    }
+
+    impl Render for JumpHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let first = if self.wide { 120. } else { 60. };
+            div().w(px(400.)).child(
+                TabBar::new("jump-tabs")
+                    .underline()
+                    .selected_index(0)
+                    .child(Tab::new().w(px(first)).label("A").debug_selector(|| "jump-tab-0".into()))
+                    .child(Tab::new().w(px(60.)).label("B")),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn indicator_jumps_when_only_the_selected_tab_resizes(cx: &mut TestAppContext) {
+        cx.update(crate::theme::init);
+        let (view, cx) = cx.add_window_view(|_, _| JumpHarness { wide: false });
+        for _ in 0..3 {
+            draw(cx);
+        }
+        let before = cx.debug_bounds("tab-indicator").unwrap();
+        assert_eq!(before.size.width, cx.debug_bounds("jump-tab-0").unwrap().size.width);
+
+        view.update(cx, |view, cx| {
+            view.wide = true;
+            cx.notify();
+        });
+        // Measuring the new bounds takes a frame or two; no animation time
+        // passes, so a spring would still be at the old width.
+        for _ in 0..3 {
+            draw(cx);
+        }
+        let tab = cx.debug_bounds("jump-tab-0").unwrap();
+        let after = cx.debug_bounds("tab-indicator").unwrap();
+        assert_eq!(tab.size.width, px(120.));
+        assert_eq!(after.size.width, tab.size.width, "indicator must jump");
     }
 }
