@@ -38,11 +38,18 @@ fn enter_toggles_the_first_match_and_does_not_send(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
-        let first = {
+        // A message the history holds: a draft of a missing one is empty.
+        let (first, message) = {
             let session = app.demo_session.as_ref().expect("demo session");
-            ChatId(*session.chats.keys().min().expect("a chat"))
+            let (chat, history) = session
+                .histories
+                .iter()
+                .find(|(_, history)| !history.messages.is_empty())
+                .expect("a chat with messages");
+            let id = history.messages.keys().next().copied().expect("a message");
+            (ChatId(*chat), MessageId(id))
         };
-        app.share.pending_forward = ForwardDraft::from_message(first, MessageId(5), false);
+        app.share.pending_forward = ForwardDraft::from_message(first, message, false);
         app.open_forward_picker(window, cx);
         assert!(app.share.selection.is_empty());
         app.activate_first_forward_destination(cx);
