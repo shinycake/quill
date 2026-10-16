@@ -87,7 +87,12 @@ impl QuillApp {
         let failure = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
-            .filter(|call| call.is_joined)
+            // The stream's own connect failed: the error is shared with
+            // later failures (a screen share, a video subscribe) once the
+            // transport is up, and an unsupported stream has its label.
+            .filter(|call| {
+                call.is_joined && !call.transport_ready && call.stream != StreamState::Unsupported
+            })
             .and_then(|call| call.transport_error.clone());
         let stream = &mut self.group_call.stream;
         let same = match (stream.player.as_ref(), sink.as_ref()) {
@@ -113,17 +118,15 @@ impl QuillApp {
         })
     }
 
-    /// The failed card's Retry: rejoin (the reconnect path when the call
-    /// asked for it, else the window's Join).
+    /// The failed card's Retry: the card shows only for a joined call, so
+    /// Retry always rejoins (never a second join on a joined call).
     pub(crate) fn retry_stream(&mut self, cx: &mut Context<Self>) {
-        let call = self
+        let joined = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
-            .map(|call| (call.id, call.reconnecting));
-        match call {
-            Some((_, true)) => self.rejoin_active_group_call(cx),
-            Some((id, false)) => self.join_stream(id, cx),
-            None => {}
+            .is_some_and(|call| call.is_joined);
+        if joined {
+            self.rejoin_active_group_call(cx);
         }
     }
 }
