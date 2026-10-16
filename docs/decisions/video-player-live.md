@@ -297,7 +297,8 @@ because macOS trimmed the process early; neither run grows.
 7. **The paused overlay draws only the blurred picture.** The tiles keep
    drawing the shade, the pause icon and "Video is paused" themselves
    (`group_call_paused::paused_overlay`), so the visuals stay as they
-   are.
+   are. Since `video-player-live-ui.md` that shade, icon and text come
+   from the shared `PictureState::LivePaused` overlay instead.
 8. **The live story backdrop is the 90 px paused picture**
    (`paused_picture()`, blur radius 15), not the 40 px, blur 6 crop of
    the box (`frame_backdrop`). The design says the backdrop comes from

@@ -203,6 +203,7 @@
 "qll_av_order_newest_first" = "Order: newest first";
 "qll_av_order_shuffle" = "Order: shuffle";
 "qll_av_participant_mute_needs_a_live" = "Participant mute needs a live connection.";
+"qll_av_participant_volume" = "Volume for {name}";
 "qll_av_pause_video_message" = "Pause video message";
 "qll_av_photo_copied" = "photo copied";
 "qll_av_photo_update_requested" = "Photo update requested.";
@@ -331,7 +332,6 @@
 "qll_av_volume" = "Volume {level_100}%.";
 "qll_av_volume_2" = "Volume";
 "qll_av_volume_needs_a_live_connection" = "Volume needs a live connection.";
-"qll_av_participant_volume" = "Volume for {name}";
 "qll_av_we_let_the_speakers_know" = "We let the speakers know";
 "qll_av_you" = "{name} (you)";
 "qll_av_you_cant_pin_messages_in" = "you can't pin messages in this chat";

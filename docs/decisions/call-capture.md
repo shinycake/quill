@@ -263,8 +263,9 @@ their backends.
 - **UI:**
   - `screen_chooser.rs` holds the chooser window and the privacy box over
     the call window, with Escape closing the box as it closes every box.
-  - `group_call_paused.rs` holds the paused tile, using the blurred last
-    frame (`wallpaper_raster::blur`).
+  - `group_call_paused.rs` held the paused tile, using the blurred last
+    frame (`wallpaper_raster::blur`). The tiles now take the paused
+    overlay from `video_player::controls` (`video-player-live-ui.md`).
   - `screen_share_state.rs` holds the state.
   - The voice chat menu's Share Screen and the 1:1 share button open the
     chooser when there is a backend; otherwise they share directly as

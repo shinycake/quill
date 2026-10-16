@@ -34,7 +34,7 @@ chat tiles onto them.
   - There is no scrubber, time label, speed control, frame step or seek
     key in either layout.
 - The LIVE pill is `groupCallMessageBadge`: 11 px tall, radius 5, 8 px
-  semibold uppercase on the kit's `danger` token. "{n} viewers"
+  semibold uppercase on a fixed red (the kit palette's red-600). "{n} viewers"
   (`lng_group_call_rtmp_viewers`) follows it and is hidden at 0. The
   stream window's title shows the pill before the count. The live
   story's header and the comments' admin badge use the same pill.
@@ -113,7 +113,9 @@ Decisions:
   request as the participant menu's volume steps. TDLib applies it for
   everyone only when you manage the call; otherwise the server keeps it
   for you. Quill's own playback does not follow it either, for the same
-  reason: ntgcalls mixes the call itself and has no gain per source.
+  reason: ntgcalls mixes the call itself and has no gain per source. A
+  level from the server does not rebuild the slider while it is being
+  dragged, and the slider goes when the stage closes.
 
 ## PiP
 
@@ -127,10 +129,21 @@ GPUI's `Platform` has `hide_cursor_until_mouse_moves` on macOS
 (`NSCursor setHiddenUntilMouseMoves`), Windows (`SetCursor(None)` while
 hovered), X11 and Wayland. `App` does not expose it. Quill already wraps
 the platform in `ZoomPlatform` for the interface zoom, so `ZoomPlatform`
-keeps a weak handle and `interface_zoom::hide_cursor_until_mouse_moves`
-calls through it. The statement in `call-stream-window.md` that "GPUI has
-no API for it" no longer holds. The cursor comes back on the next mouse
-move, which also shows the controls, matching tdesktop.
+hands a weak handle to `platform_cursor.rs`, and
+`platform_cursor::hide_until_mouse_moves` calls through it. The statement
+in `call-stream-window.md` that "GPUI has no API for it" no longer holds.
+The cursor comes back on the next mouse move, which also shows the
+controls, matching tdesktop.
+
+The platform call hides the cursor system wide, while tdesktop only sets
+a blank cursor on its own widget. So Quill hides it only when the
+controls hide in full screen, the pointer is over the picture or the
+controls, and the window is active. With the stream full screen on one
+display and the pointer on another display or app, the controls still
+hide but the cursor stays. Both hide paths check this: the 5 s timer, and
+leaving the controls. The leave path checks after the event settles,
+because tdesktop's Leave is followed by the viewport's MouseMove, which
+shows the controls again; the cursor must not flash off in between.
 
 ## tdesktop
 
@@ -154,9 +167,11 @@ move, which also shows the controls, matching tdesktop.
   badge. The design asks for one, and it reuses the live story's pill.
   The title keeps tdesktop's count of at least 1 viewer, while the
   header hides the count at 0 as designed.
-- The pill's colour: it uses the kit's `danger` token, as designed,
-  not tdesktop's `attentionButtonFg`. In the dark theme that token is a
-  lighter red.
+- The pill's colour: the design named the kit's `danger` token, but
+  in the dark theme that token (red-400) washed out to salmon on the
+  dark call chrome. The pill always sits on dark media chrome, as
+  tdesktop's fixed `attentionButtonFg` does, so it uses the kit
+  palette's red-600 in both themes (white text at about 4.8:1).
 - M and F keys: tdesktop's RTMP panel has no M or F keys. The design
   asks for them. Esc and the full-screen button behave as before.
 - No stream volume slider: see "The volume finding".
@@ -165,8 +180,17 @@ move, which also shows the controls, matching tdesktop.
   between the feed ending and the call ending.
 - Failed overlay: the driver never produces `LiveEnd::Failed`, so
   the stream window also treats the joined call's `transport_error` as
-  a failure. Retry runs the reconnect path when the call asks for it,
-  and Join otherwise.
+  a failure, but only while the transport is not up and the stream is
+  not marked unsupported. The same field carries later failures (a
+  screen share, a video subscribe), which must not show the stream's
+  card. The card only shows for a joined call, so Retry always rejoins
+  (`rejoin_active_group_call`) and never sends a second join.
+- Live story backdrop: the blurred picture behind a landscape stream
+  was stretched to the frame, so the band above the picture matched
+  nothing in it. It is now cropped from the center to the frame's
+  shape, as tdesktop's `PrepareBlurredBackground` does. The edge between
+  the blurred band and the sharp picture is the letterbox itself; no
+  placeholder is drawn over a playing story (a test checks it).
 - "Connecting…" timing: it shows 3.5 s into Buffering, which is 5 s
   after the last frame under the default stall rule (1.5 s). A feed
   whose stall rule is four median gaps, such as a slow screen share,
@@ -201,7 +225,10 @@ move, which also shows the controls, matching tdesktop.
     and "Connecting…" 5 s after it;
   - the paused overlay coming and going with the feed's state;
   - full screen hiding the controls after 5 s, sliding them out and
-    hiding the cursor once;
+    hiding the cursor once; a move bringing them back and re-arming the
+    timer; leaving full screen showing them and stopping it;
+  - the cursor staying when the pointer is off the window;
+  - leaving the bar for the picture keeping the controls and the cursor;
   - the no-stream text with no spinner;
   - a paused tile with the shared overlay;
   - the stage volume shown for the other participant and not for you;
