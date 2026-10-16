@@ -257,7 +257,7 @@ impl Session {
 /// Q1: whether a request is something the user did on purpose (send,
 /// edit, join, ...), as opposed to a background lookup, a view/online
 /// ping or a login submit (which has its own error line).
-fn is_user_action(purpose: RequestPurpose) -> bool {
+pub(crate) fn is_user_action(purpose: RequestPurpose) -> bool {
     if is_auth_submit(purpose) || purpose.is_sweepable() {
         return false;
     }

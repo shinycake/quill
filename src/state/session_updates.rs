@@ -36,7 +36,7 @@ impl Session {
         }
         if matches!(state, AuthorizationState::Closed) {
             self.shutdown = ShutdownPhase::Closed;
-            self.requests.invalidate_account();
+            self.settle_account_requests();
             self.account_generation.bump();
             self.media.files.clear();
             self.media.downloads.clear();
@@ -51,7 +51,7 @@ impl Session {
             self.messages.last_forward = None;
         }
         if matches!(state, AuthorizationState::LoggingOut) {
-            self.requests.invalidate_account();
+            self.settle_account_requests();
             self.search.search.close();
             self.search.chat_search.close();
             self.messages.in_flight_forward = None;

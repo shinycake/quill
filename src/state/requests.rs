@@ -110,6 +110,44 @@ impl RequestPurpose {
     }
 }
 
+/// The code of the error a lost request settles with: HTTP's "Request
+/// Timeout". It never came from TDLib; the domain handlers only read the
+/// class (`Other`), so every purpose settles as an ordinary failed lookup.
+const LOST_REQUEST_ERROR_CODE: i32 = 408;
+
+impl Session {
+    /// Settle a request that will never be answered (swept after its TTL,
+    /// dropped because the flood-retry re-send failed, or abandoned with its
+    /// account) by feeding it through the same per-domain failure handling a
+    /// TDLib error uses. Every purpose settles in this one place: spinners
+    /// and "loading more" flags clear, the history window offers Retry.
+    /// The request must already be out of the registry.
+    pub(crate) fn settle_lost_request(&mut self, pending: PendingRequest) {
+        let extra = pending.id;
+        let seq = self.last_seq;
+        let error = TdError::from_code(LOST_REQUEST_ERROR_CODE);
+        self.apply_payload_in_asking_view(
+            EnvelopePayload::Error(error),
+            Some(&pending),
+            Some(extra),
+            seq,
+        );
+    }
+
+    /// The account is going away (logout, close): no answer can land any
+    /// more, so settle every pending lookup the way a failure would and
+    /// forget the stale-window marks. User actions (sends, edits, ...) are
+    /// dropped without a failure notice about a session the user left.
+    pub(crate) fn settle_account_requests(&mut self) {
+        for pending in self.requests.drain_all() {
+            if !super::session_apply_error::is_user_action(pending.purpose) {
+                self.settle_lost_request(pending);
+            }
+        }
+        self.stale_history_requests.clear();
+    }
+}
+
 pub fn is_auth_submit(purpose: RequestPurpose) -> bool {
     matches!(
         purpose,
@@ -717,8 +755,12 @@ impl RequestRegistry {
         }
     }
 
-    pub fn invalidate_account(&mut self) {
-        self.pending.clear();
+    /// Take every pending request, oldest first, so the reducer can settle
+    /// what each one guarded ([`Session::settle_account_requests`]).
+    pub(crate) fn drain_all(&mut self) -> Vec<PendingRequest> {
+        let mut all: Vec<PendingRequest> = self.pending.drain().map(|(_, p)| p).collect();
+        all.sort_by_key(|p| p.id.0);
+        all
     }
 
     pub fn len(&self) -> usize {

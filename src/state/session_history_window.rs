@@ -165,20 +165,15 @@ impl Session {
             return false;
         }
         let dropped = self.requests.sweep_stale(now, ttl, keep);
-        for pending in &dropped {
-            match pending.purpose {
-                RequestPurpose::GetHistory | RequestPurpose::GetHistoryAround => {
-                    if !self.take_stale_history_request(pending)
-                        && let Some(chat_id) = pending.chat_id
-                    {
-                        self.histories.entry(chat_id.0).or_default().load_failed = true;
-                    }
-                }
-                RequestPurpose::GetHistoryNewer => self.fail_history_newer(pending),
-                _ => {}
+        let any = !dropped.is_empty();
+        for pending in dropped {
+            // The mute toggle only guards a local flag: dropping it is
+            // the whole settlement, its errors would be user-facing.
+            if pending.purpose.is_sweepable() {
+                self.settle_lost_request(pending);
             }
         }
-        !dropped.is_empty()
+        any
     }
 
     /// Whether `pending` was issued for a window that has since been

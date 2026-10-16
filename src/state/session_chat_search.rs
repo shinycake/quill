@@ -144,7 +144,7 @@ impl Session {
     pub fn begin_logout(&mut self) {
         self.settings.account_export = None;
         self.settings.chat_export = None;
-        self.requests.invalidate_account();
+        self.settle_account_requests();
         self.account_generation.bump();
         self.shutdown = ShutdownPhase::CloseRequested;
     }
