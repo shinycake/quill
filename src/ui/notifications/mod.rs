@@ -709,8 +709,8 @@ impl QuillApp {
     /// Slice auth-logout-warning: drop the logged-out client and start a
     /// fresh connection — the auth flow resumes at
     /// `WaitTdlibParameters` → phone entry, i.e. the login screen. The
-    /// old client is already Closed, so `Drop` joins its receive thread
-    /// immediately instead of waiting out the 5s close timeout. If the
+    /// old client is already Closed: the closing set finishes it on the
+    /// next poll and the new client opens after that. If the
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
@@ -718,8 +718,7 @@ impl QuillApp {
         self.payments.marketplace_open = false;
         self.payments.marketplace_error = None;
         self.payments.marketplace_private = true;
-        let old = self.live.take();
-        drop(old);
+        self.close_screen_client(cx);
         // D2 fix-up: the warning promises "Downloaded media will be
         // erased from this device" — TDLib destroyed its own data, but
         // Quill's decrypted media scratch is only swept at startup.

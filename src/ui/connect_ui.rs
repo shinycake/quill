@@ -5,8 +5,9 @@ use quill::auth::view_for;
 use quill::connect::{ConnectBlocker, ConnectGate, evaluate_gate, start_prepared_live_connect};
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
+use quill::ids::AccountKey;
 use quill::lang::{keys, tr};
-use quill::platform::live_secret_store;
+use quill::platform::SecretStore;
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 
@@ -27,20 +28,28 @@ pub enum ConnectUiStatus {
     Live,
 }
 
+/// `swept`: folders the startup sweep just deleted (their records are
+/// cleared on the UI thread afterwards).
 fn prepare_startup(
     credentials: Option<TelegramCredentials>,
+    root: Option<std::path::PathBuf>,
+    secrets: &dyn SecretStore,
+    swept: &[AccountKey],
 ) -> Result<(TelegramCredentials, quill::connect::PreparedConnect), ConnectBlocker> {
     if let ConnectGate::Blocked(blocker) = evaluate_gate(credentials.is_some()) {
         return Err(blocker);
     }
     let credentials = credentials.ok_or(ConnectBlocker::MissingCredentials)?;
-    let root = quill::settings::safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
-    let prepared = quill::connect::prepare_connect(
-        &root,
-        quill::settings::active_account(&root),
-        live_secret_store().as_ref(),
-        &credentials,
-    )?;
+    let root = root.ok_or(ConnectBlocker::LockedStore)?;
+    let active = quill::settings::active_account(&root);
+    // A folder that could not be deleted yet is never opened.
+    if quill::settings::pending_deletes(&root)
+        .iter()
+        .any(|key| key == &active && !swept.contains(key))
+    {
+        return Err(ConnectBlocker::StoreError);
+    }
+    let prepared = quill::connect::prepare_connect(&root, active, secrets, &credentials)?;
     Ok((credentials, prepared))
 }
 
@@ -67,57 +76,128 @@ pub(super) fn live_status_for(auth: &AuthorizationState) -> String {
 
 impl super::app::QuillApp {
     pub(super) fn start_connection(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        // The lock-screen log out is deleting the local data; it starts the
+        // connection itself once that is gone.
+        if self.background.wiping {
+            return;
+        }
         self.connection.generation += 1;
         let generation = self.connection.generation;
         let credentials = self.credentials.clone();
         self.connection.status = ConnectUiStatus::Live;
         self.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
         self.connection.status_note = tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM).into();
-        let connect = cx
-            .background_executor()
-            .spawn(async move { prepare_startup(credentials) });
+        // The first connection of the run first deletes folders an earlier
+        // run left for deletion (it quit before their clients had closed).
+        let sweep = self.startup_sweep();
+        let root = self.accounts_root();
+        let secrets = self.secrets();
+        // Nothing deletes a folder while this preparation (which creates
+        // the account's folders) still runs.
+        self.background.screen_preparing += 1;
+        let connect = cx.background_executor().spawn(async move {
+            let swept = sweep.map(|sweep| sweep.run());
+            let done: &[AccountKey] = swept.as_ref().map_or(&[], |(_, keys)| keys.as_slice());
+            let prepared = prepare_startup(credentials, root, secrets().as_ref(), done);
+            (swept, prepared)
+        });
         cx.spawn(async move |this, cx| {
-            let prepared = connect.await;
-            let _ = this.update(cx, |this, cx| {
-                if generation != this.connection.generation {
-                    return;
+            let (swept, prepared) = connect.await;
+            let _ = this.update(cx, |this, _| {
+                this.background.screen_preparing =
+                    this.background.screen_preparing.saturating_sub(1);
+                if let Some((root, deleted)) = &swept {
+                    this.finish_sweep(root, deleted);
                 }
-                let result = prepared.and_then(|(credentials, prepared)| {
-                    start_prepared_live_connect(credentials, prepared, Arc::new(MemorySink::new()))
-                });
-                match result {
-                    Ok(live) => this.live = Some(live),
-                    Err(blocker) => {
-                        this.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
-                        this.connection.status = match blocker {
-                            ConnectBlocker::MissingCredentials => ConnectUiStatus::NeedCredentials,
-                            ConnectBlocker::MissingTdjson => ConnectUiStatus::NeedTdjson,
-                            _ => ConnectUiStatus::RestoreBlocked(blocker.user_message()),
-                        };
-                        this.connection.status_note = blocker.user_message().into();
-                    }
-                }
-                this.reload_account_keybindings(cx);
-                if this.live.is_some() {
-                    this.spawn_poll_loop(cx);
-                    // `parity:notify-all-accounts`: the other accounts
-                    // connect too, after the one on screen.
-                    this.ensure_background_accounts(cx);
-                }
-                cx.notify();
             });
+            let account = prepared.as_ref().ok().map(|(_, p)| p.account.clone());
+            let mut prepared = Some(prepared);
+            loop {
+                // The account's previous client may still be closing.
+                let safe = match &account {
+                    Some(account) => {
+                        super::background_accounts::closing::closed(&this, account, cx).await
+                    }
+                    None => true,
+                };
+                let again = this
+                    .update(cx, |this, cx| {
+                        if generation != this.connection.generation {
+                            return false;
+                        }
+                        if !safe {
+                            // Its old client's close can't be confirmed in
+                            // this run: never open the database again.
+                            this.connection.status_note =
+                                tr(keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into();
+                            cx.notify();
+                            return false;
+                        }
+                        // A client still on screen closes first; when it is
+                        // this account's, wait for that close too.
+                        if let Some(old) = this.live.take() {
+                            let same = Some(&old.driver.session.account) == account.as_ref();
+                            this.close_live_later(old, false, cx);
+                            if same {
+                                return true;
+                            }
+                        }
+                        let Some(prepared) = prepared.take() else {
+                            return false;
+                        };
+                        this.open_prepared(prepared, cx);
+                        false
+                    })
+                    .unwrap_or(false);
+                if !again {
+                    break;
+                }
+            }
         })
         .detach();
+        cx.notify();
+    }
+
+    /// Open the prepared client on screen (its database is not in use).
+    fn open_prepared(
+        &mut self,
+        prepared: Result<(TelegramCredentials, quill::connect::PreparedConnect), ConnectBlocker>,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        let result = prepared.and_then(|(credentials, prepared)| {
+            start_prepared_live_connect(credentials, prepared, Arc::new(MemorySink::new()))
+        });
+        match result {
+            Ok(live) => self.live = Some(live),
+            Err(blocker) => {
+                self.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
+                self.connection.status = match blocker {
+                    ConnectBlocker::MissingCredentials => ConnectUiStatus::NeedCredentials,
+                    ConnectBlocker::MissingTdjson => ConnectUiStatus::NeedTdjson,
+                    _ => ConnectUiStatus::RestoreBlocked(blocker.user_message()),
+                };
+                self.connection.status_note = blocker.user_message().into();
+            }
+        }
+        self.reload_account_keybindings(cx);
+        if self.live.is_some() {
+            self.spawn_poll_loop(cx);
+            // `parity:notify-all-accounts`: the other accounts
+            // connect too, after the one on screen.
+            self.ensure_background_accounts(cx);
+        }
         cx.notify();
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use quill::platform::MemorySecretStore;
+
     #[test]
     fn preparation_without_credentials_does_not_open_keychain_or_a_client() {
         assert!(matches!(
-            super::prepare_startup(None),
+            super::prepare_startup(None, None, &MemorySecretStore::new(), &[]),
             Err(quill::connect::ConnectBlocker::MissingCredentials)
         ));
     }

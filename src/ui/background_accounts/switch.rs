@@ -10,7 +10,7 @@ impl QuillApp {
     /// Its open chat is closed in TDLib and it goes offline, as tdesktop's
     /// inactive accounts are. A client in the sign-in flow, or in a call
     /// (which would go on with no window to hang it up), is closed instead.
-    pub(in crate::ui) fn retire_live_to_background(&mut self) {
+    pub(in crate::ui) fn retire_live_to_background(&mut self, cx: &mut Context<Self>) {
         let Some(mut live) = self.live.take() else {
             return;
         };
@@ -30,10 +30,10 @@ impl QuillApp {
                 unread,
             });
         } else {
-            live.shutdown(CLIENT_CLOSE_TIMEOUT);
-            // An account closed for a call starts again in the background
-            // (`ensure_background_accounts`); one that needs a sign-in keeps
-            // only its status until it is switched to.
+            // Closed without waiting. An account closed for a call starts
+            // again in the background once Closed (`reap_closing`); one that
+            // needs a sign-in keeps only its status until it is switched to.
+            self.close_live_later(live, !status.stops_client(), cx);
             if status.stops_client() {
                 self.background.clients.push(BackgroundClient {
                     key,
@@ -49,7 +49,11 @@ impl QuillApp {
     /// Take `key`'s background client when it runs (signed in, or still
     /// restoring its session), so the switch can bring it forward. A dead
     /// one is closed instead: two clients must never open one database.
-    pub(in crate::ui) fn take_background_live(&mut self, key: &AccountKey) -> Option<LiveConnect> {
+    pub(in crate::ui) fn take_background_live(
+        &mut self,
+        key: &AccountKey,
+        cx: &mut Context<Self>,
+    ) -> Option<LiveConnect> {
         self.background.starting.remove(key);
         let index = self
             .background
@@ -66,8 +70,10 @@ impl QuillApp {
         if usable {
             return client.live.take();
         }
-        if let Some(live) = client.live.as_mut() {
-            live.shutdown(CLIENT_CLOSE_TIMEOUT);
+        // Closed without waiting; `start_connection` opens the database
+        // again only once it is (`closing::closed`).
+        if let Some(live) = client.live.take() {
+            self.close_later(client.key, live, false, cx);
         }
         None
     }

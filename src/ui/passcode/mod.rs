@@ -663,21 +663,16 @@ impl QuillApp {
 
     /// "Log out" on the lock screen: wipe the local data after confirming.
     pub(crate) fn confirm_lock_logout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut wiping = false;
         if !self.account.passcode.demo
             && let Some(root) = self.passcode_root()
         {
-            let accounts = account_keys(&root);
-            // Close the client first so TDLib is not writing while the
-            // database folders are removed.
-            if let Some(mut live) = self.live.take() {
-                live.shutdown(quill::connect::CLIENT_CLOSE_TIMEOUT);
-            }
-            self.stop_background_accounts();
-            let store = os_secret_store();
-            for account in &accounts {
-                let _ = store.delete(account);
-            }
-            passcode::wipe_local_data(&root, &accounts, &global_unlock());
+            // Every client closes first so TDLib is not writing while the
+            // database folders are removed; the wipe and the fresh
+            // connection wait for the close without freezing the window,
+            // and a quit before then finishes the wipe on the next start.
+            self.begin_local_wipe(root, cx);
+            wiping = true;
         }
         self.account.passcode.enabled = false;
         self.account.passcode.system_unlock = false;
@@ -689,7 +684,8 @@ impl QuillApp {
             .passcode
             .lock_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        if !self.account.passcode.demo {
+        // With local data, the connection starts once it is wiped (above).
+        if !self.account.passcode.demo && !wiping {
             self.start_connection(cx);
         }
         cx.notify();

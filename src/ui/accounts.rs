@@ -21,10 +21,8 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::AccountKey;
 use quill::lang::{keys, tr, tr_with};
-use quill::platform::live_secret_store;
 use quill::settings::{
-    AccountRecord, active_account, add_account, list_accounts, remove_account, safe_app_root,
-    set_active_account,
+    AccountRecord, active_account, add_account, list_accounts, safe_app_root, set_active_account,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -104,6 +102,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The lock-screen log out is deleting every account's data; the
+        // connection starts once it is gone.
+        if self.background.wiping {
+            return;
+        }
         let Some(root) = safe_app_root() else {
             self.fail_account_switch(tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_NO), window, cx);
             return;
@@ -164,7 +167,7 @@ impl QuillApp {
         // `parity:notify-all-accounts`: the outgoing account stays connected
         // in the background, and an account already running there comes
         // forward as it is instead of restarting.
-        self.retire_live_to_background();
+        self.retire_live_to_background(cx);
         if let Err(e) = set_active_account(&root, key) {
             self.fail_account_switch(
                 tr_with(
@@ -177,7 +180,7 @@ impl QuillApp {
             return;
         }
         self.refresh_test_environment();
-        match self.take_background_live(key) {
+        match self.take_background_live(key, cx) {
             Some(live) => self.adopt_live(live, cx),
             None => self.start_connection(cx),
         }
@@ -238,36 +241,13 @@ impl QuillApp {
     /// Slice parity:auth-multi-account: remove a non-active account (the
     /// UI never offers the active one — switch away from it first).
     pub(crate) fn remove_account_key(&mut self, key: &AccountKey, cx: &mut Context<Self>) {
-        let Some(root) = safe_app_root() else {
+        let Some(root) = self.accounts_root() else {
             self.account.accounts.error =
                 Some(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
             cx.notify();
             return;
         };
-        self.account.accounts.remove_confirm = None;
-        // Its Picture-in-Picture plays one of its files.
-        self.video_pip_account_ended(key, cx);
-        // Close its background client first: TDLib must not be writing
-        // while the account's folder is deleted.
-        self.stop_background_account(key);
-        match remove_account(&root, key) {
-            Ok(()) => {
-                // Drop the account's keychain item too: otherwise the
-                // lowest-free-id recycling in `add_account` hands a later
-                // account the deleted account's stale DB key. Best-effort —
-                // the account data is already gone; a locked keychain is
-                // just an orphaned item, not a failure.
-                let _ = live_secret_store().delete(key);
-                self.account.accounts.error = None;
-            }
-            Err(e) => {
-                self.account.accounts.error = Some(tr_with(
-                    keys::Q_OPS_COULD_NOT_REMOVE_THE_ACCOUNT,
-                    &[("e", &e.to_string())],
-                ));
-            }
-        }
-        cx.notify();
+        self.remove_account_in(root, key, cx);
     }
 
     /// One account row: name, the active badge or Switch/Remove actions,

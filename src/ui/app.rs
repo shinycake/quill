@@ -262,5 +262,6 @@ impl Drop for QuillApp {
     fn drop(&mut self) {
         self.stop_animation_playback();
         self.stop_sticker_playback();
+        self.close_clients_on_drop();
     }
 }

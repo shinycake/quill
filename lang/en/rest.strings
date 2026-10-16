@@ -123,6 +123,8 @@
 "qll_rest_buy" = "Buy";
 "qll_rest_checking_the_gift_code" = "Checking the gift code…";
 "qll_rest_connection_to_telegram_was_closed" = "Connection to Telegram was closed";
+"qll_rest_could_not_log_out_e" = "Could not log out: {e}";
+"qll_rest_restart_quill_to_finish_logging_out" = "Restart Quill to finish logging out. Nothing connects until then.";
 "qll_rest_could_not_change_slow_mode" = "could not change slow mode";
 "qll_rest_could_not_check_the_gift" = "could not check the gift code";
 "qll_rest_could_not_look_up_the" = "could not look up the language";
