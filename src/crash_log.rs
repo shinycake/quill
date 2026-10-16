@@ -359,7 +359,7 @@ pub fn begin_run(root: &Path) {
     begin_run_for_session(root, session_start(), std::process::id());
 }
 
-fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
+pub(crate) fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
     let dir = log_dir(root);
     let previous = fs::read_to_string(dir.join(RUNNING_FILE))
         .ok()
@@ -367,6 +367,14 @@ fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
     // A sentinel that cannot be parsed still proves the run did not finish.
     let unfinished = previous.is_some() || dir.join(RUNNING_FILE).exists();
     let fatal = take_native_fatal(&dir);
+    // A native crash handler's report becomes a crash file of its own; the
+    // unfinished-run report below then sees it and stays out of the way.
+    let started = previous.as_ref().map_or(0, |run| run.started);
+    let _ = crate::native_crash::promote_previous(
+        &dir,
+        report_date(&dir, started, session_start),
+        KEEP_CRASH_FILES,
+    );
     if unfinished || fatal.is_some() {
         let _ = report_unfinished_run(&dir, previous.as_ref(), fatal.as_ref(), session_start);
     }
@@ -377,6 +385,13 @@ fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
     };
     let _ = fs::create_dir_all(&dir);
     let _ = fs::write(dir.join(RUNNING_FILE), sentinel.render());
+}
+
+/// [`begin_run`], then the native crash handlers for this process. Kept
+/// apart so tests can start a run without installing signal handlers.
+pub fn begin_run_with_native_handlers(root: &Path) {
+    begin_run(root);
+    crate::native_crash::install(&log_dir(root));
 }
 
 /// File a crash report for a run that left its `running` file behind,
@@ -398,14 +413,18 @@ fn report_unfinished_run(
     {
         return Ok(());
     }
-    // Dated inside (marker, this run): pending_crash shows reports newer
-    // than the last clean exit and older than this run.
-    let since = read_marker(dir).unwrap_or(0);
-    let unix_secs = started
-        .max(since.saturating_add(1))
-        .min(session_start.saturating_sub(1));
+    let unix_secs = report_date(dir, started, session_start);
     let report = format_unfinished_report(previous, fatal, unix_secs);
     write_report_file(dir, ReportKind::Crash, unix_secs, &report, KEEP_CRASH_FILES).map(|_| ())
+}
+
+/// Dated inside (marker, this run): pending_crash shows reports newer than
+/// the last clean exit and older than this run.
+fn report_date(dir: &Path, started: u64, session_start: u64) -> u64 {
+    let since = read_marker(dir).unwrap_or(0);
+    started
+        .max(since.saturating_add(1))
+        .min(session_start.saturating_sub(1))
 }
 
 fn format_unfinished_report(
@@ -497,6 +516,7 @@ fn mark_clean_exit_for_session(root: &Path, session_start: u64, now: u64) {
     let dir = log_dir(root);
     // The quit is clean: the next launch must not read this run as unfinished.
     let _ = fs::remove_file(dir.join(RUNNING_FILE));
+    crate::native_crash::discard_active(&dir);
     for ((unix_secs, _), path) in crash_files(&dir) {
         if unix_secs >= session_start {
             let _ = reclassify_as_caught(&dir, unix_secs, &path);

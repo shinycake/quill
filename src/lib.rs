@@ -105,6 +105,7 @@ pub mod message_menu;
 pub mod moderation;
 pub mod moderation_exceptions;
 pub mod mute_menu;
+pub mod native_crash;
 pub mod network_usage;
 pub mod notify;
 pub mod notify_accounts;
