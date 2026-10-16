@@ -304,6 +304,7 @@ impl QuillApp {
                         // The sound is the authority on where the track
                         // ends (its real length can differ from TDLib's
                         // rounded duration).
+                        this.playback.audio.settle();
                         let finished = this.playback.audio.is_ended();
                         if finished && !this.playback.seek_scrubbing {
                             // Capture the id first: the stops below save the
