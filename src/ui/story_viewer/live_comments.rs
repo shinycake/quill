@@ -311,7 +311,7 @@ fn comment_row(
             .flex()
             .items_center()
             .gap(px(4.))
-            .child(live_pill(cx))
+            .child(live_pill())
             .child(
                 div()
                     .text_size(px(11.))

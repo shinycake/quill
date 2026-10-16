@@ -31,7 +31,7 @@ thread_local! {
 pub(crate) fn hide_cursor() {
     #[cfg(test)]
     CURSOR_HIDES.with(|hides| hides.set(hides.get().saturating_add(1)));
-    crate::ui::interface_zoom::hide_cursor_until_mouse_moves();
+    crate::ui::platform_cursor::hide_until_mouse_moves();
 }
 
 /// How many times the cursor was hidden on this thread (tests).
@@ -192,6 +192,11 @@ impl ControlsFade {
         let elapsed = now.saturating_duration_since(started).as_secs_f32();
         let t = (elapsed / SLIDE.as_secs_f32()).clamp(0.0, 1.0);
         self.from + (self.to - self.from) * t
+    }
+
+    /// The pointer is over the picture or the controls.
+    pub(crate) fn pointer_inside(&self) -> bool {
+        self.over_picture || self.over_controls
     }
 
     /// Full screen with the controls hidden: the cursor hides too

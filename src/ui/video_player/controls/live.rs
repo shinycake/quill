@@ -27,7 +27,7 @@ use super::{Handler, overlay_button, volume_icon};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_kit::component::slider::{Slider, SliderState};
-use gpui_kit::component::{ActiveTheme, Icon, Sizable as _};
+use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, trn_with};
@@ -51,6 +51,12 @@ const BADGE_HEIGHT: f32 = 11.;
 const BADGE_RADIUS: f32 = 5.;
 const BADGE_TEXT: f32 = 8.;
 const BADGE_PADDING: f32 = 3.;
+/// The pill's red: tdesktop's `attentionButtonFg` is a fixed red, and
+/// the pill always sits on dark media chrome (the stream window, the
+/// story viewer), so it does not follow the app theme. The kit's dark
+/// `danger` (red-400) washed out to salmon there; this is the kit
+/// palette's red-600, white text at about 4.8:1.
+const LIVE_RED: u32 = 0xdc2626;
 /// Between the pill and the viewer count (`groupCallMessageBadge`
 /// skip in the story header).
 pub(crate) const BADGE_GAP: f32 = 4.;
@@ -141,14 +147,14 @@ impl LiveController {
 }
 
 /// The red LIVE pill alone (`groupCallMessageBadge`).
-pub(crate) fn live_pill(cx: &App) -> Div {
+pub(crate) fn live_pill() -> Div {
     div()
         .debug_selector(|| "live-pill".into())
         .flex_none()
         .h(px(BADGE_HEIGHT))
         .px(px(BADGE_PADDING))
         .rounded(px(BADGE_RADIUS))
-        .bg(cx.theme().danger)
+        .bg(rgb(LIVE_RED))
         .flex()
         .items_center()
         .text_size(px(BADGE_TEXT))
@@ -187,14 +193,14 @@ pub(crate) fn viewers_label(viewers: u32) -> Option<String> {
 }
 
 /// The pill followed by the viewer count, in the parent's text style.
-pub(crate) fn live_badge(viewers: u32, cx: &App) -> Div {
+pub(crate) fn live_badge(viewers: u32) -> Div {
     div()
         .debug_selector(|| "live-badge".into())
         .flex()
         .items_center()
         .gap(px(BADGE_GAP))
         .min_w_0()
-        .child(live_pill(cx))
+        .child(live_pill())
         .children(viewers_label(viewers).map(|text| div().truncate().child(text)))
 }
 
@@ -345,7 +351,7 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
         .flex()
         .items_center()
         .gap(px(BADGE_GAP))
-        .child(live_badge(this.facts.viewers, cx))
+        .child(live_badge(this.facts.viewers))
         .children(this.leading)
         .child(
             Button::new(("live-mute", row_id))

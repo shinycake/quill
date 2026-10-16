@@ -618,31 +618,129 @@ fn a_paused_stream_shows_the_paused_overlay(cx: &mut TestAppContext) {
     assert!(find(call, "live-paused").is_none());
 }
 
-/// Full screen the controls and the cursor hide after 5 idle seconds.
+fn controls_shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| app.group_call.stream.controls.shown())
+}
+
+fn hide_pending(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| {
+        app.group_call.stream.controls.hide_at().is_some()
+    })
+}
+
+/// The stream window full screen and active, the mouse over the picture.
+fn full_screen_under_the_mouse(app: &Entity<QuillApp>, call: &mut VisualTestContext) {
+    call.update(|window, _| {
+        window.activate_window();
+        window.toggle_fullscreen();
+    });
+    app.update(call, |_, cx| cx.notify());
+    frames(call);
+    let viewport = find(call, "group-call-stream-viewport").expect("the picture");
+    call.simulate_mouse_move(viewport.center(), None, Modifiers::default());
+    frames(call);
+}
+
+/// Full screen the controls and the cursor hide after 5 idle seconds; a
+/// move brings them back and starts the timer again; leaving full screen
+/// shows them and stops it.
 #[gpui_kit::test]
 fn full_screen_hides_the_controls_and_the_cursor(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::Live);
     let call = &mut call;
-    call.update(|window, _| window.toggle_fullscreen());
-    app.update(call, |_, cx| cx.notify());
-    frames(call);
-    let shown = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.group_call.stream.controls.shown())
-    };
-    assert!(shown(&app, call), "entering full screen shows them");
+    full_screen_under_the_mouse(&app, call);
+    assert!(
+        controls_shown(&app, call),
+        "entering full screen shows them"
+    );
     let hides = cursor_hides();
     cx.executor().advance_clock(Duration::from_millis(4500));
     frames(call);
-    assert!(shown(&app, call), "still shown before 5 s");
+    assert!(controls_shown(&app, call), "still shown before 5 s");
     cx.executor().advance_clock(Duration::from_millis(700));
     frames(call);
-    assert!(!shown(&app, call), "hidden after 5 s");
+    assert!(!controls_shown(&app, call), "hidden after 5 s");
     assert_eq!(cursor_hides(), hides + 1, "the cursor hides with them");
     let height = call.update(|window, _| window.viewport_size().height);
     cx.executor().advance_clock(Duration::from_millis(300));
     frames(call);
     let bar = find(call, "group-call-stream-bar").expect("the bar stays mounted");
     assert!(bar.top() >= height, "slid out of sight");
+    // A move shows them again and re-arms the timer.
+    let viewport = find(call, "group-call-stream-viewport").expect("the picture");
+    call.simulate_mouse_move(
+        viewport.center() + point(px(20.), px(10.)),
+        None,
+        Modifiers::default(),
+    );
+    frames(call);
+    assert!(controls_shown(&app, call), "a move shows them");
+    assert!(hide_pending(&app, call), "and starts the timer again");
+    cx.executor().advance_clock(Duration::from_millis(5200));
+    frames(call);
+    assert!(!controls_shown(&app, call), "hidden again after 5 s");
+    assert_eq!(cursor_hides(), hides + 2);
+    // Leaving full screen with them hidden: shown (the mouse is over the
+    // picture) and no timer.
+    call.update(|window, _| window.toggle_fullscreen());
+    app.update(call, |_, cx| cx.notify());
+    frames(call);
+    assert!(controls_shown(&app, call), "leaving full screen shows them");
+    assert!(!hide_pending(&app, call), "and stops the timer");
+    cx.executor().advance_clock(Duration::from_secs(6));
+    frames(call);
+    assert!(controls_shown(&app, call), "nothing hides them now");
+    assert_eq!(cursor_hides(), hides + 2, "nor the cursor");
+}
+
+/// The platform hides the cursor system wide: with the pointer not over
+/// the stream (another display, another app) the controls hide but the
+/// cursor stays.
+#[gpui_kit::test]
+fn the_cursor_stays_when_the_pointer_is_elsewhere(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    call.update(|window, _| {
+        window.activate_window();
+        window.toggle_fullscreen();
+    });
+    app.update(call, |_, cx| cx.notify());
+    frames(call);
+    // The pointer off the window (another display, say).
+    call.simulate_mouse_move(point(px(-40.), px(-40.)), None, Modifiers::default());
+    frames(call);
+    let hides = cursor_hides();
+    cx.executor().advance_clock(Duration::from_millis(5200));
+    frames(call);
+    assert!(!controls_shown(&app, call), "the controls hide");
+    assert_eq!(cursor_hides(), hides, "the cursor elsewhere stays");
+}
+
+/// Leaving the bar for the picture in full screen: tdesktop's Leave hides
+/// the controls and the viewport's move shows them again, so they stay
+/// and the cursor never flashes off.
+#[gpui_kit::test]
+fn leaving_the_bar_for_the_picture_keeps_the_controls_and_cursor(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    full_screen_under_the_mouse(&app, call);
+    let bar = find(call, "group-call-stream-bar").expect("the bar");
+    call.simulate_mouse_move(bar.center(), None, Modifiers::default());
+    frames(call);
+    assert!(controls_shown(&app, call));
+    let hides = cursor_hides();
+    let viewport = find(call, "group-call-stream-viewport").expect("the picture");
+    call.simulate_mouse_move(
+        point(viewport.center().x, viewport.top() + px(40.)),
+        None,
+        Modifiers::default(),
+    );
+    frames(call);
+    assert!(
+        controls_shown(&app, call),
+        "the move over the picture shows them"
+    );
+    assert_eq!(cursor_hides(), hides, "the cursor stays");
 }
 
 /// Nobody broadcasting: tdesktop's no-stream text on the controls'

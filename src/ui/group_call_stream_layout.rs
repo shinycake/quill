@@ -440,7 +440,7 @@ impl QuillApp {
             viewers,
             &[("count", &quill::premium_hub::group_digits(viewers))],
         );
-        let title = title_row(&facts.title, &viewers, full, shown, window, cx);
+        let title = title_row(&facts.title, &viewers, full, shown, window);
         let bar = self
             .group_call_stream_bar(facts, full, shown, cx)
             .into_any_element();
@@ -581,12 +581,24 @@ impl QuillApp {
             // No live PiP until the next PR; the window's own pin on top
             // stays where it is.
             pip: None,
-            hover: Some(Rc::new(move |inside, _, cx| {
+            hover: Some(Rc::new(move |inside, window, cx| {
+                let active = window.is_window_active();
                 let _ = view.update(cx, |this, cx| {
-                    this.group_call
-                        .stream
-                        .controls
-                        .hover_controls(inside, cx.background_executor().now());
+                    let controls = &mut this.group_call.stream.controls;
+                    let was = controls.shown();
+                    controls.hover_controls(inside, cx.background_executor().now());
+                    // Leaving the controls in full screen hides them at
+                    // once: the cursor goes with them, as on the timer.
+                    // Checked once the event settles: a move over the
+                    // picture in the same event shows them again
+                    // (tdesktop's Leave, then the viewport's MouseMove),
+                    // and the cursor must not flash off.
+                    if was && !controls.shown() {
+                        let app = cx.entity().downgrade();
+                        cx.defer(move |cx| {
+                            let _ = app.update(cx, |this, _| this.hide_stream_cursor(active));
+                        });
+                    }
                     this.arm_stream_hide_timer(cx);
                     cx.notify();
                 });
@@ -732,6 +744,18 @@ impl QuillApp {
 
     /// Full screen: hide the controls when the 5 s timer runs out. One
     /// task runs while the timer does; a move only pushes its deadline.
+    /// The controls just hid: in full screen the cursor goes too (tdesktop
+    /// `setCursorShown(!_rtmpFull || shown)`). The platform call hides it
+    /// system wide, so only while the pointer is over this window's picture
+    /// or controls and the window is active (tdesktop sets a blank cursor
+    /// on its own widget).
+    fn hide_stream_cursor(&self, window_active: bool) {
+        let controls = &self.group_call.stream.controls;
+        if window_active && controls.cursor_hidden() && controls.pointer_inside() {
+            hide_cursor();
+        }
+    }
+
     fn arm_stream_hide_timer(&mut self, cx: &mut Context<Self>) {
         let stream = &mut self.group_call.stream;
         if stream.hide_armed || stream.controls.hide_at().is_none() {
@@ -746,18 +770,26 @@ impl QuillApp {
                 };
                 let wait = at.saturating_duration_since(cx.background_executor().now());
                 cx.background_executor().timer(wait).await;
+                // Asked outside the app's update: the window's own state.
+                let handle = this
+                    .update(cx, |app, _| app.group_call.window)
+                    .ok()
+                    .flatten();
+                let active = handle
+                    .and_then(|handle| {
+                        cx.update_window(handle, |_, window, _| window.is_window_active())
+                            .ok()
+                    })
+                    .unwrap_or(false);
                 let more = this.update(cx, |app, cx| {
                     let controls = &mut app.group_call.stream.controls;
                     let was = controls.shown();
                     controls.tick(cx.background_executor().now());
                     if was != controls.shown() {
-                        // tdesktop `setCursorShown(!_rtmpFull || shown)`.
-                        if controls.cursor_hidden() {
-                            hide_cursor();
-                        }
+                        app.hide_stream_cursor(active);
                         cx.notify();
                     }
-                    controls.hide_at().is_some()
+                    app.group_call.stream.controls.hide_at().is_some()
                 });
                 if !matches!(more, Ok(true)) {
                     break;
@@ -816,7 +848,6 @@ fn title_row(
     full: bool,
     shown: f32,
     window: &mut Window,
-    cx: &App,
 ) -> AnyElement {
     let width = f32::from(window.viewport_size().width);
     let title_width = title_text_width(title, window);
@@ -862,7 +893,7 @@ fn title_row(
                 .flex()
                 .items_center()
                 .gap(px(BADGE_GAP))
-                .child(live_pill(cx))
+                .child(live_pill())
                 .child(
                     div()
                         .min_w_0()

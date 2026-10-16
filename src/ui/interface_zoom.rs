@@ -308,22 +308,8 @@ pub(crate) struct ZoomPlatform {
 
 impl ZoomPlatform {
     pub(crate) fn new(inner: Rc<dyn Platform>) -> Self {
-        OS_PLATFORM.with(|slot| *slot.borrow_mut() = Some(Rc::downgrade(&inner)));
+        super::platform_cursor::remember(&inner);
         Self { inner }
-    }
-}
-
-thread_local! {
-    /// The OS platform, for the cursor call `App` does not expose.
-    static OS_PLATFORM: RefCell<Option<Weak<dyn Platform>>> = const { RefCell::new(None) };
-}
-
-/// Hide the mouse cursor until it next moves (GPUI's typing behavior).
-/// Does nothing without the OS platform (tests).
-pub(crate) fn hide_cursor_until_mouse_moves() {
-    let platform = OS_PLATFORM.with(|slot| slot.borrow().as_ref().and_then(Weak::upgrade));
-    if let Some(platform) = platform {
-        platform.hide_cursor_until_mouse_moves();
     }
 }
 
