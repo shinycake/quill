@@ -1,7 +1,9 @@
 //! Voice notes, music files, waveforms, seek bars and speech
 //! transcription.
 
+use super::scrubber::waveform_canvas;
 use super::*;
+use crate::ui::playback_state::SeekSite;
 use quill::lang::{keys, tr, tr_with};
 
 /// Round video note. tdesktop paints `history/view/media` round video as a
@@ -80,44 +82,6 @@ pub(in crate::ui) fn transcription_row(
     }
 }
 
-/// A voice note's waveform across the whole row, as Telegram Desktop
-/// paints it (`PaintWaveform`): `msgWaveformBar` bars `msgWaveformSkip`
-/// apart, `msgWaveformMin` to `msgWaveformMax` tall, laid out at paint
-/// time over the width the row gives (`bubble_width::waveform_bars`). The
-/// bars left of `progress` (0..=1) take the full color, the rest fade, so
-/// the waveform doubles as the progress indicator.
-pub(in crate::ui) fn waveform_canvas(
-    bars: Vec<u8>,
-    color: Hsla,
-    progress: f32,
-) -> impl IntoElement {
-    use crate::ui::history::bubble_width::{WAVEFORM_HEIGHT, waveform_bars};
-    use quill::bubble_layout::WAVEFORM_BAR;
-    canvas(
-        |_, _, _| {},
-        move |bounds, _, window, _| {
-            let available = f32::from(bounds.size.width).floor() as i32;
-            let active_width = (available as f32 * progress.clamp(0., 1.)).round();
-            let faded = color.opacity(0.35);
-            for bar in waveform_bars(&bars, available) {
-                let lit = (bar.left as f32) < active_width;
-                window.paint_quad(fill(
-                    Bounds::new(
-                        point(
-                            bounds.origin.x + px(bar.left as f32),
-                            bounds.origin.y + px(bar.top),
-                        ),
-                        size(px(WAVEFORM_BAR as f32), px(bar.height as f32)),
-                    ),
-                    if lit { color } else { faded },
-                ));
-            }
-        },
-    )
-    .w_full()
-    .h(px(WAVEFORM_HEIGHT as f32))
-}
-
 /// Voice waveform bars at a fixed pitch (the record bar); the first
 /// `played` fraction is drawn solid, the rest faded. Bubbles use
 /// [`waveform_canvas`], which fills its row.
@@ -154,37 +118,6 @@ pub(in crate::ui) fn waveform_row(
     row
 }
 
-/// Phase 4.6 seek bar (tdesktop-style): the interactive gpui-component
-/// `Slider` on the active row — click-to-seek and drag, with the UI layer
-/// seeking the sound to the released offset — and a static
-/// track + fill on every other audio/voice row.
-pub(in crate::ui) fn seek_bar_element(row_key: u64, seek: &SeekBarView, color: Hsla) -> AnyElement {
-    if let Some(slider) = &seek.slider {
-        div()
-            .id(("seek-bar", row_key))
-            .role(gpui_kit::Role::Group)
-            .aria_label(tr(keys::Q_AV_PLAYBACK_POSITION))
-            .w_full()
-            .child(Slider::new(slider).bg(color).text_color(color))
-            .into_any_element()
-    } else {
-        div()
-            .id(("seek-bar", row_key))
-            .w_full()
-            .h(px(3.))
-            .rounded_full()
-            .bg(color.opacity(0.25))
-            .child(
-                div()
-                    .h_full()
-                    .w(relative(seek.fraction() as f32))
-                    .rounded_full()
-                    .bg(color),
-            )
-            .into_any_element()
-    }
-}
-
 pub(in crate::ui) fn voice_note_row(
     chat_id: ChatId,
     message_id: MessageId,
@@ -213,9 +146,10 @@ pub(in crate::ui) fn voice_note_row(
     let meta = if downloading_now && !seek.is_playing {
         tr(keys::Q_AV_DOWNLOADING_4).to_string()
     } else if active {
+        // Hovering the waveform shows the time under the pointer (tdesktop).
         format!(
             "{} / {total}",
-            format_voice_duration(seek.display_secs as i32)
+            format_voice_duration(seek.label_secs() as i32)
         )
     } else {
         total
@@ -287,7 +221,21 @@ pub(in crate::ui) fn voice_note_row(
                         .flex()
                         .flex_col()
                         .gap_0p5()
-                        .child(waveform_canvas(bars, accent, progress))
+                        .child(match &seek.slider {
+                            // The active note's waveform is its scrubber.
+                            Some(slider) => AudioScrubber::new(
+                                ("voice-scrubber", row_key),
+                                slider,
+                                ScrubberFace::Waveform(bars),
+                                accent,
+                                QuillApp::seek_hover_handler(SeekSite::Row, cx),
+                            )
+                            .progress(progress)
+                            .hover(seek.hover)
+                            .dragging(seek.dragging)
+                            .into_any_element(),
+                            None => waveform_canvas(bars, accent, progress).into_any_element(),
+                        })
                         .child(
                             div()
                                 .flex()
@@ -302,10 +250,9 @@ pub(in crate::ui) fn voice_note_row(
                         ),
                 ),
         )
+        // MED1: speed + mute on the active row.
         .when(active, |this| {
-            this.child(seek_bar_element(row_key, seek, accent))
-                // MED1: speed + mute on the active row.
-                .child(row_playback_controls(row_key, "voice", seek, accent, cx))
+            this.child(row_playback_controls(row_key, "voice", seek, accent, cx))
         })
         // MED2: transcription (schema 1.8.67 `speechRecognitionResult`
         // on `voiceNote`).
@@ -348,7 +295,7 @@ pub(in crate::ui) fn audio_row(
     let duration_label = if active {
         format!(
             "{} / {total}",
-            voice::format_voice_duration(seek.display_secs as i32)
+            voice::format_voice_duration(seek.label_secs() as i32)
         )
     } else {
         total
@@ -448,10 +395,21 @@ pub(in crate::ui) fn audio_row(
                     .child(div().text_xs().opacity(0.7).truncate().child(meta)),
             ),
         )
-        .when(active, |this| {
-            this.child(seek_bar_element(row_key, seek, accent))
-                // MED1: speed + mute on the active row.
-                .child(row_playback_controls(row_key, "audio", seek, accent, cx))
+        .when_some(seek.slider.as_ref(), |this, slider| {
+            this.child(
+                AudioScrubber::new(
+                    ("audio-scrubber", row_key),
+                    slider,
+                    ScrubberFace::Line,
+                    accent,
+                    QuillApp::seek_hover_handler(SeekSite::Row, cx),
+                )
+                .progress(seek.fraction() as f32)
+                .hover(seek.hover)
+                .dragging(seek.dragging),
+            )
+            // MED1: speed + mute on the active row.
+            .child(row_playback_controls(row_key, "audio", seek, accent, cx))
         })
         .into_any_element()
 }

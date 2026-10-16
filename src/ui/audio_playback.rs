@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
+use super::playback_state::{SeekHover, SeekSite};
 use super::*;
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::*;
@@ -108,6 +109,7 @@ impl QuillApp {
         self.playback.player.slider = None;
         self.playback.seek_scrubbing = false;
         self.playback.seek_preview_secs = None;
+        self.playback.seek_hover = None;
     }
 
     /// Message id of the active (playing or paused) track, if any.
@@ -156,6 +158,7 @@ impl QuillApp {
         quill::wake::CHROME.poke();
         let slider = cx.new(|_| {
             SliderState::new()
+                .label(tr(keys::Q_AV_PLAYBACK_POSITION))
                 .min(0.0)
                 .max(duration_secs.max(0.1) as f32)
                 .step(0.1)
@@ -375,6 +378,36 @@ impl QuillApp {
         }
     }
 
+    /// Where the pointer is over `site`'s scrubber (`None`: it left).
+    /// Redraws only when that changes.
+    pub(super) fn set_seek_hover(
+        &mut self,
+        site: SeekSite,
+        at: Option<f32>,
+        cx: &mut Context<Self>,
+    ) {
+        let next = match at {
+            Some(at) => Some(SeekHover { site, at }),
+            // A late leave from one control never clears the other's hover.
+            None => self.playback.seek_hover.filter(|hover| hover.site != site),
+        };
+        if next != self.playback.seek_hover {
+            self.playback.seek_hover = next;
+            cx.notify();
+        }
+    }
+
+    /// The scrubber hover handler for `site`.
+    pub(super) fn seek_hover_handler(
+        site: SeekSite,
+        cx: &Context<Self>,
+    ) -> super::message_media::HoverHandler {
+        let app = cx.weak_entity();
+        std::rc::Rc::new(move |at, _, cx| {
+            let _ = app.update(cx, |this, cx| this.set_seek_hover(site, at, cx));
+        })
+    }
+
     /// View model for one audio/voice row's seek bar.
     pub(super) fn seek_bar_view(
         &self,
@@ -400,6 +433,12 @@ impl QuillApp {
                 speed: self.playback.speed,
                 muted: self.playback.volume < 0.01,
                 error: self.playback.audio.error().map(audio_error_text),
+                hover: self
+                    .playback
+                    .seek_hover
+                    .filter(|hover| hover.site == SeekSite::Row)
+                    .map(|hover| hover.at),
+                dragging: self.playback.seek_preview_secs.is_some(),
             }
         } else {
             SeekBarView {
@@ -415,6 +454,8 @@ impl QuillApp {
                 speed: self.playback.speed,
                 muted: false,
                 error: None,
+                hover: None,
+                dragging: false,
             }
         }
     }

@@ -30,6 +30,10 @@ pub(crate) struct SeekBarView {
     pub(crate) muted: bool,
     /// MED1: honest playback error for the active row, if any.
     pub(crate) error: Option<String>,
+    /// The pointer's fraction over the active row's scrubber.
+    pub(crate) hover: Option<f32>,
+    /// True while the seek slider is dragged (`display_secs` is the preview).
+    pub(crate) dragging: bool,
 }
 impl SeekBarView {
     pub(crate) fn fraction(&self) -> f64 {
@@ -37,6 +41,15 @@ impl SeekBarView {
             return 0.0;
         }
         (self.display_secs / self.duration_secs).clamp(0.0, 1.0)
+    }
+
+    /// Seconds for the time label: the time under the pointer while it
+    /// hovers (tdesktop shows the hover time), else `display_secs`.
+    pub(crate) fn label_secs(&self) -> f64 {
+        match self.hover.filter(|_| !self.dragging) {
+            Some(at) => f64::from(at.clamp(0.0, 1.0)) * self.duration_secs.max(0.0),
+            None => self.display_secs,
+        }
     }
 }
 /// MED1: speed + mute buttons and the honest playback error line for an
