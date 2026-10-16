@@ -870,7 +870,7 @@ crate::ui::shell::register_dialogs! {
 mod call_again;
 pub(super) mod call_video;
 #[cfg(feature = "demo-capture")]
-mod call_video_demo;
+pub(super) mod call_video_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod call_video_tests;

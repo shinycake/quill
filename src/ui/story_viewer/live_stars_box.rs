@@ -365,43 +365,29 @@ impl QuillApp {
     }
 }
 
-/// tdesktop `confirmLeaveCurrent`'s question and button for a live story
-/// (the in-frame card, `live_view::live_leave_other_card`, says the
-/// question; its button is Quill's "Leave call and watch").
-pub(super) fn leave_other_words(text: LeaveText) -> (quill::lang::Key, quill::lang::Key) {
+/// tdesktop `confirmLeaveCurrent`'s question for a live story, said by the
+/// in-frame card (`live_view::live_leave_other_card`); its button is
+/// Quill's "Leave call and watch".
+pub(super) fn leave_other_question(text: LeaveText) -> quill::lang::Key {
     match text {
-        LeaveText::EndCall { to_channel: false } => {
-            (keys::CALL_LEAVE_TO_OTHER_SURE, keys::CALL_BAR_HANGUP)
-        }
-        LeaveText::EndCall { to_channel: true } => (
-            keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
-            keys::CALL_BAR_HANGUP,
-        ),
+        LeaveText::EndCall { to_channel: false } => keys::CALL_LEAVE_TO_OTHER_SURE,
+        LeaveText::EndCall { to_channel: true } => keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
         LeaveText::LeaveGroupCall {
             from_channel: true,
             to_channel: true,
-        } => (
-            keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE_CHANNEL,
-            keys::GROUP_CALL_LEAVE,
-        ),
+        } => keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE_CHANNEL,
         LeaveText::LeaveGroupCall {
             from_channel: true,
             to_channel: false,
-        } => (
-            keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE,
-            keys::GROUP_CALL_LEAVE,
-        ),
+        } => keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE,
         LeaveText::LeaveGroupCall {
             from_channel: false,
             to_channel: true,
-        } => (
-            keys::GROUP_CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
-            keys::GROUP_CALL_LEAVE,
-        ),
+        } => keys::GROUP_CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
         LeaveText::LeaveGroupCall {
             from_channel: false,
             to_channel: false,
-        } => (keys::GROUP_CALL_LEAVE_TO_OTHER_SURE, keys::GROUP_CALL_LEAVE),
+        } => keys::GROUP_CALL_LEAVE_TO_OTHER_SURE,
     }
 }
 

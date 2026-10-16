@@ -61,7 +61,7 @@ impl QuillApp {
 
 /// Maya, and a connected video call with her camera (or screen) on and
 /// yours too.
-pub(super) fn seed_video_call(
+pub(in crate::ui) fn seed_video_call(
     session: &mut Session,
     screen: bool,
     sink: &Arc<dyn DiagnosticSink>,

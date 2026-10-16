@@ -298,13 +298,13 @@ impl QuillApp {
     /// `live_story`): the frame asks, in place of the picture, whether to
     /// leave it, with tdesktop's `confirmLeaveCurrent` question.
     /// "Leave call and watch" leaves the other call and joins the story
-    /// once the slot is free; Cancel brings the Join button back, which
-    /// asks again.
+    /// once the slot is free; Cancel (or Esc) brings the Join button back,
+    /// which asks again.
     pub(super) fn live_leave_other_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(text) = self.stories.live.leave_other else {
             return div().into_any_element();
         };
-        let (question, _) = super::live_stars_box::leave_other_words(text);
+        let question = super::live_stars_box::leave_other_question(text);
         div()
             .id("live-story-leave-other-card")
             .debug_selector(|| "live-story-leave-other-card".into())
@@ -338,8 +338,7 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .custom(chrome::ghost(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.stories.live.leave_other = None;
-                                cx.notify();
+                                this.cancel_live_leave_other(cx);
                             })),
                     )
                     .child(
