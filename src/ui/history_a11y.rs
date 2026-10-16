@@ -309,19 +309,8 @@ impl QuillApp {
                 if note.is_secret {
                     return false;
                 }
-                let sounding = self
-                    .playback
-                    .inline_videos
-                    .toggle_sound(chat.0, message.id.0);
-                if sounding {
-                    self.round_sound_started((chat.0, message.id.0), cx);
-                    if !note.is_viewed {
-                        self.mark_voice_opened(chat, message.id);
-                    }
-                    cx.notify();
-                } else if let Some(play) = note.play_file_id() {
-                    self.request_media_download(play, None, cx);
-                }
+                // The same as a click on the circle.
+                self.play_video_note(chat, message.id, note, cx);
             }
             _ => return false,
         }

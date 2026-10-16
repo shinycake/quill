@@ -19,13 +19,20 @@
 //!   and unloads it once far from the visible area (`unloadHeavyViewParts`).
 //! - A round video message plays once with sound when clicked, then loops
 //!   muted again.
+//! - With autoplay off (or data saver on) a clip plays only on demand
+//!   ([`Demand`]): a clicked round video once with sound, a clicked MP4
+//!   GIF as a muted loop. The demand lasts until the round video ends or
+//!   the slot is dropped.
 //!
 //! The state sits in one `RefCell`; every borrow is one short scope, and
 //! no player call (each reaches the backend) is made while it is held.
 #![deny(clippy::indexing_slicing)]
 
+mod demand;
+
 use super::inline_video::{InlineFrame, InlineTile};
 use super::video_player::{PlayState, Purpose, VideoPlayer};
+pub(super) use demand::Demand;
 use gpui_kit::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -318,6 +325,9 @@ struct State {
     scale: f32,
     /// The timer that releases players off screen for [`RELEASE_AFTER`].
     release_timer: Option<Task<()>>,
+    /// Clips asked for by a click (autoplay off, data saver, or not
+    /// downloaded yet).
+    on_demand: HashMap<Key, demand::OnDemand>,
 }
 
 /// The players (see the module docs). Shared (`Rc`) with the history's
@@ -366,6 +376,7 @@ impl InlineVideos {
                     .into_iter()
                     .partition(|(key, slot)| survives(*key, slot.seen, pass));
             state.players = keep;
+            state.forget(&drop);
             drop
         });
         drop(dropped);
@@ -382,6 +393,7 @@ impl InlineVideos {
                     .into_iter()
                     .partition(|((chat, _), _)| *chat == PANEL_CHAT);
             state.players = keep;
+            state.forget(&drop);
             drop
         });
         drop(dropped);
@@ -402,6 +414,7 @@ impl InlineVideos {
                     .into_iter()
                     .partition(|(key, slot)| survives(*key, slot.seen, pass));
             state.players = keep;
+            state.forget(&drop);
             drop
         });
         let marks: Vec<(Key, VideoPlayer)> = self
@@ -599,6 +612,7 @@ impl InlineVideos {
             if state.scale > 0. && (state.scale - scale).abs() > f32::EPSILON {
                 dropped.extend(std::mem::take(&mut state.players));
             }
+            state.forget(&dropped);
             state.swept = false;
             state.scale = scale;
             dropped
@@ -636,7 +650,10 @@ impl InlineVideos {
 
     /// Stop everything (viewer opened, autoplay turned off).
     pub(super) fn clear(&self) {
-        let dropped = self.with(|state| std::mem::take(&mut state.players));
+        let dropped = self.with(|state| {
+            state.on_demand.clear();
+            std::mem::take(&mut state.players)
+        });
         drop(dropped);
     }
 

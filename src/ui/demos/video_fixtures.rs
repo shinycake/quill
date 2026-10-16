@@ -180,3 +180,29 @@ pub(in crate::ui) fn apply_ready_video_send(
         }
     }
 }
+
+/// Test fixture: an animation message `message_id` in chat 11 whose file
+/// (`file_id`) is the local `demo-clip.mp4`, labelled `mime` (an MP4 GIF,
+/// or a video passed off as `image/gif`).
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(in crate::ui) fn apply_clip_animation(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+    (message_id, file_id): (i64, i32),
+    mime: &str,
+) {
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let clip_path = demo_media_allowlist()
+        .join("demo-clip.mp4")
+        .to_string_lossy()
+        .into_owned();
+    let clip = demo_file_json(file_id, &clip_path, true);
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{message_id},"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":1,"width":320,"height":180,"file_name":"clip.mp4","mime_type":"{mime}","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{clip}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+    );
+    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+        session.apply(owned);
+    }
+}

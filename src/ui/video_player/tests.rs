@@ -324,6 +324,11 @@ fn the_trace_line_has_the_documented_columns() {
 #[cfg(feature = "demo-capture")]
 mod inline;
 
+/// With autoplay off: a clicked round video plays with sound (downloaded
+/// first), a clicked MP4 GIF loops on the inline player.
+#[cfg(feature = "demo-capture")]
+mod on_demand;
+
 /// Picture-in-Picture: handed over, paused, snapped, closed, handed back.
 #[cfg(feature = "demo-capture")]
 mod pip;
