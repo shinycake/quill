@@ -14,7 +14,9 @@ use gpui_kit::{
     VisualTestContext, Window, div, px,
 };
 use quill::calls::live_video::convert::gradient_frame;
-use quill::calls::live_video::{LiveFrame, LiveRotation, LiveSink, LiveSource, LiveState};
+use quill::calls::live_video::{
+    LiveEnd, LiveFrame, LiveRotation, LiveSink, LiveSource, LiveState,
+};
 use std::time::{Duration, Instant};
 
 /// One tile, 160 × 90, at `top` in a window that clips.
@@ -243,6 +245,12 @@ fn a_refused_nv12_frame_shows_as_an_image_and_nv12_comes_back(cx: &mut TestAppCo
     push(&source, 3, later);
     draw(vcx);
     assert!(player.live_nv12_frame().is_some(), "NV12 again");
+    assert!(player.live_nv12_pooled() > 0);
+    // The feed ends: its spare buffers go, its last frame stays up.
+    source.end(LiveEnd::Over);
+    draw(vcx);
+    assert_eq!(player.live_nv12_pooled(), 0, "the pool went with the feed");
+    assert!(player.live_nv12_frame().is_some(), "the last frame stays");
     // Released with the player: its images and NV12 frames go.
     let made = take_made_images();
     assert!(!made.is_empty());

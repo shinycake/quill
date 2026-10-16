@@ -45,6 +45,16 @@ impl super::super::VideoPlayer {
         core.track.try_borrow().ok()?.nv12.shown_frame()
     }
 
+    /// Tests: NV12 buffers kept for reuse.
+    pub(crate) fn live_nv12_pooled(&self) -> usize {
+        let Some(core) = self.0.live.as_ref() else {
+            return 0;
+        };
+        core.track
+            .try_borrow()
+            .map_or(0, |track| track.nv12.pooled().len())
+    }
+
     /// Tests: what the player's pull does when the renderer refused the
     /// surface on screen (Windows), for platforms whose renderer draws no
     /// NV12 frames, so the picture on screen can't report a refusal.
