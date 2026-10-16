@@ -523,3 +523,130 @@ fn measure_1080p_frame_costs() {
         mb(picture)
     );
 }
+
+#[test]
+fn packed_nv12_is_tight_luma_then_interleaved_chroma() {
+    // 4 × 2: luma 0..8, U [100, 101], V [200, 201].
+    let mut planes: Vec<u8> = (0..8).collect();
+    planes.extend([100, 101, 200, 201]);
+    let frame = I420::new(&planes, 4, 2).expect("frame");
+    assert_eq!(nv12_packed_len(4, 2), Some(12));
+    let mut out = vec![0u8; 12];
+    assert!(i420_to_nv12_packed(&frame, &mut out));
+    assert_eq!(out, [0, 1, 2, 3, 4, 5, 6, 7, 100, 200, 101, 201]);
+    // Wider: each row is exactly the width, no padding between rows.
+    let (w, h) = (6u16, 4u16);
+    let planes = gradient(w, h);
+    let frame = I420::new(&planes, w, h).expect("frame");
+    let mut out = vec![0u8; nv12_packed_len(6, 4).expect("even")];
+    assert!(i420_to_nv12_packed(&frame, &mut out));
+    let (luma, chroma) = out.split_at(24);
+    assert_eq!(luma, frame.y);
+    for (row, pairs) in chroma.as_chunks::<6>().0.iter().enumerate() {
+        for (col, pair) in pairs.as_chunks::<2>().0.iter().enumerate() {
+            assert_eq!(*pair, [frame.u[row * 3 + col], frame.v[row * 3 + col]]);
+        }
+    }
+}
+
+#[test]
+fn packed_nv12_needs_even_sides_and_the_exact_length() {
+    for (w, h) in [(3usize, 2usize), (4, 3), (1, 1), (0, 2), (2, 0)] {
+        assert_eq!(nv12_packed_len(w, h), None, "{w}x{h}");
+    }
+    assert_eq!(nv12_packed_len(1920, 1080), Some(1920 * 1080 * 3 / 2));
+    assert_eq!(nv12_packed_len(usize::MAX - 1, 2), None, "overflow");
+    // An odd frame is a valid I420 frame but not an NV12 surface.
+    let odd = gradient(5, 3);
+    let odd = I420::new(&odd, 5, 3).expect("frame");
+    let mut out = vec![0u8; 64];
+    assert!(!i420_to_nv12_packed(&odd, &mut out));
+    assert!(out.iter().all(|byte| *byte == 0), "nothing written");
+    let even = gradient(4, 2);
+    let even = I420::new(&even, 4, 2).expect("frame");
+    for len in [0, 11, 13, 16] {
+        let mut out = vec![0u8; len];
+        assert!(!i420_to_nv12_packed(&even, &mut out), "{len} bytes");
+    }
+}
+
+#[test]
+fn packed_nv12_of_a_turned_and_mirrored_frame_matches_the_planes() {
+    // 4 × 2 turned a quarter (to 2 × 4), then mirrored: the planes the
+    // live picture packs, checked pixel by pixel against the turn rule
+    // and a row reversal.
+    let (w, h) = (4u16, 2u16);
+    let planes = gradient(w, h);
+    let frame = I420::new(&planes, w, h).expect("frame");
+    let (mut turned, tw, th) = rotate_planes(&frame, LiveRotation::R90).expect("turned");
+    assert_eq!((tw, th), (2, 4));
+    assert!(mirror_planes(&mut turned, tw, th));
+    let shown = I420::new(&turned, tw, th).expect("turned frame");
+    let mut out = vec![0u8; nv12_packed_len(2, 4).expect("even")];
+    assert!(i420_to_nv12_packed(&shown, &mut out));
+    let (luma, chroma) = out.split_at(8);
+    // Turned 90: (x, y) lands at (y, w - 1 - x); mirrored: x' = tw - 1 - x.
+    for y in 0..2usize {
+        for x in 0..4usize {
+            let (tx, ty) = (y, 3 - x);
+            let mx = 1 - tx;
+            assert_eq!(luma[ty * 2 + mx], frame.y[y * 4 + x], "luma {x},{y}");
+        }
+    }
+    // Chroma: the 2 × 1 grid turned to 1 × 2 (the right block on top); a
+    // single column mirrors to itself.
+    assert_eq!(chroma, [frame.u[1], frame.v[1], frame.u[0], frame.v[0]]);
+}
+
+/// What a live frame costs on Windows before (I420 to BGRA, uploaded to
+/// the atlas) and after (I420 to a packed NV12 surface frame), on this
+/// machine: the pure functions only
+/// (`docs/decisions/video-player-live-nv12.md`). Run in release:
+/// `cargo test --release --no-default-features --lib -- --ignored
+/// measure_windows_live_nv12 --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn measure_windows_live_nv12() {
+    use std::hint::black_box;
+    use std::sync::Arc;
+    let runs = 61;
+    for (w, h) in [(1920u16, 1080u16), (1280, 720), (640, 360)] {
+        let planes = gradient(w, h);
+        let frame = I420::new(&planes, w, h).expect("frame");
+        let len = nv12_packed_len(usize::from(w), usize::from(h)).expect("even");
+        // Before: one BGRA buffer a frame.
+        let bgra = median_us(runs, || {
+            black_box(i420_to_bgra(black_box(&frame)));
+        });
+        // After, a new buffer a frame (no pool).
+        let fresh = median_us(runs, || {
+            let mut bytes: Arc<[u8]> = std::iter::repeat_n(0u8, len).collect();
+            let out = Arc::get_mut(&mut bytes).expect("unique");
+            black_box(i420_to_nv12_packed(black_box(&frame), out));
+            black_box(bytes);
+        });
+        // After, a pooled buffer filled again.
+        let mut pooled: Arc<[u8]> = std::iter::repeat_n(0u8, len).collect();
+        let reused = median_us(runs, || {
+            let out = Arc::get_mut(&mut pooled).expect("unique");
+            black_box(i420_to_nv12_packed(black_box(&frame), out));
+        });
+        // The CPU fallback when the renderer refuses the surface.
+        let color = crate::video_decode::YuvColor {
+            matrix: crate::video_decode::YuvMatrix::Bt601,
+            full_range: true,
+        };
+        let fallback = median_us(runs, || {
+            black_box(crate::video_decode::nv12_to_bgra(
+                black_box(&pooled),
+                u32::from(w),
+                u32::from(h),
+                color,
+            ));
+        });
+        let bgra_bytes = usize::from(w) * usize::from(h) * 4;
+        eprintln!(
+            "MEASURE {w}x{h} before: bgra {bgra} us ({bgra_bytes} B); after: nv12 fresh {fresh} us, nv12 pooled {reused} us ({len} B); refused fallback nv12->bgra {fallback} us"
+        );
+    }
+}

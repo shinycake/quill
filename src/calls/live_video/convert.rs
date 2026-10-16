@@ -1,12 +1,14 @@
-//! Pure conversions for pushed frames: I420 turned or mirrored, interleaved into NV12
-//! (macOS pixel buffers), expanded to BGRA (GPUI images on Windows and
-//! Linux), shrunk and blurred for the paused tile, and back from RGBA for
+//! Pure conversions for pushed frames: I420 turned or mirrored,
+//! interleaved into NV12 (macOS pixel buffers, Windows surface frames),
+//! expanded to BGRA (GPUI images on Linux, and the fallback elsewhere),
+//! shrunk and blurred for the paused tile, and back from RGBA for
 //! pictures Quill makes itself (your shared screen's preview, fixtures).
 //!
 //! The colour math is the one the engine's RGBA conversion used before
-//! every picture became a live feed: BT.601 with full-range luma, which is also the matrix GPUI's surface
-//! shader applies to a full-range NV12 buffer, so every path shows the
-//! same colours.
+//! every picture became a live feed: BT.601 with full-range luma, which
+//! is also the matrix GPUI's macOS surface shader applies to a full-range
+//! NV12 buffer and the one Windows NV12 live frames carry, so every path
+//! shows the same colours.
 #![deny(clippy::indexing_slicing)]
 
 use super::LiveRotation;
@@ -183,6 +185,35 @@ pub fn i420_to_nv12(
         }
     }
     true
+}
+
+/// Bytes of a tightly packed NV12 frame (Y `w × h`, then Cb and Cr
+/// interleaved, `w × h / 2`): what a GPUI NV12 surface frame holds.
+/// `None` for a zero or odd side (NV12 surfaces need even sides) or a
+/// size that overflows.
+pub fn nv12_packed_len(width: usize, height: usize) -> Option<usize> {
+    if width == 0 || height == 0 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+        return None;
+    }
+    let luma = width.checked_mul(height)?;
+    luma.checked_add(luma / 2)
+}
+
+/// [`i420_to_nv12`] into one tightly packed buffer (rows of exactly the
+/// frame's width, the chroma plane right after the luma plane), as a
+/// Windows NV12 surface frame wants it. `false`, with nothing written
+/// past a bound, for an odd side or a buffer not exactly
+/// [`nv12_packed_len`] long.
+pub fn i420_to_nv12_packed(src: &I420, out: &mut [u8]) -> bool {
+    let (w, h) = (src.width, src.height);
+    if nv12_packed_len(w, h) != Some(out.len()) {
+        return false;
+    }
+    let Some((y, uv)) = out.split_at_mut_checked(w * h) else {
+        return false;
+    };
+    // Even sides: a chroma row is `w / 2` pairs, `w` bytes.
+    i420_to_nv12(src, y, w, uv, w)
 }
 
 /// The per-byte terms of the engine's conversion, computed once a frame
