@@ -739,7 +739,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
 - [x] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
 - [x] Picture-in-picture for live streams and live stories (LIVE badge with viewers, mute, enlarge back to the stream window or story, close; tdesktop has no live PiP, #883) <!-- parity:calls-live-pip -->
-- [ ] Live PiP follows a feed change (a rejoin or presenter switch keeps the old feed in the PiP until it is enlarged; it closes when that feed ends) <!-- parity:calls-live-pip-feed-follow -->
+- [x] Live PiP follows a feed change (a rejoin or presenter switch keeps the old feed in the PiP until it is enlarged; it closes when that feed ends) <!-- parity:calls-live-pip-feed-follow -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
 - [x] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 

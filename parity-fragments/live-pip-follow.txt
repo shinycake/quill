@@ -1,3 +1,0 @@
-# live PiP follows a feed change: a rejoin, a restart or a presenter
-# switch swaps the player inside the open PiP; the gap shows connecting.
-parity:calls-live-pip-feed-follow
