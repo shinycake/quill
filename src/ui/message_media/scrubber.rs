@@ -32,8 +32,9 @@ const WAVEFORM_UNPLAYED: f32 = 0.35;
 /// Opacity of the line's unplayed track.
 const LINE_UNPLAYED: f32 = 0.25;
 /// How much of the full color the hovered stretch gains over the unplayed
-/// tone (tdesktop paints it with the active color at 30%).
-const HOVER_TINT: f32 = 0.3;
+/// tone. tdesktop uses 30%; at that the stretch barely shows on a dark
+/// bubble.
+const HOVER_TINT: f32 = 0.5;
 /// The line face's row: room for the dragged knob and a comfortable
 /// pointer target around the thin track.
 const LINE_ROW: f32 = 20.;
