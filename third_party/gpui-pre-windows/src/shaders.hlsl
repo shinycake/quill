@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// scRGB output for HDR stills (`to_output`, the `hdr_surface` shaders). See
+// scRGB output for HDR stills (`to_output`, the `hdr_surface` shaders), NV12 video
+// pictures (the `yuv_surface` shaders). See
 // third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #include "alpha_correction.hlsl"
 
@@ -1422,4 +1423,60 @@ float4 hdr_surface_fragment(HdrSurfaceFragmentInput input): SV_Target {
     }
     // Linear, 1.0 = SDR white, to scRGB.
     return float4(rgb * output_scale, alpha);
+}
+
+/*
+**
+**              QUILL: YUV surfaces
+**
+*/
+
+// A video picture uploaded from an NV12 `SurfaceFrame`: luma in `t_sprite`
+// (R8_UNORM), interleaved chroma in `t_chroma` (R8G8_UNORM, half size),
+// drawn opaque over `bounds`. `r_row`, `g_row` and `b_row` are the frame's
+// `YuvColor::rgb_rows` (its BT.601/BT.709 matrix and full/limited range):
+// each channel is `dot(row, (y, cb, cr, 1))`, gamma-encoded like an image.
+struct YuvSurface {
+    Bounds bounds;
+    Bounds content_mask;
+    float4 r_row;
+    float4 g_row;
+    float4 b_row;
+};
+
+struct YuvSurfaceVertexOutput {
+    nointerpolation uint surface_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 texture_coords: TEXCOORD1;
+    float4 clip_distance: SV_ClipDistance;
+};
+
+struct YuvSurfaceFragmentInput {
+    nointerpolation uint surface_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 texture_coords: TEXCOORD1;
+};
+
+StructuredBuffer<YuvSurface> yuv_surfaces: register(t1);
+Texture2D<float4> t_chroma: register(t2);
+
+YuvSurfaceVertexOutput yuv_surface_vertex(uint vertex_id: SV_VertexID, uint surface_id: SV_InstanceID) {
+    float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    YuvSurface surface = yuv_surfaces[surface_id];
+
+    YuvSurfaceVertexOutput output;
+    output.surface_id = surface_id;
+    output.position = to_device_position(unit_vertex, surface.bounds);
+    output.texture_coords = unit_vertex;
+    output.clip_distance = distance_from_clip_rect(unit_vertex, surface.bounds, surface.content_mask);
+    return output;
+}
+
+float4 yuv_surface_fragment(YuvSurfaceFragmentInput input): SV_Target {
+    YuvSurface surface = yuv_surfaces[input.surface_id];
+    float luma = t_sprite.Sample(s_sprite, input.texture_coords).r;
+    float2 chroma = t_chroma.Sample(s_sprite, input.texture_coords).rg;
+    float4 yuv = float4(luma, chroma.x, chroma.y, 1.0);
+    float3 rgb = saturate(float3(dot(surface.r_row, yuv), dot(surface.g_row, yuv), dot(surface.b_row, yuv)));
+    return to_output(float4(rgb, 1.0));
 }

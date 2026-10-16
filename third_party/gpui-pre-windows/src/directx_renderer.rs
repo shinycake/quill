@@ -1,7 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // drawing returns an error instead of panicking when device-loss recovery
 // failed, and every recovery attempt keeps DirectComposition; HDR stills and the scRGB
-// swap chain (`hdr_surfaces`). See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`). See
+// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -25,6 +26,7 @@ use windows::{
 
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
 use hdr_surfaces::{HdrSurfaces, OutputMode};
+use yuv_surfaces::YuvSurfaces;
 use crate::*;
 use gpui::*;
 
@@ -36,6 +38,8 @@ const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
 
 #[path = "hdr_surfaces.rs"]
 mod hdr_surfaces;
+#[path = "yuv_surfaces.rs"]
+mod yuv_surfaces;
 
 pub(crate) struct FontInfo {
     pub gamma_ratios: [f32; 4],
@@ -109,6 +113,9 @@ struct DirectXRenderPipelines {
     subpixel_sprites: PipelineState<SubpixelSprite>,
     poly_sprites: PipelineState<PolychromeSprite>,
     hdr_surfaces: HdrSurfaces,
+    /// Quill: `None` when the NV12 pipeline couldn't be made (NV12 is then
+    /// not offered, `surface_support`).
+    yuv_surfaces: Option<YuvSurfaces>,
 }
 
 struct DirectXGlobalElements {
@@ -352,6 +359,10 @@ impl DirectXRenderer {
         self.devices = Some(devices);
         self.resources = Some(resources);
         self.globals = globals;
+        // A recovered device with a working NV12 pipeline offers NV12 again.
+        if pipelines.yuv_surfaces.is_some() {
+            crate::surface_support::set_nv12_available(true);
+        }
         self.pipelines = pipelines;
         self.direct_composition = direct_composition;
         // The new swap chain is 8-bit; the next frame switches again if needed.
@@ -435,10 +446,17 @@ impl DirectXRenderer {
                 )
             })?;
         }
-        // Quill: a frame without HDR stills frees their textures (the viewer
-        // closed), so they never outlive what's on screen.
+        // Quill: video textures not drawn lately go, and a frame without
+        // surfaces frees every surface texture (the viewer closed), so they
+        // never outlive what's on screen.
+        if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
+            yuv.end_frame();
+        }
         if scene.surfaces.is_empty() {
             self.pipelines.hdr_surfaces.release();
+            if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
+                yuv.release();
+            }
         }
         Ok(())
     }
@@ -862,7 +880,21 @@ impl DirectXRenderer {
             return Ok(());
         }
         let devices = self.devices.as_ref().context("devices missing")?;
-        self.pipelines.hdr_surfaces.draw(devices, surfaces)
+        // Quill: in order, each through the pipeline for its format.
+        for surface in surfaces {
+            match surface.frame.format() {
+                SurfaceFormat::Rgba16Float => self
+                    .pipelines
+                    .hdr_surfaces
+                    .draw(devices, slice::from_ref(surface))?,
+                SurfaceFormat::Nv12 => {
+                    if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
+                        yuv.draw(devices, surface)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn gpu_specs(&self) -> Result<GpuSpecs> {
@@ -1043,6 +1075,16 @@ impl DirectXRenderPipelines {
             create_blend_state(device)?,
         )?;
         let hdr_surfaces = HdrSurfaces::new(device)?;
+        // Quill: without the NV12 pipeline the window still draws; video
+        // falls back to BGRA images.
+        let yuv_surfaces = match YuvSurfaces::new(device) {
+            Ok(yuv) => Some(yuv),
+            Err(error) => {
+                log::warn!("NV12 surface pipeline unavailable: {error:#}");
+                crate::surface_support::set_nv12_available(false);
+                None
+            }
+        };
 
         Ok(Self {
             shadow_pipeline,
@@ -1054,6 +1096,7 @@ impl DirectXRenderPipelines {
             subpixel_sprites,
             poly_sprites,
             hdr_surfaces,
+            yuv_surfaces,
         })
     }
 }
@@ -1770,6 +1813,7 @@ pub(crate) mod shader_resources {
         PolychromeSprite,
         EmojiRasterization,
         HdrSurface,
+        YuvSurface,
     }
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1850,6 +1894,10 @@ pub(crate) mod shader_resources {
                 ShaderModule::HdrSurface => match target {
                     ShaderTarget::Vertex => HDR_SURFACE_VERTEX_BYTES,
                     ShaderTarget::Fragment => HDR_SURFACE_FRAGMENT_BYTES,
+                },
+                ShaderModule::YuvSurface => match target {
+                    ShaderTarget::Vertex => YUV_SURFACE_VERTEX_BYTES,
+                    ShaderTarget::Fragment => YUV_SURFACE_FRAGMENT_BYTES,
                 },
             };
             Self { inner: bytes }
@@ -1939,6 +1987,7 @@ pub(crate) mod shader_resources {
                 ShaderModule::PolychromeSprite => "polychrome_sprite",
                 ShaderModule::EmojiRasterization => "emoji_rasterization",
                 ShaderModule::HdrSurface => "hdr_surface",
+                ShaderModule::YuvSurface => "yuv_surface",
             }
         }
     }

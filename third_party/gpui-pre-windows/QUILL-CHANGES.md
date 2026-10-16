@@ -168,3 +168,40 @@ Windows HDR on (`docs/decisions/hdr-viewer-windows.md`):
 
 Type-checked and linted with `cargo clippy --target x86_64-pc-windows-msvc`
 on macOS and the HLSL validated with glslang; not run on Windows.
+
+The Quill project changed it in 2026 to draw video pictures as NV12
+(`SurfaceFormat::Nv12` from the vendored gpui-pre core) and convert them on
+the GPU, so the decoder skips its BGRA conversion and a 1080p picture
+uploads 3 MB instead of 8 MB (`docs/decisions/video-player-nv12.md`):
+
+- `src/yuv_surfaces.rs` (new, a child module of `directx_renderer`): each
+  NV12 `PaintSurface` is uploaded with `UpdateSubresource` into an
+  `R8_UNORM` luma texture and an `R8G8_UNORM` half-size chroma texture,
+  only when its frame id is new. Texture pairs are slots reused for the
+  next picture of the same size (up to 16, one per clip on screen; a slot
+  not drawn for two frames is freed) and remade when the size changes.
+  The per-surface instance data carries `YuvColor::rgb_rows` (the
+  BT.601/BT.709 matrix and full/limited range, picked in gpui-pre).
+  A texture or pipeline that can't be made is logged, the surface is
+  skipped, and `surface_support` stops offering NV12; nothing fails the
+  frame.
+- `src/surface_support.rs` (new, public): `nv12_available()`, cleared on
+  such a failure and set again when a lost device recovers with a working
+  pipeline, so the producer can go back to BGRA images. With
+  `QUILL_TRACE_VIDEO` set, uploads print `VU,nv12,<bytes>,<us>`, and atlas
+  uploads of 64 KiB and up print `VU,atlas,<bytes>,<us>` (`directx_atlas.rs`),
+  so the two paths can be compared.
+- `src/directx_renderer.rs`: `draw_surfaces` sends each surface, in order,
+  to `hdr_surfaces` or `yuv_surfaces` by format; the NV12 pipeline is an
+  `Option` (a failure to make it doesn't fail the renderer); slots age at
+  the end of each frame and go with the HDR textures in a frame without
+  surfaces.
+- `src/shaders.hlsl`: `yuv_surface_vertex` / `yuv_surface_fragment`: sample
+  luma (`t0`) and chroma (`t2`), `dot` each row with `(y, cb, cr, 1)`,
+  saturate, and write through `to_output` (so HDR output mode keeps the
+  picture at SDR white). `build.rs` compiles the module.
+- `src/hdr_surfaces.rs`: uses its own 8 bytes a pixel (the core's
+  `bytes_per_pixel` became `byte_len`) and ignores NV12 frames.
+
+The HLSL was validated with glslang on macOS; the CI Windows release build
+compiles it with fxc. Not run on Windows by the author.
