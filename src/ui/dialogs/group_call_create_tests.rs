@@ -30,6 +30,10 @@ const OTHER_CALL: i32 = 77;
 const ME: MessageSender = MessageSender::User { user_id: 1 };
 
 fn frames(vcx: &mut VisualTestContext) {
+    // QuillApp resets reduce-motion when it is built; dialog entrances run
+    // on the wall clock, so a click aimed at a mid-slide button misses
+    // under load. At rest the layout is the same on every run.
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
     vcx.run_until_parked();
     for _ in 0..3 {
         vcx.update(|window, cx| window.render_frame(cx));
