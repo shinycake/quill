@@ -42,8 +42,6 @@ pub(crate) struct HistoryRowInputs {
     pub(crate) seek_bar: Option<SeekBarView>,
     pub(crate) animation_playing: bool,
     pub(crate) animation_frame: Option<std::sync::Arc<gpui_kit::RenderImage>>,
-    pub(crate) video_playing: bool,
-    pub(crate) video_frame: Option<PathBuf>,
     pub(crate) is_secret: bool,
     /// Delete animation progress (0..1) while the deleted message
     /// dissolves; `None` for live messages.

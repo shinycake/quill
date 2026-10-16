@@ -261,7 +261,7 @@ impl QuillApp {
         if grab == Grab::Head {
             editor.motion.dot.start(1.0, DOT_MS, reduce);
         }
-        if let Some(player) = editor.player.borrow_mut().as_mut() {
+        if let Some(player) = editor.player.as_ref() {
             player.pause();
         }
         self.video_timeline_drag(x, cx);
@@ -310,14 +310,14 @@ impl QuillApp {
         if due {
             editor.motion.seek_last = Some(now);
             editor.motion.seek_pending = None;
-            if let Some(player) = editor.player.borrow_mut().as_mut() {
+            if let Some(player) = editor.player.as_ref() {
                 player.seek(at as f64 / 1000.0);
             }
         } else {
             editor.motion.seek_pending = Some(at);
         }
         let cover_moved = matches!(moved, Moved::Cover(_));
-        let no_player = editor.player.borrow().is_none();
+        let no_player = editor.player.is_none();
         if cover_moved || no_player {
             self.refresh_video_preview(at, cx);
         }
@@ -348,7 +348,7 @@ impl QuillApp {
         let resume = if latest >= till { from } else { latest };
         editor.motion.seek_last = None;
         editor.playback_ms = Some(resume);
-        if let Some(player) = editor.player.borrow_mut().as_mut() {
+        if let Some(player) = editor.player.as_ref() {
             player.seek(resume as f64 / 1000.0);
             if !editor.user_paused {
                 player.play();

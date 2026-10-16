@@ -125,8 +125,6 @@ impl QuillApp {
                         _ => Vec::new(),
                     },
                     self.message_custom_emoji_frames(message, cx),
-                    inputs.video_playing,
-                    inputs.video_frame.clone(),
                     inline,
                     &self.message_ui.spoiler_revealed,
                     inputs.is_secret,

@@ -366,8 +366,6 @@ pub(in crate::ui) fn video_attachment(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    playing: bool,
-    frame: Option<&std::path::Path>,
     inline: Option<crate::ui::inline_video::InlineFrame>,
     sponsored: Option<(ChatId, i64)>,
     // Phase 4.5: `(chat_id, message_id)` when a click should open the
@@ -382,34 +380,21 @@ pub(in crate::ui) fn video_attachment(
     let row_id = message_id.0 as u64;
     let play_id = video.play_file_id().unwrap_or(FileId(0));
     let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
-    let mime = video.mime_type.clone();
-    let start_timestamp = video.start_timestamp;
-    let play_label = if playing {
-        tr(keys::Q_MISC_PAUSE)
-    } else {
-        tr(keys::Q_MISC_PLAY)
-    };
+    let play_label = tr(keys::Q_MISC_PLAY);
     // Autoplaying: the time left and a muted mark (Telegram Desktop).
     let live_remaining = inline.as_ref().map(|inline| inline.remaining_secs);
     let duration = match live_remaining {
         Some(Some(left)) => format_voice_duration(left.ceil() as i32),
         _ => format_voice_duration(video.duration),
     };
-    let visual = if playing {
-        frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
-    } else {
-        None
-    };
-    let visual = visual.or_else(|| {
-        [thumb_id, play_id].into_iter().find_map(|id| {
-            if id.0 == 0 {
-                return None;
-            }
-            files
-                .get(&id.0)
-                .and_then(|file| file.usable_path())
-                .and_then(|path| sandboxed_display_path(path, media_roots))
-        })
+    let visual = [thumb_id, play_id].into_iter().find_map(|id| {
+        if id.0 == 0 {
+            return None;
+        }
+        files
+            .get(&id.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, media_roots))
     });
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
@@ -486,10 +471,8 @@ pub(in crate::ui) fn video_attachment(
             })
             .into_any_element()
     };
-    let video_disc = if downloading_now && !playing {
+    let video_disc = if downloading_now {
         MediaDisc::Progress(download_fraction(play_id, files))
-    } else if playing {
-        MediaDisc::Pause
     } else {
         MediaDisc::Play
     };
@@ -534,10 +517,6 @@ pub(in crate::ui) fn video_attachment(
                                     .role(gpui_kit::Role::Button)
                                     .aria_label(play_label)
                                     .cursor_pointer()
-                                    .when(playing, |disc| {
-                                        disc.invisible()
-                                            .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
-                                    })
                                     // Press on the disc must not start the frame's click (open viewer).
                                     .swallow_press()
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -549,23 +528,11 @@ pub(in crate::ui) fn video_attachment(
                                                 cx,
                                             );
                                         }
-                                        // With the native player, videos play in
-                                        // the media viewer (Telegram Desktop's
-                                        // behavior); inline frames otherwise.
-                                        if crate::ui::video_player::supported()
-                                            && let Some((chat_id, message_id)) = viewer
-                                        {
+                                        // Videos play in the media viewer
+                                        // (Telegram Desktop's behavior).
+                                        if let Some((chat_id, message_id)) = viewer {
                                             this.open_media_viewer(chat_id, message_id, cx);
-                                            return;
                                         }
-                                        this.toggle_video_playback(
-                                            message_id,
-                                            play_id,
-                                            mime.clone(),
-                                            start_timestamp,
-                                            None,
-                                            cx,
-                                        );
                                     })),
                             ),
                     )

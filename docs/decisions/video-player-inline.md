@@ -262,7 +262,8 @@ from Opening, Playing and Failed.
 - **`video-player-core.md`, "Supersedes":** "`NativeVideo` and
   `ffmpeg_video.rs` remain for inline tiles, round videos, GIFs and stories
   until PR 3 and PR 5" now reads: they remain for the video editor, premium
-  promo and premium preview until PR 5.
+  promo and premium preview until PR 5. (Done in PR 5,
+  `video-player-legacy.md`.)
 
 ## Deviations from the design
 
@@ -348,7 +349,7 @@ Not verified:
 - The story viewer in a cached slice, so a story frame redraws only its
   picture.
 - PR 5 deletes `native_video.rs` and `ffmpeg_video.rs` with their last
-  consumers.
+  consumers. (Done, `video-player-legacy.md`.)
 
 No README parity item is fully completed by this PR, so there is no parity
 fragment.

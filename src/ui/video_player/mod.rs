@@ -20,6 +20,7 @@ mod backend_still;
 pub(crate) mod controls;
 mod element;
 pub(super) mod pacing;
+mod rotate;
 mod transport;
 
 #[cfg(target_os = "macos")]
@@ -749,11 +750,10 @@ fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
     }
     match picture {
         Picture::Image(image) => {
-            super::native_video_rotate::turn_render_image(image, turns, mirrored)
-                .map(Picture::Image)
+            rotate::turn_render_image(image, turns, mirrored).map(Picture::Image)
         }
         Picture::Surface(buffer) => {
-            super::native_video_rotate::turn_surface(buffer, turns, mirrored).map(Picture::Surface)
+            rotate::turn_surface(buffer, turns, mirrored).map(Picture::Surface)
         }
     }
 }
@@ -764,7 +764,7 @@ fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
         return None;
     }
     let Picture::Image(image) = picture;
-    super::native_video_rotate::turn_render_image(image, turns, mirrored).map(Picture::Image)
+    rotate::turn_render_image(image, turns, mirrored).map(Picture::Image)
 }
 
 /// The backend for this file: a still first picture in screenshot

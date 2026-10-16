@@ -1,69 +1,12 @@
-//! History playback for `messageVideo`.
-//!
-//! tdesktop’s video bubble (`history/view/media`) shows the JPEG thumbnail, a
-//! duration, and a play control, then plays inline. Unigram does the same with
-//! TDLib `video`. GPUI has no video surface, so Quill extracts a short preview
-//! with `ffmpeg` — the same approach as GIF frames — and loops those frames
-//! until Pause. Frames live under `quill-media-cache/{account}/video-frames/{file_id}`.
-//! That cache root is on the display allowlist; other temp paths stay blocked.
+//! What sending a video needs from `ffprobe`/`ffmpeg`: the probes behind
+//! `inputMessageVideo` and `inputMessageVideoNote`, the round video capture,
+//! and the one frame extraction still used (webm stickers). Playing a video
+//! is the job of the shared player (`ui/video_player`).
 #![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-
-/// Parent of every ffmpeg frame directory: `{media_cache_base}/video-frames`,
-/// created 0700. That cache root is on the display allowlist; other temp
-/// paths stay blocked.
-pub fn video_frame_cache_root() -> PathBuf {
-    crate::local_path::media_cache_base().join("video-frames")
-}
-
-/// Per-file frame directory: `{video_frame_cache_root}/{file_id}`.
-pub fn video_frame_cache_dir(file_id: i32) -> PathBuf {
-    video_frame_cache_root().join(file_id.to_string())
-}
-
-/// Parent of every viewer frame directory: `{media_cache_base}/viewer-frames`,
-/// created 0700. The media viewer extracts full-clip frames at viewer
-/// resolution, separate from the row preview's 12-frame cache, so the two
-/// never share a directory.
-pub fn viewer_frame_cache_root() -> PathBuf {
-    crate::local_path::media_cache_base().join("viewer-frames")
-}
-
-/// Per-file viewer frame directory: `{viewer_frame_cache_root}/{file_id}`.
-pub fn viewer_frame_cache_dir(file_id: i32) -> PathBuf {
-    viewer_frame_cache_root().join(file_id.to_string())
-}
-
-/// Account or demo roots plus the viewer frame cache. Creates the cache root
-/// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
-pub fn with_viewer_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
-    let root = viewer_frame_cache_root();
-    crate::local_path::ensure_private_dir(&root);
-    roots.push(root);
-    roots
-}
-
-/// Remove extracted viewer frames for one file.
-pub fn discard_viewer_frame_cache(file_id: i32) {
-    let _ = std::fs::remove_dir_all(viewer_frame_cache_dir(file_id));
-}
-
-/// Account or demo roots plus the video frame cache. Creates the cache root
-/// (0700, symlink-safe) so `sandboxed_display_path` can canonicalize it.
-pub fn with_video_frame_cache(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
-    let root = video_frame_cache_root();
-    crate::local_path::ensure_private_dir(&root);
-    roots.push(root);
-    roots
-}
-
-/// Remove extracted frames for one file. Source media outside the cache is left alone.
-pub fn discard_frame_cache(file_id: i32) {
-    let _ = std::fs::remove_dir_all(video_frame_cache_dir(file_id));
-}
 
 /// Dimensions and streaming hint for `inputVideo` (TDLib 1.8.67).
 ///
@@ -421,118 +364,11 @@ pub fn is_playable_video(mime: &str, path: &Path) -> bool {
     )
 }
 
-/// Frames to cycle. `start_timestamp` is `messageVideo.start_timestamp` (seconds).
-/// A missing `ffmpeg` or an unreadable file is an error.
-pub fn playback_frames(
-    src: &Path,
-    mime: &str,
-    cache_dir: &Path,
-    start_timestamp: i32,
-) -> Result<Vec<PathBuf>, String> {
-    if !is_playable_video(mime, src) {
-        return Err("unsupported video".into());
-    }
-    let frames = extract_frames(src, cache_dir, start_timestamp, 8.0, 240, 12, None, None)?;
-    if frames.is_empty() {
-        return Err("ffmpeg produced no frames".into());
-    }
-    Ok(frames)
-}
-
-/// Full-clip frames for the media viewer (parity slice 5).
-///
-/// The row preview extracts 12 frames at 8 fps; the viewer needs the whole
-/// clip so decoded frames render in-place. Frame rate adapts to `duration_secs`
-/// to bound the cache: 8 fps for clips up to 75 s, then fewer fps to stay
-/// under `VIEWER_MAX_FRAMES` (600). `fps` is the actual extraction rate, used
-/// to map the playback clock to a frame index.
+/// Frames an ffmpeg run wrote (the webm sticker decoder, `sticker_playback`).
 #[derive(Debug)]
 pub struct ViewerFrames {
     pub frames: Vec<PathBuf>,
     pub fps: f64,
-}
-
-/// Maximum viewer frames per clip (75 s at 8 fps). Longer clips get a lower
-/// fps so the full duration stays covered.
-pub const VIEWER_MAX_FRAMES: i32 = 600;
-/// Viewer extraction frame rate for clips within the frame budget.
-pub const VIEWER_FPS: f64 = 8.0;
-/// Viewer frame width in px (matches the viewer's fixed frame).
-pub const VIEWER_FRAME_WIDTH: i32 = 720;
-
-pub fn viewer_playback_frames(
-    src: &Path,
-    mime: &str,
-    cache_dir: &Path,
-    start_timestamp: i32,
-    duration_secs: i32,
-) -> Result<ViewerFrames, String> {
-    if !is_playable_video(mime, src) {
-        return Err("unsupported video".into());
-    }
-    let fps = viewer_fps_for_duration(duration_secs);
-    let frames = extract_frames(
-        src,
-        cache_dir,
-        start_timestamp,
-        fps,
-        VIEWER_FRAME_WIDTH,
-        VIEWER_MAX_FRAMES,
-        None,
-        None,
-    )?;
-    if frames.is_empty() {
-        return Err("ffmpeg produced no frames".into());
-    }
-    Ok(ViewerFrames { frames, fps })
-}
-
-/// Like `viewer_playback_frames`, but the running ffmpeg child is published
-/// into `child_slot` while it runs (cleared when it exits), so the UI can
-/// kill an extraction the user abandoned (viewer closed/stepped) instead of
-/// letting it run to completion on a discarded cache dir. `cancelled` is a
-/// shared flag the UI sets when the run is abandoned: it is checked before
-/// spawning and right after publishing the child, closing the race where
-/// the UI kills between extraction start and the child being published —
-/// in that window the worker kills its own freshly spawned child.
-pub fn viewer_playback_frames_cancelable(
-    src: &Path,
-    mime: &str,
-    cache_dir: &Path,
-    start_timestamp: i32,
-    duration_secs: i32,
-    child_slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
-    cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<ViewerFrames, String> {
-    if !is_playable_video(mime, src) {
-        return Err("unsupported video".into());
-    }
-    let fps = viewer_fps_for_duration(duration_secs);
-    let frames = extract_frames(
-        src,
-        cache_dir,
-        start_timestamp,
-        fps,
-        VIEWER_FRAME_WIDTH,
-        VIEWER_MAX_FRAMES,
-        Some((child_slot, cancelled)),
-        None,
-    )?;
-    if frames.is_empty() {
-        return Err("ffmpeg produced no frames".into());
-    }
-    Ok(ViewerFrames { frames, fps })
-}
-
-/// Extraction fps for a clip: 8 fps up to 75 s, then fewer fps to stay
-/// under `VIEWER_MAX_FRAMES` (600). Minimum 1 fps.
-fn viewer_fps_for_duration(duration_secs: i32) -> f64 {
-    let fps = if duration_secs > 0 {
-        (f64::from(VIEWER_MAX_FRAMES) / f64::from(duration_secs)).min(VIEWER_FPS)
-    } else {
-        VIEWER_FPS
-    };
-    fps.max(1.0)
 }
 
 fn wait_for_cancelable_child(

@@ -236,11 +236,7 @@ impl QuillApp {
         if primary.is_empty() {
             primary
         } else {
-            quill::voice::with_capture_root(quill::video::with_viewer_frame_cache(
-                quill::video::with_video_frame_cache(quill::animation::with_gif_frame_cache(
-                    primary,
-                )),
-            ))
+            quill::voice::with_capture_root(quill::animation::with_gif_frame_cache(primary))
         }
     }
 

@@ -485,7 +485,6 @@ impl QuillApp {
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();
         self.stop_sticker_playback();
-        self.stop_video_playback();
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.deselect_chat();
         } else if let Some(session) = self.demo_session.as_mut() {

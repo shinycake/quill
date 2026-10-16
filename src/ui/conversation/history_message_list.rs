@@ -273,21 +273,15 @@ impl QuillApp {
                         };
                         let animation_playing = self.playback.playing_animation == Some(message.id);
                         let animation_frame = if animation_playing {
-                            self.playback
-                                .animation_frames
-                                .get(self.playback.animation_frame)
-                                .cloned()
-                                .or_else(|| self.playback.animation_frames.first().cloned())
-                        } else {
-                            None
-                        };
-                        let video_playing = self.playback.playing_video == Some(message.id);
-                        let video_frame = if video_playing {
-                            self.playback
-                                .video_frames
-                                .get(self.playback.video_frame)
-                                .cloned()
-                                .or_else(|| self.playback.video_frames.first().cloned())
+                            if self
+                                .playback
+                                .gif
+                                .as_ref()
+                                .is_some_and(|clip| !clip.is_still())
+                            {
+                                self.request_animation_tick(30, cx);
+                            }
+                            self.playback.gif_frame()
                         } else {
                             None
                         };
@@ -317,8 +311,6 @@ impl QuillApp {
                             seek_bar,
                             animation_playing,
                             animation_frame,
-                            video_playing,
-                            video_frame,
                             is_secret,
                             vanishing: self.vanish_progress(message.id),
                             message,
@@ -346,8 +338,6 @@ impl QuillApp {
                     seek_bar: None,
                     animation_playing: false,
                     animation_frame: None,
-                    video_playing: false,
-                    video_frame: None,
                     is_secret: false,
                     vanishing: None,
                     message,

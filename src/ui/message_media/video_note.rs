@@ -15,8 +15,6 @@ pub(in crate::ui) fn video_note_attachment(
     files: &HashMap<i32, ParsedFile>,
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
-    playing: bool,
-    frame: Option<&std::path::Path>,
     inline: Option<crate::ui::inline_video::InlineFrame>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -32,26 +30,19 @@ pub(in crate::ui) fn video_note_attachment(
     };
     let live = inline.is_some();
     let sounding = inline.as_ref().is_some_and(|inline| inline.sound);
-    let visual = if playing {
-        frame.and_then(|path| sandboxed_display_path(&path.to_string_lossy(), media_roots))
-    } else {
-        None
-    };
-    let visual = visual.or_else(|| {
-        [thumb_id, play_id].into_iter().find_map(|id| {
-            if id.0 == 0 {
-                return None;
-            }
-            files
-                .get(&id.0)
-                .and_then(|file| file.usable_path())
-                .and_then(|path| sandboxed_display_path(path, media_roots))
-        })
+    let visual = [thumb_id, play_id].into_iter().find_map(|id| {
+        if id.0 == 0 {
+            return None;
+        }
+        files
+            .get(&id.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, media_roots))
     });
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
     let blocked = note.is_secret;
-    let unseen = !outgoing && !note.is_viewed && !playing && !sounding;
+    let unseen = !outgoing && !note.is_viewed && !sounding;
     let has_visual = !blocked && (live || visual.is_some());
     // tdesktop's seek ring over a round video playing with sound.
     let seek_ring = inline.as_ref().filter(|inline| inline.sound).map(|inline| {
@@ -127,8 +118,6 @@ pub(in crate::ui) fn video_note_attachment(
     };
     let disc = if downloading_now && !has_visual {
         MediaDisc::Progress(download_fraction(play_id, files))
-    } else if playing {
-        MediaDisc::Pause
     } else {
         MediaDisc::Play
     };
@@ -152,14 +141,9 @@ pub(in crate::ui) fn video_note_attachment(
             }
             return;
         }
-        this.toggle_video_playback(
-            message_id,
-            play_id,
-            "video/mp4".into(),
-            0,
-            if viewed { None } else { Some(chat_id) },
-            cx,
-        );
+        // Not playing inline (yet): fetch the clip; the inline player
+        // starts it once it is local.
+        this.request_media_download(play_id, None, cx);
     };
     div()
         .id(("video-note", row_id))
@@ -180,7 +164,7 @@ pub(in crate::ui) fn video_note_attachment(
                     this.border_2().border_color(cx.theme().primary)
                 })
                 .role(gpui_kit::Role::Button)
-                .aria_label(if playing || sounding {
+                .aria_label(if sounding {
                     "Pause video message"
                 } else {
                     "Play video message"
@@ -203,13 +187,7 @@ pub(in crate::ui) fn video_note_attachment(
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(media_disc(("video-note-disc", row_id), disc).when(
-                                playing,
-                                |disc| {
-                                    disc.invisible()
-                                        .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
-                                },
-                            )),
+                            .child(media_disc(("video-note-disc", row_id), disc)),
                     )
                 })
                 .when(!layered, |this| {

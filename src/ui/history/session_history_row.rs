@@ -29,8 +29,6 @@ pub(in crate::ui) fn session_history_row(
     dice_layers: Vec<Option<super::super::sticker_playback::AnimatedVisual>>,
     // Decoded animations of the message's custom emoji (by custom emoji id).
     animated_emoji: HashMap<i64, super::super::sticker_playback::AnimatedVisual>,
-    video_playing: bool,
-    video_frame: Option<PathBuf>,
     // The row's clip playing inline (muted autoplay), if any.
     inline: Option<super::super::inline_video::InlineFrame>,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
@@ -440,8 +438,6 @@ pub(in crate::ui) fn session_history_row(
             files,
             downloading,
             media_roots,
-            video_playing,
-            video_frame.as_deref(),
             inline,
             None,
             Some((message.chat_id, message.id)),
@@ -457,8 +453,6 @@ pub(in crate::ui) fn session_history_row(
             files,
             downloading,
             media_roots,
-            video_playing,
-            video_frame.as_deref(),
             inline,
             cx,
         )),

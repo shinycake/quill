@@ -320,8 +320,7 @@ impl QuillApp {
                     }
                     cx.notify();
                 } else if let Some(play) = note.play_file_id() {
-                    let mark = (!note.is_viewed).then_some(chat);
-                    self.toggle_video_playback(message.id, play, "video/mp4".into(), 0, mark, cx);
+                    self.request_media_download(play, None, cx);
                 }
             }
             _ => return false,

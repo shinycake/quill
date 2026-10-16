@@ -7,9 +7,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::native_video::{NativeVideo, Purpose, VideoPicture, supported};
 use super::video_editor::{VideoEditorDialog, palette};
 use super::video_editor_timeline::StagePress;
+use super::video_player::{PlayState, Purpose, VideoPlayer, supported, video_frame};
 use gpui_kit::*;
 use quill::sticker_video::square_crop;
 use quill::video_edit::{Crop, quality_levels, turned_size};
@@ -41,21 +41,25 @@ impl QuillApp {
         if !supported() {
             return;
         }
-        match NativeVideo::open(
+        let duration = editor.info.map(|info| info.duration_ms as f64 / 1000.0);
+        match VideoPlayer::open(
             &editor.source,
             Purpose::Inline {
                 max_edge: PLAYER_EDGE,
             },
+            duration,
+            cx,
         ) {
-            Ok(mut video) => {
+            Ok(video) => {
                 video.set_volume(0.0);
                 video.set_orientation(editor.edits.turns, editor.edits.flipped);
                 video.seek(editor.edits.from_ms as f64 / 1000.0);
                 if !editor.user_paused {
                     video.play();
                 }
+                video.watch(cx.entity_id());
                 editor.playback_ms = Some(editor.edits.from_ms);
-                *editor.player.borrow_mut() = Some(video);
+                editor.player = Some(video);
             }
             Err(_) => editor.note = Some("Quill can't play this video here.".into()),
         }
@@ -72,22 +76,29 @@ impl QuillApp {
         let held = editor.user_paused || editor.motion.grab.is_some() || editor.busy;
         let (from, till) = (editor.edits.from_ms, editor.edits.till_ms);
         let mut playing = false;
-        // A re-entrant borrow skips this frame instead of aborting.
-        if !held
-            && let Ok(mut slot) = editor.player.try_borrow_mut()
-            && let Some(video) = slot.as_mut().filter(|video| video.error().is_none())
-        {
-            let at = (video.position_secs() * 1000.0).round() as i64;
-            if at >= till || at < from - 250 {
-                video.seek(from as f64 / 1000.0);
-                editor.playback_ms = Some(from);
-            } else {
-                editor.playback_ms = Some(at.clamp(from, till));
+        if !held && let Some(video) = editor.player.as_ref() {
+            match video.state() {
+                PlayState::Failed => {
+                    if video.take_error().is_some() {
+                        editor.note = Some("Quill can't play this video here.".into());
+                    }
+                }
+                // Still opening: it was told where to start and to play.
+                PlayState::Opening => playing = true,
+                _ => {
+                    let at = (video.transport().position * 1000.0).round() as i64;
+                    if at >= till || at < from.saturating_sub(250) {
+                        video.seek(from as f64 / 1000.0);
+                        editor.playback_ms = Some(from);
+                    } else {
+                        editor.playback_ms = Some(at.clamp(from, till));
+                    }
+                    if !video.wants_play() {
+                        video.play();
+                    }
+                    playing = true;
+                }
             }
-            if !video.is_playing() {
-                video.play();
-            }
-            playing = true;
         }
         if playing || editor.motion.animating(Instant::now()) {
             self.request_animation_tick(60, cx);
@@ -99,16 +110,14 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        if editor.player.borrow().is_none() {
+        let Some(video) = editor.player.as_ref() else {
             return;
-        }
+        };
         editor.user_paused = !editor.user_paused;
-        if let Some(video) = editor.player.borrow_mut().as_mut() {
-            if editor.user_paused {
-                video.pause();
-            } else {
-                video.play();
-            }
+        if editor.user_paused {
+            video.pause();
+        } else {
+            video.play();
         }
         cx.notify();
     }
@@ -156,7 +165,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        if let Some(video) = editor.player.borrow_mut().as_mut() {
+        if let Some(video) = editor.player.as_ref() {
             video.set_orientation(editor.edits.turns, editor.edits.flipped);
         }
         let at = editor.edits.cover_ms;
@@ -257,20 +266,16 @@ impl QuillApp {
         let (width, height) = editor.info.map_or((16, 9), |info| {
             turned_size(info.width, info.height, editor.edits.turns)
         });
-        // The player's frame, else the still (cut turned and mirrored).
-        let frame = editor
-            .player
-            .try_borrow_mut()
-            .ok()
-            .and_then(|mut slot| slot.as_mut().and_then(NativeVideo::frame));
+        // The player's picture, else the still (cut turned and mirrored).
+        let player = editor.player.clone();
         let still = editor.still.clone();
         let crop = CropArea::of(editor.edits.crop);
         let picture_cell = editor.motion.picture_bounds.clone();
         let crop_cell = editor.motion.crop_bounds.clone();
         let grid = editor.motion.grid.value(Instant::now());
         let round = editor.target.round();
-        let paused = editor.user_paused && editor.player.borrow().is_some();
-        canvas(
+        let paused = editor.user_paused && editor.player.is_some();
+        let overlay = canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
             move |bounds, hitbox, window, _| {
                 // Fit, and scale small pictures up, like tdesktop.
@@ -281,18 +286,13 @@ impl QuillApp {
                     size(px(width as f32 * scale), px(height as f32 * scale)),
                 );
                 picture_cell.set(Some(fit));
-                match frame {
-                    #[cfg(target_os = "macos")]
-                    Some(VideoPicture::Surface(buffer)) => window.paint_surface(fit, buffer),
-                    Some(VideoPicture::Image(image)) => {
-                        let _ = window.paint_image(fit, fit, Corners::default(), image, 0, false);
-                    }
-                    None => {
-                        if let Some(still) = still.clone() {
-                            let _ =
-                                window.paint_image(fit, fit, Corners::default(), still, 0, false);
-                        }
-                    }
+                // The picture is the player's element below; the still
+                // shows until the player has one.
+                let playing = player
+                    .as_ref()
+                    .is_some_and(|player| player.current_picture().is_some());
+                if !playing && let Some(still) = still.clone() {
+                    let _ = window.paint_image(fit, fit, Corners::default(), still, 0, false);
                 }
                 let at = |x: f32, y: f32| {
                     point(
@@ -357,8 +357,24 @@ impl QuillApp {
                 });
             },
         )
-        .size_full()
-        .into_any_element()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
+        // The player fits and scales up like `fit` above (same aspect).
+        div()
+            .relative()
+            .size_full()
+            .children(editor.player.as_ref().map(|video| {
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .child(video_frame(video))
+            }))
+            .child(overlay)
+            .into_any_element()
     }
 }
 

@@ -16,9 +16,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::native_video::NativeVideo;
 use super::shell::{DialogKind, QuillShell};
 use super::video_editor_timeline::EditorMotion;
+use super::video_player::VideoPlayer;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -146,7 +146,7 @@ pub(super) struct VideoEditorDialog {
     pub(super) busy: bool,
     pub(super) note: Option<String>,
     /// The player looping the kept range, muted.
-    pub(super) player: RefCell<Option<NativeVideo>>,
+    pub(super) player: Option<VideoPlayer>,
     /// Paused by a click on the picture (tdesktop `_userPaused`).
     pub(super) user_paused: bool,
     /// Where the player is, for the playhead.
@@ -249,7 +249,7 @@ impl QuillApp {
             serial,
             busy: false,
             note: Some("Reading the video…".into()),
-            player: RefCell::new(None),
+            player: None,
             user_paused: false,
             playback_ms: None,
             motion: EditorMotion::default(),
@@ -467,7 +467,7 @@ impl QuillApp {
             self.close_video_editor(cx);
             return true;
         }
-        *editor.player.borrow_mut() = None;
+        editor.player = None;
         editor.busy = true;
         editor.note = Some("Preparing the video…".into());
         editor.serial += 1;

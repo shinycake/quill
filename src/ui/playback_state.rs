@@ -9,10 +9,6 @@ use quill::ids::MessageId;
 use quill::playback::PlaybackClock;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Child;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 pub(crate) struct PlaybackUi {
@@ -52,27 +48,14 @@ pub(crate) struct PlaybackUi {
     pub(super) emoji_playback: super::sticker_playback::StickerPlayback,
     pub(super) playing_animation: Option<MessageId>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
-    pub(super) animation_frames: Vec<Arc<RenderImage>>,
-    pub(super) animation_frame: usize,
-    pub(super) animation_tick: bool,
-    pub(super) animation_fps: f64,
-    pub(super) animation_started_at: Option<Instant>,
-    pub(super) animation_extract_child: Option<Arc<Mutex<Option<Child>>>>,
-    pub(super) animation_extract_cancel: Option<Arc<AtomicBool>>,
-    pub(super) animation_extract_epoch: u64,
-    /// File whose extracted frames should be deleted when playback stops.
-    pub(super) animation_cache_file: Option<i32>,
+    /// The playing GIF's held pictures (`gif_clip`), once decoded.
+    pub(super) gif: Option<super::gif_clip::GifClip>,
+    pub(super) gif_started_at: Option<Instant>,
+    /// Bumped whenever GIF playback stops, so a decode that finishes late
+    /// is dropped.
+    pub(super) gif_epoch: u64,
     /// Play was tapped before the clip was local. Resume when `downloadFile` finishes.
     pub(super) pending_gif_play: Option<(MessageId, FileId, String)>,
-    /// History row whose video preview is looping.
-    pub(super) playing_video: Option<MessageId>,
-    pub(super) video_frames: Vec<PathBuf>,
-    pub(super) video_frame: usize,
-    pub(super) video_tick: bool,
-    pub(super) video_cache_file: Option<i32>,
-    /// Play was tapped before the video was local. Resume when `downloadFile` finishes.
-    /// The last field is the chat to mark opened (`openMessageContent`) once playback starts.
-    pub(super) pending_video_play: Option<(MessageId, FileId, String, i32, Option<ChatId>)>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, polls waited).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,
@@ -93,6 +76,24 @@ pub(crate) struct PlaybackUi {
 }
 
 impl PlaybackUi {
+    /// The picture of the playing GIF now.
+    pub(super) fn gif_frame(&self) -> Option<std::sync::Arc<RenderImage>> {
+        let clip = self.gif.as_ref()?;
+        let elapsed = self
+            .gif_started_at
+            .map(|at| at.elapsed())
+            .unwrap_or_default();
+        // A screenshot capture shows the first picture, so it is the same
+        // every run.
+        #[cfg(feature = "demo-capture")]
+        let elapsed = if std::env::var_os("QUILL_DEMO_CAPTURE").is_some() {
+            std::time::Duration::ZERO
+        } else {
+            elapsed
+        };
+        clip.frame_at(elapsed).cloned()
+    }
+
     pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
         Self {
             player: Default::default(),
@@ -114,22 +115,10 @@ impl PlaybackUi {
             emoji_playback: Default::default(),
             playing_animation: None,
             autoplayed_gifs: Default::default(),
-            animation_frames: Vec::new(),
-            animation_frame: 0,
-            animation_tick: false,
-            animation_fps: 8.0,
-            animation_started_at: None,
-            animation_extract_child: None,
-            animation_extract_cancel: None,
-            animation_extract_epoch: 0,
-            animation_cache_file: None,
+            gif: None,
+            gif_started_at: None,
+            gif_epoch: 0,
             pending_gif_play: None,
-            playing_video: None,
-            video_frames: Vec::new(),
-            video_frame: 0,
-            video_tick: false,
-            video_cache_file: None,
-            pending_video_play: None,
             pending_media_seek: None,
             inline_videos: Default::default(),
             speed: 1.0,
