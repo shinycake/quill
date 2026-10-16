@@ -39,8 +39,6 @@
 1 src/ui/giveaway_create_ui.rs
 1 src/ui/giveaway_pick_ui.rs
 1 src/ui/group_admin_settings.rs
-21 src/ui/group_call_panel.rs
-2 src/ui/group_call_window.rs
 2 src/ui/groups/build_group_confirm_dialog.rs
 1 src/ui/message_menu_ui/menu_save_to_rows.rs
 1 src/ui/message_text/mod.rs

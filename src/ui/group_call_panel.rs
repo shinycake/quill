@@ -24,6 +24,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::state::ActiveGroupCall;
 
+use quill::lang::{keys, tr, tr_with};
 use std::time::Duration;
 
 /// lib_ui `colors.palette`.
@@ -70,20 +71,20 @@ impl MuteState {
 
     fn label(self) -> &'static str {
         match self {
-            MuteState::Join => "Join",
-            MuteState::Connecting => "Connecting...",
-            MuteState::Live => "You are Live",
-            MuteState::Muted => "Unmute",
-            MuteState::ForceMuted => "Muted by admin",
-            MuteState::HandRaised => "You asked to speak",
-            MuteState::Scheduled => "Starts soon",
+            MuteState::Join => tr(keys::GROUP_CALL_JOIN),
+            MuteState::Connecting => tr(keys::GROUP_CALL_CONNECTING),
+            MuteState::Live => tr(keys::GROUP_CALL_YOU_ARE_LIVE),
+            MuteState::Muted => tr(keys::GROUP_CALL_UNMUTE),
+            MuteState::ForceMuted => tr(keys::GROUP_CALL_FORCE_MUTED),
+            MuteState::HandRaised => tr(keys::GROUP_CALL_RAISED_HAND),
+            MuteState::Scheduled => tr(keys::Q_AV_STARTS_SOON),
         }
     }
 
     fn sublabel(self) -> Option<&'static str> {
         match self {
-            MuteState::ForceMuted => Some("You are in Listen Only mode"),
-            MuteState::HandRaised => Some("We let the speakers know"),
+            MuteState::ForceMuted => Some(tr(keys::GROUP_CALL_FORCE_MUTED_SUB)),
+            MuteState::HandRaised => Some(tr(keys::Q_AV_WE_LET_THE_SPEAKERS_KNOW)),
             _ => None,
         }
     }
@@ -151,28 +152,35 @@ impl QuillApp {
         });
         let title = if call.title.is_empty() {
             if call.is_video_chat {
-                "Video Chat"
+                tr(keys::MENU_START_GROUP_CALL_OPTIONS)
             } else {
-                "Voice Chat"
+                tr(keys::Q_AV_VOICE_CHAT_2)
             }
             .to_string()
         } else {
             call.title.clone()
         };
         let mut subtitle = match call.participant_count {
-            1 => "1 participant".to_string(),
+            1 => tr(keys::Q_AV_1_PARTICIPANT).to_string(),
             n => format!("{n} participants"),
         };
         if call.record_duration > 0 {
-            subtitle.push_str(&format!(
-                " · Recording {}",
-                super::format_helpers::format_record_duration(call.record_duration)
+            subtitle.push_str(&tr_with(
+                keys::Q_AV_RECORDING,
+                &[(
+                    "record_duration",
+                    &(super::format_helpers::format_record_duration(call.record_duration))
+                        .to_string(),
+                )],
             ));
         }
         if state == MuteState::Scheduled {
-            subtitle = format!(
-                "Starts {}",
-                format_starts_in(call.scheduled_start_date as i64)
+            subtitle = tr_with(
+                keys::GROUP_CALL_STARTS_SHORT,
+                &[(
+                    "when",
+                    &(format_starts_in(call.scheduled_start_date as i64)).to_string(),
+                )],
             );
         }
 
@@ -200,7 +208,7 @@ impl QuillApp {
                         .justify_center()
                         .child(Icon::new(IconName::UserPlus).with_size(px(20.))),
                 )
-                .child(div().text_size(px(14.)).child("Invite Members"))
+                .child(div().text_size(px(14.)).child(tr(keys::GROUP_CALL_INVITE)))
         });
 
         let rows: Vec<AnyElement> = call
@@ -243,7 +251,7 @@ impl QuillApp {
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.load_more_group_call_participants(cx)
                                     }))
-                                    .child("Show more"),
+                                    .child(tr(keys::Q_AV_SHOW_MORE)),
                             )
                         },
                     ),
@@ -316,7 +324,7 @@ impl QuillApp {
                 .text_color(white())
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| this.rejoin_active_group_call(cx)))
-                .child("Connection lost. Click to rejoin.")
+                .child(tr(keys::Q_AV_CONNECTION_LOST_CLICK_TO_REJOIN))
         });
 
         let invite = (self.group_call.invite_open && !self.account.passcode.locked).then(|| {
@@ -339,7 +347,7 @@ impl QuillApp {
         });
 
         // Rename (`setVideoChatTitle`).
-        let rename = self.group_call_rename_overlay("Edit Title".into(), cx);
+        let rename = self.group_call_rename_overlay(tr(keys::Q_AV_EDIT_TITLE).into(), cx);
         // Streaming with an external app: the server URL and key.
         let stream = call.rtmp_url.clone().map(|url| {
             let key = call.rtmp_stream_key.clone().unwrap_or_default();
@@ -366,7 +374,7 @@ impl QuillApp {
                 .child(
                     div()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("Stream with another app"),
+                        .child(tr(keys::Q_AV_STREAM_WITH_ANOTHER_APP)),
                 )
                 .child(
                     div()
@@ -378,11 +386,19 @@ impl QuillApp {
                     div()
                         .flex()
                         .gap(px(4.))
-                        .child(copy("group-call-rtmp-url", "Copy Server URL", url))
-                        .child(copy("group-call-rtmp-key", "Copy Stream Key", key))
+                        .child(copy(
+                            "group-call-rtmp-url",
+                            tr(keys::GROUP_CALL_RTMP_URL_COPY),
+                            url,
+                        ))
+                        .child(copy(
+                            "group-call-rtmp-key",
+                            tr(keys::GROUP_CALL_RTMP_KEY_COPY),
+                            key,
+                        ))
                         .child(
                             Button::new("group-call-rtmp-revoke")
-                                .label("Revoke Key")
+                                .label(tr(keys::Q_AV_REVOKE_KEY))
                                 .ghost()
                                 .xsmall()
                                 .text_color(rgb(MEMBER_MUTED_ICON))
@@ -452,7 +468,7 @@ impl QuillApp {
                                 .gap(px(8.))
                                 .child(
                                     Button::new("group-call-title-cancel")
-                                        .label("Cancel")
+                                        .label(tr(keys::CALL_CANCEL))
                                         .ghost()
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.close_group_call_title_dialog(cx)
@@ -460,7 +476,7 @@ impl QuillApp {
                                 )
                                 .child(
                                     Button::new("group-call-title-save")
-                                        .label("Save")
+                                        .label(tr(keys::SETTINGS_SAVE))
                                         .primary()
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.save_group_call_title(cx)
@@ -515,7 +531,7 @@ impl QuillApp {
                 } else {
                     IconName::VideoOff
                 },
-                "Video",
+                tr(keys::GROUP_CALL_VIDEO),
                 if video_on {
                     hsla(0., 0., 1., 0.12)
                 } else {
@@ -527,7 +543,11 @@ impl QuillApp {
         let leave = side(
             "group-call-leave",
             IconName::Close,
-            if joined { "Leave" } else { "Close" },
+            if joined {
+                tr(keys::GROUP_CALL_LEAVE)
+            } else {
+                tr(keys::GROUP_CALL_CLOSE)
+            },
             rgba(LEAVE_BG).into(),
         )
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -619,9 +639,9 @@ impl QuillApp {
                     .text_size(px(16.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(match state {
-                        MuteState::Scheduled if scheduled_admin => "Start Now",
-                        MuteState::Scheduled if notify_on => "Cancel Reminder",
-                        MuteState::Scheduled => "Notify Me",
+                        MuteState::Scheduled if scheduled_admin => tr(keys::GROUP_CALL_START_NOW),
+                        MuteState::Scheduled if notify_on => tr(keys::GROUP_CALL_CANCEL_REMINDER),
+                        MuteState::Scheduled => tr(keys::Q_AV_NOTIFY_ME),
                         _ => state.label(),
                     }),
             )
@@ -665,7 +685,7 @@ impl QuillApp {
         let state = mute_state(call);
         let (from, to) = state.colors();
         let title = if call.title.is_empty() {
-            "Video Chat".to_string()
+            tr(keys::MENU_START_GROUP_CALL_OPTIONS).to_string()
         } else {
             call.title.clone()
         };

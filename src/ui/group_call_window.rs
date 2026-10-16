@@ -109,7 +109,7 @@ impl QuillApp {
                 .unwrap_or_default()
                 .into()
         } else {
-            "Video Chat".into()
+            tr(keys::MENU_START_GROUP_CALL_OPTIONS).into()
         };
         let (window_size, min_size) = if stream {
             (size(px(720.), px(580.)), size(px(240.), px(160.)))
@@ -182,7 +182,8 @@ impl QuillApp {
                         app.group_call.stream.window_is_stream = stream;
                     }
                     Err(_) => {
-                        app.connection.status_note = "Couldn't open the video chat window".into()
+                        app.connection.status_note =
+                            tr(keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT).into()
                     }
                 }
                 cx.notify();
