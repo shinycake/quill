@@ -387,6 +387,17 @@ pub(crate) fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
     let _ = fs::write(dir.join(RUNNING_FILE), sentinel.render());
 }
 
+/// Start of the UI process, after the single-instance check and before
+/// GPUI, AppKit, TDLib and the video/call libraries start, so a fault in
+/// their setup is covered too. A second launch never gets here, so it never
+/// touches the running Quill's files. It also files the previous run's crash
+/// report before the "closed unexpectedly" notice looks for it.
+pub fn begin_app_run() {
+    if let Some(root) = crate::settings::safe_app_root() {
+        begin_run_with_native_handlers(&root);
+    }
+}
+
 /// [`begin_run`], then the native crash handlers for this process. Kept
 /// apart so tests can start a run without installing signal handlers.
 pub fn begin_run_with_native_handlers(root: &Path) {
