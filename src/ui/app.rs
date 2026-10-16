@@ -206,15 +206,6 @@ impl QuillApp {
         }
     }
 
-    /// The camera and microphone picked in the call menu, read from the
-    /// driver that owns the pick (demo mode has no device names: defaults).
-    pub(crate) fn capture_choice(&self) -> quill::capture_choice::CaptureChoice {
-        self.live
-            .as_ref()
-            .map(|live| live.driver.capture_choice())
-            .unwrap_or_default()
-    }
-
     pub(crate) fn session(&self) -> Option<&Session> {
         self.live
             .as_ref()
