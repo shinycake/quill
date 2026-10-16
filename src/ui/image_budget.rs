@@ -92,14 +92,40 @@ struct SliceFrames {
     rendered: u64,
     shown: u64,
     previous_render: u64,
+    /// Every image the slice's last render painted has an id below this
+    /// (`RenderImage` ids only grow): the next image id at the start of
+    /// the frame after that render. `None` until that frame starts.
+    images_below: Option<usize>,
 }
 
 /// Start a window frame (`QuillApp::render`, before anything renders).
 pub(super) fn begin_frame() -> u64 {
-    FRAME.with(|frame| {
+    super::frame_clock::trace_slice_render("(window frame)");
+    let now = FRAME.with(|frame| {
         frame.set(frame.get() + 1);
         frame.get()
-    })
+    });
+    // Slices that rendered in the frame just drawn painted only images
+    // that exist by now.
+    SLICES.with(|slices| {
+        let mut slices = slices.borrow_mut();
+        let mut fresh = slices
+            .values_mut()
+            .filter(|s| s.rendered + 1 == now && s.images_below.is_none())
+            .peekable();
+        if fresh.peek().is_some() {
+            let below = next_image_id();
+            fresh.for_each(|s| s.images_below = Some(below));
+        }
+    });
+    now
+}
+
+/// The id the next `RenderImage` will get. GPUI numbers images from one
+/// counter, so an image made later has a larger id; an empty image is the
+/// only way to read it (no pixels, nothing allocated).
+fn next_image_id() -> usize {
+    RenderImage::new(Vec::<image::Frame>::new()).id.0
 }
 
 fn frame() -> u64 {
@@ -117,6 +143,7 @@ pub(super) fn slice_rendered(id: EntityId) {
         }
         entry.rendered = now;
         entry.shown = now;
+        entry.images_below = None;
     });
 }
 
@@ -195,21 +222,31 @@ pub(super) fn idle_trim_due() -> Option<Instant> {
     (trimmed != Some(activity)).then_some(activity + IDLE_AFTER)
 }
 
-/// The oldest frame a cached slice shown last frame may still replay.
-fn oldest_replayable() -> u64 {
+/// What each cached slice shown last frame may replay: the frame of its
+/// last render, and the image ids that render can have painted.
+fn replayable_slices() -> Vec<(u64, Option<usize>)> {
     let now = frame();
     SLICES.with(|slices| {
         slices
             .borrow()
             .values()
             .filter(|s| s.shown + 1 >= now)
-            .map(|s| s.rendered)
-            .min()
-            .unwrap_or(now)
-            // `QuillApp` re-renders each frame, so last frame's images
-            // are the newest anything still shows.
-            .min(now.saturating_sub(1))
+            .map(|s| (s.rendered, s.images_below))
+            .collect()
     })
+}
+
+/// Whether a retired image (GPUI id `id`, retired in frame `at`) may
+/// still be on screen. `QuillApp` re-renders every frame, so last frame's
+/// images are the newest it still shows; a slice replaying its last render
+/// shows the image only if that render came no later than the retirement
+/// and the image already existed then. Without the id check a chat list
+/// replaying for minutes kept every video frame retired meanwhile.
+fn retired_may_show(id: usize, at: u64, slices: &[(u64, Option<usize>)]) -> bool {
+    at + 1 >= frame()
+        || slices
+            .iter()
+            .any(|&(rendered, below)| at >= rendered && below.is_none_or(|below| id < below))
 }
 
 /// Hand images Quill made (and painted) to the atlas sweeper once their
@@ -227,14 +264,14 @@ pub(super) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage>>) {
 /// Drop retired images no frame can show any more from the atlas. Call at
 /// the start of a frame, before anything renders.
 pub(super) fn sweep(window: &mut Window, cx: &mut App) {
-    let safe_before = oldest_replayable();
+    let slices = replayable_slices();
     let gone: Vec<Arc<RenderImage>> = RETIRED.with(|retired| {
         let mut retired = retired.borrow_mut();
         let mut gone = Vec::new();
         retired.retain(|(image, at)| {
             // Still held elsewhere (a cache that took it back, the chat
             // list's animation layer): it may be painted again.
-            if *at >= safe_before || Arc::strong_count(image) > 1 {
+            if Arc::strong_count(image) > 1 || retired_may_show(image.id.0, *at, &slices) {
                 return true;
             }
             gone.push(image.clone());
@@ -937,7 +974,67 @@ mod tests {
         plan_eviction, slice_rendered, slice_shown,
     };
     use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
+    use super::{next_image_id, replayable_slices, retired_may_show};
     use gpui_kit::EntityId;
+
+    /// The F1 leak: an inline video retires a picture every frame while
+    /// only its animation layer redraws and the chat list replays a render
+    /// from long ago. Pictures made after that render must still leave on
+    /// the next frame; one the chat list may have painted must stay.
+    #[test]
+    fn frames_retired_while_a_slice_replays_leave_on_the_next_frame() {
+        let sidebar = EntityId::from((1_u64 << 32) | 13);
+        begin_frame();
+        let painted_by_sidebar = next_image_id();
+        slice_rendered(sidebar);
+        // Layer-only frames: `QuillApp` renders, the sidebar replays.
+        begin_frame();
+        slice_shown(sidebar);
+        let mut pictures = Vec::new();
+        for _ in 0..30 {
+            let picture = next_image_id();
+            let retired = begin_frame();
+            slice_shown(sidebar);
+            pictures.push((picture, retired));
+        }
+        let at = begin_frame();
+        slice_shown(sidebar);
+        let slices = replayable_slices();
+        assert_eq!(slices.len(), 1);
+        // Last frame may still show the newest picture.
+        let (newest, newest_at) = pictures.pop().unwrap_or_default();
+        assert_eq!(newest_at, at - 1);
+        assert!(retired_may_show(newest, newest_at, &slices));
+        for (picture, retired) in &pictures {
+            assert!(
+                !retired_may_show(*picture, *retired, &slices),
+                "picture {picture} retired in frame {retired} is held by a replaying slice"
+            );
+        }
+        // Something the sidebar's render may have painted stays until the
+        // sidebar renders again.
+        assert!(retired_may_show(painted_by_sidebar, at - 2, &slices));
+        slice_rendered(sidebar);
+        begin_frame();
+        let slices = replayable_slices();
+        assert!(!retired_may_show(painted_by_sidebar, at - 2, &slices));
+    }
+
+    #[test]
+    fn a_slice_render_not_yet_closed_by_a_frame_keeps_everything() {
+        let slice = EntityId::from((1_u64 << 32) | 15);
+        begin_frame();
+        slice_rendered(slice);
+        // Still the frame of the render: images made now may be painted
+        // by it, so the bound is unknown and nothing is ruled out.
+        let slices = replayable_slices();
+        assert_eq!(slices.len(), 1);
+        assert!(slices.iter().all(|(_, below)| below.is_none()));
+        assert!(retired_may_show(next_image_id(), 0, &[(0, None)]));
+        // The next frame closes it.
+        begin_frame();
+        assert!(replayable_slices().iter().all(|(_, below)| below.is_some()));
+    }
 
     #[test]
     fn app_images_stay_for_one_frame() {
