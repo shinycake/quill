@@ -29,7 +29,7 @@ impl QuillApp {
     /// commands of the button's menu apply.
     fn composer_sendable(&self, cx: &App) -> bool {
         self.composer_ui.pending_edit.is_none()
-            && !self.recording_active()
+            && !self.recording_here()
             && (!self.composer.read(cx).value().trim().is_empty()
                 || !self.pending_attachments().is_empty()
                 || self.forward_bar_here())

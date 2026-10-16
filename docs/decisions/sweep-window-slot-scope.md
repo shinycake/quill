@@ -63,10 +63,9 @@ the scope. B gives that work the window as a key:
   for a window that has closed applies with a throwaway view, so its
   messages and files still land but no window's view is touched. The UI
   slot no longer carries a copy of the session view.
-- UI async work starts with `spawn_scoped` / `spawn_scoped_in` /
-  `defer_scoped`. The task receives a `ScopedApp` instead of the app's weak
-  handle, and each `update` puts the starting window's state in place
-  first. App-wide work uses `spawn_main` / `spawn_main_in`.
+- UI async work starts with `spawn_scoped` / `spawn_scoped_in`. The
+  task receives a `ScopedApp` instead of the app's weak handle, and each
+  `update` puts the starting window's state in place first. App-wide work uses `spawn_main` / `spawn_main_in`.
 - `in_window_scope` runs nothing for a window that has closed, so that work
   can't fall back to the main window's state.
 - `scripts/check-window-scope.py` (CI step "window scope") flags async
@@ -90,39 +89,67 @@ insert on the session per scope change, which already swaps eight structs.
 The review (BLOCK) found a wrong-recipient send the table above had called
 fixed, and blind spots in the lint. Changes:
 
-**The recording belongs to its window.** `RecordingUi::window` records the
-window a recording started in (`begin_voice_capture`,
-`begin_video_note_capture`; the permission prompt's continuation now runs
-with `spawn_scoped`, so it starts in the window that asked). From there
-(`chat_window/recording.rs`):
+**The recording belongs to its window.** The capture in progress carries
+the window it started in (`recording_state::Capture { media, origin,
+purpose }`). The only way to make one is `QuillApp::hold_capture`, which
+reads `windows.scope`; all four starts go through it (`begin_voice_capture`,
+`begin_video_note_capture`, and the story reply's
+`begin_story_voice_capture` / `begin_story_video_capture`). The permission
+prompt's continuation runs with `spawn_scoped`, so a capture starts in the
+window that asked. Sending, cancelling or failing takes the capture, and
+its window goes with it. A finished recording's window can't be left over
+for the next one. From there (`chat_window/recording.rs`):
 
 - `send_recording` runs the send inside `in_window_scope(origin)`, whichever
   window asks, so it goes to that window's chat and uses its composer.
-- A video message at its time limit is sent at the next draw of its own
-  window (`flush_recording_auto_send`, called by the main window's render
-  and by each chat window's), not by whichever window draws first.
+- A video message at its time limit is sent right away
+  (`send_recording_at_time_limit`, called from `check_recording`), through
+  the handle of the window it was recorded in (the main window's for
+  `None`). It does not wait for that window to draw: GPUI does not draw a
+  covered or minimized window.
 - The 100 ms tick runs as a `spawn_main` task whose every step goes through
   `in_window_scope(origin)`, so `sync_voice_action` addresses the right chat.
 - Closing the window (`forget_chat_window`, also on an account switch) ends
   the recording with a status note ("recording discarded — its chat window
   closed"). A video message whose window closes while the file is being
-  finished is deleted with a note ("video note not sent — its chat window
-  closed").
-- The record bar, its Esc layers, and the cancels on a chat switch or the
-  media panel opening use `recording_here()`: only the recording's own
-  window shows or ends it.
+  finished is deleted with a note ("video message not sent — its chat
+  window closed").
+- The record bar, its Esc layers, the cancels on a chat switch or the media
+  panel opening, and the send menu's shortcuts (`composer_sendable`) use
+  `recording_here()`: only the recording's own window shows it, ends it or
+  is blocked by it.
 
 Demo mode could not show a sent voice message at all (`apply_demo_voice`
 reused a stale update number and a negative message id, so the session
 dropped it); it now numbers it like `apply_demo_outgoing`. The UI tests
 need that.
 
-Tests (`chat_window/tests.rs`), each failing with the routing removed: a
-video message at its limit from a chat window is not sent by the main
-window's draw and goes to the window's chat on that window's draw; Send
-asked with the main window's state in place still goes to the recording's
-window (and a main-window recording still goes to the main chat); closing
-the window ends the recording, and nothing reaches the main window's chat.
+Tests (`chat_window/tests.rs`), each failing with the routing removed:
+
+- a video message at its limit from a chat window goes to that window's
+  chat with no window drawn, and the main window's chat gets nothing;
+- a main-window recording at its limit goes to the main chat;
+- Send asked with the main window's state in place still goes to the
+  recording's window, and a main-window recording still goes to the main
+  chat;
+- closing the window ends the recording, and nothing reaches the main
+  window's chat;
+- after a recording from a chat window is sent, a story reply recorded in
+  the main window does not belong to that chat window and survives its
+  closing with no "discarded" note.
+
+**Second review round.** The re-review (BLOCK) found that the first fix's
+separate `RecordingUi::window` field went stale. It was set at start and
+cleared only when the window closed. It stayed set after a send, and the
+story reply never set it. So a later story reply ticked as the old window,
+sent "recording…" to its chat, was discarded when it closed and showed its
+record bar there. More clears would have patched it. Instead the window
+moved into the capture value (above), and the field is gone. The same
+change folded in `stories.reply_recording`, a flag of the same kind (set at
+start, cleared by hand in three places, never by `cancel_recording`). It is
+now `Capture::purpose`. The render-time auto-send (`auto_send`,
+`flush_recording_auto_send`, and `defer_scoped`, which only it used) is
+gone. The send menu's shortcuts now check `recording_here()`.
 
 **Subscriptions and observers are scoped too.** GPUI calls a
 `subscribe_in` / `observe_*` / `on_focus_*` callback with the window it was
@@ -170,8 +197,8 @@ another type is not seen; a function pointer passed in (`with_capture_access`
 takes `start: fn(...)`) is not followed; `spawn_scoped*` / `spawn_main*`
 bodies are not checked, they name their window by construction; and it
 cannot tell a wrongly chosen window, which is how the recording send got
-past it (`defer_scoped` from the main window's render captured the main
-window).
+past it (`defer_scoped`, since removed, called from the main window's
+render captured the main window).
 
 **Session side.**
 

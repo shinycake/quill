@@ -13,6 +13,7 @@ use crate::ui::demos::video_fixtures::{
 };
 use crate::ui::playback::PlaybackKind;
 use crate::ui::playback_state::{SeekHover, SeekSite};
+use crate::ui::recording_state::{CaptureFor, CaptureMedia};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -288,11 +289,14 @@ impl QuillApp {
             self.stop_voice_playback();
         }
         let bars = vec![4, 16, 28, 12, 8, 20, 6, 18, 10, 24, 8, 14];
-        self.recording.voice_capture = Some(VoiceCapture::preview(
-            demo_media_allowlist().join("demo-voice.ogg"),
-            2,
-            bars,
-        ));
+        self.hold_capture(
+            CaptureMedia::Voice(VoiceCapture::preview(
+                demo_media_allowlist().join("demo-voice.ogg"),
+                2,
+                bars,
+            )),
+            CaptureFor::Message,
+        );
         // MED2: demo shows the locked record bar + a transcribed note.
         self.recording.locked = true;
         self.connection.status_note = "screenshot demo — recording voice · locked".into();

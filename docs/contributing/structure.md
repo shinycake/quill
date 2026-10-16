@@ -112,8 +112,8 @@ share box, and the session's view of its chat) sits in the shared
 state is in place then, so it has to say which window it belongs to:
 
 - A timer, file picker or background job started from a window:
-  `spawn_scoped` / `spawn_scoped_in` / `defer_scoped`. It finishes in that
-  window, or not at all once the window has closed.
+  `spawn_scoped` / `spawn_scoped_in`. It finishes in that window, or not
+  at all once the window has closed.
 - Work that belongs to no chat window (the poll loop, background accounts,
   the passcode): `QuillApp::spawn_main` / `spawn_main_in`.
 - A subscription or observer made with a window (`subscribe_in`,
@@ -125,7 +125,10 @@ state is in place then, so it has to say which window it belongs to:
   `self.windows.scope` when you make it and run the body in
   `in_window_scope(scope, ...)`.
 - State that outlives one window's draw but belongs to one window (the
-  recording) records its window and goes through `in_window_scope` with it.
+  recording) carries that window inside the value itself
+  (`recording_state::Capture::origin`), so taking or dropping the value
+  takes the window with it, and goes through `in_window_scope` with it. A
+  separate "which window" field next to it goes stale.
 
 `scripts/check-window-scope.py` (CI step "window scope") flags async calls
 in `src/ui` whose closure touches window state without one of these. Work
@@ -138,8 +141,8 @@ cx.spawn(async move |this, cx| { ... })
 ```
 
 The check matches methods by name and can't see a window chosen wrongly:
-`defer_scoped` from the main window's render captures the main window even
-when the work belongs to another one. The limits are listed in
+a scoped task started from the main window's render captures the main
+window even when the work belongs to another one. The limits are listed in
 `docs/decisions/sweep-window-slot-scope.md`.
 
 ## Screenshots

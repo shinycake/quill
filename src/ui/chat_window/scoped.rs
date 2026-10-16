@@ -5,7 +5,7 @@
 //! usually with the main window's state in place. Run as-is, its update
 //! would read and write the main window's composer, viewer or history
 //! instead of its own. Started through [`QuillApp::spawn_scoped`] (or
-//! [`QuillApp::spawn_scoped_in`], [`QuillApp::defer_scoped`]) the task
+//! [`QuillApp::spawn_scoped_in`]) the task
 //! gets a [`ScopedApp`] in place of the app's weak handle: every update
 //! puts the starting window's state back in place first, and none runs
 //! once that window has closed. Work that belongs to no window (the poll
@@ -155,19 +155,5 @@ impl QuillApp {
             window: None,
         };
         cx.spawn_in(window, async move |_, cx| f(app, cx).await)
-    }
-
-    /// `cx.defer_in` for work that belongs to the window whose state is in
-    /// place now.
-    pub(in crate::ui) fn defer_scoped(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-        f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
-    ) {
-        let scope = self.windows.scope;
-        cx.defer_in(window, move |app, window, cx| {
-            app.in_window_scope(scope, cx, |app, cx| f(app, window, cx));
-        });
     }
 }

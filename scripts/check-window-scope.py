@@ -25,9 +25,9 @@ whose closure touches per-window state:
 - a `QuillApp` method that does any of these, directly or through other
   `QuillApp` methods (matched by name, so a false hit is possible).
 
-Fix one by starting the work with `spawn_scoped` / `spawn_scoped_in` /
-`defer_scoped` (it finishes in the window it started in, and not at all
-once that window closed), `QuillApp::spawn_main` / `spawn_main_in` (it
+Fix one by starting the work with `spawn_scoped` / `spawn_scoped_in`
+(it finishes in the window it started in, and not at all once that window
+closed), `QuillApp::spawn_main` / `spawn_main_in` (it
 belongs to no chat window), or by doing the window work inside
 `in_window_scope(window, ...)` in the closure (only what is outside that
 call is checked). Work that is really the app's, with no window state
@@ -286,8 +286,8 @@ def main() -> int:
         print("\n".join(failures))
         print(
             f"\n{len(failures)} async call(s) in src/ui touch per-window state without a scope.\n"
-            "Start them with spawn_scoped / spawn_scoped_in / defer_scoped (the window that\n"
-            "started the work), QuillApp::spawn_main / spawn_main_in (no chat window), do the\n"
+            "Start them with spawn_scoped / spawn_scoped_in (the window that started the\n"
+            "work), QuillApp::spawn_main / spawn_main_in (no chat window), do the\n"
             "window work inside in_window_scope(window, ...) in the closure, or, when no\n"
             "window state is involved, add `// window-scope: <why>` on one of the three\n"
             "lines above the call. See src/ui/chat_window/scoped.rs and\n"

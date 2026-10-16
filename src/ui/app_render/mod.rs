@@ -101,7 +101,6 @@ impl Render for QuillApp {
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
         }
-        self.flush_recording_auto_send(window, cx);
         let status_toast = self.status_toast_visible(cx);
         let viewer_open = self.viewer.state.is_open();
         let menu_open = self.message_ui.menu.is_some()

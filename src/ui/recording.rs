@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::demo::demo_file_json;
 use super::message_media::waveform_row;
+use super::recording_state::{CaptureFor, CaptureMedia};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -59,7 +60,7 @@ impl QuillApp {
     }
 
     pub(super) fn recording_active(&self) -> bool {
-        self.recording.voice_capture.is_some() || self.recording.video_note_capture.is_some()
+        self.recording.active()
     }
 
     /// MED2: right-click on the record button flips audio/video mode
@@ -114,8 +115,7 @@ impl QuillApp {
         }
         match VoiceCapture::start() {
             Ok(capture) => {
-                self.recording.voice_capture = Some(capture);
-                self.recording.window = self.windows.scope;
+                self.hold_capture(CaptureMedia::Voice(capture), CaptureFor::Message);
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
                 self.connection.status_note = tr(keys::Q_MISC_RECORDING_VOICE_NOTE).into();
@@ -168,8 +168,7 @@ impl QuillApp {
             .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         match VideoNoteCapture::start(hq, &self.capture_choice()) {
             Ok(capture) => {
-                self.recording.video_note_capture = Some(capture);
-                self.recording.window = self.windows.scope;
+                self.hold_capture(CaptureMedia::Video(capture), CaptureFor::Message);
                 self.recording.locked = lock;
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
@@ -186,27 +185,14 @@ impl QuillApp {
     /// 60 s limit is sent (as tdesktop does); a failed start (no camera or
     /// microphone access) ends the recording with the reason.
     pub(super) fn check_recording(&mut self, cx: &mut Context<Self>) {
-        if let Some(ended) = self
-            .recording
-            .video_note_capture
-            .as_mut()
-            .and_then(|c| c.ended())
-        {
+        if let Some(ended) = self.recording.video_mut().and_then(|c| c.ended()) {
             match ended {
-                Ok(()) => {
-                    self.recording.auto_send = true;
-                    cx.notify();
-                }
+                Ok(()) => self.send_recording_at_time_limit(cx),
                 Err(reason) => self.fail_recording(reason, cx),
             }
             return;
         }
-        if let Some(reason) = self
-            .recording
-            .voice_capture
-            .as_mut()
-            .and_then(|c| c.failure())
-        {
+        if let Some(reason) = self.recording.voice_mut().and_then(|c| c.failure()) {
             self.fail_recording(reason, cx);
         }
     }
@@ -252,7 +238,7 @@ impl QuillApp {
     /// Pause the voice recording, or carry on after a pause. Pausing
     /// releases the microphone; resuming stops any preview first.
     pub(super) fn toggle_record_pause(&mut self, cx: &mut Context<Self>) {
-        let Some(capture) = self.recording.voice_capture.as_mut() else {
+        let Some(capture) = self.recording.voice_mut() else {
             return;
         };
         if capture.is_paused() {
@@ -277,7 +263,7 @@ impl QuillApp {
     /// Play or pause what has been recorded so far. A preview that reached
     /// its end starts again from the top.
     pub(super) fn toggle_record_preview(&mut self, cx: &mut Context<Self>) {
-        let Some(capture) = self.recording.voice_capture.as_ref() else {
+        let Some(capture) = self.recording.voice() else {
             return;
         };
         let Some(path) = capture.preview_path().map(std::path::Path::to_path_buf) else {
@@ -362,16 +348,14 @@ impl QuillApp {
     pub(super) fn cancel_recording(&mut self, cx: &mut Context<Self>) {
         self.stop_record_preview();
         self.recording.once = false;
-        let was_video = self.recording.video_note_capture.is_some();
-        if let Some(capture) = self.recording.voice_capture.take() {
-            capture.discard();
-        }
-        if let Some(capture) = self.recording.video_note_capture.take() {
-            capture.discard();
+        let was_video = self.recording.video().is_some();
+        match self.recording.take() {
+            Some(CaptureMedia::Voice(capture)) => capture.discard(),
+            Some(CaptureMedia::Video(capture)) => capture.discard(),
+            None => {}
         }
         self.recording.locked = false;
         self.recording.discard_confirm = false;
-        self.recording.auto_send = false;
         self.sync_voice_action();
         self.connection.status_note = if was_video {
             tr(keys::Q_MISC_VIDEO_RECORDING_CANCELLED).into()
@@ -394,7 +378,7 @@ impl QuillApp {
         {
             return;
         }
-        let Some(capture) = self.recording.voice_capture.take() else {
+        let Some(capture) = self.recording.take_voice() else {
             return;
         };
         // MED2 fix-up: the send consumes the recording — locked state must
@@ -466,7 +450,7 @@ impl QuillApp {
     /// the window whose state is in place (`send_recording` puts the
     /// recording's own window in place first).
     pub(super) fn send_recording_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.recording.video_note_capture.is_some() {
+        if self.recording.video().is_some() {
             self.send_video_note_recording(window, cx);
         } else {
             self.send_voice_recording(window, cx);
@@ -491,7 +475,7 @@ impl QuillApp {
         {
             return;
         }
-        let Some(capture) = self.recording.video_note_capture.take() else {
+        let Some(capture) = self.recording.take_video() else {
             return;
         };
         self.recording.once = false;
@@ -673,7 +657,7 @@ impl QuillApp {
         self.check_recording(cx);
         self.check_record_preview();
         let recording = self.recording_active();
-        if let Some(capture) = self.recording.voice_capture.as_mut() {
+        if let Some(capture) = self.recording.voice_mut() {
             capture.sample_bar();
         }
         if recording {
@@ -689,10 +673,9 @@ impl QuillApp {
     pub(super) fn sync_voice_action(&mut self) {
         let voice = self
             .recording
-            .voice_capture
-            .as_ref()
+            .voice()
             .is_some_and(|capture| !capture.is_paused());
-        let video = self.recording.video_note_capture.is_some();
+        let video = self.recording.video().is_some();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -711,31 +694,27 @@ impl QuillApp {
     /// desktop-mapped), Cancel (asks for confirmation), Send. A locked
     /// recording ignores Esc.
     pub(super) fn record_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let video = self.recording.video_note_capture.is_some();
+        let video = self.recording.video().is_some();
         let seconds = if video {
             self.recording
-                .video_note_capture
-                .as_ref()
+                .video()
                 .map(|capture| capture.elapsed_secs())
                 .unwrap_or(0)
         } else {
             self.recording
-                .voice_capture
-                .as_ref()
+                .voice()
                 .map(|capture| capture.elapsed_secs())
                 .unwrap_or(0)
         };
         let bars = self
             .recording
-            .voice_capture
-            .as_ref()
+            .voice()
             .map(|capture| capture.bars.clone())
             .unwrap_or_default();
         let paused = !video
             && self
                 .recording
-                .voice_capture
-                .as_ref()
+                .voice()
                 .is_some_and(|capture| capture.is_paused());
         let previewing = self
             .recording
@@ -858,12 +837,11 @@ impl QuillApp {
                 )
                 .into_any_element();
         }
-        let video = self.recording.video_note_capture.is_some();
+        let video = self.recording.video().is_some();
         let paused = !video
             && self
                 .recording
-                .voice_capture
-                .as_ref()
+                .voice()
                 .is_some_and(|capture| capture.is_paused());
         let controls = record_controls(RecordBarFacts {
             video,

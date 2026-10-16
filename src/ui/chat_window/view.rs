@@ -132,7 +132,6 @@ impl Render for ChatWindowView {
         });
         let dialog_open = self.shell.read(cx).dialog_open();
         let body = app.update(cx, |app, cx| {
-            app.flush_recording_auto_send(window, cx);
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.chat_window_body(chat_id, window, cx)
