@@ -295,8 +295,12 @@ impl QuillApp {
                 None | Some(JoinRequestFetch::Loading) => {
                     body = body.child(
                         div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
+                            .child(gpui_kit::component::spinner::Spinner::new().small())
                             .child(tr(keys::Q_CHAT_LOADING_JOIN_REQUESTS)),
                     );
                 }

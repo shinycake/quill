@@ -32,15 +32,15 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(
-                Button::new("settings-experimental")
-                    .label(EXPERIMENTAL_PAGE)
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings.page = Some(EXPERIMENTAL_PAGE);
-                        cx.notify();
-                    })),
-            )
+            .child(super::nav_row::nav_row(
+                "settings-experimental",
+                EXPERIMENTAL_PAGE,
+                cx,
+                |this, _, cx| {
+                    this.settings.page = Some(EXPERIMENTAL_PAGE);
+                    cx.notify();
+                },
+            ))
             .into_any_element()
     }
 

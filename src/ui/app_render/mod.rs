@@ -127,6 +127,7 @@ impl Render for QuillApp {
             self.frame.context_menu_previous_focus = None;
         }
         self.frame.context_menu_was_open = menu_open;
+        self.track_layer_focus(window, cx);
         self.frame_upkeep(window, cx);
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);

@@ -19,6 +19,13 @@ use quill::advanced::experimental::{self, Imported, Values};
 static EXPERIMENTAL_OPTIONS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
+    new_app_on(cx, "ready-privacy")
+}
+
+fn new_app_on(
+    cx: &mut TestAppContext,
+    demo: &'static str,
+) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     let root = std::env::temp_dir().join(format!("quill-advanced-ui-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
@@ -28,14 +35,8 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, Vi
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(
-                window,
-                cx,
-                None,
-                Some(ScreenshotDemo::named("ready-privacy")),
-            )
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         let shell = cx.new(|_| QuillShell::new(view.clone()));
         *slot_in.borrow_mut() = Some((view, shell.clone()));
         Root::new(shell, window, cx)
@@ -167,6 +168,25 @@ fn numberbuttons_switches_fast_buttons_mode_and_lists_it_on_the_page(cx: &mut Te
     });
     assert!(!quill::fast_buttons::is_enabled(4242));
     quill::fast_buttons::set_enabled(4242, false);
+}
+
+#[gpui_kit::test]
+fn the_experimental_row_on_the_advanced_page_opens_the_experimental_page(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app_on(cx, "ready-settings-advanced");
+    let vcx = &mut vcx;
+    app.update(vcx, |_, cx| cx.notify());
+    for _ in 0..3 {
+        vcx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        vcx.update(|window, cx| window.render_frame(cx));
+    }
+    let open = _shell.read_with(vcx, |shell, _| shell.open_dialog);
+    assert_eq!(open, Some(DialogKind::Settings));
+    vcx.update(|window, cx| window.click("settings-experimental", cx));
+    vcx.run_until_parked();
+    app.update(vcx, |app, _| {
+        assert_eq!(app.settings.page, Some(EXPERIMENTAL_PAGE));
+    });
 }
 
 #[gpui_kit::test]
