@@ -1773,8 +1773,8 @@ Apache License
 
 Used by:
 - [gpui-base 0.7.3](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.7.3](https://crates.io/crates/gpui-component-macros)
 - [gpui-component 0.7.3](https://github.com/longbridge/gpui-kit)
+- [gpui-component-macros 0.7.3](https://crates.io/crates/gpui-component-macros)
 
 ````text
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
