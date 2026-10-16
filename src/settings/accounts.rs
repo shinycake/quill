@@ -1,6 +1,9 @@
 //! Account paths and the multi-account registry.
 use super::*;
 
+mod deletion;
+pub use deletion::*;
+
 #[derive(Debug, Clone)]
 pub struct AccountPaths {
     pub root: PathBuf,
@@ -54,6 +57,11 @@ struct AccountRegistry {
     /// notifications from: All accounts"), app-wide like tdesktop's.
     #[serde(default = "default_true")]
     notify_from_all: bool,
+    /// Account folders to delete before any client opens them again
+    /// (`deletion`): a removal or log-out whose TDLib client was still
+    /// closing when the app quit finishes on the next start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pending_deletes: Vec<AccountKey>,
 }
 
 impl Default for AccountRegistry {
@@ -65,6 +73,7 @@ impl Default for AccountRegistry {
             }],
             active: Some(AccountKey::primary()),
             notify_from_all: true,
+            pending_deletes: Vec::new(),
         }
     }
 }
@@ -89,6 +98,10 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
         .retain(|r| AccountKey::new(&r.key.0).is_some());
     let mut seen = std::collections::HashSet::new();
     registry.accounts.retain(|r| seen.insert(r.key.clone()));
+    let mut seen = std::collections::HashSet::new();
+    registry
+        .pending_deletes
+        .retain(|key| AccountKey::new(&key.0).is_some() && seen.insert(key.clone()));
     if registry.accounts.is_empty() {
         return AccountRegistry::default();
     }
@@ -179,7 +192,10 @@ pub fn add_account(app_root: &Path, display_name: &str) -> std::io::Result<Accou
         let candidate = AccountKey::new(&format!("account-{n}")).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid account key")
         })?;
-        if !registry.accounts.iter().any(|r| r.key == candidate) {
+        // A key whose old folder is still to be deleted is not free yet.
+        if !registry.accounts.iter().any(|r| r.key == candidate)
+            && !registry.pending_deletes.contains(&candidate)
+        {
             registry.accounts.push(AccountRecord {
                 key: candidate.clone(),
                 display_name: display_name.to_string(),
@@ -224,25 +240,14 @@ impl From<std::io::Error> for RemoveAccountError {
     }
 }
 
-/// Remove an account and delete its directory tree (`accounts/<key>`).
-/// Refuses to remove the last remaining account.
+/// Remove an account and delete its directory tree (`accounts/<key>`) at
+/// once. Refuses to remove the last remaining account. The app uses
+/// [`begin_remove_account`] instead, which waits for the account's TDLib
+/// client to close before the folder goes.
 pub fn remove_account(app_root: &Path, key: &AccountKey) -> Result<(), RemoveAccountError> {
-    let mut registry = load_registry(app_root);
-    if registry.accounts.len() <= 1 {
-        return Err(RemoveAccountError::LastAccount);
-    }
-    registry.accounts.retain(|r| &r.key != key);
-    if registry.active.as_ref() == Some(key) {
-        registry.active = registry.accounts.first().map(|r| r.key.clone());
-    }
-    // The DB tree is gone once the record is; a missing dir is not an error.
-    let dir = app_root.join("accounts").join(&key.0);
-    if let Err(e) = std::fs::remove_dir_all(&dir)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        return Err(RemoveAccountError::Io(e));
-    }
-    save_registry(app_root, &registry)?;
+    begin_remove_account(app_root, key)?;
+    delete_account_folder(app_root, key)?;
+    finish_pending_delete(app_root, key)?;
     Ok(())
 }
 

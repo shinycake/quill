@@ -1,5 +1,5 @@
 //! Connect gate: live TDLib connection bootstrap and shutdown.
-use super::closing::{Closable, QUIT_CLOSE_DEADLINE, drain_until_closed};
+use super::closing::{Closable, CloseProgress, QUIT_CLOSE_DEADLINE};
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::data_settings::load_data_storage_prefs;
@@ -97,23 +97,11 @@ impl Drop for LiveConnect {
 
 impl Closable for LiveConnect {
     fn begin_close(&mut self) {
-        if self.bridge.is_joined() || self.bridge.stopped_unexpectedly() {
-            return;
-        }
-        super::closing::begin_close(&mut self.driver);
+        super::closing::begin_close_bridged(&mut self.driver, &self.bridge);
     }
 
-    fn drain_closed(&mut self, budget: Duration) -> bool {
-        // A dead receive loop can never deliver Closed; do not wait for it.
-        if self.bridge.is_joined() || self.bridge.stopped_unexpectedly() {
-            return true;
-        }
-        let bridge = &self.bridge;
-        drain_until_closed(
-            &mut self.driver,
-            || bridge.next_timeout(Duration::ZERO),
-            budget,
-        )
+    fn drain(&mut self, budget: Duration) -> CloseProgress {
+        super::closing::drain_bridged(&mut self.driver, &self.bridge, budget)
     }
 
     fn finish(&mut self) {

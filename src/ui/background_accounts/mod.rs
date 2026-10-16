@@ -27,9 +27,10 @@ use quill::notify_accounts::{
     AccountUnread, BackgroundDrain, BackgroundStatus, background_status, drain_background,
     set_other_accounts_unread,
 };
-use quill::platform::live_secret_store;
-use quill::settings::{AccountPaths, active_account, list_accounts, safe_app_root};
-use std::collections::HashSet;
+use quill::settings::{
+    AccountPaths, active_account, list_accounts, pending_deletes, safe_app_root,
+};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -38,6 +39,7 @@ mod calls;
 pub(super) mod chrome;
 mod clicks;
 pub(super) mod closing;
+pub(super) mod deleting;
 mod switch;
 
 /// Clicks on notifications of accounts that are not on screen, queued by
@@ -70,8 +72,15 @@ pub(super) struct PendingOpen {
 
 pub(crate) struct BackgroundAccounts {
     pub(super) clients: Vec<BackgroundClient>,
-    /// Accounts whose database key is being read on a worker.
+    /// Accounts whose client is wanted once its database key is read on
+    /// a worker. Removing an account takes it out: the start then ends.
     starting: HashSet<AccountKey>,
+    /// Background preparations still running on a worker, cancelled or
+    /// not (`prepare_connect` creates the account's folders): nothing may
+    /// delete those folders until they are done.
+    preparing: HashMap<AccountKey, u32>,
+    /// `start_connection` preparations still running on a worker.
+    pub(super) screen_preparing: u32,
     /// Bumped by `stop_background_accounts`: starts in flight and the poll
     /// loop of an older generation end.
     generation: u64,
@@ -89,6 +98,20 @@ pub(crate) struct BackgroundAccounts {
     pub(super) closing: ClosingSet,
     /// The quit observer that closes every client together.
     quit_close: Option<Subscription>,
+    /// Accounts whose folder is being deleted (`deleting`): nothing opens
+    /// them.
+    pub(super) deleting: HashSet<AccountKey>,
+    /// Lock-screen log out in progress: no client starts until the local
+    /// data is gone (the wipe starts the connection itself).
+    pub(super) wiping: bool,
+    /// Folders left for deletion by an earlier run were deleted (once, at
+    /// the first connection).
+    swept: bool,
+    /// The keychain the account database keys live in.
+    pub(super) secrets: deleting::SecretsFactory,
+    /// Tests point account work at a temporary app root.
+    #[cfg(test)]
+    pub(super) test_root: Option<std::path::PathBuf>,
 }
 
 impl BackgroundAccounts {
@@ -96,6 +119,8 @@ impl BackgroundAccounts {
         Self {
             clients: Vec::new(),
             starting: HashSet::new(),
+            preparing: HashMap::new(),
+            screen_preparing: 0,
             generation: 0,
             polling: false,
             clicks: Arc::new(Mutex::new(Vec::new())),
@@ -105,6 +130,26 @@ impl BackgroundAccounts {
             ringing: None,
             closing: ClosingSet::new(),
             quit_close: None,
+            deleting: HashSet::new(),
+            wiping: false,
+            swept: false,
+            secrets: deleting::live_secrets(),
+            #[cfg(test)]
+            test_root: None,
+        }
+    }
+
+    /// A background preparation of `key` is running on a worker.
+    pub(super) fn preparing(&self, key: &AccountKey) -> bool {
+        self.preparing.get(key).is_some_and(|count| *count > 0)
+    }
+
+    fn prepared(&mut self, key: &AccountKey) {
+        if let Some(count) = self.preparing.get_mut(key) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.preparing.remove(key);
+            }
         }
     }
 
@@ -160,26 +205,44 @@ impl QuillApp {
     /// connect and switch.
     pub(super) fn ensure_background_accounts(&mut self, cx: &mut Context<Self>) {
         self.watch_quit_close(cx);
-        if self.demo_session.is_some() {
+        // Local data is being wiped: nothing opens until it is gone.
+        if self.background.wiping {
             return;
         }
-        let (Some(root), Some(credentials)) = (safe_app_root(), self.credentials.clone()) else {
+        let Some(root) = self.client_accounts_root() else {
+            return;
+        };
+        let Some(credentials) = self.credentials.clone() else {
             return;
         };
         self.background.notify_from_all = quill::settings::notify_from_all(&root);
         let active = active_account(&root);
         let accounts = list_accounts(&root);
-        self.background.clients.retain(|client| {
-            client.key != active && accounts.iter().any(|record| record.key == client.key)
-        });
+        let pending = pending_deletes(&root);
+        // Forget clients of accounts that were removed or are on screen
+        // now; their clients close without blocking the window.
+        let (keep, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut self.background.clients)
+            .into_iter()
+            .partition(|client| {
+                client.key != active && accounts.iter().any(|record| record.key == client.key)
+            });
+        self.background.clients = keep;
+        for client in gone {
+            if let Some(live) = client.live {
+                self.close_later(client.key, live, false, cx);
+            }
+        }
         for record in accounts {
             let key = record.key;
             // A client still closing keeps its database until Closed; the
-            // account starts again once it is (`reap_closing`).
+            // account starts again once it is (`reap_closing`). A folder
+            // waiting to be deleted is never opened.
             if key == active
                 || self.background.client(&key).is_some()
                 || self.background.starting.contains(&key)
-                || self.background.closing.contains(&key)
+                || self.background.closing.may_be_open(&key)
+                || self.background.deleting.contains(&key)
+                || pending.contains(&key)
             {
                 continue;
             }
@@ -194,16 +257,18 @@ impl QuillApp {
                 continue;
             }
             self.background.starting.insert(key.clone());
+            *self.background.preparing.entry(key.clone()).or_insert(0) += 1;
             let generation = self.background.generation;
             let prepare_root = root.clone();
             let prepare_key = key.clone();
             let prepare_credentials = credentials.clone();
+            let secrets = self.background.secrets.clone();
             // The database key comes from the OS keychain: off the UI thread.
             let prepared = cx.background_executor().spawn(async move {
                 quill::connect::prepare_connect(
                     &prepare_root,
                     prepare_key,
-                    live_secret_store().as_ref(),
+                    secrets().as_ref(),
                     &prepare_credentials,
                 )
             });
@@ -212,13 +277,21 @@ impl QuillApp {
             cx.spawn(async move |this, cx| {
                 let prepared = prepared.await;
                 let _ = this.update(cx, |this, cx| {
-                    this.background.starting.remove(&key);
-                    // Stopped since, or switched to meanwhile: a second client
-                    // must never open the same database.
-                    if generation != this.background.generation
+                    this.background.prepared(&key);
+                    // Stopped since: every start of that generation ends.
+                    if generation != this.background.generation {
+                        return;
+                    }
+                    // Removed since (it left `starting`), being wiped,
+                    // switched to meanwhile, or still closing: a second
+                    // client must never open the same database, nor one
+                    // whose folder is being deleted.
+                    if !this.background.starting.remove(&key)
+                        || this.background.wiping
+                        || this.background.deleting.contains(&key)
                         || active_account(&root) == key
                         || this.background.client(&key).is_some()
-                        || this.background.closing.contains(&key)
+                        || this.background.closing.may_be_open(&key)
                     {
                         return;
                     }
@@ -251,11 +324,12 @@ impl QuillApp {
         self.spawn_background_poll(cx);
     }
 
-    /// Close one background client without waiting for it. Before its
-    /// account is removed, wait with `after_closing` so TDLib is not
-    /// writing while its folder is deleted.
-    pub(super) fn stop_background_account(&mut self, key: &AccountKey) {
+    /// Close one background client without waiting for it, and end a start
+    /// in flight. Before its account is removed, wait with `after_closing`
+    /// so TDLib is not writing while its folder is deleted.
+    pub(super) fn stop_background_account(&mut self, key: &AccountKey, cx: &mut Context<Self>) {
         self.background.starting.remove(key);
+        self.background.closing.cancel_restart(key);
         if let Some(index) = self
             .background
             .clients
@@ -264,7 +338,7 @@ impl QuillApp {
         {
             let client = self.background.clients.remove(index);
             if let Some(live) = client.live {
-                self.background.close_later(client.key, live, false);
+                self.close_later(client.key, live, false, cx);
             }
         }
         self.publish_background_unread();
@@ -272,13 +346,15 @@ impl QuillApp {
 
     /// Close every background client (local data is about to be wiped:
     /// wait with `after_closing` before deleting it). Never blocks.
-    pub(super) fn stop_background_accounts(&mut self) {
+    pub(super) fn stop_background_accounts(&mut self, cx: &mut Context<Self>) {
         self.background.generation += 1;
         self.background.starting.clear();
         self.background.polling = false;
         self.background.close_all_later();
         self.background.closing.cancel_restarts();
         self.publish_background_unread();
+        // The new generation's poll drains the closing clients.
+        self.spawn_background_poll(cx);
     }
 
     fn publish_background_unread(&self) {
@@ -403,7 +479,7 @@ impl QuillApp {
             }
         }
         for (key, live) in stopped {
-            self.background.close_later(key, live, false);
+            self.background.push_closing(key, live, false);
         }
         if changed {
             self.publish_background_unread();
@@ -427,3 +503,7 @@ mod tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod closing_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod deleting_tests;
