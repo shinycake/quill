@@ -142,7 +142,7 @@ impl QuillApp {
             effective_content(&message.content, message.ephemeral.as_ref()),
             playing_here,
             can_reply,
-        ) && let Some(position) = self.playback.clock.as_ref().map(|c| c.elapsed_secs())
+        ) && let Some(position) = self.playback.active_position_secs()
         {
             let timecode = quill::message_menu::timecode_text(position);
             let label_timecode = timecode.clone();

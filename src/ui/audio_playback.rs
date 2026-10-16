@@ -10,7 +10,6 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
-use quill::playback::PlaybackClock;
 use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use quill::voice::{self, format_voice_duration};
@@ -92,21 +91,19 @@ impl QuillApp {
         self.playback.pending_audio_play = None;
     }
 
-    /// Drop the seek-bar state for the active track (clock, slider entity,
-    /// scrub preview). Idempotent: both stop functions call it. The
+    /// Drop the seek-bar state for the active track (slider entity, scrub
+    /// preview). Idempotent: both stop functions call it. The
     /// remembered per-message position in `playback_positions` is kept so a
     /// stopped row still shows where it got to.
     pub(super) fn clear_playback_state(&mut self) {
-        if let (Some(message_id), Some(clock)) =
-            (self.active_playback_id(), self.playback.clock.as_ref())
-        {
-            self.playback
-                .positions
-                .insert(message_id, clock.elapsed_secs());
+        if let (Some(message_id), Some(position)) = (
+            self.active_playback_id(),
+            self.playback.active_position_secs(),
+        ) {
+            self.playback.positions.insert(message_id, position);
         }
-        self.playback.clock = None;
+        self.playback.track_duration = None;
         quill::wake::CHROME.poke();
-        self.playback.path = None;
         self.playback.seek_slider = None;
         self.playback.player.slider = None;
         self.playback.seek_scrubbing = false;
@@ -127,11 +124,12 @@ impl QuillApp {
         }
     }
 
-    /// Mark the given row as the active track: sets `playing_voice` /
-    /// `playing_audio`, starts the playback clock at `offset_secs`, builds
-    /// the seek slider entity, and starts the progress tick. Does not spawn
-    /// the caller starts the sound (the screenshot demo fakes playback
-    /// without a subprocess).
+    /// Make the given row the active track and start its sound at
+    /// `offset_secs`: builds the seek slider entity and starts the progress
+    /// tick. The row becomes active even when the sound can't start; the
+    /// engine then reports `Failed` and the UI shows exactly that. Returns
+    /// whether the sound is playing.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn begin_track_playback(
         &mut self,
         kind: PlaybackKind,
@@ -139,8 +137,9 @@ impl QuillApp {
         message_id: MessageId,
         duration_secs: f64,
         offset_secs: f64,
+        path: &std::path::Path,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
@@ -148,15 +147,12 @@ impl QuillApp {
         // The sound was replaced, so a recording preview is over.
         self.recording.preview = None;
         self.playback.error = None;
+        let playing = self.start_player(path, offset_secs, duration_secs);
         match kind {
             PlaybackKind::Voice => self.playback.playing_voice = Some(message_id),
             PlaybackKind::Audio => self.playback.playing_audio = Some(message_id),
         }
-        let mut clock = PlaybackClock::new(duration_secs);
-        clock.set_rate(self.playback.speed);
-        clock.seek(offset_secs);
-        clock.resume();
-        self.playback.clock = Some(clock);
+        self.playback.track_duration = Some(duration_secs.max(0.0));
         quill::wake::CHROME.poke();
         let slider = cx.new(|_| {
             SliderState::new()
@@ -174,16 +170,32 @@ impl QuillApp {
         self.playback.seek_preview_secs = None;
         self.note_track_started(kind, chat_id, message_id, cx);
         self.spawn_playback_tick(cx);
+        playing
     }
 
     /// Start the in-process player on `path` at `offset_secs` with the
-    /// current volume and speed. Returns true when it is playing.
-    pub(super) fn start_player(&mut self, path: &std::path::Path, offset_secs: f64) -> bool {
+    /// current volume and speed. Returns true when it is playing; on false
+    /// the engine is `Failed` and `playback.error` says why. The screenshot
+    /// demos have no audio device and use the engine's explicit simulation.
+    pub(super) fn start_player(
+        &mut self,
+        path: &std::path::Path,
+        offset_secs: f64,
+        duration_secs: f64,
+    ) -> bool {
+        let simulation = self
+            .demo_session
+            .is_some()
+            .then(|| super::audio::Simulation {
+                fail: std::env::var_os("QUILL_DEMO_AUDIO_FAIL").is_some(),
+            });
+        self.playback.audio.set_simulation(simulation);
         match self.playback.audio.start(
             path,
             offset_secs,
             self.playback.volume,
             self.playback.speed,
+            duration_secs,
         ) {
             Ok(()) => {
                 self.playback.error = None;
@@ -197,46 +209,34 @@ impl QuillApp {
         }
     }
 
-    /// Move the sound to `offset_secs` (seek while playing).
-    pub(super) fn restart_player_at(&mut self, offset_secs: f64) {
-        if let Err(err) = self.playback.audio.seek(offset_secs, true) {
-            self.playback.error = Some(err.to_string());
-        }
-    }
-
-    /// Pause the active track: freeze the clock and the sound, keep the row
-    /// active so the seek bar stays interactive and Play resumes from here.
+    /// Pause the active track: hold the sound, keep the row active so the
+    /// seek bar stays interactive and Play resumes from here.
     pub(super) fn pause_active_playback(&mut self) {
-        let id = self.active_playback_id();
-        if let Some(clock) = self.playback.clock.as_mut() {
-            clock.pause();
-            if let Some(id) = id {
-                self.playback.positions.insert(id, clock.elapsed_secs());
-            }
-        }
         self.playback.audio.pause();
+        if let (Some(id), Some(position)) = (
+            self.active_playback_id(),
+            self.playback.active_position_secs(),
+        ) {
+            self.playback.positions.insert(id, position);
+        }
         quill::wake::CHROME.poke();
     }
 
-    /// Resume the active track from the frozen clock position.
+    /// Resume the active track from where the sound is. A failure leaves the
+    /// engine in the state it reports (still paused, or failed), with the
+    /// reason in `playback.error`.
     pub(super) fn resume_active_playback(&mut self, cx: &mut Context<Self>) {
-        let offset = self.playback.clock.as_ref().map(|c| c.elapsed_secs());
-        match offset {
-            Some(offset) => {
-                self.sound_starts(cx);
-                if let Err(err) = self.playback.audio.resume(offset) {
-                    self.playback.error = Some(err.to_string());
-                }
-                if let Some(clock) = self.playback.clock.as_mut() {
-                    clock.resume();
-                }
-                quill::wake::CHROME.poke();
-            }
-            _ => {
-                self.stop_voice_playback();
-                self.stop_audio_playback();
-            }
+        let Some(position) = self.playback.active_position_secs() else {
+            self.stop_voice_playback();
+            self.stop_audio_playback();
+            return;
+        };
+        self.sound_starts(cx);
+        match self.playback.audio.resume(position) {
+            Ok(()) => self.playback.error = None,
+            Err(err) => self.playback.error = Some(err.to_string()),
         }
+        quill::wake::CHROME.poke();
     }
 
     /// `SliderEvent` sink for the active row's seek slider.
@@ -257,24 +257,22 @@ impl QuillApp {
         }
     }
 
-    /// Apply a finished seek: clamp, move the clock, and seek the sound.
-    /// Seeking while paused just moves the frozen position; the sound
-    /// catches up on resume.
+    /// Apply a finished seek: clamp it and move the sound. Seeking while
+    /// not playing just moves the held position; the sound catches up on
+    /// resume.
     pub(super) fn seek_active_to(&mut self, secs: f64, cx: &mut Context<Self>) {
-        let Some(clock) = self.playback.clock.as_mut() else {
+        let Some(duration) = self.playback.track_duration else {
             return;
         };
-        clock.seek(secs);
-        let offset = clock.elapsed_secs();
-        let was_playing = clock.is_playing();
+        let offset = secs.clamp(0.0, duration.max(0.0));
+        let was_playing = self.playback.is_playing();
         if let Some(id) = self.active_playback_id() {
             self.playback.positions.insert(id, offset);
         }
-        if !was_playing {
-            let _ = self.playback.audio.seek(offset, false);
+        if let Err(err) = self.playback.audio.seek(offset, was_playing) {
+            self.playback.error = Some(err.to_string());
         }
         if was_playing {
-            self.restart_player_at(offset);
             self.connection.status_note = format!(
                 "{} — seek {}",
                 match self.active_playback_kind() {
@@ -288,8 +286,7 @@ impl QuillApp {
     }
 
     /// 250 ms progress tick while a track is active: re-renders so the seek
-    /// bar advances, and auto-stops when the clock reaches the duration
-    /// (the sound ending ends the track too).
+    /// bar follows the sound, and ends the track when the sound ran out.
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
         if self.playback.tick {
             return;
@@ -315,17 +312,8 @@ impl QuillApp {
                         }
                         // The sound is the authority on where the track
                         // ends (its real length can differ from TDLib's
-                        // rounded duration); without one (demo) the clock is.
-                        let sound_ended =
-                            this.playback.audio.is_loaded() && this.playback.audio.is_ended();
-                        let finished = this.playback.clock.as_ref().is_some_and(|clock| {
-                            clock.is_playing()
-                                && if this.playback.audio.is_loaded() {
-                                    sound_ended
-                                } else {
-                                    clock.finished()
-                                }
-                        });
+                        // rounded duration).
+                        let finished = this.playback.audio.is_ended();
                         if finished && !this.playback.seek_scrubbing {
                             // Capture the id first: the stops below save the
                             // (now end-of-track) position via clear_playback_state,
@@ -361,19 +349,19 @@ impl QuillApp {
         .detach();
     }
 
-    /// Push the playback clock into the seek slider entity so the thumb
-    /// follows elapsed time. Called at the top of `render` (the tick has no
+    /// Push the sound's position into the seek slider entity so the thumb
+    /// follows it. Called at the top of `render` (the tick has no
     /// `&mut Window`, which `SliderState::set_value` needs). Skipped while
     /// scrubbing so the user's drag is never fought.
     pub(super) fn sync_seek_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.playback.seek_scrubbing {
             return;
         }
-        if let (Some(slider), Some(clock)) = (
+        if let (Some(slider), Some(position)) = (
             self.playback.seek_slider.as_ref(),
-            self.playback.clock.as_ref(),
+            self.playback.active_position_secs(),
         ) {
-            let value = clock.elapsed_secs().clamp(0.0, clock.duration_secs()) as f32;
+            let value = position as f32;
             // `set_value` calls `cx.notify()` unconditionally — only push when
             // the value actually changed, otherwise this render-triggered sync
             // loops at frame rate instead of the tick cadence.
@@ -383,7 +371,7 @@ impl QuillApp {
                     state.set_value(value, window, cx);
                 });
             }
-            // The player bar's own slider follows the same clock.
+            // The player bar's own slider follows the same position.
             if let Some(bar) = self.playback.player.slider.as_ref()
                 && bar.read(cx).value() != SliderValue::Single(value)
             {
@@ -406,21 +394,15 @@ impl QuillApp {
         let active = self.active_playback_id() == Some(message_id)
             && self.playback.player.chat.is_none_or(|chat| chat == chat_id);
         if active {
-            let display = self.playback.seek_preview_secs.or_else(|| {
-                self.playback
-                    .clock
-                    .as_ref()
-                    .map(|clock| clock.elapsed_secs())
-            });
+            let display = self
+                .playback
+                .seek_preview_secs
+                .or_else(|| self.playback.active_position_secs());
             SeekBarView {
                 slider: self.playback.seek_slider.clone(),
                 display_secs: display.unwrap_or(0.0),
                 duration_secs,
-                is_playing: self
-                    .playback
-                    .clock
-                    .as_ref()
-                    .is_some_and(PlaybackClock::is_playing),
+                is_playing: self.playback.is_playing(),
                 // MED1: speed/mute/error shown on the active row.
                 speed: self.playback.speed,
                 muted: self.playback.volume < 0.01,
@@ -458,17 +440,16 @@ impl QuillApp {
         {
             // Active row: pause ↔ resume (the row stays active so the seek
             // bar keeps working and Play resumes from the frozen position).
-            let playing = self
-                .playback
-                .clock
-                .as_ref()
-                .is_some_and(PlaybackClock::is_playing);
-            if playing {
+            if self.playback.is_playing() {
                 self.pause_active_playback();
                 self.connection.status_note = tr(keys::Q_AV_VOICE_NOTE_PAUSED).into();
             } else {
                 self.resume_active_playback(cx);
-                self.connection.status_note = tr(keys::Q_AV_PLAYING_VOICE_NOTE).into();
+                self.connection.status_note = if self.playback.is_playing() {
+                    tr(keys::Q_AV_PLAYING_VOICE_NOTE).into()
+                } else {
+                    tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED).into()
+                };
             }
             cx.notify();
             return;
@@ -501,19 +482,18 @@ impl QuillApp {
             .get(&message_id)
             .copied()
             .unwrap_or(0.0);
-        self.begin_track_playback(
+        let playing = self.begin_track_playback(
             PlaybackKind::Voice,
             chat_id,
             message_id,
             duration_secs,
             offset,
+            &safe,
             cx,
         );
-        self.playback.path = Some(safe.clone());
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
         }
-        let playing = self.start_player(&safe, offset);
         self.connection.status_note = if playing {
             tr(keys::Q_AV_PLAYING_VOICE_NOTE).into()
         } else {
@@ -534,17 +514,16 @@ impl QuillApp {
             && self.playback.player.chat.is_none_or(|chat| chat == chat_id)
         {
             // Active row: pause ↔ resume (see voice toggle).
-            let playing = self
-                .playback
-                .clock
-                .as_ref()
-                .is_some_and(PlaybackClock::is_playing);
-            if playing {
+            if self.playback.is_playing() {
                 self.pause_active_playback();
                 self.connection.status_note = tr(keys::Q_AV_AUDIO_PAUSED).into();
             } else {
                 self.resume_active_playback(cx);
-                self.connection.status_note = tr(keys::Q_AV_PLAYING_AUDIO).into();
+                self.connection.status_note = if self.playback.is_playing() {
+                    tr(keys::Q_AV_PLAYING_AUDIO).into()
+                } else {
+                    tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED).into()
+                };
             }
             cx.notify();
             return;
@@ -577,16 +556,15 @@ impl QuillApp {
             .get(&message_id)
             .copied()
             .unwrap_or(0.0);
-        self.begin_track_playback(
+        let playing = self.begin_track_playback(
             PlaybackKind::Audio,
             chat_id,
             message_id,
             duration_secs,
             offset,
+            &safe,
             cx,
         );
-        self.playback.path = Some(safe.clone());
-        let playing = self.start_player(&safe, offset);
         self.connection.status_note = if playing {
             tr(keys::Q_AV_PLAYING_AUDIO).into()
         } else {

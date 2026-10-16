@@ -162,6 +162,7 @@ impl QuillApp {
                     MessageId(sc::MAYA_AUDIO_MESSAGE),
                     214.0,
                     87.0,
+                    std::path::Path::new("demo-track"),
                     cx,
                 );
                 self.pause_active_playback();

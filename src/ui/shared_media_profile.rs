@@ -329,11 +329,7 @@ impl QuillApp {
             .and_then(|s| s.open_chat)
             .unwrap_or(quill::ids::ChatId(0));
         let playing = self.playback.playing_audio;
-        let is_playing = self
-            .playback
-            .clock
-            .as_ref()
-            .is_some_and(|clock| clock.is_playing());
+        let is_playing = self.playback.is_playing();
         let mut list = div()
             .id("playlist-tracks")
             .flex_1()

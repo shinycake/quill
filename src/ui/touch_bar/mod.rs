@@ -92,14 +92,13 @@ impl QuillApp {
     /// tdesktop shows the player for songs only, from start until stop.
     fn touch_bar_song(&self) -> Option<Track> {
         self.playback.playing_audio?;
-        let clock = self.playback.clock.as_ref();
         let (can_previous, can_next) = self.playlist_can_move();
         Some(Track {
-            playing: clock.is_some_and(|clock| clock.is_playing()),
+            playing: self.playback.is_playing(),
             can_previous,
             can_next,
-            position: clock.map_or(0., |clock| clock.elapsed_secs()),
-            duration: clock.map_or(0., |clock| clock.duration_secs()),
+            position: self.playback.active_position_secs().unwrap_or(0.),
+            duration: self.playback.track_duration.unwrap_or(0.),
         })
     }
 
@@ -278,8 +277,8 @@ impl QuillApp {
             Command::PlayerClose => self.close_player(cx),
             Command::PlayerSeek { fraction, done } => {
                 // tdesktop seeks on release (`finishSeeking`).
-                if done && let Some(clock) = self.playback.clock.as_ref() {
-                    let secs = fraction.clamp(0., 1.) * clock.duration_secs();
+                if done && let Some(duration) = self.playback.track_duration {
+                    let secs = fraction.clamp(0., 1.) * duration;
                     self.seek_active_to(secs, cx);
                 }
             }
