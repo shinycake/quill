@@ -10,10 +10,11 @@
 use super::live_state::{
     ADMIN_BADGE_OPACITY, ADMIN_BG_OPACITY, DARK_OVER_OPACITY, PAID_BG_OPACITY, Pinned, level_color,
 };
-use super::live_view::{FRAME_H, FRAME_W, live_badge, sender_avatar};
+use super::live_view::{FRAME_H, FRAME_W, sender_avatar};
 use super::*;
 use crate::ui::group_call_panel::BG as GROUP_CALL_BG;
 use crate::ui::message_text::custom_emoji_paths;
+use crate::ui::video_player::controls::live_pill;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use quill::live_story::{MAX_TOP_SHOWN, level_for_stars};
 use quill::premium_hub::group_digits;
@@ -310,7 +311,7 @@ fn comment_row(
             .flex()
             .items_center()
             .gap(px(4.))
-            .child(live_badge(cx))
+            .child(live_pill())
             .child(
                 div()
                     .text_size(px(11.))

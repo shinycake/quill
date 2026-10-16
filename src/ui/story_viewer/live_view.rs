@@ -2,7 +2,10 @@
 //! as tdesktop's `DecideFrameResize` fits it, with the comments over its
 //! lower half (`live_comments`), the pinned paid comments, the "Stars
 //! Sent!" toast and the Stars effects; and the header's LIVE badge, viewer
-//! count and sound toggle (tdesktop `Header::setVideoStreamViewers`).
+//! count and sound toggle (tdesktop `Header::setVideoStreamViewers`), the
+//! live controller's header layout (`VideoController::live`). The live
+//! states (opening spinner, stall, paused, failed with Retry) go over the
+//! picture from the same overlay code as the stream window.
 #![deny(clippy::indexing_slicing)]
 
 use super::live_comments::{MESSAGE_SKIP, live_pinned_strip};
@@ -11,6 +14,10 @@ use super::*;
 use crate::ui::calls::stream_view::frame_expands;
 use crate::ui::message_text::kit_avatar_element;
 use crate::ui::screen_chooser::split_bold;
+use crate::ui::video_player::controls::{
+    LiveActions, LiveFacts, LiveInput, LiveOverlayParts, PictureOverlay, PictureState,
+    VideoController,
+};
 use crate::ui::video_player::{Purpose, VideoPlayer, video_frame};
 use gpui_kit::assets::IconName;
 use quill::calls::engine::StreamState;
@@ -20,6 +27,7 @@ use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
 use quill::state::{Session, unix_ms_now};
 use quill::telegram::envelope::{GroupCallMessageLevel, ParsedGroupCallMessage};
+use std::rc::Rc;
 
 /// The story frame (the viewer's media box).
 pub(super) const FRAME_W: f32 = 360.;
@@ -37,70 +45,84 @@ pub(super) fn sender_avatar(session: &Session, sender: MessageSender, size: f32)
     kit_avatar_element(&name, photo.map(std::path::Path::new), px(size))
 }
 
-/// The red LIVE badge (`groupCallMessageBadge`: 11 px tall, radius 5,
-/// 8 px semibold, `attentionButtonFg`).
-pub(super) fn live_badge(cx: &App) -> Div {
-    div()
-        .flex_none()
-        .h(px(11.))
-        .px(px(3.))
-        .rounded(px(5.))
-        .bg(cx.theme().danger)
-        .flex()
-        .items_center()
-        .text_size(px(8.))
-        .line_height(px(11.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(chrome::fg())
-        .child(tr(keys::VIDEO_STREAM_LIVE).to_uppercase())
-}
-
 impl QuillApp {
     /// The header's LIVE badge with " {count} viewers", and the sound
-    /// toggle (tdesktop's volume button; Quill mutes only).
+    /// toggle (tdesktop's volume button; Quill mutes only: ntgcalls has
+    /// no gain for the stream's sound): the live controller's header.
     pub(super) fn live_story_header(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.stories.live.watching?;
         let call = self.session()?.calls.active_group_call.as_ref()?;
-        let count = call.viewer_count;
         let muted = self
             .live
             .as_ref()
             .is_some_and(|live| live.driver.group_call_playback_muted());
-        let viewers = (count > 0).then(|| {
-            trn_with(
-                keys::GROUP_CALL_RTMP_VIEWERS,
-                i64::from(count),
-                &[("count", &group_digits(i64::from(count)))],
-            )
-        });
+        let view = cx.entity().downgrade();
+        let facts = LiveFacts {
+            viewers: call.viewer_count,
+            muted,
+            volume: None,
+            fullscreen: false,
+        };
+        let actions = LiveActions {
+            toggle_mute: Rc::new(move |_, cx| {
+                let _ = view.update(cx, |this, cx| this.toggle_live_story_sound(cx));
+            }),
+            fullscreen: None,
+            pip: None,
+            hover: None,
+        };
         Some(
             div()
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .child(live_badge(cx))
-                .children(
-                    viewers.map(|text| div().text_xs().text_color(chrome::secondary()).child(text)),
-                )
+                .text_xs()
+                .text_color(chrome::secondary())
                 .child(
-                    Button::new("live-story-sound")
-                        .icon(if muted {
-                            IconName::VolumeX
-                        } else {
-                            IconName::Volume2
-                        })
-                        .custom(chrome::ghost(cx))
-                        .small()
-                        .tab_index(0)
-                        .accessibility_label(if muted {
-                            tr(keys::Q_MEDIA_SOUND_OFF)
-                        } else {
-                            tr(keys::Q_MEDIA_SOUND_ON)
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_live_story_sound(cx))),
+                    VideoController::live(u64::from(call.id.unsigned_abs()), facts, actions)
+                        .header()
+                        .button_variant(chrome::ghost(cx)),
                 )
                 .into_any_element(),
         )
+    }
+
+    /// The live states over the story's picture (no placeholder: the
+    /// story frame's background stands in), redrawn when a delay is up.
+    fn live_story_overlay(
+        &mut self,
+        player: Option<&VideoPlayer>,
+        unsupported: bool,
+        row_id: u64,
+        cx: &mut Context<Self>,
+    ) -> Option<PictureOverlay> {
+        let input = LiveInput {
+            state: player.map(VideoPlayer::state),
+            idle: unsupported,
+            failed: false,
+        };
+        let now = cx.background_executor().now();
+        let (overlay, due) = self.stories.live.overlay.observe(input, now);
+        if let Some(due) = due {
+            let wait = due.saturating_duration_since(now);
+            let timer = cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            });
+            self.stories.live.overlay.arm(due, timer);
+        }
+        let leave = cx.entity().downgrade();
+        let retry = cx.entity().downgrade();
+        let parts = LiveOverlayParts {
+            placeholder: None,
+            wide: true,
+            // tdesktop closes the viewer when the stream is over.
+            on_leave: Some(Rc::new(move |_, cx| {
+                let _ = leave.update(cx, |this, cx| this.close_story_viewer(cx));
+            })),
+            on_retry: Some(Rc::new(move |_, cx| {
+                let _ = retry.update(cx, |this, cx| this.retry_live_story(cx));
+            })),
+            detail: None,
+        };
+        PictureState::live(overlay, parts).map(|state| PictureOverlay::new(row_id, state))
     }
 
     /// The live story's player, following its feed: a new feed (a
@@ -180,7 +202,10 @@ impl QuillApp {
         } else {
             ObjectFit::Contain
         };
-        // The last frame small and blurred behind a picture shown whole.
+        // The last frame small and blurred behind a picture shown whole,
+        // cropped to the frame's shape from its center as tdesktop's
+        // `PrepareBlurredBackground` does (stretched, the band above the
+        // picture matched nothing in it).
         let backdrop = (!expands)
             .then(|| player.as_ref().and_then(VideoPlayer::paused_picture))
             .flatten()
@@ -194,7 +219,7 @@ impl QuillApp {
                             .absolute()
                             .inset_0()
                             .size_full()
-                            .object_fit(ObjectFit::Fill),
+                            .object_fit(ObjectFit::Cover),
                     )
                     .child(
                         div()
@@ -214,6 +239,7 @@ impl QuillApp {
                         .corner_radii(Corners::all(px(6.)), hsla(0., 0., 0., 0.)),
                 )
         });
+        let overlay = self.live_story_overlay(player.as_ref(), unsupported, key as u64, cx);
         let unsupported_label = unsupported.then(|| {
             div()
                 .absolute()
@@ -242,6 +268,7 @@ impl QuillApp {
                 .bg(chrome::compose_bg())
                 .children(backdrop)
                 .children(tile)
+                .children(overlay)
                 .children(unsupported_label)
                 .child(
                     div()

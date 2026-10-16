@@ -14,7 +14,9 @@ use super::app::QuillApp;
 use super::calls::stream_view::StreamPictureView;
 use super::frame_clock::trace_slice_render;
 use super::group_call_panel::BG;
-use super::group_call_stream_layout::{leave_stream_full, stream_viewport, uses_stream_layout};
+use super::group_call_stream_layout::{
+    leave_stream_full, stream_full, stream_viewport, uses_stream_layout,
+};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
@@ -238,9 +240,9 @@ struct GroupCallRoot {
 
 impl Render for GroupCallRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let stream = self
-            .owner
-            .upgrade()
+        let owner = self.owner.upgrade();
+        let stream = owner
+            .as_ref()
             .is_some_and(|owner| owner.read(cx).group_call_is_stream());
         if !stream {
             return div()
@@ -248,7 +250,9 @@ impl Render for GroupCallRoot {
                 .child(self.panel.clone())
                 .into_any_element();
         }
-        let full = window.is_fullscreen() || window.is_maximized();
+        let full = owner
+            .as_ref()
+            .is_some_and(|owner| stream_full(window, owner.read(cx)));
         let (inset, top) = stream_viewport(full);
         div()
             .size_full()
@@ -302,7 +306,7 @@ impl Render for GroupCallPanel {
         }
         let fullscreen = window.is_fullscreen();
         // tdesktop treats a maximized stream window as full screen too.
-        let stream_full = fullscreen || window.is_maximized();
+        let stream_full = stream_full(window, owner.read(cx));
         let (body, animating, stream_title) = owner.update(cx, |app, cx| {
             if let Some(facts) = app.group_call_stream_facts() {
                 let body = app.group_call_stream_body(&facts, stream_full, window, cx);
@@ -315,6 +319,10 @@ impl Render for GroupCallPanel {
                 .and_then(|s| s.calls.active_group_call.clone())
                 .filter(|_| wants_stage);
             let stage = call.and_then(|call| app.group_call_stage(&call, cx));
+            // The stage closed: its volume slider goes with it.
+            if stage.is_none() {
+                app.group_call.stage_volume = None;
+            }
             let body = match stage {
                 Some(stage) => stage,
                 None => app.group_call_panel_body(cx),
@@ -342,18 +350,24 @@ impl Render for GroupCallPanel {
                 };
                 let key = event.keystroke.key.clone();
                 let exits = quill::calls::tile_pin::exits_fullscreen(&key);
-                if exits && owner.read(cx).group_call_is_stream() {
-                    // Esc closes an open box first, then leaves full
-                    // screen or the maximized window.
-                    if owner.read(cx).group_call.stream.overlay.is_some() {
+                if owner.read(cx).group_call_is_stream() {
+                    // Esc closes an open box first; then the live keys
+                    // (Esc leaves full screen or the maximized window,
+                    // F toggles it, M mutes, Space does nothing).
+                    if exits && owner.read(cx).group_call.stream.overlay.is_some() {
                         owner.update(cx, |app, cx| app.close_stream_overlay(cx));
                         cx.stop_propagation();
-                    } else if window.is_fullscreen() || window.is_maximized() {
-                        leave_stream_full(window);
+                        return;
+                    }
+                    let keystroke = event.keystroke.clone();
+                    if owner.update(cx, |app, cx| app.stream_key_down(&keystroke, window, cx)) {
                         cx.stop_propagation();
                         cx.notify();
+                        return;
                     }
-                    return;
+                    if exits {
+                        return;
+                    }
                 }
                 if exits && window.is_fullscreen() {
                     owner.update(cx, |app, cx| app.leave_group_call_stage(window, cx));

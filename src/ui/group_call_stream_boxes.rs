@@ -24,8 +24,9 @@ use super::app::QuillApp;
 use super::call_panel_devices::DeviceMenuTarget;
 use super::dialogs::rtmp_stream::{RtmpRows, rtmp_info_rows};
 use super::group_call_stream_layout::{StreamFacts, leave_stream_full};
+use super::video_player::controls::bar_disc;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::radio::Radio;
@@ -49,9 +50,6 @@ pub(crate) enum StreamOverlay {
     KeyWarning,
 }
 
-/// `callIconBg`: the settings and menu buttons' disc.
-pub(super) const ICON_BG: u32 = 0xffffff1f;
-
 impl QuillApp {
     pub(super) fn open_stream_overlay(&mut self, overlay: StreamOverlay, cx: &mut Context<Self>) {
         self.group_call.stream.overlay = Some(overlay);
@@ -74,13 +72,7 @@ impl QuillApp {
         facts: &StreamFacts,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let disc = |cx: &App| {
-            ButtonCustomVariant::new(cx)
-                .color(rgba(ICON_BG).into())
-                .hover(hsla(0., 0., 1., 0.2))
-                .active(hsla(0., 0., 1., 0.25))
-                .foreground(white())
-        };
+        let disc = bar_disc;
         if !facts.manager {
             return Button::new("group-call-stream-settings")
                 .custom(disc(cx))

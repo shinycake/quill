@@ -9,8 +9,17 @@
 //! player's [`Transport`], the slider entities in [`VideoControlsState`]
 //! (on `ViewerUi`) and callbacks into `QuillApp`, so it never holds state
 //! of its own.
+//!
+//! Live pictures (streams, live stories) use its live mode,
+//! [`VideoController::live`] (`live.rs`): no timeline, the LIVE badge,
+//! mute and full screen; their states over the picture come from
+//! `live_overlay.rs` through [`PictureState`], and their full-screen fade
+//! and cursor from [`ControlsFade`] (`fade.rs`).
 #![deny(clippy::indexing_slicing)]
 
+mod fade;
+mod live;
+mod live_overlay;
 mod metrics;
 mod overlay;
 pub(crate) mod pip;
@@ -20,7 +29,16 @@ mod speed;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use overlay::{PictureOverlay, PictureState};
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) use fade::cursor_hides;
+pub(crate) use fade::{ControlsFade, hide_cursor};
+pub(crate) use live::{
+    BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, LiveActions, LiveFacts, LiveKeyAction, bar_disc,
+    live_key_action, live_label, live_pill, live_pill_text_size, live_pill_width,
+};
+pub(crate) use live_overlay::{LiveInput, LiveOverlayClock};
+pub(crate) use overlay::{LiveOverlayParts, PictureOverlay, PictureState, stream_label_box};
 pub(crate) use scrubber::{HoverHandler, VideoScrubber, elapsed_label, remaining_label};
 pub(crate) use speed::{SpeedMenu, speed_trigger};
 

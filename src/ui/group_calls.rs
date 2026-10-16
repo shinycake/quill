@@ -353,7 +353,19 @@ impl QuillApp {
             })
             .map(|p| p.volume_level)
             .unwrap_or(10000);
-        let level = (current + delta).clamp(1, 20000);
+        let level = current.saturating_add(delta).clamp(1, 20000);
+        self.set_group_call_participant_volume(sender, level, cx);
+    }
+
+    /// `setGroupCallParticipantVolumeLevel` to `level` (1 to 20000,
+    /// 10000 being 100 %): the stage's slider and the menu's steps.
+    pub(super) fn set_group_call_participant_volume(
+        &mut self,
+        sender: MessageSender,
+        level: i32,
+        cx: &mut Context<Self>,
+    ) {
+        let level = level.clamp(1, 20000);
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note =
                 match live.driver.set_group_call_participant_volume(sender, level) {

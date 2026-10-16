@@ -26,7 +26,8 @@ pub(crate) struct DemoUi {
     /// media.
     pub(super) group_feeds:
         HashMap<quill::calls::live_video::LiveKey, super::calls::demo_feed::DemoFeed>,
-    /// Demo captures can't go full screen: show the stage anyway.
+    /// Demo captures can't go full screen: show the stage (and a stream
+    /// window's full-screen layout) anyway.
     pub(super) group_stage: bool,
     pub(super) seq: AtomicU64,
     pub(super) sink: Arc<MemorySink>,

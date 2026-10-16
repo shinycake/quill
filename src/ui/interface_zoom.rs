@@ -308,6 +308,7 @@ pub(crate) struct ZoomPlatform {
 
 impl ZoomPlatform {
     pub(crate) fn new(inner: Rc<dyn Platform>) -> Self {
+        super::platform_cursor::remember(&inner);
         Self { inner }
     }
 }

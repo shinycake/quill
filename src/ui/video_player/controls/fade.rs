@@ -1,5 +1,6 @@
-//! When the live stream window shows its controls (the bottom bar, and in
-//! full screen the title too), as tdesktop's `Calls::Group::Panel` decides:
+//! When a live picture's controls show (the stream window's bottom bar,
+//! and in full screen its title too; later the live PiP), and when the
+//! cursor hides with them, as tdesktop's `Calls::Group::Panel` decides:
 //!
 //! - In a normal window they show while the mouse is over the picture or
 //!   over the controls themselves (`mouseInsideValue`, `trackControls`).
@@ -9,9 +10,36 @@
 //!   controls hides them at once.
 //! - Showing and hiding slide over `st::slideWrapDuration` (150 ms,
 //!   linear), and an interrupted slide turns back from where it is.
+//! - Full screen, the cursor hides with the controls
+//!   (`setCursorShown(!_rtmpFull || shown)`); the next mouse movement
+//!   brings both back.
+//!
+//! The file viewer keeps its own fade (`media_viewer`); this one is for
+//! live pictures.
 #![deny(clippy::indexing_slicing)]
 
 use std::time::{Duration, Instant};
+
+#[cfg(test)]
+thread_local! {
+    static CURSOR_HIDES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Hide the cursor until the mouse moves: the controls just hid in full
+/// screen ([`ControlsFade::cursor_hidden`]). The next movement shows the
+/// controls again, and the system shows the cursor with it.
+pub(crate) fn hide_cursor() {
+    #[cfg(test)]
+    CURSOR_HIDES.with(|hides| hides.set(hides.get().saturating_add(1)));
+    crate::ui::platform_cursor::hide_until_mouse_moves();
+}
+
+/// How many times the cursor was hidden on this thread (tests).
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn cursor_hides() -> u32 {
+    CURSOR_HIDES.with(std::cell::Cell::get)
+}
 
 /// `kHideControlsTimeout` in calls_group_panel.cpp.
 pub(crate) const HIDE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -19,7 +47,7 @@ pub(crate) const HIDE_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SLIDE: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone)]
-pub(crate) struct StreamControls {
+pub(crate) struct ControlsFade {
     full: bool,
     over_picture: bool,
     over_controls: bool,
@@ -33,7 +61,7 @@ pub(crate) struct StreamControls {
     started: Option<Instant>,
 }
 
-impl Default for StreamControls {
+impl Default for ControlsFade {
     fn default() -> Self {
         Self {
             full: false,
@@ -48,7 +76,7 @@ impl Default for StreamControls {
     }
 }
 
-impl StreamControls {
+impl ControlsFade {
     /// Whether the controls are (or are sliding to be) shown.
     pub(crate) fn shown(&self) -> bool {
         self.to > 0.5
@@ -166,6 +194,17 @@ impl StreamControls {
         self.from + (self.to - self.from) * t
     }
 
+    /// The pointer is over the picture or the controls.
+    pub(crate) fn pointer_inside(&self) -> bool {
+        self.over_picture || self.over_controls
+    }
+
+    /// Full screen with the controls hidden: the cursor hides too
+    /// (tdesktop `setCursorShown(!_rtmpFull || shown)`).
+    pub(crate) fn cursor_hidden(&self) -> bool {
+        self.full && !self.shown()
+    }
+
     /// Whether the slide still moves at `now`.
     pub(crate) fn sliding(&self, now: Instant) -> bool {
         self.started
@@ -175,13 +214,13 @@ impl StreamControls {
 
 #[cfg(test)]
 mod tests {
-    use super::{HIDE_TIMEOUT, SLIDE, StreamControls};
+    use super::{ControlsFade, HIDE_TIMEOUT, SLIDE};
     use std::time::{Duration, Instant};
 
     #[test]
     fn normal_window_follows_the_mouse() {
         let t0 = Instant::now();
-        let mut c = StreamControls::default();
+        let mut c = ControlsFade::default();
         assert!(!c.shown());
         c.hover_picture(true, t0);
         assert!(c.shown());
@@ -202,7 +241,7 @@ mod tests {
     #[test]
     fn full_screen_hides_after_five_idle_seconds() {
         let t0 = Instant::now();
-        let mut c = StreamControls::default();
+        let mut c = ControlsFade::default();
         c.set_full(true, t0);
         assert!(c.shown());
         assert_eq!(c.hide_at(), Some(t0 + HIDE_TIMEOUT));
@@ -229,7 +268,7 @@ mod tests {
     #[test]
     fn an_interrupted_slide_turns_back_from_where_it_is() {
         let t0 = Instant::now();
-        let mut c = StreamControls::default();
+        let mut c = ControlsFade::default();
         c.hover_picture(true, t0);
         let half = t0 + SLIDE / 2;
         let at_half = c.value(half);
@@ -237,5 +276,33 @@ mod tests {
         c.hover_picture(false, half);
         assert!((c.value(half) - at_half).abs() < f32::EPSILON);
         assert!(c.value(half + SLIDE) < f32::EPSILON);
+    }
+
+    #[test]
+    fn the_cursor_hides_with_the_controls_only_in_full_screen() {
+        let t0 = Instant::now();
+        let mut c = ControlsFade::default();
+        // A normal window never hides the cursor, shown or not.
+        assert!(!c.cursor_hidden());
+        c.hover_picture(true, t0);
+        assert!(!c.cursor_hidden());
+        c.set_full(true, t0);
+        assert!(
+            !c.cursor_hidden(),
+            "entering full screen shows the controls"
+        );
+        c.tick(t0 + HIDE_TIMEOUT);
+        assert!(c.cursor_hidden(), "five idle seconds hide both");
+        // A move brings both back.
+        c.mouse_moved(t0 + HIDE_TIMEOUT + Duration::from_millis(10));
+        assert!(!c.cursor_hidden());
+        // Entering the controls shows them; the timer still runs, as
+        // tdesktop's `_hideControlsTimer` does, and hides both.
+        c.hover_controls(true, t0 + HIDE_TIMEOUT * 2);
+        assert!(!c.cursor_hidden());
+        c.tick(t0 + HIDE_TIMEOUT * 3);
+        assert!(c.cursor_hidden());
+        c.set_full(false, t0 + HIDE_TIMEOUT * 5);
+        assert!(!c.cursor_hidden());
     }
 }

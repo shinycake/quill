@@ -1,0 +1,128 @@
+//! UI tests for the voice chat's video tiles over the screen-share demo
+//! (your hidden window is paused, another camera sends): the paused tile
+//! takes the live controller's paused overlay, and the full-screen stage
+//! shows a volume slider for anyone but you. Nothing reaches Telegram.
+use crate::ui::app::QuillApp;
+use crate::ui::keybindings::bind_keys;
+use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::shell::QuillShell;
+use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt;
+use gpui_kit::{AppContext, Bounds, Entity, Pixels, TestAppContext, VisualTestContext, px, size};
+use quill::calls::tile_pin::TileKey;
+use quill::telegram::envelope::MessageSender;
+
+fn frames(vcx: &mut VisualTestContext) {
+    vcx.run_until_parked();
+    for _ in 0..2 {
+        vcx.update(|window, cx| window.render_frame(cx));
+    }
+}
+
+fn find(vcx: &mut VisualTestContext, selector: &'static str) -> Option<Bounds<Pixels>> {
+    vcx.debug_bounds(selector)
+}
+
+/// The demo's call window; returns the app, the main window and the call
+/// window.
+fn open_share(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, VisualTestContext) {
+    cx.update(gpui_kit::init);
+    cx.update(bind_keys);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| {
+            QuillApp::new_with_demo(
+                window,
+                cx,
+                None,
+                Some(ScreenshotDemo::named("ready-call-screen-share")),
+            )
+        });
+        *slot_in.borrow_mut() = Some(view.clone());
+        let shell = cx.new(|_| QuillShell::new(view));
+        Root::new(shell, window, cx)
+    });
+    let app: Entity<QuillApp> = slot.borrow().clone().expect("the app");
+    let mut main = VisualTestContext::from_window(handle.into(), cx);
+    frames(&mut main);
+    app.update(&mut main, |app, cx| {
+        app.close_screen_chooser(cx);
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut main);
+    let window = app
+        .read_with(&main, |app, _| app.group_call.window)
+        .expect("the call window opens");
+    let mut call = VisualTestContext::from_window(window, cx);
+    frames(&mut call);
+    (app, main, call)
+}
+
+/// You and the other participant.
+fn people(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (MessageSender, MessageSender) {
+    app.read_with(vcx, |app, _| {
+        let call = app
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .expect("the call");
+        let me = call
+            .participants
+            .iter()
+            .find(|p| p.is_current_user)
+            .map(|p| p.participant_id)
+            .expect("you");
+        let other = call
+            .participants
+            .iter()
+            .find(|p| !p.is_current_user)
+            .map(|p| p.participant_id)
+            .expect("the other participant");
+        (me, other)
+    })
+}
+
+#[gpui_kit::test]
+fn a_paused_tile_takes_the_shared_paused_overlay(cx: &mut TestAppContext) {
+    let (_app, _main, mut call) = open_share(cx);
+    let call = &mut call;
+    assert!(
+        find(call, "live-paused").is_some(),
+        "your hidden window's tile reads paused"
+    );
+}
+
+#[gpui_kit::test]
+fn the_stage_shows_the_volume_of_anyone_but_you(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_share(cx);
+    let call = &mut call;
+    let (me, other) = people(&app, call);
+    app.update_in(call, |app, window, cx| {
+        app.toggle_group_call_tile_pin(
+            TileKey {
+                participant: other,
+                screen: false,
+            },
+            cx,
+        );
+        app.enter_group_call_stage(window, cx);
+    });
+    frames(call);
+    assert!(find(call, "group-call-stage").is_some(), "the stage");
+    assert!(find(call, "group-stage-volume").is_some(), "their volume");
+    app.update(call, |app, cx| {
+        app.toggle_group_call_tile_pin(
+            TileKey {
+                participant: me,
+                screen: true,
+            },
+            cx,
+        );
+    });
+    frames(call);
+    assert!(
+        find(call, "group-call-stage").is_some(),
+        "your share on the stage"
+    );
+    assert!(find(call, "group-stage-volume").is_none(), "none for you");
+}

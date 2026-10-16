@@ -68,7 +68,9 @@ Branch `call-stream-window`, on top of PR 1 (`call-streams.md`). Parity
   and the one before it; the one from two frames back is dropped from
   every window's atlas at once with `App::drop_image`, without waiting for
   the main window's sweep.
-- `src/ui/calls/stream_controls.rs`: the show/hide rules as a pure state
+- `src/ui/calls/stream_controls.rs` (now
+  `src/ui/video_player/controls/fade.rs`, see `video-player-live-ui.md`):
+  the show/hide rules as a pure state
   machine with the 5 s timer and the 150 ms slide. The bar stays mounted
   while hidden (slid below the window), so its hover state never goes
   stale.
@@ -148,6 +150,8 @@ the background executor.
 - An unjoined window with a Join button (and the reason after a failed
   join) is Quill-only; tdesktop never shows the panel unjoined.
 - The cursor is not hidden in full screen: GPUI has no API for it.
+  (Superseded by `video-player-live-ui.md`: the cursor now hides with
+  the controls through the platform handle.)
 - The letterbox is plain `groupCallMembersBg` (black full screen), as
   tdesktop's software renderer draws it. The OpenGL renderer fills it
   with the blurred frame.
@@ -167,7 +171,8 @@ the cursor and the letter-avatar placeholder still differ.
 
 ## How it was verified
 
-- Unit tests: `stream_controls`, `stream_tile`, `stream_picture` (only
+- Unit tests: `stream_controls` (now `video_player::controls::fade`),
+  `stream_tile`, `stream_picture` (only
   two images stay, a stale conversion is handed back, BGRA order),
   `stream_title` (centering, shrinking, pushing inside the rect), the
   RTMP URL from the join answer, the frame sequence, and the chosen

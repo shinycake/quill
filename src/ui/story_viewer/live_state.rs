@@ -98,6 +98,8 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(super) last_comment: Option<i32>,
     /// The screenshot demo's feed (no driver, no stream).
     pub(super) demo_feed: Option<DemoFeed>,
+    /// The live controller's states over the picture: when each began.
+    pub(super) overlay: crate::ui::video_player::controls::LiveOverlayClock,
 }
 
 impl LiveStoryUi {
@@ -139,6 +141,7 @@ impl LiveStoryUi {
             scroll: ScrollHandle::new(),
             last_comment: None,
             demo_feed: None,
+            overlay: Default::default(),
         }
     }
 
@@ -154,6 +157,7 @@ impl LiveStoryUi {
         self.stars_before_top_up = None;
         self.flying.clear();
         self.last_comment = None;
+        self.overlay = Default::default();
     }
 
     /// Queue effects, keeping the newest four.

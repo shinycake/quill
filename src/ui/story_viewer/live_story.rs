@@ -548,6 +548,13 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The live overlay's Retry: join the watched story's call again.
+    pub(super) fn retry_live_story(&mut self, cx: &mut Context<Self>) {
+        if let Some((chat_id, story_id)) = self.stories.live.watching {
+            self.join_live_story_from_viewer(chat_id, story_id, cx);
+        }
+    }
+
     /// The emoji button opens the shared panel for the comment field
     /// (emoji only: tdesktop's video stream field takes no stickers or
     /// GIFs). Closing it lets the reply row go too.
