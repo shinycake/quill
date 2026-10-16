@@ -233,12 +233,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !call.is_joined || !call.transport_ready {
             return None;
         }
-        let forced = call
-            .participants
-            .iter()
-            .find(|p| p.is_current_user)
-            .is_some_and(|me| me.is_muted_for_all_users && !me.can_unmute_self);
-        Some((CaptureTarget::Group(call.id), call.is_muted_self || forced))
+        Some((
+            CaptureTarget::Group(call.id),
+            call.is_muted_self || call.is_force_muted(),
+        ))
     }
 
     /// The chosen microphone's name as the engine lists it (`None`: the

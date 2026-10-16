@@ -745,3 +745,55 @@ fn group_call_unmute_is_refused_while_force_muted() {
     assert_eq!(recorder.snapshot().len(), sent_before);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A server force-mute that lands while a local toggle is in flight is held
+/// back from `is_muted_self` (the toggle is newer), but the microphone must
+/// still close: the engine follows `is_muted_self || forced`.
+#[test]
+fn group_call_force_mute_during_an_in_flight_toggle_mutes_the_engine() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    join_tracked_call(&mut driver, &seq, &sink);
+    let me = group_participant_json(7, true, "null", "null");
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    driver.set_group_call_self_mute(true).expect("mute");
+    driver.set_group_call_self_mute(false).expect("unmute");
+    assert_eq!(handle.group_mutes().last(), Some(&(555, false)));
+    let held = me.replace(
+        r#""is_muted_for_all_users":false"#,
+        r#""is_muted_for_all_users":true"#,
+    );
+    ingest_call_json(&mut driver, &seq, &sink, &held);
+    assert!(
+        !is_muted_self(&driver),
+        "the in-flight toggle still owns the flag"
+    );
+    assert_eq!(
+        handle.group_mutes().last(),
+        Some(&(555, true)),
+        "the engine follows the admin hold"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A toggle request TDLib never answers is swept after the TTL, so own-row
+/// updates settle `is_muted_self` again instead of staying held forever.
+#[test]
+fn group_call_unanswered_mute_toggle_is_swept_and_settling_resumes() {
+    let (dir, mut driver, _recorder, _handle, sink, seq) = ready_group_call_driver();
+    join_tracked_call(&mut driver, &seq, &sink);
+    let me = group_participant_json(7, true, "null", "null");
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    driver.set_group_call_self_mute(true).expect("mute");
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(is_muted_self(&driver), "held while the request is pending");
+    driver.session.connection = crate::telegram::envelope::ConnectionState::Ready;
+    let later = std::time::Instant::now() + crate::state::PENDING_REQUEST_TTL;
+    assert!(
+        driver
+            .session
+            .sweep_stale_requests(later, crate::state::PENDING_REQUEST_TTL, |_| false)
+    );
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(!is_muted_self(&driver), "settled after the sweep");
+    let _ = std::fs::remove_dir_all(&dir);
+}
