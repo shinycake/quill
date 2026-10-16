@@ -272,7 +272,7 @@ impl QuillApp {
             } else {
                 footer = footer.child(
                     Button::new("premium-limit-ok")
-                        .label("OK")
+                        .label(tr(keys::BOX_OK))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.dismiss_premium_limit();

@@ -289,16 +289,17 @@ impl QuillApp {
                     let mut footer = div().flex().justify_end().gap_2();
                     if later {
                         footer = footer.child(
-                            Button::new("earn-check-ok").label("OK").primary().on_click(
-                                cx.listener(|this, _, window, cx| {
+                            Button::new("earn-check-ok")
+                                .label(tr(keys::BOX_OK))
+                                .primary()
+                                .on_click(cx.listener(|this, _, window, cx| {
                                     this.cancel_withdraw(window, cx);
                                     this.close_kit_dialog_if_done(
                                         DialogKind::EarnWithdraw,
                                         window,
                                         cx,
                                     );
-                                }),
-                            ),
+                                })),
                         );
                     } else {
                         footer = footer

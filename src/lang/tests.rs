@@ -118,3 +118,26 @@ fn entries_round_trip_through_a_snapshot() {
     assert_eq!(rebuilt.entries(), entries);
     assert_eq!(snapshot.translated_count("lng_").0, 2);
 }
+
+#[test]
+fn english_strings_use_the_ellipsis_character() {
+    for (name, text) in [
+        ("av", include_str!("../../lang/en/av.strings")),
+        ("chat", include_str!("../../lang/en/chat.strings")),
+        ("media", include_str!("../../lang/en/media.strings")),
+        ("money", include_str!("../../lang/en/money.strings")),
+        ("ops", include_str!("../../lang/en/ops.strings")),
+        ("people", include_str!("../../lang/en/people.strings")),
+        ("prefs", include_str!("../../lang/en/prefs.strings")),
+        ("search", include_str!("../../lang/en/search.strings")),
+        (
+            "stories_live",
+            include_str!("../../lang/en/stories_live.strings"),
+        ),
+    ] {
+        assert!(
+            !text.contains("..."),
+            "{name}.strings has a three-dot ellipsis"
+        );
+    }
+}

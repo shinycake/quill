@@ -748,12 +748,9 @@ impl QuillApp {
                     } else if let Some(intro) = self.greeting_intro(chat.as_ref(), cx) {
                         intro
                     } else {
-                        pane_placeholder(
-                            tr(keys::Q_CHAT_NO_MESSAGES_YET),
-                            tr(keys::Q_CHAT_HISTORY_ARRIVES_VIA_GETCHATHISTORY_AND),
-                            cx,
-                        )
-                        .into_any_element()
+                        // tdesktop paints nothing for an empty group or channel
+                        // it did not create; no developer text in the pane.
+                        div().id("empty-chat").flex_1().into_any_element()
                     }
                 } else {
                     let list = self.history_message_list(

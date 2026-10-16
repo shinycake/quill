@@ -463,7 +463,7 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("banned-ok")
-                            .label("OK")
+                            .label(tr(keys::BOX_OK))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.auth_ui.signin.banned_dismissed = true;

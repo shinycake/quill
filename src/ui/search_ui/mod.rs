@@ -80,6 +80,9 @@ pub(super) fn search_result_row(
         .px_2()
         .py_1p5()
         .rounded_md()
+        // Same 2 px leading edge as a chat row, so avatars share one spine.
+        .border_l_2()
+        .border_color(transparent_black())
         .role(gpui_kit::Role::Button)
         .aria_label(format!("{title} · {preview}"))
         .tab_index(0)

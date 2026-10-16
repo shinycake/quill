@@ -8,6 +8,7 @@
 //! own list and leaves that tab out.
 #![deny(clippy::indexing_slicing)]
 
+use crate::lang::{keys, tr};
 use crate::search_filters::{GlobalSearchFilters, SearchChatType, SearchMediaKind, SearchScope};
 use crate::state::SharedMediaTab;
 
@@ -57,17 +58,17 @@ impl SearchTab {
     /// `lng_recent_posts` and the `lng_all_*` media labels.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Chats => "Chats",
-            Self::Channels => "Channels",
-            Self::Apps => "Apps",
-            Self::Posts => "Posts",
-            Self::Photos => "Photos",
-            Self::Videos => "Videos",
-            Self::Downloads => "Downloads",
-            Self::Links => "Links",
-            Self::Files => "Files",
-            Self::Music => "Music",
-            Self::Voice => "Voice",
+            Self::Chats => tr(keys::RECENT_CHATS),
+            Self::Channels => tr(keys::RECENT_CHANNELS),
+            Self::Apps => tr(keys::RECENT_APPS),
+            Self::Posts => tr(keys::RECENT_POSTS),
+            Self::Photos => tr(keys::ALL_PHOTOS),
+            Self::Videos => tr(keys::ALL_VIDEOS),
+            Self::Downloads => tr(keys::ALL_DOWNLOADS),
+            Self::Links => tr(keys::ALL_LINKS),
+            Self::Files => tr(keys::ALL_FILES),
+            Self::Music => tr(keys::RIGHTS_CHAT_MUSIC),
+            Self::Voice => tr(keys::Q_SEARCH_VOICE),
         }
     }
 
@@ -167,17 +168,17 @@ impl SearchTab {
     /// The hint of an empty field.
     pub fn idle_hint(self) -> &'static str {
         match self {
-            Self::Chats => "Type to search chats and messages.",
-            Self::Channels => "Type to search channels.",
+            Self::Chats => tr(keys::Q_SEARCH_HINT_CHATS),
+            Self::Channels => tr(keys::Q_SEARCH_HINT_CHANNELS),
             Self::Apps => "",
-            Self::Posts => "Type to search posts of public channels.",
-            Self::Photos => "No photos to show.",
-            Self::Videos => "No videos to show.",
-            Self::Downloads => "No downloads yet.",
-            Self::Links => "No links to show.",
-            Self::Files => "No files to show.",
-            Self::Music => "No music to show.",
-            Self::Voice => "No voice messages to show.",
+            Self::Posts => tr(keys::Q_SEARCH_HINT_POSTS),
+            Self::Photos => tr(keys::Q_SEARCH_NONE_PHOTOS),
+            Self::Videos => tr(keys::Q_SEARCH_NONE_VIDEOS),
+            Self::Downloads => tr(keys::Q_SEARCH_NONE_DOWNLOADS),
+            Self::Links => tr(keys::Q_SEARCH_NONE_LINKS),
+            Self::Files => tr(keys::Q_SEARCH_NONE_FILES),
+            Self::Music => tr(keys::Q_SEARCH_NONE_MUSIC),
+            Self::Voice => tr(keys::Q_SEARCH_NONE_VOICE),
         }
     }
 }
@@ -208,6 +209,32 @@ mod tests {
                 "Voice"
             ]
         );
+    }
+
+    #[test]
+    fn chips_and_tabs_come_from_the_language_pack() {
+        use crate::lang::{PackValue, Snapshot, install, isolate_thread};
+        isolate_thread();
+        let mut pack = Snapshot::new("pt-br", "pt", false);
+        let chats = PackValue::Ordinary("Conversas".into());
+        let week = PackValue::Ordinary("Última semana".into());
+        let private = PackValue::Ordinary("Chats privados".into());
+        let hint = PackValue::Ordinary("Digite para buscar.".into());
+        pack.layer([
+            ("lng_recent_chats", &chats),
+            ("qll_search_date_week", &week),
+            ("lng_search_filter_private", &private),
+            ("qll_search_hint_chats", &hint),
+        ]);
+        install(Some(pack));
+        assert_eq!(SearchTab::Chats.label(), "Conversas");
+        assert_eq!(SearchDateRange::Week.label(), "Última semana");
+        assert_eq!(SearchChatType::Private.label(), "Chats privados");
+        assert_eq!(SearchTab::Chats.idle_hint(), "Digite para buscar.");
+        // What the pack does not translate stays English.
+        assert_eq!(SearchTab::Channels.label(), "Channels");
+        install(None);
+        assert_eq!(SearchTab::Chats.label(), "Chats");
     }
 
     #[test]

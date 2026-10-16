@@ -12,9 +12,9 @@
 "lng_context_new_window" = "Open in new window";
 "lng_context_pin_msg" = "Pin";
 "lng_context_save_music_about" = "Choose where you want this audio to be saved.";
-"lng_context_save_music_folder" = "... Downloads";
-"lng_context_save_music_profile" = "... Profile";
-"lng_context_save_music_saved" = "... Saved Messages";
+"lng_context_save_music_folder" = "… Downloads";
+"lng_context_save_music_profile" = "… Profile";
+"lng_context_save_music_saved" = "… Saved Messages";
 "lng_context_select_msg_bulk" = "Select up to this message";
 "lng_context_send_now_msg" = "Send Now";
 "lng_context_unpin_from_top" = "Unpin";
@@ -42,7 +42,7 @@
 "lng_manage_messages_ttl_menu" = "Auto-Delete";
 "lng_menu_formatting_spoiler" = "Spoiler";
 "lng_menu_insert_unicode" = "Insert Unicode control character";
-"lng_message_ph" = "Write a message...";
+"lng_message_ph" = "Write a message…";
 "lng_new_contact_add_name" = "Add {user} to contacts";
 "lng_new_contact_share" = "Share my phone number";
 "lng_new_contact_share_sure" = "Do you want to share your phone number {phone} with {user}?";
@@ -270,7 +270,6 @@
 "qll_chat_hide_info" = "Hide info";
 "qll_chat_hide_pinned_message" = "Hide pinned message";
 "qll_chat_hide_with_spoiler" = "Hide with spoiler";
-"qll_chat_history_arrives_via_getchathistory_and" = "History arrives via getChatHistory and updates.";
 "qll_chat_i_understand" = "I understand";
 "qll_chat_in_chat_search_closed" = "in-chat search closed";
 "qll_chat_inline_code" = "Inline code";
@@ -299,7 +298,7 @@
 "qll_chat_link_preview_will_appear_above" = "Link preview will appear above the text";
 "qll_chat_link_preview_will_appear_below" = "Link preview will appear below the text";
 "qll_chat_list" = "• List";
-"qll_chat_loading" = "Loading...";
+"qll_chat_loading" = "Loading…";
 "qll_chat_loading_2" = "Loading…";
 "qll_chat_loading_instant_view" = "loading Instant View…";
 "qll_chat_loading_join_requests" = "Loading join requests…";
@@ -339,7 +338,6 @@
 "qll_chat_no_messages_in_this_topic" = "No messages in this topic yet";
 "qll_chat_no_messages_in_this_topic_2" = "No messages in this topic yet.";
 "qll_chat_no_messages_match" = "No messages match {subject}.";
-"qll_chat_no_messages_yet" = "No messages yet";
 "qll_chat_no_messages_yet_2" = "No messages yet.";
 "qll_chat_no_preview_for_this_link" = "No preview for this link";
 "qll_chat_no_public_posts_match" = "No public posts match “{query}”.";
@@ -416,7 +414,7 @@
 "qll_chat_rich_messages_require_telegram_premium" = "Rich messages require Telegram Premium";
 "qll_chat_roll" = "Roll {emoji}";
 "qll_chat_save_selected" = "Save Selected";
-"qll_chat_save_to" = "Save to...";
+"qll_chat_save_to" = "Save to…";
 "qll_chat_saved_1_file" = "saved 1 file";
 "qll_chat_saved_files#one" = "saved {count} file";
 "qll_chat_saved_files#other" = "saved {count} files";

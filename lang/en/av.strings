@@ -8,7 +8,7 @@
 "lng_context_pin_msg" = "Pin";
 "lng_group_call_cancel_reminder" = "Cancel Reminder";
 "lng_group_call_close" = "Close";
-"lng_group_call_connecting" = "Connecting...";
+"lng_group_call_connecting" = "Connecting…";
 "lng_group_call_context_mute" = "Mute";
 "lng_group_call_context_mute_for_me" = "Mute for me";
 "lng_group_call_context_remove" = "Remove";
@@ -54,7 +54,7 @@
 "lng_mediaview_share_at_time" = "Share at {time}";
 "lng_mediaview_ttl_in" = "Disappears in {time}";
 "lng_menu_start_group_call_options" = "Video chat";
-"lng_menu_start_group_call_with" = "Stream with...";
+"lng_menu_start_group_call_with" = "Stream with…";
 "lng_photo_editor_menu_flip" = "Flip";
 "lng_settings_save" = "Save";
 "lng_share_title" = "Share to";
@@ -134,7 +134,7 @@
 "qll_av_downloading_3" = "Downloading… {round}%";
 "qll_av_downloading_4" = "Downloading…";
 "qll_av_downloading_choose_save_as_again" = "downloading… choose Save As again when it finishes";
-"qll_av_downloads" = "... Downloads";
+"qll_av_downloads" = "… Downloads";
 "qll_av_edit_title" = "Edit Title";
 "qll_av_ending_needs_a_live_connection" = "Ending needs a live connection.";
 "qll_av_ending_voice_chat" = "Ending voice chat…";
@@ -222,7 +222,7 @@
 "qll_av_press_a_key" = "Press a key…";
 "qll_av_previous" = "Previous";
 "qll_av_previous_track" = "Previous track";
-"qll_av_profile" = "... Profile";
+"qll_av_profile" = "… Profile";
 "qll_av_profile_edits_need_a_signed" = "Profile edits need a signed-in account.";
 "qll_av_profile_photo" = "Profile photo";
 "qll_av_push_to_talk" = "Push-to-talk";
@@ -246,10 +246,10 @@
 "qll_av_revoke_key" = "Revoke Key";
 "qll_av_revoking_invite_link" = "Revoking invite link…";
 "qll_av_rotate" = "Rotate";
-"qll_av_save_as" = "Save As...";
+"qll_av_save_as" = "Save As…";
 "qll_av_save_as_2" = "Save As…";
-"qll_av_save_to" = "Save to...";
-"qll_av_saved_messages" = "... Saved Messages";
+"qll_av_save_to" = "Save to…";
+"qll_av_saved_messages" = "… Saved Messages";
 "qll_av_saved_to_saved_messages" = "saved to Saved Messages";
 "qll_av_screen" = "{name} · screen";
 "qll_av_screen_sharing_needs_a_live" = "Screen sharing needs a live connection.";

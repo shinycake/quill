@@ -22,7 +22,7 @@ impl QuillApp {
     ) -> Option<(String, AnyElement, AnyElement)> {
         let body = div().text_sm().child(CHANGE_PHONE_ERROR);
         let footer = Button::new("change-phone-close")
-            .label("OK")
+            .label(tr(keys::BOX_OK))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.close_profile_dialog(cx);
                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);

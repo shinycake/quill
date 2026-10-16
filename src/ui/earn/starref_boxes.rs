@@ -792,7 +792,7 @@ impl QuillApp {
                 .child(
                     Button::new("earn-revoke-ok")
                         .debug_selector(|| "earn-revoke-ok".into())
-                        .label("OK")
+                        .label(tr(keys::BOX_OK))
                         .primary()
                         .loading(revoke.sending)
                         .disabled(revoke.sending)

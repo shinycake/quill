@@ -250,7 +250,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("debug-mode-confirm")
-                        .label("OK")
+                        .label(tr(keys::BOX_OK))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.settings.advanced.debug_confirm = None;

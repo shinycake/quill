@@ -343,7 +343,7 @@ impl QuillApp {
                 .into_any_element();
             let footer = div().flex().justify_end().gap_2().child(
                 Button::new("deep-link-ok")
-                    .label("OK")
+                    .label(tr(keys::BOX_OK))
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.links.deep_link_dialog = None;

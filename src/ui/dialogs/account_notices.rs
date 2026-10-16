@@ -446,7 +446,7 @@ impl QuillApp {
         } else {
             div().flex().justify_end().child(
                 Button::new("service-notice-ok")
-                    .label("OK")
+                    .label(tr(keys::BOX_OK))
                     .primary()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(live) = this.live.as_mut() {
@@ -490,7 +490,7 @@ impl QuillApp {
             );
         let footer = div().flex().justify_end().child(
             Button::new("login-prevented-ok")
-                .label("OK")
+                .label(tr(keys::BOX_OK))
                 .primary()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.auth_ui.login_prevented = None;

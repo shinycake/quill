@@ -101,7 +101,7 @@
 "lng_profile_join_channel" = "Join Channel";
 "lng_profile_leave_channel" = "Leave channel";
 "lng_profile_leave_group" = "Leave group";
-"lng_profile_loading" = "Loading...";
+"lng_profile_loading" = "Loading…";
 "lng_profile_open_app_short" = "Open";
 "lng_profile_set_photo_button" = "Set Photo";
 "lng_profile_unblock_user" = "Unblock user";
@@ -426,7 +426,7 @@
 "qll_people_joined_channel_demo" = "joined channel (demo)";
 "qll_people_joining_channel" = "joining channel…";
 "qll_people_last_name" = "Last name";
-"qll_people_learn_more" = "Learn more...";
+"qll_people_learn_more" = "Learn more…";
 "qll_people_leave" = "Leave";
 "qll_people_leave_channel" = "Leave channel";
 "qll_people_leave_chat" = "Leave chat";
