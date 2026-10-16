@@ -1,0 +1,3 @@
+# video player live UI: the cursor hides with the controls in full screen;
+# the letter avatar for a chat with no photo was already drawn.
+parity:calls-rtmp-window-polish
