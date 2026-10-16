@@ -662,7 +662,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Story replies with stickers, emoji or voice <!-- parity:stories-reply-media -->
 - [x] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [x] Story statistics and public forwards <!-- parity:stories-statistics -->
-- [ ] Live story stream playback (designed: same stream path as RTMP viewing plus joinLiveStory; quill-tools/designs/group-call-streams.md, queued) <!-- parity:stories-live-stream-playback -->
+- [x] Live story stream playback: stream in the story frame, LIVE badge and viewers, comments with entities, paid comments, send-as, Stars reactions with Undo, pinned paid comments, top donors, moderation (#852; not tried on a live account) <!-- parity:stories-live-stream-playback -->
+- [ ] Watch a live story while in another call (tdesktop runs the stream as its own call; Quill asks to leave the current call first) <!-- parity:stories-live-beside-call -->
+- [ ] Live story Stars reaction effect animation (tdesktop plays bundled Lottie effects; Quill draws its own burst) <!-- parity:stories-live-stars-effect -->
 
 ### Calls
 
@@ -733,7 +735,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Call window options: stay on top, device settings inside the call <!-- parity:calls-window-options -->
 - [ ] Battery-low and microphone-off indicators for the other person (partial: microphone-off shipped; battery-low blocked: ntgcalls encrypts its own signaling, so the battery flag never reaches Quill) <!-- parity:calls-peer-indicators -->
 - [x] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
-- [ ] Watch channel live streams (RTMP) (designed: ntgcalls stream mode fed by getGroupCallStreamSegment; quill-tools/designs/group-call-streams.md, queued) <!-- parity:calls-rtmp-viewing -->
+- [x] Watch channel live streams (RTMP): ntgcalls stream mode fed by getGroupCallStreamSegment, wide stream window, fullscreen, no-stream and connecting states, settings with speakers, stream key and revoke (#814, #823, #837; not tried on a live stream) <!-- parity:calls-rtmp-viewing -->
+- [ ] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
+- [ ] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
 - [x] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
