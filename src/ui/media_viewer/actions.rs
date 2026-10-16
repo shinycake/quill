@@ -497,8 +497,7 @@ impl QuillApp {
             self.viewer.controls_gen += 1;
             cx.notify();
         }
-        // Captures render once, after the idle wait: keep the controls up.
-        if self.viewer.hide_timer || still_frame() {
+        if self.viewer.hide_timer || controls_stay_up() {
             return;
         }
         self.viewer.hide_timer = true;

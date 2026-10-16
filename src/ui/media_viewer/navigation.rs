@@ -195,6 +195,7 @@ impl QuillApp {
     pub(in crate::ui) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
         self.viewer.zoom.reset();
         self.viewer.drag = None;
+        self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
         self.viewer.orientation = Default::default();
         self.viewer.rotated = None;

@@ -80,7 +80,7 @@ impl QuillApp {
                 let transport = self.viewer_transport();
                 ViewerBar::Video {
                     playing: self.viewer_video_playing(),
-                    fullscreen: self.viewer.extra.video_fullscreen,
+                    fullscreen: self.viewer.extra.video_fullscreen.is_on(),
                     position: transport.as_ref().map_or(0., |t| t.position),
                     duration: transport.as_ref().map_or(0., |t| t.total()),
                 }

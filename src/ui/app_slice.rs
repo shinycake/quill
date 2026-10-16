@@ -46,10 +46,13 @@ pub(super) enum SliceKind {
     /// in its place: typing and the caret's blink redraw only this, not
     /// the history above it.
     Composer,
-    /// The media viewer's panel (top bar, media box, controls): the
-    /// playing picture is drawn by a layer above it
-    /// (`media_viewer::layer`), so a new video frame replays the panel.
+    /// The media viewer's media box (thumbnail or photo, zoom, pan, its
+    /// menu), under the playing picture (`media_viewer::layer`), so a new
+    /// video frame replays it.
     Viewer,
+    /// The media viewer's chrome over the playing picture: top bar,
+    /// arrows, caption and controls.
+    ViewerChrome,
 }
 
 pub(super) struct AppSlice {
@@ -71,8 +74,10 @@ pub(super) struct Slices {
     conversation: Option<SliceParts>,
     /// The composer slice, below the conversation slice.
     composer: Option<Entity<AppSlice>>,
-    /// The media viewer's panel, while the viewer is open.
+    /// The media viewer's media box and its chrome, while the viewer is
+    /// open.
     viewer: Option<Entity<AppSlice>>,
+    viewer_chrome: Option<Entity<AppSlice>>,
     /// The composer's height as laid out last time: a cached slice's
     /// box is sized before its content renders, so the slot takes the
     /// measured height (a change redraws the slot next frame).
@@ -153,6 +158,10 @@ impl QuillApp {
             app: app.clone(),
             kind: SliceKind::Viewer,
         }));
+        self.slices.viewer_chrome = Some(cx.new(|_| AppSlice {
+            app: app.clone(),
+            kind: SliceKind::ViewerChrome,
+        }));
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
@@ -170,6 +179,7 @@ impl QuillApp {
             .map(|parts| parts.slice.entity_id())
             .chain(self.slices.composer.iter().map(Entity::entity_id))
             .chain(self.slices.viewer.iter().map(Entity::entity_id))
+            .chain(self.slices.viewer_chrome.iter().map(Entity::entity_id))
             .collect();
         let app: &mut App = cx;
         for id in ids {
@@ -382,19 +392,33 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The media viewer's panel as a cached slice filling the overlay
-    /// (`None` before the slices exist).
-    pub(super) fn viewer_slot(&self) -> Option<AnyElement> {
-        let slice = self.slices.viewer.as_ref()?;
-        super::image_budget::slice_shown(slice.entity_id());
-        Some(embed_slice(slice, full(), self.slices.a11y_active.get()))
+    /// The media viewer's media box and chrome as cached slices filling
+    /// the overlay (`None` before the slices exist).
+    pub(super) fn viewer_slots(&self) -> Option<(AnyElement, AnyElement)> {
+        let media = self.slices.viewer.as_ref()?;
+        let chrome = self.slices.viewer_chrome.as_ref()?;
+        let a11y = self.slices.a11y_active.get();
+        super::image_budget::slice_shown(media.entity_id());
+        super::image_budget::slice_shown(chrome.entity_id());
+        // Stacked, not side by side in the overlay's row.
+        let layer = || {
+            StyleRefinement::default()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+        };
+        Some((
+            embed_slice(media, layer(), a11y),
+            embed_slice(chrome, layer(), a11y),
+        ))
     }
 
     fn slice_layer(&self, kind: SliceKind) -> Option<Layer> {
         match kind {
             SliceKind::Sidebar => self.slices.sidebar.as_ref(),
             SliceKind::Conversation => self.slices.conversation.as_ref(),
-            SliceKind::Composer | SliceKind::Viewer => None,
+            SliceKind::Composer | SliceKind::Viewer | SliceKind::ViewerChrome => None,
         }
         .map(|parts| parts.layer.clone())
     }
@@ -406,9 +430,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match kind {
-            SliceKind::Viewer => {
+            SliceKind::Viewer | SliceKind::ViewerChrome => {
                 if self.viewer.state.is_open() {
-                    self.media_viewer_panel(true, window, cx)
+                    let part = if kind == SliceKind::Viewer {
+                        super::media_viewer::ViewerPart::Media
+                    } else {
+                        super::media_viewer::ViewerPart::Chrome
+                    };
+                    self.media_viewer_panel(part, window, cx)
                 } else {
                     Empty.into_any_element()
                 }
@@ -484,6 +513,7 @@ impl Render for AppSlice {
             SliceKind::Conversation => "conversation",
             SliceKind::Composer => "composer",
             SliceKind::Viewer => "viewer",
+            SliceKind::ViewerChrome => "viewer-chrome",
         });
         let Some(app) = self.app.upgrade() else {
             return Empty.into_any_element();

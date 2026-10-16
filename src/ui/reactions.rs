@@ -115,7 +115,7 @@ impl QuillApp {
         if !self.viewer.state.is_open() {
             return false;
         }
-        if self.viewer.extra.video_fullscreen {
+        if self.viewer.extra.video_fullscreen.is_on() {
             self.viewer_leave_video_fullscreen();
             cx.notify();
             return true;
