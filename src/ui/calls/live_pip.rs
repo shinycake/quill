@@ -289,8 +289,11 @@ impl QuillApp {
     /// The PiP's call is still there and its picture not over: the stream
     /// or live story's call is tracked, not left, and not ended; a live
     /// story is still the one watched. A stream's call being rejoined
-    /// (TDLib's `need_rejoin`, or the driver's rejoin under way) counts:
-    /// its new feed comes into the same window.
+    /// on its own (`ActiveGroupCall::rejoining`: TDLib's `need_rejoin`
+    /// or the driver's rejoin, while attempts are left) counts: its new
+    /// feed comes into the same window. Once the attempts are spent the
+    /// PiP closes, as for a left call; the stream window keeps the
+    /// manual Rejoin.
     fn live_pip_source_alive(&self, source: LivePipSource) -> bool {
         let Some(calls) = self.session().map(|s| &s.calls) else {
             return false;
@@ -299,7 +302,7 @@ impl QuillApp {
         match source {
             LivePipSource::Stream { call_id } => call.is_some_and(|call| {
                 call.id == call_id
-                    && (call.is_joined || call.need_rejoin || call.reconnecting)
+                    && (call.is_joined || call.rejoining())
                     && calls.left_group_call != Some(call_id)
                     && call.stream != StreamState::Ended
             }),

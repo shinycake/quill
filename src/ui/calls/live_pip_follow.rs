@@ -83,12 +83,10 @@ impl QuillApp {
             }
         };
         let Some(old) = window.replace_player(next.clone(), cx) else {
-            // The window went meanwhile: nothing was swapped. The slot
-            // keeps the new player, which its host or the next window
-            // sync lets go of.
-            let previous = slot.replace(next.clone());
-            if let Some(previous) = previous.filter(|player| !player.same_as(&next)) {
-                previous.release_live(cx);
+            // The window went meanwhile: nothing was swapped. A player
+            // built here goes again; the slot stays as it was.
+            if !slot.as_ref().is_some_and(|player| player.same_as(&next)) {
+                next.release_live(cx);
             }
             return;
         };

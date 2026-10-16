@@ -64,11 +64,22 @@ feed change."
   because it already shows their feed. With no feed yet (the rejoin's
   leave came before its connect) nothing changes, and the window keeps
   showing the connecting state.
-- `live_pip_source_alive` for a stream now counts a call being rejoined
-  (`is_joined || need_rejoin || reconnecting`). The PiP still closes when
-  the call is left (`left_group_call`), ends (`StreamState::Ended`) or
-  goes, on lock and on logout. For a story it closes when the story is no
-  longer watched.
+- `live_pip_source_alive` for a stream now counts a call that is being
+  rejoined on its own (`is_joined || rejoining()`).
+  `ActiveGroupCall::rejoining` is `need_rejoin || reconnecting` while
+  attempts are left (`rejoin_attempts < MAX_GROUP_CALL_REJOIN_ATTEMPTS`,
+  the new name for the `3` that `join.rs` and `calls/error.rs` used), or
+  while the last attempt's answer is pending (`reconnecting` cleared).
+  When the last attempt fails, `calls/error.rs` sets `reconnecting` again
+  with no attempts left, only the stream window's manual Rejoin remains,
+  and the PiP closes as it does for a left call. Without that bound,
+  TDLib's `need_rejoin` stays set and the PiP would show its spinner with
+  no way out.
+- What bounds the alive state for a stream: the attempt limit above,
+  leaving the call (`left_group_call`), the stream ending
+  (`StreamState::Ended`), the call going from the session, lock, and
+  logout or an account switch. For a story: the story no longer being
+  watched, or its stream ending.
 
 ## Deviations from the design, with reasons
 
@@ -81,10 +92,17 @@ feed change."
   end (it closes on `StreamState::Ended` or when the call goes, in
   `check_live_story_ended`). Point 4 is done by moving it onto the shared
   helper, and a test covers the swap.
-- **`need_rejoin` and `reconnecting` count as alive.** The design said
-  the PiP closes only when the source is gone. Without this, the rejoin
-  case the design names would still close the PiP on TDLib's update,
-  before any feed change.
+- **A call being rejoined counts as alive, while attempts are left.**
+  The design said the PiP closes only when the source is gone. Without
+  this, the rejoin case the design names would still close the PiP on
+  TDLib's update, before any feed change. An edge: if a TDLib update
+  with `need_rejoin` arrives while the last attempt is in flight, it sets
+  `reconnecting` again and the PiP closes one attempt early.
+- **A swap into a window that went.** `follow_live_pip_feed` builds the
+  new player before `replace_player` can find the window gone; it then
+  releases that player and leaves the slot as it was. A host's
+  `follow_live_slot` may also release the PiP's current player first in
+  a race; `release_live` is idempotent, so that is harmless.
 - **Connecting state.** The PiP has no placeholder photo or
   "Connecting…" label. Its connecting state is its existing waiting
   spinner over the last picture, which is what the stream window's
@@ -115,6 +133,9 @@ window does on a rejoin.
   - a stream that really ends (`StreamState::Ended`, feed `Over`) still
     closes the PiP;
   - a left feed with the call left closes the PiP;
+  - while rejoins are left (one due, then the last one in flight) the
+    PiP waits; once the last one failed it closes and the call stays for
+    the manual Rejoin;
   - enlarge after a swap reopens the stream window with the swapped
     player, and the PiP lets go;
   - the live story viewer survives a feed swap: it stays open, watches
