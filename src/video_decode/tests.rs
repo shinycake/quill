@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+mod decode_panic;
 mod nv12;
 
 fn frame(pts: f64) -> VideoFrame {
