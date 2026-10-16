@@ -277,13 +277,13 @@ fn mirroring_reverses_every_row_of_every_plane() {
     assert!(mirror_planes(&mut mirrored, w, h));
     let src = I420::new(&planes, w, h).expect("frame");
     let out = I420::new(&mirrored, w, h).expect("mirrored frame");
-    for (y, row) in out.y.chunks_exact(6).enumerate() {
+    for (y, row) in out.y.as_chunks::<6>().0.iter().enumerate() {
         for (x, value) in row.iter().enumerate() {
             assert_eq!(Some(value), src.y.get(y * 6 + (5 - x)), "luma {x},{y}");
         }
     }
     for (plane, source) in [(out.u, src.u), (out.v, src.v)] {
-        for (y, row) in plane.chunks_exact(3).enumerate() {
+        for (y, row) in plane.as_chunks::<3>().0.iter().enumerate() {
             for (x, value) in row.iter().enumerate() {
                 assert_eq!(Some(value), source.get(y * 3 + (2 - x)), "chroma {x},{y}");
             }
@@ -292,7 +292,12 @@ fn mirroring_reverses_every_row_of_every_plane() {
     // The same picture as BGRA, mirrored pixel for pixel.
     let bgra = i420_to_bgra(&src).expect("bgra");
     let mirrored_bgra = i420_to_bgra(&out).expect("bgra");
-    for (row, mirrored_row) in bgra.chunks_exact(24).zip(mirrored_bgra.chunks_exact(24)) {
+    for (row, mirrored_row) in bgra
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .zip(mirrored_bgra.as_chunks::<24>().0)
+    {
         let mut reversed = row.as_chunks::<4>().0.to_vec();
         reversed.reverse();
         assert_eq!(mirrored_row.as_chunks::<4>().0, reversed.as_slice());

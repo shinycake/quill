@@ -350,7 +350,7 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
     let pip = this.actions.pip.map(|pip| {
         Button::new(("live-pip", row_id))
             .icon(IconName::PictureInPicture2)
-            .custom(variant.clone())
+            .custom(variant)
             .small()
             .tab_index(0)
             .tooltip(tr(keys::Q_AV_PICTURE_IN_PICTURE))
