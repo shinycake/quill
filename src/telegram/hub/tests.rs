@@ -158,10 +158,56 @@ fn a_dead_receive_thread_marks_every_bridge_stopped() {
     let first = hub.bridge(1);
     let second = hub.bridge(2);
     assert!(!first.stopped_unexpectedly());
+    // The loop survives single panics; a source that keeps failing (the
+    // closed channel panics at once from now on) ends it.
     tx.send(()).unwrap();
+    drop(tx);
     assert!(wait_until(|| first.stopped_unexpectedly()));
     assert!(second.stopped_unexpectedly());
     assert!(hub.stopped_unexpectedly());
+}
+
+#[test]
+fn one_panicking_envelope_does_not_end_the_receive_thread() {
+    let (tx, rx) = mpsc::channel::<String>();
+    let mut panicked = false;
+    let source: ReceiveSource = Box::new(move |timeout| {
+        let json = rx.recv_timeout(Duration::from_secs_f64(timeout)).ok()?;
+        if !panicked {
+            panicked = true;
+            panic!("one envelope failed to parse");
+        }
+        Some(json)
+    });
+    let hub = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    let bridge = hub.bridge(1);
+    tx.send(option_update(Some(1), 1)).unwrap();
+    tx.send(option_update(Some(1), 2)).unwrap();
+    // The first envelope is lost with its panic; the second one arrives.
+    let owned = bridge.next_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(owned.client_id, Some(1));
+    assert!(!bridge.stopped_unexpectedly());
+    assert!(!hub.stopped_unexpectedly());
+}
+
+#[test]
+fn a_stopped_shared_hub_is_replaced_but_a_running_one_is_kept() {
+    assert!(matches!(reusable(None), Reuse::None));
+    let (live, _tx, _sink) = channel_hub();
+    assert!(matches!(reusable(Some(&live)), Reuse::Running(_)));
+
+    let (dying_tx, dying_rx) = mpsc::channel::<()>();
+    let source: ReceiveSource = Box::new(move |_| {
+        let _ = dying_rx.recv();
+        panic!("receive source failed");
+    });
+    let dead = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    // The loop only reads while a client is registered.
+    let _bridge = dead.bridge(1);
+    dying_tx.send(()).unwrap();
+    drop(dying_tx);
+    assert!(wait_until(|| dead.stopped_unexpectedly()));
+    assert!(matches!(reusable(Some(&dead)), Reuse::Stopped(_)));
 }
 
 #[test]

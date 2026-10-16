@@ -24,8 +24,8 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const HEADER: &str = "quill-ipc 1";
@@ -35,6 +35,17 @@ pub const ACK_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
 /// Upper bound on forwarded arguments honored per connection.
 const MAX_ARGS: usize = 256;
+/// How many launches the owner serves at once; further connections are
+/// dropped (the sender sees a closed pipe and counts the owner as gone,
+/// which `forward` handles).
+const MAX_CLIENT_THREADS: usize = 8;
+/// How long a connected client may stay silent before its thread gives up.
+/// Unix sockets only: Windows named pipes have no timeouts, so there the
+/// cap above is the only bound.
+const CLIENT_READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// Pause after a failed `accept`, so a persistent error (out of file
+/// descriptors) does not turn the listener thread into a busy loop.
+const ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(250);
 /// `sun_path` is 104 bytes on macOS (108 on Linux), terminator included.
 #[cfg(unix)]
 const MAX_SOCKET_PATH: usize = 100;
@@ -208,7 +219,35 @@ fn decode_message(reader: impl Read) -> Option<Vec<String>> {
     Some(args)
 }
 
+/// Counts the client threads in flight.
+#[derive(Default)]
+struct ClientSlots(Arc<Mutex<usize>>);
+
+/// One taken slot; freed on drop, including when the thread panics.
+struct ClientSlot(Arc<Mutex<usize>>);
+
+impl ClientSlots {
+    /// A slot, or `None` when `max` clients are already being served.
+    fn try_take(&self, max: usize) -> Option<ClientSlot> {
+        let mut count = crate::locks::lock_or_recover(&self.0);
+        if *count >= max {
+            return None;
+        }
+        *count = count.saturating_add(1);
+        Some(ClientSlot(self.0.clone()))
+    }
+}
+
+impl Drop for ClientSlot {
+    fn drop(&mut self) {
+        let mut count = crate::locks::lock_or_recover(&self.0);
+        *count = count.saturating_sub(1);
+    }
+}
+
 fn serve(stream: Stream, on_launch: &(dyn Fn(Vec<String>) + Send + Sync)) {
+    // Best effort: Windows named pipes refuse timeouts.
+    let _ = stream.set_recv_timeout(Some(CLIENT_READ_TIMEOUT));
     let Some(args) = decode_message(&stream) else {
         return;
     };
@@ -270,11 +309,23 @@ pub fn acquire(
     }
     let on_launch: Arc<dyn Fn(Vec<String>) + Send + Sync> = Arc::new(on_launch);
     crate::thread_guard::spawn_guarded("quill-single-instance", move || {
+        let slots = ClientSlots::default();
         for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
+            let stream = match stream {
+                Ok(stream) => stream,
+                Err(_) => {
+                    std::thread::sleep(ACCEPT_ERROR_PAUSE);
+                    continue;
+                }
+            };
+            // Over the cap the connection is dropped, not queued.
+            let Some(slot) = slots.try_take(MAX_CLIENT_THREADS) else {
+                continue;
+            };
             let on_launch = Arc::clone(&on_launch);
             // A client that connects and stalls must not block others.
             let _ = crate::thread_guard::spawn_guarded("quill-single-instance-client", move || {
+                let _slot = slot;
                 serve(stream, &*on_launch)
             });
         }
@@ -284,7 +335,7 @@ pub fn acquire(
 
 #[cfg(test)]
 mod tests {
-    use super::{Acquired, Endpoint, acquire, root_digest};
+    use super::{Acquired, ClientSlots, Endpoint, acquire, root_digest};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -292,6 +343,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("quill-si-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn client_slots_cap_concurrent_clients_and_free_on_drop() {
+        let slots = ClientSlots::default();
+        let held: Vec<_> = (0..3).filter_map(|_| slots.try_take(3)).collect();
+        assert_eq!(held.len(), 3);
+        assert!(slots.try_take(3).is_none(), "over the cap");
+        drop(held);
+        assert!(slots.try_take(3).is_some(), "slots come back");
     }
 
     #[test]

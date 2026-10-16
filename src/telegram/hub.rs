@@ -128,15 +128,50 @@ impl Drop for StopGuard {
 
 static SHARED: Mutex<Option<Arc<TdHub>>> = Mutex::new(None);
 
+/// What the shared slot holds, as far as [`TdHub::shared`] is concerned.
+enum Reuse {
+    None,
+    Running(Arc<TdHub>),
+    /// A hub whose receive thread ended unexpectedly, with its library.
+    Stopped(Option<Arc<TdJson>>),
+}
+
+fn reusable(slot: Option<&Arc<TdHub>>) -> Reuse {
+    match slot {
+        None => Reuse::None,
+        Some(hub) if hub.stopped_unexpectedly() => Reuse::Stopped(hub.api().cloned()),
+        Some(hub) => Reuse::Running(hub.clone()),
+    }
+}
+
 impl TdHub {
     /// The process-wide hub over `libtdjson`, loaded and secured on first
     /// use. A failed load is not remembered, so a later call can retry.
     pub fn shared(sink: Arc<dyn DiagnosticSink>) -> Result<Arc<TdHub>, TdJsonError> {
         let mut slot = lock(&SHARED);
-        if let Some(hub) = slot.as_ref() {
-            return Ok(hub.clone());
-        }
+        let api = match reusable(slot.as_ref()) {
+            Reuse::Running(hub) => return Ok(hub),
+            // The receive thread died: keep the loaded library (it is
+            // already secured and must stay loaded for TDLib's worker
+            // threads) and only start a new receive thread over it.
+            Reuse::Stopped(Some(api)) => api,
+            Reuse::Stopped(None) | Reuse::None => Self::load_secured_api()?,
+        };
+        let receive = api.clone();
+        let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
+        let mut hub = TdHub::with_source(source, sink).map_err(|_| TdJsonError::Load)?;
+        hub.api = Some(api);
+        let hub = Arc::new(hub);
+        *slot = Some(hub.clone());
+        Ok(hub)
+    }
+
+    /// Load `libtdjson` and close its native log stream.
+    fn load_secured_api() -> Result<Arc<TdJson>, TdJsonError> {
         let api = Arc::new(TdJson::load_default()?);
+        if let Some(root) = crate::settings::safe_app_root() {
+            crate::crash_log::arm_native_fatal_breadcrumb(&root);
+        }
         // Fail closed: no client until the native log stream is emptied.
         // install_redacted_log alone does not stop TDLib writing to stderr.
         api.secure_native_logging()?;
@@ -148,13 +183,7 @@ impl TdHub {
         {
             let _ = crate::advanced::debug_mode::start_tdlib_log(&api, &root);
         }
-        let receive = api.clone();
-        let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
-        let mut hub = TdHub::with_source(source, sink).map_err(|_| TdJsonError::Load)?;
-        hub.api = Some(api);
-        let hub = Arc::new(hub);
-        *slot = Some(hub.clone());
-        Ok(hub)
+        Ok(api)
     }
 
     /// The loaded `libtdjson` of the process-wide hub, if one was made.
@@ -238,6 +267,13 @@ impl Drop for TdHub {
     }
 }
 
+/// Consecutive panicked iterations after which the loop gives up and the
+/// hub reports itself stopped (the shared hub is then replaced on the next
+/// connect), instead of spinning on a source that keeps panicking.
+const MAX_CONSECUTIVE_PANICS: u32 = 16;
+/// Pause after a panicked iteration.
+const PANIC_PAUSE: Duration = Duration::from_millis(10);
+
 fn receive_loop(
     mut source: ReceiveSource,
     routes: &Routes,
@@ -245,30 +281,57 @@ fn receive_loop(
     shutdown: &AtomicBool,
     sink: &Arc<dyn DiagnosticSink>,
 ) {
+    let mut panics = 0u32;
     while !shutdown.load(Ordering::SeqCst) {
-        routes.wait_for_client(Duration::from_secs(1));
-        if shutdown.load(Ordering::SeqCst) {
-            break;
-        }
-        let Some(json) = source(RECEIVE_TIMEOUT_SECS) else {
-            continue;
-        };
-        let Some(owned) = copy_and_parse(&json, seq, sink) else {
-            continue;
-        };
-        let note = match routes.deliver(owned) {
-            Delivery::Delivered => continue,
-            Delivery::Unrouted => "unrouted-client",
-            Delivery::ReaderGone => "client-reader-gone",
-        };
-        sink.record(Diagnostic {
-            category: "td-receive",
-            type_name: None,
-            extra: None,
-            seq: None,
-            note,
+        // One envelope's parse or delivery going wrong must not end the
+        // receive thread: it serves every account in the process. The panic
+        // hook has already filed the report (`crate::thread_guard`).
+        let finished = crate::thread_guard::ffi_boundary(false, || {
+            receive_one(&mut source, routes, seq, shutdown, sink);
+            true
         });
+        if finished {
+            panics = 0;
+            continue;
+        }
+        panics = panics.saturating_add(1);
+        if panics >= MAX_CONSECUTIVE_PANICS {
+            return;
+        }
+        std::thread::sleep(PANIC_PAUSE);
     }
+}
+
+/// One pass of the loop: wait for a client, read one envelope, route it.
+fn receive_one(
+    source: &mut ReceiveSource,
+    routes: &Routes,
+    seq: &AtomicU64,
+    shutdown: &AtomicBool,
+    sink: &Arc<dyn DiagnosticSink>,
+) {
+    routes.wait_for_client(Duration::from_secs(1));
+    if shutdown.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some(json) = source(RECEIVE_TIMEOUT_SECS) else {
+        return;
+    };
+    let Some(owned) = copy_and_parse(&json, seq, sink) else {
+        return;
+    };
+    let note = match routes.deliver(owned) {
+        Delivery::Delivered => return,
+        Delivery::Unrouted => "unrouted-client",
+        Delivery::ReaderGone => "client-reader-gone",
+    };
+    sink.record(Diagnostic {
+        category: "td-receive",
+        type_name: None,
+        extra: None,
+        seq: None,
+        note,
+    });
 }
 
 #[cfg(test)]

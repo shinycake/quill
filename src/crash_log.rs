@@ -7,6 +7,15 @@
 //! version, the OS and a backtrace. Nothing else from the session goes in it.
 //! Only the newest [`KEEP_CRASH_FILES`] reports are kept.
 //!
+//! A crash that never reaches the panic hook (a native fault, the process
+//! killed, a power cut) is caught the way tdesktop catches it with its
+//! `tdata/working` file (`CrashReports::Start` / `Finish`): `logs/running`
+//! is written at startup and removed on a clean quit. A file still there at
+//! the next launch, with no report newer than that run, becomes a report of
+//! its own. TDLib's fatal log line (verbosity 0, right before it aborts)
+//! leaves `logs/tdlib-fatal` with no message text, which that report
+//! mentions.
+//!
 //! A panic that `spawn_guarded` or `ffi_boundary` will catch
 //! (`crate::thread_guard`) is filed as `panic-caught-<unix-ts>.txt`
 //! instead: Quill kept running, so the next launch does not say it closed.
@@ -19,7 +28,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::panic::PanicHookInfo;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// How many crash reports stay on disk; older ones are removed after each
@@ -32,6 +41,16 @@ const CRASH_SUFFIX: &str = ".txt";
 /// Unix seconds of the last clean quit, or of the last crash the user was
 /// told about.
 const CLEAN_EXIT_FILE: &str = "clean-exit";
+
+/// Present while a Quill process runs: process id, version, start time.
+const RUNNING_FILE: &str = "running";
+/// Left by TDLib's fatal log callback: when, and which Quill.
+const NATIVE_FATAL_FILE: &str = "tdlib-fatal";
+/// A caught panic from one code location is filed at most this often, so a
+/// hot callback that panics on every call does not write a report per call.
+const CAUGHT_REPORT_INTERVAL_SECS: u64 = 10;
+/// How many panic sites the rate limiter remembers.
+const MAX_CAUGHT_SITES: usize = 32;
 
 /// What a report is about: a panic that ended the process, or one a
 /// thread or FFI guard caught.
@@ -95,19 +114,66 @@ fn record_panic(info: &PanicHookInfo<'_>) {
     let current = std::thread::current();
     let now = unix_now();
     let kind = ReportKind::for_current_thread();
+    let location = info
+        .location()
+        .map(|at| format!("{}:{}:{}", at.file(), at.line(), at.column()));
+    if kind == ReportKind::Caught {
+        let site = location
+            .as_deref()
+            .or(current.name())
+            .unwrap_or("(unknown)");
+        // Checked before the backtrace is captured: that is the costly part.
+        if !caught_report_due(site, now) {
+            return;
+        }
+    }
     let report = format_report(&CrashDetails {
         kind,
         message: info
             .payload_as_str()
             .unwrap_or("(panic payload is not text)"),
-        location: info
-            .location()
-            .map(|at| format!("{}:{}:{}", at.file(), at.line(), at.column())),
+        location,
         thread: current.name().unwrap_or("(unnamed)"),
         unix_secs: now,
         backtrace: &Backtrace::force_capture().to_string(),
     });
     let _ = write_report_file(&log_dir(&root), kind, now, &report, KEEP_CRASH_FILES);
+}
+
+static CAUGHT_SITES: Mutex<Vec<(String, u64)>> = Mutex::new(Vec::new());
+
+/// Whether a caught panic at `site` gets a report now (the global limiter).
+/// Never blocks: the panic hook must not wait on a lock.
+fn caught_report_due(site: &str, now: u64) -> bool {
+    match crate::locks::try_lock_or_recover(&CAUGHT_SITES) {
+        Some(mut sites) => caught_site_due(&mut sites, site, now),
+        None => false,
+    }
+}
+
+/// The limiter itself: true (and the site noted) when `site` has no report
+/// from the last [`CAUGHT_REPORT_INTERVAL_SECS`].
+fn caught_site_due(sites: &mut Vec<(String, u64)>, site: &str, now: u64) -> bool {
+    if let Some((_, last)) = sites.iter_mut().find(|(known, _)| known == site) {
+        if now.saturating_sub(*last) < CAUGHT_REPORT_INTERVAL_SECS {
+            return false;
+        }
+        *last = now;
+        return true;
+    }
+    if sites.len() >= MAX_CAUGHT_SITES {
+        // Forget the site that reported longest ago.
+        if let Some(oldest) = sites
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (_, last))| *last)
+            .map(|(index, _)| index)
+        {
+            sites.swap_remove(oldest);
+        }
+    }
+    sites.push((site.to_owned(), now));
+    true
 }
 
 /// What one report says.
@@ -262,6 +328,161 @@ pub fn pending_crash_before(root: &Path, session_start: u64) -> Option<PendingCr
     (unix_secs > since).then_some(PendingCrash { unix_secs, path })
 }
 
+/// The previous run of Quill, as its `running` file recorded it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunningSentinel {
+    pid: u32,
+    version: String,
+    started: u64,
+}
+
+impl RunningSentinel {
+    fn render(&self) -> String {
+        format!("{}\n{}\n{}\n", self.pid, self.version, self.started)
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        let mut lines = text.lines();
+        Some(Self {
+            pid: lines.next()?.trim().parse().ok()?,
+            version: lines.next()?.trim().to_owned(),
+            started: lines.next()?.trim().parse().ok()?,
+        })
+    }
+}
+
+/// Call once at startup, before [`pending_crash`]: turns the previous run's
+/// leftover `running` file (and TDLib fatal breadcrumb) into a crash report
+/// when that run ended without writing one, then marks this run as running.
+/// Every failure is ignored.
+pub fn begin_run(root: &Path) {
+    begin_run_for_session(root, session_start(), std::process::id());
+}
+
+fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
+    let dir = log_dir(root);
+    let previous = fs::read_to_string(dir.join(RUNNING_FILE))
+        .ok()
+        .and_then(|text| RunningSentinel::parse(&text));
+    // A sentinel that cannot be parsed still proves the run did not finish.
+    let unfinished = previous.is_some() || dir.join(RUNNING_FILE).exists();
+    let fatal = take_native_fatal(&dir);
+    if unfinished || fatal.is_some() {
+        let _ = report_unfinished_run(&dir, previous.as_ref(), fatal.as_ref(), session_start);
+    }
+    let sentinel = RunningSentinel {
+        pid,
+        version: crate::version::APP.to_owned(),
+        started: session_start,
+    };
+    let _ = fs::create_dir_all(&dir);
+    let _ = fs::write(dir.join(RUNNING_FILE), sentinel.render());
+}
+
+/// File a crash report for a run that left its `running` file behind,
+/// unless the run already wrote one (a panic: its report is newer than the
+/// run's start).
+fn report_unfinished_run(
+    dir: &Path,
+    previous: Option<&RunningSentinel>,
+    fatal: Option<&NativeFatal>,
+    session_start: u64,
+) -> io::Result<()> {
+    let started = previous
+        .map(|run| run.started)
+        .or(fatal.map(|fatal| fatal.unix_secs))
+        .unwrap_or(0);
+    if crash_files(dir)
+        .iter()
+        .any(|((unix_secs, _), _)| *unix_secs >= started)
+    {
+        return Ok(());
+    }
+    // Dated inside (marker, this run): pending_crash shows reports newer
+    // than the last clean exit and older than this run.
+    let since = read_marker(dir).unwrap_or(0);
+    let unix_secs = started
+        .max(since.saturating_add(1))
+        .min(session_start.saturating_sub(1));
+    let report = format_unfinished_report(previous, fatal, unix_secs);
+    write_report_file(dir, ReportKind::Crash, unix_secs, &report, KEEP_CRASH_FILES).map(|_| ())
+}
+
+fn format_unfinished_report(
+    previous: Option<&RunningSentinel>,
+    fatal: Option<&NativeFatal>,
+    unix_secs: u64,
+) -> String {
+    let (version, pid, started) = match previous {
+        Some(run) => (
+            run.version.as_str(),
+            run.pid.to_string(),
+            run.started.to_string(),
+        ),
+        None => ("(unknown)", "(unknown)".to_owned(), "(unknown)".to_owned()),
+    };
+    let cause = match fatal {
+        Some(fatal) => format!(
+            "TDLib reported a fatal error at {} (unix seconds) in Quill {}, then the process ended.",
+            fatal.unix_secs, fatal.version
+        ),
+        None => "No panic report exists for that run: the process was killed, lost power, or \
+                 failed in native code."
+            .to_owned(),
+    };
+    format!(
+        "Quill closed without finishing.\n\
+         previous run: Quill {version}, pid {pid}, started {started} (unix seconds)\n\
+         report dated: {unix_secs}\n\
+         os: {os} ({arch})\n\
+         \n\
+         {cause}\n",
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+    )
+}
+
+/// What TDLib's fatal log callback recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NativeFatal {
+    unix_secs: u64,
+    version: String,
+}
+
+fn take_native_fatal(dir: &Path) -> Option<NativeFatal> {
+    let path = dir.join(NATIVE_FATAL_FILE);
+    let text = fs::read_to_string(&path).ok()?;
+    let _ = fs::remove_file(&path);
+    let mut lines = text.lines();
+    Some(NativeFatal {
+        unix_secs: lines.next()?.trim().parse().ok()?,
+        version: lines.next()?.trim().to_owned(),
+    })
+}
+
+static NATIVE_FATAL_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Where TDLib's fatal log callback leaves its breadcrumb. Call before the
+/// first TDLib client is made.
+pub fn arm_native_fatal_breadcrumb(root: &Path) {
+    let _ = NATIVE_FATAL_PATH.set(log_dir(root).join(NATIVE_FATAL_FILE));
+}
+
+/// TDLib logged at verbosity 0 (fatal): it aborts right after the callback
+/// returns. Leave a one-line breadcrumb for the next launch. The message
+/// text is never read: native logs can contain account data. Failures are
+/// ignored.
+pub fn note_native_fatal() {
+    let Some(path) = NATIVE_FATAL_PATH.get() else {
+        return;
+    };
+    let line = format!("{}\n{}\n", unix_now(), crate::version::APP);
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = fs::write(path, line);
+}
+
 /// Record a normal quit, so the next launch shows no crash notice.
 pub fn mark_clean_exit(root: &Path) {
     mark_clean_exit_for_session(root, session_start(), unix_now());
@@ -274,6 +495,8 @@ pub fn mark_clean_exit(root: &Path) {
 /// launch still shows it; otherwise the marker moves to `now`.
 fn mark_clean_exit_for_session(root: &Path, session_start: u64, now: u64) {
     let dir = log_dir(root);
+    // The quit is clean: the next launch must not read this run as unfinished.
+    let _ = fs::remove_file(dir.join(RUNNING_FILE));
     for ((unix_secs, _), path) in crash_files(&dir) {
         if unix_secs >= session_start {
             let _ = reclassify_as_caught(&dir, unix_secs, &path);
@@ -323,9 +546,11 @@ fn write_marker(dir: &Path, unix_secs: u64) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CrashDetails, KEEP_CRASH_FILES, ReportKind, acknowledge, crash_files, format_report,
-        log_dir, mark_clean_exit, mark_clean_exit_for_session, parse_report_name, pending_crash,
-        pending_crash_before, report_files, write_crash_file, write_marker, write_report_file,
+        CAUGHT_REPORT_INTERVAL_SECS, CrashDetails, KEEP_CRASH_FILES, MAX_CAUGHT_SITES,
+        NATIVE_FATAL_FILE, RUNNING_FILE, ReportKind, acknowledge, begin_run_for_session,
+        caught_site_due, crash_files, format_report, log_dir, mark_clean_exit,
+        mark_clean_exit_for_session, parse_report_name, pending_crash, pending_crash_before,
+        report_files, write_crash_file, write_marker, write_report_file,
     };
     use std::path::PathBuf;
 
@@ -486,5 +711,84 @@ mod tests {
         }
         assert!(report.contains(std::env::consts::OS));
         assert!(report.contains(crate::version::APP));
+    }
+
+    #[test]
+    fn a_hot_panic_site_reports_once_per_interval() {
+        let mut sites = Vec::new();
+        assert!(caught_site_due(&mut sites, "a.rs:1:1", 100));
+        for now in 100..(100 + CAUGHT_REPORT_INTERVAL_SECS) {
+            assert!(!caught_site_due(&mut sites, "a.rs:1:1", now));
+        }
+        // Another site is independent; the first is due again after the pause.
+        assert!(caught_site_due(&mut sites, "b.rs:2:2", 101));
+        assert!(caught_site_due(
+            &mut sites,
+            "a.rs:1:1",
+            100 + CAUGHT_REPORT_INTERVAL_SECS
+        ));
+        // The table stays bounded.
+        for index in 0..(MAX_CAUGHT_SITES * 2) {
+            caught_site_due(&mut sites, &format!("s{index}"), 200);
+        }
+        assert!(sites.len() <= MAX_CAUGHT_SITES);
+    }
+
+    #[test]
+    fn a_leftover_running_file_becomes_a_pending_crash_once() {
+        let root = temp_root("sentinel");
+        let dir = log_dir(&root);
+        write_marker(&dir, 1_000).unwrap();
+        // Run A starts and is killed: its sentinel stays.
+        begin_run_for_session(&root, 2_000, 11);
+        assert!(dir.join(RUNNING_FILE).exists());
+        assert_eq!(
+            pending_crash_before(&root, 2_000),
+            None,
+            "first run: nothing"
+        );
+
+        // Run B finds it.
+        begin_run_for_session(&root, 3_000, 12);
+        let crash = pending_crash_before(&root, 3_000).expect("unfinished run reported");
+        assert_eq!(crash.unix_secs, 2_000);
+        let text = std::fs::read_to_string(&crash.path).unwrap();
+        assert!(text.contains("pid 11"));
+        acknowledge(&root, &crash);
+
+        // Run B quits cleanly: run C sees nothing.
+        mark_clean_exit_for_session(&root, 3_000, 3_500);
+        assert!(!dir.join(RUNNING_FILE).exists());
+        begin_run_for_session(&root, 4_000, 13);
+        assert_eq!(pending_crash_before(&root, 4_000), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_panic_report_from_the_run_is_not_doubled_by_its_sentinel() {
+        let root = temp_root("sentinel-panic");
+        let dir = log_dir(&root);
+        write_marker(&dir, 1_000).unwrap();
+        begin_run_for_session(&root, 2_000, 11);
+        write_crash_file(&dir, 2_400, "panic", KEEP_CRASH_FILES).unwrap();
+        begin_run_for_session(&root, 3_000, 12);
+        assert_eq!(crash_files(&dir).len(), 1, "no second report");
+        assert_eq!(pending_crash_before(&root, 3_000).unwrap().unix_secs, 2_400);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_tdlib_fatal_breadcrumb_is_reported_and_consumed() {
+        let root = temp_root("fatal");
+        let dir = log_dir(&root);
+        write_marker(&dir, 1_000).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(NATIVE_FATAL_FILE), "2100\n1.2.3\n").unwrap();
+        begin_run_for_session(&root, 3_000, 12);
+        assert!(!dir.join(NATIVE_FATAL_FILE).exists(), "consumed");
+        let crash = pending_crash_before(&root, 3_000).unwrap();
+        let text = std::fs::read_to_string(crash.path).unwrap();
+        assert!(text.contains("TDLib reported a fatal error"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
