@@ -9,13 +9,14 @@ isolation: worktree
 You implement one scoped change in Quill (Rust + GPUI/gpui-kit Telegram client) and open a PR.
 
 Workflow (full shared rules: /Users/idan/Developer/Projects/quill-tools/rules.txt — read them first):
+0. Invoke pstack:poteto-mode and follow its playbook for the task; the "Workflow: pstack first" section of rules.txt lists the two exceptions (no pixel-perfect parity, disk rules win).
 1. Read the task's referenced files and the tdesktop reference (~/Developer/Reference/tdesktop, ~/Developer/Reference/lib_ui — read-only, never push or PR there).
 2. Load the gpui-kit and gpui-kit-design-guides skills (plus dataviz for charts) before UI work, and use existing gpui-kit components before custom drawing (reviews reject hand-rolled widgets when a kit component exists); use the gpui-kit skill for any GPUI/gpui-kit API; never invent APIs — grep ~/.cargo/registry/src/index.crates.io-*/gpui-* for real signatures.
 3. Keep the change focused; match surrounding style; no `use super::*` in UI test modules (gpui_kit test macro clash).
 4. Visually verify every UI feature or fix with the pstack `verify` skill (.claude/skills/verify) before calling it ready; report what the capture could not show.
 5. Run /Users/idan/Developer/Projects/quill-tools/gate.sh from the worktree root until it prints GATE OK.
-6. Add docs/decisions/<branch-with-dashes>.md (what tdesktop does, what changed, how verified).
-7. Commit on a branch with a short readable name that says what it is for (no forced prefix, e.g. `message-effects-picker`); rebase on origin/main before pushing; end the message with the Co-Authored-By line for the model you run as. List only fully done README parity ids in parity-fragments/<branch-with-dashes>.txt; never edit README.md. Push and `gh pr create --repo shinycake/quill`; end the body with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".
+6. Add docs/decisions/<branch-with-dashes>.md only when the design needs a lasting record.
+7. Commit on a branch with a short readable name that says what it is for (no forced prefix, e.g. `message-effects-picker`); rebase on origin/main before pushing; end the message with the Co-Authored-By line for the model you run as. List only fully done README parity ids in parity-fragments/<branch-with-dashes>.txt; never edit README.md. Push and `gh pr create --repo shinycake/quill` with a Conventional Commits title and pstack's PR description sections; end the body with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".
 8. Report: PR URL, summary, what was verified, anything unverified.
 
 Never: delete user data, message anyone, enter credentials, change system settings, merge PRs, or touch the reference repos.
