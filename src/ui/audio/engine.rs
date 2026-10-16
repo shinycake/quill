@@ -567,12 +567,9 @@ impl AudioEngine {
     /// is its target until then.
     #[cfg(test)]
     pub(in crate::ui) fn seek_pending(&self) -> bool {
-        self.track.is_some()
-            && (self.restart.is_some()
-                || self
-                    .track
-                    .as_ref()
-                    .is_some_and(|t| t.seeks.target().is_some()))
+        self.track
+            .as_ref()
+            .is_some_and(|t| self.restart.is_some() || t.seeks.target().is_some())
     }
 
     /// Tests: the audio side owes an answer to a seek it was handed.
@@ -1123,9 +1120,9 @@ mod tests {
         pull(&mut device, usize::try_from(RATE).unwrap());
         engine.seek(5.0, true).unwrap();
         // The worker hands the seek over; the device pulls nothing.
-        while !engine.seek_awaits_device() {
-            std::thread::yield_now();
-        }
+        wait_until("the seek reaches the device", || {
+            engine.seek_awaits_device()
+        });
         clock.store(2499, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(engine.error(), None, "inside the bound");
         clock.store(2500, std::sync::atomic::Ordering::Relaxed);
@@ -1149,6 +1146,18 @@ mod tests {
             pull_until_settled(&mut engine, &mut device);
             assert_eq!(engine.error(), None, "step {step}");
         }
+    }
+
+    /// Spin until `done` holds, failing the test instead of hanging it.
+    fn wait_until(what: &str, done: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            if done() {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("never happened: {what}");
     }
 
     /// Pull one frame at a time until `done` holds (bounded).
@@ -1179,9 +1188,9 @@ mod tests {
         engine.start(&first, 0.0, 1.0, 1.0, 6.0).unwrap();
         pull(&mut device, usize::try_from(RATE).unwrap());
         engine.seek(5.0, true).unwrap();
-        while !engine.seek_awaits_device() {
-            std::thread::yield_now();
-        }
+        wait_until("the seek reaches the device", || {
+            engine.seek_awaits_device()
+        });
         clock.store(2500, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(engine.error(), Some(AudioError::DeviceStalled));
         assert_eq!(engine.live_workers(), 1);
@@ -1192,9 +1201,7 @@ mod tests {
         engine.start(&second, 0.0, 1.0, 1.0, 6.0).unwrap();
         assert_eq!(engine.error(), None, "the new track starts clean");
         engine.seek(3.0, true).unwrap();
-        while engine.live_workers() < 2 {
-            std::thread::yield_now();
-        }
+        wait_until("both workers parked", || engine.live_workers() >= 2);
 
         // The device wakes: the old worker leaves without writing anything,
         // the new one delivers its seek, and no thread stays behind.
@@ -1215,12 +1222,17 @@ mod tests {
         let (mut engine, mut device) = rig();
         let path = track("drop-track.wav", 4);
         engine.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        // A seek the device never answers parks a worker.
+        engine.seek(2.0, true).unwrap();
+        wait_until("a worker is parked", || engine.live_workers() == 1);
         let (board, _) = engine.track_parts().unwrap();
         assert!(!board.is_cancelled());
         engine.stop();
         assert!(board.is_cancelled());
-        pull(&mut device, 4000);
-        assert_eq!(engine.live_workers(), 0);
+        pull_until(&mut engine, &mut device, "worker gone", |engine| {
+            engine.live_workers() == 0
+        });
     }
 
     #[test]
