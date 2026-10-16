@@ -18,7 +18,7 @@ use crate::ui::video_player::controls::{
     LiveActions, LiveFacts, LiveInput, LiveOverlayParts, PictureOverlay, PictureState,
     VideoController,
 };
-use crate::ui::video_player::{Purpose, VideoPlayer, video_frame};
+use crate::ui::video_player::{VideoPlayer, follow_live_slot, video_frame};
 use gpui_kit::assets::IconName;
 use quill::calls::engine::StreamState;
 use quill::calls::live_video::LiveSink;
@@ -128,10 +128,10 @@ impl QuillApp {
         PictureState::live(overlay, parts).map(|state| PictureOverlay::new(row_id, state))
     }
 
-    /// The live story's player, following its feed: a new feed (a
-    /// rejoin) gets a new player; no feed, no player.
-    fn live_story_player(&mut self, cx: &mut App) -> Option<VideoPlayer> {
-        let sink: Option<LiveSink> = match self.live.as_ref() {
+    /// The watched live story's feed: the driver's (the stream, or the
+    /// presenter's camera or screen), or the demo fixture's.
+    pub(crate) fn live_story_sink(&self) -> Option<LiveSink> {
+        match self.live.as_ref() {
             Some(live) => live
                 .driver
                 .live_story_live_key()
@@ -142,20 +142,15 @@ impl QuillApp {
                 .demo_feed
                 .as_ref()
                 .map(|feed| feed.sink.clone()),
-        };
-        let live = &mut self.stories.live;
-        let same = match (live.player.as_ref(), sink.as_ref()) {
-            (Some(player), Some(sink)) => player.live_sink().is_some_and(|own| own.same_as(sink)),
-            (None, None) => true,
-            _ => false,
-        };
-        if !same {
-            if let Some(old) = live.player.take() {
-                old.release_live(cx);
-            }
-            live.player =
-                sink.map(|sink| VideoPlayer::live(sink, Purpose::Live { tile: false }, cx));
         }
+    }
+
+    /// The live story's player, following its feed: a new feed (a
+    /// rejoin, a presenter switch) gets a new player; no feed, no player.
+    fn live_story_player(&mut self, cx: &mut App) -> Option<VideoPlayer> {
+        let sink = self.live_story_sink();
+        let live = &mut self.stories.live;
+        follow_live_slot(&mut live.player, sink.as_ref(), cx);
         live.player.clone()
     }
 

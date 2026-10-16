@@ -25,6 +25,7 @@ mod backend_live;
 mod backend_still;
 pub(crate) mod controls;
 mod element;
+mod live_follow;
 mod live_picture;
 #[cfg(any(target_os = "windows", test))]
 mod live_surface;
@@ -45,6 +46,7 @@ mod tests;
 
 pub(crate) use backend_live::STALL_AFTER;
 pub(crate) use element::{WidthReport, video_frame};
+pub(crate) use live_follow::{follow_live_feed, follow_live_slot, shows_feed};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(crate) use live_picture::{bgra_only, take_made_images};
