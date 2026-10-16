@@ -1,8 +1,20 @@
-//! Explicit binary updates: verify first, hand off after exit, retain rollback.
+//! Explicit updates: verify first, hand off after exit, retain rollback.
+//!
+//! macOS (bare executable) swaps the one file. Linux and Windows install the
+//! whole release package so the bundled TDLib, ntgcalls, FFmpeg and OpenSSL
+//! libraries never go stale next to a new executable: Linux stages the package
+//! beside the install directory and swaps the directories; Windows renames
+//! each running file aside and moves the new one in (`swap.rs`). Locations
+//! Quill cannot rewrite without elevation or a package manager keep the
+//! "install the release package from GitHub" path.
 #![deny(clippy::indexing_slicing)]
-// The self-update handoff is Unix-only for now (Windows needs an installer
-// handoff — see the cross-platform backlog), so its helpers go unused there.
-#![cfg_attr(not(unix), allow(dead_code))]
+// The self-update handoff has per-platform halves; the others go unused.
+#![cfg_attr(not(any(unix, windows)), allow(dead_code))]
+// Downloading (and so unpacking) is part of the UI build only.
+#![cfg_attr(not(feature = "ui"), allow(dead_code))]
+mod bundle;
+mod swap;
+
 use crate::updater::{ReleaseInfo, UpdateState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -18,7 +30,19 @@ pub struct InstallPlan {
     staged: PathBuf,
     parent: u32,
     release: ReleaseInfo,
+    /// `staged` is an extracted package directory, not a single executable.
+    #[serde(default)]
+    bundle: bool,
 }
+
+/// Linux and Windows install the whole package; other platforms swap the file.
+const BUNDLE_UPDATES: bool = cfg!(any(target_os = "linux", windows));
+const PACKAGE_EXE: &str = if cfg!(windows) { "quill.exe" } else { "quill" };
+const PACKAGE_SENTINEL: &str = if cfg!(windows) {
+    "tdjson.dll"
+} else {
+    "lib/libtdjson.so"
+};
 
 #[derive(Serialize, Deserialize)]
 struct InstallResult {
@@ -26,13 +50,60 @@ struct InstallResult {
     failed: bool,
 }
 
+fn receipt_for(exe: &Path) -> PathBuf {
+    exe.with_extension("last-update.json")
+}
+
 fn result_path() -> Option<PathBuf> {
-    std::env::current_exe()
+    std::env::current_exe().ok().map(|p| receipt_for(&p))
+}
+
+/// The package executable at `exe` sits next to the package's TDLib.
+fn packaged(exe: &Path) -> bool {
+    exe.file_name().is_some_and(|n| n == PACKAGE_EXE)
+        && exe
+            .parent()
+            .is_some_and(|install| install.join(PACKAGE_SENTINEL).is_file())
+}
+
+/// Where a Linux swap keeps the previous install directory:
+/// `.quill.update-backup` beside it.
+fn backup_for(install: &Path) -> Option<PathBuf> {
+    let name = install.file_name()?.to_string_lossy();
+    Some(install.with_file_name(format!(".{name}.update-backup")))
+}
+
+/// What a finished update leaves for the new version's first start: Windows
+/// `*.old` files that could not go while the previous version ran, and the
+/// Linux backup directory, kept until now so a failed start could still be
+/// undone by hand. Runs on a background thread (the backup is a whole
+/// package tree).
+fn finish_previous_update() {
+    let Some(exe) = std::env::current_exe()
         .ok()
-        .map(|p| p.with_extension("last-update.json"))
+        .and_then(|p| fs::canonicalize(p).ok())
+    else {
+        return;
+    };
+    let Some(install) = exe.parent().map(Path::to_path_buf) else {
+        return;
+    };
+    let windows = cfg!(windows);
+    if !windows && !(BUNDLE_UPDATES && packaged(&exe)) {
+        return;
+    }
+    let _ = crate::thread_guard::spawn_guarded("quill-update-cleanup", move || {
+        if windows {
+            swap::remove_leftovers(&install);
+        } else if let Some(backup) = backup_for(&install) {
+            // This version started, so the previous one is no longer needed.
+            let _ = swap::recover_or_clear_backup(&install, &exe, &backup);
+        }
+    });
 }
 
 pub fn startup_state() -> UpdateState {
+    finish_previous_update();
     let result = result_path()
         .and_then(|p| fs::read(p).ok())
         .and_then(|b| serde_json::from_slice::<InstallResult>(&b).ok());
@@ -69,9 +140,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.sync_all()
 }
 
-fn write_result(release: &ReleaseInfo, failed: bool) -> std::io::Result<()> {
-    let path =
-        result_path().ok_or_else(|| std::io::Error::other("No application data directory"))?;
+fn write_result(path: PathBuf, release: &ReleaseInfo, failed: bool) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -165,13 +234,71 @@ fn probe_binary(path: &Path, version: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Only our supported standalone executable can be atomically replaced.
+/// Whether the install at `exe` can be rewritten by Quill itself.
+fn installable(exe: &Path) -> bool {
+    if !BUNDLE_UPDATES {
+        // macOS: the bare executable only, never an app bundle.
+        return cfg!(unix)
+            && !exe
+                .components()
+                .any(|c| c.as_os_str().to_string_lossy().ends_with(".app"));
+    }
+    let Some(install) = exe.parent() else {
+        return false;
+    };
+    if !packaged(exe) || swap::distro_managed(install) {
+        return false;
+    }
+    // Windows renames files inside the install directory; Linux also swaps the
+    // directory itself, so its parent must be writable too.
+    swap::dir_writable(install)
+        && (cfg!(windows) || install.parent().is_some_and(swap::dir_writable))
+}
+
+/// Only an installation Quill can replace itself, without elevation, qualifies;
+/// anything else (app bundle, package manager, Program Files, AppImage, a plain
+/// cargo build) is pointed at the release download instead. Probed once.
 pub fn can_install_here() -> bool {
-    cfg!(unix)
-        && std::env::current_exe().is_ok_and(|p| {
-            !p.components()
-                .any(|c| c.as_os_str().to_string_lossy().ends_with(".app"))
-        })
+    static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ANSWER.get_or_init(|| {
+        std::env::current_exe()
+            .and_then(fs::canonicalize)
+            .is_ok_and(|exe| installable(&exe))
+    })
+}
+
+fn archive_kind() -> bundle::ArchiveKind {
+    if cfg!(windows) {
+        bundle::ArchiveKind::Zip
+    } else {
+        bundle::ArchiveKind::TarGz
+    }
+}
+
+/// Where the extracted package waits: Linux swaps directories, so beside the
+/// install directory; Windows moves files, so inside it (same volume).
+fn staging_parent(install: &Path) -> Option<PathBuf> {
+    if cfg!(windows) {
+        Some(install.to_path_buf())
+    } else {
+        install.parent().map(Path::to_path_buf)
+    }
+}
+
+/// Before staging a new package (the running install is intact): drops what
+/// an interrupted or finished earlier update left, so none of it can block
+/// this one or keep using disk. Linux: a stale backup directory; both
+/// platforms: staged packages, archives, plans and failed trees.
+fn clear_interrupted_update(exe: &Path, install: &Path, stage_root: &Path) {
+    if !cfg!(windows)
+        && let Some(backup) = backup_for(install)
+    {
+        let _ = swap::recover_or_clear_backup(install, exe, &backup);
+    }
+    swap::clear_temp_entries(stage_root);
+    if stage_root != install {
+        swap::clear_temp_entries(install);
+    }
 }
 
 #[cfg(feature = "ui")]
@@ -183,7 +310,7 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
     }
     if !can_install_here() {
         return Err(
-            "This installation uses an app bundle. Install its release package from GitHub.",
+            "This installation cannot update itself. Install its release package from GitHub.",
         );
     }
     let asset = release
@@ -194,16 +321,28 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         .and_then(fs::canonicalize)
         .map_err(|_| "Could not locate the installed executable.")?;
     let parent = target.parent().ok_or("Invalid executable location.")?;
-    let staged = parent.join(format!(
-        ".quill-update-{}-{}-{}.new",
+    let stage_root = if BUNDLE_UPDATES {
+        staging_parent(parent).ok_or("Invalid executable location.")?
+    } else {
+        parent.to_path_buf()
+    };
+    if BUNDLE_UPDATES {
+        clear_interrupted_update(&target, parent, &stage_root);
+    }
+    let stamp = format!(
+        "{}{}-{}-{}",
+        swap::TEMP_PREFIX,
         std::process::id(),
         release.version,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos()
-    ));
-    let plan_path = staged.with_extension("json");
+    );
+    let staged = stage_root.join(format!("{stamp}.new"));
+    let archive = stage_root.join(format!("{stamp}.archive"));
+    let download = if BUNDLE_UPDATES { &archive } else { &staged };
+    let plan_path = parent.join(format!("{stamp}.json"));
     let result = (|| {
         let agent = ureq::Agent::config_builder()
             .https_only(true)
@@ -221,9 +360,9 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o700);
+            options.mode(if BUNDLE_UPDATES { 0o600 } else { 0o700 });
         }
-        let mut file = options.open(&staged).map_err(
+        let mut file = options.open(download).map_err(
             |_| "Could not stage update beside the executable. Check folder permissions and retry.",
         )?;
         let mut reader = response.body_mut().as_reader().take(asset.size + 1);
@@ -232,14 +371,23 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         file.sync_all()
             .map_err(|_| "Could not save the update. Check disk space and retry.")?;
         if size != asset.size
-            || digest_file(&staged).map_err(|_| "Could not verify the update.")?
+            || digest_file(download).map_err(|_| "Could not verify the update.")?
                 != asset.sha256.to_ascii_lowercase()
         {
             return Err(
                 "Update checksum or size mismatch. Nothing was installed. Retry the release check.",
             );
         }
-        probe_binary(&staged, &release.version).map_err(
+        let probed = if BUNDLE_UPDATES {
+            bundle::extract(&archive, archive_kind(), &staged).map_err(
+                |_| "The downloaded package could not be unpacked. Nothing was installed.",
+            )?;
+            let _ = fs::remove_file(&archive);
+            staged.join(PACKAGE_EXE)
+        } else {
+            staged.clone()
+        };
+        probe_binary(&probed, &release.version).map_err(
             |_| "The downloaded binary failed its version check. Nothing was installed.",
         )?;
         let plan = InstallPlan {
@@ -247,6 +395,7 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
             staged: staged.clone(),
             parent: std::process::id(),
             release: release.clone(),
+            bundle: BUNDLE_UPDATES,
         };
         write_private(
             &plan_path,
@@ -256,8 +405,10 @@ pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str
         Ok(plan_path.clone())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(staged);
-        let _ = fs::remove_file(plan_path);
+        let _ = fs::remove_file(&archive);
+        let _ = fs::remove_file(&staged);
+        let _ = fs::remove_dir_all(&staged);
+        let _ = fs::remove_file(&plan_path);
     }
     result
 }
@@ -275,7 +426,115 @@ pub fn launch_helper(plan: &Path) -> std::io::Result<()> {
         use std::os::unix::process::CommandExt;
         helper.process_group(0);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS | CREATE_NO_WINDOW: outlive the exiting app, no console.
+        helper.creation_flags(0x0000_0008 | 0x0800_0000);
+    }
     helper.spawn().map(|_| ())
+}
+
+/// Blocks until process `pid` has exited (30 s at most).
+fn wait_for_parent(pid: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?
+            .success()
+        {
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::other(
+                    "App did not exit; update was not installed",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+        };
+        // SAFETY: OpenProcess takes plain integers and returns an owned handle
+        // (null when the process is already gone); the handle is waited on and
+        // closed exactly once below.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        if handle.is_null() {
+            return Ok(());
+        }
+        // SAFETY: `handle` is a valid process handle with SYNCHRONIZE access.
+        let status = unsafe { WaitForSingleObject(handle, 30_000) };
+        // SAFETY: closes the handle opened above, once.
+        unsafe { CloseHandle(handle) };
+        if status == WAIT_OBJECT_0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(
+                "App did not exit; update was not installed",
+            ))
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        Err(std::io::Error::other(
+            "Updates are unavailable on this platform",
+        ))
+    }
+}
+
+fn spawn_app(path: &Path) -> std::io::Result<()> {
+    Command::new(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+}
+
+/// Installs a staged package: Linux swaps the install directory, Windows
+/// renames each file aside. The receipt for the new version travels inside the
+/// staged tree on Linux (the old directory is deleted on success).
+fn install_bundle(plan: &InstallPlan, target: &Path, plan_path: &Path) -> std::io::Result<()> {
+    let install = target
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Invalid executable location"))?;
+    let name = plan
+        .staged
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    if staging_parent(install).as_deref() != plan.staged.parent()
+        || !name.starts_with(swap::TEMP_PREFIX)
+        || !name.ends_with(".new")
+        || !fs::symlink_metadata(&plan.staged)?.file_type().is_dir()
+    {
+        return Err(std::io::Error::other("Invalid update handoff"));
+    }
+    let staged_exe = plan.staged.join(PACKAGE_EXE);
+    probe_binary(&staged_exe, &plan.release.version)?;
+    // The plan lives inside the install directory; drop it before the swap.
+    let _ = fs::remove_file(plan_path);
+    let launch = || spawn_app(target);
+    if cfg!(windows) {
+        write_result(receipt_for(target), &plan.release, false)?;
+        swap::swap_files(install, &plan.staged, launch)
+    } else {
+        write_result(receipt_for(&staged_exe), &plan.release, false)?;
+        let backup =
+            backup_for(install).ok_or_else(|| std::io::Error::other("Invalid install location"))?;
+        // A backup the previous version never got to clear (it did not
+        // start, or its startup cleanup failed) must not block this update.
+        swap::recover_or_clear_backup(install, target, &backup)?;
+        swap::swap_dir(install, &plan.staged, &backup, launch)
+    }
 }
 
 /// Entry point runs before GPUI, credentials, or any account is opened.
@@ -289,67 +548,56 @@ pub fn apply_update(plan_path: &Path) -> std::io::Result<()> {
     }
     let plan: InstallPlan = serde_json::from_slice(&bytes)?;
     let target = fs::canonicalize(std::env::current_exe()?)?;
+    apply_plan(plan_path, plan, target)
+}
+
+/// [`apply_update`] for the executable at `target` (the helper itself).
+fn apply_plan(plan_path: &Path, plan: InstallPlan, target: PathBuf) -> std::io::Result<()> {
     if plan.target != target
-        || plan.staged.parent() != target.parent()
         || plan_path.parent() != target.parent()
+        || (!plan.bundle && plan.staged.parent() != target.parent())
+        || (cfg!(windows) && !plan.bundle)
         || plan.parent == std::process::id()
         || plan.parent == 0
         || plan.staged == target
     {
         return Err(std::io::Error::other("Invalid update handoff"));
     }
-    #[cfg(not(unix))]
-    {
-        Err(std::io::Error::other(
-            "Binary updates are unavailable on this platform",
-        ))
-    }
-    #[cfg(unix)]
-    {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while Command::new("/bin/kill")
-            .args(["-0", &plan.parent.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?
-            .success()
+    wait_for_parent(plan.parent)?;
+    let result = (|| {
+        if !valid_release(&plan.release) {
+            return Err(std::io::Error::other("Invalid update release"));
+        }
+        if plan.bundle {
+            return install_bundle(&plan, &target, plan_path);
+        }
+        let asset = plan
+            .release
+            .asset
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("Missing update checksum"))?;
+        if fs::symlink_metadata(&plan.staged)?.file_type().is_symlink()
+            || fs::metadata(&plan.staged)?.len() != asset.size
+            || digest_file(&plan.staged)? != asset.sha256
         {
-            if Instant::now() >= deadline {
-                return Err(std::io::Error::other(
-                    "App did not exit; update was not installed",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(100));
+            return Err(std::io::Error::other(
+                "Staged update changed before installation",
+            ));
         }
-        let result = (|| {
-            if !valid_release(&plan.release) {
-                return Err(std::io::Error::other("Invalid update release"));
-            }
-            let asset = plan
-                .release
-                .asset
-                .as_ref()
-                .ok_or_else(|| std::io::Error::other("Missing update checksum"))?;
-            if fs::symlink_metadata(&plan.staged)?.file_type().is_symlink()
-                || fs::metadata(&plan.staged)?.len() != asset.size
-                || digest_file(&plan.staged)? != asset.sha256
-            {
-                return Err(std::io::Error::other(
-                    "Staged update changed before installation",
-                ));
-            }
-            probe_binary(&plan.staged, &plan.release.version)?;
-            // The new process may read this immediately after spawn.
-            write_result(&plan.release, false)?;
-            replace_and_launch(&target, &plan.staged)
-        })();
-        if result.is_err() {
-            let _ = write_result(&plan.release, true);
-            let _ = Command::new(&target).spawn();
+        probe_binary(&plan.staged, &plan.release.version)?;
+        // The new process may read this immediately after spawn.
+        write_result(receipt_for(&target), &plan.release, false)?;
+        replace_and_launch(&target, &plan.staged)
+    })();
+    if result.is_err() {
+        let _ = write_result(receipt_for(&target), &plan.release, true);
+        let _ = spawn_app(&target);
+        if plan.bundle {
+            let _ = fs::remove_dir_all(&plan.staged);
         }
-        let _ = fs::remove_file(plan_path);
-        result
     }
+    let _ = fs::remove_file(plan_path);
+    result
 }
 
 fn replace_and_launch(target: &Path, staged: &Path) -> std::io::Result<()> {
@@ -417,6 +665,171 @@ mod tests {
         fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).unwrap();
         replace_and_launch(&target, &staged).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"#!/bin/sh\nexit 0\n");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn release() -> ReleaseInfo {
+        let base = crate::updater::RELEASES_URL;
+        ReleaseInfo {
+            version: "999.0.0".into(),
+            notes: String::new(),
+            url: format!("{base}/tag/v999.0.0"),
+            asset: Some(crate::updater::ReleaseAsset {
+                url: format!(
+                    "{base}/download/v999.0.0/{}",
+                    crate::updater::update_asset_name()
+                ),
+                size: 100,
+                sha256: "a".repeat(64),
+            }),
+        }
+    }
+
+    /// A pid that is certainly not running (spawned and reaped).
+    fn exited_pid() -> u32 {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    }
+
+    fn script(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    const NEW_APP: &str =
+        "case \"$1\" in --version) echo 'Quill 999.0.0';; --build-info) echo ui;; esac";
+
+    /// An installed package `opt/quill` and a staged one beside it, as
+    /// `download_and_stage` leaves them on Linux.
+    fn bundle_fixture(tag: &str, new_app: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("quill-apply-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("opt")).unwrap();
+        let root = fs::canonicalize(root).unwrap();
+        let install = root.join("opt/quill");
+        script(&install.join("quill"), "exit 0");
+        fs::create_dir_all(install.join("lib")).unwrap();
+        fs::write(install.join("lib/libtdjson.so"), b"old-td").unwrap();
+        let staged = root.join("opt/.quill-update-1-999.0.0-1.new");
+        script(&staged.join("quill"), new_app);
+        fs::create_dir_all(staged.join("lib")).unwrap();
+        fs::write(staged.join("lib/libtdjson.so"), b"new-td").unwrap();
+        let plan_path = install.join(".quill-update-1-999.0.0-1.json");
+        fs::write(&plan_path, b"{}").unwrap();
+        (root, install, staged, plan_path)
+    }
+
+    fn receipt(install: &Path) -> InstallResult {
+        serde_json::from_slice(&fs::read(install.join("quill.last-update.json")).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn apply_plan_installs_a_bundle_and_keeps_the_old_tree_until_the_next_start() {
+        let (root, install, staged, plan_path) = bundle_fixture("bundle-ok", NEW_APP);
+        // A backup an earlier update never cleared must not block this one.
+        let backup = root.join("opt/.quill.update-backup");
+        fs::create_dir_all(backup.join("stale")).unwrap();
+        let target = install.join("quill");
+        let plan = InstallPlan {
+            target: target.clone(),
+            staged: staged.clone(),
+            parent: exited_pid(),
+            release: release(),
+            bundle: true,
+        };
+        apply_plan(&plan_path, plan, target.clone()).unwrap();
+        assert!(
+            fs::read_to_string(&target)
+                .unwrap()
+                .contains("Quill 999.0.0")
+        );
+        assert_eq!(
+            fs::read(install.join("lib/libtdjson.so")).unwrap(),
+            b"new-td"
+        );
+        let result = receipt(&install);
+        assert!(!result.failed);
+        assert_eq!(result.release.version, "999.0.0");
+        assert!(!staged.exists() && !plan_path.exists());
+        // The previous tree waits for the new version's first start.
+        assert_eq!(
+            fs::read(backup.join("lib/libtdjson.so")).unwrap(),
+            b"old-td"
+        );
+        assert!(!backup.join("stale").exists());
+        swap::recover_or_clear_backup(&install, &target, &backup).unwrap();
+        assert!(!backup.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn apply_plan_keeps_the_old_bundle_and_reports_when_the_new_one_fails_its_probe() {
+        let (root, install, staged, plan_path) = bundle_fixture("bundle-bad", "echo 'Quill 0.0.1'");
+        let target = install.join("quill");
+        let plan = InstallPlan {
+            target: target.clone(),
+            staged: staged.clone(),
+            parent: exited_pid(),
+            release: release(),
+            bundle: true,
+        };
+        assert!(apply_plan(&plan_path, plan, target.clone()).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "#!/bin/sh\nexit 0\n");
+        assert_eq!(
+            fs::read(install.join("lib/libtdjson.so")).unwrap(),
+            b"old-td"
+        );
+        assert!(receipt(&install).failed);
+        assert!(!staged.exists() && !plan_path.exists());
+        assert!(!root.join("opt/.quill.update-backup").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn staging_first_clears_what_an_interrupted_update_left() {
+        let (root, install, staged, plan_path) = bundle_fixture("bundle-clear", NEW_APP);
+        let backup = root.join("opt/.quill.update-backup");
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(root.join("opt/.quill-update-2-1.0.0-3.archive"), b"x").unwrap();
+        clear_interrupted_update(&install.join("quill"), &install, &root.join("opt"));
+        assert!(!backup.exists() && !staged.exists() && !plan_path.exists());
+        assert!(!root.join("opt/.quill-update-2-1.0.0-3.archive").exists());
+        assert!(install.join("quill").exists() && install.join("lib/libtdjson.so").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_a_writable_unmanaged_package_directory_can_self_update() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("quill-installable-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let install = root.join("opt/quill");
+        fs::create_dir_all(install.join("lib")).unwrap();
+        let exe = install.join("quill");
+        fs::write(&exe, b"x").unwrap();
+        // A bare binary without the package's library directory (cargo build).
+        assert!(!installable(&exe));
+        fs::write(install.join("lib/libtdjson.so"), b"td").unwrap();
+        assert!(installable(&exe));
+        // A renamed executable is not our package layout.
+        let renamed = install.join("quill-dev");
+        fs::write(&renamed, b"x").unwrap();
+        assert!(!installable(&renamed));
+        // Read-only install directory: fall back to the download page. (Root
+        // can write anywhere, so only assert when the probe agrees.)
+        fs::set_permissions(&install, fs::Permissions::from_mode(0o555)).unwrap();
+        if !swap::dir_writable(&install) {
+            assert!(!installable(&exe));
+        }
+        fs::set_permissions(&install, fs::Permissions::from_mode(0o755)).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

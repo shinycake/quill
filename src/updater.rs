@@ -30,6 +30,21 @@ pub fn binary_asset_name() -> String {
     format!("quill-{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
+/// The release asset the in-app updater downloads. macOS (and other Unix) swap
+/// the bare executable; Linux and Windows install the whole package (the same
+/// tarball/zip users download), so the bundled TDLib, ntgcalls, FFmpeg and
+/// OpenSSL libraries always match the new executable.
+pub fn update_asset_name() -> String {
+    let name = binary_asset_name();
+    if cfg!(target_os = "linux") {
+        format!("{name}-bundle.tar.gz")
+    } else if cfg!(windows) {
+        format!("{name}.zip")
+    } else {
+        name
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum UpdateState {
     #[default]
@@ -83,7 +98,7 @@ struct GithubAsset {
 }
 
 pub fn valid_asset(asset: &ReleaseAsset, tag: &str) -> bool {
-    asset.url == format!("{RELEASES_URL}/download/{tag}/{}", binary_asset_name())
+    asset.url == format!("{RELEASES_URL}/download/{tag}/{}", update_asset_name())
         && (1..=536_870_912).contains(&asset.size)
         && asset.sha256.len() == 64
         && asset.sha256.bytes().all(|b| b.is_ascii_hexdigit())
@@ -160,7 +175,7 @@ fn release_state(release: GithubRelease, version: Version, current: &Version) ->
         return UpdateState::Failed("Invalid release link. Retry the check.");
     }
     let asset = release.assets.into_iter().find_map(|a| {
-        if a.name != binary_asset_name() {
+        if a.name != update_asset_name() {
             return None;
         }
         let asset = ReleaseAsset {
@@ -238,6 +253,19 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn update_asset_is_the_package_on_linux_and_windows() {
+        let name = binary_asset_name();
+        let asset = update_asset_name();
+        if cfg!(target_os = "linux") {
+            assert_eq!(asset, format!("{name}-bundle.tar.gz"));
+        } else if cfg!(windows) {
+            assert_eq!(asset, format!("{name}.zip"));
+        } else {
+            assert_eq!(asset, name);
+        }
+    }
+
+    #[test]
     fn release_checks_handle_ordering_notes_absence_and_errors() {
         let release = |tag: &str| {
             serde_json::to_vec(&json!({"tag_name":tag,"html_url":format!("{RELEASES_URL}/tag/{tag}"),"body":"Changes 😀\nSecond line","draft":false,"prerelease":false})).unwrap()
@@ -249,7 +277,7 @@ mod tests {
         assert_eq!(info.version, "0.10.0");
         assert_eq!(info.notes, "Changes 😀\nSecond line");
         assert!(info.asset.is_none());
-        let asset = json!({"name": binary_asset_name(), "browser_download_url": format!("{RELEASES_URL}/download/v0.2.0/{}", binary_asset_name()), "size": 120, "digest": format!("sha256:{}", "a".repeat(64))});
+        let asset = json!({"name": update_asset_name(), "browser_download_url": format!("{RELEASES_URL}/download/v0.2.0/{}", update_asset_name()), "size": 120, "digest": format!("sha256:{}", "a".repeat(64))});
         let mut downloadable = json!({"tag_name":"v0.2.0", "html_url":format!("{RELEASES_URL}/tag/v0.2.0"), "body":"Release notes", "draft":false,"prerelease":false,"assets":[asset]});
         let UpdateState::Available(info) =
             interpret_release(200, downloadable.to_string().as_bytes(), "0.1.0")

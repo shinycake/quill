@@ -126,8 +126,11 @@ resvg = { version = "0.48", default-features = false, features = ["svgz"], optio
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 sha2 = "0.11"
 # Emoji set packs (docs/decisions/emoji-set-style.md): stored (uncompressed)
-# zip entries only, so no compression features.
-zip = { version = "9", default-features = false }
+# zip entries only. The Windows in-app updater (src/update_install/bundle.rs)
+# also reads the deflated release zip, hence the pure-Rust inflate backend.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# Linux in-app updater: reads the release tarball (flate2 above does the gunzip).
+tar = { version = "0.4", default-features = false }
 # Local passcode (docs/decisions/codex-local-passcode.md): PBKDF2-HMAC-SHA512 key
 # derivation and an XChaCha20-Poly1305 key wrap; no hand-rolled crypto.
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
