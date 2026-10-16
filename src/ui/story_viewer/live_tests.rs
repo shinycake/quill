@@ -142,8 +142,28 @@ fn open_live(cx: &mut TestAppContext, kind: &'static str) -> (Entity<QuillApp>, 
     let app: Entity<QuillApp> = slot.borrow().clone().expect("the app");
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     frames(&mut vcx);
+    hold_the_feed_clock(&app, &mut vcx);
     frames(&mut vcx);
     (app, vcx)
+}
+
+/// The demo's one frame was stamped with the real time it was made at, and
+/// the player judges a stall by the real time since (`STALL_AFTER`, 1.5 s).
+/// A loaded machine can let that pass between the setup and an assertion,
+/// which turns the picture into the stalled overlay with its spinner. The
+/// test executor's timers are simulated, so only this clock is real: read
+/// it as the frame's own arrival time, and the picture plays until a test
+/// moves the clock.
+fn hold_the_feed_clock(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    let arrived = app.read_with(vcx, |app, _| {
+        let player = app.stories.live.player.as_ref()?;
+        let (_, at) = player.live_sink()?.snapshot().latest?;
+        Some((player.clone(), at))
+    });
+    if let Some((player, at)) = arrived {
+        player.set_live_clock(at);
+        app.update(vcx, |_, cx| cx.notify());
+    }
 }
 
 fn find(vcx: &mut VisualTestContext, selector: &'static str) -> Option<Bounds<Pixels>> {
