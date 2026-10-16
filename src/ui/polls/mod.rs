@@ -631,17 +631,13 @@ impl QuillApp {
             return;
         }
         // Slice G1: the poll carries the composer's quote, if any.
-        let reply_to = self
-            .composer_ui
-            .pending_reply
-            .as_ref()
-            .and_then(|reply| reply.send_target(chat_id));
+        let reply_to = self.send_reply_for(chat_id, cx);
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
             match result {
                 Ok(_) => {
                     self.composer_ui.poll_dialog = None;
-                    self.composer_ui.pending_reply = None;
+                    self.composer_ui.set_reply(None);
                     self.connection.status_note = tr(keys::Q_MEDIA_SENDING_POLL).into();
                 }
                 Err(_) => {

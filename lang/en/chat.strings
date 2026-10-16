@@ -20,6 +20,7 @@
 "lng_context_unpin_from_top" = "Unpin";
 "lng_delete_all_from_user" = "Delete all from {user}";
 "lng_dlg_search_from" = "From: {user}";
+"lng_edit_error" = "You can't edit this message.";
 "lng_error_nocopy_channel" = "Sorry, copying from this channel is disabled by admins.";
 "lng_error_nocopy_group" = "Sorry, copying from this group is disabled by admins.";
 "lng_error_nocopy_user" = "Sorry, copying from this chat is restricted.";

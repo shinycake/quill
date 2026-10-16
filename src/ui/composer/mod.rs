@@ -165,6 +165,7 @@ impl QuillApp {
                             matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
                         });
                     let grouped = self.composer_group_media_effective();
+                    let reply = self.reply_for_send(cx);
                     let mut snaps = Vec::new();
                     // A repeating message is sent alone (tdesktop limits the
                     // batch to one item with a repeat period).
@@ -199,21 +200,17 @@ impl QuillApp {
                                 )
                             };
                             snaps.push(
-                                snap.with_reply(if i == 0 {
-                                    self.composer_ui.pending_reply.clone()
-                                } else {
-                                    None
-                                })
-                                .with_self_destruct(self_destruct)
-                                // M1: silent / scheduled / when-online /
-                                // link-preview options ride the snapshot to
-                                // `sendMessage.options`.
-                                .with_send_options(self.composer_post_options())
-                                // MED4: caption-above-media toggle.
-                                .with_caption_above_media(
-                                    self.pending_send().caption_above
-                                        && !self.open_chat_is_secret(),
-                                ),
+                                snap.with_reply(if i == 0 { reply.clone() } else { None })
+                                    .with_self_destruct(self_destruct)
+                                    // M1: silent / scheduled / when-online /
+                                    // link-preview options ride the snapshot to
+                                    // `sendMessage.options`.
+                                    .with_send_options(self.composer_post_options())
+                                    // MED4: caption-above-media toggle.
+                                    .with_caption_above_media(
+                                        self.pending_send().caption_above
+                                            && !self.open_chat_is_secret(),
+                                    ),
                             );
                         }
                     } else if attachments.len() >= 2 {
@@ -227,11 +224,7 @@ impl QuillApp {
                                     if i == 0 { text.clone() } else { String::new() },
                                     Some(att),
                                 )
-                                .with_reply(if i == 0 {
-                                    self.composer_ui.pending_reply.clone()
-                                } else {
-                                    None
-                                })
+                                .with_reply(if i == 0 { reply.clone() } else { None })
                                 .with_self_destruct(self_destruct)
                                 .with_send_options(self.composer_post_options())
                                 // MED4: caption-above-media toggle.
@@ -249,7 +242,7 @@ impl QuillApp {
                                 text,
                                 attachments.first().cloned(),
                             )
-                            .with_reply(self.composer_ui.pending_reply.clone())
+                            .with_reply(reply)
                             .with_self_destruct(self_destruct)
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
@@ -333,7 +326,7 @@ impl QuillApp {
                             // the next composer follows the pref again.
                             self.composer_ui.group_media = None;
                             self.composer_ui.schedule_popup_open = false;
-                            self.composer_ui.pending_reply = None;
+                            self.composer_ui.set_reply(None);
                             self.clear_suggest_bar_after_send(chat_id);
                             self.composer_ui.clear_draft_on_success = Some(chat_id);
                             self.composer
@@ -400,7 +393,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    let reply = self.composer_ui.pending_reply.clone();
+                    let reply = self.reply_for_send(cx);
                     // MED1: the grouping toggle applies to the demo too.
                     let albumable = attachments.len() >= 2
                         && attachments.iter().all(|att| {
@@ -421,7 +414,7 @@ impl QuillApp {
                     }
                     self.finish_pending_send();
                     self.composer_ui.group_media = None;
-                    self.composer_ui.pending_reply = None;
+                    self.composer_ui.set_reply(None);
                     if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                         self.forget_local_draft(chat_id);
                     }
@@ -540,9 +533,7 @@ impl QuillApp {
             return;
         }
         let reply_to = self
-            .composer_ui
-            .pending_reply
-            .as_ref()
+            .reply_for_send(cx)
             .and_then(|reply| reply.send_reply(chat_id));
         let options = self.composer_post_options();
         let Some(live) = self.live.as_mut() else {
@@ -555,7 +546,7 @@ impl QuillApp {
             Ok(_) => {
                 self.finish_pending_send();
                 self.composer_ui.schedule_popup_open = false;
-                self.composer_ui.pending_reply = None;
+                self.composer_ui.set_reply(None);
                 self.composer_ui.rich_editor_open = false;
                 self.clear_suggest_bar_after_send(chat_id);
                 self.composer_ui.clear_draft_on_success = Some(chat_id);

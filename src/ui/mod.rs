@@ -373,6 +373,7 @@ mod quick_action_ui;
 mod quick_replies;
 mod reactions;
 mod recording;
+mod reply_guard_tests;
 mod reply_options_ui;
 mod reply_pattern;
 mod request_share;

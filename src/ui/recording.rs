@@ -410,9 +410,8 @@ impl QuillApp {
                 return;
             }
         };
-        self.cancel_gone_reply(cx);
-        let reply = self.composer_ui.pending_reply.clone();
-        let reply_to = self.recording_send_reply();
+        let reply = self.reply_for_send(cx);
+        let reply_to = self.recording_send_reply(reply.as_ref());
         if let Some(live) = self.live.as_mut() {
             let result = live
                 .driver
@@ -422,7 +421,7 @@ impl QuillApp {
                 Err(_) => tr(keys::Q_MISC_COULD_NOT_SEND_VOICE_NOTE).into(),
             };
             if self.connection.status_note == tr(keys::Q_MISC_SENDING_VOICE_NOTE) {
-                self.composer_ui.pending_reply = None;
+                self.composer_ui.set_reply(None);
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live
                         .as_ref()
@@ -437,7 +436,7 @@ impl QuillApp {
             }
         } else if self.demo_session.is_some() {
             self.apply_demo_voice(&draft, caption.trim(), reply.as_ref());
-            self.composer_ui.pending_reply = None;
+            self.composer_ui.set_reply(None);
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
             if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
@@ -451,8 +450,11 @@ impl QuillApp {
 
     /// Reply target for a recording send: the pending reply when it belongs
     /// to the open chat.
-    pub(super) fn recording_send_reply(&self) -> Option<quill::telegram::SendReply> {
-        let reply = self.composer_ui.pending_reply.as_ref()?;
+    pub(super) fn recording_send_reply(
+        &self,
+        reply: Option<&quill::composer::ComposerReplyTo>,
+    ) -> Option<quill::telegram::SendReply> {
+        let reply = reply?;
         let open = self.live.as_ref()?.driver.session.open_chat?;
         reply.send_target(open)
     }
@@ -519,9 +521,8 @@ impl QuillApp {
                 return;
             }
         };
-        self.cancel_gone_reply(cx);
-        let reply = self.composer_ui.pending_reply.clone();
-        let reply_to = self.recording_send_reply();
+        let reply = self.reply_for_send(cx);
+        let reply_to = self.recording_send_reply(reply.as_ref());
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_recorded_video_note(&draft, reply_to);
             self.connection.status_note = match result {
@@ -529,7 +530,7 @@ impl QuillApp {
                 Err(_) => tr(keys::Q_MISC_COULD_NOT_SEND_VIDEO_NOTE).into(),
             };
             if self.connection.status_note == tr(keys::Q_MISC_SENDING_VIDEO_NOTE) {
-                self.composer_ui.pending_reply = None;
+                self.composer_ui.set_reply(None);
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live
                         .as_ref()
@@ -545,7 +546,7 @@ impl QuillApp {
         } else if self.demo_session.is_some() {
             if let Some(att) = ComposerAttachment::pick(&draft.path, AttachmentKind::VideoNote) {
                 self.apply_demo_outgoing("", Some(&att), reply.as_ref());
-                self.composer_ui.pending_reply = None;
+                self.composer_ui.set_reply(None);
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {

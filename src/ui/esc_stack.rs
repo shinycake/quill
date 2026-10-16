@@ -305,7 +305,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
         "reply-panels",
         |app| (app.share.reply_elsewhere_open || app.share.reply_quote_open)
-            && app.composer_ui.pending_reply.is_some(),
+            && app.composer_ui.has_reply(),
         |app, window, cx| app.close_reply_panels(window, cx)
     ),
     layer!(
@@ -361,7 +361,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "pending-reply",
-        |app| app.composer_ui.pending_reply.is_some(),
+        |app| app.composer_ui.has_reply(),
         |app, _, cx| app.clear_reply(cx)
     ),
     layer!(

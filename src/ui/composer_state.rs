@@ -71,7 +71,9 @@ pub(crate) struct ComposerUi {
     /// 3+ lines, per the anniversary post).
     pub(super) rich_editor_open: bool,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
-    pub(super) pending_reply: Option<ComposerReplyTo>,
+    /// Private on purpose: a sender must take the reply through
+    /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.
+    pending_reply: Option<ComposerReplyTo>,
     /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
     /// if the composer is still empty.
     pub(super) clear_draft_on_success: Option<ChatId>,
@@ -123,6 +125,24 @@ pub(crate) struct ComposerUi {
 }
 
 impl ComposerUi {
+    /// The reply the bar shows. Display and bookkeeping only: anything that
+    /// sends reads `QuillApp::reply_for_send`, which drops a deleted target.
+    pub(super) fn reply(&self) -> Option<&ComposerReplyTo> {
+        self.pending_reply.as_ref()
+    }
+
+    pub(super) fn has_reply(&self) -> bool {
+        self.pending_reply.is_some()
+    }
+
+    pub(super) fn set_reply(&mut self, reply: Option<ComposerReplyTo>) {
+        self.pending_reply = reply;
+    }
+
+    pub(super) fn take_reply(&mut self) -> Option<ComposerReplyTo> {
+        self.pending_reply.take()
+    }
+
     pub(super) fn new() -> Self {
         Self {
             command_menu_open: false,

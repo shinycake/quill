@@ -158,7 +158,7 @@ impl QuillApp {
     /// The toggle pressed: the bar goes up with empty terms, in the
     /// reply's place (tdesktop clears the reply; the box doesn't open).
     pub(super) fn toggle_suggest_post(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.composer_ui.pending_reply = None;
+        self.composer_ui.set_reply(None);
         self.set_suggest_bar(chat_id, Some(SuggestBar::new(SuggestTerms::default())), cx);
     }
 
@@ -284,7 +284,7 @@ impl QuillApp {
         }) else {
             return;
         };
-        self.composer_ui.pending_reply = None;
+        self.composer_ui.set_reply(None);
         self.composer
             .update(cx, |input, cx| input.set_value(text, window, cx));
         self.set_suggest_bar(

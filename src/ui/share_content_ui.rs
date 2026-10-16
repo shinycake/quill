@@ -16,7 +16,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::telegram::SendReply;
 use quill::telegram::requests::{ContactShare, parse_coordinates};
 
 /// Most contacts listed in the chooser at once; the search narrows them.
@@ -67,15 +66,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The composer's reply (with its quote), carried by the share like by
-    /// any other send.
-    fn share_reply(&self, chat_id: ChatId) -> Option<SendReply> {
-        self.composer_ui
-            .pending_reply
-            .as_ref()
-            .and_then(|reply| reply.send_target(chat_id))
-    }
-
     /// Send the picked address-book entry as a contact card.
     pub(super) fn submit_share_contact(&mut self, user_id: i64, cx: &mut Context<Self>) {
         let Some(chat_id) = self.share_target() else {
@@ -96,7 +86,7 @@ impl QuillApp {
         else {
             return;
         };
-        let reply_to = self.share_reply(chat_id);
+        let reply_to = self.send_reply_for(chat_id, cx);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
@@ -110,7 +100,7 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.share.content_dialog = None;
-                self.composer_ui.pending_reply = None;
+                self.composer_ui.set_reply(None);
                 self.connection.status_note = tr(keys::Q_OPS_SENDING_CONTACT).into();
             }
             Err(_) => {
@@ -128,7 +118,7 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
-        let reply_to = self.share_reply(chat_id);
+        let reply_to = self.send_reply_for(chat_id, cx);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.connection.status_note = tr(keys::Q_OPS_SENDING_DICE_NEEDS_A_LIVE).into();
@@ -140,7 +130,7 @@ impl QuillApp {
             .share_dice_to_chat(chat_id, emoji, reply_to, &options)
         {
             Ok(_) => {
-                self.composer_ui.pending_reply = None;
+                self.composer_ui.set_reply(None);
                 self.connection.status_note = tr(keys::Q_OPS_ROLLING).into();
             }
             Err(_) => self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_SEND_THE_DICE).into(),
@@ -176,7 +166,7 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
-        let reply_to = self.share_reply(chat_id);
+        let reply_to = self.send_reply_for(chat_id, cx);
         let options = self.composer_send_options();
         let Some(live) = self.live.as_mut() else {
             self.share.content_dialog = None;
@@ -190,7 +180,7 @@ impl QuillApp {
         {
             Ok(_) => {
                 self.share.content_dialog = None;
-                self.composer_ui.pending_reply = None;
+                self.composer_ui.set_reply(None);
                 self.connection.status_note = tr(keys::Q_OPS_SENDING_LOCATION).into();
             }
             Err(_) => {

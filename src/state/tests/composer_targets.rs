@@ -134,3 +134,46 @@ fn a_selection_survives_the_window_trim_and_a_window_reset() {
     apply_json(&mut session, &seq, &sink, DELETED);
     assert_eq!(alive(&session, &draft), 1);
 }
+
+#[test]
+fn a_delete_is_a_tombstone_in_the_open_thread_and_every_topic_of_the_chat() {
+    let (mut session, sink, seq) = seeded();
+    let mut thread = ThreadView::resolving(ChatId(7), MessageId(1));
+    thread.status = ThreadStatus::Ready;
+    session.threads.thread = Some(thread);
+    session
+        .threads
+        .topic_histories
+        .insert((7, 2), Default::default());
+    apply_json(&mut session, &seq, &sink, DELETED);
+    let in_thread = session
+        .threads
+        .thread
+        .as_ref()
+        .is_some_and(|thread| thread.history.is_tombstone(MessageId(50)));
+    assert!(in_thread, "the thread remembers the delete");
+    assert!(session.threads.topic_histories[&(7, 2)].is_tombstone(MessageId(50)));
+}
+
+#[test]
+fn a_message_deleted_only_in_the_thread_or_topic_it_was_found_in_is_gone() {
+    // `reply_target` looks in the chat, the open thread and the open topic:
+    // "deleted" answers for the same places.
+    let (mut session, _sink, _seq) = seeded();
+    assert!(!session.message_deleted(ChatId(7), MessageId(60)));
+    let mut thread = ThreadView::resolving(ChatId(7), MessageId(1));
+    thread.status = ThreadStatus::Ready;
+    thread.history.remove(MessageId(60), true);
+    session.threads.thread = Some(thread);
+    assert!(session.message_deleted(ChatId(7), MessageId(60)));
+    // Another chat's thread says nothing about this chat.
+    assert!(!session.message_deleted(ChatId(8), MessageId(60)));
+
+    session.threads.thread = None;
+    assert!(!session.message_deleted(ChatId(7), MessageId(60)));
+    let mut topic = TopicHistory::default();
+    topic.remove(MessageId(60), true);
+    session.threads.topic_histories.insert((7, 3), topic);
+    assert!(session.message_deleted(ChatId(7), MessageId(60)));
+    assert!(!session.message_deleted(ChatId(9), MessageId(60)));
+}

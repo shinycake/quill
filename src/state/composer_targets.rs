@@ -30,12 +30,26 @@ impl Session {
     }
 
     /// The message was deleted (or became inaccessible): its id is a
-    /// tombstone in the chat history. A message that is merely not loaded
-    /// is not gone.
+    /// tombstone in the chat history, or in the open thread or a topic
+    /// history of the chat (the places `reply_target` looks in). A message
+    /// that is merely not loaded is not gone.
     pub fn message_deleted(&self, chat_id: ChatId, message_id: MessageId) -> bool {
         self.histories
             .get(&chat_id.0)
             .is_some_and(|history| history.is_tombstone(message_id))
+            || self
+                .threads
+                .thread
+                .as_ref()
+                .filter(|thread| thread.chat_id == chat_id)
+                .is_some_and(|thread| thread.history.is_tombstone(message_id))
+            || self
+                .threads
+                .topic_histories
+                .iter()
+                .any(|((topic_chat, _), history)| {
+                    *topic_chat == chat_id.0 && history.is_tombstone(message_id)
+                })
     }
 
     /// The text or caption an edit shows now, from the live message (the

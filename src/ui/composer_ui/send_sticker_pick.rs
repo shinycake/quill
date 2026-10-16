@@ -29,7 +29,6 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
-        self.cancel_gone_reply(cx);
         // Phase A1: slow-mode gate applies to sticker sends too.
         if self.slow_mode_blocked(chat_id, cx) {
             return;
@@ -37,11 +36,7 @@ impl QuillApp {
         if self.deny_send(quill::send_rights::SendKind::Stickers, cx) {
             return;
         }
-        let reply = self
-            .composer_ui
-            .pending_reply
-            .as_ref()
-            .and_then(|reply| reply.send_target(chat_id));
+        let reply = self.send_reply_for(chat_id, cx);
         let sent = if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.send_sticker(
                 chat_id,

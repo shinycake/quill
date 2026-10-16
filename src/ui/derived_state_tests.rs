@@ -51,7 +51,7 @@ fn frames(vcx: &mut VisualTestContext) {
 
 fn reply_text(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
     app.read_with(vcx, |app, _| {
-        let reply = app.composer_ui.pending_reply.as_ref()?;
+        let reply = app.composer_ui.reply()?;
         let session = app.session()?;
         session
             .reply_target(reply.chat_id, reply.message_id)
@@ -80,7 +80,7 @@ fn the_reply_bar_follows_an_edit_of_the_message(cx: &mut TestAppContext) {
     frames(vcx);
     assert_eq!(reply_text(&app, vcx).as_deref(), Some("Moved to 6 pm."));
     assert!(
-        app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_some()),
+        app.read_with(vcx, |app, _| app.composer_ui.has_reply()),
         "an edit keeps the reply"
     );
 }
@@ -89,11 +89,11 @@ fn the_reply_bar_follows_an_edit_of_the_message(cx: &mut TestAppContext) {
 fn deleting_the_replied_message_cancels_the_reply(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-reply");
     let vcx = &mut vcx;
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.has_reply()));
     app.update(vcx, |app, _| app.demo_delete_message(CHAT, REPLIED));
     frames(vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_none()),
+        app.read_with(vcx, |app, _| app.composer_ui.reply().is_none()),
         "the bar goes with the message"
     );
 }
@@ -276,10 +276,10 @@ fn history_len(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
 fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-reply");
     let vcx = &mut vcx;
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.has_reply()));
     // Deleted, and no frame ran: the bar still holds the reply.
     app.update(vcx, |app, _| app.demo_delete_message(CHAT, REPLIED));
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.has_reply()));
     let ids = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| {
             app.session()
@@ -295,7 +295,7 @@ fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut Test
         })
     });
     assert!(
-        app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_none()),
+        app.read_with(vcx, |app, _| app.composer_ui.reply().is_none()),
         "the reply is dropped at send time"
     );
     let replies_to_deleted = app.read_with(vcx, |app, _| {
@@ -352,5 +352,10 @@ fn an_edit_of_a_message_that_is_not_loaded_does_not_begin(cx: &mut TestAppContex
     assert!(
         app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()),
         "no edit starts on an empty field"
+    );
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.connection.status_note.to_string()),
+        quill::lang::tr(quill::lang::keys::EDIT_ERROR),
+        "the refusal says so (tdesktop lng_edit_error)"
     );
 }

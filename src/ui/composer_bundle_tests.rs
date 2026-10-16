@@ -393,10 +393,11 @@ fn up_keeps_scrolling_while_a_reply_is_pending(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         pending_photo(app, "on its way");
-        app.composer_ui.pending_reply = Some(quill::composer::ComposerReplyTo::new(
-            OPEN,
-            quill::ids::MessageId(1),
-        ));
+        app.composer_ui
+            .set_reply(Some(quill::composer::ComposerReplyTo::new(
+                OPEN,
+                quill::ids::MessageId(1),
+            )));
         app.composer.update(cx, |input, cx| input.focus(window, cx));
     });
     vcx.simulate_keystrokes("up");

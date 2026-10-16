@@ -243,7 +243,7 @@ impl QuillApp {
                         .when_some(self.composer_ui.pending_edit.clone(), |this, edit| {
                             this.child(self.composer_edit_banner(&edit, cx))
                         })
-                        .when_some(self.composer_ui.pending_reply.clone(), |this, reply| {
+                        .when_some(self.composer_ui.reply().cloned(), |this, reply| {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
                         .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
