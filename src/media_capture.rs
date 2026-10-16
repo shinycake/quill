@@ -55,7 +55,7 @@ fn platform_input(
     } else if cfg!(windows) {
         let devices = list_dshow_devices()?;
         let (camera, mic) = choose_dshow(choice, &devices, with_audio)?;
-        Ok(dshow_input(&camera, mic.as_deref()))
+        dshow_input(&camera, mic.as_deref())
     } else {
         Err("Recording isn't supported on this system yet.".into())
     }
@@ -103,18 +103,32 @@ fn v4l2_input(camera: &Path, audio: Option<(&str, &str)>) -> CaptureInput {
 /// DirectShow camera and microphone as two inputs, not one `video=:audio=`
 /// pair: a camera without a microphone, or a virtual camera, then opens on
 /// its own and the chosen microphone is independent of the camera.
-fn dshow_input(camera: &str, mic: Option<&str>) -> CaptureInput {
+///
+/// ffmpeg's dshow demuxer splits its url at every `:` and has no escape, so a
+/// device name containing one (`video=Cam: HD`) is cut short and not found;
+/// such a name is refused with a message instead of opening the wrong device.
+fn dshow_input(camera: &str, mic: Option<&str>) -> Result<CaptureInput, String> {
+    if let Some(name) = [Some(camera), mic]
+        .into_iter()
+        .flatten()
+        .find(|n| n.contains(':'))
+    {
+        return Err(format!(
+            "Windows names a device \"{name}\", and ffmpeg can't open a name with a colon. \
+             Rename it in Device Manager or pick another one."
+        ));
+    }
     let mut args: Vec<String> = ["-f", "dshow", "-i"].map(String::from).to_vec();
     args.push(format!("video={camera}"));
     if let Some(mic) = mic {
         args.extend(["-f", "dshow", "-i"].map(String::from));
         args.push(format!("audio={mic}"));
     }
-    CaptureInput {
+    Ok(CaptureInput {
         args,
         audio: "1:a",
         video: "0:v",
-    }
+    })
 }
 
 /// The DirectShow camera for the pick (else the first), and with
@@ -258,12 +272,9 @@ pub fn avfoundation_specifiers(
 /// also serves) when this ffmpeg has it, otherwise ALSA.
 fn linux_audio_backend() -> &'static str {
     static BACKEND: LazyLock<&'static str> = LazyLock::new(|| {
-        let listing = command("ffmpeg")
-            .args(["-hide_banner", "-devices"])
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-            .unwrap_or_default();
+        let mut list = command("ffmpeg");
+        list.args(["-hide_banner", "-devices"]);
+        let listing = stdout_within(&mut list, DEVICE_LIST_LIMIT).unwrap_or_default();
         pick_audio_backend(&listing)
     });
     *BACKEND
@@ -510,17 +521,25 @@ dummy: Immediate exit requested\n";
 
     #[test]
     fn dshow_opens_camera_and_microphone_as_separate_inputs() {
-        let both = dshow_input("OBS Virtual Camera", Some("Microphone (Realtek)"));
+        let both = dshow_input("OBS Virtual Camera", Some("Microphone (Realtek)")).unwrap();
         assert_eq!(
             joined(&both.args),
             "-f dshow -i video=OBS Virtual Camera -f dshow -i audio=Microphone (Realtek)"
         );
         assert_eq!((both.video, both.audio), ("0:v", "1:a"));
-        let camera_only = dshow_input("Integrated Camera", None);
+        let camera_only = dshow_input("Integrated Camera", None).unwrap();
         assert_eq!(
             joined(&camera_only.args),
             "-f dshow -i video=Integrated Camera"
         );
+    }
+
+    #[test]
+    fn a_dshow_name_with_a_colon_is_refused() {
+        // dshow.c splits the url at ':', so `video=Cam: HD` would open "Cam".
+        assert!(dshow_input("Cam: HD", None).is_err());
+        assert!(dshow_input("Cam", Some("Mic: 2")).is_err());
+        assert!(dshow_input("Cam (HD)", Some("Mic = 2")).is_ok());
     }
 
     fn dshow_devices() -> DshowDevices {

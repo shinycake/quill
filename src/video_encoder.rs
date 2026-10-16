@@ -23,6 +23,7 @@ const H264_ENCODERS: [&str; 3] = ["libx264", "h264_videotoolbox", "h264_mf"];
 /// from the UI thread for round videos.
 const LISTING_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Cached successful listings; a failed or timed-out one is retried next time.
 static LISTINGS: LazyLock<Mutex<HashMap<PathBuf, String>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -35,7 +36,7 @@ pub struct EncodeJob {
 /// The ffmpeg and arguments that encode `args` (which name `libx264`) as
 /// H.264, `pixels` being the output's width times height (it sizes the
 /// bitrate where the encoder has no constant-quality mode). `what` starts
-/// the error sentence.
+/// the error message ("{what}: Quill needs an ffmpeg ...").
 pub fn h264_job(what: &str, args: &[String], pixels: u32) -> Result<EncodeJob, String> {
     let tools = candidates("ffmpeg");
     if tools.is_empty() {
@@ -44,7 +45,7 @@ pub fn h264_job(what: &str, args: &[String], pixels: u32) -> Result<EncodeJob, S
     tools
         .into_iter()
         .find_map(|program| {
-            let encoder = pick_h264_encoder(&encoders_of(&program))?;
+            let encoder = pick_h264_encoder(&encoders_of(&program)?)?;
             Some(EncodeJob {
                 args: rewrite_h264_args(args, encoder, pixels),
                 program,
@@ -52,9 +53,9 @@ pub fn h264_job(what: &str, args: &[String], pixels: u32) -> Result<EncodeJob, S
         })
         .ok_or_else(|| {
             format!(
-                "{what} need an ffmpeg that can write H.264, and the one found can't \
-                 (install ffmpeg with libx264, for example `brew install ffmpeg` or `sudo apt \
-                 install ffmpeg`)."
+                "{what}: Quill needs an ffmpeg with an H.264 encoder, and the one found can't \
+                 write H.264 (install ffmpeg with libx264, for example `brew install ffmpeg` or \
+                 `sudo apt install ffmpeg`)."
             )
         })
 }
@@ -63,7 +64,15 @@ pub fn h264_job(what: &str, args: &[String], pixels: u32) -> Result<EncodeJob, S
 pub fn program_with_encoder(encoder: &str) -> Option<PathBuf> {
     candidates("ffmpeg")
         .into_iter()
-        .find(|program| lists_encoder(&encoders_of(program), encoder))
+        .find(|program| encoders_of(program).is_some_and(|l| lists_encoder(&l, encoder)))
+}
+
+/// List the encoders of every ffmpeg now, so the first encode doesn't wait.
+/// Run it off the UI thread (see `media_tools::warm_up`).
+pub fn warm_listings() {
+    for program in candidates("ffmpeg") {
+        let _ = encoders_of(&program);
+    }
 }
 
 /// A `Command` for `program` without a console window on Windows.
@@ -73,19 +82,20 @@ pub fn quiet_command_for(program: &Path) -> Command {
     command
 }
 
-fn encoders_of(program: &Path) -> String {
+/// `program -encoders`, cached; `None` when it didn't answer in time.
+fn encoders_of(program: &Path) -> Option<String> {
     if let Ok(cache) = LISTINGS.lock()
         && let Some(listing) = cache.get(program)
     {
-        return listing.clone();
+        return Some(listing.clone());
     }
     let mut list = quiet_command_for(program);
     list.args(["-hide_banner", "-encoders"]);
-    let listing = crate::media_capture::stdout_within(&mut list, LISTING_LIMIT).unwrap_or_default();
+    let listing = crate::media_capture::stdout_within(&mut list, LISTING_LIMIT)?;
     if let Ok(mut cache) = LISTINGS.lock() {
         cache.insert(program.to_path_buf(), listing.clone());
     }
-    listing
+    Some(listing)
 }
 
 /// True when an `-encoders` line `V....D name  description` names `encoder`.
@@ -121,28 +131,29 @@ fn h264_codec_args_for(args: &[String], encoder: &str, pixels: u32) -> Vec<Strin
     codec
 }
 
-/// `args` with `-c:v libx264 [-preset X] [-crf N]` turned into the options
+/// `args` with `-c:v libx264` and its `-preset X` / `-crf N` (wherever they
+/// sit in the options) turned into the options
 /// `encoder` understands (a command line's own `-b:v` is kept); unchanged
 /// for libx264 itself.
 fn rewrite_h264_args(args: &[String], encoder: &str, pixels: u32) -> Vec<String> {
     if encoder == "libx264" {
         return args.to_vec();
     }
+    let names_x264 = args
+        .windows(2)
+        .any(|pair| matches!(pair, [flag, codec] if flag == "-c:v" && codec == "libx264"));
     let mut out = Vec::with_capacity(args.len());
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
-        if arg == "-c:v" && iter.peek().is_some_and(|next| next.as_str() == "libx264") {
-            iter.next();
-            out.extend(h264_codec_args_for(args, encoder, pixels));
-            while iter
-                .peek()
-                .is_some_and(|next| matches!(next.as_str(), "-preset" | "-crf"))
-            {
+        match arg.as_str() {
+            "-c:v" if iter.peek().is_some_and(|next| next.as_str() == "libx264") => {
                 iter.next();
+                out.extend(h264_codec_args_for(args, encoder, pixels));
+            }
+            "-preset" | "-crf" if names_x264 => {
                 iter.next();
             }
-        } else {
-            out.push(arg.clone());
+            _ => out.push(arg.clone()),
         }
     }
     out
@@ -236,6 +247,37 @@ V....D h264_nvenc           NVIDIA NVENC H.264 encoder (codec h264)\n";
                 "500000"
             ])
         );
+    }
+
+    #[test]
+    fn x264_options_are_dropped_wherever_they_sit() {
+        let args = strings(&[
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-shortest",
+            "out.mp4",
+        ]);
+        assert_eq!(
+            rewrite_h264_args(&args, "h264_mf", 1280 * 720),
+            strings(&[
+                "-c:v",
+                "h264_mf",
+                "-b:v",
+                "2764800",
+                "-pix_fmt",
+                "yuv420p",
+                "-shortest",
+                "out.mp4"
+            ])
+        );
+        let vp9 = strings(&["-c:v", "libvpx-vp9", "-crf", "30", "out.webm"]);
+        assert_eq!(rewrite_h264_args(&vp9, "h264_mf", 1), vp9);
     }
 
     #[test]

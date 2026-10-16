@@ -84,6 +84,12 @@ Shipping a software H.264 encoder there needs OpenH264 built from source (BSD, n
 from Cisco's binaries) or a hardware path; that is a licensing decision for the owner, not made
 here.
 
+Probing runs off the UI thread: `media_tools::warm_up` (called at startup) resolves ffmpeg and
+ffprobe (the bundled `-version` check) and lists each ffmpeg's encoders on a background thread.
+Until it has finished, `command`/`is_installed` take a bundled copy as working without probing
+(a file check only). A timed-out encoder listing is not cached, so the next encode retries. The
+`-preset`/`-crf` options are dropped wherever they sit in a command that names `libx264`.
+
 ### Capture devices (`src/media_capture.rs`, split out of `media_tools.rs`)
 
 Pure functions build the input arguments per platform (`avfoundation_input`, `v4l2_input`,
@@ -91,6 +97,8 @@ Pure functions build the input arguments per platform (`avfoundation_input`, `v4
 
 - Windows: camera and microphone are two `-f dshow` inputs (`video=NAME`, `audio=NAME`), each the
   call-settings pick or the first device. A camera without a microphone opens on its own.
+  ffmpeg's dshow code splits the url at every `:` with no escape, so a device name containing a
+  colon is refused with a message rather than opening a truncated name.
 - Linux: the camera is the picked `/dev/video*` node (matched by path, file name or the V4L2 card
   name the call engine lists, as before). The microphone is the PulseAudio source (also served by
   PipeWire) whose description or name matches the picked microphone, found with

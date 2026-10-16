@@ -36,39 +36,69 @@ pub fn command(name: &str) -> Command {
     Command::new(resolve(name))
 }
 
+/// Resolve the tools and list the encoders on a background thread, so the
+/// probes (up to 5 s each) are done before the UI thread asks.
+pub fn warm_up() {
+    let _ = std::thread::Builder::new()
+        .name("quill-media-tools".into())
+        .spawn(|| {
+            for name in ["ffmpeg", "ffprobe"] {
+                let _ = candidates(name);
+            }
+            crate::video_encoder::warm_listings();
+        });
+}
+
+/// The preferred copy of `name`. Never probes: before [`warm_up`] has
+/// finished, a bundled copy is taken as working (a file check only), so the
+/// UI thread never waits on a child process here.
 fn resolve(name: &str) -> PathBuf {
-    candidates(name)
+    cached_or_unprobed(name)
         .into_iter()
         .next()
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+fn cached_or_unprobed(name: &str) -> Vec<PathBuf> {
+    if let Ok(cache) = RESOLVED.lock()
+        && let Some(found) = cache.get(name)
+    {
+        return found.clone();
+    }
+    search(name, |_| true)
+}
+
 /// Every copy of media tool `name` that can run, in the order `command`
-/// prefers them. Resolved once per process.
+/// prefers them. Resolved once per process; the first call probes a bundled
+/// copy (up to 5 s), so call it off the UI thread (see [`warm_up`]).
 pub fn candidates(name: &str) -> Vec<PathBuf> {
     if let Ok(cache) = RESOLVED.lock()
         && let Some(found) = cache.get(name)
     {
         return found.clone();
     }
+    let found = search(name, runs);
+    if let Ok(mut cache) = RESOLVED.lock() {
+        cache.insert(name.to_string(), found.clone());
+    }
+    found
+}
+
+fn search(name: &str, works: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
     let beside_exe = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf));
     let path_dirs = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
         .unwrap_or_default();
-    let found = find_all(
+    find_all(
         name,
         beside_exe.as_deref(),
         path_dirs
             .into_iter()
             .chain(FALLBACK_DIRS.iter().map(PathBuf::from)),
-        runs,
-    );
-    if let Ok(mut cache) = RESOLVED.lock() {
-        cache.insert(name.to_string(), found.clone());
-    }
-    found
+        works,
+    )
 }
 
 /// The executables called `name`: the copy in `bundled` first, but only when

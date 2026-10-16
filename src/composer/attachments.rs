@@ -400,11 +400,15 @@ mod tests {
                 args.extend(["-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac"]);
             }
             args.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest"]);
-            let made = crate::media_tools::command("ffmpeg")
-                .args(args)
-                .arg(&path)
-                .output()
-                .is_ok_and(|out| out.status.success());
+            let mut args: Vec<String> = args.into_iter().map(String::from).collect();
+            args.push(path.to_string_lossy().into_owned());
+            let made =
+                crate::video_encoder::h264_job("The test clip", &args, 64 * 64).is_ok_and(|job| {
+                    crate::video_encoder::quiet_command_for(&job.program)
+                        .args(&job.args)
+                        .output()
+                        .is_ok_and(|out| out.status.success())
+                });
             made.then_some(path)
         };
         // Skipped where ffmpeg isn't installed.

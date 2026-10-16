@@ -97,6 +97,7 @@ fn main() {
     if let Some(code) = quill::dev_cli::exit_code(&args) {
         std::process::exit(code);
     }
+    quill::media_tools::warm_up();
 
     #[cfg(feature = "ui")]
     {

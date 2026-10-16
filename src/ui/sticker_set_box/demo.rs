@@ -133,17 +133,26 @@ impl QuillApp {
             // ffmpeg; without it the editor shows its wait note).
             Ok("video") => {
                 let clip = std::env::temp_dir().join("quill-demo-sticker-clip.mp4");
-                let _ = quill::media_tools::command("ffmpeg")
-                    .args([
-                        "-y",
-                        "-f",
-                        "lavfi",
-                        "-i",
-                        "testsrc=duration=5:size=640x360:rate=30",
-                    ])
-                    .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
-                    .arg(&clip)
-                    .output();
+                let args: Vec<String> = [
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=duration=5:size=640x360:rate=30",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                ]
+                .map(String::from)
+                .into_iter()
+                .chain([clip.to_string_lossy().into_owned()])
+                .collect();
+                if let Ok(job) = quill::video_encoder::h264_job("The demo clip", &args, 640 * 360) {
+                    let _ = quill::video_encoder::quiet_command_for(&job.program)
+                        .args(&job.args)
+                        .output();
+                }
                 self.open_set_video_editor(
                     78,
                     SetKind::Stickers,
