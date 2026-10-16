@@ -8,6 +8,10 @@ pub struct MediaState {
     pub media_library: MediaLibrary,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: HashMap<i32, ParsedFile>,
+    /// File ids each loaded message brought into `files`, by (chat,
+    /// message): lets the entries go with their message when the history
+    /// window drops it (`release_message_files`). Cleared on logout.
+    pub(crate) message_files: HashMap<(i64, i64), Vec<i32>>,
     /// `downloadFile` in flight (until completed, undownloadable, idle, or error).
     pub downloading: HashSet<i32>,
     /// Subset of `downloading` the user explicitly started (history rows,
@@ -73,6 +77,7 @@ impl MediaState {
         Self {
             media_library: MediaLibrary::default(),
             files: HashMap::new(),
+            message_files: HashMap::new(),
             downloading: HashSet::new(),
             user_downloads: HashSet::new(),
             paused_downloads: HashSet::new(),

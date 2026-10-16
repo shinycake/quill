@@ -42,10 +42,21 @@ impl HistoryState {
     /// local send (its temporary id is not a server position; it must
     /// stay visible until `updateMessageSendSucceeded`); the trim happens
     /// on a later page instead.
+    #[cfg(test)]
     pub(crate) fn trim_window_end(&mut self, end: WindowEnd, cap: usize, keep: usize) -> usize {
+        self.trim_window_end_ids(end, cap, keep).len()
+    }
+
+    /// `trim_window_end`, returning the ids of the removed messages.
+    pub(crate) fn trim_window_end_ids(
+        &mut self,
+        end: WindowEnd,
+        cap: usize,
+        keep: usize,
+    ) -> Vec<i64> {
         let len = self.messages.len();
         if len <= cap || keep >= len {
-            return 0;
+            return Vec::new();
         }
         let excess = len - keep;
         let doomed: Vec<i64> = match end {
@@ -57,7 +68,7 @@ impl HistoryState {
                 .get(id)
                 .is_some_and(|message| message.pending || message.failed)
         }) {
-            return 0;
+            return Vec::new();
         }
         match end {
             WindowEnd::Newest => {
@@ -76,7 +87,7 @@ impl HistoryState {
             self.messages.remove(id);
             self.visible.remove(id);
         }
-        doomed.len()
+        doomed
     }
 }
 
@@ -84,9 +95,47 @@ impl Session {
     /// Apply the window cap to `chat_id`'s main history after a page
     /// landed at the opposite `end`'s far side (see the module docs).
     pub(crate) fn trim_history_window(&mut self, chat_id: ChatId, end: WindowEnd) -> usize {
-        self.histories.get_mut(&chat_id.0).map_or(0, |history| {
-            history.trim_window_end(end, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO)
-        })
+        let dropped = self
+            .histories
+            .get_mut(&chat_id.0)
+            .map(|history| {
+                history.trim_window_end_ids(end, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO)
+            })
+            .unwrap_or_default();
+        self.release_message_files(chat_id, &dropped);
+        dropped.len()
+    }
+
+    /// Forget the `media.files` entries that only the dropped messages
+    /// brought in. Kept: files another loaded message also brought, and
+    /// any with a download in flight, paused, failed or shown as an avatar.
+    pub(crate) fn release_message_files(&mut self, chat_id: ChatId, dropped: &[i64]) {
+        let mut candidates: Vec<i32> = Vec::new();
+        for id in dropped {
+            if let Some(files) = self.media.message_files.remove(&(chat_id.0, *id)) {
+                candidates.extend(files);
+            }
+        }
+        if candidates.is_empty() {
+            return;
+        }
+        let media = &self.media;
+        let kept: HashSet<i32> = media.message_files.values().flatten().copied().collect();
+        let still_used = |file: &i32| {
+            media.downloading.contains(file)
+                || media.user_downloads.contains(file)
+                || media.paused_downloads.contains(file)
+                || media.failed_downloads.contains(file)
+                || media.stalled_auto_downloads.contains(file)
+                || media.open_chat_media_downloads.contains(file)
+                || media.avatar_file_refs.contains_key(file)
+                || media.download_extras.values().any(|id| id == file)
+                || kept.contains(file)
+        };
+        candidates.retain(|file| !still_used(file));
+        for file in candidates {
+            self.media.files.remove(&file);
+        }
     }
 }
 

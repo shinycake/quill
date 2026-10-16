@@ -12,7 +12,6 @@ use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::{MessageContent, MiniThumbnail};
-use std::sync::Arc;
 
 /// `st::historyReplyPreview`.
 const PREVIEW_SIZE: f32 = 32.;
@@ -107,13 +106,10 @@ impl QuillApp {
                 .size_full()
                 .object_fit(ObjectFit::Cover)
                 .into_any_element(),
-            (None, Some(mini)) => img(ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
-                gpui_kit::ImageFormat::Jpeg,
-                mini.data.clone(),
-            ))))
-            .size_full()
-            .object_fit(ObjectFit::Cover)
-            .into_any_element(),
+            (None, Some(mini)) => img(super::mini_image::mini_image(mini))
+                .size_full()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
             (None, None) => return None,
         };
         Some(

@@ -68,12 +68,9 @@ pub(in crate::ui) fn picture_file_attachment(
         (Some(path), _) => Some(
             fill(img(sized_media(path, (frame_w, frame_h), dims, Fit::Cover))).into_any_element(),
         ),
-        (None, Some(mini)) if !mini.data.is_empty() => Some(
-            fill(img(ImageSource::Image(Arc::new(
-                gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Jpeg, mini.data.clone()),
-            ))))
-            .into_any_element(),
-        ),
+        (None, Some(mini)) if !mini.data.is_empty() => {
+            Some(fill(img(crate::ui::mini_image::mini_image(mini))).into_any_element())
+        }
         _ => None,
     };
     let hdr = full_path

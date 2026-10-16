@@ -100,15 +100,12 @@ pub(in crate::ui) fn thumbed_document_chip(
             .into_any_element(),
         ),
         (None, Some(mini)) if !mini.data.is_empty() => Some(
-            img(ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
-                gpui_kit::ImageFormat::Jpeg,
-                mini.data.clone(),
-            ))))
-            .absolute()
-            .inset_0()
-            .size_full()
-            .object_fit(ObjectFit::Cover)
-            .into_any_element(),
+            img(crate::ui::mini_image::mini_image(mini))
+                .absolute()
+                .inset_0()
+                .size_full()
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
         ),
         _ => None,
     };

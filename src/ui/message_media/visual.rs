@@ -98,15 +98,12 @@ pub(in crate::ui) fn photo_attachment(
         .flatten()
         .filter(|mini| !mini.data.is_empty())
         .map(|mini| {
-            img(ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
-                gpui_kit::ImageFormat::Jpeg,
-                mini.data.clone(),
-            ))))
-            .absolute()
-            .inset_0()
-            .size_full()
-            .map(|this| corners.round(this))
-            .object_fit(ObjectFit::Cover)
+            img(crate::ui::mini_image::mini_image(mini))
+                .absolute()
+                .inset_0()
+                .size_full()
+                .map(|this| corners.round(this))
+                .object_fit(ObjectFit::Cover)
         });
     let has_preview = preview.is_some();
     div()
