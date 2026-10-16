@@ -746,9 +746,9 @@ pub fn autolock_label(secs: u32) -> String {
 /// OS-wide idle time (time since the last keyboard or mouse input anywhere
 /// on the desktop) where the platform exposes it without extra
 /// dependencies: macOS (CoreGraphics) and Windows (`GetLastInputInfo`).
-/// On Linux it asks GNOME's idle monitor over D-Bus ([`linux_idle_ms`]);
-/// `None` on other desktops, where idle time needs a compositor-specific
-/// protocol, so callers fall back to in-window input ("inactive" instead of
+/// On Linux a sampler probes GNOME's idle monitor, the KDE screensaver
+/// service and (X11 sessions only) MIT-SCREEN-SAVER, see `idle.rs`; `None`
+/// when none answers (for example wlroots compositors), so callers fall back to in-window input ("inactive" instead of
 /// "away").
 pub fn os_idle_ms() -> Option<u64> {
     #[cfg(target_os = "macos")]
@@ -792,162 +792,15 @@ pub fn os_idle_ms() -> Option<u64> {
     }
 }
 
-/// Sampled idle state shared between the poller thread and readers.
 #[cfg(any(target_os = "linux", test))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum IdleCache {
-    /// Poller not started or no sample yet.
-    Unknown,
-    /// `ms` of idle time measured `age_ms` ago relative to the read.
-    Sample { ms: u64, taken_ms: u64 },
-    /// The query failed once; never retried.
-    Failed,
-}
-
-#[cfg(any(target_os = "linux", test))]
-impl IdleCache {
-    /// Idle time at `now_ms` (same clock as `taken_ms`), extrapolated from
-    /// the last sample. `None` until a sample exists and forever after a
-    /// failure.
-    fn read(self, now_ms: u64) -> Option<u64> {
-        match self {
-            Self::Sample { ms, taken_ms } => Some(ms + now_ms.saturating_sub(taken_ms)),
-            Self::Unknown | Self::Failed => None,
-        }
-    }
-}
-
-/// Reads the cache a background thread refreshes every two seconds from
-/// GNOME Mutter's `org.gnome.Mutter.IdleMonitor.GetIdletime` over zbus.
-/// A read starts the thread; it pauses once reads stop (auto-lock off or
-/// locked) and stops for good after the first failure (not GNOME, no bus).
-/// Never blocks on D-Bus.
+mod idle;
+#[cfg(test)]
+use idle::{
+    IDLE_ARMED_GRACE_MS, IdleBackend, IdleCache, SessionEnv, candidate_backends,
+    idle_sampling_wanted, select_backend,
+};
 #[cfg(target_os = "linux")]
-fn linux_idle_ms() -> Option<u64> {
-    IDLE_LAST_READ.store(linux_now_ms(), std::sync::atomic::Ordering::Relaxed);
-    linux_idle_start();
-    linux_idle_cache().read(linux_now_ms())
-}
-
-/// True once a sample succeeded; starts nothing (safe from render).
-#[cfg(target_os = "linux")]
-fn linux_idle_known() -> bool {
-    linux_idle_cache().read(0).is_some()
-}
-
-#[cfg(target_os = "linux")]
-static IDLE: std::sync::Mutex<IdleCache> = std::sync::Mutex::new(IdleCache::Unknown);
-
-#[cfg(target_os = "linux")]
-fn linux_idle_cache() -> IdleCache {
-    *IDLE.lock_or_recover()
-}
-
-#[cfg(target_os = "linux")]
-fn linux_now_ms() -> u64 {
-    use std::sync::OnceLock;
-    use std::time::Instant;
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_millis() as u64
-}
-
-/// How long the sampler keeps running after the last [`os_idle_ms`] read.
-/// The auto-lock tick reads every second while armed, so a gap this long
-/// means auto-lock is off, locked, or the app is gone.
-#[cfg(any(target_os = "linux", test))]
-const IDLE_ARMED_GRACE_MS: u64 = 5_000;
-
-/// Whether the sampler should take another sample: auto-lock asked for the
-/// idle time recently enough.
-#[cfg(any(target_os = "linux", test))]
-fn idle_sampling_wanted(last_read_ms: Option<u64>, now_ms: u64) -> bool {
-    last_read_ms.is_some_and(|t| now_ms.saturating_sub(t) <= IDLE_ARMED_GRACE_MS)
-}
-
-/// Time of the latest [`linux_idle_ms`] read (`u64::MAX` = never).
-#[cfg(target_os = "linux")]
-static IDLE_LAST_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
-
-/// True while a sampler thread is alive.
-#[cfg(target_os = "linux")]
-static IDLE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-#[cfg(target_os = "linux")]
-fn idle_last_read() -> Option<u64> {
-    use std::sync::atomic::Ordering;
-    match IDLE_LAST_READ.load(Ordering::Relaxed) {
-        u64::MAX => None,
-        t => Some(t),
-    }
-}
-
-/// One `GetIdletime` call on the session bus (no subprocess).
-#[cfg(all(target_os = "linux", feature = "ui"))]
-fn linux_idle_sample(conn: &zbus::blocking::Connection) -> Option<u64> {
-    let reply = conn
-        .call_method(
-            Some("org.gnome.Mutter.IdleMonitor"),
-            "/org/gnome/Mutter/IdleMonitor/Core",
-            Some("org.gnome.Mutter.IdleMonitor"),
-            "GetIdletime",
-            &(),
-        )
-        .ok()?;
-    reply.body().deserialize::<u64>().ok()
-}
-
-/// Starts the sampler thread unless one is running or sampling already
-/// failed for good. The thread exits when auto-lock stops reading, and the
-/// next read restarts it.
-#[cfg(target_os = "linux")]
-fn linux_idle_start() {
-    use std::sync::atomic::Ordering;
-    use std::time::Duration;
-    if linux_idle_cache() == IdleCache::Failed || IDLE_RUNNING.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    linux_now_ms(); // pin the clock origin before the first sample
-    // A sample from before a pause would extrapolate to a bogus huge idle
-    // time (and lock spuriously); drop it until the fresh one lands.
-    *IDLE.lock_or_recover() = IdleCache::Unknown;
-    let spawned = crate::thread_guard::spawn_guarded("quill-idle", || {
-        #[cfg(feature = "ui")]
-        let conn = zbus::blocking::Connection::session().ok();
-        loop {
-            if !idle_sampling_wanted(idle_last_read(), linux_now_ms()) {
-                IDLE_RUNNING.store(false, Ordering::Release);
-                // A read may have raced the exit; pick it back up.
-                if idle_sampling_wanted(idle_last_read(), linux_now_ms())
-                    && !IDLE_RUNNING.swap(true, Ordering::AcqRel)
-                {
-                    continue;
-                }
-                return;
-            }
-            #[cfg(feature = "ui")]
-            let ms = conn.as_ref().and_then(linux_idle_sample);
-            #[cfg(not(feature = "ui"))]
-            let ms: Option<u64> = None;
-            let state = match ms {
-                Some(ms) => IdleCache::Sample {
-                    ms,
-                    taken_ms: linux_now_ms(),
-                },
-                None => IdleCache::Failed,
-            };
-            *IDLE.lock_or_recover() = state;
-            if state == IdleCache::Failed {
-                IDLE_RUNNING.store(false, Ordering::Release);
-                return;
-            }
-            std::thread::sleep(Duration::from_secs(2));
-        }
-    });
-    if spawned.is_err() {
-        *IDLE.lock_or_recover() = IdleCache::Failed;
-        IDLE_RUNNING.store(false, Ordering::Release);
-    }
-}
+use idle::{linux_idle_known, linux_idle_ms};
 
 /// Whether OS idle time is currently known, without starting any sampling
 /// (for render paths). Equivalent to `os_idle_ms().is_some()` elsewhere.

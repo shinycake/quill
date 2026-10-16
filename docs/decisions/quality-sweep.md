@@ -76,7 +76,7 @@ updated 2026-10-16 after release v2026.1016.2630.
 | 24 | Linux window `app_id` and desktop file name did not match, so GNOME and KDE showed no icon grouping or pinning. | fixed #863 |
 | 25 | Default emoji set "System" shows tofu on minimal Linux installs without a color emoji font. | fixed #874 |
 | 26 | File names on save/export: Windows reserved names, trailing dots, extension lost on truncation, 255-byte limit. | fixed #863 |
-| 27 | Wayland/Linux gaps: hide-to-tray only minimizes, PiP cannot stay on top, global push-to-talk is X11-only, file paste only through text heuristics, OS idle on GNOME only; no Windows Hello / polkit unlock; dragging files out is unsupported everywhere. | open |
+| 27 | Wayland/Linux gaps: hide-to-tray only minimizes, PiP cannot stay on top, global push-to-talk is X11-only, file paste only through text heuristics, OS idle on GNOME only (idle now also works on KDE and X11 sessions, see sweep-linux-idle-backends.md; wlroots still has none); no Windows Hello / polkit unlock; dragging files out is unsupported everywhere. | open |
 | 28 | No Vulkan on Linux exits with an alert that gives no hint how to fix it. | fixed #874 |
 | 29 | Small: Linux autostart ignored `XDG_CONFIG_HOME`, `~` expansion used `HOME` (unset on Windows), media Save de-duplication could overwrite. | fixed #863 |
 
@@ -123,7 +123,7 @@ them, which were fixed first.
 
 - 18: hardware video decoding (D3D11VA, VA-API).
 - 23: ffmpeg/ffprobe tools for video editing on Windows and Linux; Windows capture device choice.
-- 27: Wayland and Linux desktop gaps.
+- 27: Wayland and Linux desktop gaps (OS idle on wlroots needs ext-idle-notify-v1).
 - 39: chat-list keyboard navigation (in progress).
 - 41: literal `px()` and colour values.
 - Owner decisions: solid-fill selected row; muted unread badge contrast.
