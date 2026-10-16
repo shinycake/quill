@@ -358,18 +358,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         self.teardown_group_call_transport(group_call_id);
         // Not joined yet: TDLib has nothing to leave (and would answer an
-        // error), so the slot is only dropped.
-        let joining =
-            self.session
-                .requests
-                .has_purpose(RequestPurpose::Calls(CallsPurpose::JoinVideoChat {
-                    group_call_id,
-                }));
+        // error), so the slot is only dropped. A join on its way is
+        // forgotten, so its late answer cannot land in a new slot for the
+        // same story.
+        let joining = self
+            .session
+            .requests
+            .take_purpose(RequestPurpose::Calls(CallsPurpose::JoinVideoChat {
+                group_call_id,
+            }))
+            .is_some();
         if !(stream.is_joined || stream.reconnecting || stream.need_rejoin || joining) {
             return Ok(());
         }
         let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }),
+            RequestPurpose::Calls(CallsPurpose::LeaveStoryStream { group_call_id }),
             None,
         );
         self.send_json_request(extra, &leave_group_call(extra, group_call_id))

@@ -136,8 +136,6 @@ impl Session {
                     ));
                 }
             }
-            Some(RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }))
-                if !self.calls.is_current_group_call(group_call_id) => {}
             // Phase C2g: a failed screen-sharing handshake must
             // not leave the call stuck "sharing" — clear the
             // pending/active flags and surface an honest error.

@@ -45,10 +45,18 @@ plays mixed with the call's audio.
 
 ## Limits
 
-- ntgcalls keys each connection by chat id, and a 1:1 call is keyed by the
-  peer's user id. When the story's poster chat matches the chat of the current
-  video chat, or matches the 1:1 peer's id, `ntg_create_call` fails for the
-  story. The driver isolates that failure to the story, and the current call
-  keeps running. This has not been tried on a live account.
+- ntgcalls keys each connection by chat id, and a 1:1 call by the peer's user
+  id. A story can hold the key that a real call needs, for example the peer's
+  own story or the channel of a video chat you join. Whichever comes first, the
+  real call wins.
+  - If the call comes first, `ntg_create_call` fails for the story and the call
+    keeps playing.
+  - If the story comes first, the engine stops the story's connection before
+    it creates the call (`yield_viewer_key`). The story's picture then stops.
+  - None of this has been tried on a live account.
 - No one has heard two real streams mixing through WebRTC's audio device
   module.
+- If a story leave or a story join fails, the call window's error line does
+  not show it. A story leave has its own purpose (`LeaveStoryStream`). A join
+  that is still pending when you leave is forgotten, so its late answer can
+  never land in a new slot for the same story.

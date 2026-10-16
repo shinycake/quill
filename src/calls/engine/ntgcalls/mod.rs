@@ -246,12 +246,32 @@ impl NtgcallsEngine {
         GroupCallMode::from_native(raw).unwrap_or(GroupCallMode::Rtc)
     }
 
+    /// ntgcalls keys a connection by chat id, a 1:1 call by the peer's
+    /// user id, so a story stream can hold the key a real call needs
+    /// (the peer's own story, or the video chat's channel). The real call
+    /// wins: the story's connection is stopped first.
+    fn yield_viewer_key(&mut self, key: i64) {
+        let viewer = self
+            .group_calls
+            .iter()
+            .find(|(_, media)| media.role == GroupCallRole::Viewer && media.chat_id == key)
+            .map(|(id, _)| *id);
+        if let Some(group_call_id) = viewer
+            && let Err(err) = self.leave_group_call(group_call_id)
+        {
+            eprintln!("quill: stopping story stream {group_call_id} for a call failed: {err}");
+        }
+    }
+
     fn issue_group_sources(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let media = self
             .group_calls
             .get(&group_call_id)
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        if media.role == GroupCallRole::Viewer {
+            return self.issue_group_playback(group_call_id);
+        }
         let instance = self.ensure_instance()?;
         let camera = native_input(media.camera.as_deref())?;
         // The system's default microphone, as for 1:1 calls: without it
@@ -287,7 +307,7 @@ impl NtgcallsEngine {
         // `set_stream_sources`). An MTProto stream carries nothing
         // outgoing: ntgcalls only sends media again after a new connect
         // with an RTC answer, which issues capture then.
-        if !media.mode.is_stream() && media.role == GroupCallRole::Member {
+        if !media.mode.is_stream() {
             // SAFETY: `instance` is live and the descriptions are
             // stack-local for the duration of this synchronous C call.
             let rc = unsafe {

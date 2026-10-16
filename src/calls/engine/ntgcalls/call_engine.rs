@@ -12,6 +12,7 @@ impl CallEngine for NtgcallsEngine {
         if self.call_to_user.contains_key(&call_id) {
             return Ok(());
         }
+        self.yield_viewer_key(user_id);
         let instance = self.ensure_instance()?;
         // SAFETY: `instance` is live and ntgcalls keys P2P calls by user id.
         let rc = unsafe { (self.api.ntg_create_p2p_call)(instance.as_ptr(), user_id) };
@@ -283,6 +284,9 @@ impl CallEngine for NtgcallsEngine {
         chat_id: i64,
         role: GroupCallRole,
     ) -> Result<String, EngineError> {
+        if role == GroupCallRole::Member {
+            self.yield_viewer_key(chat_id);
+        }
         let instance = self.ensure_instance()?;
         let mut out: *mut c_char = null_mut();
         // SAFETY: `out` is a valid writable C output; ntgcalls allocates the

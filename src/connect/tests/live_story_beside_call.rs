@@ -172,3 +172,39 @@ fn a_real_call_still_asks_with_a_story_open() {
     ));
     assert_eq!(story_id(&h), Some(4242));
 }
+
+#[test]
+fn a_late_join_answer_does_not_land_in_a_new_story_slot() {
+    let mut h = watching();
+    let old = sent_request(&h.recorder, "joinLiveStory")["@extra"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_default();
+    h.driver.leave_live_story().unwrap();
+    h.driver.join_live_story(ChatId(7), 6).unwrap();
+    h.ingest(&LIVE_CALL.replace("JOINED", "false"));
+    assert_eq!(h.sent("joinLiveStory"), 2);
+    h.ingest(&format!(
+        r#"{{"@type":"text","@extra":"{old}","text":"{{\"old\":true}}"}}"#
+    ));
+    let payload = h
+        .driver
+        .session
+        .calls
+        .story_stream
+        .as_ref()
+        .map(|call| call.join_payload.clone());
+    assert_eq!(payload, Some(String::new()), "the old answer is dropped");
+}
+
+#[test]
+fn a_failed_story_leave_does_not_reach_the_call_overlay() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.driver.leave_live_story().unwrap();
+    h.answer(
+        "leaveGroupCall",
+        r#"{"@type":"error","code":400,"message":"GROUPCALL_JOIN_MISSING"}"#,
+    );
+    assert!(h.driver.session.calls.group_call_error.is_none());
+}
