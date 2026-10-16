@@ -35,23 +35,60 @@ pub fn account_is_test(app_root: &Path, key: &AccountKey) -> bool {
     is_test_environment(&AccountPaths::for_root(app_root, key))
 }
 
+/// The active account's test flag, kept in memory so render paths never read
+/// the account store. Every writer of the registry or the marker calls
+/// [`invalidate_active_test`]; the next read recomputes it once.
+static ACTIVE_TEST: std::sync::Mutex<Option<(std::path::PathBuf, bool)>> =
+    std::sync::Mutex::new(None);
+/// Bumped on each invalidation so a read that raced a write never stores a
+/// value computed from the old state.
+static ACTIVE_TEST_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn cache_lock() -> std::sync::MutexGuard<'static, Option<(std::path::PathBuf, bool)>> {
+    ACTIVE_TEST.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Forget the remembered flag: the registry or an account marker changed.
+pub fn invalidate_active_test() {
+    ACTIVE_TEST_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    *cache_lock() = None;
+}
+
 /// Whether the account the registry marks active connects to the test
-/// environment. Read from the account store every time, so removing,
-/// adding or switching accounts can never leave a stale copy behind.
+/// environment. Computed from the store on the first read after any change,
+/// then served from memory.
 pub fn active_account_is_test(app_root: &Path) -> bool {
-    account_is_test(app_root, &crate::settings::active_account(app_root))
+    use std::sync::atomic::Ordering::SeqCst;
+    if let Some((root, value)) = cache_lock().as_ref()
+        && root == app_root
+    {
+        return *value;
+    }
+    let epoch = ACTIVE_TEST_EPOCH.load(SeqCst);
+    let value = account_is_test(app_root, &crate::settings::active_account(app_root));
+    let mut cache = cache_lock();
+    if ACTIVE_TEST_EPOCH.load(SeqCst) == epoch {
+        *cache = Some((app_root.to_path_buf(), value));
+    }
+    value
 }
 
 /// Whether the account on screen connects to the test environment, for code
 /// that has no app state (the schedule menu's test-only repeat periods).
+/// Render-safe: memory only once the flag has been computed.
 pub fn active_is_test() -> bool {
+    if let Some((_, value)) = cache_lock().as_ref() {
+        return *value;
+    }
     crate::settings::safe_app_root().is_some_and(|root| active_account_is_test(&root))
 }
 
 /// Make the account a test account. Created before its first connect.
 pub fn mark_test_environment(paths: &AccountPaths) -> std::io::Result<()> {
     std::fs::create_dir_all(&paths.root)?;
-    std::fs::write(paths.root.join(MARKER_FILE), b"1")
+    let written = std::fs::write(paths.root.join(MARKER_FILE), b"1");
+    invalidate_active_test();
+    written
 }
 
 /// What the `testmode` code does for the current accounts.
@@ -118,6 +155,24 @@ mod tests {
             !active_account_is_test(&root),
             "the removed test account no longer makes the active one a test account"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cached_flag_follows_add_switch_and_remove() {
+        let root = temp_root("cache");
+        let prod = crate::settings::active_account(&root);
+        assert!(!active_account_is_test(&root));
+        let (test, _) = add_environment_account(&root, TestModeAction::AddTest).unwrap();
+        assert!(!active_account_is_test(&root), "adding does not switch");
+        crate::settings::set_active_account(&root, &test).unwrap();
+        assert!(active_account_is_test(&root), "switch to test");
+        // A second read is served from memory: delete the marker under it.
+        let marker = AccountPaths::for_root(&root, &test).root.join(MARKER_FILE);
+        std::fs::remove_file(&marker).unwrap();
+        assert!(active_account_is_test(&root), "memory, not disk, on read");
+        crate::settings::set_active_account(&root, &prod).unwrap();
+        assert!(!active_account_is_test(&root), "switch back");
         let _ = std::fs::remove_dir_all(&root);
     }
 
