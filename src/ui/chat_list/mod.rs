@@ -491,43 +491,6 @@ impl QuillApp {
         }
     }
 
-    /// Sidebar "Chats | Contacts | Calls" tabs (Ready mode). Other modes
-    /// keep the plain "Chats" title.
-    /// kit Phase 3: the Chats/Contacts/Calls strip as a kit segmented
-    /// `TabBar` — same three tabs and handlers as before.
-    pub(super) fn list_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.pane_mode() != PaneMode::Ready {
-            return div()
-                .font_semibold()
-                .child(tr(keys::RECENT_CHATS))
-                .into_any_element();
-        }
-        let selected = if self.chat_list.contacts_tab_open {
-            1
-        } else if self.chat_list.calls_tab_open {
-            2
-        } else {
-            0
-        };
-        let weak = cx.weak_entity();
-        TabBar::new("list-tabs")
-            .segmented()
-            .selected_index(selected)
-            .child(Tab::new().label(tr(keys::RECENT_CHATS)))
-            .child(Tab::new().label(tr(keys::MENU_CONTACTS)))
-            // Phase C2i: Recent-calls tab (server-side `searchCallMessages`
-            // history + call settings).
-            .child(Tab::new().label(tr(keys::MENU_CALLS)))
-            .on_click(move |ix, _window, cx| {
-                let _ = weak.update(cx, |this, cx| match ix {
-                    0 => this.open_chats_tab(cx),
-                    1 => this.open_contacts_tab(cx),
-                    _ => this.open_calls_tab(cx),
-                });
-            })
-            .into_any_element()
-    }
-
     pub(super) fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
         self.chat_list.contacts_tab_open = false;
         self.chat_list.calls_tab_open = false;
@@ -798,6 +761,7 @@ impl QuillApp {
     }
 }
 
+mod header_fit;
 mod listed;
 mod select_bar;
 mod toggle_chat_pin;

@@ -170,21 +170,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .when(mode == PaneMode::Ready, |this| {
-                        this.child(self.main_navigation_menu(cx))
-                    })
-                    .when(
-                        mode == PaneMode::Ready && self.account.passcode.enabled,
-                        |this| this.child(self.lock_button(cx)),
-                    )
-                    .child(self.list_tabs(cx))
-                    .children(self.proxy_shield_button(cx)),
-            )
+            .child(self.sidebar_header(mode, cx))
             .when_some(
                 (!self.chat_list.contacts_tab_open && !self.chat_list.calls_tab_open)
                     .then(|| chat_list_caption(mode, self.session()))
