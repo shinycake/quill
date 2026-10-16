@@ -348,6 +348,7 @@ mod premium_ui;
 mod pressable;
 mod profile;
 mod profile_business;
+mod profile_edit_save;
 mod profile_modal;
 mod profile_panels;
 mod profile_photo_sources;

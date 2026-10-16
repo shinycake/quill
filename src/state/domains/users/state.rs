@@ -36,6 +36,9 @@ pub struct UsersState {
     pub username_check: Option<(String, UsernameCheckResult)>,
     /// A5: username text of the in-flight `checkChatUsername`.
     pub username_check_pending: Option<String>,
+    /// `bio_length_max` option (TDLib default 70, Premium raises it):
+    /// the edit-profile bio counter.
+    pub bio_length_max: usize,
     /// A5: last profile-edit request failure
     /// (`setName`/`setBio`/`setUsername`/`checkChatUsername`/
     /// `reorderActiveUsernames`/`toggleUsernameIsActive`/
@@ -93,6 +96,21 @@ pub enum NewContactOutcome {
 }
 
 impl UsersState {
+    /// Fold the options this domain reads (`bio_length_max`).
+    pub(crate) fn apply_option(
+        &mut self,
+        name: &str,
+        value: &crate::telegram::envelope::OptionValue,
+    ) {
+        if name == "bio_length_max"
+            && let crate::telegram::envelope::OptionValue::Integer(limit) = value
+            && let Ok(limit) = usize::try_from(*limit)
+            && limit > 0
+        {
+            self.bio_length_max = limit;
+        }
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             profile_chat_lists: HashMap::new(),
@@ -104,6 +122,7 @@ impl UsersState {
             user_full_infos: HashMap::new(),
             username_check: None,
             username_check_pending: None,
+            bio_length_max: 70,
             profile_edit_error: None,
             background_emoji_icons: Vec::new(),
             background_emoji_icons_failed: false,
@@ -117,5 +136,22 @@ impl UsersState {
             new_contact_outcome: None,
             open_info_panel: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod bio_limit_tests {
+    use super::UsersState;
+    use crate::telegram::envelope::OptionValue;
+
+    #[test]
+    fn bio_limit_follows_the_option() {
+        let mut users = UsersState::new();
+        assert_eq!(users.bio_length_max, 70);
+        users.apply_option("bio_length_max", &OptionValue::Integer(140));
+        assert_eq!(users.bio_length_max, 140);
+        users.apply_option("bio_length_max", &OptionValue::Integer(0));
+        users.apply_option("other", &OptionValue::Integer(5));
+        assert_eq!(users.bio_length_max, 140);
     }
 }

@@ -6,6 +6,7 @@ use super::shell::{DialogKind, QuillShell};
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::form::{field, v_form};
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -75,14 +76,30 @@ impl QuillApp {
             let Some(body) = this.edit_profile_dialog_body(cx) else {
                 return dialog.on_close(on_close);
             };
-            let footer = div().flex().justify_end().child(
-                Button::new("edit-profile-close")
-                    .label(tr(keys::BOX_DONE))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_edit_profile_dialog(cx);
-                        this.close_kit_dialog_if_done(DialogKind::EditProfile, window, cx);
-                    })),
-            );
+            let can_save = this.profile_form_can_save(cx);
+            let footer = div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(
+                    Button::new("edit-profile-cancel")
+                        .label(tr(keys::CANCEL))
+                        .ghost()
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_edit_profile_dialog(cx);
+                            this.close_kit_dialog_if_done(DialogKind::EditProfile, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("edit-profile-save")
+                        .label(tr(keys::SETTINGS_SAVE))
+                        .primary()
+                        .disabled(!can_save)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.save_profile_form(cx);
+                            this.close_kit_dialog_if_done(DialogKind::EditProfile, window, cx);
+                        })),
+                );
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
@@ -145,56 +162,6 @@ impl QuillApp {
 
     pub(super) fn close_edit_profile_dialog(&mut self, cx: &mut Context<Self>) {
         self.dialogs.edit_profile_dialog = None;
-        cx.notify();
-    }
-
-    /// A5: `setName` from the dialog. The first name is required
-    /// (schema: 1-64 chars).
-    pub(super) fn submit_profile_name(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
-            return;
-        };
-        let first = EditProfileDialog::text(&dialog.first_name_input, cx)
-            .trim()
-            .to_string();
-        let last = EditProfileDialog::text(&dialog.last_name_input, cx)
-            .trim()
-            .to_string();
-        if first.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_FIRST_NAME_CANT_BE_EMPTY).into();
-            cx.notify();
-            return;
-        }
-        let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
-            cx.notify();
-            return;
-        };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.set_name(&first, &last) {
-            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED).into(),
-            Err(err) => self.connection.status_note = format!("set name failed: {err:?}"),
-        }
-        cx.notify();
-    }
-
-    /// A5: `setBio` from the dialog. Newlines are collapsed — the schema
-    /// allows no line feeds.
-    pub(super) fn submit_profile_bio(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
-            return;
-        };
-        let bio = EditProfileDialog::text(&dialog.bio_input, cx).replace(['\n', '\r'], " ");
-        let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
-            cx.notify();
-            return;
-        };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.set_bio(bio.trim()) {
-            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_BIO_UPDATE_REQUESTED).into(),
-            Err(err) => self.connection.status_note = format!("set bio failed: {err:?}"),
-        }
         cx.notify();
     }
 
@@ -325,34 +292,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// A5: `setProfilePhoto` from a local path (`inputChatPhotoStatic` /
-    /// `inputFileLocal`). Sets the main profile photo (`is_public=false`,
-    /// not the public photo).
-    pub(super) fn submit_profile_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.dialogs.edit_profile_dialog else {
-            return;
-        };
-        let path = EditProfileDialog::text(&dialog.photo_path_input, cx)
-            .trim()
-            .to_string();
-        if path.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_PHOTO_PATH_FIRST).into();
-            cx.notify();
-            return;
-        }
-        let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
-            cx.notify();
-            return;
-        };
-        live.driver.session.users_state.profile_edit_error = None;
-        match live.driver.set_profile_photo(&path) {
-            Ok(_) => self.connection.status_note = tr(keys::Q_PEOPLE_PHOTO_UPDATE_REQUESTED).into(),
-            Err(err) => self.connection.status_note = format!("set photo failed: {err:?}"),
-        }
-        cx.notify();
-    }
-
     /// A5: `deleteProfilePhoto` for the current photo (`chatPhoto.id`
     /// from the cached user full info).
     pub(super) fn remove_profile_photo(&mut self, cx: &mut Context<Self>) {
@@ -420,6 +359,9 @@ impl QuillApp {
         let error = self
             .session()
             .and_then(|s| s.users_state.profile_edit_error.clone());
+        let bio_left = dialog
+            .current_fields(cx)
+            .bio_remaining(self.profile_bio_limit());
         let section_muted = cx.theme().muted_foreground;
         let section = move |title: &'static str| {
             div()
@@ -573,61 +515,69 @@ impl QuillApp {
                     .gap_1()
                     .child(section(tr(keys::Q_PEOPLE_PHOTO)))
                     .child(
-                        Textarea::new(&dialog.photo_path_input)
-                            .aria_label(tr(keys::Q_PEOPLE_PROFILE_PHOTO_FILE_PATH))
-                            .h(px(40.)),
-                    )
-                    .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .gap_2()
                             .child(
                                 Button::new("edit-profile-set-photo")
                                     .label(tr(keys::PROFILE_SET_PHOTO_BUTTON))
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.submit_profile_photo(cx);
+                                        this.choose_profile_photo(cx);
                                     })),
                             )
-                            .child(
-                                // No photo → nothing to remove (TGX shows no
+                            .when(has_photo, |this| {
+                                // No photo: nothing to remove (TGX shows no
                                 // remove affordance either).
-                                div().when(has_photo, |this| {
-                                    this.child(
-                                        Button::new("edit-profile-remove-photo")
-                                            .label(tr(keys::Q_PEOPLE_REMOVE_PHOTO))
-                                            .ghost()
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.remove_profile_photo(cx);
-                                            })),
-                                    )
-                                }),
-                            ),
+                                this.child(
+                                    Button::new("edit-profile-remove-photo")
+                                        .label(tr(keys::Q_PEOPLE_REMOVE_PHOTO))
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.remove_profile_photo(cx);
+                                        })),
+                                )
+                            }),
                     )
                     .child(self.photo_source_buttons(cx)),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(section(tr(keys::Q_PEOPLE_NAME)))
+                v_form()
                     .child(
-                        Textarea::new(&dialog.first_name_input)
-                            .aria_label(tr(keys::Q_PEOPLE_FIRST_NAME))
-                            .h(px(40.)),
+                        field().label(tr(keys::Q_PEOPLE_FIRST_NAME)).child(
+                            Textarea::new(&dialog.first_name_input)
+                                .aria_label(tr(keys::Q_PEOPLE_FIRST_NAME)),
+                        ),
                     )
                     .child(
-                        Textarea::new(&dialog.last_name_input)
-                            .aria_label(tr(keys::Q_PEOPLE_LAST_NAME))
-                            .h(px(40.)),
+                        field().label(tr(keys::Q_PEOPLE_LAST_NAME)).child(
+                            Textarea::new(&dialog.last_name_input)
+                                .aria_label(tr(keys::Q_PEOPLE_LAST_NAME)),
+                        ),
                     )
                     .child(
-                        div().flex().gap_2().child(
-                            Button::new("edit-profile-save-name")
-                                .label(tr(keys::Q_PEOPLE_SAVE_NAME))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.submit_profile_name(cx);
-                                })),
+                        field().label(tr(keys::INFO_BIO_LABEL)).child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    Textarea::new(&dialog.bio_input)
+                                        .aria_label(tr(keys::INFO_BIO_LABEL)),
+                                )
+                                .child(
+                                    div()
+                                        .id("edit-profile-bio-counter")
+                                        .flex()
+                                        .justify_end()
+                                        .text_xs()
+                                        .text_color(if bio_left < 0 {
+                                            Hsla::from(danger())
+                                        } else {
+                                            cx.theme().muted_foreground
+                                        })
+                                        .child(bio_left.to_string()),
+                                ),
                         ),
                     ),
             )
@@ -664,23 +614,6 @@ impl QuillApp {
                             ),
                     )
                     .child(usernames_body),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(section(tr(keys::INFO_BIO_LABEL)))
-                    .child(Textarea::new(&dialog.bio_input).aria_label(tr(keys::INFO_BIO_LABEL)))
-                    .child(
-                        div().flex().gap_2().child(
-                            Button::new("edit-profile-save-bio")
-                                .label(tr(keys::Q_PEOPLE_SAVE_BIO))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.submit_profile_bio(cx);
-                                })),
-                        ),
-                    ),
             );
         // tdesktop's Settings phone row only explains that the number is
         // changed in the phone apps.

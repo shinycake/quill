@@ -175,7 +175,6 @@
 "qll_people_ban" = "Ban";
 "qll_people_banned_until" = "Banned until";
 "qll_people_bio_copied_to_clipboard" = "Bio copied to clipboard";
-"qll_people_bio_update_requested" = "Bio update requested.";
 "qll_people_birthday" = "Birthday";
 "qll_people_birthday_removed" = "Birthday removed";
 "qll_people_birthday_saved" = "Birthday saved";
@@ -374,7 +373,6 @@
 "qll_people_enable_paid_reactions" = "Enable Paid Reactions";
 "qll_people_enter_a_name_for_the" = "Enter a name for the contact.";
 "qll_people_enter_a_name_or_phone" = "Enter a name or phone number to add the contact.";
-"qll_people_enter_a_photo_path_first" = "Enter a photo path first.";
 "qll_people_enter_a_username_to_check" = "Enter a username to check, or save it empty to remove it.";
 "qll_people_expiration_must_be_a_non" = "expiration must be a non-negative number of days";
 "qll_people_expires_in_days" = "Expires in {remaining_86_400} days";
@@ -383,7 +381,6 @@
 "qll_people_file_not_found" = "file not found: {value}";
 "qll_people_filter_by_tag" = "Filter by Tag";
 "qll_people_first_name" = "First name";
-"qll_people_first_name_cant_be_empty" = "First name can't be empty.";
 "qll_people_founder" = "Founder";
 "qll_people_general" = "General";
 "qll_people_general_2" = " · General";
@@ -564,7 +561,6 @@
 "qll_people_primary_link" = "Primary link";
 "qll_people_profile_edits_need_a_signed" = "Profile edits need a signed-in account.";
 "qll_people_profile_photo_changes_need_a" = "profile photo changes need a live connection (demo)";
-"qll_people_profile_photo_file_path" = "Profile photo file path";
 "qll_people_profile_photo_updated" = "Profile photo updated";
 "qll_people_profile_photos_need_a_live" = "profile photos need a live connection (demo)";
 "qll_people_promote_member" = "Promote member";
@@ -618,8 +614,6 @@
 "qll_people_rights" = "Rights ({summary})";
 "qll_people_rights_are_still_loading" = "rights are still loading";
 "qll_people_saturation" = "Saturation";
-"qll_people_save_bio" = "Save bio";
-"qll_people_save_name" = "Save name";
 "qll_people_saved_chat" = "Saved chat";
 "qll_people_saved_chats" = "Saved chats";
 "qll_people_saving_invite_link" = "saving invite link…";

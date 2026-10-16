@@ -1,5 +1,5 @@
 use super::super::app::QuillApp;
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 /// One-line fields.
@@ -9,18 +9,19 @@ const SINGLE_LINE: (usize, usize) = (1, 1);
 pub(crate) const BIO_ROWS: (usize, usize) = (3, 8);
 
 /// A5: edit-profile dialog — the profile edit UI entry point
-/// (`parity:auth-edit-name`). One dialog with per-section saves, mirroring
-/// TGX's edit-profile rows: name (`setName`), bio (`setBio`), username
-/// (`setUsername` + availability check + active/disabled lists), and photo
-/// (`setProfilePhoto` / `deleteProfilePhoto`). Photo upload is a path
-/// entry like the story composer (no native file-picker infrastructure
-/// yet).
+/// (`parity:auth-edit-name`). One form with one Save (tdesktop's
+/// `Settings::Information`): the name (`setName`) and bio (`setBio`)
+/// fields are saved together, sending only what changed. The username row
+/// keeps its availability check and its own button, the photo is chosen
+/// with the native file dialog (`setProfilePhoto` / `deleteProfilePhoto`).
 pub struct EditProfileDialog {
     pub(crate) first_name_input: Entity<TextareaState>,
     pub(crate) last_name_input: Entity<TextareaState>,
     pub(crate) bio_input: Entity<TextareaState>,
     pub(crate) username_input: Entity<TextareaState>,
-    pub(crate) photo_path_input: Entity<TextareaState>,
+    /// The name and bio the form opened with; Save sends only the fields
+    /// that differ from these.
+    pub(crate) initial: super::super::profile_edit_save::ProfileFields,
     /// The camera, emoji and video avatar panels.
     pub(crate) sources: crate::ui::profile_photo_sources::PhotoSources,
 }
@@ -50,7 +51,7 @@ impl EditProfileDialog {
                 state
             })
         }
-        Self {
+        let dialog = Self {
             first_name_input: field(
                 window,
                 cx,
@@ -67,9 +68,37 @@ impl EditProfileDialog {
             ),
             bio_input: field(window, cx, tr(keys::INFO_BIO_LABEL), bio, BIO_ROWS),
             username_input: field(window, cx, "username", username, SINGLE_LINE),
-            photo_path_input: field(window, cx, "/path/to/photo.jpg", "", SINGLE_LINE),
+            initial: super::super::profile_edit_save::ProfileFields::new(
+                first_name, last_name, bio,
+            ),
             sources: Default::default(),
+        };
+        // Save's enabled state and the bio counter follow every keystroke.
+        for input in [
+            &dialog.first_name_input,
+            &dialog.last_name_input,
+            &dialog.bio_input,
+        ] {
+            cx.subscribe(input, |_this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            })
+            .detach();
         }
+        dialog
+    }
+
+    /// The name and bio as typed now.
+    pub(crate) fn current_fields(
+        &self,
+        cx: &App,
+    ) -> super::super::profile_edit_save::ProfileFields {
+        super::super::profile_edit_save::ProfileFields::new(
+            &Self::text(&self.first_name_input, cx),
+            &Self::text(&self.last_name_input, cx),
+            &Self::text(&self.bio_input, cx),
+        )
     }
 
     pub(crate) fn text(entity: &Entity<TextareaState>, cx: &App) -> String {
