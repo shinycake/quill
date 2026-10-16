@@ -174,9 +174,9 @@ pub(crate) fn cache_temp_dir() -> PathBuf {
 }
 
 /// Tests that create or delete `{temp}/quill-media-cache` must hold this for
-/// the whole test. `sweep_removes_stale_viewer_frame_caches` asserts the
-/// account base is gone after the sweep; a parallel test recreating
-/// `video-frames` or `gif-frames` under that base makes the assertion flake.
+/// the whole test: a test that sweeps the account base asserts it is gone
+/// afterwards, and a parallel test recreating a cache root under that base
+/// (`gif-frames`, used by webm stickers) makes the assertion flake.
 #[cfg(test)]
 pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

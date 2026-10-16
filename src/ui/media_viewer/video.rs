@@ -64,8 +64,8 @@ impl QuillApp {
             .is_some_and(|item| item.kind.loops())
     }
 
-    /// Phase C2e: decode a `VideoFrame`'s RGBA8 bytes into a GPUI image
-    /// handle, exactly like `decode_viewer_frames`. `None` on malformed
+    /// Phase C2e: decode a call `VideoFrame`'s RGBA8 bytes into a GPUI
+    /// image handle (BGRA, as `RenderImage` holds). `None` on malformed
     /// bytes — never render garbage.
     pub(in crate::ui) fn video_render_image(
         frame: &quill::calls::engine::VideoFrame,

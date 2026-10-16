@@ -187,7 +187,7 @@ fn extraction_cancelled_before_the_child_is_published_leaves_no_orphan() {
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let cancel = std::sync::atomic::AtomicBool::new(true);
     let err =
-        extract_frames(&clip, &cache, 0, 8.0, 240, 12, Some((&slot, &cancel)), None).unwrap_err();
+        extract_frames(&clip, &cache, 8.0, 240, 12, Some((&slot, &cancel)), None).unwrap_err();
     assert!(
         err.contains("cancelled"),
         "expected a cancellation error, got: {err}"

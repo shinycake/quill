@@ -4,8 +4,13 @@ tdesktop references are under `Telegram/SourceFiles/media/view/media_view_overla
 
 ## B32 GIFs / animations in the viewer
 - tdesktop streams an animation video-only with `options.loop = !_stories` (:5614) and creates no playback controls for it (`streamingRequiresControls`, :1491-1494). Quill: new `MediaViewerKind::Animation`; the viewer shows no transport (zoom row only, as for photos), no sound, and loops.
-- Clicking a GIF in a chat row opens the viewer (`animation_attachment` got a `viewer` argument); the Play disc keeps toggling inline playback. Secret GIFs never open.
-- Playback reuses the existing viewer video path:
+- Clicking a GIF in a chat row opens the viewer (`animation_attachment` got a `viewer` argument); the Play disc keeps toggling inline playback (now an `image/gif` file loops through `gif_clip`, an MP4 GIF on the inline player). Secret GIFs never open.
+- Playback reuses the existing viewer video path. *Superseded by the
+  video player (`video-player-core.md`, `video-player-legacy.md`): every
+  viewer clip, GIFs included, now plays on `VideoPlayer`
+  (`Purpose::ViewerLoop` for GIFs), whose element asks for its own frames;
+  `NativeVideo`, the ffmpeg frames below and the 30 fps tick are gone.
+  The three bullets below are the original design.*
   - macOS: AVPlayer (`NativeVideo`), volume 0, restarted by the viewer tick when it ends. `.gif` files (not an AVPlayer format) use the frames path.
   - Other platforms: ffmpeg frames (`animation::viewer_loop_frames_cancelable`, 480 px, at most 200 frames) cycled by the playback clock, wrapping at the end. No ffplay (GIFs are silent).
   - No ffmpeg / unplayable: the thumbnail stays, a red error line shows, and an "Open externally" button (`platform::open_local_file`) appears for videos and GIFs.

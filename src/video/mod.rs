@@ -350,7 +350,7 @@ fn mpeg4_has_moov(path: &Path) -> bool {
     false
 }
 
-pub fn is_playable_video(mime: &str, path: &Path) -> bool {
+fn is_playable_video(mime: &str, path: &Path) -> bool {
     let mime = mime.to_ascii_lowercase();
     if mime.starts_with("video/") {
         return true;
@@ -426,7 +426,6 @@ fn wait_for_cancelable_child(
 pub(crate) fn extract_frames(
     src: &Path,
     cache_dir: &Path,
-    start_timestamp: i32,
     fps: f64,
     width: i32,
     max_frames: i32,
@@ -440,9 +439,6 @@ pub(crate) fn extract_frames(
     let pattern = cache_dir.join("frame-%03d.png");
     let mut command = crate::media_tools::command("ffmpeg");
     command.args(["-y", "-hide_banner", "-loglevel", "error"]);
-    if start_timestamp > 0 {
-        command.arg("-ss").arg(start_timestamp.to_string());
-    }
     if let Some(decoder) = input_decoder {
         command.args(["-c:v", decoder]);
     }

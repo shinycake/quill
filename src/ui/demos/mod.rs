@@ -16,7 +16,7 @@ mod privacy_media;
 mod security;
 mod signin;
 mod stories;
-pub mod video_fixtures;
+pub(in crate::ui) mod video_fixtures;
 
 use quill::composer::{AttachmentKind, ComposerAttachment};
 

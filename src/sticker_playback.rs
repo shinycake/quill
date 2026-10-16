@@ -284,7 +284,6 @@ pub fn decode_webm_sized(
     let frames = crate::video::extract_frames(
         path,
         cache,
-        0,
         fps,
         edge as i32,
         max_frames as i32,
