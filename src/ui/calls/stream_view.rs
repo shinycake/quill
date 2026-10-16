@@ -22,6 +22,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::chat_row::initials_avatar;
 use crate::ui::frame_clock::trace_slice_render;
 use crate::ui::group_call_panel::MEMBERS_BG;
+use crate::ui::group_call_stream_layout::stream_full;
 use crate::ui::video_player::controls::{
     LiveInput, LiveOverlayClock, LiveOverlayParts, PictureOverlay, PictureState,
 };
@@ -152,7 +153,10 @@ impl StreamPictureView {
 impl Render for StreamPictureView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         trace_slice_render("stream-picture");
-        let full = window.is_fullscreen() || window.is_maximized();
+        let full = self
+            .owner
+            .upgrade()
+            .is_some_and(|owner| stream_full(window, owner.read(cx)));
         let (radius, background): (Pixels, Hsla) = if full {
             (px(0.), black())
         } else {

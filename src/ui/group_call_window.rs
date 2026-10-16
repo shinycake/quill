@@ -14,7 +14,9 @@ use super::app::QuillApp;
 use super::calls::stream_view::StreamPictureView;
 use super::frame_clock::trace_slice_render;
 use super::group_call_panel::BG;
-use super::group_call_stream_layout::{leave_stream_full, stream_viewport, uses_stream_layout};
+use super::group_call_stream_layout::{
+    leave_stream_full, stream_full, stream_viewport, uses_stream_layout,
+};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
@@ -238,9 +240,9 @@ struct GroupCallRoot {
 
 impl Render for GroupCallRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let stream = self
-            .owner
-            .upgrade()
+        let owner = self.owner.upgrade();
+        let stream = owner
+            .as_ref()
             .is_some_and(|owner| owner.read(cx).group_call_is_stream());
         if !stream {
             return div()
@@ -248,7 +250,9 @@ impl Render for GroupCallRoot {
                 .child(self.panel.clone())
                 .into_any_element();
         }
-        let full = window.is_fullscreen() || window.is_maximized();
+        let full = owner
+            .as_ref()
+            .is_some_and(|owner| stream_full(window, owner.read(cx)));
         let (inset, top) = stream_viewport(full);
         div()
             .size_full()
@@ -302,7 +306,7 @@ impl Render for GroupCallPanel {
         }
         let fullscreen = window.is_fullscreen();
         // tdesktop treats a maximized stream window as full screen too.
-        let stream_full = fullscreen || window.is_maximized();
+        let stream_full = stream_full(window, owner.read(cx));
         let (body, animating, stream_title) = owner.update(cx, |app, cx| {
             if let Some(facts) = app.group_call_stream_facts() {
                 let body = app.group_call_stream_body(&facts, stream_full, window, cx);

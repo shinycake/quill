@@ -179,6 +179,13 @@ pub(super) fn uses_stream_layout(call: &ActiveGroupCall) -> bool {
     call.is_rtmp_stream && !call.is_live_story && call.scheduled_start_date == 0
 }
 
+/// The stream window draws full screen: full screen or maximized
+/// (tdesktop treats both alike), or a capture asked for it
+/// (`QUILL_DEMO_FULL=1`; a capture cannot go full screen).
+pub(crate) fn stream_full(window: &Window, app: &QuillApp) -> bool {
+    window.is_fullscreen() || window.is_maximized() || app.demo_ui.group_stage
+}
+
 /// Full screen or maximized off (tdesktop `toggleFullScreen(false)`:
 /// `showNormal`).
 pub(super) fn leave_stream_full(window: &mut Window) {
@@ -646,7 +653,7 @@ impl QuillApp {
         {
             return false;
         }
-        let full = window.is_fullscreen() || window.is_maximized();
+        let full = stream_full(window, self);
         let Some(action) = live_key_action(&keystroke.key, &keystroke.modifiers, full) else {
             return false;
         };

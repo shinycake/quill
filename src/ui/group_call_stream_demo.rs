@@ -65,6 +65,8 @@ impl QuillApp {
         }
         // The capture shows the controls, as with the mouse over the picture.
         self.group_call.stream.controls.show_now();
+        // `QUILL_DEMO_FULL=1`: the full-screen layout.
+        self.demo_ui.group_stage = std::env::var_os("QUILL_DEMO_FULL").is_some();
         cx.notify();
     }
 }
