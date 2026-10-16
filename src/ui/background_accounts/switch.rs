@@ -84,7 +84,6 @@ impl QuillApp {
     pub(in crate::ui) fn adopt_live(&mut self, mut live: LiveConnect, cx: &mut Context<Self>) {
         self.connection.generation += 1;
         self.connection.status = ConnectUiStatus::Live;
-        self.connection.lost = false;
         self.connection.presence.reset();
         let auth = live.driver.session.auth.clone();
         self.connection.status_note = live_status_for(&auth);

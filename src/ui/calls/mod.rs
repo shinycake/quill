@@ -212,22 +212,18 @@ impl QuillApp {
             let Some(call) = live.driver.session.calls.active_call.as_ref() else {
                 return;
             };
-            let (call_id, camera_on) = (call.id, !call.camera_on);
+            let (call_id, want_on) = (call.id, !call.camera_on);
             let ready = live.driver.call_video_ready();
+            let result = live.driver.set_call_camera(call_id, want_on && ready);
+            let camera_on = live
+                .driver
+                .session
+                .calls
+                .active_call
+                .as_ref()
+                .is_some_and(|call| call.camera_on);
             self.connection.status_note =
-                match live.driver.set_call_camera(call_id, camera_on && ready) {
-                    Ok(()) => {
-                        if camera_on {
-                            tr(keys::Q_OPS_CAMERA_ON_2).into()
-                        } else {
-                            tr(keys::Q_OPS_CAMERA_OFF_2).into()
-                        }
-                    }
-                    Err(err) => tr_with(
-                        keys::Q_OPS_COULD_NOT_CHANGE_CAMERA_STATE,
-                        &[("err", &err.to_string())],
-                    ),
-                };
+                camera_toggle_note(result.map_err(|e| e.to_string()), camera_on);
         } else if let Some(call) = self
             .demo_session
             .as_mut()
@@ -883,6 +879,8 @@ pub(super) mod call_video_demo;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod call_video_tests;
+#[cfg(test)]
+mod camera_note_tests;
 pub(super) mod demo_feed;
 pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]
@@ -890,3 +888,14 @@ mod live_pip_demo;
 mod live_pip_follow;
 pub(super) mod stream_title;
 pub(super) mod stream_view;
+
+/// The status note after a camera toggle, read from the call's resulting
+/// `camera_on` rather than from what the toggle asked for: the driver may
+/// keep the camera off (video not ready), so the request is not the state.
+pub(super) fn camera_toggle_note(result: Result<(), String>, camera_on: bool) -> String {
+    match result {
+        Ok(()) if camera_on => tr(keys::Q_OPS_CAMERA_ON_2).into(),
+        Ok(()) => tr(keys::Q_OPS_CAMERA_OFF_2).into(),
+        Err(err) => tr_with(keys::Q_OPS_COULD_NOT_CHANGE_CAMERA_STATE, &[("err", &err)]),
+    }
+}

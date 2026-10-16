@@ -71,11 +71,30 @@ fn trace(line: &str) {
 /// tray timer); emits only on change.
 pub fn sync_icon_badge(session: Option<&Session>) {
     let unread = crate::notify_accounts::total_unread(session).count;
+    let forced = INVALIDATED.swap(false, std::sync::atomic::Ordering::SeqCst);
+    sync_with(unread, forced, push_badge);
+}
+
+/// The OS may have lost or reset the badge without telling us (the app
+/// came back to the front, the account on screen changed, the user
+/// toggled badges in system settings), so the next sync pushes the count
+/// again even if it equals the last one pushed. The cache only dedupes.
+pub fn invalidate_icon_badge() {
+    INVALIDATED.store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::wake::CHROME.poke();
+}
+
+static INVALIDATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn sync_with(unread: u32, forced: bool, push: impl FnOnce(u32) -> bool) {
     LAST_SENT.with(|last| {
+        if forced {
+            last.set(None);
+        }
         if last.get() == Some(unread) {
             return;
         }
-        let pushed = push_badge(unread);
+        let pushed = push(unread);
         trace(&format!("icon-badge: unread={unread} pushed={pushed}"));
         if pushed {
             last.set(Some(unread));
@@ -362,6 +381,22 @@ fn emit_launcher_entry(unread: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn badge_is_repushed_after_invalidation_but_deduped_otherwise() {
+        let pushes = std::cell::Cell::new(0);
+        let push = |_| {
+            pushes.set(pushes.get() + 1);
+            true
+        };
+        sync_with(4, false, push);
+        sync_with(4, false, push);
+        assert_eq!(pushes.get(), 1, "same count is deduped");
+        sync_with(4, true, push);
+        assert_eq!(pushes.get(), 2, "re-activation pushes the same count again");
+        sync_with(4, false, push);
+        assert_eq!(pushes.get(), 2);
+    }
 
     #[test]
     fn latest_slot_keeps_only_the_newest_value() {

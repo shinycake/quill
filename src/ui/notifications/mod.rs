@@ -279,7 +279,7 @@ impl QuillApp {
             self.connection.status_note.clone(),
             self.auth_ui.login_prevented.is_some(),
             self.folders.tab,
-            self.connection.lost,
+            self.connection_lost(),
         )
     }
 
@@ -356,14 +356,13 @@ impl QuillApp {
         // The receive thread ended on its own (panic or closed channel):
         // nothing more will arrive, so surface it like an unexpected
         // Closed with a Retry instead of a UI that silently goes stale.
+        let closed_note: String = tr(keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into();
         if bridge_lost(
             live.bridge.stopped_unexpectedly(),
             budget_hit,
-            self.connection.lost,
+            self.connection.status_note == closed_note,
         ) {
-            self.connection.lost = true;
-            self.connection.status_note =
-                tr(keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into();
+            self.connection.status_note = closed_note;
             progressed = true;
             need = RedrawNeed::Now;
         }
@@ -770,7 +769,6 @@ impl QuillApp {
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
-        self.connection.lost = false;
         self.payments.marketplace_open = false;
         self.payments.marketplace_error = None;
         self.payments.marketplace_private = true;

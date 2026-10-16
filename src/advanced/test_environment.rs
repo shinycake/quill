@@ -35,17 +35,17 @@ pub fn account_is_test(app_root: &Path, key: &AccountKey) -> bool {
     is_test_environment(&AccountPaths::for_root(app_root, key))
 }
 
-static ACTIVE_IS_TEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Remember whether the account on screen is a test account, for code that
-/// has no app state (the schedule menu's test-only repeat periods).
-pub fn set_active_test(on: bool) {
-    ACTIVE_IS_TEST.store(on, std::sync::atomic::Ordering::Relaxed);
+/// Whether the account the registry marks active connects to the test
+/// environment. Read from the account store every time, so removing,
+/// adding or switching accounts can never leave a stale copy behind.
+pub fn active_account_is_test(app_root: &Path) -> bool {
+    account_is_test(app_root, &crate::settings::active_account(app_root))
 }
 
-/// Whether the account on screen connects to the test environment.
+/// Whether the account on screen connects to the test environment, for code
+/// that has no app state (the schedule menu's test-only repeat periods).
 pub fn active_is_test() -> bool {
-    ACTIVE_IS_TEST.load(std::sync::atomic::Ordering::Relaxed)
+    crate::settings::safe_app_root().is_some_and(|root| active_account_is_test(&root))
 }
 
 /// Make the account a test account. Created before its first connect.
@@ -105,6 +105,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn active_flag_is_read_from_the_store_and_follows_removal() {
+        let root = temp_root("derive");
+        let (key, _) = add_environment_account(&root, TestModeAction::AddTest).unwrap();
+        crate::settings::set_active_account(&root, &key).unwrap();
+        assert!(active_account_is_test(&root));
+        remove_account(&root, &key).unwrap();
+        assert!(
+            !active_account_is_test(&root),
+            "the removed test account no longer makes the active one a test account"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
