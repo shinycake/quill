@@ -213,6 +213,15 @@ impl LiveSink {
         }
     }
 
+    /// Wake the armed waker (or the next arm) though nothing changed:
+    /// the player came back into sight and takes the waiting frame.
+    pub fn poke(&self) {
+        let waker = self.0.lock_or_recover().wake();
+        if let Some(waker) = waker {
+            waker();
+        }
+    }
+
     /// Call `waker` once there is something new: at once when something
     /// changed since the last wake, else on the next push, state change
     /// or end. Replaces a waker armed before.
@@ -255,8 +264,11 @@ impl LiveSink {
 
 impl LiveSource {
     /// Keep `frame` as the newest; one the UI has not taken is replaced.
+    /// The new frame is allocated and the old one freed (a few MB for a
+    /// 1080p frame) outside the lock the UI thread takes.
     pub fn push(&self, frame: LiveFrame) {
-        let waker = {
+        let frame = Some(Arc::new(frame));
+        let (waker, _replaced) = {
             let mut latest = self.0.lock_or_recover();
             if latest.end.is_some() {
                 return;
@@ -264,10 +276,10 @@ impl LiveSource {
             if latest.unshown {
                 latest.dropped = latest.dropped.saturating_add(1);
             }
-            latest.frame = Some(Arc::new(frame));
+            let replaced = std::mem::replace(&mut latest.frame, frame);
             latest.unshown = true;
             latest.pushed = latest.pushed.saturating_add(1);
-            latest.wake()
+            (latest.wake(), replaced)
         };
         if let Some(waker) = waker {
             waker();

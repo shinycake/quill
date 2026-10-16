@@ -7,37 +7,61 @@
 //! A stream's feed exists only while its feeder runs, so a picture that
 //! arrives between the drain and the native stop is dropped instead of
 //! bringing the feed back. A participant's camera or screen, and your own
-//! camera, get a feed on the first frame or when the UI asks for one.
+//! camera, get a feed when the UI asks for one while the tracked call
+//! has that video on; the engine hook only fills feeds that exist. When
+//! TDLib reports the video off (or the call left), the feed ends and goes
+//! ([`ConnectDriver::sync_call_feeds`]), so turning it on again starts
+//! from a new feed with no stale frame.
 use super::*;
 use crate::calls::engine::{LiveFrameCallback, StreamState};
 use crate::calls::live_video::{LiveEnd, LiveFrame, LiveKey, LiveSink, LiveSource, LiveState};
+use crate::state::ActiveGroupCall;
+use crate::telegram::envelope::MessageSender;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// The driver's live feeds, shared with the engine hook.
 pub(crate) type LiveFeeds = Arc<Mutex<HashMap<LiveKey, LiveSource>>>;
 
-/// The engine hook: store the frame in its feed and wake the player.
+/// The engine hook: store the frame in its feed, if it has one, and wake
+/// the player. A frame for a track nobody asked for (or one already
+/// turned off) is dropped: feeds are made only for the tracked call.
 pub(crate) fn live_frame_hook(feeds: LiveFeeds) -> LiveFrameCallback {
     Arc::new(move |key, frame| {
         // The source is cloned and the map unlocked before the push: the
         // push wakes the UI, and the waker must never run under this lock.
-        let source = {
-            let mut feeds = feeds.lock_or_recover();
-            match key {
-                LiveKey::Stream { .. } => feeds.get(&key).cloned(),
-                LiveKey::Video { .. } | LiveKey::Local { .. } => Some(
-                    feeds
-                        .entry(key)
-                        .or_insert_with(|| LiveSink::new().1)
-                        .clone(),
-                ),
-            }
-        };
+        let source = feeds.lock_or_recover().get(&key).cloned();
         if let Some(source) = source {
             source.push(frame);
         }
     })
+}
+
+/// Whether `call` has the video `key` names on: your camera, or a
+/// participant's camera or screen (yours from when you start sharing,
+/// for Quill's own preview). Streams have their own feeder.
+pub(crate) fn call_has_video(call: &ActiveGroupCall, key: LiveKey) -> bool {
+    match key {
+        LiveKey::Stream { .. } => false,
+        LiveKey::Local { call_id } => call.id == call_id && call.is_my_video_enabled,
+        LiveKey::Video {
+            call_id,
+            user_id,
+            screen,
+        } => {
+            call.id == call_id
+                && call.participants.iter().any(|participant| {
+                    participant.participant_id == MessageSender::User { user_id }
+                        && if screen {
+                            participant.screen_sharing_enabled
+                                || (participant.is_current_user
+                                    && (call.screen_sharing || call.screen_share_pending))
+                        } else {
+                            participant.video_enabled
+                        }
+                })
+        }
+    }
 }
 
 /// What a stream's state means for its picture.
@@ -52,9 +76,9 @@ fn stream_feed_change(state: StreamState) -> Option<Result<LiveState, LiveEnd>> 
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// The UI side of `key`'s feed. A stream's feed exists while its
-    /// feeder runs; a track's feed is made on demand for the tracked call
-    /// until you leave it (`None` for any other call, so a stale id
-    /// leaves nothing behind).
+    /// feeder runs; a track's feed is made on demand while the tracked
+    /// call has that video on (`None` for any other call or a video that
+    /// is off, so a stale id leaves nothing behind).
     pub fn live_sink(&self, key: LiveKey) -> Option<LiveSink> {
         self.feed_source(key).map(|source| source.sink())
     }
@@ -66,7 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && calls
                     .active_group_call
                     .as_ref()
-                    .is_some_and(|call| call.id == call_id)
+                    .is_some_and(|call| call_has_video(call, key))
         });
         let mut feeds = self.live_feeds.lock_or_recover();
         if let Some(source) = feeds.get(&key) {
@@ -122,6 +146,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// After every reducer update: end and drop the tracked call's track
+    /// feeds whose video TDLib reports off (all of them once the call is
+    /// left). The player sees the end; a feed asked for again later is a
+    /// new one, so no frame from before shows when the video comes back.
+    pub(super) fn sync_call_feeds(&self, group_call_id: i32) {
+        let calls = &self.session.calls;
+        let call = calls
+            .active_group_call
+            .as_ref()
+            .filter(|call| call.id == group_call_id && calls.left_group_call != Some(call.id));
+        let mut ended = Vec::new();
+        self.live_feeds.lock_or_recover().retain(|key, source| {
+            let ours =
+                key.call_id() == Some(group_call_id) && !matches!(key, LiveKey::Stream { .. });
+            let keep = !ours || call.is_some_and(|call| call_has_video(call, *key));
+            if !keep {
+                ended.push(source.clone());
+            }
+            keep
+        });
+        for source in ended {
+            source.end(LiveEnd::Left);
+        }
+    }
+
     /// Mirror a stream's state onto its picture's feed.
     pub(super) fn sync_stream_feed(&self, chat_id: i64, state: StreamState) {
         let Some(change) = stream_feed_change(state) else {
@@ -141,8 +190,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Push a frame into `key`'s feed, making it for the tracked call
-    /// (your own screen preview, which Quill captures itself).
+    /// Push a frame into `key`'s feed, making it while the tracked call
+    /// has that video on (your own screen preview, which Quill captures
+    /// itself).
     pub(crate) fn push_live_frame(&self, key: LiveKey, frame: LiveFrame) {
         if let Some(source) = self.feed_source(key) {
             source.push(frame);

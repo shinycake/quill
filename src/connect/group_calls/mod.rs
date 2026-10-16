@@ -71,6 +71,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(group_call_id) = active_group_call_after else {
             return Ok(());
         };
+        // Track feeds whose video went off end now, engine or not.
+        self.sync_call_feeds(group_call_id);
         let engine_available = self
             .call_engine
             .as_ref()

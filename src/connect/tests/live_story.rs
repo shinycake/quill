@@ -562,6 +562,9 @@ fn a_call_dropped_for_a_live_story_loses_its_transport() {
         user_id: 42,
         screen: false,
     };
+    // 42's camera is on, and the call window asks for its feed.
+    h.ingest(&group_participant_json(42, false, CAMERA_INFO, "null"));
+    let camera = h.driver.live_sink(key).unwrap();
     handle.emit_live_frame(
         key,
         crate::calls::live_video::LiveFrame::new(
@@ -574,7 +577,6 @@ fn a_call_dropped_for_a_live_story_loses_its_transport() {
         )
         .unwrap(),
     );
-    let camera = h.driver.live_sink(key).unwrap();
     assert!(camera.latest().is_some());
     add_other_live_story(&mut h);
     h.driver.join_live_story(ChatId(7), 8).unwrap();
