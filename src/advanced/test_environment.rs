@@ -35,40 +35,59 @@ pub fn account_is_test(app_root: &Path, key: &AccountKey) -> bool {
     is_test_environment(&AccountPaths::for_root(app_root, key))
 }
 
-/// The active account's test flag, kept in memory so render paths never read
-/// the account store. Every writer of the registry or the marker calls
-/// [`invalidate_active_test`]; the next read recomputes it once.
-static ACTIVE_TEST: std::sync::Mutex<Option<(std::path::PathBuf, bool)>> =
-    std::sync::Mutex::new(None);
-/// Bumped on each invalidation so a read that raced a write never stores a
-/// value computed from the old state.
-static ACTIVE_TEST_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// One app root's remembered flag. `epoch` is bumped on each invalidation so
+/// a read that raced a write never stores a value computed from old state.
+#[derive(Default)]
+struct CachedFlag {
+    epoch: u64,
+    value: Option<bool>,
+}
 
-fn cache_lock() -> std::sync::MutexGuard<'static, Option<(std::path::PathBuf, bool)>> {
+type FlagMap = std::collections::BTreeMap<std::path::PathBuf, CachedFlag>;
+
+/// The active account's test flag per app root, kept in memory so render
+/// paths never read the account store. Every writer of the registry or the
+/// marker calls [`invalidate_active_test`] for its root; the next read of
+/// that root recomputes once. Other roots are untouched.
+static ACTIVE_TEST: std::sync::Mutex<FlagMap> = std::sync::Mutex::new(FlagMap::new());
+
+fn cache_lock() -> std::sync::MutexGuard<'static, FlagMap> {
     ACTIVE_TEST.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Forget the remembered flag: the registry or an account marker changed.
-pub fn invalidate_active_test() {
-    ACTIVE_TEST_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    *cache_lock() = None;
+fn forget(slot: &mut CachedFlag) {
+    slot.epoch = slot.epoch.wrapping_add(1);
+    slot.value = None;
+}
+
+/// Forget the remembered flag of this app root: its registry, an account
+/// folder or an account marker changed.
+pub fn invalidate_active_test(app_root: &Path) {
+    forget(cache_lock().entry(app_root.to_path_buf()).or_default());
+}
+
+/// Forget the flag of every app root, for a writer that cannot name its root.
+fn invalidate_all_active_test() {
+    cache_lock().values_mut().for_each(forget);
 }
 
 /// Whether the account the registry marks active connects to the test
 /// environment. Computed from the store on the first read after any change,
 /// then served from memory.
 pub fn active_account_is_test(app_root: &Path) -> bool {
-    use std::sync::atomic::Ordering::SeqCst;
-    if let Some((root, value)) = cache_lock().as_ref()
-        && root == app_root
-    {
-        return *value;
-    }
-    let epoch = ACTIVE_TEST_EPOCH.load(SeqCst);
+    let epoch = {
+        let mut cache = cache_lock();
+        let slot = cache.entry(app_root.to_path_buf()).or_default();
+        if let Some(value) = slot.value {
+            return value;
+        }
+        slot.epoch
+    };
     let value = account_is_test(app_root, &crate::settings::active_account(app_root));
     let mut cache = cache_lock();
-    if ACTIVE_TEST_EPOCH.load(SeqCst) == epoch {
-        *cache = Some((app_root.to_path_buf(), value));
+    let slot = cache.entry(app_root.to_path_buf()).or_default();
+    if slot.epoch == epoch {
+        slot.value = Some(value);
     }
     value
 }
@@ -77,9 +96,6 @@ pub fn active_account_is_test(app_root: &Path) -> bool {
 /// that has no app state (the schedule menu's test-only repeat periods).
 /// Render-safe: memory only once the flag has been computed.
 pub fn active_is_test() -> bool {
-    if let Some((_, value)) = cache_lock().as_ref() {
-        return *value;
-    }
     crate::settings::safe_app_root().is_some_and(|root| active_account_is_test(&root))
 }
 
@@ -87,7 +103,11 @@ pub fn active_is_test() -> bool {
 pub fn mark_test_environment(paths: &AccountPaths) -> std::io::Result<()> {
     std::fs::create_dir_all(&paths.root)?;
     let written = std::fs::write(paths.root.join(MARKER_FILE), b"1");
-    invalidate_active_test();
+    // `<app root>/accounts/<key>`: the root two levels up owns the cache entry.
+    match paths.root.parent().and_then(Path::parent) {
+        Some(app_root) => invalidate_active_test(app_root),
+        None => invalidate_all_active_test(),
+    }
     written
 }
 
@@ -173,6 +193,35 @@ mod tests {
         assert!(active_account_is_test(&root), "memory, not disk, on read");
         crate::settings::set_active_account(&root, &prod).unwrap();
         assert!(!active_account_is_test(&root), "switch back");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn another_roots_writes_do_not_clear_this_roots_flag() {
+        let root = temp_root("isolated");
+        let other = temp_root("isolated-other");
+        let (test, _) = add_environment_account(&root, TestModeAction::AddTest).unwrap();
+        crate::settings::set_active_account(&root, &test).unwrap();
+        assert!(active_account_is_test(&root));
+        let marker = AccountPaths::for_root(&root, &test).root.join(MARKER_FILE);
+        std::fs::remove_file(&marker).unwrap();
+        for _ in 0..20 {
+            let _ = add_environment_account(&other, TestModeAction::AddTest).unwrap();
+            invalidate_active_test(&other);
+        }
+        assert!(active_account_is_test(&root), "still the remembered value");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn deleting_an_account_folder_forgets_the_flag() {
+        let root = temp_root("folder");
+        let (test, _) = add_environment_account(&root, TestModeAction::AddTest).unwrap();
+        crate::settings::set_active_account(&root, &test).unwrap();
+        assert!(active_account_is_test(&root));
+        crate::settings::delete_account_folder(&root, &test).unwrap();
+        assert!(!active_account_is_test(&root), "the marker went with the folder");
         let _ = std::fs::remove_dir_all(&root);
     }
 

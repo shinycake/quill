@@ -52,7 +52,10 @@ pub fn pending_deletes(app_root: &Path) -> Vec<AccountKey> {
 /// Delete `key`'s folder (`accounts/<key>`); a missing folder is fine.
 /// Never call it while a TDLib client of `key` may still be open.
 pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
-    match std::fs::remove_dir_all(AccountPaths::for_root(app_root, key).root) {
+    let removed = std::fs::remove_dir_all(AccountPaths::for_root(app_root, key).root);
+    // The folder held the test-environment marker.
+    crate::advanced::test_environment::invalidate_active_test(app_root);
+    match removed {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     }

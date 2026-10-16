@@ -569,6 +569,7 @@ pub fn wipe_local_data(root: &Path, accounts: &[AccountKey], state: &UnlockState
     for account in accounts {
         let _ = std::fs::remove_dir_all(AccountPaths::for_root(root, account).root);
     }
+    crate::advanced::test_environment::invalidate_active_test(root);
     forget_passcode(root, state);
 }
 
