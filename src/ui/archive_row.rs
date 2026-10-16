@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::{ChatListFilter, QuillApp};
+use super::chat_list_keys::ListRow;
 use super::chat_row::chat_row_height;
 use super::pressable::PressableDiv;
 use super::*;
@@ -187,6 +188,7 @@ impl QuillApp {
                             ),
                     ),
             )
+            .map(|row| self.chat_list_nav_row(row, ListRow::Archive, false, cx))
             .into_any_element()
     }
 
@@ -220,6 +222,7 @@ impl QuillApp {
             )
             .child(div().text_sm().font_semibold().child(TITLE))
             .when_some(badge, |this, text| this.child(muted_badge(text, cx)))
+            .map(|row| self.chat_list_nav_row(row, ListRow::Archive, false, cx))
             .into_any_element()
     }
 

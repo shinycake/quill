@@ -77,6 +77,8 @@ pub(crate) struct ChatListUi {
     /// full content was still being fetched; resolved on the next render
     /// once the `story` response lands in the cache.
     pub(super) pending_story_open: Option<(i64, i32)>,
+    /// The keyboard selection in the list and in its search results.
+    pub(super) keys: super::chat_list_keys::ChatListKeys,
 }
 
 impl ChatListUi {
@@ -107,6 +109,7 @@ impl ChatListUi {
             forum_column_shown: false,
             pending_close_secret_chat: None,
             pending_story_open: None,
+            keys: Default::default(),
         }
     }
 }

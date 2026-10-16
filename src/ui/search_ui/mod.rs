@@ -53,7 +53,7 @@ pub(super) fn search_result_row(
     photo: Option<std::path::PathBuf>,
     cx: &mut Context<QuillApp>,
     on_pick: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
-) -> impl IntoElement {
+) -> gpui_kit::Stateful<Div> {
     let preview = one_line_preview(&preview);
     let stamp = date.filter(|date| *date > 0).map(|date| {
         let now = quill::local_time::civil_local(quill::local_time::now_unix());
@@ -333,10 +333,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Escape: closes the topmost open layer (see `esc_stack`). The lock
-    /// screen ignores it.
+    /// Escape: closes the topmost open layer (see `esc_stack`); with none
+    /// open, moves between the chat and the chat list
+    /// (`chat_list_keys::escape_to_chat_list`). The lock screen ignores it.
     pub(super) fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.dismiss_topmost_layer(window, cx);
+        if !self.dismiss_topmost_layer(window, cx) {
+            self.escape_to_chat_list(window, cx);
+        }
     }
 
     /// Slice CL2: "Clear" on the Recent searches heading —

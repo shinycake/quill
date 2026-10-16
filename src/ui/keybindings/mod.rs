@@ -401,6 +401,7 @@ fn default_bindings() -> Vec<KeyBinding> {
     let mut bindings: Vec<KeyBinding> =
         shortcut_rows().into_iter().map(|row| row.binding).collect();
     bindings.extend(composer_scoped_bindings());
+    bindings.extend(super::chat_list_keys::chat_list_bindings());
     bindings
 }
 
@@ -728,6 +729,7 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     // After the rebindable rows: the composer link chord ties with quick
     // switch on depth and the later binding wins.
     bindings.extend(composer_bindings());
+    bindings.extend(super::chat_list_keys::chat_list_bindings());
     cx.clear_key_bindings();
     cx.bind_keys(bindings);
 }
@@ -764,7 +766,7 @@ mod tests {
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
         // macOS adds ⌃⌘F first, for the Window menu's Toggle Full Screen.
-        let expected = if cfg!(target_os = "macos") { 94 } else { 93 };
+        let expected = if cfg!(target_os = "macos") { 105 } else { 104 };
         assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
