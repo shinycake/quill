@@ -735,6 +735,9 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod appearance_keybindings_section;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod glass_readability_tests;
 mod new_accent_picker;
 mod send_to_menu_section;
 mod telegram_wallpapers;
