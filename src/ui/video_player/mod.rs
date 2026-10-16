@@ -827,8 +827,12 @@ fn open_backend(path: &Path, purpose: Purpose) -> Result<Box<dyn Backend>, Playe
     }
     // Only capture builds render a still (a blocking decode of up to two
     // seconds); the variable means nothing to other builds.
+    // `QUILL_DEMO_REAL_PLAYER=1` keeps the real backend in a capture, for
+    // playback and seek paths a still cannot exercise.
     #[cfg(feature = "demo-capture")]
-    if std::env::var_os("QUILL_DEMO_CAPTURE").is_some() {
+    if std::env::var_os("QUILL_DEMO_CAPTURE").is_some()
+        && std::env::var_os("QUILL_DEMO_REAL_PLAYER").is_none()
+    {
         return backend_still::StillBackend::open(path).map(|b| Box::new(b) as Box<dyn Backend>);
     }
     #[cfg(target_os = "macos")]
