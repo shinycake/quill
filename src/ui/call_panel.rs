@@ -235,7 +235,7 @@ impl QuillApp {
             muted: call.muted,
             camera_on: call.camera_on,
             screen_sharing: call.screen_sharing,
-            can_share_screen: ready && cfg!(any(target_os = "macos", windows)),
+            can_share_screen: ready && quill::calls::capture::screen::can_share(),
             emojis: call
                 .ready
                 .as_ref()

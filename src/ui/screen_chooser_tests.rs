@@ -10,7 +10,9 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::calls::capture::screen::{ScreenAccess, ScreenSource, SourceId, SourceKind};
+use quill::calls::capture::screen::{
+    SYSTEM_PICKER_SOURCE, ScreenAccess, ScreenSource, SourceId, SourceKind,
+};
 use quill::state::ActiveGroupCall;
 use std::sync::Arc;
 
@@ -44,7 +46,10 @@ fn new_app(cx: &mut TestAppContext, access: ScreenAccess) -> (Entity<QuillApp>, 
     let app = slot.borrow().clone().unwrap();
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, _, _| {
-        app.screen_share.backend = Some(Arc::new(DemoScreens { access }));
+        app.screen_share.backend = Some(Arc::new(DemoScreens {
+            access,
+            system_picker: false,
+        }));
         let session = app.demo_session.as_mut().unwrap();
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_joined: true,
@@ -288,6 +293,34 @@ fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppConte
     });
     vcx.run_until_parked();
     assert!(group_sharing(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_system_picker_shares_and_stops_without_the_chooser(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.screen_share.backend = Some(Arc::new(DemoScreens {
+            access: ScreenAccess::Granted,
+            system_picker: true,
+        }));
+        app.toggle_group_call_screen_share(cx);
+    });
+    vcx.run_until_parked();
+    assert!(group_sharing(&app, vcx), "the button shares at once");
+    app.read_with(vcx, |app, _| {
+        assert!(app.screen_share.window.is_none(), "no chooser");
+        assert_eq!(
+            app.screen_share.demo_active,
+            Some(SourceId(SYSTEM_PICKER_SOURCE.into()))
+        );
+    });
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.open_screen_chooser(ScreenFor::Group, cx));
+    });
+    vcx.run_until_parked();
+    assert!(!group_sharing(&app, vcx), "pressing it again stops");
+    app.read_with(vcx, |app, _| assert!(app.screen_share.window.is_none()));
 }
 
 #[test]

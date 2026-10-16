@@ -520,3 +520,81 @@ and works out the source column offsets once per frame.
   and Windows 11 before the slice is trusted, and a Windows 10 1809
   machine for the Unsupported note.
 - A real call hearing the system audio.
+
+# Slice 4: Linux screen capture
+
+Slice 4 of 4. Brings Quill's own screen capture, the chooser and pause to
+Linux, the way tdesktop's tgcalls capturers do it.
+
+**Only compile-checked.** No Linux desktop was available. All Linux code
+(`screen_linux.rs`, `pipewire_dl.rs`, `screen_x11.rs`) was type-checked
+and linted with `cargo check` and `cargo clippy --all-targets --features
+demo-capture --target x86_64-unknown-linux-gnu` from macOS, with stub C
+tools and pkg-config. It has never run. The SPA POD writer and parser,
+the PipeWire buffer conversion and the YUV conversions are platform
+independent and unit-tested on macOS.
+
+## What tdesktop does
+
+- On Wayland no app may read the screen, so tgcalls opens the
+  `org.freedesktop.portal.ScreenCast` portal and the desktop shows its own
+  picker. tdesktop then skips its chooser (`uniqueDesktopCaptureSource`):
+  the share button starts sharing, or stops a running share.
+- On X11 tgcalls lists screens and windows itself and tdesktop shows its
+  chooser as on the other systems.
+- System audio sharing is Windows only.
+
+## What changed
+
+- **`src/calls/capture/screen_linux.rs`**: `LinuxScreen` picks the portal
+  when `WAYLAND_DISPLAY` is set (as GPUI does) and X11 otherwise.
+  - Portal: `ashpd` creates a session, asks for one monitor or window
+    (the types the portal offers), with the cursor embedded where
+    supported, starts it and opens the PipeWire remote. The share ends
+    when the portal session closes (the desktop's own "Stop sharing", the
+    source going away) or the picker is cancelled. A missing portal or
+    PipeWire gives "Screen sharing needs xdg-desktop-portal and PipeWire."
+    (`qll_ops_screen_portal_missing`).
+  - PipeWire pausing the stream after frames have flowed pauses the share
+    (`toggleGroupCallScreenSharingIsPaused`); streaming again resumes it.
+- **`pipewire_dl.rs`**: libpipewire-0.3 is loaded at run time with
+  `libloading`, so building needs no PipeWire headers and Quill still
+  starts where PipeWire is missing. One stream per share on its own
+  `pw_thread_loop`, shared-memory buffers mapped by PipeWire. Callbacks
+  never unwind into C (`catch_unwind`), and teardown runs in reverse
+  order under the loop lock.
+- **`spa_pod.rs`**: writes the format offer (raw video, I420 preferred,
+  NV12 and BGRx/RGBx accepted, any size, up to 15 fps) and parses the
+  negotiated format. No DMA-BUF modifiers are offered.
+- **`pipewire_frames.rs`, `screen_yuv.rs`**: the negotiated buffer to the
+  call's I420 at the fitted size.
+- **`screen_x11.rs`** (best effort, as the design says): RandR monitors
+  (primary first) and `_NET_CLIENT_LIST` windows without docks, desktops,
+  hidden windows, Quill's own and anything under 100 × 100. Pictures come
+  from `GetImage` on the root area or the window's Composite pixmap. A
+  shared window is checked every 500 ms: unmapped or
+  `_NET_WM_STATE_HIDDEN` pauses, back resumes, gone ends. Only 24/32-bit
+  little-endian TrueColor displays are read; others get Unsupported.
+- The chooser skips itself where the OS has a picker
+  (`ScreenBackend::system_picker`). `external_screen_capture_enabled()`
+  and `can_share_screen` include Linux.
+- Dependencies: `ashpd` 0.13 (screencast, async-io; MIT), and the
+  `composite` and `randr` features of the existing `x11rb`.
+
+## Verified
+
+- `cargo check` and `cargo clippy -D warnings` for
+  `x86_64-unknown-linux-gnu` with `demo-capture` and all targets: clean.
+- macOS gate (core and UI tests).
+- Unit tests: the POD offer and the parse of a negotiated format, I420,
+  NV12 and BGRx/RGBx buffers to I420 (strides, scaling, RGB order), the
+  X11 source id round trip.
+- GPUI test: with a system-picker backend the share button shares at
+  once without a chooser and stops a running share.
+
+## Not verified
+
+- Everything that needs a Linux desktop: the portal on GNOME and KDE,
+  the PipeWire stream and its formats, pause from the stream state, the
+  session-closed end, and X11 listing, thumbnails, capture and the window
+  poll. The owner should check these on a Wayland and an X11 session.

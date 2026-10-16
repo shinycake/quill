@@ -888,6 +888,7 @@
 "qll_ops_screen" = "Screen";
 "qll_ops_screen_access_allow" = "Please allow **Screen Recording** for Quill in Privacy Settings.";
 "qll_ops_screen_access_needed" = "Quill does not have access to screen recording required for Screen Sharing.";
+"qll_ops_screen_portal_missing" = "Screen sharing needs xdg-desktop-portal and PipeWire.";
 "qll_ops_screen_share_off" = "screen share off";
 "qll_ops_screen_share_on" = "screen share on";
 "qll_ops_screen_share_paused_by_peer" = "Screen share paused by peer";
