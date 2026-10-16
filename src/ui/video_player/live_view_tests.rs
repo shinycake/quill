@@ -14,9 +14,7 @@ use gpui_kit::{
     VisualTestContext, Window, div, px,
 };
 use quill::calls::live_video::convert::gradient_frame;
-use quill::calls::live_video::{
-    LiveEnd, LiveFrame, LiveRotation, LiveSink, LiveSource, LiveState,
-};
+use quill::calls::live_video::{LiveEnd, LiveFrame, LiveRotation, LiveSink, LiveSource, LiveState};
 use std::time::{Duration, Instant};
 
 /// One tile, 160 × 90, at `top` in a window that clips.
