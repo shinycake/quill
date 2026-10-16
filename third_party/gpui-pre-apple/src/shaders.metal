@@ -469,7 +469,9 @@ vertex ShadowVertexOutput shadow_vertex(
   Shadow shadow = shadows[shadow_id];
 
   Bounds_ScaledPixels bounds;
-  if (shadow.inset != 0u) {
+  // QUILL: only an inset shadow stays inside its element; one cut to outside
+  // it (inset 2) needs the full drop-shadow quad.
+  if (shadow.inset == 1u) {
     bounds = shadow.element_bounds;
   } else {
     // Leave room for the gaussian tail outside the shadow rect.
