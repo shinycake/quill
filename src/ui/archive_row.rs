@@ -152,8 +152,6 @@ impl QuillApp {
             .pressable(cx.theme())
             .role(Role::Button)
             .aria_label(format!("{TITLE} — {}", summary.text()))
-            .border_l_2()
-            .border_color(transparent_black())
             .bg(cx.theme().sidebar)
             .on_click(cx.listener(|this, _, _, cx| this.open_archive_folder(cx)))
             .on_mouse_down(

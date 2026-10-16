@@ -293,6 +293,7 @@ pub(super) fn message_footer(
             OutboxReceipt::None => "",
         }
     };
+    let outgoing = pending || receipt != OutboxReceipt::None;
     let accessible = format!("{time} {status}");
     Some(
         div()
@@ -303,7 +304,7 @@ pub(super) fn message_footer(
             .items_center()
             .gap(px(3.))
             .text_xs()
-            .opacity(0.7)
+            .opacity(footer_alpha(outgoing))
             .child(time)
             .when_some(mark, |this, icon| {
                 this.child(Icon::new(icon).size(px(14.)).flex_none())
@@ -342,6 +343,7 @@ pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
         return time;
     }
     let tooltip = meta.tooltip.clone();
+    let alpha = footer_alpha(meta.pending || meta.receipt != OutboxReceipt::None);
     let label = if meta.imported {
         Some("imported")
     } else if meta.edited {
@@ -365,7 +367,7 @@ pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
             .when_some(meta.signature.clone(), |this, signature| {
                 this.child(
                     div()
-                        .opacity(0.7)
+                        .opacity(alpha)
                         .max_w(px(200.))
                         .truncate()
                         .child(signature),
@@ -377,7 +379,7 @@ pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
                         .id("message-pinned")
                         .role(Role::Label)
                         .aria_label("pinned")
-                        .opacity(0.7)
+                        .opacity(alpha)
                         .child(Icon::new(gpui_kit::assets::IconName::Pin).size(px(12.))),
                 )
             })
@@ -393,13 +395,13 @@ pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
                         .flex()
                         .items_center()
                         .gap_0p5()
-                        .opacity(0.7)
+                        .opacity(alpha)
                         .child(Icon::new(gpui_kit::assets::IconName::Eye).size(px(12.)))
                         .child(super::statistics::format_view_count(views)),
                 )
             })
             .when_some(label, |this, label| {
-                this.child(div().opacity(0.7).child(label))
+                this.child(div().opacity(alpha).child(label))
             })
             .children(time)
             .into_any_element(),
@@ -919,3 +921,23 @@ pub use rich_text_reserving::*;
 mod rich_block_element;
 #[allow(unused_imports)]
 pub use rich_block_element::*;
+
+/// Opacity of the in-bubble time row (time, receipt ticks, views, edited).
+/// Incoming bubbles keep it quiet (0.7); on an outgoing bubble the text is
+/// light on the accent fill and anything below full opacity falls under
+/// WCAG AA (3.3:1 light, 3.1:1 dark at 0.7; the dark accent only reaches
+/// 4.6:1 with full white).
+fn footer_alpha(outgoing: bool) -> f32 {
+    if outgoing { 1.0 } else { 0.7 }
+}
+
+#[cfg(test)]
+mod footer_alpha_tests {
+    /// Outgoing meta is full opacity (AA on the accent fill); incoming
+    /// stays quiet.
+    #[test]
+    fn outgoing_meta_is_opaque() {
+        assert_eq!(super::footer_alpha(true), 1.0);
+        assert!(super::footer_alpha(false) < 1.0);
+    }
+}

@@ -671,11 +671,7 @@ impl QuillApp {
                     .flex_col()
                     .gap_1()
                     .child(section(tr(keys::INFO_BIO_LABEL)))
-                    .child(
-                        Textarea::new(&dialog.bio_input)
-                            .aria_label(tr(keys::INFO_BIO_LABEL))
-                            .h(px(40.)),
-                    )
+                    .child(Textarea::new(&dialog.bio_input).aria_label(tr(keys::INFO_BIO_LABEL)))
                     .child(
                         div().flex().gap_2().child(
                             Button::new("edit-profile-save-bio")

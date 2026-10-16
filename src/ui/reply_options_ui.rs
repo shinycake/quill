@@ -430,8 +430,9 @@ impl QuillApp {
                     .px_2()
                     .py_1()
                     .rounded_md()
-                    .border_l_2()
-                    .border_color(if selected { accent() } else { bg_canvas() })
+                    // Selection is a filled row (plus the check), not a
+                    // leading bar that squares the rounded corners.
+                    .when(selected, |row| row.bg(cx.theme().primary.opacity(0.25)))
                     .text_sm()
                     .role(gpui_kit::Role::Button)
                     .aria_label(format!(

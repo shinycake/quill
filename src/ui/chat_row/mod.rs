@@ -169,12 +169,6 @@ pub(super) fn static_chat_row(
         .role(Role::Button)
         .aria_label(title)
         .aria_selected(selected)
-        .border_l_2()
-        .border_color(if selected {
-            cx.theme().primary
-        } else {
-            transparent_black()
-        })
         .bg(if selected {
             cx.theme().primary.opacity(0.25)
         } else {
@@ -184,7 +178,11 @@ pub(super) fn static_chat_row(
         .child(
             div()
                 .text_xs()
-                .text_color(cx.theme().muted_foreground)
+                .text_color(if selected {
+                    selected_secondary_fg(cx.theme().foreground)
+                } else {
+                    cx.theme().muted_foreground
+                })
                 .child(preview),
         )
 }
@@ -343,6 +341,13 @@ pub(super) fn session_chat_row(
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let id = chat.id;
+    // The selected row sits on a tinted fill; its secondary text uses a
+    // foreground tuned for AA contrast there (the grey muted token is 3.2:1).
+    let muted_fg = if selected {
+        selected_secondary_fg(cx.theme().foreground)
+    } else {
+        muted_fg
+    };
     let topic_line = topic_names.clone().filter(|_| row_style.preview_lines < 3);
     let title: String = if saved {
         tr(keys::SAVED_MESSAGES).to_string()
@@ -441,12 +446,6 @@ pub(super) fn session_chat_row(
         .when(selected, |this| {
             this.hover(|s| s.bg(cx.theme().primary.opacity(0.3)))
                 .active(|s| s.bg(cx.theme().primary.opacity(0.4)))
-        })
-        .border_l_2()
-        .border_color(if selected {
-            cx.theme().primary
-        } else {
-            transparent_black()
         })
         .bg(if selected {
             cx.theme().primary.opacity(0.25)
@@ -581,7 +580,7 @@ pub(super) fn session_chat_row(
                                             },
                                         )
                                         .when_some(kind_icon, |this, icon| {
-                                            this.child(row_glyph(icon, cx.theme().muted_foreground))
+                                            this.child(row_glyph(icon, muted_fg))
                                         })
                                         .when_some(verify_icon, |this, path| {
                                             this.child(super::bot_verify_icon::bot_verify_icon(path))
@@ -609,7 +608,7 @@ pub(super) fn session_chat_row(
                                         .when(chat.is_muted(), |this| {
                                             this.child(row_glyph(
                                                 IconName::BellOff,
-                                                cx.theme().muted_foreground,
+                                                muted_fg,
                                             ))
                                         })
                                         .when(chat.is_forum_chat(), |this| {
@@ -624,7 +623,7 @@ pub(super) fn session_chat_row(
                                             .items_center()
                                             .gap_0p5()
                                             .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
+                                            .text_color(muted_fg)
                                             .when(status != RowStatus::None, |this| {
                                                 this.child(row_status_mark(status, cx))
                                             })
@@ -641,7 +640,7 @@ pub(super) fn session_chat_row(
                                     .text_xs()
                                     .font_semibold()
                                     .truncate()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(muted_fg)
                                     .child(
                                         topic_names
                                             .unwrap_or_else(|| chat.last_preview_sender.clone()),
@@ -676,7 +675,11 @@ pub(super) fn session_chat_row(
                                                     div()
                                                         .flex_none()
                                                         .text_xs()
-                                                        .text_color(accent())
+                                                        .text_color(if selected {
+                                                            muted_fg
+                                                        } else {
+                                                            accent().into()
+                                                        })
                                                         .child(format!("{sender}: ")),
                                                 )
                                             },
@@ -746,7 +749,7 @@ pub(super) fn session_chat_row(
                                                                     .map(|sender| format!("{sender}: "))
                                                             })
                                                             .flatten(),
-                                                        cx,
+                                                        muted_fg,
                                                     ),
                                                 )
                                                 .into_any_element(),
@@ -779,7 +782,7 @@ pub(super) fn session_chat_row(
                                             {
                                                 this.child(row_glyph(
                                                     IconName::Pin,
-                                                    cx.theme().muted_foreground,
+                                                    muted_fg,
                                                 ))
                                             }
                                             None => this,
@@ -902,3 +905,62 @@ mod folder_tag_context;
 mod with_call_badge;
 #[allow(unused_imports)]
 pub use with_call_badge::*;
+
+/// Opacity of the foreground used for secondary text (time, preview) on
+/// the selected chat row.
+const SELECTED_SECONDARY_ALPHA: f32 = 0.78;
+
+/// Secondary text colour on the selected row's tinted fill: the theme
+/// foreground, softened but kept above WCAG AA (4.5:1) on that fill in
+/// both themes (the grey `muted_foreground` is only 3.2:1 there).
+pub(crate) fn selected_secondary_fg(foreground: Hsla) -> Hsla {
+    foreground.opacity(SELECTED_SECONDARY_ALPHA)
+}
+
+#[cfg(test)]
+mod selected_row_tests {
+    use gpui_kit::{Hsla, Rgba, rgb};
+
+    fn blend(top: Rgba, a: f32, under: Rgba) -> Rgba {
+        Rgba {
+            r: top.r * a + under.r * (1. - a),
+            g: top.g * a + under.g * (1. - a),
+            b: top.b * a + under.b * (1. - a),
+            a: 1.,
+        }
+    }
+    fn lum(c: Rgba) -> f32 {
+        let f = |v: f32| {
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    fn ratio(a: Rgba, b: Rgba) -> f32 {
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    /// Selected-row secondary text on the 25% primary tint, both themes.
+    #[test]
+    fn selected_secondary_text_meets_aa() {
+        // (foreground, sidebar, primary) of the default light and dark themes.
+        for (fg, sidebar, primary) in [
+            (0x1f2328, 0xfafafa, 0x0969da),
+            (0xe6edf3, 0x22272e, 0x2f81f7),
+        ] {
+            let fgh: Hsla = rgb(fg).into();
+            let text: Rgba = super::selected_secondary_fg(fgh).into();
+            let tint = blend(rgb(primary), 0.25, rgb(sidebar));
+            let shown = blend(text, text.a, tint);
+            assert!(
+                ratio(shown, tint) >= 4.5,
+                "fg {fg:x}: {}",
+                ratio(shown, tint)
+            );
+        }
+    }
+}
