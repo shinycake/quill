@@ -272,11 +272,13 @@ impl ComposerSends {
     }
 }
 
-/// The auth state went from signed in to signed out.
+/// The auth state went from signed in (or on its way out) to signed out.
+/// `Closing` counts as on the way out, so Ready then Closing then Closed
+/// ends the session whether or not one poll saw all three.
 fn session_ended(prev: &AuthorizationState, now: &AuthorizationState) -> bool {
     matches!(
         prev,
-        AuthorizationState::Ready | AuthorizationState::LoggingOut
+        AuthorizationState::Ready | AuthorizationState::LoggingOut | AuthorizationState::Closing
     ) && matches!(
         now,
         AuthorizationState::WaitPhoneNumber | AuthorizationState::Closed
@@ -394,7 +396,7 @@ impl QuillApp {
     }
 
     /// The account on screen left `Ready` for good (`logOut`, an expired
-    /// or terminated session, a lost bridge ending in `Closed`): its
+    /// or terminated session, TDLib closing the client): its
     /// choices go, whether or not `LoggingOut` was seen on the way.
     pub(in crate::ui) fn forget_sends_after_auth(
         &mut self,

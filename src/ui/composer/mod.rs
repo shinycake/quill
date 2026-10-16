@@ -669,9 +669,8 @@ impl QuillApp {
             }
             appended
         });
-        if let Err(note) = appended {
-            self.connection.status_note = note.into();
-        }
+        // A limit note is about a chat that is not on screen: show nothing.
+        let _ = appended;
         self.check_tray_videos(cx);
         cx.notify();
     }

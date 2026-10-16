@@ -81,9 +81,12 @@ impl QuillApp {
         }
     }
 
-    /// Thumbnails of tray files are still being made.
+    /// Thumbnails of the open slot's tray files are still being made.
     pub(super) fn tray_thumbnails_pending(&self) -> bool {
-        !self.composer_ui.send_box.thumbnailing.is_empty()
+        let making = &self.composer_ui.send_box.thumbnailing;
+        self.pending_attachments()
+            .iter()
+            .any(|attachment| making.contains_key(&attachment.path))
     }
 }
 

@@ -635,3 +635,46 @@ fn the_choices_go_when_the_session_leaves_ready_without_a_logout(cx: &mut TestAp
         assert_eq!(app.composer_sends.slot_count(), 0);
     });
 }
+
+#[gpui_kit::test]
+fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(A, window, cx);
+        let in_a = photo("checking-a.mp4");
+        app.update_pending_send(|send| send.attachments.push(in_a.clone()))
+            .expect("an open chat");
+        let send_box = &mut app.composer_ui.send_box;
+        send_box.sound_checking.insert(in_a.path.clone());
+        send_box.thumbnailing.insert(in_a.path.clone(), 1);
+        assert!(app.tray_videos_checking(), "A waits on its own file");
+        assert!(app.tray_thumbnails_pending());
+        app.select_listed_chat(B, window, cx);
+        assert!(!app.tray_videos_checking(), "B is not held by A's probe");
+        assert!(!app.tray_thumbnails_pending());
+        app.select_listed_chat(A, window, cx);
+        assert!(app.tray_videos_checking());
+    });
+}
+
+#[gpui_kit::test]
+fn a_session_closing_over_two_polls_ends_like_one_that_closed_at_once(cx: &mut TestAppContext) {
+    use quill::telegram::envelope::AuthorizationState as Auth;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(A, window, cx);
+        choose_everything(app);
+        // Poll 1: Ready to Closing keeps them (still on its way out).
+        app.demo_session.as_mut().expect("demo").auth = Auth::Closing;
+        app.forget_sends_after_auth(&Auth::Ready, false);
+        assert_eq!(app.pending_attachments().len(), 1);
+        // Poll 2: Closing to Closed drops them.
+        app.demo_session.as_mut().expect("demo").auth = Auth::Closed;
+        app.forget_sends_after_auth(&Auth::Closing, false);
+        assert_eq!(app.composer_sends.slot_count(), 0);
+        // Batched Ready to Closed drops them too.
+        choose_everything(app);
+        app.forget_sends_after_auth(&Auth::Ready, false);
+        assert_eq!(app.composer_sends.slot_count(), 0);
+    });
+}

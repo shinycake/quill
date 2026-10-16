@@ -156,9 +156,13 @@ impl QuillApp {
         self.prepare_tray_file_thumbnails(cx);
     }
 
-    /// Videos in the tray are still being read.
+    /// Videos in the open slot's tray are still being read (a probe for
+    /// another chat's tray does not count).
     pub(super) fn tray_videos_checking(&self) -> bool {
-        !self.composer_ui.send_box.sound_checking.is_empty()
+        let checking = &self.composer_ui.send_box.sound_checking;
+        self.pending_attachments()
+            .iter()
+            .any(|attachment| checking.contains(&attachment.path))
     }
 
     /// The options row of the tray: High quality and the price.
