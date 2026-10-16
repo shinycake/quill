@@ -88,11 +88,12 @@ pub(super) struct Preview {
 }
 
 impl Preview {
-    fn new(effect_id: i64, center: Point<Pixels>) -> Self {
+    /// `now` is the executor's clock, so tests move the fade by advancing it.
+    fn new(effect_id: i64, center: Point<Pixels>, now: Instant) -> Self {
         Self {
             effect_id,
             center,
-            shown: Instant::now(),
+            shown: now,
             hiding: None,
             playing: Cell::new(None),
         }
@@ -259,12 +260,13 @@ impl QuillApp {
             .get(&effect_id)
             .map(|bounds| bounds.center())
             .unwrap_or(open.position);
+        let now = cx.background_executor().now();
         if let Some(mut shown) = open.preview.take() {
-            shown.hiding.get_or_insert_with(Instant::now);
+            shown.hiding.get_or_insert(now);
             open.leaving = Some(shown);
         }
         open.card_menu = None;
-        open.preview = Some(Preview::new(effect_id, center));
+        open.preview = Some(Preview::new(effect_id, center, now));
         cx.notify();
     }
 
@@ -273,8 +275,9 @@ impl QuillApp {
         let Some(open) = self.composer_ui.send_menu.open.as_mut() else {
             return;
         };
+        let now = cx.background_executor().now();
         if let Some(preview) = open.preview.as_mut() {
-            preview.hiding.get_or_insert_with(Instant::now);
+            preview.hiding.get_or_insert(now);
         }
         open.card_menu = None;
         cx.notify();
