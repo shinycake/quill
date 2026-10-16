@@ -290,6 +290,12 @@ impl Session {
         if tracked.id != group_call_id {
             return;
         }
+        // Telegram is the truth for your own mute once joined (it reports
+        // a mute you asked for, and one an admin imposed); the driver pump
+        // makes the engine follow.
+        if participant.is_current_user && tracked.is_joined && !participant.order.is_empty() {
+            tracked.is_muted_self = participant.is_muted_for_all_users;
+        }
         if participant.order.is_empty() {
             tracked
                 .participants

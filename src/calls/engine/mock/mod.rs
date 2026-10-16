@@ -18,6 +18,8 @@ struct MockInner {
     mute_changes: Vec<(i32, bool)>,
     /// Test-only failure injection for `set_muted`.
     fail_mute: bool,
+    /// Test-only failure injection for `set_group_muted`.
+    fail_group_mute: bool,
     /// Test-only failure injection for the next `connect`.
     fail_connect: bool,
     devices: Vec<MediaDevice>,
@@ -114,6 +116,11 @@ impl MockEngine {
 
     pub fn set_devices(&self, devices: Vec<MediaDevice>) {
         self.inner.lock_or_recover().devices = devices;
+    }
+
+    /// Test-only: make `set_group_muted` fail.
+    pub fn fail_group_mute(&self) {
+        self.inner.lock_or_recover().fail_group_mute = true;
     }
 
     /// Test-only: make the next `set_muted` calls fail.
@@ -643,10 +650,14 @@ impl CallEngine for MockEngine {
     }
 
     fn set_group_muted(&mut self, group_call_id: i32, muted: bool) -> Result<(), EngineError> {
-        self.inner
-            .lock_or_recover()
-            .group_mutes
-            .push((group_call_id, muted));
+        let mut inner = self.inner.lock_or_recover();
+        if inner.fail_group_mute {
+            return Err(EngineError::Engine {
+                op: "set_group_muted",
+                code: -1,
+            });
+        }
+        inner.group_mutes.push((group_call_id, muted));
         Ok(())
     }
 

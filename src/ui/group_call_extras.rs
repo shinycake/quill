@@ -41,7 +41,9 @@ impl QuillApp {
     /// Mute or unmute the microphone without a toggle round trip.
     pub(super) fn set_group_call_self_mute_to(&mut self, muted: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.set_group_call_self_mute(muted);
+            if live.driver.set_group_call_self_mute(muted).is_err() {
+                self.connection.status_note = tr(keys::Q_AV_COULDNT_CHANGE_THE_MICROPHONE).into();
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_group_call_self_muted(muted);
         }

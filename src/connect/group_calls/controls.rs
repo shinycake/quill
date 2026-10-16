@@ -98,29 +98,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C3a: local-only self mute toggle. There is no TDLib "mute
-    /// self" for group calls outside the join parameters — the UI labels
-    /// this honestly as local-only; the state rides on the next (re)join.
-    /// Mute or unmute yourself in the joined group call: the
-    /// microphone goes quiet at once (the engine), and Telegram learns
-    /// it so everyone sees the muted icon
-    /// (`toggleGroupCallParticipantIsMuted` on yourself).
-    pub fn toggle_group_call_self_mute(&mut self) {
+    /// Mute or unmute yourself in the joined group call (see
+    /// [`Self::set_group_call_self_mute`]).
+    pub fn toggle_group_call_self_mute(&mut self) -> Result<(), SelfMuteError> {
         let Some(call) = self.session.calls.active_group_call.as_ref() else {
-            return;
+            return Ok(());
         };
         let muted = !call.is_muted_self;
-        self.set_group_call_self_mute(muted);
+        self.set_group_call_self_mute(muted)
     }
 
     /// Set (rather than flip) the self-mute state; push-to-talk drives
     /// this. A no-op when the state already matches.
-    pub fn set_group_call_self_mute(&mut self, muted: bool) {
+    ///
+    /// The tracked `is_muted_self` flag is what the mute button shows, so
+    /// it only changes once the engine applied the change: the engine is
+    /// called first and its error leaves the flag as it was (the 1:1
+    /// `set_call_muted` discipline). Telegram is told afterwards
+    /// (`toggleGroupCallParticipantIsMuted` on yourself); its
+    /// `updateGroupCallParticipant` for you settles the flag, and the
+    /// driver pump makes the engine follow it (muted by an admin, say).
+    pub fn set_group_call_self_mute(&mut self, muted: bool) -> Result<(), SelfMuteError> {
         let Some(call) = self.session.calls.active_group_call.as_ref() else {
-            return;
+            return Ok(());
         };
         if call.is_muted_self == muted {
-            return;
+            return Ok(());
         }
         let group_call_id = call.id;
         let me = call
@@ -128,13 +131,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .find(|p| p.is_current_user)
             .map(|p| p.participant_id);
+        // Before the transport is up the engine only stores the state for
+        // the connect; with it up the call is real and may fail.
+        if let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.is_available()
+        {
+            engine
+                .set_group_muted(group_call_id, muted)
+                .map_err(SelfMuteError::Engine)?;
+            self.group_mute_state.insert(group_call_id, muted);
+        }
         self.session.set_group_call_self_muted(muted);
-        if let Some(engine) = self.call_engine.as_deref_mut() {
-            let _ = engine.set_group_muted(group_call_id, muted);
-        }
         if let Some(me) = me {
-            let _ = self.toggle_group_call_participant_muted(me, muted);
+            self.toggle_group_call_participant_muted(me, muted)
+                .map_err(SelfMuteError::Send)?;
         }
+        Ok(())
     }
 
     /// Phase C3a: `toggleGroupCallIsMyVideoEnabled` (schema 1.8.67,
@@ -434,4 +446,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         Ok(extra)
     }
+}
+
+/// Why a self-mute change did not fully go through.
+#[derive(Debug)]
+pub enum SelfMuteError {
+    /// The engine refused; nothing changed.
+    Engine(crate::calls::engine::EngineError),
+    /// The engine applied it (the button is truthful) but Telegram could
+    /// not be told, so other participants may still see the old icon.
+    Send(ConnectSendError),
 }

@@ -89,6 +89,7 @@
 "qll_av_could_not_save_to_your" = "could not save to your profile";
 "qll_av_couldnt_ban_the_participant" = "Couldn't ban the participant.";
 "qll_av_couldnt_change_the_hand_state" = "Couldn't change the hand state.";
+"qll_av_couldnt_change_the_microphone" = "Couldn't change the microphone.";
 "qll_av_couldnt_change_the_participant_mute" = "Couldn't change the participant mute.";
 "qll_av_couldnt_change_the_participant_volume" = "Couldn't change the participant volume.";
 "qll_av_couldnt_change_who_you_join" = "Couldn't change who you join as.";

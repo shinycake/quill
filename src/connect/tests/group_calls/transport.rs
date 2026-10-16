@@ -544,12 +544,105 @@ fn group_call_self_mute_reaches_the_microphone_and_telegram() {
         &sink,
         &group_participant_json(7, true, "null", "null"),
     );
-    driver.toggle_group_call_self_mute();
+    driver.toggle_group_call_self_mute().expect("mute");
     assert_eq!(handle.group_mutes(), vec![(555, true)]);
     let sent = sent_request(&recorder, "toggleGroupCallParticipantIsMuted");
     assert_eq!(sent["participant_id"]["user_id"], 7);
     assert_eq!(sent["is_muted"], true);
-    driver.toggle_group_call_self_mute();
+    driver.toggle_group_call_self_mute().expect("mute");
     assert_eq!(handle.group_mutes(), vec![(555, true), (555, false)]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+const JOINED_GROUP_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
+
+fn is_muted_self(driver: &ConnectDriver<Arc<RecordingSender>>) -> bool {
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .is_some_and(|call| call.is_muted_self)
+}
+
+/// The mute button follows what the engine applied: a failing engine
+/// leaves the state as it was, nothing is sent to Telegram, and the error
+/// reaches the caller (the UI shows it as the status note).
+#[test]
+fn group_call_self_mute_failure_leaves_the_state_unchanged() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, JOINED_GROUP_CALL);
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &group_participant_json(7, true, "null", "null"),
+    );
+    assert!(!is_muted_self(&driver));
+    handle.fail_group_mute();
+    let result = driver.toggle_group_call_self_mute();
+    assert!(result.is_err());
+    assert!(!is_muted_self(&driver), "the button must not claim muted");
+    assert!(handle.group_mutes().is_empty());
+    assert!(
+        recorder
+            .snapshot()
+            .iter()
+            .all(|json| !json.contains("toggleGroupCallParticipantIsMuted"))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// When Telegram says you are muted (an admin, or another device) the
+/// button follows the server and the engine is muted to match; when it
+/// later says unmuted, the engine opens again.
+#[test]
+fn group_call_server_mute_settles_the_button_and_the_engine() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    let extra = driver.join_video_chat(555).expect("join tracked call");
+    ingest_call_json(&mut driver, &seq, &sink, JOINED_GROUP_CALL);
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+            extra.0
+        ),
+    );
+    let me = group_participant_json(7, true, "null", "null");
+    let muted_by_admin = me.replace(
+        r#""is_muted_for_all_users":false"#,
+        r#""is_muted_for_all_users":true"#,
+    );
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(!is_muted_self(&driver));
+    ingest_call_json(&mut driver, &seq, &sink, &muted_by_admin);
+    assert!(is_muted_self(&driver));
+    assert_eq!(handle.group_mutes().last(), Some(&(555, true)));
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(!is_muted_self(&driver));
+    assert_eq!(handle.group_mutes().last(), Some(&(555, false)));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Push-to-talk press and release go through the same engine-first path.
+#[test]
+fn group_call_push_to_talk_drives_the_engine_first() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, JOINED_GROUP_CALL);
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &group_participant_json(7, true, "null", "null"),
+    );
+    driver.set_group_call_self_mute(true).expect("hold closed");
+    driver.set_group_call_self_mute(false).expect("press");
+    assert_eq!(handle.group_mutes(), vec![(555, true), (555, false)]);
+    assert!(!is_muted_self(&driver));
+    handle.fail_group_mute();
+    assert!(driver.set_group_call_self_mute(true).is_err());
+    assert!(!is_muted_self(&driver), "a failed release keeps it open");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -132,7 +132,9 @@ impl QuillApp {
     /// path exists yet). The state rides on the next (re)join.
     pub(super) fn toggle_group_call_self_mute(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.toggle_group_call_self_mute();
+            if live.driver.toggle_group_call_self_mute().is_err() {
+                self.connection.status_note = tr(keys::Q_AV_COULDNT_CHANGE_THE_MICROPHONE).into();
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             let muted = !session
                 .calls
