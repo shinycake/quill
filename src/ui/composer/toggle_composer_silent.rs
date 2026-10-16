@@ -677,7 +677,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(position) = self.playback.clock.as_ref().map(|c| c.elapsed_secs()) else {
+        let Some(position) = self.playback.active_position_secs() else {
             return;
         };
         let timecode = quill::message_menu::timecode_text(position);

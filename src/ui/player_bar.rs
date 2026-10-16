@@ -26,7 +26,6 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::media_session::{self, Command, NowPlaying};
-use quill::playback::PlaybackClock;
 use quill::playlist::{self, Move, OrderMode, RepeatMode, ShuffleState, Step, VoiceEntry};
 use quill::telegram::envelope::MessageContent;
 use quill::voice::format_voice_duration;
@@ -137,16 +136,8 @@ impl QuillApp {
     ) {
         self.playback.player.chat = Some(chat);
         self.playback.player.meta = Some(self.track_meta_for(chat, id, kind));
-        let duration = self
-            .playback
-            .clock
-            .as_ref()
-            .map_or(0.1, |c| c.duration_secs().max(0.1));
-        let offset = self
-            .playback
-            .clock
-            .as_ref()
-            .map_or(0.0, |c| c.elapsed_secs());
+        let duration = self.playback.track_duration().map_or(0.1, |d| d.max(0.1));
+        let offset = self.playback.active_position_secs().unwrap_or(0.0);
         let slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -273,10 +264,10 @@ impl QuillApp {
 
     /// Pause when playing, resume when paused.
     pub(super) fn toggle_active_playback(&mut self, cx: &mut Context<Self>) {
-        let Some(clock) = self.playback.clock.as_ref() else {
+        if self.playback.track_duration().is_none() {
             return;
-        };
-        if clock.is_playing() {
+        }
+        if self.playback.is_playing() {
             self.pause_active_playback();
         } else {
             self.resume_active_playback(cx);
@@ -296,11 +287,7 @@ impl QuillApp {
     /// Apply what the OS asked for (media keys, the Now Playing widget).
     pub(super) fn drain_media_commands(&mut self, cx: &mut Context<Self>) {
         for command in media_session::take_commands() {
-            let playing = self
-                .playback
-                .clock
-                .as_ref()
-                .is_some_and(PlaybackClock::is_playing);
+            let playing = self.playback.is_playing();
             match command {
                 Command::Play if !playing => self.toggle_active_playback(cx),
                 Command::Pause if playing => self.toggle_active_playback(cx),
@@ -316,8 +303,11 @@ impl QuillApp {
 
     /// Tell the OS what is playing (cheap: deduplicated downstream).
     pub(super) fn publish_now_playing(&mut self) {
-        let (Some(id), Some(clock)) = (self.active_playback_id(), self.playback.clock.as_ref())
-        else {
+        let (Some(id), Some(duration), Some(position)) = (
+            self.active_playback_id(),
+            self.playback.track_duration(),
+            self.playback.active_position_secs(),
+        ) else {
             media_session::publish(None);
             return;
         };
@@ -333,9 +323,9 @@ impl QuillApp {
         let info = NowPlaying {
             title: meta.title,
             artist: meta.subtitle,
-            duration_secs: clock.duration_secs(),
-            position_secs: clock.elapsed_secs(),
-            playing: clock.is_playing(),
+            duration_secs: duration,
+            position_secs: position,
+            playing: self.playback.is_playing(),
             rate: self.playback.speed,
             can_next,
             can_previous,
@@ -357,7 +347,8 @@ impl QuillApp {
     /// The bar, when a voice note or music file is active.
     pub(super) fn player_bar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.active_playback_id()?;
-        let clock = self.playback.clock.as_ref()?;
+        let duration = self.playback.track_duration()?;
+        let position = self.playback.active_position_secs()?;
         let kind = self.active_playback_kind();
         let meta = match (&self.playback.player.meta, self.playback.player.chat) {
             (Some(meta), _) => meta.clone(),
@@ -371,21 +362,22 @@ impl QuillApp {
                 subtitle: String::new(),
             },
         };
-        let playing = clock.is_playing();
-        let elapsed = self
-            .playback
-            .seek_preview_secs
-            .unwrap_or_else(|| clock.elapsed_secs());
+        let playing = self.playback.is_playing();
+        let elapsed = self.playback.seek_preview_secs.unwrap_or(position);
         let time = format!(
             "{} / {}",
             format_voice_duration(elapsed as i32),
-            format_voice_duration(clock.duration_secs() as i32)
+            format_voice_duration(duration as i32)
         );
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
         let muted = self.playback.volume < 0.01;
-        let speed_trigger = self.speed_label_trigger("player-bar-speed");
+        // The shared trigger is white for the video overlay; the bar sits on
+        // the theme surface.
+        let speed_trigger = self
+            .speed_label_trigger("player-bar-speed")
+            .text_color(text_primary());
         let speed_dial = self.speed_dial("player-bar-speed", speed_trigger, cx);
 
         let icon_button = |id: &'static str, icon: IconName, label: &'static str| {

@@ -101,6 +101,7 @@
 "qll_av_couldnt_get_the_invite_link" = "Couldn't get the invite link.";
 "qll_av_couldnt_invite_to_the_voice" = "Couldn't invite to the voice chat.";
 "qll_av_couldnt_join_the_voice_chat" = "Couldn't join the voice chat.";
+"qll_av_couldnt_open_the_audio_file" = "Couldn't open the audio file.";
 "qll_av_couldnt_open_the_folder" = "couldn't open the folder";
 "qll_av_couldnt_open_the_video_chat" = "Couldn't open the video chat window";
 "qll_av_couldnt_pin_album_item_s" = "couldn't pin {failed} album item(s)";
@@ -190,6 +191,7 @@
 "qll_av_muting_participant" = "Muting participant…";
 "qll_av_next" = "Next";
 "qll_av_next_track" = "Next track";
+"qll_av_no_audio_output_device" = "No audio output device.";
 "qll_av_no_chats_loaded_yet" = "No chats loaded yet.";
 "qll_av_no_contacts_to_invite" = "No contacts to invite.";
 "qll_av_no_live_connection" = "no live connection";
@@ -298,6 +300,7 @@
 "qll_av_stream_keys_need_a_live" = "Stream keys need a live connection.";
 "qll_av_stream_with_another_app" = "Stream with another app";
 "qll_av_the_gif_leaves_the_album" = "The GIF leaves the album and goes out on its own";
+"qll_av_this_audio_format_cant_be_played" = "This audio format can't be played.";
 "qll_av_this_isnt_a_video_quill" = "This isn't a video Quill can read.";
 "qll_av_this_video_cant_be_played" = "This video can't be played.";
 "qll_av_this_video_cant_be_played_2" = "This video can't be played";

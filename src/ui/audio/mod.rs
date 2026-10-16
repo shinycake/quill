@@ -11,6 +11,7 @@
 
 #[cfg(test)]
 mod cpal_stream_tests;
+pub(super) mod engine;
 mod opus;
 mod tempo;
 
@@ -36,6 +37,7 @@ use rodio::{
 };
 
 use super::call_tones;
+pub(super) use engine::{AudioEngine, EngineState, Simulation};
 use tempo::{SharedSpeed, Tempo};
 
 /// Which decoder reads a file.
@@ -87,7 +89,7 @@ pub(super) fn format_hint(extension: Option<&str>, mime: Option<&str>) -> Option
         .or_else(|| mime.and_then(by_mime))
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AudioError {
     /// The file can't be read.
     Open,
@@ -109,6 +111,11 @@ impl fmt::Display for AudioError {
 
 /// Open `path` as a rodio source, stretched to the shared speed.
 fn open_source(path: &Path, speed: &SharedSpeed) -> Result<Box<dyn Source + Send>, AudioError> {
+    Ok(Box::new(Tempo::new(open_decoded(path)?, speed.clone())))
+}
+
+/// Open `path` as the decoder's own source (no speed stretching).
+fn open_decoded(path: &Path) -> Result<Box<dyn Source + Send>, AudioError> {
     let mut file = File::open(path).map_err(|_| AudioError::Open)?;
     let len = file.metadata().map(|m| m.len()).unwrap_or(0);
     let mut header = [0u8; 64];
@@ -116,8 +123,7 @@ fn open_source(path: &Path, speed: &SharedSpeed) -> Result<Box<dyn Source + Send
     file.seek(SeekFrom::Start(0))
         .map_err(|_| AudioError::Open)?;
     let reader = BufReader::new(file);
-    let source: Box<dyn Source + Send> = match choose_codec(header.get(..read).unwrap_or_default())
-    {
+    Ok(match choose_codec(header.get(..read).unwrap_or_default()) {
         Codec::Opus => {
             Box::new(opus::OpusSource::new(reader).map_err(|_| AudioError::Unsupported)?)
         }
@@ -132,8 +138,7 @@ fn open_source(path: &Path, speed: &SharedSpeed) -> Result<Box<dyn Source + Send
             }
             Box::new(builder.build().map_err(|_| AudioError::Unsupported)?)
         }
-    };
-    Ok(Box::new(Tempo::new(source, speed.clone())))
+    })
 }
 
 fn read_prefix(file: &mut File, buf: &mut [u8]) -> usize {
@@ -172,11 +177,27 @@ struct OutputState {
     /// replacement.
     retired: Option<MixerDeviceSink>,
     failed_at: Option<Instant>,
+    /// Tests: stands in for the device (`Some(None)` is "no device").
+    #[cfg(test)]
+    forced: Option<Option<Mixer>>,
 }
 
 impl SharedOutput {
+    /// Tests: an output that hands out `mixer` (or nothing) instead of
+    /// opening a device.
+    #[cfg(test)]
+    pub(super) fn for_test(mixer: Option<Mixer>) -> Self {
+        let this = Self::default();
+        this.0.borrow_mut().forced = Some(mixer);
+        this
+    }
+
     pub(super) fn mixer(&self) -> Option<Mixer> {
         let mut state = self.0.borrow_mut();
+        #[cfg(test)]
+        if let Some(forced) = &state.forced {
+            return forced.clone();
+        }
         if state.sink.is_some() && state.stale.load(Ordering::Relaxed) {
             debug_log("audio: output: reopening the default output device");
             state.retired = state.sink.take();
@@ -245,134 +266,6 @@ where
                 })
                 .ok_or(first)
         })
-}
-
-/// One track's player: play, pause, seek, volume and speed. The app clock
-/// (`quill::playback::PlaybackClock`) owns the shown position; this owns
-/// the sound and reports when it ran out.
-pub(super) struct AudioEngine {
-    output: SharedOutput,
-    player: Option<Player>,
-    path: Option<PathBuf>,
-    speed: SharedSpeed,
-    volume: f32,
-    /// Seeked while paused: the sound still sits at the old position, so
-    /// resuming restarts it at the new one.
-    stale: bool,
-}
-
-impl AudioEngine {
-    pub(super) fn new(output: SharedOutput) -> Self {
-        Self {
-            output,
-            player: None,
-            path: None,
-            speed: SharedSpeed::new(1.0),
-            volume: 1.0,
-            stale: false,
-        }
-    }
-
-    /// Play `path` from `offset_secs`, replacing whatever played.
-    pub(super) fn start(
-        &mut self,
-        path: &Path,
-        offset_secs: f64,
-        volume: f32,
-        speed: f64,
-    ) -> Result<(), AudioError> {
-        self.stop();
-        self.volume = volume.clamp(0.0, 1.0);
-        self.speed.set(speed);
-        let mixer = self.output.mixer().ok_or(AudioError::NoOutput)?;
-        let mut source = open_source(path, &self.speed)?;
-        if offset_secs > 0.05 {
-            // A source that can't seek starts from the top.
-            let _ = source.try_seek(Duration::from_secs_f64(offset_secs));
-        }
-        let player = Player::connect_new(&mixer);
-        player.set_volume(self.volume);
-        player.append(source);
-        self.player = Some(player);
-        self.path = Some(path.to_path_buf());
-        self.stale = false;
-        Ok(())
-    }
-
-    /// True while a track is loaded (playing or paused, ended or not).
-    pub(super) fn is_loaded(&self) -> bool {
-        self.player.is_some()
-    }
-
-    /// The loaded track played to its end.
-    pub(super) fn is_ended(&self) -> bool {
-        self.player
-            .as_ref()
-            .is_some_and(|p| p.empty() && !p.is_paused())
-    }
-
-    pub(super) fn pause(&mut self) {
-        if let Some(player) = &self.player {
-            player.pause();
-        }
-    }
-
-    /// Continue from the pause; restarts at `offset_secs` when the sound is
-    /// no longer where the clock is (seek while paused, or it ended).
-    pub(super) fn resume(&mut self, offset_secs: f64) -> Result<(), AudioError> {
-        let ended = self.player.as_ref().is_none_or(Player::empty);
-        if self.stale || ended {
-            let Some(path) = self.path.clone() else {
-                return Ok(());
-            };
-            return self.start(&path, offset_secs, self.volume, f64::from(self.speed.get()));
-        }
-        if let Some(player) = &self.player {
-            player.play();
-        }
-        Ok(())
-    }
-
-    /// Move to `offset_secs`. While playing the sound seeks in place (and
-    /// restarts if its decoder can't); while paused it catches up on resume.
-    pub(super) fn seek(&mut self, offset_secs: f64, playing: bool) -> Result<(), AudioError> {
-        if !playing {
-            self.stale = true;
-            return Ok(());
-        }
-        let seeked = self.player.as_ref().is_some_and(|p| {
-            !p.empty()
-                && p.try_seek(Duration::from_secs_f64(offset_secs.max(0.0)))
-                    .is_ok()
-        });
-        if seeked {
-            return Ok(());
-        }
-        let Some(path) = self.path.clone() else {
-            return Ok(());
-        };
-        self.start(&path, offset_secs, self.volume, f64::from(self.speed.get()))
-    }
-
-    pub(super) fn set_volume(&mut self, volume: f32) {
-        self.volume = volume.clamp(0.0, 1.0);
-        if let Some(player) = &self.player {
-            player.set_volume(self.volume);
-        }
-    }
-
-    /// Takes effect on the running sound at its next 20 ms block.
-    pub(super) fn set_speed(&mut self, speed: f64) {
-        self.speed.set(speed);
-    }
-
-    pub(super) fn stop(&mut self) {
-        if let Some(player) = self.player.take() {
-            player.stop();
-        }
-        self.path = None;
-        self.stale = false;
-    }
 }
 
 thread_local! {

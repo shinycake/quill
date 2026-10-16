@@ -11,6 +11,7 @@ use crate::ui::demo::{
 use crate::ui::demos::video_fixtures::{
     apply_ready_gifs, apply_ready_video, apply_ready_video_note, apply_ready_video_viewer,
 };
+use crate::ui::playback::PlaybackKind;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -106,13 +107,24 @@ enum GifsDemo {
 }
 
 impl QuillApp {
-    fn demo_ready_audio(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn demo_ready_audio(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.playback.playing_audio = Some(MessageId(801));
-        self.connection.status_note = "screenshot demo — audio · playing".into();
+        // The demo has no audio device: the engine's explicit simulation plays
+        // the track (`QUILL_DEMO_AUDIO_FAIL=1` shows a failed start instead).
+        let track = demo_media_allowlist().join("demo-voice.ogg");
+        self.begin_track_playback(
+            PlaybackKind::Audio,
+            ChatId(11),
+            MessageId(801),
+            214.0,
+            87.0,
+            &track,
+            cx,
+        );
+        self.connection.status_note = "screenshot demo — audio".into();
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
