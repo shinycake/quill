@@ -41,6 +41,7 @@ mod caption;
 mod controller;
 mod files;
 mod files_demo;
+mod geometry;
 mod layer;
 mod navigation;
 mod overlay;

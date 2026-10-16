@@ -137,22 +137,13 @@ impl QuillApp {
         item: &MediaViewerItem,
         viewport: gpui_kit::Size<Pixels>,
     ) -> ViewerGeometry {
-        // A video keeps room for its 72 px controller (and the bar's
-        // 16 px padding) under the picture.
-        let controls = if item.kind == MediaViewerKind::Video {
-            96.0
-        } else {
-            72.0
-        };
-        let bottom_space = if item.caption.is_empty() {
-            controls
-        } else {
-            controls + 32.0
-        };
-        let fit = (
-            (f32::from(viewport.width) - 2.0 * VIEWER_SIDE_LANE).max(240.0),
-            (f32::from(viewport.height) - VIEWER_TOP_BAR - bottom_space).max(200.0),
-        );
+        let area = geometry::fit_area(geometry::ViewerFrame {
+            viewport: (f32::from(viewport.width), f32::from(viewport.height)),
+            video: item.kind == MediaViewerKind::Video,
+            caption: if item.caption.is_empty() { 0.0 } else { 32.0 },
+            fullscreen: self.viewer.extra.video_fullscreen,
+        });
+        let fit = area.size;
         // The media's own box inside the frame: sized from its natural
         // dimensions (axes swapped for a quarter turn) rather than trusting
         // object-fit, so it can never spill out of the frame.
@@ -175,8 +166,8 @@ impl QuillApp {
             fit,
             media,
             origin: (
-                (f32::from(viewport.width) - media.0) / 2.0,
-                VIEWER_TOP_BAR + (fit.1 - media.1) / 2.0,
+                area.origin.0 + (fit.0 - media.0) / 2.0,
+                area.origin.1 + (fit.1 - media.1) / 2.0,
             ),
             zoomed: (media.0 * zoom.zoom, media.1 * zoom.zoom),
             pan: zoom.pan,
