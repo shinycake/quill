@@ -40,7 +40,7 @@ pub(crate) fn decode(path: &Path, long_edge: u32) -> Result<Option<HdrPixels>, D
         SurfaceFormat::Rgba16Float,
         bytes,
     )
-    .ok_or_else(|| DecodeError::Failed("HDR frame size mismatch".into()))?;
+    .map_err(|err| DecodeError::Failed(format!("HDR frame: {err}")))?;
     Ok(Some(HdrPixels {
         frame: Frame {
             frame: Arc::new(frame),

@@ -142,8 +142,11 @@ fn upload(
     devices: &DirectXRendererDevices,
     frame: &SurfaceFrame,
 ) -> Result<Option<ID3D11ShaderResourceView>> {
-    let format = match frame.format() {
-        SurfaceFormat::Rgba16Float => DXGI_FORMAT_R16G16B16A16_FLOAT,
+    // Four half floats a pixel.
+    let (format, bytes_per_pixel) = match frame.format() {
+        SurfaceFormat::Rgba16Float => (DXGI_FORMAT_R16G16B16A16_FLOAT, 8),
+        // Drawn by `yuv_surfaces`, never handed here.
+        SurfaceFormat::Nv12 => return Ok(None),
     };
     let (width, height) = (frame.width(), frame.height());
     if width > MAX_TEXTURE_SIDE || height > MAX_TEXTURE_SIDE {
@@ -151,7 +154,7 @@ fn upload(
         return Ok(None);
     }
     let row_pitch = width
-        .checked_mul(frame.format().bytes_per_pixel() as u32)
+        .checked_mul(bytes_per_pixel)
         .context("HDR still row too long")?;
     let desc = D3D11_TEXTURE2D_DESC {
         Width: width,

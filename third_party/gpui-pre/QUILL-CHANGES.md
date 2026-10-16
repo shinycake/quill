@@ -25,3 +25,19 @@ pixels where CoreVideo doesn't exist, for HDR stills on Windows
 
 Renderers that don't draw surfaces (gpui-pre-wgpu on Linux) ignore them, as
 before.
+
+The Quill project changed it again in 2026 so video pictures can reach the
+DirectX renderer as YUV instead of BGRA (`docs/decisions/video-player-nv12.md`):
+
+- `src/scene.rs`: `SurfaceFormat::Nv12` (8-bit 4:2:0, luma plane then
+  interleaved chroma, even sides). `SurfaceFormat::byte_len(w, h)` replaces
+  `bytes_per_pixel` (`w * h * 8` for RGBA16F, `w * h * 3 / 2` for NV12),
+  and `SurfaceFrame::new` returns a `SurfaceFrameError` (zero or odd side,
+  overflow, wrong length) instead of `None`. `YuvMatrix` (BT.601, BT.709)
+  and `YuvColor { matrix, full_range }` ride on the frame
+  (`SurfaceFrame::with_yuv`, `yuv`); `YuvColor::rgb_rows` is the one place
+  the matrix and range become the numbers a renderer uploads.
+  `SurfaceFrame::nv12_planes` splits the two planes.
+- Only the vendored Windows renderer draws NV12. macOS keeps CoreVideo
+  surfaces and Linux (gpui-pre-wgpu) draws no surfaces, so Quill produces
+  NV12 frames on Windows only, after asking `gpui_windows::surface_support`.
