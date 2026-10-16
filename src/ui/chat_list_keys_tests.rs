@@ -237,6 +237,30 @@ fn escape_from_the_composer_closes_the_chat_and_focuses_the_list(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn escape_then_down_then_enter_from_a_mouse_opened_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-chats-composer", 800.);
+    let vcx = &mut vcx;
+    let ids = listed(&app, vcx);
+    let opened = open_chat(&app, vcx);
+    assert!(opened.is_some(), "the demo opens a chat");
+    app.update_in(vcx, |app, window, cx| {
+        app.composer.update(cx, |input, cx| input.focus(window, cx));
+    });
+    frames(vcx);
+    press(vcx, "escape");
+    assert_eq!(open_chat(&app, vcx), None);
+    assert!(list_focused(&app, vcx));
+    // The closed chat's row is the selection: drawn, and stepped from.
+    assert_eq!(highlighted(&app, vcx), opened);
+    let at = ids.iter().position(|id| Some(*id) == opened);
+    let next = at.and_then(|at| ids.get(at + 1)).copied();
+    press(vcx, "down");
+    assert_eq!(highlighted(&app, vcx), next);
+    press(vcx, "enter");
+    assert_eq!(open_chat(&app, vcx), next);
+}
+
+#[gpui_kit::test]
 fn escape_in_the_list_goes_back_to_the_open_chat(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx, "ready-chats", 800.);
     let vcx = &mut vcx;
