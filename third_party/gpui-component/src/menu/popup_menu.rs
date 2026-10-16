@@ -1478,16 +1478,20 @@ impl Render for PopupMenu {
             .any(|item| item.has_left_icon(self.check_side));
 
         let max_width = self.max_width();
+        // QUILL: with glass on, the menu drops the popover fill and shadow and
+        // sits on a glass surface that paints them, rounder than the flat
+        // popover, with the item highlight concentric with its corners (the
+        // items sit one `p_1` in); off, it renders as before.
+        let glass = glass_style(GlassVariant::Regular, cx);
+        let radius = glass.map_or(cx.theme().radius, |style| style.radius);
         let options = RenderOptions {
             has_left_icon,
             check_side: self.check_side,
-            radius: cx.theme().radius.min(px(8.)),
+            radius: match glass {
+                Some(_) => (radius - px(4.)).max(px(4.)),
+                None => cx.theme().radius.min(px(8.)),
+            },
         };
-
-        // QUILL: with glass on, the menu drops the popover fill and shadow and
-        // sits on a glass surface that paints them; off, it renders as before.
-        let glass = glass_style(GlassVariant::Regular, cx);
-        let radius = cx.theme().radius;
         let menu = v_flex()
             .id("popup-menu")
             .test_support()
@@ -1535,12 +1539,7 @@ impl Render for PopupMenu {
                 this.vertical_scrollbar(&self.scroll_handle)
             });
         match glass {
-            Some(style) => GlassSurface::new(style, radius, menu)
-                .shadows(crate::styled::popover_shadow(
-                    crate::styled::popover_ring(cx),
-                    1.,
-                ))
-                .into_any_element(),
+            Some(style) => GlassSurface::new(style, menu).into_any_element(),
             None => menu.into_any_element(),
         }
     }

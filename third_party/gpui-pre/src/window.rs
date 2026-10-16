@@ -1586,22 +1586,71 @@ pub struct GlassEffect {
     /// vertical at the rim, so the displacement needs a bound of its own.
     pub reach: Pixels,
     /// Displacement amplitude; signed, so its sign picks the direction.
+    /// Negative pulls in what lies beyond the rim.
     pub magnify: f32,
-    /// Per-channel spread of the displacement, the chromatic fringe.
-    pub dispersion: f32,
-    /// Slope of `out = gain * saturated(backdrop) + tint`.
+    /// Slope of the interior's level: `tint + gain * level`, on the encoded
+    /// Rec. 709 level of the blurred backdrop, eased under `ceiling`.
     pub gain: f32,
-    /// How far the backdrop's chroma is pushed from its own grey before the
-    /// gain drops the level. 1 passes it through.
+    /// How much of the backdrop's chroma about its level survives, scaled
+    /// down by the square root of how far the level was pulled down.
     pub saturation: f32,
-    /// The transfer's offset, added.
+    /// The interior's level over black (its Rec. 709 level; the hue is not
+    /// used). Transparent leaves the blur bare: no transfer, no light.
     pub tint: Hsla,
-    /// How much white the lit rim adds, 0..1.
+    /// The encoded level the interior eases toward and never passes,
+    /// `tint + x / (1 + (x / (ceiling - tint))^4)^(1/4)` with `x = gain *
+    /// level`. At or below the tint's level, the level is not eased.
+    pub ceiling: f32,
+    /// The relative luminance the interior stays above: results near or
+    /// below it mix toward white, easing in so it is approached, never met.
+    pub min_luminance: f32,
+    /// The relative luminance the interior stays below: results near or
+    /// above it scale toward black, easing in the same way.
+    pub max_luminance: f32,
+    /// How much the thin bright line on the rim adds to the encoded colour,
+    /// over the held interior.
     pub edge: f32,
-    /// How far in that light falls off to nothing.
+    /// The line's gaussian half-width, in from the rim.
     pub edge_width: Pixels,
+    /// How much the soft glow just inside the rim adds to the encoded colour.
+    pub specular: f32,
+    /// How far in the glow falls off, exponentially.
+    pub specular_width: Pixels,
+    /// The axis the light falls along (window space, y down). The rim is lit
+    /// where it faces along it, at both ends; zero lights it all round.
+    pub light: Point<f32>,
+    /// How much the one device pixel just outside the rim darkens the
+    /// backdrop where the rim faces across the axis, unlit, 0..1: the glass's
+    /// edge seen side-on.
+    pub shade: f32,
     /// Width of the coverage ramp at the shape's boundary. Zero is a hard edge.
     pub edge_aa: Pixels,
+}
+
+impl Default for GlassEffect {
+    /// A bare frost: a 10px blur with no transfer, lens or lighting, so a
+    /// caller can name only the knobs it sets.
+    fn default() -> Self {
+        Self {
+            blur_radius: px(10.),
+            lens: px(0.),
+            reach: px(0.),
+            magnify: 0.,
+            gain: 1.,
+            saturation: 1.,
+            tint: transparent_black(),
+            ceiling: 0.,
+            min_luminance: 0.,
+            max_luminance: 1.,
+            edge: 0.,
+            edge_width: px(0.),
+            specular: 0.,
+            specular_width: px(0.),
+            light: Point { x: 0., y: 0. },
+            shade: 0.,
+            edge_aa: px(1.),
+        }
+    }
 }
 
 impl Window {
@@ -4742,12 +4791,19 @@ impl Window {
             lens: glass.lens.scale(scale_factor),
             reach: glass.reach.scale(scale_factor),
             magnify: glass.magnify,
-            dispersion: glass.dispersion,
             gain: glass.gain,
             saturation: glass.saturation,
             tint: glass.tint,
+            ceiling: glass.ceiling,
+            min_luminance: glass.min_luminance,
+            max_luminance: glass.max_luminance,
             edge: glass.edge,
             edge_width: glass.edge_width.scale(scale_factor),
+            specular: glass.specular,
+            specular_width: glass.specular_width.scale(scale_factor),
+            light_x: glass.light.x,
+            light_y: glass.light.y,
+            shade: glass.shade,
             edge_aa: glass.edge_aa.scale(scale_factor),
             // Read here rather than taken from the caller: a material inside a
             // fading tree fades with it, like every other primitive.

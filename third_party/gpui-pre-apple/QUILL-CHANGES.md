@@ -53,12 +53,20 @@ commit 693d6a82, `crates/gpui_apple`), which bezel
 - `vendor/gpui/src/scene.rs`: `BackdropBlur` and the `Shadow::inset` doc,
   mirrored from gpui-pre so cbindgen puts them in the shader header.
   `build.rs` exports `BackdropBlur` and `BackdropBlurInputIndex`.
-- `src/shaders.metal`: `backdrop_blur_vertex` / `backdrop_blur_fragment`
-  (the fork's transfer `gain * saturated(backdrop) + tint`, the rim lens
-  with chromatic dispersion, the lit edge, coverage mixed against the sharp
-  snapshot). 0.3.9 has no `mask_alpha`, so the content mask clips through
-  `clip_distance` alone. `shadow_fragment` reads `inset == 1` as an inset
-  shadow (0.3.9 treated any non-zero value so) and `inset == 2` as a drop
+- `src/shaders.metal`: `backdrop_blur_vertex` / `backdrop_blur_fragment`,
+  rewritten from the fork's to macOS 26's Regular glass: the interior is
+  `tint + gain * level` on the blurred backdrop's encoded Rec. 709 level,
+  eased under `ceiling`, its chroma scaled by `saturation`, then held
+  inside `[min_luminance, max_luminance]` by easing in linear light
+  (`glass_transfer`, `glass_hold`); a dome lens over the rim band samples
+  the same blur inward, bounded by `reach`; the rim adds a thin gaussian
+  line and a short glow where it faces the light axis, and darkens the one
+  device pixel outside it where it faces across (the quad reaches 2 device
+  pixels past the shape for that); coverage mixes against the sharp
+  snapshot. 0.3.9 has no `mask_alpha`, so the content mask clips through
+  `clip_distance` alone. `shadow_vertex` keeps only `inset == 1` (an inset
+  shadow) inside its element and `shadow_fragment` reads `inset == 1` as
+  inset (0.3.9 treated any non-zero value so) and `inset == 2` as a drop
   shadow cut to outside its element.
 - `src/metal_renderer.rs`:
   - `draw_primitives_to_texture` interleaves `Scene::backdrop_blurs` by

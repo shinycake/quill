@@ -1357,17 +1357,13 @@ struct BackdropBlurFragmentInput {
   uint blur_id [[flat]];
 };
 
-// The backdrop's chroma about its own grey. A gain alone moves level and
-// colour together; this lets a surface go dark and stay coloured.
-float3 saturated(float3 color, float amount) {
-  float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
-  return luma + (color - luma) * amount;
-}
-
 // The drawable is premultiplied, and a translucent window carries alpha < 1
 // wherever the desktop shows. The transfer is about colour, so it runs on the
 // straight value and the result is scaled back by the alpha it keeps.
 float3 unpremultiply(float4 color) { return color.rgb / max(color.a, 1e-4); }
+
+// How far past the shape, in device pixels, its dark outline reaches.
+constant float GLASS_OUTLINE = 2.;
 
 vertex BackdropBlurVertexOutput backdrop_blur_vertex(
     uint unit_vertex_id [[vertex_id]], uint blur_id [[instance_id]],
@@ -1377,14 +1373,86 @@ vertex BackdropBlurVertexOutput backdrop_blur_vertex(
     [[buffer(BackdropBlurInputIndex_ViewportSize)]]) {
   float2 unit_vertex = unit_vertices[unit_vertex_id];
   BackdropBlur blur = blurs[blur_id];
-  float4 device_position =
-      to_device_position(unit_vertex, blur.bounds, viewport_size);
-  float4 clip_distance = distance_from_clip_rect(unit_vertex, blur.bounds,
+  // The quad reaches past the shape by the outline's width.
+  Bounds_ScaledPixels quad = blur.bounds;
+  quad.origin.x -= GLASS_OUTLINE;
+  quad.origin.y -= GLASS_OUTLINE;
+  quad.size.width += 2. * GLASS_OUTLINE;
+  quad.size.height += 2. * GLASS_OUTLINE;
+  float4 device_position = to_device_position(unit_vertex, quad, viewport_size);
+  float4 clip_distance = distance_from_clip_rect(unit_vertex, quad,
                                                  blur.content_mask.bounds);
   return BackdropBlurVertexOutput{
       device_position,
       blur_id,
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
+}
+
+
+// Rec. 709 weights: on encoded values they give the level the transfer
+// curves; on linear values, relative luminance.
+constant float3 GLASS_LUMA = float3(0.2126, 0.7152, 0.0722);
+
+float3 glass_linear(float3 c) {
+  c = saturate(c);
+  return select(pow((c + 0.055) / 1.055, 2.4), c / 12.92, c <= 0.04045);
+}
+
+float3 glass_encode(float3 c) {
+  c = saturate(c);
+  return select(1.055 * pow(c, 1. / 2.4) - 0.055, c * 12.92, c <= 0.0031308);
+}
+
+// Eases `value` under `limit`: nearly untouched well below it, approaching
+// it without ever reaching it. A higher `hardness` keeps it untouched closer
+// to the limit.
+float glass_ease_under(float value, float limit, float hardness) {
+  return value /
+         pow(1. + pow(value / max(limit, 1e-4), hardness), 1. / hardness);
+}
+
+// The glass interior from the backdrop's straight, encoded colour. The level
+// runs through `tint + gain * level`, eased under `ceiling`; the chroma about
+// that level keeps `saturation` of itself, less where the level was pulled
+// down.
+float3 glass_transfer(float3 backdrop, BackdropBlur blur, float tint) {
+  float level = dot(backdrop, GLASS_LUMA);
+  float lifted = blur.gain * level;
+  float span = blur.ceiling - tint;
+  if (span > 0.) {
+    lifted = glass_ease_under(lifted, span, 4.);
+  }
+  float target = tint + lifted;
+  float chroma =
+      blur.saturation * sqrt(min(1., target / max(level, 1e-4)));
+  return saturate(target + (backdrop - level) * chroma);
+}
+
+// Holds the relative luminance strictly inside [min_luminance,
+// max_luminance], the range the theme's text stays readable over, easing
+// into either bound rather than flattening at it: scaled toward black under
+// the top, mixed toward white over the bottom, so the hue survives.
+float3 glass_hold(float3 color, BackdropBlur blur) {
+  float3 light = glass_linear(color);
+  float luminance = dot(light, GLASS_LUMA);
+  float held = luminance;
+  if (blur.max_luminance < 1.) {
+    held = glass_ease_under(held, blur.max_luminance, 8.);
+  }
+  if (blur.min_luminance > 0.) {
+    held = 1. - glass_ease_under(1. - held, 1. - blur.min_luminance, 8.);
+  }
+  if (held < luminance) {
+    light *= held / max(luminance, 1e-4);
+  } else if (held > luminance) {
+    light = 1. - (1. - light) * (1. - held) / max(1. - luminance, 1e-4);
+  }
+  return glass_encode(light);
+}
+
+// Screen `amount` of white over `color`: lightens without clipping the hue.
+float3 glass_screen(float3 color, float amount) {
+  return 1. - (1. - color) * (1. - saturate(amount));
 }
 
 fragment float4 backdrop_blur_fragment(
@@ -1400,40 +1468,46 @@ fragment float4 backdrop_blur_fragment(
                                    filter::linear);
   BackdropBlur blur = blurs[input.blur_id];
 
-  // Blending is disabled on this pipeline, so fragments outside the rounded
-  // rect discard rather than return 0. The content mask clips through
-  // `clip_distance`.
+  // Blending is disabled on this pipeline, so fragments the shape and its
+  // outline leave alone discard rather than return 0. The content mask clips
+  // through `clip_distance`.
   float distance = quad_sdf(input.position.xy, blur.bounds, blur.corner_radii);
   // How much of this pixel the shape covers, over the stated ramp, mixed
   // against the untouched backdrop since the blender does not.
   float coverage =
       saturate(0.5 - distance / max(blur.edge_aa, 1e-3)) * blur.opacity;
-  if (coverage <= 0.) {
+  // The outline: the one device pixel just outside the shape.
+  float outline = saturate(1.5 - distance) * blur.shade * blur.opacity;
+  if (coverage <= 0. && outline <= 0.) {
     discard_fragment();
   }
 
   float2 viewport =
       float2((float)viewport_size->width, (float)viewport_size->height);
   float2 point = input.position.xy;
+  float2 uv = point / viewport;
+  float4 sharp = sharp_texture.sample(source_sampler, uv);
 
+  // A transparent tint leaves the blur bare: no transfer, no light.
   float4 tint = hsla_to_rgba(blur.tint);
-  // The transfer is `out = gain * saturated(backdrop) + tint`. A plain
-  // material, whose tint is transparent, is left alone.
-  float gain = tint.a > 0. ? blur.gain : 1.;
-  float saturation = tint.a > 0. ? blur.saturation : 1.;
-  float bevel = blur.lens;
-  // How deep into the glass this fragment is across the bevel: 0 at the rim,
-  // 1 once the surface has flattened out.
-  float depth = bevel > 0. ? saturate(-distance / bevel) : 1.;
-  if (depth >= 1.) {
-    float2 uv = point / viewport;
+  bool material = tint.a > 0.;
+  float tint_level = dot(tint.rgb, GLASS_LUMA);
+  if (!material && coverage <= 0.) {
+    discard_fragment();
+  }
+  float inside = -distance;
+  // The band the rim works in: the lens, and the light's falloff.
+  float band = max(blur.lens, 4. * max(blur.edge_width, blur.specular_width));
+
+  if (!material || inside >= band) {
     float4 source = source_texture.sample(source_sampler, uv);
-    float4 sharp = sharp_texture.sample(source_sampler, uv);
-    float3 flat_color =
-        saturated(unpremultiply(source), saturation) * gain + tint.rgb * tint.a;
-    flat_color = mix(unpremultiply(sharp), flat_color, coverage);
+    float3 color = unpremultiply(source);
+    if (material) {
+      color = glass_hold(glass_transfer(color, blur, tint_level), blur);
+    }
+    color = mix(unpremultiply(sharp), color, coverage);
     float alpha = mix(sharp.a, source.a, coverage);
-    return float4(flat_color * alpha, alpha);
+    return float4(color * alpha, alpha);
   }
 
   // Outward normal of the rounded rect: the SDF's gradient by central
@@ -1449,42 +1523,47 @@ fragment float4 backdrop_blur_fragment(
   float2 outward =
       gradient_length > 0. ? gradient / gradient_length : float2(0.);
 
-  // The surface is a dome: flat along the centre, tilting to vertical at the
-  // rim. The epsilon keeps that divergence finite.
-  float rise = 1. - depth;
-  float slope = rise / sqrt(max(1. - rise * rise, 1e-4));
-
-  float2 step = -outward * slope * bevel * blur.magnify;
-  float limit = blur.reach;
-  float reach = length(step);
-  if (reach > limit) {
-    step *= limit / reach;
+  // The surface is a dome: flat in the middle, tilting to vertical at the
+  // rim, so the lens bends hardest at the edge. The epsilon keeps the
+  // divergence finite.
+  float2 step = float2(0.);
+  if (blur.lens > 0. && inside < blur.lens) {
+    float rise = 1. - saturate(inside / blur.lens);
+    float slope = rise / sqrt(max(1. - rise * rise, 1e-4));
+    step = -outward * slope * blur.lens * blur.magnify;
+    float reach = length(step);
+    if (reach > blur.reach) {
+      step *= blur.reach / reach;
+    }
   }
-  float2 offsets[3];
-  for (int channel = 0; channel < 3; channel++) {
-    offsets[channel] = step * (1. + float(channel - 1) * blur.dispersion);
-  }
+  // One blur across the whole surface, sampled through the lens.
+  float4 source =
+      source_texture.sample(source_sampler, (point + step) / viewport);
+  float3 lensed = unpremultiply(source);
 
-  // One blur across the whole surface, sampled through the lens. Each channel
-  // is straightened against its own alpha, since the three come from three
-  // positions.
-  float3 lensed;
-  for (int channel = 0; channel < 3; channel++) {
-    float2 uv = (point + offsets[channel]) / viewport;
-    lensed[channel] =
-        unpremultiply(source_texture.sample(source_sampler, uv))[channel];
-  }
-  float3 color = saturated(lensed, saturation) * gain + tint.rgb * tint.a;
+  // The light falls along one axis: brightest where the rim faces along it,
+  // at both ends.
+  float2 axis = float2(blur.light_x, blur.light_y);
+  float axis_length = length(axis);
+  float facing =
+      axis_length > 0. ? fabs(dot(outward, axis / axis_length)) : 1.;
+  float lit = facing * facing * facing;
 
-  // The lit rim, even the whole way round.
-  color += (1. - smoothstep(0., blur.edge_width, -distance)) * blur.edge;
+  // The interior's range holds; over it the light adds a thin bright line on
+  // the rim itself and a soft glow just inside, both fading out within a few
+  // points, short of any text. Where the rim faces across the light, the
+  // backdrop just outside it darkens instead.
+  float rim = max(inside, 0.) / max(blur.edge_width, 1e-3);
+  float light = blur.edge * exp(-rim * rim) +
+                blur.specular * exp(-max(inside, 0.) /
+                                    max(blur.specular_width, 1e-3));
+  float3 color = saturate(
+      glass_hold(glass_transfer(lensed, blur, tint_level), blur) + light * lit);
+  float3 behind = unpremultiply(sharp) * (1. - outline * (1. - lit));
 
   // The lens carries the coverage it bent into place, so the band hands the
   // window the same transparency the flat interior does.
-  float4 source =
-      source_texture.sample(source_sampler, (point + step) / viewport);
-  float4 sharp = sharp_texture.sample(source_sampler, point / viewport);
-  color = mix(unpremultiply(sharp), color, coverage);
+  color = mix(behind, color, coverage);
   float alpha = mix(sharp.a, source.a, coverage);
   return float4(color * alpha, alpha);
 }

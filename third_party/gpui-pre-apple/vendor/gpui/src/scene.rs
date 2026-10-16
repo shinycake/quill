@@ -587,21 +587,38 @@ pub struct BackdropBlur {
     pub reach: ScaledPixels,
     /// Displacement amplitude. Signed: positive samples toward the centre, so
     /// the interior magnifies and what it displaces compresses at the rim;
-    /// negative inverts that.
+    /// negative pulls in what lies beyond the rim.
     pub magnify: f32,
-    /// Per-channel spread of the displacement, the chromatic fringe.
-    pub dispersion: f32,
-    /// Slope of `out = gain * saturated(backdrop) + tint`.
+    /// Slope of the interior's level, `tint + gain * level`, before `ceiling`
+    /// eases it.
     pub gain: f32,
-    /// How far the backdrop's chroma is pushed from its own grey before the
-    /// gain drops the level. 1 passes it through.
+    /// How much of the backdrop's chroma about its level survives, 0..1+.
     pub saturation: f32,
-    /// The transfer's offset. Transparent leaves the blur bare.
+    /// The interior's level over black. Transparent leaves the blur bare.
     pub tint: Hsla,
-    /// How much white the lit rim adds, 0..1.
+    /// The encoded level the interior eases toward and never passes; at or
+    /// below the tint's level, no easing.
+    pub ceiling: f32,
+    /// The relative luminance range the interior is held inside, the range
+    /// the text over it stays readable on.
+    pub min_luminance: f32,
+    pub max_luminance: f32,
+    /// How much the thin bright line on the rim adds to the encoded colour.
     pub edge: f32,
-    /// How far in that light falls off to nothing.
+    /// The line's gaussian half-width, in from the rim.
     pub edge_width: ScaledPixels,
+    /// How much the soft glow just inside the rim adds to the encoded colour.
+    pub specular: f32,
+    /// How far in the glow falls off, exponentially.
+    pub specular_width: ScaledPixels,
+    /// The axis the light falls along, in window space. The rim is lit where
+    /// it faces along the axis, at both ends; zero lights it all round.
+    pub light_x: f32,
+    pub light_y: f32,
+    /// How much the one device pixel just outside the rim darkens the
+    /// backdrop where the rim faces across the axis, unlit, 0..1: the glass's
+    /// edge seen side-on.
+    pub shade: f32,
     /// Width of the coverage ramp at the boundary. Zero is a hard edge.
     pub edge_aa: ScaledPixels,
     /// The element tree's opacity here. The pass replaces its region rather

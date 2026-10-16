@@ -60,9 +60,13 @@ GPUI fork in crabtalk/zed (Apache-2.0, commit 693d6a82), which bezel
   the fork indexes the primitive vectors, this returns `Option`). `clear`,
   `replay` and `finish` carry the blurs. `Shadow::inset == 2` is a drop
   shadow cut to outside its element.
-- `src/window.rs`: `GlassEffect` (blur radius, lens, reach, magnify,
-  dispersion, gain, saturation, tint, edge, edge width, edge antialiasing),
+- `src/window.rs`: `GlassEffect` (blur radius; the dome lens's depth,
+  reach and magnify; the interior's gain, saturation, tint, ceiling and the
+  readable luminance range it is held inside; the rim's bright line, glow,
+  light axis and the dark outline just outside it; edge antialiasing),
   `Window::paint_backdrop_blur` and `Window::paint_drop_shadows_outside`.
+  The look was fitted to macOS 26's `NSGlassEffectView`; the fork's
+  `dispersion`, `gradient` and `ambient` are gone.
   `paint_drop_shadows` shares `drop_shadows` with the outside variant. The
   blur's opacity is `element_opacity()`; the fork's per-bounds opacity does
   not exist in 0.3.9.
