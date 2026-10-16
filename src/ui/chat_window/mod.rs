@@ -29,6 +29,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod body;
+mod recording;
 mod saved;
 mod scoped;
 mod slot;
@@ -320,6 +321,8 @@ impl QuillApp {
             self.windows.next_bounds(main)
         });
         let owner = cx.entity();
+        // window-scope: window bookkeeping by chat id; the draft goes in with
+        // the new window's state in place (`in_window_scope` below).
         cx.defer(move |cx| {
             let opened = view::open_chat_window(owner.clone(), chat_id, bounds, cx);
             let (handle, view, slot) = match opened {
@@ -393,8 +396,9 @@ impl QuillApp {
         cx.defer(move |cx| {
             let _ = main.update(cx, |_, window, cx| {
                 owner.update(cx, |app, cx| {
-                    app.set_window_scope(None);
-                    app.select_chat_with(chat_id, thread_switch, window, cx);
+                    app.in_window_scope(None, cx, |app, cx| {
+                        app.select_chat_with(chat_id, thread_switch, window, cx);
+                    });
                 });
                 cx.activate(true);
                 window.activate_window();
@@ -432,17 +436,19 @@ impl QuillApp {
         if let Some(bounds) = reopen_at {
             self.windows.note_closed(chat_id, bounds);
         }
-        self.forget_chat_window(chat_id);
+        self.forget_chat_window(chat_id, cx);
         self.schedule_chat_windows_save(cx);
         cx.notify();
     }
 
-    /// Drop the window's bookkeeping and close its chat in TDLib.
-    fn forget_chat_window(&mut self, chat_id: ChatId) {
+    /// Drop the window's bookkeeping, end what it was recording and close
+    /// its chat in TDLib.
+    fn forget_chat_window(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         // Its state must not stay in the app's place.
         if self.windows.scope == Some(chat_id) {
             self.set_window_scope(None);
         }
+        self.end_recording_of_window(chat_id, cx);
         self.windows.open.retain(|open| open.chat_id != chat_id);
         if self.windows.last_input == Some(chat_id) {
             self.windows.last_input = None;
@@ -489,7 +495,7 @@ impl QuillApp {
         self.message_ui.pending_delete = None;
         self.message_ui.pending_stop_poll = None;
         self.notify.ttl_picker_open = false;
-        if self.recording_active() {
+        if self.recording_here() {
             self.cancel_recording(cx);
         }
         self.stop_animation_playback();

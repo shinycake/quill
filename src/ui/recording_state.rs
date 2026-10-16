@@ -1,6 +1,7 @@
 //! Voice and round video recording.
 #![deny(clippy::indexing_slicing)]
 
+use quill::ids::ChatId;
 use quill::playback::PlaybackClock;
 use quill::video::VideoNoteCapture;
 use quill::voice::VoiceCapture;
@@ -26,8 +27,13 @@ pub(crate) struct RecordingUi {
     /// "Play once": the voice message goes out as a one-time message.
     pub(super) once: bool,
     pub(super) voice_tick: bool,
-    /// A video message reached its time limit: send it next frame.
+    /// A video message reached its time limit: send it at the next draw
+    /// of the window it was recorded in.
     pub(super) auto_send: bool,
+    /// The chat window the recording was started in (`None`: the main
+    /// window). It is sent to that window's chat and ends when that window
+    /// closes (`chat_window::recording`).
+    pub(super) window: Option<ChatId>,
     /// The live camera image while a video message records.
     pub(super) round_preview: std::cell::RefCell<super::round_record::RoundPreview>,
 }
@@ -44,6 +50,7 @@ impl RecordingUi {
             once: false,
             voice_tick: false,
             auto_send: false,
+            window: None,
             round_preview: Default::default(),
         }
     }

@@ -657,3 +657,137 @@ fn work_from_a_closed_chat_window_lands_nowhere(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(toast_shown(&h, None, cx), "the main window's toast stays");
 }
+
+/// How many voice messages the main window's chat and `OTHER` hold.
+fn voice_notes(h: &Harness, cx: &mut TestAppContext) -> (usize, usize) {
+    h.settle(cx);
+    h.app.read_with(cx, |app, _| {
+        let count = |chat: ChatId| {
+            app.session()
+                .and_then(|session| session.histories.get(&chat.0))
+                .map_or(0, |history| {
+                    history
+                        .ordered()
+                        .into_iter()
+                        .filter(|message| matches!(message.content, MessageContent::VoiceNote(_)))
+                        .count()
+                })
+        };
+        (count(OPEN), count(OTHER))
+    })
+}
+
+/// A voice message recording in `chat`'s window (`None`: the main
+/// window; a fixture capture, no microphone), as `begin_voice_capture`
+/// starts one there.
+fn record_in_window(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) {
+    h.app.update(cx, |app, cx| {
+        app.in_window_scope(chat, cx, |app, _| {
+            let path = std::env::temp_dir().join("quill-window-recording-test.ogg");
+            app.recording.voice_capture =
+                Some(quill::voice::VoiceCapture::preview(path, 3, vec![4, 8, 12]));
+            app.recording.window = app.windows.scope;
+        })
+        .expect("the chat has a window");
+    });
+}
+
+#[gpui_kit::test]
+fn a_recording_from_a_chat_window_is_never_sent_to_the_main_windows_chat(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let (main, other) = voice_notes(&h, cx);
+    record_in_window(&h, Some(OTHER), cx);
+    // Its record bar is the window's, not the main window's.
+    let here = h.app.update(cx, |app, cx| {
+        let main = app.in_window_scope(None, cx, |app, _| app.recording_here());
+        let window = app.in_window_scope(Some(OTHER), cx, |app, _| app.recording_here());
+        (main, window)
+    });
+    assert_eq!(here, (Some(false), Some(true)));
+
+    // The time limit is reached (`check_recording`), and the main window
+    // draws first, with its own state in place.
+    h.app.update(cx, |app, _| app.recording.auto_send = true);
+    cx.update_window(h.main, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        voice_notes(&h, cx),
+        (main, other),
+        "the main window's draw sent nothing"
+    );
+
+    // The window it was recorded in draws: the message goes to its chat.
+    cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        voice_notes(&h, cx),
+        (main, other + 1),
+        "the window's chat got it, the main window's did not"
+    );
+    assert!(h.app.read_with(cx, |app, _| !app.recording_active()));
+}
+
+#[gpui_kit::test]
+fn the_send_button_sends_to_the_recording_window_whichever_window_asks(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    let (main, other) = voice_notes(&h, cx);
+    record_in_window(&h, Some(OTHER), cx);
+    // Asked with the main window's state in place (a shortcut, the Touch
+    // Bar): it still goes to the window's chat.
+    cx.update_window(h.main, |_, window, cx| {
+        h.app.update(cx, |app, cx| {
+            app.set_window_scope(None);
+            app.send_recording(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(voice_notes(&h, cx), (main, other + 1));
+
+    // One recorded in the main window still goes to its chat.
+    record_in_window(&h, None, cx);
+    cx.update_window(h.main, |_, window, cx| {
+        h.app.update(cx, |app, cx| app.send_recording(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(voice_notes(&h, cx), (main + 1, other + 1));
+}
+
+#[gpui_kit::test]
+fn closing_a_chat_window_ends_the_recording_made_there(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let (main, _) = voice_notes(&h, cx);
+    record_in_window(&h, Some(OTHER), cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        // It reached its time limit just as the window closes.
+        h.app.update(cx, |app, _| app.recording.auto_send = true);
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+    cx.update_window(h.main, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    cx.run_until_parked();
+
+    let (active, note) = h.app.read_with(cx, |app, _| {
+        (app.recording_active(), app.connection.status_note.clone())
+    });
+    assert!(!active, "the recording ended with its window");
+    assert_eq!(
+        note,
+        quill::lang::tr(quill::lang::keys::Q_MISC_RECORDING_DISCARDED_ITS_WINDOW_CLOSED)
+    );
+    assert_eq!(
+        voice_notes(&h, cx).0,
+        main,
+        "nothing went to the main window's chat"
+    );
+}

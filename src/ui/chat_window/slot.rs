@@ -89,8 +89,10 @@ impl WindowSlot {
 
 impl QuillApp {
     /// Put `target`'s window state in place (`None`: the main window's).
-    /// A no-op when it already is; a chat with no window puts the main
-    /// window's state in place.
+    /// A no-op when it already is. A chat with no window, or a window
+    /// whose session view is gone (the session records a diagnostic, and
+    /// the window closes at its next render), puts the main window's state
+    /// in place: a window never shows its own slot over another view.
     pub(in crate::ui) fn set_window_scope(&mut self, target: Option<ChatId>) {
         if self.windows.scope == target {
             return;
@@ -100,17 +102,25 @@ impl QuillApp {
         {
             self.swap_slot(&slot);
         }
-        if let Some(chat_id) = target
-            && let Some(slot) = self.windows.slot_for(chat_id)
+        let slot = target.and_then(|chat_id| Some((chat_id, self.windows.slot_for(chat_id)?)));
+        let view = slot.as_ref().map(|(chat_id, _)| *chat_id);
+        if self.enter_session_view(view)
+            && let Some((chat_id, slot)) = slot
         {
             self.swap_slot(&slot);
             self.windows.scope = Some(chat_id);
         }
-        let scope = self.windows.scope;
+    }
+
+    /// Put `target`'s view in the session's place. `false` when the
+    /// session has no view for it (the main window's is in place then).
+    fn enter_session_view(&mut self, target: Option<ChatId>) -> bool {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.enter_view(scope);
+            live.driver.session.enter_view(target)
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.enter_view(scope);
+            session.enter_view(target)
+        } else {
+            true
         }
     }
 
@@ -130,19 +140,20 @@ impl QuillApp {
     /// Run `f` as `window_chat`'s window (`None`: the main window), for
     /// work deferred from a window's render or finishing later, then
     /// restore the scope that was in place. `None`, without running `f`,
-    /// when that window has closed: its work must not land in the state
-    /// of whichever window is in place instead.
+    /// when that window has closed (or lost its session view): its work
+    /// must not land in the state of whichever window is in place instead.
     pub(in crate::ui) fn in_window_scope<R>(
         &mut self,
         window_chat: Option<ChatId>,
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut Self, &mut Context<Self>) -> R,
     ) -> Option<R> {
-        if window_chat.is_some_and(|chat_id| self.windows.window_for(chat_id).is_none()) {
-            return None;
-        }
         let outer = self.windows.scope;
         self.set_window_scope(window_chat);
+        if self.windows.scope != window_chat {
+            self.set_window_scope(outer);
+            return None;
+        }
         let result = f(self, cx);
         self.set_window_scope(outer);
         Some(result)

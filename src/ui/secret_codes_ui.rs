@@ -36,6 +36,11 @@ impl QuillApp {
         if modifiers.control || modifiers.alt || modifiers.platform {
             return;
         }
+        // Both screens are the main window's; a chat window's keys are its
+        // own (the observer sees every window's).
+        if self.window_scope_of(window).is_some() {
+            return;
+        }
         let Some(text) = keystroke.key_char.as_deref() else {
             return;
         };
@@ -43,7 +48,9 @@ impl QuillApp {
             return;
         };
         if let Some(code) = self.settings.advanced.codes.feed(text) {
-            self.run_secret_code(code, screen, window, cx);
+            self.in_window_scope(None, cx, |this, cx| {
+                this.run_secret_code(code, screen, window, cx)
+            });
         }
     }
 

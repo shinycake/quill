@@ -89,7 +89,11 @@ impl NotifyView {
         let owner = self.owner.clone();
         let id = self.id;
         cx.defer(move |cx| {
-            let _ = owner.update(cx, |app, cx| app.notify_window_event(id, event, cx));
+            // A notification acts as the main window does (its chat opens
+            // there, its reply goes from there).
+            let _ = owner.update(cx, |app, cx| {
+                app.in_window_scope(None, cx, |app, cx| app.notify_window_event(id, event, cx))
+            });
         });
     }
 

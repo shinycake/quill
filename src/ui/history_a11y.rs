@@ -400,8 +400,10 @@ pub(crate) fn install(handle: &FocusHandle, window: &mut Window, cx: &mut Contex
         });
     })
     .detach();
-    cx.on_focus_out(handle, window, |this, _, _, _| {
-        this.message_ui.a11y.focused = false;
+    cx.on_focus_out(handle, window, |this, _, window, cx| {
+        this.in_window_of(window, cx, |this, _, _| {
+            this.message_ui.a11y.focused = false
+        });
     })
     .detach();
 }

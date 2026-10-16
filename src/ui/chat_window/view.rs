@@ -89,12 +89,14 @@ impl Render for ChatWindowView {
         let chat_id = self.chat_id;
         // The chat or the session went away: the window goes with it
         // (Telegram Desktop `closeChatFromWindows`, and a separate window
-        // closes when its peer becomes unavailable).
+        // closes when its peer becomes unavailable). So does a window the
+        // session keeps no view for: it could only show another window's.
         let (alive, title) = app.read_with(cx, |app, _| {
             let alive = app.pane_mode() == super::super::app::PaneMode::Ready
-                && app
-                    .session()
-                    .is_some_and(|session| session.chats.contains_key(&chat_id.0));
+                && app.session().is_some_and(|session| {
+                    session.chats.contains_key(&chat_id.0)
+                        && session.window_chats.contains(&chat_id)
+                });
             (alive, app.chat_window_title(chat_id))
         });
         if !alive {
@@ -130,6 +132,7 @@ impl Render for ChatWindowView {
         });
         let dialog_open = self.shell.read(cx).dialog_open();
         let body = app.update(cx, |app, cx| {
+            app.flush_recording_auto_send(window, cx);
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.chat_window_body(chat_id, window, cx)

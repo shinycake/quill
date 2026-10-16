@@ -36,8 +36,9 @@ impl QuillApp {
     }
 
     /// React to edits, focus and Enter in `composer`. The handlers read
-    /// `self.composer` and the composer state, which are the field's own
-    /// while its window handles the event (`chat_window::slot`).
+    /// `self.composer` and the composer state, so they run with the
+    /// field's window in place: an edit made inside another window's scope
+    /// is delivered after that scope ends (`chat_window::slot`).
     pub(super) fn subscribe_composer_events(
         composer: &Entity<TextareaState>,
         window: &mut Window,
@@ -47,81 +48,92 @@ impl QuillApp {
             composer,
             window,
             |this, state, event: &InputEvent, window, cx| {
-                let mut text = state.read(cx).value().to_string();
-                if matches!(event, InputEvent::Change) {
-                    let prev = this.composer_ui.prev_text.clone();
-                    if this
-                        .composer_ui
-                        .markdown_revert
-                        .as_ref()
-                        .is_some_and(|revert| revert.text != text)
-                    {
-                        this.composer_ui.markdown_revert = None;
-                    }
-                    if let Some(replaced) = this.apply_instant_replace(&text, window, cx) {
-                        text = replaced;
-                    } else if this.apply_markdown_replacement(&prev, window, cx) {
-                        // `**bold**` typed: the markers became formatting.
-                        text = state.read(cx).value().to_string();
-                        this.composer_ui.prev_text = text.clone();
-                    }
-                    this.sync_composer_typing(&text);
-                    this.note_open_draft(true, cx);
-                }
-                // Phase 3.3: the `/` menu tracks the composer text (Blur
-                // dismisses it); Enter picks the highlighted command
-                // instead of sending while the menu is open.
-                match event {
-                    InputEvent::Blur => {
-                        this.close_command_menu(cx);
-                        this.close_inline_results(cx);
-                        this.close_mention_menu(cx);
-                        this.close_suggest_menu(false, cx);
-                    }
-                    _ => {
-                        this.sync_command_menu(cx);
-                        this.sync_mention_menu(cx);
-                        this.sync_suggest_menu(cx);
-                        this.sync_inline_mode(cx);
-                        // codex:spellcheck-native: shift underlines with
-                        // the edit and debounce a background re-check.
-                        this.sync_spellcheck(&text, cx);
-                        this.sync_sticker_suggestions(&text, cx);
-                        this.sync_animated_emoji_suggestion(&text, cx);
-                    }
-                }
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        this.chat_prefs.send_key_mode,
-                    ) {
-                        if this.pick_inline_result_selection(window, cx) {
-                            // Enter was consumed by the inline results.
-                        } else if this.pick_mention_selection(window, cx) {
-                            // Enter completed the highlighted mention.
-                        } else if this.pick_suggest_selection(window, cx) {
-                            // Enter inserted the highlighted hashtag/emoji.
-                        } else if this.pick_command_menu_selection(window, cx) {
-                            // Enter was consumed by the open menu.
-                        } else if !text.trim().is_empty()
-                            || !this.pending_attachments().is_empty()
-                            || this.forward_bar_here()
-                        {
-                            let markup = this.composer_markup(cx);
-                            this.submit_composer(
-                                quill::composer::send_text_on_enter(
-                                    markup,
-                                    this.chat_prefs.send_key_mode,
-                                ),
-                                window,
-                                cx,
-                            );
-                        }
-                    }
-                }
+                this.in_window_of(window, cx, |this, window, cx| {
+                    this.on_composer_event(state, event, window, cx)
+                });
             },
         )
         .detach();
+    }
+
+    /// An edit, focus change or Enter in a compose field, with the field's
+    /// window in place (`in_window_of`).
+    fn on_composer_event(
+        &mut self,
+        state: &Entity<TextareaState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut text = state.read(cx).value().to_string();
+        if matches!(event, InputEvent::Change) {
+            let prev = self.composer_ui.prev_text.clone();
+            if self
+                .composer_ui
+                .markdown_revert
+                .as_ref()
+                .is_some_and(|revert| revert.text != text)
+            {
+                self.composer_ui.markdown_revert = None;
+            }
+            if let Some(replaced) = self.apply_instant_replace(&text, window, cx) {
+                text = replaced;
+            } else if self.apply_markdown_replacement(&prev, window, cx) {
+                // `**bold**` typed: the markers became formatting.
+                text = state.read(cx).value().to_string();
+                self.composer_ui.prev_text = text.clone();
+            }
+            self.sync_composer_typing(&text);
+            self.note_open_draft(true, cx);
+        }
+        // Phase 3.3: the `/` menu tracks the composer text (Blur
+        // dismisses it); Enter picks the highlighted command
+        // instead of sending while the menu is open.
+        match event {
+            InputEvent::Blur => {
+                self.close_command_menu(cx);
+                self.close_inline_results(cx);
+                self.close_mention_menu(cx);
+                self.close_suggest_menu(false, cx);
+            }
+            _ => {
+                self.sync_command_menu(cx);
+                self.sync_mention_menu(cx);
+                self.sync_suggest_menu(cx);
+                self.sync_inline_mode(cx);
+                // codex:spellcheck-native: shift underlines with
+                // the edit and debounce a background re-check.
+                self.sync_spellcheck(&text, cx);
+                self.sync_sticker_suggestions(&text, cx);
+                self.sync_animated_emoji_suggestion(&text, cx);
+            }
+        }
+        if let InputEvent::PressEnter { secondary, shift } = event {
+            let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+            if should_send_on_enter(
+                quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                self.chat_prefs.send_key_mode,
+            ) {
+                if self.pick_inline_result_selection(window, cx) {
+                    // Enter was consumed by the inline results.
+                } else if self.pick_mention_selection(window, cx) {
+                    // Enter completed the highlighted mention.
+                } else if self.pick_suggest_selection(window, cx) {
+                    // Enter inserted the highlighted hashtag/emoji.
+                } else if self.pick_command_menu_selection(window, cx) {
+                    // Enter was consumed by the open menu.
+                } else if !text.trim().is_empty()
+                    || !self.pending_attachments().is_empty()
+                    || self.forward_bar_here()
+                {
+                    let markup = self.composer_markup(cx);
+                    self.submit_composer(
+                        quill::composer::send_text_on_enter(markup, self.chat_prefs.send_key_mode),
+                        window,
+                        cx,
+                    );
+                }
+            }
+        }
     }
 }

@@ -60,9 +60,35 @@ impl ScopedApp {
             .flatten()
             .ok_or(Gone)
     }
+
+    /// The same task as the main window sees it, for what it still owes
+    /// once its own window has closed (a note that its result was dropped).
+    pub(in crate::ui) fn main(&self) -> ScopedApp {
+        ScopedApp {
+            app: self.app.clone(),
+            window: None,
+        }
+    }
 }
 
 impl QuillApp {
+    /// Run `f` with the state of the window `window` is in place: a chat
+    /// window's, else the main window's (also for the app's other
+    /// windows). GPUI calls a subscription or an observer made with
+    /// `subscribe_in` / `observe_*` with the window it was made in, but
+    /// whatever state is in place at that moment: an edit made inside
+    /// another window's `in_window_scope` emits after that scope is gone.
+    /// A closed window's subscriptions do not run at all.
+    pub(in crate::ui) fn in_window_of<R>(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) -> R,
+    ) -> Option<R> {
+        let scope = self.window_scope_of(window);
+        self.in_window_scope(scope, cx, |app, cx| f(app, window, cx))
+    }
+
     /// The handle a task started now carries: the window whose state is in
     /// place.
     fn scoped_app(&self, cx: &Context<Self>) -> ScopedApp {

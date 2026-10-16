@@ -143,7 +143,9 @@ impl QuillApp {
                     cx.notify();
                     let (sender, answer) = std::sync::mpsc::channel();
                     request(device, sender);
-                    cx.spawn(async move |this, cx| {
+                    // The recording starts in the window that asked, or
+                    // not at all once that window closed.
+                    self.spawn_scoped(cx, async move |this, cx| {
                         let granted = loop {
                             match answer.try_recv() {
                                 Ok(granted) => break granted,

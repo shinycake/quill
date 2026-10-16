@@ -70,7 +70,9 @@ impl Session {
 
     /// Put `target`'s view in the session's place (`None`: the main
     /// window's). Returns whether it is in place: `false` for a chat with
-    /// no window, which leaves the main window's view in place.
+    /// no window, which leaves the main window's view in place and
+    /// records a diagnostic (the UI asks only for windows it has, so a
+    /// miss means the two disagree).
     pub fn enter_view(&mut self, target: Option<ChatId>) -> bool {
         if self.requests.window == target {
             return true;
@@ -84,7 +86,16 @@ impl Session {
                 self.requests.window = Some(chat_id);
                 true
             }
-            Some(_) => false,
+            Some(chat_id) => {
+                self.diagnostics.record(Diagnostic {
+                    category: "window",
+                    type_name: None,
+                    extra: Some(chat_id.0.unsigned_abs()),
+                    seq: None,
+                    note: "no-window-view",
+                });
+                false
+            }
             None => true,
         }
     }
@@ -111,7 +122,9 @@ impl Session {
     /// that lands in a view ([`lands_in_view`]) goes to the view that was
     /// in place when its request was registered; a window closed since
     /// gets a throwaway view, so the answer lands in no window's view
-    /// while the account's data it carries (messages, files) still applies.
+    /// while the account's data it carries (messages, files) still applies;
+    /// requests registered meanwhile are stamped with the closed window
+    /// too, so their answers land nowhere either.
     pub(crate) fn apply_payload_in_asking_view(
         &mut self,
         payload: EnvelopePayload,
@@ -126,12 +139,16 @@ impl Session {
             return self.apply_payload(payload, pending, extra, seq);
         };
         let outer = self.view_in_place();
-        if self.enter_view(asked_in) {
+        if asked_in.is_none_or(|chat_id| self.window_chats.contains(&chat_id)) {
+            self.enter_view(asked_in);
             self.apply_payload(payload, pending, extra, seq);
         } else {
+            self.enter_view(None);
             let mut detached = SessionView::default();
             self.swap_view(&mut detached);
+            self.requests.window = asked_in;
             self.apply_payload(payload, pending, extra, seq);
+            self.requests.window = None;
             self.swap_view(&mut detached);
         }
         self.enter_view(outer);
@@ -171,7 +188,8 @@ impl Session {
 
 /// Whether the answer to a `purpose` request lands in a window's view
 /// (`SessionView`): the in-chat search and its jumps, the gallery, a
-/// comment thread, a Saved Messages sublist or tag search.
+/// comment thread, a Saved Messages sublist or tag search, and the
+/// sponsored rows (kept by chat, but accepted only for the open one).
 fn lands_in_view(purpose: RequestPurpose) -> bool {
     matches!(
         purpose,
@@ -190,6 +208,7 @@ fn lands_in_view(purpose: RequestPurpose) -> bool {
             | RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { .. })
             | RequestPurpose::GetSavedMessagesTopicHistory { .. }
             | RequestPurpose::SearchSavedMessages { .. }
+            | RequestPurpose::GetChatSponsoredMessages
     )
 }
 

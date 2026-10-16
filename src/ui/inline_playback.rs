@@ -269,25 +269,14 @@ impl QuillApp {
             return;
         }
         self.recording.voice_tick = true;
-        cx.spawn(async move |this, cx| {
+        // The tick is the app's; each step runs as the recording's window.
+        Self::spawn_main(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(100))
                     .await;
                 let cont = this
-                    .update(cx, |this, cx| {
-                        this.check_recording(cx);
-                        this.check_record_preview();
-                        let recording = this.recording_active();
-                        if let Some(capture) = this.recording.voice_capture.as_mut() {
-                            capture.sample_bar();
-                        }
-                        if recording {
-                            this.sync_voice_action();
-                            cx.notify();
-                        }
-                        recording
-                    })
+                    .update(cx, |this, cx| this.recording_tick_in_window(cx))
                     .unwrap_or(false);
                 if !cont {
                     break;

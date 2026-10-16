@@ -133,7 +133,7 @@ impl QuillApp {
         self.composer_ui.inline_results_open = false;
         self.composer_ui.inline_results_selected = 0;
         self.composer_ui.inline_query_armed = None;
-        if self.recording_active() {
+        if self.recording_here() {
             self.cancel_recording(cx);
         }
     }
@@ -225,6 +225,8 @@ impl QuillApp {
         delay: Duration,
         cx: &mut Context<Self>,
     ) {
+        // window-scope: the pending draft names its own chat and topic (and
+        // its token), so the commit needs no window's state.
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
             this.update(cx, |this, _cx| {

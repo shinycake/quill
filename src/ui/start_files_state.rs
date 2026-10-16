@@ -28,21 +28,24 @@ impl StartFilesUi {
         cx.subscribe_in(
             &search,
             window,
-            |this, state, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => {
-                    let text = state.read(cx).value().to_string();
-                    this.start_files_search_changed(&text, cx);
-                }
-                InputEvent::PressEnter { secondary, shift } => {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        SendKeyMode::Enter,
-                    ) {
-                        this.choose_first_start_files_chat(window, cx);
+            |this, state, event: &InputEvent, window, cx| {
+                this.in_window_of(window, cx, |this, window, cx| match event {
+                    InputEvent::Change => {
+                        let text = state.read(cx).value().to_string();
+                        this.start_files_search_changed(&text, cx);
                     }
-                }
-                _ => {}
+                    InputEvent::PressEnter { secondary, shift } => {
+                        let marked =
+                            state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                        if should_send_on_enter(
+                            quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                            SendKeyMode::Enter,
+                        ) {
+                            this.choose_first_start_files_chat(window, cx);
+                        }
+                    }
+                    _ => {}
+                });
             },
         )
         .detach();

@@ -184,3 +184,95 @@ fn a_view_is_put_in_place_by_window_and_given_back() {
     assert_eq!(session.view_in_place(), None);
     assert_eq!(session.open_chat, Some(ChatId(1)));
 }
+
+const CAROL_JSON: &str = r#"{"@type":"updateNewChat","chat":{"id":9,"title":"Carol","type":{"@type":"chatTypePrivate","user_id":9},"unread_count":0}}"#;
+
+#[test]
+fn an_answer_for_one_window_lands_there_while_another_window_is_in_place() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for chat in [CHAT_JSON, BOB_JSON, CAROL_JSON] {
+        apply_json(&mut session, &seq, &sink, chat);
+    }
+    session.open_chat(ChatId(8));
+    session.open_window_chat(ChatId(7));
+    session.open_window_chat(ChatId(9));
+    let (extra, _) = search_in_window(&mut session);
+    // Carol's window is drawing or handling input when the answer comes,
+    // with a search of its own under way.
+    assert!(session.enter_view(Some(ChatId(9))));
+    assert!(session.open_chat_search());
+    session.search.chat_search.begin_query("own");
+
+    apply_json(&mut session, &seq, &sink, &found_json(extra));
+    assert_eq!(
+        session.view_in_place(),
+        Some(ChatId(9)),
+        "Carol's view stayed in place"
+    );
+    assert_eq!(session.open_chat, Some(ChatId(9)));
+    assert_eq!(session.search.chat_search.status, SearchStatus::Searching);
+    assert!(
+        session.search.chat_search.hits.is_empty(),
+        "Carol's search kept its own state"
+    );
+    assert!(session.enter_view(None));
+    let hits = session.with_view(Some(ChatId(7)), |session| {
+        (
+            session.search.chat_search.status,
+            session.search.chat_search.hits.len(),
+        )
+    });
+    assert_eq!(
+        hits,
+        Some((SearchStatus::Ready, 1)),
+        "the asking window got its hits"
+    );
+}
+
+#[test]
+fn sponsored_rows_asked_for_by_a_window_land_for_its_chat() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, CHAT_JSON);
+    apply_json(&mut session, &seq, &sink, BOB_JSON);
+    session.open_chat(ChatId(8));
+    session.open_window_chat(ChatId(7));
+    let extra = session
+        .with_view(Some(ChatId(7)), |session| {
+            session.request(RequestPurpose::GetChatSponsoredMessages, Some(ChatId(7)))
+        })
+        .expect("chat 7 has a window");
+    // The answer arrives with the main window's view (chat 8) in place.
+    let json = format!(
+        r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":3,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"ad","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com","info":"Ads"}},"title":"Sale","button_text":"Shop","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+        extra.0
+    );
+    apply_json(&mut session, &seq, &sink, &json);
+    assert!(
+        session.messages.sponsored.contains_key(&7),
+        "the window's chat got its sponsored rows"
+    );
+}
+
+#[test]
+fn an_answer_for_a_closed_window_leaves_the_main_view_in_place() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, CHAT_JSON);
+    session.open_window_chat(ChatId(7));
+    let (extra, _) = search_in_window(&mut session);
+    assert!(session.close_window_chat(ChatId(7)));
+    apply_json(&mut session, &seq, &sink, &found_json(extra));
+    // While it applied, requests were the closed window's; afterwards the
+    // main window's view is back and new requests are its own.
+    assert_eq!(session.view_in_place(), None);
+    let next = session.request(RequestPurpose::GetChatPreview, Some(ChatId(7)));
+    assert_eq!(
+        session
+            .requests
+            .take(next)
+            .and_then(|pending| pending.window),
+        None
+    );
+}

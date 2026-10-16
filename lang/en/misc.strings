@@ -494,6 +494,7 @@
 "qll_misc_recently_used" = "Recently used";
 "qll_misc_recolors_the_theme_around_the" = "Recolors the theme around the color you pick. Custom colors are kept light enough on dark themes and dark enough on light ones.";
 "qll_misc_recording" = "Recording";
+"qll_misc_recording_discarded_its_window_closed" = "recording discarded — its chat window closed";
 "qll_misc_recording_is_locked_unlock_it" = "recording is locked — unlock it or use Cancel";
 "qll_misc_recording_locked_esc_wont_cancel" = "recording locked — Esc won't cancel it";
 "qll_misc_recording_paused" = "recording paused";
@@ -647,6 +648,7 @@
 "qll_misc_video_message" = "video message";
 "qll_misc_video_message_2" = "Video message";
 "qll_misc_video_note_mode" = "video note mode";
+"qll_misc_video_note_not_sent_its_window_closed" = "video note not sent — its chat window closed";
 "qll_misc_video_recording_cancelled" = "video recording cancelled";
 "qll_misc_view" = "View";
 "qll_misc_view_contact" = "View contact";

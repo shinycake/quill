@@ -75,7 +75,7 @@ impl QuillApp {
         }
         for (chat_id, handle) in windows {
             self.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
-            self.forget_chat_window(chat_id);
+            self.forget_chat_window(chat_id, cx);
             let _ = handle.update(cx, |_, window, _| window.remove_window());
         }
         self.windows.restore = Restore::Pending;

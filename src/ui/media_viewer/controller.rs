@@ -219,7 +219,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !window.is_window_active() {
-            self.cancel_viewer_boost(cx);
+            // The viewer of the window that went to the background.
+            let scope = self.window_scope_of(window);
+            self.in_window_scope(scope, cx, Self::cancel_viewer_boost);
         }
     }
 

@@ -115,6 +115,7 @@ impl QuillApp {
         match VoiceCapture::start() {
             Ok(capture) => {
                 self.recording.voice_capture = Some(capture);
+                self.recording.window = self.windows.scope;
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
                 self.connection.status_note = tr(keys::Q_MISC_RECORDING_VOICE_NOTE).into();
@@ -168,6 +169,7 @@ impl QuillApp {
         match VideoNoteCapture::start(hq, &self.capture_choice()) {
             Ok(capture) => {
                 self.recording.video_note_capture = Some(capture);
+                self.recording.window = self.windows.scope;
                 self.recording.locked = lock;
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
@@ -369,6 +371,7 @@ impl QuillApp {
         }
         self.recording.locked = false;
         self.recording.discard_confirm = false;
+        self.recording.auto_send = false;
         self.sync_voice_action();
         self.connection.status_note = if was_video {
             tr(keys::Q_MISC_VIDEO_RECORDING_CANCELLED).into()
@@ -459,8 +462,10 @@ impl QuillApp {
         reply.send_target(open)
     }
 
-    /// MED2: send the finished recording, whichever mode is active.
-    pub(super) fn send_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// MED2: send the finished recording, whichever mode is active, from
+    /// the window whose state is in place (`send_recording` puts the
+    /// recording's own window in place first).
+    pub(super) fn send_recording_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.recording.video_note_capture.is_some() {
             self.send_video_note_recording(window, cx);
         } else {
@@ -500,9 +505,22 @@ impl QuillApp {
         let finished = cx.background_spawn(async move { capture.finish() });
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             let result = finished.await;
-            let _ = this.update_in(cx, |this, window, cx| {
+            let path = result.as_ref().ok().map(|draft| draft.path.clone());
+            let sent = this.update_in(cx, |this, window, cx| {
                 this.send_finished_video_note(result, window, cx);
             });
+            if sent.is_err() {
+                // Its window closed while the file was finished: say so,
+                // rather than send it to whichever chat is open now.
+                if let Some(path) = path {
+                    let _ = std::fs::remove_file(path);
+                }
+                let _ = this.main().update(cx, |this, cx| {
+                    this.connection.status_note =
+                        tr(keys::Q_MISC_VIDEO_NOTE_NOT_SENT_ITS_WINDOW_CLOSED).into();
+                    cx.notify();
+                });
+            }
         })
         .detach();
     }
@@ -611,8 +629,18 @@ impl QuillApp {
         let Some(chat_id) = session.open_chat else {
             return;
         };
+        // Past the session's last update, or it is dropped as one already
+        // applied (`apply_demo_outgoing` does the same).
+        self.demo_ui
+            .seq
+            .fetch_max(session.last_seq, std::sync::atomic::Ordering::Relaxed);
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
-        let id = -(session.view_generation.0 as i64);
+        // After the newest loaded message, so it lands at the bottom.
+        let id = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.keys().next_back().copied())
+            .map_or(1, |last| last.max(0) + 1);
         let path = draft.path.to_string_lossy();
         let file = demo_file_json(910, &path, true);
         let waveform = draft.waveform_b64();
@@ -635,6 +663,24 @@ impl QuillApp {
         if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
             session.apply(owned);
         }
+    }
+
+    /// One tick of the running recording (every 100 ms), with its window's
+    /// state in place: a video message at its limit is queued to send, the
+    /// preview and the waveform advance, the chat action is refreshed.
+    /// `false` once nothing records any more.
+    pub(super) fn recording_tick(&mut self, cx: &mut Context<Self>) -> bool {
+        self.check_recording(cx);
+        self.check_record_preview();
+        let recording = self.recording_active();
+        if let Some(capture) = self.recording.voice_capture.as_mut() {
+            capture.sample_bar();
+        }
+        if recording {
+            self.sync_voice_action();
+            cx.notify();
+        }
+        recording
     }
 
     /// While a recording bar is active, sync `chatActionRecordingVoiceNote`

@@ -307,8 +307,19 @@ impl QuillApp {
     }
 
     /// Enter in the search field: open the selected result, else the
-    /// first one (tdesktop `Widget::submit`).
+    /// first one (tdesktop `Widget::submit`). The chat list and its search
+    /// are the main window's, so the result opens there.
     pub(in crate::ui) fn activate_first_search_result(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.in_window_scope(None, cx, |this, cx| {
+            this.activate_first_search_result_in_main(window, cx)
+        });
+    }
+
+    fn activate_first_search_result_in_main(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
