@@ -11,6 +11,8 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
+use quill::message_effects_picker::PREVIEW_TOGGLE_MS;
+use std::time::Duration;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -116,6 +118,44 @@ fn a_click_on_the_card_hides_it_and_one_outside_closes_the_menu(cx: &mut TestApp
     vcx.simulate_click(point(px(300.), px(300.)), Modifiers::none());
     frames(vcx);
     assert!(!menu_open(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_hidden_card_is_dropped_once_its_fade_has_run(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let (party, _, _) = REACTION_EFFECTS[3];
+    vcx.update(|window, cx| window.right_click("composer-send-wrap", cx));
+    frames(vcx);
+    vcx.update(|window, cx| window.click(("send-effect", party as u64), cx));
+    frames(vcx);
+    let card = ("send-effect-card", party as u64);
+    vcx.update(|window, cx| window.click_at(card, point(px(100.), px(40.)), cx));
+    frames(vcx);
+    // The fade runs on the executor's clock: it has not moved, so the card
+    // is still drawn, however long the machine took.
+    app.update(vcx, |app, _| {
+        assert!(
+            app.composer_ui
+                .send_menu
+                .open
+                .as_ref()
+                .is_some_and(|open| { open.areas.card.get().is_some() })
+        );
+    });
+    cx.executor()
+        .advance_clock(Duration::from_millis(PREVIEW_TOGGLE_MS));
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        assert!(
+            app.composer_ui
+                .send_menu
+                .open
+                .as_ref()
+                .is_some_and(|open| { open.areas.card.get().is_none() })
+        );
+    });
+    assert!(menu_open(&app, vcx));
 }
 
 #[gpui_kit::test]

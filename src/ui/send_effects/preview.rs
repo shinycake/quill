@@ -38,11 +38,12 @@ const FPS: u32 = 60;
 const WINDOW_MARGIN: f32 = 8.;
 
 /// How far shown the card is, 0 to 1 (`_shownAnimation`).
-fn progress(preview: &Preview) -> f32 {
+fn progress(preview: &Preview, now: Instant) -> f32 {
     let span = Duration::from_millis(PREVIEW_TOGGLE_MS).as_secs_f32();
+    let since = |at: Instant| now.saturating_duration_since(at).as_secs_f32() / span;
     match preview.hiding {
-        Some(since) => 1. - ease_out_circ(since.elapsed().as_secs_f32() / span),
-        None => ease_out_circ(preview.shown.elapsed().as_secs_f32() / span),
+        Some(at) => 1. - ease_out_circ(since(at)),
+        None => ease_out_circ(since(preview.shown)),
     }
 }
 
@@ -59,9 +60,11 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|shown| std::ptr::eq(shown, preview));
         let toggle = Duration::from_millis(PREVIEW_TOGGLE_MS);
+        // The executor's clock: simulated in tests, the real one otherwise.
+        let now = cx.background_executor().now();
         let gone = preview
             .hiding
-            .is_some_and(|since| since.elapsed() >= toggle);
+            .is_some_and(|since| now.saturating_duration_since(since) >= toggle);
         if gone {
             if current {
                 open.areas.card.set(None);
@@ -102,7 +105,7 @@ impl QuillApp {
         let y = y
             .min(viewport.1 - card.1 - WINDOW_MARGIN)
             .max(WINDOW_MARGIN);
-        let progress = progress(preview);
+        let progress = progress(preview, now);
         let hiding = preview.hiding.is_some();
 
         let icon = badge::effect_icon(effect, &session.media.files, &self.media_display_roots());
