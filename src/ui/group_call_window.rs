@@ -319,6 +319,10 @@ impl Render for GroupCallPanel {
                 .and_then(|s| s.calls.active_group_call.clone())
                 .filter(|_| wants_stage);
             let stage = call.and_then(|call| app.group_call_stage(&call, cx));
+            // The stage closed: its volume slider goes with it.
+            if stage.is_none() {
+                app.group_call.stage_volume = None;
+            }
             let body = match stage {
                 Some(stage) => stage,
                 None => app.group_call_panel_body(cx),

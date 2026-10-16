@@ -211,6 +211,9 @@ impl QuillApp {
         let volume = (!tile.own)
             .then(|| self.stage_volume_slider(call, stage.participant, cx))
             .flatten();
+        if volume.is_none() {
+            self.group_call.stage_volume = None;
+        }
         Some(stage_view(tile, volume, cx))
     }
 

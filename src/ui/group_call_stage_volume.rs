@@ -29,10 +29,12 @@ const SLIDER_WIDTH: f32 = 120.;
 pub(super) struct StageVolume {
     sender: MessageSender,
     /// The level the slider was made from; a new level from the server
-    /// remakes it.
+    /// remakes it, unless a drag is under way.
     level: i32,
+    /// A drag is under way (a change seen, no release yet).
+    dragging: bool,
     slider: Entity<SliderState>,
-    _release: Subscription,
+    _events: Subscription,
 }
 
 /// The slider's percent for a TDLib level.
@@ -68,7 +70,7 @@ impl QuillApp {
             .group_call
             .stage_volume
             .as_ref()
-            .filter(|volume| volume.sender == sender && volume.level == level)
+            .filter(|volume| volume.sender == sender && (volume.level == level || volume.dragging))
             .map(|volume| volume.slider.clone());
         let slider = match current {
             Some(slider) => slider,
@@ -85,7 +87,11 @@ impl QuillApp {
                             &[("name", &name.to_string())],
                         ))
                 });
-                let release = cx.subscribe(&slider, move |this, _, event: &SliderEvent, cx| {
+                let events = cx.subscribe(&slider, move |this, _, event: &SliderEvent, cx| {
+                    let release = matches!(event, SliderEvent::Release(_));
+                    if let Some(volume) = this.group_call.stage_volume.as_mut() {
+                        volume.dragging = !release;
+                    }
                     if let SliderEvent::Release(value) = event {
                         this.set_group_call_participant_volume(
                             sender,
@@ -97,8 +103,9 @@ impl QuillApp {
                 self.group_call.stage_volume = Some(StageVolume {
                     sender,
                     level,
+                    dragging: false,
                     slider: slider.clone(),
-                    _release: release,
+                    _events: events,
                 });
                 slider
             }
