@@ -73,10 +73,8 @@ pub(super) fn sticker_pixels(path: &Path, format: StickerFormat) -> Option<RgbaI
             let frames =
                 quill::sticker_playback::decode_webm_sized(path, &dir, 512, 1, &child, &cancelled)
                     .ok()?;
-            let first = frames.frames.into_iter().next()?;
-            let image = image::open(first).ok()?.to_rgba8();
-            let _ = std::fs::remove_dir_all(dir);
-            image
+            let (width, height, rgba) = frames.first_rgba()?;
+            RgbaImage::from_raw(width, height, rgba)?
         }
         _ => image::open(path).ok()?.to_rgba8(),
     };

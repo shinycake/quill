@@ -301,29 +301,27 @@ impl QuillApp {
                                     max_frames,
                                     &child,
                                     &cancel,
-                                )?;
-                                let mut frames = Vec::with_capacity(decoded.frames.len());
-                                for path in decoded.frames {
+                                )
+                                .map_err(|error| {
                                     if cancel.load(Ordering::SeqCst) {
-                                        return Err(
-                                            tr(keys::Q_AV_STICKER_PLAYBACK_CANCELLED).into()
-                                        );
+                                        tr(keys::Q_AV_STICKER_PLAYBACK_CANCELLED).to_string()
+                                    } else {
+                                        error
                                     }
-                                    let rgba =
-                                        image::open(path).map_err(|e| e.to_string())?.into_rgba8();
-                                    let mut square = image::RgbaImage::new(edge, edge);
-                                    image::imageops::overlay(
-                                        &mut square,
-                                        &rgba,
-                                        i64::from((edge - rgba.width().min(edge)) / 2),
-                                        i64::from((edge - rgba.height().min(edge)) / 2),
-                                    );
-                                    for pixel in square.as_chunks_mut::<4>().0 {
-                                        pixel.swap(0, 2);
-                                    }
-                                    frames.push(square);
-                                }
-                                (frames, decoded.fps)
+                                })?;
+                                let fps = decoded.fps;
+                                // Already BGRA (GPUI's byte order), centered
+                                // on the transparent square.
+                                let frames = decoded
+                                    .into_squares(edge)
+                                    .into_iter()
+                                    .map(|bgra| {
+                                        image::RgbaImage::from_raw(edge, edge, bgra).ok_or_else(
+                                            || tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string(),
+                                        )
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?;
+                                (frames, fps)
                             }
                             _ => return Err(tr(keys::Q_AV_UNSUPPORTED_ANIMATED_STICKER).into()),
                         };

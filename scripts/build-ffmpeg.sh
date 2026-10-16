@@ -81,23 +81,25 @@ mkdir -p "$BUILD"
   make install
 )
 
-# The shim, linked against the libraries above.
-SHIM="$ROOT/native/quillvideo/quillvideo.c"
+# The shim, linked against the libraries above: the video player's
+# quillvideo.c and the WebM sticker decoder quillsticker.c (VP9/VP8 alpha via
+# a second native decoder; docs/decisions/sweep-webm-stickers.md).
+SHIM=("$ROOT/native/quillvideo/quillvideo.c" "$ROOT/native/quillvideo/quillsticker.c")
 LIBS=(-lavformat -lavcodec -lswscale -lswresample -lavutil)
 case "$OS" in
   linux)
     cc -O2 -fPIC -shared -fvisibility=hidden -Wall -Wextra -Werror \
-      -I"$PREFIX/include" "$SHIM" -L"$PREFIX/lib" -Wl,--no-as-needed "${LIBS[@]}" \
+      -I"$PREFIX/include" "${SHIM[@]}" -L"$PREFIX/lib" -Wl,--no-as-needed "${LIBS[@]}" \
       -Wl,-rpath,'$ORIGIN' -Wl,-soname,libquillvideo.so -o "$PREFIX/lib/libquillvideo.so"
     ;;
   macos)
     cc -O2 -dynamiclib -fvisibility=hidden -Wall -Wextra -Werror \
-      -I"$PREFIX/include" "$SHIM" -L"$PREFIX/lib" "${LIBS[@]}" \
+      -I"$PREFIX/include" "${SHIM[@]}" -L"$PREFIX/lib" "${LIBS[@]}" \
       -install_name @rpath/libquillvideo.dylib -o "$PREFIX/lib/libquillvideo.dylib"
     ;;
   windows)
     gcc -O2 -shared -Wall -Wextra -Werror -static-libgcc \
-      -I"$PREFIX/include" "$SHIM" -L"$PREFIX/lib" "${LIBS[@]}" -o "$PREFIX/bin/quillvideo.dll"
+      -I"$PREFIX/include" "${SHIM[@]}" -L"$PREFIX/lib" "${LIBS[@]}" -o "$PREFIX/bin/quillvideo.dll"
     ;;
 esac
 
