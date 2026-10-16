@@ -49,3 +49,6 @@ Follow-ups, not done here:
   drop the source from rodio's side; bounded by user actions meanwhile.
 - A refused seek still restarts the track (file open and decoder setup) on the UI thread in `settle`. The old code did
   the same; moving the open to a worker needs the new `Player` handed back through the board.
+
+Both follow-ups above are handled in `sweep-audio-stall-followups.md` (the leaked worker is released when the
+device answers; the restart is built off the UI thread).
