@@ -13,10 +13,10 @@ pub const OBJECT_PATH: &str = "/org/freedesktop/Notifications";
 pub const INTERFACE: &str = "org.freedesktop.Notifications";
 
 /// The `app_name` argument of `Notify` and the `desktop-entry` hint (the
-/// packaged `assets/quill.desktop`), so the daemon can show the app icon
+/// packaged `assets/org.shinycake.quill.desktop`), so the daemon can show the app icon
 /// and group the notifications under the app.
 pub const APP_NAME: &str = "Quill";
-pub const DESKTOP_ENTRY: &str = "quill";
+pub const DESKTOP_ENTRY: &str = "org.shinycake.quill";
 
 /// The action key a daemon with the `inline-reply` capability turns into a
 /// text field; its text comes back in the `NotificationReplied` signal.
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn hints_name_the_desktop_entry_and_category() {
         let hints = notify_hints();
-        assert!(hints.contains(&("desktop-entry", "quill")));
+        assert!(hints.contains(&("desktop-entry", "org.shinycake.quill")));
         assert!(hints.contains(&("category", "im.received")));
         assert_eq!(app_icon(None), "");
         assert_eq!(

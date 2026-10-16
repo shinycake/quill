@@ -10,11 +10,11 @@
 //!   `URLForApplicationToOpenURL` to read the current handler. There is no
 //!   API to hand the scheme back to another app, so the UI offers a
 //!   "Make default" button instead of a switch.
-//! * Linux: `xdg-mime default quill.desktop x-scheme-handler/tg` and
+//! * Linux: `xdg-mime default org.shinycake.quill.desktop x-scheme-handler/tg` and
 //!   `xdg-mime query default x-scheme-handler/tg`. `xdg-mime` only accepts a
 //!   desktop file that exists, so a build that was never installed (an
 //!   unpacked tarball, an AppImage) first gets a per-user
-//!   `~/.local/share/applications/quill.desktop`, written atomically like the
+//!   `~/.local/share/applications/org.shinycake.quill.desktop`, written atomically like the
 //!   autostart entry. An installed or packaged entry is left alone. Turning
 //!   off restores nothing: xdg has no "previous" handler.
 //! * Windows: per-user keys under `HKCU\Software\Classes\tg`, like
@@ -87,7 +87,9 @@ pub const fn turn_off_note() -> &'static str {
 // ---- Linux ---------------------------------------------------------------
 
 /// The desktop file `xdg-mime` is told about.
-pub const LINUX_DESKTOP_FILE: &str = "quill.desktop";
+pub const LINUX_DESKTOP_FILE: &str = "org.shinycake.quill.desktop";
+/// The name older installs used; still counts as ours.
+const LEGACY_LINUX_DESKTOP_FILE: &str = "quill.desktop";
 /// The MIME type xdg uses for the `tg` scheme.
 pub const LINUX_SCHEME_MIME: &str = "x-scheme-handler/tg";
 
@@ -106,7 +108,7 @@ pub fn parse_xdg_default(output: &str) -> LinkHandlerState {
     let name = output.lines().next().unwrap_or("").trim();
     if name.is_empty() {
         LinkHandlerState::Unset
-    } else if name == LINUX_DESKTOP_FILE {
+    } else if name == LINUX_DESKTOP_FILE || name == LEGACY_LINUX_DESKTOP_FILE {
         LinkHandlerState::Ours
     } else {
         LinkHandlerState::Other(name.strip_suffix(".desktop").unwrap_or(name).to_string())
@@ -146,13 +148,13 @@ pub fn linux_launch_target(exe: &std::path::Path, appimage: Option<&str>) -> std
 }
 
 /// Content of the per-user `quill.desktop` that makes Quill selectable for
-/// `tg:` links. `%u` receives the link; `StartupWMClass` is not set because
-/// the window class is not fixed across toolkits.
+/// `tg:` links. `%u` receives the link; `StartupWMClass` is the window app_id
+/// so the shell groups the window with its launcher and icon.
 pub fn linux_desktop_entry(exe: &std::path::Path) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName=Quill\n\
          Comment=Unofficial Telegram desktop client\n\
-         Exec={exec} %u\nIcon=quill\nTerminal=false\n\
+         Exec={exec} %u\nIcon=quill\nTerminal=false\nStartupWMClass=org.shinycake.quill\n\
          Categories=Network;Chat;\nMimeType={LINUX_SCHEME_MIME};\nActions=quit;\n\n\
          [Desktop Action quit]\nName=Quit Quill\nExec={exec} --quit\nIcon=application-exit\n",
         exec = crate::autostart::desktop_exec(exe)
@@ -472,6 +474,11 @@ mod tests {
 
     #[test]
     fn xdg_output_maps_to_state() {
+        assert_eq!(
+            parse_xdg_default("org.shinycake.quill.desktop\n"),
+            LinkHandlerState::Ours
+        );
+        // Older installs registered the previous file name.
         assert_eq!(parse_xdg_default("quill.desktop\n"), LinkHandlerState::Ours);
         assert_eq!(parse_xdg_default("\n"), LinkHandlerState::Unset);
         assert_eq!(parse_xdg_default(""), LinkHandlerState::Unset);
@@ -485,7 +492,11 @@ mod tests {
     fn xdg_commands_target_the_tg_scheme() {
         assert_eq!(
             linux_set_args(),
-            ["default", "quill.desktop", "x-scheme-handler/tg"]
+            [
+                "default",
+                "org.shinycake.quill.desktop",
+                "x-scheme-handler/tg"
+            ]
         );
         assert_eq!(
             linux_query_args(),
@@ -602,6 +613,7 @@ mod tests {
                 .contains("[Desktop Action quit]\nName=Quit Quill\nExec=/opt/quill/quill --quit\n")
         );
         assert!(plain.starts_with("[Desktop Entry]\nType=Application\n"));
+        assert!(plain.contains("StartupWMClass=org.shinycake.quill\n"));
         let spaced = linux_desktop_entry(Path::new("/home/a b/Quill/quill"));
         assert!(spaced.contains("Exec=\"/home/a b/Quill/quill\" %u\n"));
     }
@@ -634,7 +646,7 @@ mod tests {
         let written = ensure_linux_desktop_entry(&[user.clone(), system], exe)
             .unwrap()
             .expect("written");
-        assert_eq!(written, user.join("quill.desktop"));
+        assert_eq!(written, user.join("org.shinycake.quill.desktop"));
         let content = std::fs::read_to_string(&written).unwrap();
         assert_eq!(content, linux_desktop_entry(exe));
         // No temp file is left next to it.
@@ -642,7 +654,7 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert_eq!(names, ["quill.desktop"]);
+        assert_eq!(names, ["org.shinycake.quill.desktop"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -652,10 +664,28 @@ mod tests {
         let user = root.join("home/applications");
         let system = root.join("sys/applications");
         std::fs::create_dir_all(&system).unwrap();
-        std::fs::write(system.join("quill.desktop"), "packaged").unwrap();
+        std::fs::write(system.join("org.shinycake.quill.desktop"), "packaged").unwrap();
         let out = ensure_linux_desktop_entry(&[user.clone(), system], Path::new("/x/quill"));
         assert_eq!(out.unwrap(), None);
         assert!(!user.exists());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod packaged_entry_tests {
+    use super::LINUX_DESKTOP_FILE;
+
+    const SHIPPED: &str = include_str!("../assets/org.shinycake.quill.desktop");
+
+    /// The window app_id (src/main.rs, chat_window/view.rs) must equal the
+    /// desktop file id and StartupWMClass or GNOME/KDE cannot group the
+    /// window with its launcher and icon.
+    #[test]
+    fn shipped_desktop_file_matches_the_window_app_id() {
+        let app_id = LINUX_DESKTOP_FILE.trim_end_matches(".desktop");
+        assert_eq!(app_id, "org.shinycake.quill");
+        assert!(SHIPPED.contains(&format!("\nStartupWMClass={app_id}\n")));
+        assert!(SHIPPED.contains("MimeType=x-scheme-handler/tg;"));
     }
 }

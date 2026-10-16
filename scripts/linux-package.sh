@@ -12,7 +12,7 @@
 #     lib/libav{codec,format,util}.so.N, libsw{scale,resample}.so.N   FFmpeg, LGPL-2.1+
 #     licenses/ffmpeg/           FFmpeg license texts + exact source and configure line
 #     lib/libssl.so.3, libcrypto.so.3   (bundled OpenSSL, see decision doc)
-#     share/applications/quill.desktop, share/icons/hicolor/<size>/apps/quill.png
+#     share/applications/org.shinycake.quill.desktop, share/icons/hicolor/<size>/apps/quill.png
 #     install.sh, README.txt, LICENSE, THIRD_PARTY.md, THIRD_PARTY_LICENSES.md
 #     licenses/                  native-library license texts (scripts/stage-licenses.sh)
 #
@@ -107,7 +107,7 @@ for lib in "$PKG"/lib/*.so*; do
   patchelf --set-rpath '$ORIGIN' "$lib"
 done
 
-install -m 644 assets/quill.desktop "$PKG/share/applications/quill.desktop"
+install -m 644 assets/org.shinycake.quill.desktop "$PKG/share/applications/org.shinycake.quill.desktop"
 for icon in assets/icons/hicolor/*/apps/quill.png; do
   size="$(basename "$(dirname "$(dirname "$icon")")")"
   install -D -m 644 "$icon" "$PKG/share/icons/hicolor/$size/apps/quill.png"

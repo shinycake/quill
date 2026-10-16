@@ -244,7 +244,13 @@ fn windows_icon(manifest: &Path, out: &Path) -> Result<(), String> {
     let icon = manifest.join("assets/icons/Quill.ico");
     let rc = out.join("quill.rc");
     let icon = icon.to_string_lossy().replace('\\', "/");
-    std::fs::write(&rc, format!("1 ICON \"{icon}\"\n"))
+    // gpui is built with `windows-manifest-provided-by-host`, so this exe must
+    // carry the manifest itself (RT_MANIFEST = 24, id 1): per-monitor-v2 DPI,
+    // long paths, UTF-8 code page, common controls 6.
+    println!("cargo:rerun-if-changed=assets/windows/quill.manifest");
+    let app_manifest = manifest.join("assets/windows/quill.manifest");
+    let app_manifest = app_manifest.to_string_lossy().replace('\\', "/");
+    std::fs::write(&rc, format!("1 ICON \"{icon}\"\n1 24 \"{app_manifest}\"\n"))
         .map_err(|err| format!("write rc: {err}"))?;
     embed_resource::compile(&rc, embed_resource::NONE)
         .manifest_required()

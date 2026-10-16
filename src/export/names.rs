@@ -20,8 +20,53 @@ pub fn date_part(date: i32, offset_secs: i32) -> String {
     )
 }
 
+/// Longest file name `sanitize` returns, in characters.
+const MAX_NAME_CHARS: usize = 120;
+/// Longest file name `sanitize` returns, in UTF-8 bytes. Filesystems cap a
+/// component at 255 bytes; the rest is room for `_thumb.jpg` and ` (n)`.
+const MAX_NAME_BYTES: usize = 200;
+
+/// Windows device names: unusable as a file name with or without an extension.
+fn is_windows_reserved(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or("").trim_end();
+    let upper = base.to_ascii_uppercase();
+    match upper.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        _ => {
+            // COM1-9 / LPT1-9 (and the superscript digits Windows also reserves).
+            let digit = upper
+                .strip_prefix("COM")
+                .or_else(|| upper.strip_prefix("LPT"));
+            digit.is_some_and(|d| {
+                let mut chars = d.chars();
+                matches!(
+                    (chars.next(), chars.next()),
+                    (Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
+                )
+            })
+        }
+    }
+}
+
+/// `s` cut to at most `max_chars` characters and `max_bytes` bytes, on a char boundary.
+fn truncate(s: &str, max_chars: usize, max_bytes: usize) -> &str {
+    let mut end = 0;
+    for (count, (idx, c)) in s.char_indices().enumerate() {
+        let next = idx + c.len_utf8();
+        if count >= max_chars || next > max_bytes {
+            break;
+        }
+        end = next;
+    }
+    s.get(..end).unwrap_or("")
+}
+
 /// A file name safe on every platform: path separators, control and
-/// reserved characters become `_`; leading dots and surrounding spaces go.
+/// reserved characters become `_`; leading dots and surrounding spaces go,
+/// as do trailing dots and spaces (Windows drops them silently); Windows
+/// device names (`CON`, `NUL.txt`, `COM1`, …) get a `_` prefix. Long names
+/// are cut at 120 characters / 200 bytes on a char boundary, keeping the
+/// extension.
 pub fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -33,8 +78,31 @@ pub fn sanitize(name: &str) -> String {
             }
         })
         .collect();
-    let trimmed = cleaned.trim().trim_start_matches('.').trim();
-    trimmed.chars().take(120).collect()
+    let trimmed = cleaned
+        .trim()
+        .trim_start_matches('.')
+        .trim_end_matches(['.', ' '])
+        .trim();
+    let mut out = if trimmed.chars().count() <= MAX_NAME_CHARS && trimmed.len() <= MAX_NAME_BYTES {
+        trimmed.to_string()
+    } else {
+        // Keep a real extension (short, after a dot that is not the first char).
+        let (stem, ext) = match trimmed.rfind('.') {
+            Some(dot) if dot > 0 && trimmed.len() - dot <= 17 => trimmed.split_at(dot),
+            _ => (trimmed, ""),
+        };
+        let ext_chars = ext.chars().count();
+        let stem = truncate(
+            stem,
+            MAX_NAME_CHARS.saturating_sub(ext_chars),
+            MAX_NAME_BYTES.saturating_sub(ext.len()),
+        );
+        format!("{}{ext}", stem.trim_end_matches(['.', ' ']))
+    };
+    if is_windows_reserved(&out) {
+        out.insert(0, '_');
+    }
+    out
 }
 
 fn mime_extension(mime: &str) -> Option<&'static str> {
@@ -251,6 +319,58 @@ mod tests {
         assert_eq!(sanitize("..."), "");
         let long = "x".repeat(300);
         assert_eq!(sanitize(&long).len(), 120);
+    }
+
+    #[test]
+    fn sanitize_renames_windows_device_names() {
+        for name in [
+            "CON",
+            "con.txt",
+            "NUL",
+            "Aux.tar.gz",
+            "PRN",
+            "COM1",
+            "lpt9.log",
+            "COM1 .txt",
+        ] {
+            assert!(sanitize(name).starts_with('_'), "{name}");
+        }
+        // Only the exact device names are reserved.
+        for name in ["COM0", "COM10", "CONSOLE.txt", "LPT", "my.CON", "AUXILIARY"] {
+            assert_eq!(sanitize(name), name, "{name}");
+        }
+    }
+
+    #[test]
+    fn sanitize_drops_trailing_dots_and_spaces() {
+        assert_eq!(sanitize("a."), "a");
+        assert_eq!(sanitize("report. . "), "report");
+        assert_eq!(sanitize("name.txt "), "name.txt");
+        assert_eq!(sanitize("a/b."), "a_b");
+    }
+
+    #[test]
+    fn sanitize_keeps_the_extension_when_truncating() {
+        let long = format!("{}.pdf", "x".repeat(200));
+        let out = sanitize(&long);
+        assert_eq!(out.chars().count(), 120);
+        assert!(out.ends_with("x.pdf"));
+        // A huge "extension" is just truncated like a plain name.
+        let odd = format!("a.{}", "y".repeat(300));
+        assert_eq!(sanitize(&odd).chars().count(), 120);
+    }
+
+    #[test]
+    fn sanitize_caps_utf8_bytes_on_a_char_boundary() {
+        let cjk = format!("{}.docx", "\u{6f22}".repeat(100));
+        let out = sanitize(&cjk);
+        assert!(out.len() <= 200, "{}", out.len());
+        assert!(out.ends_with(".docx"));
+        assert!(out.starts_with('\u{6f22}'));
+        let emoji = "\u{1f600}".repeat(150);
+        let out = sanitize(&emoji);
+        assert!(out.len() <= 200);
+        assert_eq!(out.len() % 4, 0);
         let mut namer = Namer::default();
         let evil = media(MediaKind::File, "../../x.sh", "");
         let path = namer.path(&evil, 0, 0, "");

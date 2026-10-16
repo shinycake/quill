@@ -61,22 +61,37 @@ pub fn save_media_to_downloads_in_dir(
     std::fs::create_dir_all(dir)?;
     let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("media");
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let mut candidate = dir.join(if ext.is_empty() {
-        stem.to_string()
-    } else {
-        format!("{stem}.{ext}")
-    });
-    let mut n = 1;
-    while candidate.exists() {
-        n += 1;
-        candidate = dir.join(if ext.is_empty() {
-            format!("{stem} ({n})")
-        } else {
-            format!("{stem} ({n}).{ext}")
-        });
+    let mut input = std::fs::File::open(src)?;
+    let mut n = 1u32;
+    loop {
+        let name = match (n, ext.is_empty()) {
+            (1, true) => stem.to_string(),
+            (1, false) => format!("{stem}.{ext}"),
+            (_, true) => format!("{stem} ({n})"),
+            (_, false) => format!("{stem} ({n}).{ext}"),
+        };
+        let candidate = dir.join(name);
+        // `create_new` claims the name atomically, so a file that appeared
+        // since the last check (or a concurrent save) is never overwritten.
+        let mut output = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                n = n.saturating_add(1);
+                continue;
+            }
+            Err(err) => return Err(err),
+        };
+        if let Err(err) = std::io::copy(&mut input, &mut output) {
+            drop(output);
+            let _ = std::fs::remove_file(&candidate);
+            return Err(err);
+        }
+        return Ok(candidate);
     }
-    std::fs::copy(src, &candidate)?;
-    Ok(candidate)
 }
 
 #[cfg(test)]
@@ -115,6 +130,26 @@ mod tests {
         assert_eq!(std::fs::read(&first).unwrap(), b"fake-jpeg");
         let second = save_media_to_downloads_in_dir(&src, &dir).unwrap();
         assert_eq!(second.file_name().unwrap(), "photo (2).jpg");
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn save_never_overwrites_existing_files() {
+        let tmp = std::env::temp_dir().join(format!("quill-med2-{}", std::process::id()));
+        let dir = tmp.join("dl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = tmp.join("photo.jpg");
+        std::fs::write(&src, b"new").unwrap();
+        std::fs::write(dir.join("photo.jpg"), b"mine").unwrap();
+        std::fs::write(dir.join("photo (2).jpg"), b"mine too").unwrap();
+        let saved = save_media_to_downloads_in_dir(&src, &dir).unwrap();
+        assert_eq!(saved.file_name().unwrap(), "photo (3).jpg");
+        assert_eq!(std::fs::read(dir.join("photo.jpg")).unwrap(), b"mine");
+        assert_eq!(
+            std::fs::read(dir.join("photo (2).jpg")).unwrap(),
+            b"mine too"
+        );
+        assert_eq!(std::fs::read(&saved).unwrap(), b"new");
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 }

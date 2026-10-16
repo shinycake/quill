@@ -184,11 +184,7 @@ impl QuillApp {
                 // Empty removes the photo; otherwise the path must be
                 // a real file — TDLib would reject a missing one anyway.
                 // `~` expands to the home dir.
-                let value = if let Some(rest) = value.strip_prefix('~') {
-                    format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
-                } else {
-                    value
-                };
+                let value = quill::path_expand::expand_tilde(&value);
                 let photo = if value.is_empty() {
                     None
                 } else if std::path::Path::new(&value).is_file() {
