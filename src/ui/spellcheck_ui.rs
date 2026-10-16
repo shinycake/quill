@@ -89,7 +89,7 @@ impl QuillApp {
     /// Windows ISpellChecker, else Hunspell dictionaries from disk
     /// (`quill::spell_dict`); with none of those, checking is off.
     /// `chosen` is the user's explicit language list.
-    fn build_spell_engine(chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
+    pub(super) fn build_spell_engine(chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
         #[cfg(target_os = "macos")]
         {
             let checker = match super::spellcheck_mac::SystemSpellBackend::new() {
@@ -145,8 +145,11 @@ impl QuillApp {
         }
     }
 
-    /// The engine at startup. `app_words` loads the words added on
-    /// platforms without a system dictionary, and the language picks.
+    /// The engine at startup, built synchronously. `app_words` loads the
+    /// words added on platforms without a system dictionary, and the
+    /// language picks. Only demo fixtures use this; the live app starts
+    /// with [`Self::provisional_spellchecker`] and builds the real engine
+    /// off the UI thread.
     pub(super) fn new_spellchecker(app_words: bool) -> (Arc<SpellChecker>, SpellInfo) {
         let paths = Self::appearance_paths();
         let chosen = if app_words {
@@ -161,8 +164,58 @@ impl QuillApp {
         (checker, info)
     }
 
+    /// The checker used until the platform engine is ready: the embedded
+    /// wordlist plus the persisted app words, no OS or disk dictionary
+    /// calls. Returns the user's language picks for the engine build.
+    pub(super) fn provisional_spellchecker() -> (Arc<SpellChecker>, SpellInfo, Vec<String>) {
+        let paths = Self::appearance_paths();
+        let chosen = quill::settings::load_spellcheck_languages(&paths).languages;
+        let checker = Arc::new(SpellChecker::wordlist());
+        checker.set_app_words(quill::settings::load_spellcheck_words(&paths).words);
+        let info = SpellInfo {
+            kind: if cfg!(any(target_os = "macos", windows)) {
+                EngineKind::System
+            } else {
+                EngineKind::Hunspell
+            },
+            available: Vec::new(),
+            active: Vec::new(),
+            chosen: chosen.clone(),
+        };
+        (checker, info, chosen)
+    }
+
+    /// Build the platform engine on a background task and swap it in when
+    /// it resolves (the old checker keeps answering meanwhile). A newer
+    /// call replaces a pending one.
+    pub(super) fn start_spell_engine(&mut self, chosen: Vec<String>, cx: &mut Context<Self>) {
+        let build = self.spell.engine_builder;
+        self.spell.engine_task = Some(cx.spawn(async move |this, cx| {
+            let (checker, info) = cx.background_spawn(async move { build(&chosen) }).await;
+            let _ = this.update(cx, |this, cx| this.install_spell_engine(checker, info, cx));
+        }));
+    }
+
+    fn install_spell_engine(
+        &mut self,
+        checker: Arc<SpellChecker>,
+        info: SpellInfo,
+        cx: &mut Context<Self>,
+    ) {
+        self.spell.engine_task = None;
+        // Words learned while the engine was loading carry over.
+        checker.set_app_words(self.spell.checker.app_words());
+        self.spell.checker = checker;
+        self.spell.info = info;
+        self.spell.misspellings.clear();
+        self.spell.checked_text = self.composer.read(cx).value().to_string();
+        self.schedule_spellcheck(WARM_DELAY, cx);
+        cx.notify();
+    }
+
     /// The user picked other spelling languages (empty: automatic):
-    /// persist, rebuild the engine and re-check the draft.
+    /// persist, rebuild the engine in the background and re-check the
+    /// draft once it is in.
     pub(super) fn set_spell_languages(&mut self, chosen: Vec<String>, cx: &mut Context<Self>) {
         let prefs = quill::settings::SpellcheckLanguages {
             languages: chosen.clone(),
@@ -175,13 +228,8 @@ impl QuillApp {
                 &[("err", &err.to_string())],
             );
         }
-        let (checker, info) = Self::build_spell_engine(&chosen);
-        checker.set_app_words(self.spell.checker.app_words());
-        self.spell.checker = checker;
-        self.spell.info = info;
-        self.spell.misspellings.clear();
-        self.spell.checked_text = self.composer.read(cx).value().to_string();
-        self.schedule_spellcheck(WARM_DELAY, cx);
+        self.spell.info.chosen = chosen.clone();
+        self.start_spell_engine(chosen, cx);
         cx.notify();
     }
 
@@ -645,3 +693,8 @@ mod tests {
         assert!(cursor <= text.len());
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "spell_engine_tests.rs"]
+mod engine_tests;

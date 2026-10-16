@@ -22,7 +22,19 @@ pub(crate) struct SpellUi {
     pub(super) checked_text: String,
     /// The debounced background re-check (dropping it cancels it).
     pub(super) task: Option<Task<()>>,
+    /// Builds the platform engine for the user's language picks; runs on a
+    /// background task (a field so tests can slow it down).
+    pub(super) engine_builder: EngineBuilder,
+    /// The pending background engine build (dropping it discards the result).
+    pub(super) engine_task: Option<Task<()>>,
 }
+
+pub(super) type EngineBuilder = fn(
+    &[String],
+) -> (
+    std::sync::Arc<quill::spellcheck::SpellChecker>,
+    super::spellcheck_ui::SpellInfo,
+);
 
 impl SpellUi {
     pub(super) fn new(
@@ -39,6 +51,8 @@ impl SpellUi {
             misspellings: Vec::new(),
             checked_text: String::new(),
             task: None,
+            engine_builder: super::app::QuillApp::build_spell_engine,
+            engine_task: None,
         }
     }
 }
