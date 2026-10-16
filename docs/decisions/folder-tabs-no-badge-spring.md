@@ -31,7 +31,7 @@ jump. The tab epoch (text color fade) is untouched, and the `TabBar` is not
 re-keyed, so scroll position and tab transitions are kept.
 
 The kit has no option to disable the spring for bounds changes, hence the patch.
-`THIRD_PARTY_LICENSES.md` is unchanged: same crate, same version, same license.
+`THIRD_PARTY_LICENSES.md` only reorders two entries (gpui-component is now a path crate).
 
 ## Verification
 
