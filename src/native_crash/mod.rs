@@ -4,12 +4,15 @@
 //! own.
 //!
 //! * Unix (`unix.rs`): `sigaction` for SIGSEGV, SIGBUS, SIGILL, SIGFPE and
-//!   SIGABRT on an alternate signal stack. The handler only calls `write(2)`
-//!   and `backtrace(3)` on a file opened at startup, restores the default
-//!   action and re-raises, so the OS crash reporter still runs.
-//! * Windows (`windows.rs`): an unhandled-exception filter writing the
-//!   exception code, its address and a minidump, then chaining to the
-//!   previous filter.
+//!   SIGABRT on the thread's alternate signal stack. The handler only calls
+//!   `write(2)` and `backtrace(3)` on a file opened at startup, calls the
+//!   handler that was there before (Rust's stack-overflow message), restores
+//!   the default action and lets the fault happen again (or re-raises), so
+//!   the OS crash reporter still runs with the real faulting frame.
+//! * Windows (`windows.rs`): an unhandled-exception filter that wakes a
+//!   dump thread, which writes the exception code, its address and a
+//!   minidump to files opened at startup; the filter itself allocates
+//!   nothing, then chains to the previous filter.
 //!
 //! Both write `native-crash-active.txt` (and `.dmp` on Windows) in the logs
 //! folder. A clean quit removes them ([`discard_active`]). At the next start
@@ -18,10 +21,10 @@
 //! points at. Only the newest [`crate::crash_log::KEEP_CRASH_FILES`] reports
 //! stay, with their dumps.
 //!
-//! Limits: `sigaltstack` is per thread, so only the installing thread (the
-//! main thread) survives a stack overflow; a fault on another thread runs
-//! the handler on that thread's own stack. The Rust runtime's stack-overflow
-//! message is replaced by the report.
+//! Limits: `sigaltstack` is per thread. The main thread keeps the stack
+//! Rust's runtime gave it (with a guard page), so it survives a stack
+//! overflow; so does any thread Rust spawned. A thread made by native code
+//! without an alternate stack runs the handler on its own stack.
 #![deny(clippy::indexing_slicing)]
 
 use std::fs;

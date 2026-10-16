@@ -29,9 +29,9 @@ pub(crate) fn install(window: &Window, cx: &mut App) {
     let Some(root) = quill::settings::safe_app_root() else {
         return;
     };
-    // Before the lookup: a previous run that left its `running` file (killed,
-    // native fault) becomes a report the lookup finds.
-    quill::crash_log::begin_run_with_native_handlers(&root);
+    // `ui_main` already called `begin_run_with_native_handlers`: a previous
+    // run that left its `running` file (killed, native fault) is a crash
+    // report by now, which the lookup below finds.
     let Some(crash) = quill::crash_log::pending_crash(&root) else {
         return;
     };

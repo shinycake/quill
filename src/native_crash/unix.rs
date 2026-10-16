@@ -2,19 +2,29 @@
 //!
 //! Everything the handler needs is prepared at install time: the open file
 //! descriptor, the header text and the alternate stack. The handler itself
-//! only uses `write(2)`, `time(2)`, `backtrace(3)` /
+//! only uses `write(2)`, `time(2)`, `nanosleep(2)`, `backtrace(3)` /
 //! `backtrace_symbols_fd(3)` (warmed up once at install, so the first call
 //! does not load libraries inside the handler) and `raise(3)`.
 //!
 //! A handler is async-signal-safe only if it does not allocate or take
 //! locks, so no `format!`, no `String`, no logging below.
+//!
+//! Order of events in a fault: the first thread in writes the report; any
+//! other thread that faults meanwhile waits (bounded) so the report is not
+//! cut off by the process dying. Then the handler that was installed before
+//! ours (Rust's own stack-overflow handler, which prints "has overflowed its
+//! stack") is called, the default action is restored, and for a hardware
+//! fault (SIGSEGV, SIGBUS, SIGILL, SIGFPE) the handler returns, so the
+//! faulting instruction runs again under the default action and the OS crash
+//! report keeps the real faulting frame, `si_code` and `si_addr`. A signal
+//! sent by a process (`raise`, `kill`) and SIGABRT are re-raised instead.
 
 use super::ACTIVE_REPORT_FILE;
 use std::ffi::c_int;
 use std::os::fd::IntoRawFd;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
 const SIGNALS: [c_int; 5] = [
     libc::SIGSEGV,
@@ -23,13 +33,24 @@ const SIGNALS: [c_int; 5] = [
     libc::SIGFPE,
     libc::SIGABRT,
 ];
+/// Only used for a thread that has no alternate stack of its own.
 const ALT_STACK_BYTES: usize = 256 * 1024;
+/// Small on purpose: the handler may run on a worker thread's small
+/// alternate stack.
 #[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
-const MAX_FRAMES: usize = 128;
+const MAX_FRAMES: usize = 64;
+/// How long a second faulting thread waits for the first one's report.
+const WAIT_STEP_NANOS: libc::c_long = 50_000_000;
+const WAIT_STEPS: u32 = 40;
 
 static CRASH_FD: AtomicI32 = AtomicI32::new(-1);
 static IN_HANDLER: AtomicBool = AtomicBool::new(false);
+static REPORT_DONE: AtomicBool = AtomicBool::new(false);
 static INSTALLED: AtomicBool = AtomicBool::new(false);
+/// The `sa_sigaction` value and `sa_flags` each signal had before ours, in
+/// `SIGNALS` order; zero is `SIG_DFL`.
+static OLD_HANDLER: [AtomicUsize; SIGNALS.len()] = [const { AtomicUsize::new(0) }; SIGNALS.len()];
+static OLD_FLAGS: [AtomicI32; SIGNALS.len()] = [const { AtomicI32::new(0) }; SIGNALS.len()];
 /// Text written after the signal line: version, OS, pid.
 static HEADER: OnceLock<Box<[u8]>> = OnceLock::new();
 
@@ -56,9 +77,9 @@ pub(super) fn install(dir: &Path) {
     let _ = HEADER.set(header.into_bytes().into_boxed_slice());
     warm_up_backtrace();
     CRASH_FD.store(file.into_raw_fd(), Ordering::SeqCst);
-    install_alt_stack();
-    for signal in SIGNALS {
-        install_one(signal);
+    ensure_alt_stack();
+    for (index, signal) in SIGNALS.into_iter().enumerate() {
+        install_one(index, signal);
     }
 }
 
@@ -72,7 +93,18 @@ fn warm_up_backtrace() {
 #[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
 fn warm_up_backtrace() {}
 
-fn install_alt_stack() {
+/// Keep the alternate stack the thread already has: Rust's runtime sets one
+/// up on the main thread, with a guard page below it, for its own
+/// stack-overflow handler. Ours (leaked, no guard page) is only for a thread
+/// that has none.
+fn ensure_alt_stack() {
+    // SAFETY: `stack_t` is plain data; all-zero is a valid value.
+    let mut current: libc::stack_t = unsafe { std::mem::zeroed() };
+    // SAFETY: a null new stack only queries; `current` is writable.
+    let queried = unsafe { libc::sigaltstack(std::ptr::null(), &mut current) } == 0;
+    if queried && current.ss_flags & libc::SS_DISABLE == 0 {
+        return;
+    }
     // Leaked on purpose: the kernel uses it for the life of the process.
     let stack: &'static mut [u8] = Box::leak(vec![0u8; ALT_STACK_BYTES].into_boxed_slice());
     let spec = libc::stack_t {
@@ -87,35 +119,117 @@ fn install_alt_stack() {
 
 type Handler = extern "C" fn(c_int, *mut libc::siginfo_t, *mut libc::c_void);
 
-fn install_one(signal: c_int) {
+fn install_one(index: usize, signal: c_int) {
     // SAFETY: `sigaction` is plain data; all-zero is a valid empty value
     // (no flags, empty mask) that the fields below then fill in.
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
     action.sa_sigaction = on_signal as Handler as usize;
-    // NODEFER lets the re-raise below be delivered from inside the handler;
-    // RESETHAND makes that delivery the default action.
-    action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK | libc::SA_RESETHAND | libc::SA_NODEFER;
+    // No RESETHAND and no NODEFER: the handler restores the default action
+    // itself once the report is written, so a second thread that faults
+    // meanwhile still reaches it (and waits), and a fault inside the handler,
+    // with its signal blocked, ends the process.
+    action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
     // SAFETY: `action.sa_mask` is a valid sigset_t owned by this frame.
     unsafe { libc::sigemptyset(&mut action.sa_mask) };
+    // SAFETY: `sigaction` is plain data; all-zero is a valid value.
+    let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
     // SAFETY: `action` is fully initialised and the handler has the
-    // `SA_SIGINFO` signature; the old action is not wanted.
-    unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) };
+    // `SA_SIGINFO` signature; `old` is writable.
+    let installed = unsafe { libc::sigaction(signal, &action, &mut old) } == 0;
+    if installed
+        && let (Some(handler), Some(flags)) = (OLD_HANDLER.get(index), OLD_FLAGS.get(index))
+    {
+        handler.store(old.sa_sigaction, Ordering::SeqCst);
+        flags.store(old.sa_flags as i32, Ordering::SeqCst);
+    }
 }
 
 // Cannot unwind: it has no panicking operations (no indexing, no unwrap, no
 // allocation), and an unwind out of `extern "C"` aborts.
-extern "C" fn on_signal(signal: c_int, info: *mut libc::siginfo_t, _context: *mut libc::c_void) {
-    if !IN_HANDLER.swap(true, Ordering::SeqCst) {
+extern "C" fn on_signal(signal: c_int, info: *mut libc::siginfo_t, context: *mut libc::c_void) {
+    if IN_HANDLER.swap(true, Ordering::SeqCst) {
+        // Another thread is writing the report; dying now would cut it off.
+        wait_for_report();
+    } else {
         let fd = CRASH_FD.load(Ordering::SeqCst);
         if fd >= 0 {
             write_report(fd, signal, fault_address(info));
         }
+        REPORT_DONE.store(true, Ordering::SeqCst);
     }
-    // SAFETY: restoring the default action and re-raising are plain libc
-    // calls; the OS crash reporter then sees the original signal.
-    unsafe {
-        libc::signal(signal, libc::SIG_DFL);
-        libc::raise(signal);
+    chain_to_previous(signal, info, context);
+    // SAFETY: restoring the default action is a plain libc call.
+    unsafe { libc::signal(signal, libc::SIG_DFL) };
+    if signal == libc::SIGABRT || sent_by_a_process(info) {
+        // SAFETY: re-raising is a plain libc call; it stays pending while
+        // this handler runs and is delivered, now with the default action,
+        // when it returns.
+        unsafe { libc::raise(signal) };
+    }
+    // A hardware fault returns here: the instruction faults again and the
+    // default action (and the OS crash reporter) sees the real fault.
+}
+
+fn wait_for_report() {
+    let pause = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: WAIT_STEP_NANOS,
+    };
+    for _ in 0..WAIT_STEPS {
+        if REPORT_DONE.load(Ordering::SeqCst) {
+            return;
+        }
+        // SAFETY: `pause` is a valid timespec; the remainder is not wanted.
+        unsafe { libc::nanosleep(&pause, std::ptr::null_mut()) };
+    }
+}
+
+/// Call the handler this signal had before ours, if it was a function: for
+/// SIGSEGV and SIGBUS that is Rust's, which prints the stack-overflow
+/// message when the fault hit a guard page and restores the default action.
+fn chain_to_previous(signal: c_int, info: *mut libc::siginfo_t, context: *mut libc::c_void) {
+    let Some(index) = SIGNALS.iter().position(|known| *known == signal) else {
+        return;
+    };
+    let handler = OLD_HANDLER
+        .get(index)
+        .map_or(0, |slot| slot.load(Ordering::SeqCst));
+    let flags = OLD_FLAGS
+        .get(index)
+        .map_or(0, |slot| slot.load(Ordering::SeqCst));
+    // SIG_DFL, SIG_IGN and SIG_ERR are 0, 1 and -1.
+    if handler == 0 || handler == 1 || handler == usize::MAX {
+        return;
+    }
+    if flags & libc::SA_SIGINFO != 0 {
+        // SAFETY: the previous action was registered with SA_SIGINFO, so
+        // its address is a function with the three-argument signature.
+        let previous = unsafe { std::mem::transmute::<usize, Handler>(handler) };
+        previous(signal, info, context);
+    } else {
+        // SAFETY: without SA_SIGINFO the address is a one-argument handler.
+        let previous = unsafe { std::mem::transmute::<usize, extern "C" fn(c_int)>(handler) };
+        previous(signal);
+    }
+}
+
+/// True for a signal sent with `raise`, `kill` or `sigqueue`, which does not
+/// come back by itself when the handler returns.
+fn sent_by_a_process(info: *mut libc::siginfo_t) -> bool {
+    // SAFETY: the kernel passes a valid `siginfo_t` to an `SA_SIGINFO`
+    // handler; null is checked by `as_ref`.
+    let code = unsafe { info.as_ref().map(|info| info.si_code) };
+    match code {
+        None => true,
+        // Linux: SI_USER is 0, SI_QUEUE -1, SI_TKILL -6: all <= 0.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        Some(code) => code <= 0,
+        // macOS: SI_USER and SI_QUEUE are 0x10001 and 0x10002, but `raise`
+        // (pthread_kill) reports a hardware-looking code (SEGV_ACCERR) with a
+        // zero `si_addr`. A real fault at address 0 is also taken for a sent
+        // signal: it is re-raised, the process still dies of the signal.
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        Some(code) => code <= 0 || code == 0x10001 || code == 0x10002 || fault_address(info) == 0,
     }
 }
 
@@ -161,6 +275,7 @@ fn write_report(fd: c_int, signal: c_int, address: u64) {
     }
     write_all(fd, b"\nbacktrace:\n");
     write_backtrace(fd);
+    write_all(fd, b"\nend of report\n");
 }
 
 #[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]

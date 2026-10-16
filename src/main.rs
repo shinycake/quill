@@ -170,6 +170,15 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    // The native crash handlers go in before GPUI, AppKit, TDLib and the
+    // video/call libraries start, so a fault in their setup is covered too.
+    // After the single-instance check, so a second launch never touches the
+    // running Quill's files; it also files the previous run's crash report
+    // before the "closed unexpectedly" notice looks for it.
+    if let Some(root) = quill::settings::safe_app_root() {
+        quill::crash_log::begin_run_with_native_handlers(&root);
+    }
+
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
 
