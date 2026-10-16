@@ -76,15 +76,29 @@ impl QuillApp {
         let held = editor.user_paused || editor.motion.grab.is_some() || editor.busy;
         let (from, till) = (editor.edits.from_ms, editor.edits.till_ms);
         let mut playing = false;
+        // A clip that fails after opening: the player goes (the still
+        // shows, as when it can't open) and the note says so.
+        if editor
+            .player
+            .as_ref()
+            .is_some_and(|video| video.state() == PlayState::Failed)
+        {
+            editor.player = None;
+            editor.note = Some("Quill can't play this video here.".into());
+        }
         if !held && let Some(video) = editor.player.as_ref() {
             match video.state() {
-                PlayState::Failed => {
-                    if video.take_error().is_some() {
-                        editor.note = Some("Quill can't play this video here.".into());
-                    }
-                }
+                PlayState::Failed => {}
                 // Still opening: it was told where to start and to play.
                 PlayState::Opening => playing = true,
+                // Ran to the file's end (the range ends there): back to
+                // the range's start, then play.
+                PlayState::Ended => {
+                    video.seek(from as f64 / 1000.0);
+                    editor.playback_ms = Some(from);
+                    video.play();
+                    playing = true;
+                }
                 _ => {
                     let at = (video.transport().position * 1000.0).round() as i64;
                     if at >= till || at < from.saturating_sub(250) {
@@ -117,6 +131,11 @@ impl QuillApp {
         if editor.user_paused {
             video.pause();
         } else {
+            // Paused at the file's end: resume from the range's start.
+            if video.state() == PlayState::Ended {
+                video.seek(editor.edits.from_ms as f64 / 1000.0);
+                editor.playback_ms = Some(editor.edits.from_ms);
+            }
             video.play();
         }
         cx.notify();
@@ -266,6 +285,7 @@ impl QuillApp {
         let (width, height) = editor.info.map_or((16, 9), |info| {
             turned_size(info.width, info.height, editor.edits.turns)
         });
+        let picture = (width.max(1) as f32, height.max(1) as f32);
         // The player's picture, else the still (cut turned and mirrored).
         let player = editor.player.clone();
         let still = editor.still.clone();
@@ -278,13 +298,7 @@ impl QuillApp {
         let overlay = canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
             move |bounds, hitbox, window, _| {
-                // Fit, and scale small pictures up, like tdesktop.
-                let scale = (f32::from(bounds.size.width) / width.max(1) as f32)
-                    .min(f32::from(bounds.size.height) / height.max(1) as f32);
-                let fit = Bounds::centered_at(
-                    bounds.center(),
-                    size(px(width as f32 * scale), px(height as f32 * scale)),
-                );
+                let fit = picture_fit(bounds, picture);
                 picture_cell.set(Some(fit));
                 // The picture is the player's element below; the still
                 // shows until the player has one.
@@ -361,20 +375,103 @@ impl QuillApp {
         .top_0()
         .left_0()
         .size_full();
-        // The player fits and scales up like `fit` above (same aspect).
+        // The player's picture in the same fitted box as `fit` above.
         div()
             .relative()
             .size_full()
-            .children(editor.player.as_ref().map(|video| {
+            .children(editor.player.clone().map(|player| {
                 div()
                     .absolute()
                     .top_0()
                     .left_0()
                     .size_full()
-                    .child(video_frame(video))
+                    .child(FittedPlayer { player, picture })
             }))
             .child(overlay)
             .into_any_element()
+    }
+}
+
+/// Where a `picture` (width, height) sits in `bounds`: fitted, small
+/// pictures scaled up, centered (tdesktop's editor picture).
+fn picture_fit(bounds: Bounds<Pixels>, (width, height): (f32, f32)) -> Bounds<Pixels> {
+    let scale = (f32::from(bounds.size.width) / width).min(f32::from(bounds.size.height) / height);
+    let scale = if scale.is_finite() { scale.max(0.) } else { 0. };
+    Bounds::centered_at(bounds.center(), size(px(width * scale), px(height * scale)))
+}
+
+/// The player's picture boxed to [`picture_fit`] of its bounds, so it
+/// lies exactly under the crop the canvas paints over it.
+struct FittedPlayer {
+    player: VideoPlayer,
+    picture: (f32, f32),
+}
+
+impl IntoElement for FittedPlayer {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for FittedPlayer {
+    type RequestLayoutState = ();
+    type PrepaintState = AnyElement;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let style = Style {
+            size: size(relative(1.).into(), relative(1.).into()),
+            ..Style::default()
+        };
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let fit = picture_fit(bounds, self.picture);
+        let mut element = div()
+            .w(fit.size.width)
+            .h(fit.size.height)
+            .child(video_frame(&self.player))
+            .into_any_element();
+        element.layout_as_root(fit.size.into(), window, cx);
+        element.prepaint_at(fit.origin, window, cx);
+        element
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        element: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        element.paint(window, cx);
     }
 }
 
