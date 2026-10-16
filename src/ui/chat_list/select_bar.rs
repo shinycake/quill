@@ -164,16 +164,10 @@ impl QuillApp {
                         // row in the destructive colour, like the chat row
                         // menu's "Delete chat".
                         let label = action.label(facts);
-                        let icon = action.icon(facts);
                         PopupMenuItem::element(move |_, _| {
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .text_color(danger_bright())
-                                .child(Icon::new(icon).size_4())
-                                .child(label)
+                            div().text_color(danger_bright()).child(label)
                         })
+                        .icon(Icon::new(action.icon(facts)).text_color(danger_bright()))
                     } else {
                         PopupMenuItem::new(action.label(facts)).icon(action.icon(facts))
                     };

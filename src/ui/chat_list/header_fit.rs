@@ -16,13 +16,25 @@ const SIDEBAR_PADDING: f32 = 24.;
 const SIDE_BUTTON_WIDTH: f32 = 32.;
 /// Gap between header children (`gap_1`).
 const HEADER_GAP: f32 = 4.;
-/// Width the labelled tab strip needs.
-const LABELLED_TABS_WIDTH: f32 = 228.;
+/// Estimated width of one label character in the tab strip (`text_sm`).
+const TAB_CHAR_WIDTH: f32 = 7.;
+/// Horizontal padding and segmented-bar share of one labelled tab.
+const TAB_PADDING: f32 = 34.;
+
+/// Width the labelled tab strip needs for these (translated) labels. Tabs keep
+/// their natural width, so the estimate is the sum over all of them; language
+/// packs with longer words push the icon-only breakpoint up.
+pub(super) fn labelled_tabs_width(labels: &[&str]) -> f32 {
+    labels
+        .iter()
+        .map(|label| label.chars().count() as f32 * TAB_CHAR_WIDTH + TAB_PADDING)
+        .sum()
+}
 
 /// Whether the tab strip must show icons instead of labels.
-pub(super) fn tabs_icon_only(sidebar_width: f32, side_buttons: usize) -> bool {
+pub(super) fn tabs_icon_only(sidebar_width: f32, side_buttons: usize, labelled_width: f32) -> bool {
     let side = side_buttons as f32 * (SIDE_BUTTON_WIDTH + HEADER_GAP);
-    sidebar_width - SIDEBAR_PADDING - side < LABELLED_TABS_WIDTH
+    sidebar_width - SIDEBAR_PADDING - side < labelled_width
 }
 
 impl QuillApp {
@@ -32,7 +44,16 @@ impl QuillApp {
         let lock = ready && self.account.passcode.enabled;
         let proxy = self.proxy_shield_button(cx);
         let side_buttons = usize::from(ready) + usize::from(lock) + usize::from(proxy.is_some());
-        let icon_only = tabs_icon_only(f32::from(self.frame.sidebar_width), side_buttons);
+        let labelled_width = labelled_tabs_width(&[
+            tr(keys::RECENT_CHATS),
+            tr(keys::MENU_CONTACTS),
+            tr(keys::MENU_CALLS),
+        ]);
+        let icon_only = tabs_icon_only(
+            f32::from(self.frame.sidebar_width),
+            side_buttons,
+            labelled_width,
+        );
         div()
             .flex()
             .items_center()
@@ -76,7 +97,9 @@ impl QuillApp {
         let weak = cx.weak_entity();
         let tab = |icon: IconName, label: &'static str| {
             if icon_only {
+                // Spread the icons evenly across the segmented bar.
                 Tab::new()
+                    .flex_1()
                     .icon(icon)
                     .aria_label(label)
                     .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
@@ -105,18 +128,45 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::tabs_icon_only;
+    use super::{labelled_tabs_width, tabs_icon_only};
     use quill::settings::{MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH};
+
+    /// "Chats", "Contacts", "Calls".
+    fn english() -> f32 {
+        labelled_tabs_width(&["Chats", "Contacts", "Calls"])
+    }
+
+    #[test]
+    fn english_labels_need_228() {
+        assert_eq!(english(), 228.);
+    }
 
     #[test]
     fn minimum_width_with_every_side_button_uses_icons() {
-        assert!(tabs_icon_only(MIN_SIDEBAR_WIDTH, 3));
-        assert!(tabs_icon_only(MIN_SIDEBAR_WIDTH, 1));
+        assert!(tabs_icon_only(MIN_SIDEBAR_WIDTH, 3, english()));
+        assert!(tabs_icon_only(MIN_SIDEBAR_WIDTH, 1, english()));
     }
 
     #[test]
     fn wide_sidebar_keeps_labels_even_with_every_side_button() {
-        assert!(!tabs_icon_only(MAX_SIDEBAR_WIDTH, 3));
+        assert!(!tabs_icon_only(MAX_SIDEBAR_WIDTH, 3, english()));
+    }
+
+    #[test]
+    fn one_button_breakpoint_is_pinned() {
+        // 24 padding + 36 for the menu button + 228 of labels.
+        assert!(tabs_icon_only(240., 1, english()));
+        assert!(tabs_icon_only(287., 1, english()));
+        assert!(!tabs_icon_only(288., 1, english()));
+    }
+
+    #[test]
+    fn longer_translations_push_the_breakpoint_up() {
+        let german = labelled_tabs_width(&["Unterhaltungen", "Kontakte", "Anrufliste"]);
+        assert!(german > english());
+        assert!(!tabs_icon_only(288., 1, english()));
+        assert!(tabs_icon_only(288., 1, german));
+        assert!(!tabs_icon_only(288. + (german - english()), 1, german));
     }
 
     #[test]
@@ -124,8 +174,11 @@ mod tests {
         let mut width = MIN_SIDEBAR_WIDTH;
         while width <= MAX_SIDEBAR_WIDTH {
             for buttons in 0..3 {
-                if tabs_icon_only(width, buttons) {
-                    assert!(tabs_icon_only(width, buttons + 1), "{width} {buttons}");
+                if tabs_icon_only(width, buttons, english()) {
+                    assert!(
+                        tabs_icon_only(width, buttons + 1, english()),
+                        "{width} {buttons}"
+                    );
                 }
             }
             width += 1.;
@@ -137,7 +190,7 @@ mod tests {
         let mut was_labelled = false;
         let mut width = MIN_SIDEBAR_WIDTH;
         while width <= MAX_SIDEBAR_WIDTH {
-            let labelled = !tabs_icon_only(width, 3);
+            let labelled = !tabs_icon_only(width, 3, english());
             assert!(labelled || !was_labelled, "{width}");
             was_labelled = labelled;
             width += 1.;
