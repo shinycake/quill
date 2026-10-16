@@ -47,3 +47,25 @@ DirectX renderer as YUV instead of BGRA (`docs/decisions/video-player-nv12.md`):
   window can't draw (with an image) and knows when a paused picture is on
   screen. The answer belongs to the frame, so each window answers for
   itself.
+
+The Quill project changed it again in 2026 for liquid glass on macOS
+(menus over a blurred, tinted backdrop). The primitive is ported from the
+GPUI fork in crabtalk/zed (Apache-2.0, commit 693d6a82), which bezel
+(github.com/crabtalk/bezel, MIT) builds on:
+
+- `src/scene.rs`: `BackdropBlur` (`#[repr(C)]`, field for field the fork's)
+  and `Scene::backdrop_blurs`, kept outside the primitive batch stream, with
+  `PaintOperation::BackdropBlur`, `Scene::insert_backdrop_blur` and
+  `Scene::batch_first_order` (the order the renderer interleaves blurs by;
+  the fork indexes the primitive vectors, this returns `Option`). `clear`,
+  `replay` and `finish` carry the blurs. `Shadow::inset == 2` is a drop
+  shadow cut to outside its element.
+- `src/window.rs`: `GlassEffect` (blur radius, lens, reach, magnify,
+  dispersion, gain, saturation, tint, edge, edge width, edge antialiasing),
+  `Window::paint_backdrop_blur` and `Window::paint_drop_shadows_outside`.
+  `paint_drop_shadows` shares `drop_shadows` with the outside variant. The
+  blur's opacity is `element_opacity()`; the fork's per-bounds opacity does
+  not exist in 0.3.9.
+
+Only the Metal renderer (gpui-pre-apple) draws backdrop blurs. The Linux and
+Windows renderers ignore `Scene::backdrop_blurs`.
