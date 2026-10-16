@@ -19,5 +19,6 @@
 
 pub mod catalog;
 pub mod download;
+pub mod font_probe;
 pub mod pack;
 pub mod split;

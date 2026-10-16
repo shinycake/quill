@@ -480,6 +480,7 @@
 "qll_misc_quill_can_bring_back_the" = "Quill can bring back the chat windows that were open last time, now and on every launch.";
 "qll_misc_quill_closed_unexpectedly_last_time" = "Quill closed unexpectedly last time";
 "qll_misc_quill_could_not_open_a" = "Quill could not open a window";
+"qll_misc_quill_could_not_open_a_gpu" = "Quill needs Vulkan graphics to draw its window, and none was found. Install the Vulkan driver for your graphics card, then start Quill again:\n\n- AMD or Intel: Mesa Vulkan drivers (mesa-vulkan-drivers on Debian and Ubuntu, vulkan-radeon or vulkan-intel on Arch and Fedora)\n- NVIDIA: the proprietary NVIDIA driver\n- No GPU or a virtual machine: the lavapipe software driver (mesa-vulkan-drivers, or vulkan-swrast on Arch)\n\nDetails: {detail}";
 "qll_misc_quill_needs_access_to_your" = "Quill needs access to your {device} to record. Turn on \"Let desktop apps access your {device_2}\" in Settings › Privacy & security › {pane}.";
 "qll_misc_quill_needs_access_to_your_2" = "Quill needs access to your {device} to record. Allow it in System Settings → Privacy & Security → {pane}.";
 "qll_misc_quit_quill" = "Quit Quill";

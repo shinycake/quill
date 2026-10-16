@@ -13,8 +13,31 @@ use quill::lang::{keys, tr};
 pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     let detail = error.to_string();
     eprintln!("quill: could not open a window: {detail}");
-    show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &detail);
+    let message = alert_detail(&detail);
+    show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &message);
     std::process::exit(1)
+}
+
+/// The alert's body. On Linux a missing Vulkan driver gets steps to fix it.
+fn alert_detail(detail: &str) -> String {
+    #[cfg(target_os = "linux")]
+    if is_vulkan_failure(detail) {
+        return quill::lang::tr_with(
+            keys::Q_MISC_QUILL_COULD_NOT_OPEN_A_GPU,
+            &[("detail", detail)],
+        );
+    }
+    detail.to_string()
+}
+
+/// Whether the window error comes from the graphics stack (GPUI on Linux
+/// draws through wgpu on Vulkan only).
+#[cfg(any(test, target_os = "linux"))]
+fn is_vulkan_failure(detail: &str) -> bool {
+    let lower = detail.to_lowercase();
+    ["vulkan", "adapter", "wgpu", "no gpu", "no_gpu", "gpu"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 #[cfg(target_os = "macos")]
@@ -78,4 +101,19 @@ fn show_alert(title: &str, detail: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_vulkan_failure;
+
+    #[test]
+    fn graphics_errors_get_the_vulkan_hint() {
+        assert!(is_vulkan_failure(
+            "Unable to find a suitable Vulkan adapter"
+        ));
+        assert!(is_vulkan_failure("NoSupportedDeviceFound: wgpu"));
+        assert!(is_vulkan_failure("failed to create GPU context"));
+        assert!(!is_vulkan_failure("display connection refused"));
+    }
 }

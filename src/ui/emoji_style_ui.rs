@@ -26,7 +26,9 @@ use gpui_kit::component::radio::Radio;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::emoji_sets_style::catalog::{EmojiSetId, SetState, load_current, save_current, set_dir};
+use quill::emoji_sets_style::catalog::{
+    EmojiSetId, SetState, has_saved_choice, load_current, save_current, set_dir,
+};
 use quill::emoji_sets_style::download::Progress;
 use quill::emoji_sets_style::pack::{SpritePack, is_ready};
 use quill::lang::{keys, tr, tr_with};
@@ -94,6 +96,9 @@ struct Loaded {
     current: EmojiSetId,
     ready: HashSet<EmojiSetId>,
     pack: Option<(PathBuf, Arc<SpritePack>)>,
+    /// No color emoji font and no saved choice: this pack should be
+    /// downloaded and switched to.
+    fallback: Option<EmojiSetId>,
 }
 
 fn load_state(root: &std::path::Path, wanted: Option<EmojiSetId>) -> Loaded {
@@ -118,6 +123,7 @@ fn load_state(root: &std::path::Path, wanted: Option<EmojiSetId>) -> Loaded {
         current,
         ready,
         pack,
+        fallback: None,
     }
 }
 
@@ -137,7 +143,15 @@ impl QuillApp {
             if demo {
                 demo_install(&root);
             }
-            load_state(&root, None)
+            let fallback = quill::emoji_sets_style::font_probe::fallback_set(
+                has_saved_choice(&root),
+                quill::emoji_sets_style::font_probe::color_emoji_font_installed(),
+            );
+            let mut loaded = load_state(&root, fallback);
+            if fallback.is_some() && loaded.current != EmojiSetId::Noto {
+                loaded.fallback = fallback;
+            }
+            loaded
         });
         self.settings.emoji_style.switch_task = Some(cx.spawn(async move |this, cx| {
             let loaded = load.await;
@@ -148,6 +162,7 @@ impl QuillApp {
     fn apply_emoji_state(&mut self, loaded: Loaded, cx: &mut Context<Self>) {
         let state = &mut self.settings.emoji_style;
         state.ready = loaded.ready;
+        let download_fallback = loaded.fallback;
         let changed =
             state.current != loaded.current || super::emoji_sprites::active_set() != loaded.current;
         state.current = loaded.current;
@@ -157,6 +172,9 @@ impl QuillApp {
                 cx,
             );
             cx.refresh_windows();
+        }
+        if let Some(id) = download_fallback {
+            self.download_emoji_set(id, cx);
         }
         cx.notify();
     }
