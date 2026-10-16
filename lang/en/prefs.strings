@@ -442,6 +442,9 @@
 "qll_prefs_from_file" = "From file…";
 "qll_prefs_general" = "General";
 "qll_prefs_gifs" = "GIFs";
+"qll_prefs_glass_effects" = "Glass effects";
+"qll_prefs_glass_effects_hint" = "Menus and floating panels use translucent, blurred glass.";
+"qll_prefs_glass_effects_system" = "Off because Reduce transparency is on in System Settings.";
 "qll_prefs_group" = "Group {chat_id}";
 "qll_prefs_hide" = "Hide";
 "qll_prefs_hint" = "Hint: {password_hint}";

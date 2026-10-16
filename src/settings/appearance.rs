@@ -198,6 +198,10 @@ pub struct AppearancePrefs {
     /// Windows): the operating system draws the title bar. Off by default.
     #[serde(default)]
     pub native_window_frame: bool,
+    /// Liquid glass behind menus (macOS). On by default, so files saved
+    /// before the switch existed get glass; Reduce transparency overrides it.
+    #[serde(default = "default_true")]
+    pub glass_effects: bool,
 }
 
 fn default_night_start() -> u16 {
@@ -259,6 +263,7 @@ impl Default for AppearancePrefs {
             mac_warn_before_quit: true,
             check_updates_on_launch: true,
             native_window_frame: false,
+            glass_effects: true,
         }
     }
 }
@@ -417,6 +422,7 @@ mod tests {
             mac_warn_before_quit: false,
             check_updates_on_launch: false,
             native_window_frame: true,
+            glass_effects: false,
         };
         save_appearance_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_appearance_prefs(&paths), prefs);
@@ -432,6 +438,16 @@ mod tests {
         let off: AppearancePrefs =
             serde_json::from_str(r#"{"tray_icon_monochrome":false}"#).unwrap();
         assert!(!off.tray_icon_monochrome);
+    }
+
+    /// Prefs written before "Glass effects" existed get glass, and an
+    /// explicit off survives.
+    #[test]
+    fn glass_effects_default_on() {
+        let old: AppearancePrefs = serde_json::from_str("{}").unwrap();
+        assert!(old.glass_effects);
+        let off: AppearancePrefs = serde_json::from_str(r#"{"glass_effects":false}"#).unwrap();
+        assert!(!off.glass_effects);
     }
 
     /// Settings → Appearance: a corrupt prefs file falls back to
