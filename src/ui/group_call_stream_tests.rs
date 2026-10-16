@@ -7,19 +7,25 @@
 use super::StreamJoinIntent;
 use super::demo::{CALL, CHANNEL, seed_rtmp_stream};
 use crate::ui::app::QuillApp;
+use crate::ui::calls::demo_feed::DemoFeed;
+use crate::ui::frame_clock::take_slice_renders;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::video_player::take_made_images;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AppContext, Bounds, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, point, px,
     size,
 };
-use quill::calls::engine::{StreamState, VideoFrame};
+use quill::calls::engine::StreamState;
+use quill::calls::live_video::convert::i420_size;
+use quill::calls::live_video::{LiveFrame, LiveRotation, LiveSource};
 use quill::diagnostics::DiagnosticSink;
 use quill::state::ActiveGroupCall;
 use std::sync::Arc;
+use std::time::Instant;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -290,42 +296,121 @@ fn the_settings_box_opens_and_esc_closes_it(cx: &mut TestAppContext) {
     );
 }
 
+/// The stream's feed, made a manual one; returns its source.
+fn manual_feed(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> LiveSource {
+    let feed = DemoFeed::manual();
+    let source = feed.source.clone();
+    app.update(vcx, |app, cx| {
+        app.group_call.stream.demo_feed = Some(feed);
+        cx.notify();
+    });
+    frames(vcx);
+    source
+}
+
+fn black_frame(seq: u64, width: u16, height: u16) -> LiveFrame {
+    let mut planes = vec![16u8; i420_size(width, height)];
+    let luma = usize::from(width) * usize::from(height);
+    for byte in planes.iter_mut().skip(luma) {
+        *byte = 128;
+    }
+    LiveFrame::new(
+        seq,
+        width,
+        height,
+        LiveRotation::None,
+        planes,
+        Instant::now(),
+    )
+    .expect("frame")
+}
+
 /// The stream picture with the main window in the background: only the
 /// stream window draws, so nothing waits for the main window's sweep.
-/// Before this, 200 frames at 1280 × 720 kept 199 images (699 MiB).
+/// Before the live player, 200 frames at 1280 × 720 kept 199 images
+/// (699 MiB). Now a frame is a pooled NV12 surface on macOS (no image
+/// at all) and elsewhere an image the waker drops two pictures later.
 #[gpui_kit::test]
 fn stream_pictures_stay_bounded_with_the_main_window_idle(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::Live);
     let call = &mut call;
+    let source = manual_feed(&app, call);
+    let _ = take_made_images();
     for seq in 0..200u64 {
-        app.update(call, |app, _| {
-            app.group_call.stream.demo_frame = Some(Arc::new(VideoFrame {
-                seq: seq + 10,
-                width: 1280,
-                height: 720,
-                rgba: vec![0; 1280 * 720 * 4],
-                is_local: false,
-                participant_user_id: None,
-                is_screen: false,
-            }));
-        });
-        call.update(|window, cx| window.render_frame(cx));
+        source.push(black_frame(seq + 10, 1280, 720));
         call.run_until_parked();
+        call.update(|window, cx| window.render_frame(cx));
     }
+    call.run_until_parked();
     call.update(|window, cx| window.render_frame(cx));
-    let (made, alive) = app.read_with(call, |app, _| {
-        let made = &app.group_call.stream.picture.made;
-        (
-            made.len(),
-            made.iter().filter(|image| image.strong_count() > 0).count(),
-        )
-    });
-    eprintln!("MEASURE made {made} images, {alive} alive");
-    assert!(made >= 100, "the frames were converted: {made}");
+    let player = app
+        .read_with(call, |app, _| app.group_call.stream.player.clone())
+        .expect("the stream has a player");
+    let made = take_made_images();
+    let alive = made.iter().filter(|image| image.strong_count() > 0).count();
+    eprintln!(
+        "MEASURE made {} images, {alive} alive, {} redraws",
+        made.len(),
+        player.live_asks()
+    );
+    assert!(player.live_asks() >= 190, "the frames were drawn");
+    if cfg!(target_os = "macos") {
+        assert!(made.is_empty(), "surfaces, not images: {}", made.len());
+    } else {
+        assert!(
+            made.len() >= 190,
+            "the frames were converted: {}",
+            made.len()
+        );
+    }
     assert!(
         alive <= 2,
         "only the shown image and the one before: {alive}"
     );
+}
+
+/// At 30 fps the stream window redraws its picture, not the panel above
+/// it (title, controls, labels replay their cached frame).
+#[gpui_kit::test]
+fn a_stream_frame_redraws_only_the_picture(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    let source = manual_feed(&app, call);
+    source.push(black_frame(1, 640, 360));
+    frames(call);
+    let _ = take_slice_renders();
+    for seq in 2..32u64 {
+        source.push(black_frame(seq, 640, 360));
+        call.run_until_parked();
+        // A display frame: dirty views only (`render_frame` would
+        // refresh the whole window, past every cache).
+        call.update(|window, cx| window.draw(cx).clear(cx));
+    }
+    let renders = take_slice_renders();
+    eprintln!("MEASURE slice renders for 30 frames: {renders:?}");
+    let picture = renders.get("stream-picture").copied().unwrap_or(0);
+    let panel = renders.get("group-call-panel").copied().unwrap_or(0);
+    assert!(picture >= 30, "the picture redrew per frame: {picture}");
+    assert_eq!(panel, 0, "the panel replayed");
+}
+
+/// Before the first frame the picture is the chat's photo blurred; the
+/// first frame replaces it.
+#[gpui_kit::test]
+fn the_first_frame_replaces_the_blurred_photo(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    let source = manual_feed(&app, call);
+    let player = app
+        .read_with(call, |app, _| app.group_call.stream.player.clone())
+        .expect("the stream has a player");
+    assert!(!player.has_live_frame());
+    assert_eq!(player.state(), crate::ui::video_player::PlayState::Opening);
+    source.push(black_frame(1, 640, 360));
+    frames(call);
+    assert!(player.has_live_frame());
+    assert_eq!(player.state(), crate::ui::video_player::PlayState::Playing);
+    assert_eq!(player.picture_size(), Some((640, 360)));
 }
 
 #[gpui_kit::test]

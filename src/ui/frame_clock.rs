@@ -246,6 +246,20 @@ pub(crate) fn take_video_targets() -> Vec<EntityId> {
     VIDEO_TARGETS.with(|targets| std::mem::take(&mut *targets.borrow_mut()))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Slice renders on this thread by kind, for tests.
+    static SLICE_RENDERS: std::cell::RefCell<std::collections::BTreeMap<&'static str, u32>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The slice renders since the last call, by kind, for tests.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn take_slice_renders() -> std::collections::BTreeMap<&'static str, u32> {
+    SLICE_RENDERS.with(|counts| std::mem::take(&mut *counts.borrow_mut()))
+}
+
 /// `QUILL_TRACE_TICKS=1` also counts slice renders (`app_slice`), logged
 /// once a second, to check that a tick redraws only what animates.
 pub(super) fn trace_slice_render(kind: &'static str) {
@@ -256,6 +270,12 @@ pub(super) fn trace_slice_render(kind: &'static str) {
         static COUNTS: RefCell<(Option<Instant>, BTreeMap<&'static str, u32>)> =
             const { RefCell::new((None, BTreeMap::new())) };
     }
+    #[cfg(test)]
+    SLICE_RENDERS.with(|counts| {
+        if let Ok(mut counts) = counts.try_borrow_mut() {
+            *counts.entry(kind).or_default() += 1;
+        }
+    });
     if !trace_ticks() {
         return;
     }
