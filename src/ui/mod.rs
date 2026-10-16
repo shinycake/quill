@@ -225,8 +225,6 @@ mod deep_links;
 mod demo;
 mod demo_stream;
 mod demos;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
 mod derived_state_tests;
 mod downloads;
 mod drafts;

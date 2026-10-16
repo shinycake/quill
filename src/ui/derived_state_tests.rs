@@ -2,6 +2,7 @@
 //! derived from the history and the list they point into: a deleted or
 //! hidden item leaves them without anything pruning a copy. Run on a demo
 //! `QuillApp` (gpui-kit's test support needs the `demo-capture` feature).
+#![cfg(test)]
 #![cfg(feature = "demo-capture")]
 
 use crate::ui::app::ChatListFilter;
