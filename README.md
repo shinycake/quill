@@ -652,7 +652,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 #### More story features
 
-- [x] Story video playback (partial: video stories show a thumbnail in some cases) <!-- parity:stories-video-playback -->
+- [x] Story video playback on the shared video player (#830) <!-- parity:stories-video-playback -->
 - [x] Share or forward a story to a chat <!-- parity:stories-share-to-chat -->
 - [x] Save story media and copy a story link <!-- parity:stories-save-copy-link -->
 - [x] Post to Profile and Archive actions on your own stories <!-- parity:stories-post-to-profile-archive -->
@@ -764,8 +764,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] "No sticker sets installed" empty state <!-- parity:stickers-empty-state -->
 - [x] "X sets installed" counts and batch install/remove feedback <!-- parity:stickers-install-counts -->
 - [x] Sticker suggestions by emoji in composer (Installed + recommended / Only installed / None) <!-- parity:stickers-suggest-by-emoji -->
-- [x] Animated sticker (TGS) playback in picker and history (partial: format parsed, only thumbnails rendered) <!-- parity:stickers-animated-playback -->
-- [x] Video sticker (WebM) playback (partial: format parsed, static thumb only) <!-- parity:stickers-video-playback -->
+- [x] Animated sticker (TGS) playback in picker and history <!-- parity:stickers-animated-playback -->
+- [x] Video sticker (WebM) playback <!-- parity:stickers-video-playback -->
 - [x] "Loop Animated Stickers" setting <!-- parity:stickers-loop-setting -->
 - [x] Premium sticker gating ("Sending this sticker requires Telegram Premium") <!-- parity:stickers-premium-gate -->
 - [x] Show "choosing a sticker" chat action of others <!-- parity:stickers-typing-action --> (S17: `chatActionChoosingSticker` parsed to `ChatAction::ChoosingSticker`, per-sender tracking in `ChatSummary`, "choosing a sticker…" label in header + sidebar preview, winning over "typing…")
@@ -1039,7 +1039,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Bots and websites: mini-app permissions (Telegram Desktop has no "delete cloud drafts") <!-- parity:settings-bots-websites -->
 - [x] Show 18+ content toggle <!-- parity:settings-sensitive-content -->
 - [x] File open confirmations: extension warning and IP-reveal warning <!-- parity:settings-file-open-confirm -->
-- [x] Passkeys (partial: listing and deleting passkeys shipped (#800); creating one and signing in need WebAuthn, which tdesktop does on Linux and Windows without Telegram's signature: quill-tools/designs/passkeys.md, queued) <!-- parity:settings-passkeys -->
+- [x] Passkeys: list, delete, create and sign in with a security key or a phone over QR (#800, #821, #825, #831, #839) <!-- parity:settings-passkeys -->
 - [x] Archive and mute new chats from non-contacts: "chats from folders" toggle <!-- parity:settings-archive-folder-chats -->
 
 ### Settings: notifications
@@ -1062,7 +1062,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] System accent color option <!-- parity:appearance-system-accent -->
 - [x] Interface scale <!-- parity:appearance-scale -->
 - [x] Font family choice <!-- parity:appearance-font -->
-- [x] Interface language packs (English only today) <!-- parity:appearance-localization -->
+- [x] Interface language packs: every Telegram language pack from Settings → Language, switched live <!-- parity:appearance-localization -->
 - [x] Adaptive layout for wide screens (all messages on the left with photos; off by default in Quill) <!-- parity:appearance-wide-layout -->
 - [x] Battery and animations: power saving per category <!-- parity:appearance-power-saving -->
 - [x] Chat list quick action on swipe and middle-click (partial: swipe setting exists) <!-- parity:appearance-quick-action -->
