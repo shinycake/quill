@@ -62,16 +62,33 @@ playback has no volume, so mute is the only control again).
 `QUILL_STREAM_AUDIO_DEVICE=1` skips Quill's output and always uses
 device playback.
 
+The clock clears once sound arrives, so an output reopened after a
+speaker change gets its own 5 s.
+
+A stream with video and no audio track sends no playback chunks, so it
+falls back after 5 s and loses the slider. Nothing is lost but the
+control: there is no sound to set.
+
+On Linux, ntgcalls names speakers its own way and cpal lists ALSA
+names, which may not match. When they differ, the output opens on the
+system default instead of the chosen speaker. This needs checking on a
+real Linux machine.
+
 ## Controls
 
 - Stream window: the slider sits in the bar beside mute. Up and Down
   move it by 5 %.
 - Live story: the slider is in a pill that drops down from the header's
   sound toggle while the pointer is on the toggle or the pill, and
-  stays open during a drag. This is tdesktop's
-  `Header::createVolumeToggle` layout: 75 px slider, 20 px under it,
-  `mediaviewSaveMsgBg`. A slider inline in the 360 px header cut the
-  channel name to its first letters.
+  stays open during a drag. It closes 20 ms after the pointer leaves
+  the toggle and 200 ms after it leaves the pill, tdesktop's delays.
+  This is tdesktop's `Header::createVolumeToggle` layout: 75 px slider,
+  20 px under it, `mediaviewSaveMsgBg`. A slider inline in the 360 px
+  header cut the channel name to its first letters.
+- Keyboard: Tab onto the sound toggle opens the pill, and it stays open
+  while the toggle has focus. Up and Down move the volume by 5 % while
+  a live story plays, unless the reply field is open. The pill's own
+  mute button is not a tab stop, so mute is reached once.
 - The slider shows only while Quill plays the stream. On device
   playback, after a fallback, or with the environment variable set, it
   is absent rather than disabled.
@@ -79,14 +96,11 @@ device playback.
 ## Differences from tdesktop and the design
 
 - Up and Down: the design asks for them "like the file player", but
-  neither tdesktop nor Quill's file viewer has volume keys. They work
-  in the stream window only, because the story viewer has no key
-  routing.
-- The pill closes as soon as the pointer leaves. tdesktop waits 200 ms
-  after the pointer leaves the pill.
-- The pill opens on hover only, and the kit slider takes no keyboard
-  focus. In a live story a keyboard user reaches mute but not the
-  volume; in the stream window Up and Down stand in for the slider.
+  neither tdesktop nor Quill's file viewer has volume keys. Quill adds
+  them to the stream window and the live story. In a live story they
+  come before the chat list's Up and Down, which the story viewer
+  covers.
+- The kit slider takes no keyboard focus, so the keys stand in for it.
 - tdesktop's group call settings box also has an RTMP volume row
   (`calls_group_settings.cpp`, `MenuVolumeItem`). Quill's settings box
   does not; the bar slider is the one control.
@@ -111,7 +125,8 @@ To verify, Idan runs a release build signed as usual:
    focused. The slider and the sound follow in 5 % steps.
 5. Open a channel's live story, hover the sound toggle, and drag the
    pill's slider. The sound follows, and the stream window's slider
-   (if open) shows the same value.
+   (if open) shows the same value. Press Down and Up: the sound
+   follows in 5 % steps.
 6. Check that the terminal and, with debug mode on (`--debug`),
    `logs/quill-debug.log` have no
    `stream sound: falling back` line.
@@ -123,5 +138,5 @@ To verify, Idan runs a release build signed as usual:
 
 Also unchecked: clock drift between the stream and the output over a
 long stream (the ring drops or pads, so it would show as rare clicks),
-cpal device names on Linux and Windows matching ntgcalls' speaker
-names, and devices that do not take 48 kHz.
+cpal device names on Linux (ALSA) and Windows matching ntgcalls'
+speaker names, a video-only stream falling back after 5 s, and devices that do not take 48 kHz.

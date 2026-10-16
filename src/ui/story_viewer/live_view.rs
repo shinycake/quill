@@ -79,20 +79,31 @@ impl QuillApp {
         let volume_hover = volume.is_some().then(|| -> VolumeHoverHandler {
             Rc::new(move |part, inside, _, cx| {
                 let _ = pill_view.update(cx, |this, cx| {
+                    let now = cx.background_executor().now();
                     let pill = &mut this.stories.live.volume_pill;
-                    let was = pill.open();
-                    pill.hover(part, inside);
-                    if pill.open() != was {
+                    let was = pill.open(now);
+                    if let Some(delay) = pill.hover(part, inside, now) {
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(delay).await;
+                            let _ = this.update(cx, |_, cx| cx.notify());
+                        })
+                        .detach();
+                    }
+                    if pill.open(now) != was {
                         cx.notify();
                     }
                 });
             })
         });
+        let now = cx.background_executor().now();
         let facts = LiveFacts {
             viewers: call.viewer_count,
             muted,
+            volume_focus: volume
+                .is_some()
+                .then(|| self.stories.live.volume_focus.clone()),
             volume,
-            volume_open: self.stories.live.volume_pill.open(),
+            volume_open: self.stories.live.volume_pill.open(now),
             fullscreen: false,
         };
         let actions = LiveActions {

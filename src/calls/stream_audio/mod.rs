@@ -88,12 +88,24 @@ impl StreamAudio {
         self.format.interleaved_samples(PLAYOUT_PRIME_MS)
     }
 
-    pub fn push_frames<'a>(&self, frames: impl IntoIterator<Item = &'a [u8]>) {
-        let mixed = mix(frames);
-        if mixed.is_empty() {
+    /// Runs on ntgcalls' audio thread every 10 ms, so it never
+    /// allocates: the batch is mixed sample by sample into the ring.
+    pub fn push_frames<'a, I>(&self, frames: I)
+    where
+        I: IntoIterator<Item = &'a [u8]>,
+        I::IntoIter: Clone,
+    {
+        let frames = frames.into_iter();
+        let len = frames
+            .clone()
+            .map(|frame| frame.len() / 2)
+            .max()
+            .unwrap_or(0);
+        if len == 0 {
             return;
         }
-        self.ring.push(&mixed);
+        self.ring
+            .push_with(len, |index| mixed_sample(frames.clone(), index));
         self.frames.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -109,28 +121,16 @@ impl StreamAudio {
     }
 }
 
-/// Sum frames of native-endian `i16` samples, clipping at the `i16`
-/// range. Frames of different lengths mix over the longest; a trailing
-/// odd byte is ignored.
-pub fn mix<'a>(frames: impl IntoIterator<Item = &'a [u8]>) -> Vec<i16> {
-    let mut sum: Vec<i32> = Vec::new();
-    for frame in frames {
-        let samples = frame.len() / 2;
-        if sum.len() < samples {
-            sum.resize(samples, 0);
-        }
-        let decoded = frame
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| i16::from_ne_bytes(*pair));
-        for (acc, sample) in sum.iter_mut().zip(decoded) {
-            *acc = acc.saturating_add(i32::from(sample));
-        }
-    }
-    sum.into_iter()
-        .map(|value| value.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16)
-        .collect()
+/// Sample `index` of every frame (native-endian `i16`) summed and
+/// clipped at the `i16` range. A frame shorter than `index` adds nothing,
+/// and a trailing odd byte is ignored.
+fn mixed_sample<'a>(frames: impl Iterator<Item = &'a [u8]>, index: usize) -> i16 {
+    let sum = frames
+        .filter_map(|frame| frame.as_chunks::<2>().0.get(index))
+        .fold(0i32, |sum, pair| {
+            sum.saturating_add(i32::from(i16::from_ne_bytes(*pair)))
+        });
+    sum.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
 
 /// Whether Quill plays streams itself. `QUILL_STREAM_AUDIO_DEVICE=1`
@@ -181,30 +181,39 @@ impl StreamPlayer {
 
 #[cfg(test)]
 mod tests {
-    use super::{PcmFormat, StreamAudio, mix, plays_streams_from};
+    use super::{PcmFormat, StreamAudio, plays_streams_from};
 
     fn bytes(samples: &[i16]) -> Vec<u8> {
         samples.iter().flat_map(|s| s.to_ne_bytes()).collect()
+    }
+
+    /// What one batch puts in the ring.
+    fn mix(frames: &[&[u8]]) -> Vec<i16> {
+        let audio = StreamAudio::new(PcmFormat::for_output(48_000, 1), 1.0, false);
+        audio.push_frames(frames.iter().copied());
+        let mut out = vec![0; audio.ring().len()];
+        audio.ring().pop(&mut out);
+        out
     }
 
     #[test]
     fn sources_mix_and_clip() {
         let a = bytes(&[100, -200, 30_000]);
         let b = bytes(&[1, 2, 30_000]);
-        assert_eq!(mix([a.as_slice(), b.as_slice()]), vec![101, -198, i16::MAX]);
+        assert_eq!(mix(&[&a, &b]), vec![101, -198, i16::MAX]);
         let low = bytes(&[-30_000]);
-        assert_eq!(mix([low.as_slice(), low.as_slice()]), vec![i16::MIN]);
+        assert_eq!(mix(&[&low, &low]), vec![i16::MIN]);
     }
 
     #[test]
     fn frames_of_different_lengths_mix_over_the_longest() {
         let short = bytes(&[5]);
         let long = bytes(&[1, 2, 3]);
-        assert_eq!(mix([short.as_slice(), long.as_slice()]), vec![6, 2, 3]);
+        assert_eq!(mix(&[&short, &long]), vec![6, 2, 3]);
         let mut odd = bytes(&[7]);
         odd.push(0xff);
-        assert_eq!(mix([odd.as_slice()]), vec![7]);
-        assert!(mix(std::iter::empty::<&[u8]>()).is_empty());
+        assert_eq!(mix(&[&odd]), vec![7]);
+        assert!(mix(&[]).is_empty());
     }
 
     #[test]

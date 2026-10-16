@@ -619,6 +619,7 @@ impl QuillApp {
             muted: self.stream_muted(),
             volume,
             volume_open: false,
+            volume_focus: None,
             fullscreen: full,
         };
         div()
@@ -707,7 +708,7 @@ impl QuillApp {
                     .session()
                     .and_then(|s| s.calls.active_group_call.as_ref())
                     .map(|c| c.id);
-                self.step_stream_volume(step, call_id, cx)
+                self.step_stream_volume(step, call_id, cx);
             }
             LiveKeyAction::ToggleFullscreen => toggle_stream_full(window),
             LiveKeyAction::LeaveFullscreen => leave_stream_full(window),

@@ -84,6 +84,8 @@ pub(crate) struct LiveFacts {
     pub(crate) volume: Option<Entity<SliderState>>,
     /// The header's volume pill is open; the bar ignores it.
     pub(crate) volume_open: bool,
+    /// Keyboard focus on the header's sound toggle opens the pill.
+    pub(crate) volume_focus: Option<FocusHandle>,
     /// The host is full screen (or maximized, for the stream window).
     pub(crate) fullscreen: bool,
 }
@@ -369,13 +371,13 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
     let (icon, label) = mute_look(this.facts.muted);
     let variant = this.variant.unwrap_or_else(|| overlay_button(cx));
     let toggle_mute = this.actions.toggle_mute.clone();
-    let mute = move |id: &'static str| {
+    let mute = move |id: &'static str, tab_stop: bool| {
         let toggle_mute = toggle_mute.clone();
         Button::new((id, row_id))
             .icon(icon)
             .custom(variant)
             .small()
-            .tab_index(0)
+            .when(tab_stop, |button| button.tab_index(0))
             .tooltip(label)
             .accessibility_label(label)
             .on_click(move |_, window, cx| toggle_mute(window, cx))
@@ -413,7 +415,7 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
                         hover(VolumePart::Pill, *inside, window, cx)
                     })
                 })
-                .child(mute("live-volume-mute"))
+                .child(mute("live-volume-mute", false))
                 .child(
                     Slider::new(&slider)
                         .vertical()
@@ -427,12 +429,15 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
     let toggle = div()
         .id(("live-volume-toggle", row_id))
         .relative()
+        .when_some(this.facts.volume_focus, |toggle, focus| {
+            toggle.track_focus(&focus)
+        })
         .when_some(hover, |toggle, hover| {
             toggle.on_hover(move |inside: &bool, window, cx| {
                 hover(VolumePart::Toggle, *inside, window, cx)
             })
         })
-        .child(mute("live-mute"))
+        .child(mute("live-mute", true))
         .children(pill);
     div()
         .id(("live-controller", row_id))

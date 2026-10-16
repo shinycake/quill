@@ -116,20 +116,26 @@ where
     } = ctx;
     let ring_channels = usize::from(audio.format().channels).max(1);
     let mut playout = Playout::new(audio.prime_samples());
-    let mut pcm: Vec<i16> = Vec::new();
+    let max_frames = (audio.ring().capacity() / ring_channels).max(1);
+    let mut pcm = vec![0i16; max_frames * ring_channels];
     device
         .build_output_stream(
             config,
             move |data: &mut [T], _| {
-                let frames = data.len() / device_channels;
-                pcm.resize(frames * ring_channels, 0);
-                playout.fill(audio.ring(), &mut pcm);
                 let factor = audio.gain().factor();
-                for (out, frame) in data
-                    .chunks_mut(device_channels)
-                    .zip(pcm.chunks(ring_channels))
-                {
-                    spread(frame, out, factor);
+                for part in data.chunks_mut(max_frames * device_channels) {
+                    let frames = part.len() / device_channels;
+                    let Some(pcm) = pcm.get_mut(..frames * ring_channels) else {
+                        part.fill(T::EQUILIBRIUM);
+                        continue;
+                    };
+                    playout.fill(audio.ring(), pcm);
+                    for (out, frame) in part
+                        .chunks_mut(device_channels)
+                        .zip(pcm.chunks(ring_channels))
+                    {
+                        spread(frame, out, factor);
+                    }
                 }
             },
             on_error,

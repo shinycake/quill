@@ -46,10 +46,17 @@ impl SampleRing {
     /// goes first, in whole drop chunks. Returns how many samples were
     /// dropped (old ones, or the front of a push longer than the ring).
     pub fn push(&self, samples: &[i16]) -> usize {
+        self.push_with(samples.len(), |index| {
+            samples.get(index).copied().unwrap_or_default()
+        })
+    }
+
+    /// [`Self::push`] for `len` samples computed in place by `sample`
+    /// (given each sample's index), so the producer needs no buffer.
+    pub fn push_with(&self, len: usize, sample: impl Fn(usize) -> i16) -> usize {
         let capacity = self.capacity();
-        let skip = samples.len().saturating_sub(capacity);
-        let samples = samples.get(skip..).unwrap_or_default();
-        let count = samples.len();
+        let count = len.min(capacity);
+        let skip = len.saturating_sub(count);
         let write = self.write.load(Ordering::Relaxed);
         let mut dropped = skip;
         loop {
@@ -75,9 +82,9 @@ impl SampleRing {
                 break;
             }
         }
-        for (offset, &sample) in samples.iter().enumerate() {
+        for offset in 0..count {
             if let Some(slot) = self.slot(write.wrapping_add(offset)) {
-                slot.store(sample, Ordering::Relaxed);
+                slot.store(sample(skip + offset), Ordering::Relaxed);
             }
         }
         self.write

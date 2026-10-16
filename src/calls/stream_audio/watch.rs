@@ -41,9 +41,7 @@ impl PlaybackWatch {
         }
         let reason = if health.output_failed {
             Some(FallBack::OutputFailed)
-        } else if health.frames > 0 {
-            None
-        } else if state != StreamState::Live {
+        } else if health.frames > 0 || state != StreamState::Live {
             self.live_since = None;
             None
         } else {
@@ -122,6 +120,31 @@ mod tests {
         assert_eq!(
             watch.observe(start + Duration::from_secs(60), Live, playing),
             None
+        );
+    }
+
+    #[test]
+    fn a_reopened_output_gets_its_own_five_seconds() {
+        let start = Instant::now();
+        let mut watch = PlaybackWatch::default();
+        let playing = PlaybackHealth {
+            frames: 40,
+            output_failed: false,
+        };
+        assert_eq!(watch.observe(start, Live, SILENT), None);
+        assert_eq!(
+            watch.observe(start + Duration::from_secs(1), Live, playing),
+            None
+        );
+        let reopened = start + Duration::from_secs(60);
+        assert_eq!(watch.observe(reopened, Live, SILENT), None);
+        assert_eq!(
+            watch.observe(reopened + Duration::from_millis(4_999), Live, SILENT),
+            None
+        );
+        assert_eq!(
+            watch.observe(reopened + NO_SOUND_LIMIT, Live, SILENT),
+            Some(FallBack::NoSound)
         );
     }
 

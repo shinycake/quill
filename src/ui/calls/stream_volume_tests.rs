@@ -92,3 +92,44 @@ fn the_slider_follows_the_volume_and_steps_by_five(cx: &mut TestAppContext) {
     });
     assert!((volume(&app, vcx) - 1.0).abs() < 1e-6, "100 % is the top");
 }
+
+#[gpui_kit::test]
+fn up_and_down_step_the_live_story_volume(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live_story(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_keystrokes("down");
+    frames(vcx);
+    assert!((volume(&app, vcx) - 0.95).abs() < 1e-6, "Down");
+    vcx.simulate_keystrokes("up up");
+    frames(vcx);
+    assert!((volume(&app, vcx) - 1.0).abs() < 1e-6, "Up stops at 100 %");
+    vcx.simulate_keystrokes("shift-down");
+    frames(vcx);
+    assert!(
+        (volume(&app, vcx) - 1.0).abs() < 1e-6,
+        "a modifier is not a volume key"
+    );
+}
+
+#[gpui_kit::test]
+fn keyboard_focus_on_the_sound_toggle_opens_the_pill(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live_story(cx);
+    let vcx = &mut vcx;
+    let pill_open = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.stories.live.volume_pill.open(std::time::Instant::now())
+        })
+    };
+    assert!(!pill_open(&app, vcx));
+    vcx.simulate_keystrokes("shift-down");
+    let focus = app.read_with(vcx, |app, _| app.stories.live.volume_focus.clone());
+    vcx.update(|window, cx| {
+        window.activate_window();
+        focus.focus(window, cx);
+    });
+    frames(vcx);
+    assert!(pill_open(&app, vcx), "Tab onto the toggle shows the volume");
+    vcx.update(|window, cx| window.blur(cx));
+    frames(vcx);
+    assert!(!pill_open(&app, vcx));
+}
