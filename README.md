@@ -663,7 +663,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [x] Story statistics and public forwards <!-- parity:stories-statistics -->
 - [x] Live story stream playback: stream in the story frame, LIVE badge and viewers, comments with entities, paid comments, send-as, Stars reactions with Undo, pinned paid comments, top donors, moderation (#852; not tried on a live account) <!-- parity:stories-live-stream-playback -->
-- [x] Watch a live story while in another call (tdesktop runs the stream as its own call; Quill shows a "Leave call and watch" card in the story and joins after you leave, #883) <!-- parity:stories-live-beside-call -->
+- [x] Watch a live story while in another call (its own receive-only stream slot, like tdesktop's registerVideoStream; a real call on the same chat takes the key and the story shows Failed with Retry, #912) <!-- parity:stories-live-beside-call -->
 - [ ] Live story Stars reaction effect animation (tdesktop plays bundled Lottie effects; Quill draws its own burst) <!-- parity:stories-live-stars-effect -->
 
 ### Calls
@@ -739,7 +739,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
 - [x] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
 - [x] Picture-in-picture for live streams and live stories (LIVE badge with viewers, mute, enlarge back to the stream window or story, close; tdesktop has no live PiP, #883) <!-- parity:calls-live-pip -->
-- [x] Live PiP follows a feed change (a rejoin or presenter switch keeps the old feed in the PiP until it is enlarged; it closes when that feed ends) <!-- parity:calls-live-pip-feed-follow -->
+- [x] Live PiP follows a feed change (a rejoin or presenter switch swaps the player in place; the PiP closes only when the source is gone or the automatic rejoins are spent, #892) <!-- parity:calls-live-pip-feed-follow -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
 - [x] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
