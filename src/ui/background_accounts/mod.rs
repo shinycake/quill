@@ -18,7 +18,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::connect::{CLIENT_CLOSE_TIMEOUT, LiveConnect, start_background_live_connect};
+use quill::connect::{ClosingSet, LiveConnect, start_background_live_connect};
 use quill::diagnostics::MemorySink;
 use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
@@ -37,6 +37,7 @@ mod account_row;
 mod calls;
 pub(super) mod chrome;
 mod clicks;
+pub(super) mod closing;
 mod switch;
 
 /// Clicks on notifications of accounts that are not on screen, queued by
@@ -83,6 +84,11 @@ pub(crate) struct BackgroundAccounts {
     pub(super) attention: bool,
     /// A call ringing on a background account (`calls`).
     ringing: Option<calls::BackgroundRing>,
+    /// Clients sent `close` and drained a little per poll (`closing`):
+    /// switching, signing out or logging out never waits on TDLib.
+    pub(super) closing: ClosingSet,
+    /// The quit observer that closes every client together.
+    quit_close: Option<Subscription>,
 }
 
 impl BackgroundAccounts {
@@ -97,6 +103,8 @@ impl BackgroundAccounts {
             notify_from_all: true,
             attention: false,
             ringing: None,
+            closing: ClosingSet::new(),
+            quit_close: None,
         }
     }
 
@@ -116,7 +124,9 @@ impl BackgroundAccounts {
     }
 
     fn has_work(&self) -> bool {
-        !self.starting.is_empty() || self.clients.iter().any(|client| client.live.is_some())
+        !self.starting.is_empty()
+            || !self.closing.is_empty()
+            || self.clients.iter().any(|client| client.live.is_some())
     }
 
     /// Every background account's unread, combined (tdesktop
@@ -128,33 +138,18 @@ impl BackgroundAccounts {
                 sum.combine(client.unread)
             })
     }
-
-    /// Ask every client to close at once; dropping them afterwards waits for
-    /// all of them together instead of one after another.
-    fn request_close_all(&mut self) {
-        for live in self.clients.iter_mut().filter_map(|c| c.live.as_mut()) {
-            let _ = live.driver.request_close();
-        }
-    }
-
-    /// Close every client and forget them.
-    fn close_all(&mut self) {
-        self.request_close_all();
-        for client in &mut self.clients {
-            if let Some(live) = client.live.as_mut() {
-                live.shutdown(CLIENT_CLOSE_TIMEOUT);
-            }
-        }
-        self.clients.clear();
-    }
 }
 
 impl Drop for BackgroundAccounts {
     /// Quitting closes every background client (GPUI drops the window's
     /// views on quit); a TDLib client left open can crash the process on
-    /// its way out.
+    /// its way out. The quit observer (`closing::watch_quit_close`) has
+    /// normally done it already; otherwise every client closes together
+    /// under the one quit deadline.
     fn drop(&mut self) {
-        self.close_all();
+        self.close_all_within(quill::connect::deadline_after(
+            quill::connect::QUIT_CLOSE_DEADLINE,
+        ));
     }
 }
 
@@ -164,6 +159,7 @@ impl QuillApp {
     /// were removed or are on screen now. Idempotent: runs after every
     /// connect and switch.
     pub(super) fn ensure_background_accounts(&mut self, cx: &mut Context<Self>) {
+        self.watch_quit_close(cx);
         if self.demo_session.is_some() {
             return;
         }
@@ -178,9 +174,12 @@ impl QuillApp {
         });
         for record in accounts {
             let key = record.key;
+            // A client still closing keeps its database until Closed; the
+            // account starts again once it is (`reap_closing`).
             if key == active
                 || self.background.client(&key).is_some()
                 || self.background.starting.contains(&key)
+                || self.background.closing.contains(&key)
             {
                 continue;
             }
@@ -219,6 +218,7 @@ impl QuillApp {
                     if generation != this.background.generation
                         || active_account(&root) == key
                         || this.background.client(&key).is_some()
+                        || this.background.closing.contains(&key)
                     {
                         return;
                     }
@@ -251,8 +251,9 @@ impl QuillApp {
         self.spawn_background_poll(cx);
     }
 
-    /// Close one background client (before its account is removed, so
-    /// TDLib is not writing while its folder is deleted).
+    /// Close one background client without waiting for it. Before its
+    /// account is removed, wait with `after_closing` so TDLib is not
+    /// writing while its folder is deleted.
     pub(super) fn stop_background_account(&mut self, key: &AccountKey) {
         self.background.starting.remove(key);
         if let Some(index) = self
@@ -261,20 +262,22 @@ impl QuillApp {
             .iter()
             .position(|client| &client.key == key)
         {
-            let mut client = self.background.clients.remove(index);
-            if let Some(live) = client.live.as_mut() {
-                live.shutdown(CLIENT_CLOSE_TIMEOUT);
+            let client = self.background.clients.remove(index);
+            if let Some(live) = client.live {
+                self.background.close_later(client.key, live, false);
             }
         }
         self.publish_background_unread();
     }
 
-    /// Close every background client (local data is about to be wiped).
+    /// Close every background client (local data is about to be wiped:
+    /// wait with `after_closing` before deleting it). Never blocks.
     pub(super) fn stop_background_accounts(&mut self) {
         self.background.generation += 1;
         self.background.starting.clear();
         self.background.polling = false;
-        self.background.close_all();
+        self.background.close_all_later();
+        self.background.closing.cancel_restarts();
         self.publish_background_unread();
     }
 
@@ -342,6 +345,9 @@ impl QuillApp {
         let mut changed = false;
         let mut drained: Vec<(AccountKey, BackgroundDrain)> = Vec::new();
         let proxy_target = self.app_proxy_list();
+        // Clients on their way out: one non-blocking drain each.
+        busy |= self.reap_closing(cx);
+        let mut stopped: Vec<(AccountKey, LiveConnect)> = Vec::new();
         for client in &mut self.background.clients {
             let Some(live) = client.live.as_mut() else {
                 continue;
@@ -389,12 +395,15 @@ impl QuillApp {
                 changed = true;
             }
             if status.stops_client()
-                && let Some(mut live) = client.live.take()
+                && let Some(live) = client.live.take()
             {
-                live.shutdown(CLIENT_CLOSE_TIMEOUT);
+                stopped.push((client.key.clone(), live));
                 client.unread = AccountUnread::default();
                 changed = true;
             }
+        }
+        for (key, live) in stopped {
+            self.background.close_later(key, live, false);
         }
         if changed {
             self.publish_background_unread();
@@ -414,3 +423,7 @@ impl QuillApp {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod closing_tests;

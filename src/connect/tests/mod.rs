@@ -19,6 +19,7 @@ mod chat_appearance;
 mod chat_list;
 mod chat_state;
 mod chat_window;
+mod closing;
 mod connect_flow;
 mod deep_link_routing;
 mod deep_links;

@@ -1,4 +1,5 @@
 //! Connect gate: live TDLib connection bootstrap and shutdown.
+use super::closing::{Closable, QUIT_CLOSE_DEADLINE, drain_until_closed};
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::data_settings::load_data_storage_prefs;
@@ -16,7 +17,8 @@ use crate::telegram::ffi::TdJsonError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// How long Drop / `--connect-smoke` waits for `authorizationStateClosed`.
+/// How long `--connect-smoke` waits for `authorizationStateClosed`, and how
+/// long a closing client is drained in the background ([`CLOSE_GRACE`]).
 pub const CLIENT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Send `close` and ingest until Closed. Does not join a receive thread or
@@ -29,13 +31,8 @@ pub fn wait_closed<S: JsonSender>(
     if matches!(driver.session.auth, AuthorizationState::Closed) {
         return true;
     }
-    // Like tdesktop on quit: announce going offline before the client
-    // closes (best effort — `close` follows on the same ordered queue).
-    if matches!(driver.session.auth, AuthorizationState::Ready) {
-        let _ = driver.set_online(false);
-    }
-    let _ = driver.request_close();
-    let deadline = Instant::now() + timeout;
+    super::closing::begin_close(driver);
+    let deadline = super::closing::deadline_after(timeout);
     loop {
         if matches!(driver.session.auth, AuthorizationState::Closed) {
             return true;
@@ -55,7 +52,8 @@ pub fn wait_closed<S: JsonSender>(
 
 /// Open LiveTdJson + receive bridge when gate + restore succeed.
 ///
-/// Drop / [`LiveConnect::shutdown`] send `close`, wait for
+/// The app closes clients through a [`ClosingSet`] (never blocking).
+/// Drop / [`LiveConnect::shutdown`] (CLI tools, last resort) send `close`, wait for
 /// `authorizationStateClosed`, then remove the client's route from the
 /// shared receive hub (`telegram::hub`). The hub, and with it `libtdjson`,
 /// lives as long as the process: unloading the library while TDLib worker
@@ -89,8 +87,37 @@ impl LiveConnect {
 }
 
 impl Drop for LiveConnect {
+    /// Last resort: the app hands clients to a [`ClosingSet`] first, which
+    /// leaves them joined, so this returns at once. Bounded by the quit
+    /// deadline, not the 5 s CLI wait.
     fn drop(&mut self) {
-        self.shutdown(CLIENT_CLOSE_TIMEOUT);
+        self.shutdown(QUIT_CLOSE_DEADLINE);
+    }
+}
+
+impl Closable for LiveConnect {
+    fn begin_close(&mut self) {
+        if self.bridge.is_joined() || self.bridge.stopped_unexpectedly() {
+            return;
+        }
+        super::closing::begin_close(&mut self.driver);
+    }
+
+    fn drain_closed(&mut self, budget: Duration) -> bool {
+        // A dead receive loop can never deliver Closed; do not wait for it.
+        if self.bridge.is_joined() || self.bridge.stopped_unexpectedly() {
+            return true;
+        }
+        let bridge = &self.bridge;
+        drain_until_closed(
+            &mut self.driver,
+            || bridge.next_timeout(Duration::ZERO),
+            budget,
+        )
+    }
+
+    fn finish(&mut self) {
+        self.bridge.shutdown();
     }
 }
 

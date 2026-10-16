@@ -21,6 +21,7 @@ mod calls;
 mod chat_appearance;
 mod chat_list;
 mod chat_window;
+mod closing;
 mod composer;
 mod connect_flow;
 mod contacts;
@@ -99,6 +100,7 @@ mod types;
 mod typing;
 mod web_apps;
 
+pub use closing::*;
 pub use connect_flow::*;
 pub use deep_links::detect_deep_link_arg;
 pub use flood_retry::{FLOOD_RETRY_MAX_ATTEMPTS, FLOOD_RETRY_MAX_WAIT};

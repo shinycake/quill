@@ -15,7 +15,7 @@ use quill::ids::{AccountKey, ChatId};
 use quill::notify::NotificationAction;
 use std::time::{Duration, Instant};
 
-fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let (app, _, vcx) = new_app_shell(cx);
     (app, vcx)
 }

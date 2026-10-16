@@ -78,6 +78,10 @@ impl super::app::QuillApp {
             .spawn(async move { prepare_startup(credentials) });
         cx.spawn(async move |this, cx| {
             let prepared = connect.await;
+            // The account's previous client may still be closing.
+            if let Ok((_, prepared)) = &prepared {
+                super::background_accounts::closing::closed(&this, &prepared.account, cx).await;
+            }
             let _ = this.update(cx, |this, cx| {
                 if generation != this.connection.generation {
                     return;

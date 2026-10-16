@@ -30,10 +30,10 @@ impl QuillApp {
                 unread,
             });
         } else {
-            live.shutdown(CLIENT_CLOSE_TIMEOUT);
-            // An account closed for a call starts again in the background
-            // (`ensure_background_accounts`); one that needs a sign-in keeps
-            // only its status until it is switched to.
+            // Closed without waiting. An account closed for a call starts
+            // again in the background once Closed (`reap_closing`); one that
+            // needs a sign-in keeps only its status until it is switched to.
+            self.close_live_later(live, !status.stops_client());
             if status.stops_client() {
                 self.background.clients.push(BackgroundClient {
                     key,
@@ -66,8 +66,10 @@ impl QuillApp {
         if usable {
             return client.live.take();
         }
-        if let Some(live) = client.live.as_mut() {
-            live.shutdown(CLIENT_CLOSE_TIMEOUT);
+        // Closed without waiting; `start_connection` opens the database
+        // again only once it is (`closing::closed`).
+        if let Some(live) = client.live.take() {
+            self.background.close_later(client.key, live, false);
         }
         None
     }

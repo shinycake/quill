@@ -248,25 +248,40 @@ impl QuillApp {
         // Its Picture-in-Picture plays one of its files.
         self.video_pip_account_ended(key, cx);
         // Close its background client first: TDLib must not be writing
-        // while the account's folder is deleted.
+        // while the account's folder is deleted. The removal waits for the
+        // close without freezing the window.
         self.stop_background_account(key);
-        match remove_account(&root, key) {
-            Ok(()) => {
-                // Drop the account's keychain item too: otherwise the
-                // lowest-free-id recycling in `add_account` hands a later
-                // account the deleted account's stale DB key. Best-effort —
-                // the account data is already gone; a locked keychain is
-                // just an orphaned item, not a failure.
-                let _ = live_secret_store().delete(key);
-                self.account.accounts.error = None;
-            }
-            Err(e) => {
-                self.account.accounts.error = Some(tr_with(
-                    keys::Q_OPS_COULD_NOT_REMOVE_THE_ACCOUNT,
-                    &[("e", &e.to_string())],
-                ));
-            }
-        }
+        let key = key.clone();
+        let closing = key.clone();
+        self.after_closing(
+            cx,
+            move |set| !set.contains(&closing),
+            move |this, cx| {
+                // Switched to while it closed: in use again, keep it.
+                if this.account_in_use(&root, &key) {
+                    return;
+                }
+                match remove_account(&root, &key) {
+                    Ok(()) => {
+                        // Drop the account's keychain item too: otherwise the
+                        // lowest-free-id recycling in `add_account` hands a
+                        // later account the deleted account's stale DB key.
+                        // Best-effort — the account data is already gone; a
+                        // locked keychain is just an orphaned item, not a
+                        // failure.
+                        let _ = live_secret_store().delete(&key);
+                        this.account.accounts.error = None;
+                    }
+                    Err(e) => {
+                        this.account.accounts.error = Some(tr_with(
+                            keys::Q_OPS_COULD_NOT_REMOVE_THE_ACCOUNT,
+                            &[("e", &e.to_string())],
+                        ));
+                    }
+                }
+                cx.notify();
+            },
+        );
         cx.notify();
     }
 
