@@ -13,24 +13,24 @@ use crate::telegram::envelope::MessageSender;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-const LIVE_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":4242,"title":"Live","is_active":true,"is_video_chat":true,"is_live_story":true,"is_rtmp_stream":false,"is_joined":JOINED,"need_rejoin":false,"participant_count":38,"can_send_messages":true,"are_messages_allowed":true,"paid_message_star_count":5,"message_sender_id":{"@type":"messageSenderUser","user_id":1}}}"#;
+pub(super) const LIVE_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":4242,"title":"Live","is_active":true,"is_video_chat":true,"is_live_story":true,"is_rtmp_stream":false,"is_joined":JOINED,"need_rejoin":false,"participant_count":38,"can_send_messages":true,"are_messages_allowed":true,"paid_message_star_count":5,"message_sender_id":{"@type":"messageSenderUser","user_id":1}}}"#;
 
-struct Harness {
-    driver: ConnectDriver<Arc<RecordingSender>>,
-    recorder: Arc<RecordingSender>,
+pub(super) struct Harness {
+    pub(super) driver: ConnectDriver<Arc<RecordingSender>>,
+    pub(super) recorder: Arc<RecordingSender>,
     seq: AtomicU64,
     sink: Arc<dyn DiagnosticSink>,
     dir: std::path::PathBuf,
 }
 
 impl Harness {
-    fn ingest(&mut self, json: &str) {
+    pub(super) fn ingest(&mut self, json: &str) {
         self.driver
             .ingest(copy_and_parse(json, &self.seq, &self.sink).unwrap())
             .unwrap();
     }
 
-    fn answer(&mut self, request: &str, body: &str) {
+    pub(super) fn answer(&mut self, request: &str, body: &str) {
         let extra = sent_request(&self.recorder, request)["@extra"]
             .as_str()
             .unwrap()
@@ -39,7 +39,7 @@ impl Harness {
         self.ingest(&json);
     }
 
-    fn sent(&self, type_name: &str) -> usize {
+    pub(super) fn sent(&self, type_name: &str) -> usize {
         self.recorder
             .snapshot()
             .iter()
@@ -55,7 +55,7 @@ impl Drop for Harness {
 }
 
 /// A ready driver with no live story yet.
-fn harness() -> Harness {
+pub(super) fn harness() -> Harness {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -77,7 +77,7 @@ fn harness() -> Harness {
 }
 
 /// A driver watching the live story (7, 6) on call 4242, joined.
-fn watching() -> Harness {
+pub(super) fn watching() -> Harness {
     let mut h = harness();
     h.ingest(
         r#"{"@type":"story","id":6,"poster_chat_id":7,"date":1700000000,"content":{"@type":"storyContentLive","group_call_id":4242,"is_rtmp_stream":false},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,

@@ -599,6 +599,45 @@ fn a_join_that_cannot_proceed_says_so(cx: &mut TestAppContext) {
     });
 }
 
+/// tdesktop plays a live story as a stream of its own beside the call you
+/// are in: no card asks, and the call stays.
+#[gpui_kit::test]
+fn a_live_story_plays_beside_a_one_to_one_call(cx: &mut TestAppContext) {
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            app.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            let sink: Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
+            crate::ui::calls::call_video_demo::seed_video_call(
+                session,
+                false,
+                &sink,
+                &app.demo_ui.seq,
+            );
+        }
+        app.sync_live_story(cx);
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        let calls = &app.demo_session.as_ref().expect("the demo session").calls;
+        assert!(calls.active_call.is_some(), "the call stays");
+        assert!(calls.story_stream.is_some(), "the story has its own slot");
+        assert!(
+            calls.active_group_call.is_none(),
+            "it is not the current call"
+        );
+        assert!(app.stories.viewer.is_open());
+    });
+    assert!(find(vcx, "live-story-frame").is_some(), "the picture plays");
+    assert!(
+        find(vcx, "live-story-leave-other-card").is_none(),
+        "nothing asks"
+    );
+}
+
 #[gpui_kit::test]
 fn the_toast_goes_once_the_stars_are_due(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
