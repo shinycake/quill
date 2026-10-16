@@ -54,7 +54,7 @@ impl QuillApp {
                     .and_then(|path| sandboxed_display_path(path, &media_roots));
                 // Slice CL3: multi-select mode — rows toggle the check
                 // instead of opening the chat.
-                let selecting = !self.chat_list.selected.is_empty();
+                let selecting = self.rows_selecting();
                 let checked = selecting && self.chat_list.selected.contains(&chat.id.0);
                 // Slice CL2: pin drag runs only on the unfiltered list with
                 // at least two pinned chats (TGX `ChatsAdapter`); the

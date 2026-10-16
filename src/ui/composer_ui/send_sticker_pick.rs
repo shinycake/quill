@@ -29,6 +29,7 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
+        self.cancel_gone_reply(cx);
         // Phase A1: slow-mode gate applies to sticker sends too.
         if self.slow_mode_blocked(chat_id, cx) {
             return;
@@ -79,7 +80,11 @@ impl QuillApp {
         edit: &ComposerEdit,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let preview = edit.original_text.clone();
+        // The line follows the live message: an edit elsewhere shows here.
+        let preview = self
+            .session()
+            .and_then(|session| session.edit_target_text(edit))
+            .unwrap_or_default();
         let kind = match edit.kind {
             quill::composer::ComposerEditKind::Text => tr(keys::Q_CHAT_EDITING_MESSAGE),
             quill::composer::ComposerEditKind::Caption => tr(keys::Q_CHAT_EDITING_CAPTION),
@@ -763,8 +768,7 @@ impl QuillApp {
         // custom emoji included.
         let message = self
             .session()
-            .and_then(|s| s.histories.get(&reply.chat_id.0))
-            .and_then(|h| h.messages.get(&reply.message_id.0))
+            .and_then(|s| s.reply_target(reply.chat_id, reply.message_id))
             .cloned();
         let sender = message
             .as_ref()
@@ -809,13 +813,21 @@ impl QuillApp {
                     ))
                     .into_any_element()
             }
-            _ => div()
-                .text_sm()
-                .truncate()
-                .child(super::bidi_line::one_line_plain(
-                    super::search_ui::one_line_preview(&reply.preview),
-                ))
-                .into_any_element(),
+            _ => {
+                // The message's own preview, or "Loading…" while it is not
+                // in the history (tdesktop `Reply` state text).
+                let line = message
+                    .as_ref()
+                    .map(quill::state::effective_preview)
+                    .unwrap_or_else(|| tr(keys::PROFILE_LOADING).to_string());
+                div()
+                    .text_sm()
+                    .truncate()
+                    .child(super::bidi_line::one_line_plain(
+                        super::search_ui::one_line_preview(&line),
+                    ))
+                    .into_any_element()
+            }
         };
         composer_context_bar_rich(
             "composer-reply-quote",

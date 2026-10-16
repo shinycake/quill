@@ -28,7 +28,6 @@ fn driver_edit_text_shape_and_incoming_rejected() {
     let incoming = ComposerEdit {
         chat_id: ChatId(7),
         message_id: MessageId(50),
-        original_text: "hello already here".into(),
         kind: ComposerEditKind::Text,
         scheduled: false,
         caption_above: false,
@@ -43,7 +42,6 @@ fn driver_edit_text_shape_and_incoming_rejected() {
     let edit = ComposerEdit {
         chat_id: ChatId(7),
         message_id: MessageId(60),
-        original_text: "own outgoing".into(),
         kind: ComposerEditKind::Text,
         scheduled: false,
         caption_above: false,
@@ -152,7 +150,6 @@ fn driver_edit_scheduled_message_uses_scheduled_list() {
     let plain = ComposerEdit {
         chat_id: ChatId(7),
         message_id: MessageId(70),
-        original_text: "scheduled draft".into(),
         kind: ComposerEditKind::Text,
         scheduled: false,
         caption_above: false,

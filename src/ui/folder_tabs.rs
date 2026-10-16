@@ -178,12 +178,11 @@ impl QuillApp {
     fn select_folder_slot(&mut self, kind: FolderSlotKind, cx: &mut Context<Self>) {
         match kind {
             FolderSlotKind::Unread => {
-                self.chat_list.filter = ChatListFilter::Unread;
+                self.set_chat_list_view(ChatListFilter::Unread, self.folders.tab);
                 cx.notify();
             }
             FolderSlotKind::Archived => {
-                self.chat_list.filter = ChatListFilter::Archived;
-                self.folders.tab = None;
+                self.set_chat_list_view(ChatListFilter::Archived, None);
                 cx.notify();
             }
             FolderSlotKind::All => self.open_folder_tab(None, cx),

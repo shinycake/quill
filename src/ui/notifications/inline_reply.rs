@@ -164,7 +164,7 @@ impl QuillApp {
         let snapshot = ComposerSnapshot::capture(chat_id, session.view_generation, plan.text)
             .with_reply(
                 plan.reply_to
-                    .map(|message_id| ComposerReplyTo::new(chat_id, message_id, "")),
+                    .map(|message_id| ComposerReplyTo::new(chat_id, message_id)),
             );
         let Some(live) = self.live.as_mut() else {
             return false;

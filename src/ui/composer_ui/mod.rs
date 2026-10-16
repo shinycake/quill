@@ -267,11 +267,9 @@ impl QuillApp {
             self.begin_reply_from_message(chat_id, message_id, window, cx);
             return;
         };
-        let preview = full_text.chars().take(80).collect::<String>();
         let reply = quill::composer::ComposerReplyTo::with_quote(
             chat_id,
             message_id,
-            preview,
             quill::composer::QuoteSelection {
                 text: quote.to_string(),
                 position,

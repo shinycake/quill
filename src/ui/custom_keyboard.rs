@@ -10,7 +10,7 @@ use gpui_kit::*;
 use quill::composer::ComposerReplyTo;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
-use quill::state::{ForceReplyTarget, effective_preview};
+use quill::state::ForceReplyTarget;
 use quill::telegram::envelope::{KeyboardButton, KeyboardButtonType, ReplyKeyboard};
 impl QuillApp {
     /// B1: the active custom keyboard for the open chat, if any (live or
@@ -157,21 +157,19 @@ impl QuillApp {
         let ready = self
             .session()
             .filter(|session| session.open_chat == Some(target.chat_id))
-            .and_then(|session| {
+            .is_some_and(|session| {
                 session
-                    .histories
-                    .get(&target.chat_id.0)
-                    .and_then(|history| history.messages.get(&target.message_id.0))
-                    .map(effective_preview)
+                    .reply_target(target.chat_id, target.message_id)
+                    .is_some()
             });
-        let Some(preview) = ready else {
+        if !ready {
             return;
-        };
+        }
         if self.composer_ui.pending_reply.is_some() {
             return;
         }
         self.begin_reply_to(
-            ComposerReplyTo::new(target.chat_id, target.message_id, preview),
+            ComposerReplyTo::new(target.chat_id, target.message_id),
             window,
             cx,
         );

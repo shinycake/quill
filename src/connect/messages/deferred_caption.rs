@@ -121,9 +121,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         edit.caption_above = deferred.caption_above;
+        let sent_text = ComposerEdit::editable_text(&message.content).map(|(_, text)| text);
         // The row shows the new caption while the edit is on its way.
         set_caption(&mut message.content, &deferred.text);
-        if edit.original_text != deferred.text {
+        if sent_text.as_deref() != Some(deferred.text.as_str()) {
             let _ = self.edit_snapshot(&edit, &deferred.text);
         }
     }

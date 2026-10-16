@@ -63,6 +63,7 @@ mod business_bot_bar;
 mod call_types;
 mod chat_activity;
 mod chat_types;
+mod composer_targets;
 mod domains;
 mod history_calendar;
 mod history_trim;

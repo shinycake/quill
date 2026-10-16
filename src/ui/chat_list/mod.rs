@@ -237,9 +237,8 @@ impl QuillApp {
         community_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.folders.tab = None;
         self.chat_list.contacts_tab_open = false;
-        self.chat_list.filter = ChatListFilter::Community(community_id);
+        self.set_chat_list_view(ChatListFilter::Community(community_id), None);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.get_community_full_info(community_id)
         {
@@ -253,7 +252,7 @@ impl QuillApp {
     /// also exits it — they overwrite `chat_filter`.
     pub(super) fn exit_community_chat_list_mode(&mut self, cx: &mut Context<Self>) {
         if matches!(self.chat_list.filter, ChatListFilter::Community(_)) {
-            self.chat_list.filter = ChatListFilter::All;
+            self.set_chat_list_view(ChatListFilter::All, self.folders.tab);
             cx.notify();
         }
     }
@@ -326,6 +325,7 @@ impl QuillApp {
     /// Slice CL3: multi-select mode — enter with one chat checked (from
     /// the row-menu "Select" item).
     pub(super) fn enter_select_mode(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.drop_unlisted_selection();
         self.chat_list.selected.insert(chat_id.0);
         cx.notify();
     }
@@ -339,6 +339,7 @@ impl QuillApp {
     /// Slice CL3: toggle one row's check in multi-select mode; the last
     /// uncheck exits the mode.
     pub(super) fn toggle_chat_selected(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.drop_unlisted_selection();
         if !self.chat_list.selected.remove(&chat_id.0) {
             self.chat_list.selected.insert(chat_id.0);
         }
@@ -363,6 +364,7 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
+        self.drop_unlisted_selection();
         for id in unread {
             self.chat_list.selected.insert(id);
         }
@@ -389,12 +391,7 @@ impl QuillApp {
     /// single-chat mark-read path (`toggle_chat_marked_as_unread`
     /// does the TGX `viewMessages` flow when there is unread state).
     pub(super) fn mark_selected_read(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<ChatId> = self
-            .chat_list
-            .selected
-            .iter()
-            .map(|id| ChatId(*id))
-            .collect();
+        let ids: Vec<ChatId> = self.selected_chat_ids();
         for id in ids {
             // `toggle_chat_marked_as_unread` is a genuine toggle: calling it
             // on a fully-read chat would mark it *unread* — never do that
@@ -417,15 +414,14 @@ impl QuillApp {
     /// per chat that still needs the change.
     pub(super) fn toggle_selected_mute(&mut self, cx: &mut Context<Self>) {
         let chats: Vec<(ChatId, bool)> = self
-            .chat_list
-            .selected
-            .iter()
-            .map(|&id| {
+            .selected_chat_ids()
+            .into_iter()
+            .map(|id| {
                 let muted = self
                     .session()
-                    .and_then(|s| s.chats.get(&id))
+                    .and_then(|s| s.chats.get(&id.0))
                     .is_some_and(|chat| chat.is_muted());
-                (ChatId(id), muted)
+                (id, muted)
             })
             .collect();
         let mute_all = chats.iter().any(|(_, muted)| !muted);
@@ -444,15 +440,14 @@ impl QuillApp {
     /// the change.
     pub(super) fn toggle_selected_archive(&mut self, cx: &mut Context<Self>) {
         let chats: Vec<(ChatId, bool)> = self
-            .chat_list
-            .selected
-            .iter()
-            .map(|&id| {
+            .selected_chat_ids()
+            .into_iter()
+            .map(|id| {
                 let archived = self
                     .session()
-                    .and_then(|s| s.chats.get(&id))
+                    .and_then(|s| s.chats.get(&id.0))
                     .is_some_and(|chat| chat.in_archive);
-                (ChatId(id), archived)
+                (id, archived)
             })
             .collect();
         let archive_all = chats.iter().any(|(_, archived)| !archived);
@@ -468,13 +463,12 @@ impl QuillApp {
     /// Slice CL3: per-selected-chat pin state, honoring the pinned flag
     /// of the list the chat actually sits in (main vs archive).
     pub(super) fn selected_chat_pin_states(&self) -> Vec<(ChatId, bool)> {
-        self.chat_list
-            .selected
-            .iter()
-            .map(|&id| {
+        self.selected_chat_ids()
+            .into_iter()
+            .map(|id| {
                 let pinned = self
                     .session()
-                    .and_then(|s| s.chats.get(&id))
+                    .and_then(|s| s.chats.get(&id.0))
                     .is_some_and(|chat| {
                         if chat.in_archive {
                             chat.archive_is_pinned
@@ -482,7 +476,7 @@ impl QuillApp {
                             chat.is_pinned
                         }
                     });
-                (ChatId(id), pinned)
+                (id, pinned)
             })
             .collect()
     }
@@ -492,7 +486,7 @@ impl QuillApp {
     pub(super) fn delete_selected_chats(&mut self, cx: &mut Context<Self>) {
         // The dialog needs a chat id; the ids to delete are read from
         // the live selection at submit time.
-        if let Some(first) = self.chat_list.selected.iter().next().map(|id| ChatId(*id)) {
+        if let Some(first) = self.selected_chat_ids().first().copied() {
             self.open_group_confirm(first, GroupConfirmAction::RemoveSelectedChats, cx);
         }
     }
@@ -583,8 +577,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
-        self.folders.tab = folder;
-        self.chat_list.filter = ChatListFilter::All;
+        self.set_chat_list_view(ChatListFilter::All, folder);
         self.chat_list.contacts_tab_open = false;
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)
@@ -805,4 +798,5 @@ impl QuillApp {
     }
 }
 
+mod listed;
 mod toggle_chat_pin;

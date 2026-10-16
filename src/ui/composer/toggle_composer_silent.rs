@@ -655,17 +655,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let preview = self
-            .session()
-            .and_then(|session| session.histories.get(&chat_id.0))
-            .and_then(|history| history.messages.get(&message_id.0))
-            .map(effective_preview)
-            .unwrap_or_default();
-        self.begin_reply_to(
-            ComposerReplyTo::new(chat_id, message_id, preview),
-            window,
-            cx,
-        );
+        self.begin_reply_to(ComposerReplyTo::new(chat_id, message_id), window, cx);
     }
 
     /// "Reply with timecode": reply to the playing voice message and drop

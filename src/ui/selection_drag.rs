@@ -138,9 +138,7 @@ impl QuillApp {
                     return None;
                 }
                 let selected = self
-                    .share
-                    .pending_forward
-                    .as_ref()
+                    .forward_draft()
                     .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(press));
                 // Drag-selecting gives the history the keyboard
                 // (`updateDragSelection` → `setFocus`).
@@ -175,11 +173,9 @@ impl QuillApp {
             Some(range) => {
                 let ids = self.loaded_selectable_ids(drag.chat);
                 let selected: Vec<MessageId> = self
-                    .share
-                    .pending_forward
-                    .as_ref()
+                    .forward_draft()
                     .filter(|draft| draft.from_chat_id == drag.chat)
-                    .map(|draft| draft.message_ids.clone())
+                    .map(|draft| draft.message_ids)
                     .unwrap_or_default();
                 let next = apply_drag(&ids, &selected, &range, LIMIT);
                 self.set_selection(drag.chat, next, cx);
@@ -230,7 +226,7 @@ impl QuillApp {
                     }
                 }
             }
-            let count = self.share.pending_forward.as_ref().map_or(0, |d| d.count());
+            let count = self.forward_draft().map_or(0, |d| d.count());
             self.connection.status_note = match count {
                 1 => "1 message selected".into(),
                 n => format!("{n} messages selected"),
@@ -252,9 +248,7 @@ impl QuillApp {
     /// the row.
     pub(super) fn selection_shown(&self, chat: ChatId, message_id: MessageId) -> bool {
         let selected = self
-            .share
-            .pending_forward
-            .as_ref()
+            .forward_draft()
             .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(message_id));
         match self.selection_drag_in(chat) {
             Some(range) => range.shown(message_id, selected),
@@ -275,11 +269,9 @@ impl QuillApp {
     /// progress would leave it.
     pub(super) fn selection_shown_count(&self, chat: ChatId) -> usize {
         let selected: Vec<MessageId> = self
-            .share
-            .pending_forward
-            .as_ref()
+            .forward_draft()
             .filter(|draft| draft.from_chat_id == chat)
-            .map(|draft| draft.message_ids.clone())
+            .map(|draft| draft.message_ids)
             .unwrap_or_default();
         match self.selection_drag_in(chat) {
             Some(range) => {

@@ -34,7 +34,6 @@ fn driver_sends_a_reply_aimed_at_another_chat_as_external() {
     let reply = ComposerReplyTo::with_quote(
         ChatId(12),
         MessageId(40),
-        "from elsewhere",
         QuoteSelection {
             text: "else".into(),
             position: 5,
@@ -92,11 +91,7 @@ fn driver_send_reply_shape_and_jump_to_replied() {
         driver.session.view_generation,
         "CANARYREPLYtext",
     )
-    .with_reply(Some(ComposerReplyTo::new(
-        ChatId(7),
-        MessageId(50),
-        "hello already here",
-    )));
+    .with_reply(Some(ComposerReplyTo::new(ChatId(7), MessageId(50))));
     let extra = driver.send_snapshot(&snap).unwrap();
     let send_json = recorder.snapshot().last().cloned().expect("sendMessage");
     let v: Value = serde_json::from_str(&send_json).unwrap();
@@ -283,7 +278,6 @@ fn driver_edit_snapshot_rejects_overlong_caption() {
     let edit = crate::composer::ComposerEdit {
         chat_id: ChatId(7),
         message_id: crate::ids::MessageId(9),
-        original_text: "hi".to_string(),
         kind: crate::composer::ComposerEditKind::Caption,
         scheduled: false,
         caption_above: false,
@@ -321,7 +315,6 @@ fn driver_edit_snapshot_rejects_overlong_text() {
     let edit = crate::composer::ComposerEdit {
         chat_id: ChatId(7),
         message_id: crate::ids::MessageId(9),
-        original_text: "hi".to_string(),
         kind: crate::composer::ComposerEditKind::Text,
         scheduled: false,
         caption_above: false,
@@ -367,7 +360,6 @@ fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
     let mut edit = crate::composer::ComposerEdit {
         chat_id: ChatId(7),
         message_id: crate::ids::MessageId(9),
-        original_text: "hi".to_string(),
         kind: crate::composer::ComposerEditKind::Caption,
         scheduled: false,
         caption_above: true,
@@ -623,7 +615,6 @@ fn driver_send_snapshot_carries_quote() {
     .with_reply(Some(ComposerReplyTo::with_quote(
         ChatId(7),
         MessageId(50),
-        "hello already here",
         QuoteSelection {
             text: "already".to_string(),
             position: 6,

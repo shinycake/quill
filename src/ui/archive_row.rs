@@ -104,8 +104,7 @@ impl QuillApp {
     /// Show the archive: the Archived category is Quill's opened-folder
     /// view (tdesktop `openFolder`).
     pub(super) fn open_archive_folder(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.filter = ChatListFilter::Archived;
-        self.folders.tab = None;
+        self.set_chat_list_view(ChatListFilter::Archived, None);
         self.chat_list.contacts_tab_open = false;
         self.chat_list.calls_tab_open = false;
         cx.notify();

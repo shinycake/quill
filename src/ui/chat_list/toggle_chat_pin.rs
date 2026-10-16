@@ -265,53 +265,22 @@ impl QuillApp {
                         // Parity slice: folder names + tags flag for chat-row
                         // chips.
                         let (folder_names, show_folder_tags) = self.folder_tag_context();
-                        // Borrowed, never cloned: the list can hold thousands
-                        // of chats and this runs every render.
-                        let mut chats: Vec<&ChatSummary> = self
-                            .session()
-                            .map(|s| match folder {
-                                Some(folder_id) => s.ordered_folder_chats(folder_id),
-                                None => s.ordered_chats(),
-                            })
-                            .unwrap_or_default();
-                        // Slice CL2: the Unread category filters the loaded
-                        // model (TGX `ChatFilter` unread predicate:
-                        // unread_count > 0 or marked-as-unread,
-                        // `ChatFilter.java:166`) — never the server query.
-                        if filter == ChatListFilter::Unread {
-                            chats.retain(|c| c.is_unread());
-                        }
+                        let mut chats: Vec<&ChatSummary> = self.listed_main_chats();
                         // Slice CL2: the Archived category shows only the
                         // archive section.
                         let show_main_list = filter != ChatListFilter::Archived;
-                        // Parity slice `parity:communities-chatlist-mode`: narrow
-                        // `chats` to the community's chats when the mode is
-                        // active. Membership is the cached
-                        // `communityFullInfo.chats` pack (state keeps no
-                        // per-chat `community_id`); `updateCommunityFullInfo`
-                        // replaces the pack wholesale, so a chat leaving the
-                        // community drops out on the next render. Hidden
-                        // chats (`is_hidden`) stay included — see
-                        // `community_mode::community_member_ids`.
-                        if let (ChatListFilter::Community(community_id), Some(session)) =
-                            (filter, self.session())
-                        {
-                            community_mode::retain_community_chats(
-                                &mut chats,
-                                Some(community_id),
-                                &session.groups.community_full_infos,
-                            );
-                        }
                         // Slice CL3: multi-select mode — rows toggle the
                         // check instead of opening the chat. Defined
                         // once here so the select bar, the main loop,
                         // and the archive loop all see it.
-                        let selecting = !self.chat_list.selected.is_empty();
+                        let mut archived: Vec<&ChatSummary> = self.listed_archived_chats();
+                        let selected_chats = self.selected_among_listed(&chats, &archived);
+                        let selecting = !selected_chats.is_empty();
                         // Slice CL3: multi-select action bar (TGX
                         // `ChatsController` selection header): the
                         // selected count, the bulk actions, and cancel.
                         if selecting {
-                            let count = self.chat_list.selected.len();
+                            let count = selected_chats.len();
                             list = list.child(
                                 div()
                                     .id("select-bar")
@@ -529,13 +498,8 @@ impl QuillApp {
                         if folder.is_none()
                             && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread)
                         {
-                            let mut archived: Vec<&ChatSummary> = self
-                                .session()
-                                .map(|s| s.ordered_archived_chats())
-                                .unwrap_or_default();
-                            if filter == ChatListFilter::Unread {
-                                archived.retain(|c| c.is_unread());
-                            } else if let Some(reorder) = self.chat_list.pin_reorder.as_ref()
+                            if filter != ChatListFilter::Unread
+                                && let Some(reorder) = self.chat_list.pin_reorder.as_ref()
                                 && reorder.dragging().is_some()
                                 && self.chat_list.pin_reorder_archived
                             {

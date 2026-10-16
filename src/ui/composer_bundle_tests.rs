@@ -396,7 +396,6 @@ fn up_keeps_scrolling_while_a_reply_is_pending(cx: &mut TestAppContext) {
         app.composer_ui.pending_reply = Some(quill::composer::ComposerReplyTo::new(
             OPEN,
             quill::ids::MessageId(1),
-            "hello",
         ));
         app.composer.update(cx, |input, cx| input.focus(window, cx));
     });

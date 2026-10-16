@@ -433,13 +433,12 @@ fn a_thread_restores_its_draft_from_message_thread_info() {
         ),
     );
     assert_eq!(
-        session.draft_reply_preview(ChatId(14), MessageId(502)),
+        session
+            .reply_target(ChatId(14), MessageId(502))
+            .map(effective_preview),
         Some("a reply".into())
     );
-    assert_eq!(
-        session.draft_reply_preview(ChatId(14), MessageId(999)),
-        None
-    );
+    assert!(session.reply_target(ChatId(14), MessageId(999)).is_none());
 
     // Storing into the thread slot and closing the thread.
     session.store_composer_draft(

@@ -151,7 +151,7 @@ impl QuillApp {
     /// Send the draft to every ticked chat: the comment first (a plain
     /// message), then the forwards with the chosen sound / schedule.
     pub(super) fn submit_share(&mut self, mode: ShareSend, cx: &mut Context<Self>) {
-        let Some(draft) = self.share.pending_forward.clone() else {
+        let Some(draft) = self.forward_draft() else {
             return;
         };
         let dests: Vec<ChatId> = self.share.selection.chats().to_vec();
@@ -230,9 +230,7 @@ impl QuillApp {
     /// (`getMessageProperties` then `getMessageLink`).
     pub(super) fn share_copy_link(&mut self, cx: &mut Context<Self>) {
         let Some((chat_id, message_id)) = self
-            .share
-            .pending_forward
-            .as_ref()
+            .forward_draft()
             .filter(|draft| draft.count() == 1)
             .and_then(|draft| Some((draft.from_chat_id, *draft.message_ids.first()?)))
         else {
@@ -276,11 +274,7 @@ impl QuillApp {
         };
         !self.share.forward_picker_open
             && self.composer_ui.pending_edit.is_none()
-            && self
-                .share
-                .pending_forward
-                .as_ref()
-                .is_some_and(|draft| !draft.is_empty())
+            && self.forward_draft().is_some()
             && self.session().and_then(|s| s.open_chat) == Some(dest)
     }
 
@@ -293,10 +287,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (Some(dest), Some(draft)) = (
-            self.share.forward_bar_dest,
-            self.share.pending_forward.clone(),
-        ) else {
+        let (Some(dest), Some(draft)) = (self.share.forward_bar_dest, self.forward_draft()) else {
             return;
         };
         if let Some(note) = self.share_dest_refusal(dest, cx) {
@@ -359,11 +350,7 @@ impl QuillApp {
             .pending_forward
             .as_ref()
             .is_some_and(|draft| draft.remove_caption);
-        let multiple = self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|draft| draft.count() > 1);
+        let multiple = self.forward_draft().is_some_and(|draft| draft.count() > 1);
         div()
             .flex()
             .flex_wrap()
@@ -411,7 +398,7 @@ impl QuillApp {
     /// choices (Send, Send without sound, Schedule, Copy link).
     pub(super) fn forward_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.share.search_input.read(cx).value().to_string();
-        let draft = self.share.pending_forward.clone();
+        let draft = self.forward_draft();
         let count = draft.as_ref().map(|d| d.count()).unwrap_or(0);
         let from_title = draft
             .as_ref()
@@ -600,7 +587,7 @@ impl QuillApp {
     /// The bar above the composer after one destination was chosen:
     /// who the messages are from, a preview, and the forward options.
     pub(super) fn forward_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let draft = self.share.pending_forward.clone();
+        let draft = self.forward_draft();
         let count = draft.as_ref().map(|d| d.count()).unwrap_or(0);
         let hide_sender = draft.as_ref().is_some_and(|d| d.send_copy);
         let (senders, preview) = match (&draft, self.session()) {

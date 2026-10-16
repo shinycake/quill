@@ -27,7 +27,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::schedule::ScheduleKind;
 use quill::send_rights::SendKind;
-use quill::state::{Session, effective_preview};
+use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatKind;
 use quill::telegram::requests::SelfDestructSend;
@@ -69,6 +69,12 @@ impl QuillApp {
                     self.connection.status_note =
                         tr(keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND).into();
                     cx.notify();
+                    return;
+                }
+                // Re-check the targets at send time: a reply to a deleted
+                // message is dropped (the text stays), an edit of one is
+                // cancelled and nothing is sent.
+                if self.cancel_gone_composer_targets(window, cx) {
                     return;
                 }
                 if self.composer_ui.pending_edit.is_some() {
@@ -445,6 +451,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.cancel_gone_composer_targets(window, cx) {
+            return;
+        }
         // Callers only open the rich editor with a live session.
         let Some(live) = self.live.as_ref() else {
             return;

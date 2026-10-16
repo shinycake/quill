@@ -3,11 +3,12 @@
 use super::*;
 
 /// Message the composer is quoting (tdesktop `FieldHeader::replyToMessage`).
+/// Ids and the quote only: the bar reads the message from the history each
+/// time it draws, so an edit shows and a delete cancels.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerReplyTo {
     pub chat_id: ChatId,
     pub message_id: MessageId,
-    pub preview: String,
     /// Slice G1: partial-message quote (`inputTextQuote`, schema 1.8.67
     /// line 3056) — `text` is a verbatim substring of the original
     /// message and `position` its UTF-16 code-unit offset.
@@ -25,27 +26,20 @@ pub struct QuoteSelection {
 }
 
 impl ComposerReplyTo {
-    pub fn new(chat_id: ChatId, message_id: MessageId, preview: impl Into<String>) -> Self {
+    pub fn new(chat_id: ChatId, message_id: MessageId) -> Self {
         Self {
             chat_id,
             message_id,
-            preview: preview.into(),
             quote: None,
             target_chat: None,
         }
     }
 
     /// Slice G1: reply carrying a validated partial quote.
-    pub fn with_quote(
-        chat_id: ChatId,
-        message_id: MessageId,
-        preview: impl Into<String>,
-        quote: QuoteSelection,
-    ) -> Self {
+    pub fn with_quote(chat_id: ChatId, message_id: MessageId, quote: QuoteSelection) -> Self {
         Self {
             chat_id,
             message_id,
-            preview: preview.into(),
             quote: Some(quote),
             target_chat: None,
         }
@@ -148,7 +142,7 @@ mod tests {
 
     #[test]
     fn cancel_reply_keeps_typed_text() {
-        let reply = ComposerReplyTo::new(ChatId(11), MessageId(101), "Hello from injected JSON.");
+        let reply = ComposerReplyTo::new(ChatId(11), MessageId(101));
         let (cleared, text) = cancel_reply_draft(Some(reply), "keep this draft".into());
         assert_eq!(cleared, None);
         assert_eq!(text, "keep this draft");
@@ -156,7 +150,7 @@ mod tests {
 
     #[test]
     fn aimed_reply_belongs_to_both_chats_but_drafts_stay_same_chat() {
-        let reply = ComposerReplyTo::new(ChatId(12), MessageId(40), "x").into_chat(ChatId(11));
+        let reply = ComposerReplyTo::new(ChatId(12), MessageId(40)).into_chat(ChatId(11));
         assert!(reply.belongs_to(ChatId(12)));
         assert!(reply.belongs_to(ChatId(11)));
         assert!(!reply.belongs_to(ChatId(13)));
@@ -164,16 +158,16 @@ mod tests {
         // Drafts only know replies that stay in their own chat.
         assert!(reply.send_reply(ChatId(11)).is_none());
         assert!(reply.send_reply(ChatId(12)).is_none());
-        let plain = ComposerReplyTo::new(ChatId(12), MessageId(40), "x");
+        let plain = ComposerReplyTo::new(ChatId(12), MessageId(40));
         assert!(plain.send_reply(ChatId(12)).is_some());
         // Aiming a reply at its own chat is no detour.
-        let home = ComposerReplyTo::new(ChatId(12), MessageId(40), "x").into_chat(ChatId(12));
+        let home = ComposerReplyTo::new(ChatId(12), MessageId(40)).into_chat(ChatId(12));
         assert_eq!(home.target_chat, None);
     }
 
     #[test]
     fn updating_the_quote_keeps_the_target() {
-        let reply = ComposerReplyTo::new(ChatId(12), MessageId(40), "x")
+        let reply = ComposerReplyTo::new(ChatId(12), MessageId(40))
             .into_chat(ChatId(11))
             .with_new_quote(Some(QuoteSelection {
                 text: "q".into(),
