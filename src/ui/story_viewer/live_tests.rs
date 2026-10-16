@@ -2,8 +2,9 @@
 //! the effects clock, and UI flows over the screenshot demo's live story
 //! (comments over the picture, the Stars button with its toast and Undo,
 //! the comments toggle, the Stars box for a comment, comments disabled,
-//! deleting a comment, and the viewer closing when the stream ends).
-//! Nothing reaches Telegram: the app has no connection and joins nothing.
+//! deleting a comment, the viewer closing when the stream ends, and the
+//! header drawn by the live controller). Nothing reaches Telegram: the app
+//! has no connection and joins nothing.
 use super::live_state::{
     EFFECT_DURATION, SendAction, StarsBoxMode, effect_progress, pin_label, pinned_comments,
     send_action,
@@ -476,4 +477,38 @@ fn the_emoji_panel_closes_with_the_reply_row(cx: &mut TestAppContext) {
         assert!(!app.story_reply_panel_active());
         assert!(!app.stories.reply_open, "the reply row is not left open");
     });
+}
+
+/// The header is the live controller's: the LIVE pill and the viewers,
+/// the sound toggle, and no scrubber or play button.
+#[gpui_kit::test]
+fn the_header_is_the_live_controller(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    let badge = find(vcx, "live-badge").expect("the LIVE badge");
+    let pill = find(vcx, "live-pill").expect("the pill");
+    assert_eq!(pill.size.height, px(11.), "groupCallMessageBadge height");
+    // " 2,318 viewers" after the pill.
+    assert!(
+        badge.size.width > pill.size.width + px(40.),
+        "the count follows the pill"
+    );
+    let row = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| u64::from(call.id.unsigned_abs()))
+            .expect("the story's call")
+    });
+    let present = |vcx: &mut VisualTestContext, id: &'static str| {
+        vcx.update(|window, cx| {
+            window.render_frame(cx);
+            window.try_find((id, row)).is_some()
+        })
+    };
+    assert!(present(vcx, "live-mute"), "the sound toggle");
+    assert!(!present(vcx, "viewer-scrubber"));
+    assert!(!present(vcx, "media-viewer-play"));
+    // A playing story draws no live overlay.
+    assert!(find(vcx, "live-spinner").is_none());
+    assert!(find(vcx, "live-stalled").is_none());
 }
