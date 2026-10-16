@@ -8,8 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::group_call_panel::{
-    ACTIVE_FG, BG, MEMBER_INACTIVE_ICON, MEMBER_MUTED_ICON, MEMBER_NOT_JOINED, MEMBERS_BG,
-    MEMBERS_BG_OVER,
+    ACTIVE_FG, BG, MEMBER_INACTIVE_ICON, MEMBER_NOT_JOINED, MEMBERS_BG, MEMBERS_BG_OVER,
 };
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -71,19 +70,6 @@ pub(in crate::ui) fn ghost(cx: &App) -> ButtonCustomVariant {
         .foreground(fg())
         .hover(hsla(0., 0., 1., 0.1))
         .active(hsla(0., 0., 1., 0.16))
-        .shadow(false)
-}
-
-/// A destructive text button over the chrome (`groupCallMemberMutedIcon`
-/// text on a faint wash of it); the kit's danger button takes the app
-/// theme, which is wrong on this always-dark chrome.
-pub(in crate::ui) fn attention(cx: &App) -> ButtonCustomVariant {
-    let red: Hsla = rgb(MEMBER_MUTED_ICON).into();
-    ButtonCustomVariant::new(cx)
-        .color(red.opacity(0.12))
-        .foreground(red)
-        .hover(red.opacity(0.2))
-        .active(red.opacity(0.26))
         .shadow(false)
 }
 

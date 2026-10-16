@@ -347,19 +347,20 @@ fn one_sound_at_a_time_with_a_file_pip(cx: &mut TestAppContext) {
 
 /// The live story demo, its viewer open on the story.
 pub(super) fn open_live_story(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    open_live_story_demo(cx, "ready-live-story")
+}
+
+fn open_live_story_demo(
+    cx: &mut TestAppContext,
+    kind: &'static str,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = Rc::new(RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(900.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(
-                window,
-                cx,
-                None,
-                Some(ScreenshotDemo::named("ready-live-story")),
-            )
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(kind))));
         let shell = cx.new(|_| QuillShell::new(view.clone()));
         *slot_in.borrow_mut() = Some(view);
         Root::new(shell, window, cx)
@@ -415,6 +416,26 @@ fn a_live_story_pip_keeps_the_story_until_it_closes(cx: &mut TestAppContext) {
         assert!(app.group_call.live_pip.is_none());
         assert_eq!(app.stories.live.watching, None, "closing left the story");
     });
+}
+
+#[gpui_kit::test]
+fn a_live_story_pip_plays_beside_a_one_to_one_call(cx: &mut TestAppContext) {
+    let (app, mut main) = open_live_story_demo(cx, "ready-live-story-in-call");
+    let main = &mut main;
+    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    assert!(watching.is_some());
+    app.update_in(main, |app, window, cx| app.open_story_pip(window, cx));
+    settle(main);
+    let mut pip = live_pip_window(&app, main, cx);
+    settle(main);
+    app.read_with(main, |app, _| {
+        let calls = &app.demo_session.as_ref().expect("the demo session").calls;
+        assert!(calls.active_call.is_some(), "the call stays");
+        assert!(calls.story_stream.is_some(), "the story stays joined");
+        assert!(app.group_call.live_pip.is_some(), "the PiP stays open");
+        assert_eq!(app.stories.live.watching, watching);
+    });
+    assert!(pip.debug_bounds("live-pip-badge").is_some());
 }
 
 #[gpui_kit::test]

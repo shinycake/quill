@@ -289,11 +289,21 @@ pub(crate) fn retained_call_media(
     }
 }
 
+/// What you do in a group call: take part, or only watch (a live story's
+/// stream), which captures and sends nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GroupCallRole {
+    #[default]
+    Member,
+    Viewer,
+}
+
 /// Phase C2g: retained per-group-call media state for the ntgcalls
 /// group transport (keyed by TDLib group call id).
 #[derive(Clone, Default)]
 pub(crate) struct GroupCallMedia {
     pub(crate) chat_id: i64,
+    pub(crate) role: GroupCallRole,
     /// Your microphone is muted in this group call.
     pub(crate) muted: bool,
     pub(crate) camera_enabled: bool,

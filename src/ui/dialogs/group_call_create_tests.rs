@@ -2,7 +2,7 @@
 //! visibility, the create confirmation with its "schedule" link, the
 //! "join as" box, the schedule box (default time, live countdown, range
 //! check), the leave-current confirmation (also for a join still in
-//! flight), joining the created call, and a refused create. Nothing
+//! flight, and never for a live story playing in its own slot), joining the created call, and a refused create. Nothing
 //! reaches Telegram: the app has no connection, so a confirmed create only
 //! records the join, and the tests play the server's part.
 use super::{CreateStep, GroupCallCreate};
@@ -27,6 +27,8 @@ const CHANNEL: i64 = 13;
 const NEW_CALL: i32 = 5;
 /// Another chat's call you are in.
 const OTHER_CALL: i32 = 77;
+/// A live story's call.
+const STORY_CALL: i32 = 4242;
 const ME: MessageSender = MessageSender::User { user_id: 1 };
 
 fn frames(vcx: &mut VisualTestContext) {
@@ -381,6 +383,55 @@ fn starting_while_in_another_call_asks_to_leave_it(cx: &mut TestAppContext) {
     click(&mut main, "group-call-create-confirm");
     assert!(!other_call_tracked(&app, &mut main), "left for the new one");
     assert!(join_noted(&app, &mut main).is_some());
+}
+
+/// A live story plays in its own slot (tdesktop `registerVideoStream`):
+/// it is not a call to leave.
+fn story_playing(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.story_stream = Some(ActiveGroupCall {
+                is_live_story: true,
+                is_joined: true,
+                ..ActiveGroupCall::fresh(STORY_CALL)
+            });
+        }
+    });
+}
+
+fn story_tracked(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.calls.story_stream.as_ref())
+            .is_some_and(|call| call.id == STORY_CALL)
+    })
+}
+
+#[gpui_kit::test]
+fn a_playing_live_story_is_not_asked_about(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    story_playing(&app, &mut main);
+    begin(&app, &mut main, CreateKind::Now);
+    assert!(main.debug_bounds("group-call-create-leave").is_none());
+    assert!(main.debug_bounds("group-call-create-sure").is_some());
+    click(&mut main, "group-call-create-confirm");
+    assert!(join_noted(&app, &mut main).is_some());
+    assert!(story_tracked(&app, &mut main), "the story plays on");
+}
+
+#[gpui_kit::test]
+fn a_real_call_still_asks_with_a_live_story_playing(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    manager(&app, &mut main);
+    story_playing(&app, &mut main);
+    in_other_call(&app, &mut main, true);
+    begin(&app, &mut main, CreateKind::Now);
+    assert!(main.debug_bounds("group-call-create-leave").is_some());
+    click(&mut main, "group-call-create-leave-confirm");
+    click(&mut main, "group-call-create-confirm");
+    assert!(!other_call_tracked(&app, &mut main), "left for the new one");
+    assert!(story_tracked(&app, &mut main), "the story plays on");
 }
 
 #[gpui_kit::test]

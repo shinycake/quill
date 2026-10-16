@@ -213,10 +213,7 @@ impl QuillApp {
             .and_then(|section| section.items.into_iter().find(|item| item.selected))
             .map(|item| item.name)
             .unwrap_or_else(|| tr(keys::SETTINGS_CALL_DEVICE_DEFAULT).to_string());
-        let muted = self
-            .live
-            .as_ref()
-            .is_some_and(|live| live.driver.group_call_playback_muted());
+        let muted = self.stream_muted();
         let row = |id: &'static str, label: SharedString| {
             div()
                 .id(id)
@@ -419,7 +416,14 @@ impl QuillApp {
 
     fn toggle_stream_playback_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.set_group_call_playback_muted(muted)
+            && let Some(call_id) = live
+                .driver
+                .session
+                .calls
+                .active_group_call
+                .as_ref()
+                .map(|c| c.id)
+            && let Err(err) = live.driver.set_group_call_playback_muted(call_id, muted)
         {
             self.connection.status_note = tr_with(
                 keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,

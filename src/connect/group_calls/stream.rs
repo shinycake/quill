@@ -145,13 +145,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some((url, key)) = rtmp_info_from_join_answer(answer) else {
             return;
         };
-        if let Some(call) = self
-            .session
-            .calls
-            .active_group_call
-            .as_mut()
-            .filter(|call| call.id == group_call_id)
-        {
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rtmp_url = Some(url).filter(|url| !url.is_empty());
             call.rtmp_stream_key = Some(key).filter(|key| !key.is_empty());
         }
@@ -189,13 +183,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_deref()
             .and_then(|engine| engine.group_call_mode(chat_id))
             .unwrap_or_default();
-        if let Some(call) = self
-            .session
-            .calls
-            .active_group_call
-            .as_mut()
-            .filter(|call| call.id == group_call_id)
-        {
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.stream_mode = mode;
             call.stream = StreamState::Connecting;
         }
@@ -216,13 +204,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.leave_group_call(group_call_id);
         }
-        if let Some(call) = self
-            .session
-            .calls
-            .active_group_call
-            .as_mut()
-            .filter(|call| call.id == group_call_id)
-        {
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.stream_mode = GroupCallMode::from_join_answer(answer);
             call.stream = StreamState::Unsupported;
             // Not retried on every pump: the Join button can try again.
@@ -378,21 +360,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             // pending and stop the native call. The tracked call stays
             // until TDLib's `updateGroupCall` says otherwise.
             self.teardown_group_call_transport(group_call_id);
-            if let Some(call) = self
-                .session
-                .calls
-                .active_group_call
-                .as_mut()
-                .filter(|call| call.id == group_call_id)
-            {
+            if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 call.transport_ready = false;
                 call.join_payload.clear();
             }
         }
-        if outcome == ReplyOutcome::Rejoin {
+        if outcome == ReplyOutcome::Rejoin
+            && let Some(group_call_id) = feeder_call
+        {
             // tdesktop's `startRejoin`, through the existing rejoin path
             // (`join.rs`, at most 3 attempts).
-            if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 call.reconnecting = true;
             }
             let _ = self.maybe_auto_rejoin_group_call();
@@ -400,25 +378,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         true
     }
 
-    /// Mirrors the feeder's state onto the tracked call.
     fn sync_stream_state(&mut self) {
-        let Some(call) = self.session.calls.active_group_call.as_mut() else {
-            return;
-        };
-        if !call.stream_mode.is_stream() || call.stream == StreamState::Unsupported {
-            return;
+        for group_call_id in self.session.calls.group_call_ids().into_iter().flatten() {
+            let Some(call) = self.session.calls.group_call_mut(group_call_id) else {
+                continue;
+            };
+            if !call.stream_mode.is_stream() || call.stream == StreamState::Unsupported {
+                continue;
+            }
+            let Some(feeder) = self
+                .group_call_streams
+                .feeders
+                .values()
+                .find(|feeder| feeder.group_call_id() == group_call_id)
+            else {
+                continue;
+            };
+            call.stream = feeder.stream_state();
+            let (chat_id, state) = (feeder.chat_id(), call.stream);
+            self.sync_stream_feed(chat_id, state);
         }
-        let Some(feeder) = self
-            .group_call_streams
-            .feeders
-            .values()
-            .find(|feeder| feeder.group_call_id() == call.id)
-        else {
-            return;
-        };
-        call.stream = feeder.stream_state();
-        let (chat_id, state) = (feeder.chat_id(), call.stream);
-        self.sync_stream_feed(chat_id, state);
     }
 }
 

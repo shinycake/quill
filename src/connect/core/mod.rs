@@ -38,12 +38,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let was_ready = matches!(self.session.auth, AuthorizationState::Ready);
         let active_call_before = self.session.calls.active_call.as_ref().map(|call| call.id);
-        let active_group_call_before = self
-            .session
-            .calls
-            .active_group_call
-            .as_ref()
-            .map(|call| call.id);
+        let group_calls_before = self.session.calls.group_call_ids();
         let bridge_signaling = match &owned.envelope.payload {
             EnvelopePayload::Calls(CallsPayload::UpdateNewCallSignalingData { call_id, data }) => {
                 Some((*call_id, data.clone()))
@@ -554,7 +549,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = self.fetch_pinned_messages(chat_id);
         }
         self.pump_call_engine(active_call_before, bridge_signaling)?;
-        self.pump_group_call_transport(active_group_call_before)?;
+        self.pump_group_call_transport(group_calls_before)?;
         self.pump_call_capture();
         self.pump_call_screen();
         self.pump_call_audio()?;

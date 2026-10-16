@@ -75,11 +75,13 @@ pub trait CallEngine {
     /// Phase C2g: app -> engine; create the ntgcalls group context keyed
     /// by TDLib chat id and return the WebRTC offer that `joinVideoChat`
     /// carries as its `payload` (`schema/td_api.tl:14292`). The answer
-    /// (`Text` response) goes back through `connect_group_call`.
+    /// (`Text` response) goes back through `connect_group_call`. A
+    /// `Viewer` context opens no capture source.
     fn create_group_call(
         &mut self,
         group_call_id: i32,
         chat_id: i64,
+        role: GroupCallRole,
     ) -> Result<String, EngineError>;
 
     /// Phase C2g: app -> engine; finish the group handshake with the

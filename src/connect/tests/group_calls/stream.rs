@@ -593,9 +593,9 @@ fn the_chosen_speaker_plays_the_stream_and_follows_a_change() {
         .select_call_devices(None, Some("speakers".into()))
         .expect("switch output");
     driver
-        .set_group_call_playback_muted(true)
+        .set_group_call_playback_muted(555, true)
         .expect("mute for me");
-    assert!(driver.group_call_playback_muted());
+    assert!(driver.group_call_playback_muted(555));
     assert_eq!(
         handle.group_playbacks().get(2..).map(<[_]>::to_vec),
         Some(vec![

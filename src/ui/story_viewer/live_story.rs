@@ -3,11 +3,9 @@
 //! `unfocusReply` → `GroupCall::leave`), closing the viewer when the
 //! stream ends, and the composer's and Stars button's actions.
 //!
-//! Quill has one call slot. tdesktop plays a live story as a call of its
-//! own beside the one you are in (`Calls::Instance` keeps video streams
-//! apart from the current call); here a joined call or a 1:1 call keeps
-//! the slot, and the viewer asks first to leave it (tdesktop's
-//! `confirmLeaveCurrent` box and words).
+//! The story plays in its own receive-only slot (`calls.story_stream`)
+//! beside any 1:1 call or video chat you are in, as tdesktop keeps video
+//! streams apart from the current call (`registerVideoStream`).
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::{LiveDelete, LiveStarsBox, SendAction, StarsBoxMode, send_action};
@@ -15,16 +13,12 @@ use super::*;
 use crate::ui::media_panel::PanelTab;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use quill::calls::engine::StreamState;
-use quill::calls::group_call_create::{BeforeCreate, before_create};
 use quill::lang::trn_with;
 use quill::live_story::{DEFAULT_STARS, QUICK_STARS, comment_text};
 use quill::paid_reaction::{SLIDER_STEPS, amount_for_step, step_for_amount};
 use quill::premium_hub::group_digits;
 use quill::state::{Session, unix_ms_now};
 use quill::telegram::envelope::StoryContentView;
-
-/// How long the join waits for the other call to be left.
-const RETRY_JOIN_LIMIT_MS: u64 = 10_000;
 
 /// The live story under the viewer: `(poster, story)` when the current
 /// item is one.
@@ -59,36 +53,20 @@ impl QuillApp {
         if target.is_some() && self.stories.live.watching.is_none() {
             self.stories.live.watching = target;
             self.join_watched_live_story(cx);
-        } else if self.stories.live.retry_join.is_some() && self.stories.live.watching.is_some() {
-            self.join_watched_live_story(cx);
         }
-        self.check_asked_story_ended(cx);
+        self.check_story_ended_before_call(cx);
         self.check_live_story_ended(cx);
     }
 
-    /// The frame asks to leave another call (`live_leave_other_card`).
-    pub(in crate::ui) fn live_leave_other_shown(&self) -> bool {
-        self.stories.viewer.is_open() && self.stories.live.leave_other.is_some()
-    }
-
-    /// The card's Cancel and Esc: nothing is left; the Join button asks
-    /// again.
-    pub(in crate::ui) fn cancel_live_leave_other(&mut self, cx: &mut Context<Self>) {
-        if self.stories.live.leave_other.take().is_some() {
-            cx.notify();
-        }
-    }
-
-    /// While the frame asks, the story is not joined, so the stream's end
-    /// is not seen through the call (`check_live_story_ended`): a story
-    /// that is no longer live (it ended, or was deleted) closes the viewer
-    /// as an ended stream does, and the card goes with it.
-    fn check_asked_story_ended(&mut self, cx: &mut Context<Self>) {
+    /// Until its call is seen, the stream's end does not come through it
+    /// (`check_live_story_ended`): a story that is no longer live (it
+    /// ended, or was deleted) closes the viewer as an ended stream does.
+    fn check_story_ended_before_call(&mut self, cx: &mut Context<Self>) {
         let Some((chat_id, story_id)) = self
             .stories
             .live
             .watching
-            .filter(|_| self.stories.live.leave_other.is_some())
+            .filter(|_| !self.stories.live.seen_call)
         else {
             return;
         };
@@ -100,65 +78,20 @@ impl QuillApp {
                 .is_some_and(|story| matches!(story.content, StoryContentView::Live { .. }))
         });
         if !still_live {
-            self.stories.live.leave_other = None;
             self.close_story_viewer(cx);
         }
     }
 
-    /// Joins the watched live story. When another call holds the slot the
-    /// frame asks to leave it (`live_leave_other_card`); Cancel leaves the
-    /// Join button, which comes back here.
     pub(super) fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
         let Some((chat_id, story_id)) = self.stories.live.watching else {
             return;
         };
-        let retrying = self.stories.live.retry_join;
-        if let Some(live) = self.live.as_mut()
-            && live.driver.join_live_story(chat_id, story_id).is_ok()
-        {
-            self.stories.live.retry_join = None;
-            return;
-        }
-        if let Some(since) = retrying {
-            // The other call is still being left. Past the limit (the
-            // leave failed, or a 1:1 call is stuck hanging up) the viewer
-            // says so, stops trying, and the frame asks again below while
-            // a call still holds the slot.
-            if unix_ms_now().saturating_sub(since) <= RETRY_JOIN_LIMIT_MS {
-                return;
-            }
-            self.stories.live.retry_join = None;
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
-        } else if self.live.is_none() {
-            // The demo joins nothing and asks nothing on its own.
-            return;
-        }
-        let Some(session) = self.session() else {
-            cx.notify();
+        let Some(live) = self.live.as_mut() else {
             return;
         };
-        let to_channel = session
-            .chats
-            .get(&chat_id.0)
-            .is_some_and(|chat| chat.kind.is_channel());
-        match before_create(session.current_call_for_create(None), chat_id, to_channel) {
-            BeforeCreate::Ask(text) => self.stories.live.leave_other = Some(text),
-            BeforeCreate::Proceed | BeforeCreate::ShowCurrent => {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
-            }
+        if live.driver.join_live_story(chat_id, story_id).is_err() {
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
         }
-        cx.notify();
-    }
-
-    /// The confirm's Leave / End call: the other call goes and the join is
-    /// tried on each tick until the slot is free.
-    pub(super) fn leave_other_call_for_live_story(&mut self, cx: &mut Context<Self>) {
-        if self.stories.live.leave_other.take().is_none() {
-            return;
-        }
-        self.end_current_call_for_create(cx);
-        self.stories.live.retry_join = Some(unix_ms_now());
-        self.join_watched_live_story(cx);
         cx.notify();
     }
 
@@ -175,7 +108,7 @@ impl QuillApp {
         };
         let call = session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
             .filter(|call| call.id == call_id);
         match call {
@@ -234,7 +167,7 @@ impl QuillApp {
         // newest; scrolled up, it stays put.
         let newest = self
             .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
+            .and_then(|s| s.calls.story_stream.as_ref())
             .and_then(|call| call.messages.last())
             .map(|message| message.message_id);
         if newest != self.stories.live.last_comment {
@@ -272,8 +205,8 @@ impl QuillApp {
     /// Whether this is your own live story (tdesktop `canManage`).
     pub(super) fn live_story_admin(&self) -> bool {
         self.session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .is_some_and(|call| call.is_live_story && call.can_be_managed)
+            .and_then(|s| s.calls.story_stream.as_ref())
+            .is_some_and(|call| call.can_be_managed)
     }
 
     /// The send button (or Enter): send the comment, or open the Stars
@@ -286,7 +219,7 @@ impl QuillApp {
         };
         let price = session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
             .map_or(0, |call| call.paid_message_star_count);
         let admin = self.live_story_admin();
@@ -521,7 +454,7 @@ impl QuillApp {
         } else if let Some(call) = self
             .demo_session
             .as_mut()
-            .and_then(|s| s.calls.active_group_call.as_mut())
+            .and_then(|s| s.calls.story_stream.as_mut())
         {
             call.message_sender_id = Some(sender);
         }
@@ -575,7 +508,7 @@ impl QuillApp {
         } else if let Some(call) = self
             .demo_session
             .as_mut()
-            .and_then(|s| s.calls.active_group_call.as_mut())
+            .and_then(|s| s.calls.story_stream.as_mut())
         {
             call.messages.retain(|m| match all_from {
                 Some(sender) => m.sender_id != sender,
@@ -585,12 +518,31 @@ impl QuillApp {
         cx.notify();
     }
 
+    pub(in crate::ui) fn live_story_muted(&self) -> bool {
+        self.live.as_ref().is_some_and(|live| {
+            live.driver
+                .session
+                .calls
+                .story_stream
+                .as_ref()
+                .is_some_and(|call| live.driver.group_call_playback_muted(call.id))
+        })
+    }
+
     /// The header's sound toggle (tdesktop's volume toggle; Quill has
-    /// mute only).
-    pub(super) fn toggle_live_story_sound(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let muted = live.driver.group_call_playback_muted();
-            if let Err(err) = live.driver.set_group_call_playback_muted(!muted) {
+    /// mute only): the story's sound only, not the call you are in.
+    pub(in crate::ui) fn toggle_live_story_sound(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && let Some(call_id) = live
+                .driver
+                .session
+                .calls
+                .story_stream
+                .as_ref()
+                .map(|c| c.id)
+        {
+            let muted = live.driver.group_call_playback_muted(call_id);
+            if let Err(err) = live.driver.set_group_call_playback_muted(call_id, !muted) {
                 self.connection.status_note = err.to_string();
             }
         }
@@ -600,8 +552,24 @@ impl QuillApp {
     /// The live overlay's Retry: join the watched story's call again.
     pub(super) fn retry_live_story(&mut self, cx: &mut Context<Self>) {
         if let Some((chat_id, story_id)) = self.stories.live.watching {
+            // The failed slot is left and joined afresh: until the new
+            // one shows, its absence is not the stream's end.
+            self.stories.live.seen_call = false;
             self.join_live_story_from_viewer(chat_id, story_id, cx);
         }
+    }
+
+    /// An account switch leaves the live story: the outgoing account goes
+    /// on in the background, where nothing could close the stream or stop
+    /// its sound. A story in the PiP goes with it.
+    pub(in crate::ui) fn leave_live_story_for_switch(&mut self, cx: &mut Context<Self>) {
+        if self.live_pip_story().is_some() {
+            self.close_live_pip(cx);
+        }
+        if self.stories.viewer.is_open() {
+            self.close_story_viewer(cx);
+        }
+        self.leave_live_story_view(cx);
     }
 
     /// The emoji button opens the shared panel for the comment field

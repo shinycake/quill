@@ -39,6 +39,10 @@ struct MockInner {
     device_selections: Vec<(i32, Option<String>, Option<String>)>,
     /// Phase C2g: group transport recording for driver tests.
     group_offers: Vec<(i32, i64)>,
+    group_roles: Vec<(i32, GroupCallRole)>,
+    /// The native key each live group call holds (ntgcalls keys group
+    /// calls by chat id and 1:1 calls by the peer's user id).
+    group_keys: HashMap<i32, i64>,
     group_connects: Vec<(i32, String, bool)>,
     group_video_syncs: Vec<(i32, Vec<GroupVideoSource>)>,
     group_camera_changes: Vec<(i32, bool, Option<String>)>,
@@ -147,6 +151,10 @@ impl MockEngine {
     /// Phase C2g: recorded group transport calls for driver tests.
     pub fn group_offers(&self) -> Vec<(i32, i64)> {
         self.inner.lock_or_recover().group_offers.clone()
+    }
+
+    pub fn group_roles(&self) -> Vec<(i32, GroupCallRole)> {
+        self.inner.lock_or_recover().group_roles.clone()
     }
 
     pub fn group_connects(&self) -> Vec<(i32, String, bool)> {
@@ -300,6 +308,12 @@ impl CallEngine for MockEngine {
         }
         if inner.calls.contains_key(&call_id) {
             return Ok(());
+        }
+        if inner.group_keys.values().any(|key| *key == user_id) {
+            return Err(EngineError::Engine {
+                op: "ntg_create_p2p_call",
+                code: ntgcalls_sys::NTG_ERR_CONNECTION,
+            });
         }
         inner.calls.insert(call_id, (user_id, is_outgoing));
         inner.started_calls.push((call_id, user_id, is_outgoing));
@@ -461,12 +475,26 @@ impl CallEngine for MockEngine {
         &mut self,
         group_call_id: i32,
         chat_id: i64,
+        role: GroupCallRole,
     ) -> Result<String, EngineError> {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
+        let taken = inner
+            .group_keys
+            .iter()
+            .any(|(id, key)| *id != group_call_id && *key == chat_id)
+            || inner.calls.values().any(|(user_id, _)| *user_id == chat_id);
+        if taken {
+            return Err(EngineError::Engine {
+                op: "ntg_create_call",
+                code: ntgcalls_sys::NTG_ERR_CONNECTION,
+            });
+        }
+        inner.group_keys.insert(group_call_id, chat_id);
         inner.group_offers.push((group_call_id, chat_id));
+        inner.group_roles.push((group_call_id, role));
         Ok(format!("mock-group-offer-{group_call_id}"))
     }
 
@@ -667,6 +695,7 @@ impl CallEngine for MockEngine {
             return Err(EngineError::Unavailable);
         }
         inner.group_leaves.push(group_call_id);
+        inner.group_keys.remove(&group_call_id);
         let chat_id = inner
             .group_offers
             .iter()

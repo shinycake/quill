@@ -281,6 +281,7 @@ impl CallEngine for NtgcallsEngine {
         &mut self,
         group_call_id: i32,
         chat_id: i64,
+        role: GroupCallRole,
     ) -> Result<String, EngineError> {
         let instance = self.ensure_instance()?;
         let mut out: *mut c_char = null_mut();
@@ -310,6 +311,7 @@ impl CallEngine for NtgcallsEngine {
             group_call_id,
             GroupCallMedia {
                 chat_id,
+                role,
                 ..GroupCallMedia::default()
             },
         );

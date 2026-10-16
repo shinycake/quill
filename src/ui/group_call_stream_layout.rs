@@ -632,7 +632,13 @@ impl QuillApp {
     /// local mute, the Settings box's "Mute for me").
     pub(super) fn stream_muted(&self) -> bool {
         match self.live.as_ref() {
-            Some(live) => live.driver.group_call_playback_muted(),
+            Some(live) => live
+                .driver
+                .session
+                .calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| live.driver.group_call_playback_muted(call.id)),
             None => self.group_call.stream.demo_muted,
         }
     }
@@ -643,7 +649,16 @@ impl QuillApp {
         let muted = self.stream_muted();
         match self.live.as_mut() {
             Some(live) => {
-                if let Err(err) = live.driver.set_group_call_playback_muted(!muted) {
+                let call_id = live
+                    .driver
+                    .session
+                    .calls
+                    .active_group_call
+                    .as_ref()
+                    .map(|c| c.id);
+                if let Some(call_id) = call_id
+                    && let Err(err) = live.driver.set_group_call_playback_muted(call_id, !muted)
+                {
                     self.connection.status_note = err.to_string();
                 }
             }

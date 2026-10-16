@@ -132,17 +132,8 @@ impl QuillApp {
                 ),
                 _ => status,
             };
-            // stories-live-play: the viewer joins a live story by itself;
-            // the Join button stays for a join that was refused (another
-            // call holds the slot) and for the demo. While another call
-            // holds the slot the frame asks to leave it.
             let joinable = matches!(item.kind, StoryViewerKind::Live) && item.live_call.is_some();
-            let asking = joinable
-                && self.stories.live.watching == Some((item.chat_id, item.story_id))
-                && self.stories.live.leave_other.is_some();
-            let body: AnyElement = if asking {
-                self.live_leave_other_card(cx)
-            } else if joinable {
+            let body: AnyElement = if joinable {
                 let chat_id = item.chat_id;
                 let story_id = item.story_id;
                 div()

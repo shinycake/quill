@@ -76,6 +76,12 @@ pub struct CallsState {
     /// `joinVideoChat` response payload is stored (`join_payload`) and
     /// never consumed (real media transport is the C2 program).
     pub active_group_call: Option<ActiveGroupCall>,
+    /// The live story the viewer plays: a receive-only group call of its
+    /// own beside `active_call` and `active_group_call` (tdesktop
+    /// `Calls::Instance::registerVideoStream`). Never the current call:
+    /// it sends no media, has no mute or call bar, and goes when the
+    /// viewer leaves the story.
+    pub story_stream: Option<ActiveGroupCall>,
     /// "Stream with...": the process for one chat (`calls::rtmp_start`).
     pub rtmp_start: Option<crate::calls::rtmp_start::RtmpStart>,
     /// Starting a video chat: the "join as" list asked for first.
@@ -106,6 +112,37 @@ pub struct CallsState {
 }
 
 impl CallsState {
+    /// The tracked group call `id`: the current one or the story stream.
+    pub fn group_call(&self, id: i32) -> Option<&ActiveGroupCall> {
+        [self.active_group_call.as_ref(), self.story_stream.as_ref()]
+            .into_iter()
+            .flatten()
+            .find(|call| call.id == id)
+    }
+
+    pub fn group_call_mut(&mut self, id: i32) -> Option<&mut ActiveGroupCall> {
+        [self.active_group_call.as_mut(), self.story_stream.as_mut()]
+            .into_iter()
+            .flatten()
+            .find(|call| call.id == id)
+    }
+
+    /// The ids of both slots, current call first.
+    pub fn group_call_ids(&self) -> [Option<i32>; 2] {
+        [
+            self.active_group_call.as_ref().map(|call| call.id),
+            self.story_stream.as_ref().map(|call| call.id),
+        ]
+    }
+
+    /// Whether the id is the current group call, whose errors the call
+    /// window shows.
+    pub fn is_current_group_call(&self, group_call_id: i32) -> bool {
+        self.active_group_call
+            .as_ref()
+            .is_some_and(|call| call.id == group_call_id)
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             active_call: None,
@@ -128,6 +165,7 @@ impl CallsState {
             recent_calls_error: false,
             recent_calls_clearing: false,
             active_group_call: None,
+            story_stream: None,
             rtmp_start: None,
             create_join_as: None,
             failed_creates: Vec::new(),

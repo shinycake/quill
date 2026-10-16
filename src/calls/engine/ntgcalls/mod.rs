@@ -206,7 +206,7 @@ impl NtgcallsEngine {
             .group_calls
             .get(&group_call_id)
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
-        if !media.connected {
+        if !media.connected || media.role == GroupCallRole::Viewer {
             return Ok(());
         }
         let (chat_id, muted) = (media.chat_id, media.muted);
@@ -252,6 +252,9 @@ impl NtgcallsEngine {
             .get(&group_call_id)
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
+        if media.role == GroupCallRole::Viewer {
+            return self.issue_group_playback(group_call_id);
+        }
         let instance = self.ensure_instance()?;
         let camera = native_input(media.camera.as_deref())?;
         // The system's default microphone, as for 1:1 calls: without it

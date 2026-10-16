@@ -112,8 +112,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tracked = key.call_id().is_some_and(|call_id| {
             calls.left_group_call != Some(call_id)
                 && calls
-                    .active_group_call
-                    .as_ref()
+                    .group_call(call_id)
                     .is_some_and(|call| call_has_video(call, key))
         }) || calls
             .active_call
@@ -180,9 +179,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(super) fn sync_call_feeds(&self, group_call_id: i32) {
         let calls = &self.session.calls;
         let call = calls
-            .active_group_call
-            .as_ref()
-            .filter(|call| call.id == group_call_id && calls.left_group_call != Some(call.id));
+            .group_call(group_call_id)
+            .filter(|call| calls.left_group_call != Some(call.id));
         let mut ended = Vec::new();
         self.live_feeds.lock_or_recover().retain(|key, source| {
             let ours =

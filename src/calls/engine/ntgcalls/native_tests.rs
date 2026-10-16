@@ -103,7 +103,7 @@ fn native_rtmp_connect_reports_stream_mode() {
     }));
     let chat_id = -100_123;
     engine
-        .create_group_call(7, chat_id)
+        .create_group_call(7, chat_id, GroupCallRole::Member)
         .expect("Native group offer");
     let result = engine.connect_group_call(7, r#"{"rtmp":true}"#, false);
     eprintln!("rtmp connect: {result:?}");
@@ -145,7 +145,7 @@ fn native_stream_connect_needs_no_capture_and_asks_for_parts() {
     }));
     let chat_id = -100_124;
     engine
-        .create_group_call(8, chat_id)
+        .create_group_call(8, chat_id, GroupCallRole::Member)
         .expect("Native group offer");
     let result = engine.connect_group_call(8, r#"{"stream":true}"#, false);
     eprintln!("stream connect: {result:?}");

@@ -160,7 +160,7 @@ impl Session {
             .retain(|(id, _, _)| *id != call.id);
     }
 
-    /// Phase C3a: `updateGroupCall` state machine. Quill tracks at most
+    /// Phase C3a: `updateGroupCall` state machine. The current call holds
     /// one group call at a time (like the single 1:1 call):
     /// - a different call id replaces the tracked call (participants
     ///   reload via updates);
@@ -169,14 +169,19 @@ impl Session {
     /// - a fresh joined, non-`need_rejoin` update clears `reconnecting`;
     /// - `!is_active` (ended) drops the tracked call.
     ///
-    /// Everything here is signaling — `join_payload` is stored, never
-    /// consumed (no media transport until Phase C2).
+    /// The watched live story's call goes to its own slot
+    /// (`story_stream`); any other live story is not tracked.
     pub(crate) fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
         // TDLib confirms the leave: later joined updates are real again.
         if !group_call.is_joined && self.calls.left_group_call == Some(group_call.id) {
             self.calls.left_group_call = None;
         }
-        if !self.group_call_update_may_take_slot(group_call) {
+        let watched = self.stories.live.as_ref().map(|live| live.group_call_id);
+        if watched == Some(group_call.id) {
+            self.accept_story_stream_update(group_call);
+            return;
+        }
+        if group_call.is_live_story || !self.group_call_update_may_take_slot(group_call) {
             return;
         }
         if !group_call.is_active {
@@ -229,50 +234,28 @@ impl Session {
             // state; fresh updates repopulate it.
             *tracked = ActiveGroupCall::fresh(group_call.id);
         }
-        tracked.title = group_call.title.clone();
-        tracked.is_video_chat = group_call.is_video_chat;
-        tracked.is_live_story = group_call.is_live_story;
-        tracked.is_rtmp_stream = group_call.is_rtmp_stream;
-        tracked.scheduled_start_date = 0;
-        tracked.is_joined = group_call.is_joined;
-        tracked.need_rejoin = group_call.need_rejoin;
-        tracked.can_be_managed = group_call.can_be_managed;
-        tracked.is_owned = group_call.is_owned;
-        tracked.participant_count = group_call.participant_count;
-        tracked.viewer_count = u32::try_from(group_call.participant_count).unwrap_or(0);
-        tracked.loaded_all_participants = group_call.loaded_all_participants;
-        tracked.is_my_video_enabled = group_call.is_my_video_enabled;
-        tracked.is_my_video_paused = group_call.is_my_video_paused;
-        tracked.can_enable_video = group_call.can_enable_video;
-        tracked.mute_new_participants = group_call.mute_new_participants;
-        tracked.can_toggle_mute_new_participants = group_call.can_toggle_mute_new_participants;
-        // Phase C2h: in-call chat flags + recording state drive the
-        // management UI.
-        tracked.can_send_messages = group_call.can_send_messages;
-        tracked.are_messages_allowed = group_call.are_messages_allowed;
-        tracked.can_toggle_are_messages_allowed = group_call.can_toggle_are_messages_allowed;
-        tracked.can_delete_messages = group_call.can_delete_messages;
-        tracked.record_duration = group_call.record_duration;
-        tracked.is_video_recorded = group_call.is_video_recorded;
-        tracked.paid_message_star_count = group_call.paid_message_star_count;
-        tracked.message_sender_id = group_call.message_sender_id;
-        tracked.recent_speaker_order = group_call
-            .recent_speakers
-            .iter()
-            .map(|(sender, _)| *sender)
-            .collect();
-        if group_call.need_rejoin {
-            tracked.reconnecting = true;
-        } else if group_call.is_joined {
-            tracked.reconnecting = false;
-            // Phase C2f: a clean joined update means the rejoin
-            // succeeded — the attempt counter starts over.
-            tracked.rejoin_attempts = 0;
+        apply_group_call_fields(tracked, group_call);
+        if group_call.is_joined && !group_call.need_rejoin {
             // Phase C2f: the failure is resolved — a stale
             // group-call error line would lie now.
             self.calls.group_call_error = None;
         }
-        tracked.sort_participants();
+    }
+
+    fn accept_story_stream_update(&mut self, group_call: &ParsedGroupCall) {
+        if !group_call.is_active {
+            self.calls.story_stream = None;
+            return;
+        }
+        let fresh = || ActiveGroupCall {
+            is_muted_self: true,
+            ..ActiveGroupCall::fresh(group_call.id)
+        };
+        let tracked = self.calls.story_stream.get_or_insert_with(fresh);
+        if tracked.id != group_call.id {
+            *tracked = fresh();
+        }
+        apply_group_call_fields(tracked, group_call);
     }
 
     /// Phase C3a: `updateGroupCallParticipant`. Upserts the participant;
@@ -291,12 +274,9 @@ impl Session {
         let toggle_in_flight = self.requests.has_purpose(RequestPurpose::Calls(
             CallsPurpose::ToggleGroupCallParticipantMute { group_call_id },
         ));
-        let Some(tracked) = self.calls.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
         };
-        if tracked.id != group_call_id {
-            return;
-        }
         // Telegram is the truth for your own mute once joined (it reports
         // a mute you asked for, and one an admin imposed); the driver pump
         // makes the engine follow.
@@ -332,12 +312,9 @@ impl Session {
         group_call_id: i32,
         participant_user_ids: &[i64],
     ) {
-        let Some(tracked) = self.calls.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
         };
-        if tracked.id != group_call_id {
-            return;
-        }
         tracked.participants.retain(|p| match p.participant_id {
             MessageSender::User { user_id } => participant_user_ids.contains(&user_id),
             MessageSender::Chat { .. } => true,
@@ -353,12 +330,9 @@ impl Session {
         group_call_id: i32,
         message: &ParsedGroupCallMessage,
     ) {
-        let Some(tracked) = self.calls.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
         };
-        if tracked.id != group_call_id {
-            return;
-        }
         if !tracked
             .messages
             .iter()
@@ -384,12 +358,9 @@ impl Session {
         group_call_id: i32,
         message_ids: &[i32],
     ) {
-        let Some(tracked) = self.calls.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
         };
-        if tracked.id != group_call_id {
-            return;
-        }
         tracked
             .messages
             .retain(|m| !message_ids.contains(&m.message_id));
@@ -403,12 +374,9 @@ impl Session {
         generation: i32,
         emojis: &[String],
     ) {
-        let Some(tracked) = self.calls.active_group_call.as_mut() else {
+        let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
         };
-        if tracked.id != group_call_id {
-            return;
-        }
         tracked.verification = Some(GroupCallVerificationState {
             generation,
             emojis: emojis.to_vec(),
@@ -462,28 +430,19 @@ impl Session {
     }
 
     /// Whether an update (or a `getGroupCall` answer) for `group_call`
-    /// may take the single call slot. An update for the tracked call
-    /// always may. One you are not in never replaces:
-    /// - a call you are in, scheduled updates included (a looked-up
-    ///   `getGroupCall` or another chat's call);
-    /// - the live story the viewer watches, joined or not yet.
-    ///
-    /// And a live story call the viewer no longer watches (a late
-    /// `getGroupCall` answer after it stepped past) is not tracked at all,
-    /// nor is a late joined update for the call just left.
+    /// may take the current call slot. An update for the tracked call
+    /// always may. One you are not in never replaces a call you are in,
+    /// scheduled updates included (a looked-up `getGroupCall` or another
+    /// chat's call). A late joined update for the call just left is not
+    /// tracked either.
     fn group_call_update_may_take_slot(&self, group_call: &ParsedGroupCall) -> bool {
         if group_call.is_joined {
             return self.calls.left_group_call != Some(group_call.id);
         }
-        let watched = self.stories.live.as_ref().map(|live| live.group_call_id);
-        let tracked = self.calls.active_group_call.as_ref();
-        if tracked.is_some_and(|c| c.id == group_call.id) {
-            return true;
+        match self.calls.active_group_call.as_ref() {
+            Some(tracked) => tracked.id == group_call.id || !tracked.is_joined,
+            None => true,
         }
-        if tracked.is_some_and(|c| c.is_joined || Some(c.id) == watched) {
-            return false;
-        }
-        !(group_call.is_live_story && watched != Some(group_call.id))
     }
 
     /// Phase C3a: drop the tracked group call after the local user
@@ -515,9 +474,7 @@ impl Session {
     /// the tracked call. Phase C2g consumes it in the driver pump to
     /// finish the native group handshake.
     pub fn set_group_call_join_payload(&mut self, group_call_id: i32, payload: String) {
-        if let Some(tracked) = self.calls.active_group_call.as_mut()
-            && tracked.id == group_call_id
-        {
+        if let Some(tracked) = self.calls.group_call_mut(group_call_id) {
             tracked.join_payload = payload;
         }
     }
@@ -542,6 +499,50 @@ impl Session {
             tracked.share_links.answered(speaker, link);
         }
     }
+}
+
+fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGroupCall) {
+    tracked.title = group_call.title.clone();
+    tracked.is_video_chat = group_call.is_video_chat;
+    tracked.is_live_story = group_call.is_live_story;
+    tracked.is_rtmp_stream = group_call.is_rtmp_stream;
+    tracked.scheduled_start_date = 0;
+    tracked.is_joined = group_call.is_joined;
+    tracked.need_rejoin = group_call.need_rejoin;
+    tracked.can_be_managed = group_call.can_be_managed;
+    tracked.is_owned = group_call.is_owned;
+    tracked.participant_count = group_call.participant_count;
+    tracked.viewer_count = u32::try_from(group_call.participant_count).unwrap_or(0);
+    tracked.loaded_all_participants = group_call.loaded_all_participants;
+    tracked.is_my_video_enabled = group_call.is_my_video_enabled;
+    tracked.is_my_video_paused = group_call.is_my_video_paused;
+    tracked.can_enable_video = group_call.can_enable_video;
+    tracked.mute_new_participants = group_call.mute_new_participants;
+    tracked.can_toggle_mute_new_participants = group_call.can_toggle_mute_new_participants;
+    // Phase C2h: in-call chat flags + recording state drive the
+    // management UI.
+    tracked.can_send_messages = group_call.can_send_messages;
+    tracked.are_messages_allowed = group_call.are_messages_allowed;
+    tracked.can_toggle_are_messages_allowed = group_call.can_toggle_are_messages_allowed;
+    tracked.can_delete_messages = group_call.can_delete_messages;
+    tracked.record_duration = group_call.record_duration;
+    tracked.is_video_recorded = group_call.is_video_recorded;
+    tracked.paid_message_star_count = group_call.paid_message_star_count;
+    tracked.message_sender_id = group_call.message_sender_id;
+    tracked.recent_speaker_order = group_call
+        .recent_speakers
+        .iter()
+        .map(|(sender, _)| *sender)
+        .collect();
+    if group_call.need_rejoin {
+        tracked.reconnecting = true;
+    } else if group_call.is_joined {
+        tracked.reconnecting = false;
+        // Phase C2f: a clean joined update means the rejoin
+        // succeeded — the attempt counter starts over.
+        tracked.rejoin_attempts = 0;
+    }
+    tracked.sort_participants();
 }
 
 /// The "join as" identity to preselect: an earlier pick that is still on

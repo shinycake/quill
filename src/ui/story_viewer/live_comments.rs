@@ -234,7 +234,7 @@ impl QuillApp {
             };
             let Some(call) = session
                 .calls
-                .active_group_call
+                .story_stream
                 .as_ref()
                 .filter(|call| call.id == live.group_call_id)
             else {

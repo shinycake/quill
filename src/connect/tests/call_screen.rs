@@ -108,7 +108,9 @@ fn group_driver() -> (
     let mock = MockEngine::new();
     let mut handle = mock.clone();
     driver.set_call_engine(Box::new(mock));
-    handle.create_group_call(77, -100).unwrap();
+    handle
+        .create_group_call(77, -100, crate::calls::engine::GroupCallRole::Member)
+        .unwrap();
     handle.connect_group_call(77, "answer", false).unwrap();
     let screens = install_fake_screen(&mut driver);
     (dir, driver, handle, screens)
