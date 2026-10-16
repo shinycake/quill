@@ -62,6 +62,11 @@ fn lookup_of(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Gift
 /// Lets the dialog's open animation finish and lays out a fresh frame, so
 /// the bounds measured next are where the element really is.
 fn settle(vcx: &mut VisualTestContext) {
+    // The dialog animation runs on the wall clock, which `advance_clock`
+    // does not move; reduced motion draws it at rest, so the layout does not
+    // depend on how fast this thread got to the click. `QuillApp` resets the
+    // flag when it is built, so it is set here, after.
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
     vcx.executor()
         .advance_clock(std::time::Duration::from_secs(1));
     vcx.run_until_parked();
