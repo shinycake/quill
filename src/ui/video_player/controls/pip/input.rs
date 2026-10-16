@@ -18,7 +18,15 @@ impl VideoPip {
     pub(super) fn layout(&self, window: &Window) -> ControlsLayout {
         let viewport = window.viewport_size();
         let inner = place::to_rect(Bounds::new(Point::default(), viewport));
-        ControlsLayout::new(PipRect::new(0, 0, inner.w, inner.h), self.controls_on_left)
+        let layout =
+            ControlsLayout::new(PipRect::new(0, 0, inner.w, inner.h), self.controls_on_left);
+        // A live window has no lines: their areas are picture, which
+        // moves the window.
+        if self.live.is_some() {
+            layout.live()
+        } else {
+            layout
+        }
     }
 
     pub(super) fn set_over(&mut self, over: OverState, cx: &mut Context<Self>) {
@@ -53,7 +61,7 @@ impl VideoPip {
         }
         window.focus(&self.focus, cx);
         let local = local_point(event.position);
-        let over = self.layout(window).state_at(local);
+        let over = self.over_at(window, local);
         self.set_over(over, cx);
         if event.click_count >= 2 {
             // `handleDoubleClick` takes the second press.
@@ -82,7 +90,7 @@ impl VideoPip {
         cx: &mut Context<Self>,
     ) {
         let local = local_point(event.position);
-        let over = self.layout(window).state_at(local);
+        let over = self.over_at(window, local);
         self.set_over(over, cx);
         let Some(mut press) = self.press else {
             let edge = resize_part(local, self.frame.size(), self.attached.with(self.snapped));
@@ -169,7 +177,7 @@ impl VideoPip {
     }
 
     fn finish_press(&mut self, local: PipPoint, window: &mut Window, cx: &mut Context<Self>) {
-        let over = self.layout(window).state_at(local);
+        let over = self.over_at(window, local);
         let press = self.press.take();
         let action = self.presses.release(over, self.dragged);
         if press.is_some_and(|press| press.dragging) {

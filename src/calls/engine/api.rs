@@ -36,10 +36,6 @@ pub trait CallEngine {
 
     fn set_transport_state_callback(&mut self, callback: TransportStateCallback);
 
-    /// Phase C2e: engine -> app; register the hook receiving decoded video
-    /// frames (local preview and peer camera).
-    fn set_video_frame_callback(&mut self, callback: VideoFrameCallback);
-
     /// Phase C2e: engine -> app; register the hook receiving peer camera
     /// on/off/paused state.
     fn set_remote_video_state_callback(&mut self, callback: RemoteVideoStateCallback);
@@ -170,8 +166,9 @@ pub trait CallEngine {
         let _ = callback;
     }
 
-    /// Engine -> app; register the hook receiving group-call and stream
-    /// pictures as I420 planes, keyed by their live feed.
+    /// Engine -> app; register the hook receiving every decoded picture
+    /// (group-call tracks, streams, 1:1 calls) as I420 planes, keyed by
+    /// its live feed.
     fn set_live_frame_callback(&mut self, callback: LiveFrameCallback) {
         let _ = callback;
     }

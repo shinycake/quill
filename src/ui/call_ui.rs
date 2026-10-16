@@ -7,13 +7,11 @@ use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::radio::{Radio, RadioGroup};
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{ActiveCall, CallSummary};
 use quill::telegram::envelope::CallState;
-use std::sync::Arc;
 impl QuillApp {
     /// Phase C1: call overlay — incoming / outgoing / active / ended
     /// call UI above everything else. **Signaling only**: when a call
@@ -119,185 +117,6 @@ impl QuillApp {
             .child(card)
     }
 
-    /// Phase C2e: the video stage for a connected video call — the peer's
-    /// camera as the main tile, the local preview as a 160x120 PiP
-    /// anchored bottom-right. Phase C2l: while the peer shares their
-    /// screen the share takes the main tile (with a badge), same
-    /// preference as the group tiles. Frames come from the driver
-    /// (live) or the demo fixture (screenshot mode); both tiles
-    /// degrade to honest status text when a feed is missing (a paused
-    /// peer share states itself rather than freezing), and decoded
-    /// tiles are cached by (frame seq, is_screen) so re-renders don't
-    /// re-decode.
-    pub(super) fn call_video_stage(&mut self, call: &ActiveCall, name: &str) -> Div {
-        let (remote_frame, local_frame): (
-            Option<quill::calls::engine::VideoFrame>,
-            Option<quill::calls::engine::VideoFrame>,
-        ) = if let Some(live) = self.live.as_ref() {
-            (
-                live.driver.latest_video_frame(call.id, false),
-                live.driver.latest_video_frame(call.id, true),
-            )
-        } else {
-            (
-                self.demo_ui.remote_frame.clone(),
-                self.demo_ui.local_frame.clone(),
-            )
-        };
-        // Phase C2l: the peer's 1:1 screen share. The driver drops the
-        // retained frames when the share goes inactive, and
-        // `remote_screen` closes the late-frame race — the tile shows
-        // only while the share is not inactive.
-        let screen_frame: Option<quill::calls::engine::VideoFrame> =
-            if call.remote_screen == quill::calls::engine::RemoteVideoState::Inactive {
-                None
-            } else if let Some(live) = self.live.as_ref() {
-                live.driver.latest_screen_frame(call.id)
-            } else {
-                self.demo_ui.screen_frame.clone()
-            };
-
-        let status_text = |text: &str| {
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_1()
-                .child(div().text_2xl().child("📹"))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(text_faint())
-                        .child(text.to_string()),
-                )
-        };
-        let video_img = |image: Arc<RenderImage>| {
-            img(ImageSource::from(image))
-                .w_full()
-                .h_full()
-                .object_fit(ObjectFit::Contain)
-        };
-
-        let remote: AnyElement = match (
-            screen_frame.as_ref(),
-            call.remote_video,
-            remote_frame.as_ref(),
-        ) {
-            // Phase C2l: a paused peer share states itself instead of
-            // rendering — same honest-state rule as the camera arm; a
-            // stale frozen frame would mislead.
-            (Some(_), _, _)
-                if call.remote_screen == quill::calls::engine::RemoteVideoState::Paused =>
-            {
-                status_text(tr(keys::Q_OPS_SCREEN_SHARE_PAUSED_BY_PEER)).into_any_element()
-            }
-            // Phase C2l: the peer's screen share takes the main tile
-            // while the share is Active (same preference as the group
-            // tiles); the camera resumes the tile when the share ends.
-            (Some(frame), _, _) => match self.cached_video_image(false, frame) {
-                Some(image) => div()
-                    .w_full()
-                    .h_full()
-                    .relative()
-                    .child(video_img(image))
-                    .child(
-                        div()
-                            .absolute()
-                            .top_2()
-                            .left_2()
-                            .child(Tag::info().child(tr(keys::Q_OPS_PEERS_SCREEN))),
-                    )
-                    .into_any_element(),
-                None => {
-                    status_text(tr(keys::Q_OPS_COULDNT_DECODE_THE_PEERS_SCREEN)).into_any_element()
-                }
-            },
-            (None, quill::calls::engine::RemoteVideoState::Active, Some(frame)) => {
-                match self.cached_video_image(false, frame) {
-                    Some(image) => video_img(image).into_any_element(),
-                    None => status_text(tr(keys::Q_OPS_COULDNT_DECODE_THE_PEERS_VIDEO))
-                        .into_any_element(),
-                }
-            }
-            (None, quill::calls::engine::RemoteVideoState::Active, None) => {
-                status_text(tr(keys::Q_OPS_CONNECTING_VIDEO)).into_any_element()
-            }
-            (None, quill::calls::engine::RemoteVideoState::Paused, _) => {
-                status_text(tr(keys::Q_OPS_VIDEO_PAUSED_BY_PEER)).into_any_element()
-            }
-            (None, quill::calls::engine::RemoteVideoState::Inactive, _) => div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_1()
-                .child(initials_avatar(name, 48.))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(text_on_fill())
-                        .child(name.to_string()),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(text_faint())
-                        .child(tr(keys::Q_OPS_PEERS_CAMERA_IS_OFF)),
-                )
-                .into_any_element(),
-        };
-
-        let camera_on = self.call_camera_effective(call);
-        let local: AnyElement = match (camera_on, local_frame.as_ref()) {
-            (true, Some(frame)) => match self.cached_video_image(true, frame) {
-                Some(image) => video_img(image).into_any_element(),
-                None => status_text(tr(keys::Q_OPS_COULDNT_DECODE_THE_CAMERA_PREVIEW))
-                    .into_any_element(),
-            },
-            (true, None) => status_text(tr(keys::Q_OPS_STARTING_CAMERA)).into_any_element(),
-            // Phase C2i: screen share replaces the camera track, so the
-            // local preview honestly says what's being sent.
-            (false, _) => status_text(if call.screen_sharing {
-                tr(keys::Q_OPS_SHARING_SCREEN)
-            } else {
-                tr(keys::Q_OPS_CAMERA_OFF)
-            })
-            .into_any_element(),
-        };
-
-        div()
-            .w_full()
-            .relative()
-            .child(
-                div()
-                    .w_full()
-                    .h(px(240.))
-                    .rounded_md()
-                    .bg(bg_video())
-                    .overflow_hidden()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(remote),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .bottom_2()
-                    .right_2()
-                    .w(px(160.))
-                    .h(px(120.))
-                    .rounded_md()
-                    .bg(bg_video())
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(border_video())
-                    .child(local),
-            )
-    }
-
     pub(super) fn call_active_card(
         &mut self,
         card: Stateful<Div>,
@@ -370,14 +189,8 @@ impl QuillApp {
             }
         };
         let mut card = card;
-        // Phase C2e: a connected video call shows the video stage
-        // (peer's camera as the main tile, local preview as a PiP);
-        // every other state keeps the avatar.
-        if call.is_video && matches!(call.state, CallState::Ready) {
-            card = card.child(self.call_video_stage(call, &name));
-        } else {
-            card = card.child(initials_avatar(&name, 72.));
-        }
+        // The pictures are the call window's (`calls::call_video`).
+        card = card.child(initials_avatar(&name, 72.));
         card = card
             .child(div().text_lg().font_semibold().child(name))
             .child(

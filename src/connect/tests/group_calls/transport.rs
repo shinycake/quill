@@ -250,12 +250,21 @@ fn group_video_frames_route_to_participant_feeds() {
         driver.live_sink(video(43, false)).is_none(),
         "43 has no video"
     );
-    assert!(driver.latest_video_frame(555, false).is_none());
+    // A group call's frames never reach a 1:1 call's feed of the same id.
+    assert!(
+        driver
+            .live_sink(LiveKey::Call {
+                call_id: 555,
+                local: false,
+                screen: false
+            })
+            .is_none()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Slice calls-group-self-tile: your camera preview in a group call goes
-/// to the call's local feed, not the 1:1 slots or a participant's feed.
+/// to the call's local feed, not a 1:1 call's or a participant's feed.
 #[test]
 fn group_local_frame_routes_to_the_local_feed() {
     let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
@@ -266,7 +275,6 @@ fn group_local_frame_routes_to_the_local_feed() {
     let camera = driver.live_sink(video(42, false)).expect("feed");
     handle.emit_live_frame(LiveKey::Local { call_id: 555 }, planes());
     assert!(local.latest().is_some());
-    assert!(driver.latest_video_frame(555, true).is_none());
     assert!(camera.latest().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

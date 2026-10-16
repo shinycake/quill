@@ -16,6 +16,12 @@
 //! - a click on the picture pauses or resumes, a double click goes back to
 //!   the viewer, Escape closes and Space pauses or resumes.
 //!
+//! A live picture (a stream or a live story, [`LivePip`]) gets the live
+//! controller's PiP form instead ([`live`]): the LIVE badge with the
+//! viewers, mute, enlarge and close; no progress line, no times, no play
+//! button and no volume line, and nothing to pause. tdesktop has no live
+//! PiP; the window, its placement and its moves are the file PiP's.
+//!
 //! The pure geometry and press rules live in `quill::media_viewer::pip`;
 //! [`open`] opens the window, [`input`] handles the pointer, [`place`]
 //! moves the native window and [`chrome`] draws. The window owns the
@@ -26,6 +32,7 @@
 
 mod chrome;
 mod input;
+mod live;
 mod open;
 mod place;
 
@@ -60,6 +67,27 @@ pub(crate) struct PipHooks {
     pub(crate) volume: Rc<dyn Fn(f32, &mut App)>,
 }
 
+/// A live picture's PiP (see the module docs).
+#[derive(Clone)]
+pub(crate) struct LivePip {
+    /// The badge's viewers and the mute state, read on each draw (each
+    /// frame redraws the window).
+    pub(crate) facts: Rc<dyn Fn(&App) -> LivePipFacts>,
+    /// Mute or unmute the picture's sound: the call's playback, for you.
+    pub(crate) toggle_mute: Rc<dyn Fn(&mut App)>,
+    /// The enlarge button's label: back to the stream window, or to the
+    /// story.
+    pub(crate) back_label: &'static str,
+}
+
+/// What the live PiP shows besides the picture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LivePipFacts {
+    /// After the LIVE pill; 0 hides the count.
+    pub(crate) viewers: u32,
+    pub(crate) muted: bool,
+}
+
 /// What [`open_pip_window`] needs.
 pub(crate) struct PipOpen {
     pub(crate) player: VideoPlayer,
@@ -71,6 +99,8 @@ pub(crate) struct PipOpen {
     pub(crate) last_volume: f32,
     /// The screen to open on (the main window's), else the primary one.
     pub(crate) display: Option<DisplayId>,
+    /// A live picture: the live controls (see the module docs).
+    pub(crate) live: Option<LivePip>,
 }
 
 /// An open Picture-in-Picture window.
@@ -135,6 +165,7 @@ pub(crate) struct VideoPip {
     volume_dragging: bool,
     last_volume: f32,
     waiting: WaitingGate,
+    live: Option<LivePip>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -145,6 +176,7 @@ impl VideoPip {
         dimensions: Option<(u32, u32)>,
         hooks: PipHooks,
         last_volume: f32,
+        live: Option<LivePip>,
         ratio: PipSize,
         placement: Placement,
         window: &mut Window,
@@ -211,7 +243,7 @@ impl VideoPip {
             snapped,
             controls_on_left: controls_on_left(cx),
             wayland,
-            over: OverState::None,
+            over: initial_over(),
             edge: RectPart::Center,
             presses: Presses::default(),
             press: None,
@@ -226,8 +258,16 @@ impl VideoPip {
             volume_dragging: false,
             last_volume: if last_volume > 0.0 { last_volume } else { 1.0 },
             waiting: WaitingGate::default(),
+            live,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// A live picture's window (see the module docs).
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(crate) fn is_live(&self) -> bool {
+        self.live.is_some()
     }
 
     /// The player this window plays, until it closes or hands it back.
@@ -271,6 +311,10 @@ impl VideoPip {
     /// `playbackPauseResume`: a failed clip closes, an ended one starts
     /// over, otherwise pause or resume.
     pub(crate) fn toggle_pause(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A live picture has nothing to pause.
+        if self.live.is_some() {
+            return;
+        }
         let Some(player) = self.player.clone() else {
             return;
         };
@@ -284,6 +328,10 @@ impl VideoPip {
 
     /// `volumeToggled`: mute, or back to the last volume above zero.
     fn toggle_volume(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_ref() {
+            self.toggle_live_mute(live.toggle_mute.clone(), cx);
+            return;
+        }
         let current = self
             .player
             .as_ref()
@@ -334,6 +382,9 @@ impl VideoPip {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.live_key_down(event, cx) {
+            return;
+        }
         let Some(key) = pip_key(&event.keystroke.key) else {
             return;
         };
@@ -467,4 +518,14 @@ fn position_fraction(position: f64, total: f64) -> f32 {
         return 0.0;
     }
     (position / total).clamp(0.0, 1.0) as f32
+}
+
+/// Where the pointer starts: nowhere, or over the window for a capture
+/// with `QUILL_DEMO_PIP_CONTROLS=1`, which shows the controls.
+fn initial_over() -> OverState {
+    #[cfg(feature = "demo-capture")]
+    if std::env::var_os("QUILL_DEMO_PIP_CONTROLS").is_some() {
+        return OverState::Other;
+    }
+    OverState::None
 }

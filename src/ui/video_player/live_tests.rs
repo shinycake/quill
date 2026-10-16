@@ -235,7 +235,7 @@ fn large_frames_wait_for_the_background_and_small_ones_convert_at_once() {
 }
 
 fn landed(frame: &LiveFrame, target: Target) -> Option<Landed> {
-    let prepared = live_picture::convert(frame, target)?;
+    let prepared = live_picture::convert(frame, target, false)?;
     Some(Landed {
         seq: frame.seq,
         prepared,
@@ -419,4 +419,22 @@ fn the_paused_picture_is_made_at_most_every_half_second() {
     core.clock.set(Some(t0 + 2 * PAUSED_REFRESH));
     assert!(core.paused_picture().is_some());
     assert_eq!(core.take_retired().len(), 1, "the first goes");
+}
+
+#[test]
+fn a_mirrored_feed_converts_mirrored() {
+    let shot = frame(1, 8, 4, Instant::now());
+    let picture = |mirrored| match live_picture::convert(&shot, Target::Bgra, mirrored) {
+        Some(Prepared::Bgra { bgra, width, .. }) => (bgra, width),
+        _ => panic!("a BGRA picture"),
+    };
+    let (plain, width) = picture(false);
+    let (mirrored, _) = picture(true);
+    let row = width as usize * 4;
+    for (plain, mirrored) in plain.chunks_exact(row).zip(mirrored.chunks_exact(row)) {
+        let mut reversed = plain.as_chunks::<4>().0.to_vec();
+        reversed.reverse();
+        assert_eq!(mirrored.as_chunks::<4>().0, reversed.as_slice());
+    }
+    assert_ne!(plain, mirrored);
 }

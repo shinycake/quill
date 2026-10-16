@@ -517,12 +517,8 @@ fn the_live_controller_has_no_scrubber_and_shows_the_badge(cx: &mut TestAppConte
         find(call, "group-call-stream-fullscreen").is_some(),
         "full screen"
     );
-    for id in [
-        "viewer-scrubber",
-        "media-viewer-play",
-        "media-viewer-speed",
-        "live-pip",
-    ] {
+    assert!(present(call, ("live-pip", row())), "the live PiP");
+    for id in ["viewer-scrubber", "media-viewer-play", "media-viewer-speed"] {
         assert!(!present(call, (id, row())), "{id} is not on a live picture");
     }
 }

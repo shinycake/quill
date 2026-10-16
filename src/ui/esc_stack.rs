@@ -161,6 +161,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             app.close_media_panel(cx);
         }
     ),
+    // The live story's in-frame "leave your call?" card cancels first.
+    layer!(
+        "live-story-leave-other",
+        |app| app.live_leave_other_shown(),
+        |app, _, cx| app.cancel_live_leave_other(cx)
+    ),
     // Phase 9.1: the story viewer is above the media viewer.
     layer!(
         "story-viewer",

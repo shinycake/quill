@@ -60,12 +60,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 let _ = engine.leave_group_call(before_id);
             }
             self.close_call_feeds(before_id);
-            // Slice calls-group-self-tile: the self tile lives in the
-            // shared (call id, is_local, is_screen) slots — clear it too so
-            // a stale local preview can't render after the call ends.
-            self.video_frame_slots
-                .lock_or_recover()
-                .retain(|(slot_call_id, _, _), _| *slot_call_id != before_id);
             self.group_camera_state.remove(&before_id);
         }
         let Some(group_call_id) = active_group_call_after else {

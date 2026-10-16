@@ -520,12 +520,9 @@ impl QuillApp {
         self.calls.tick_active = true;
         cx.spawn(async move |this, cx| {
             loop {
-                // Phase C2e: video calls tick at 100ms so incoming
-                // frames reach the tiles; everything else stays at 1s.
-                let interval = this
-                    .update(cx, |this, _| this.call_tick_interval())
-                    .unwrap_or(Duration::from_secs(1));
-                cx.background_executor().timer(interval).await;
+                // Frames wake their own pictures (`call_video`): the
+                // tick only keeps the clock fresh.
+                cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
                     .update(cx, |this, cx| {
                         let still_active = this
@@ -549,26 +546,6 @@ impl QuillApp {
             });
         })
         .detach();
-    }
-
-    /// Phase C2e: tick interval for the call overlay — 100ms while a
-    /// video call is Ready and a video feed is live (peer streaming or
-    /// local camera on), 1s otherwise.
-    pub(super) fn call_tick_interval(&self) -> Duration {
-        let fast = self
-            .session()
-            .and_then(|s| s.calls.active_call.as_ref())
-            .is_some_and(|call| {
-                call.is_video
-                    && matches!(call.state, CallState::Ready)
-                    && (call.remote_video != quill::calls::engine::RemoteVideoState::Inactive
-                        || self.call_camera_effective(call))
-            });
-        if fast {
-            Duration::from_millis(100)
-        } else {
-            Duration::from_secs(1)
-        }
     }
 
     /// Phase C2e: the local camera actually contributes a feed — the
@@ -891,6 +868,15 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod call_again;
+pub(super) mod call_video;
+#[cfg(feature = "demo-capture")]
+pub(super) mod call_video_demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod call_video_tests;
 pub(super) mod demo_feed;
+pub(super) mod live_pip;
+#[cfg(feature = "demo-capture")]
+mod live_pip_demo;
 pub(super) mod stream_title;
 pub(super) mod stream_view;

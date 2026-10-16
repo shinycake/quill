@@ -365,113 +365,29 @@ impl QuillApp {
     }
 }
 
-impl QuillApp {
-    pub(super) fn build_live_leave_other_dialog(
-        app: &Entity<QuillApp>,
-        shell: &Entity<QuillShell>,
-        dialog: Dialog,
-        cx: &mut App,
-    ) -> Dialog {
-        let on_close = QuillShell::on_close_kind(
-            app,
-            shell,
-            DialogKind::LiveStoryLeaveOther,
-            |this, _, cx| {
-                this.stories.live.leave_other = None;
-                cx.notify();
-            },
-        );
-        app.update(cx, |this, cx| {
-            let Some(text) = this.stories.live.leave_other else {
-                return dialog.on_close(on_close);
-            };
-            let (question, button) = leave_other_words(text);
-            let body = div()
-                .flex()
-                .flex_col()
-                .gap(px(12.))
-                .child(
-                    div()
-                        .debug_selector(|| "live-story-leave-other".into())
-                        .text_sm()
-                        .whitespace_normal()
-                        .child(tr(question)),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .justify_end()
-                        .gap(px(8.))
-                        .child(
-                            Button::new("live-story-leave-other-cancel")
-                                .label(tr(keys::CANCEL))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.stories.live.leave_other = None;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("live-story-leave-other-confirm")
-                                .label(tr(button))
-                                .danger()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.leave_other_call_for_live_story(cx);
-                                })),
-                        ),
-                );
-            dialog
-                .overlay(true)
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
-                .on_close(on_close)
-        })
-    }
-}
-
-/// tdesktop `confirmLeaveCurrent`'s question and button for a live story.
-fn leave_other_words(text: LeaveText) -> (quill::lang::Key, quill::lang::Key) {
+/// tdesktop `confirmLeaveCurrent`'s question for a live story, said by the
+/// in-frame card (`live_view::live_leave_other_card`); its button is
+/// Quill's "Leave call and watch".
+pub(super) fn leave_other_question(text: LeaveText) -> quill::lang::Key {
     match text {
-        LeaveText::EndCall { to_channel: false } => {
-            (keys::CALL_LEAVE_TO_OTHER_SURE, keys::CALL_BAR_HANGUP)
-        }
-        LeaveText::EndCall { to_channel: true } => (
-            keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
-            keys::CALL_BAR_HANGUP,
-        ),
+        LeaveText::EndCall { to_channel: false } => keys::CALL_LEAVE_TO_OTHER_SURE,
+        LeaveText::EndCall { to_channel: true } => keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
         LeaveText::LeaveGroupCall {
             from_channel: true,
             to_channel: true,
-        } => (
-            keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE_CHANNEL,
-            keys::GROUP_CALL_LEAVE,
-        ),
+        } => keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE_CHANNEL,
         LeaveText::LeaveGroupCall {
             from_channel: true,
             to_channel: false,
-        } => (
-            keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE,
-            keys::GROUP_CALL_LEAVE,
-        ),
+        } => keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE,
         LeaveText::LeaveGroupCall {
             from_channel: false,
             to_channel: true,
-        } => (
-            keys::GROUP_CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
-            keys::GROUP_CALL_LEAVE,
-        ),
+        } => keys::GROUP_CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
         LeaveText::LeaveGroupCall {
             from_channel: false,
             to_channel: false,
-        } => (keys::GROUP_CALL_LEAVE_TO_OTHER_SURE, keys::GROUP_CALL_LEAVE),
+        } => keys::GROUP_CALL_LEAVE_TO_OTHER_SURE,
     }
 }
 
@@ -487,11 +403,5 @@ crate::ui::shell::register_dialogs! {
         3853,
         |app| app.stories.live.delete.is_some(),
         QuillApp::build_live_delete_dialog,
-    ),
-    /// Leaving another call to watch a live story.
-    LiveStoryLeaveOther => DialogSpec::new(
-        3854,
-        |app| app.stories.live.leave_other.is_some(),
-        QuillApp::build_live_leave_other_dialog,
     ),
 }

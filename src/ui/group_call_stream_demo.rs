@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The demo channel and its stream.
 pub(super) const CHANNEL: i64 = 13;
-pub(super) const CALL: i32 = 4401;
+pub(in crate::ui) const CALL: i32 = 4401;
 const PHOTO_FILE: i32 = 4402;
 
 register_demos![
@@ -72,7 +72,7 @@ impl QuillApp {
 }
 
 /// The demo channel gets a photo and a joined RTMP live stream in `stream`.
-pub(super) fn seed_rtmp_stream(
+pub(in crate::ui) fn seed_rtmp_stream(
     session: &mut Session,
     stream: StreamState,
     sink: &Arc<dyn DiagnosticSink>,
@@ -108,7 +108,7 @@ pub(super) fn seed_rtmp_stream(
 }
 
 /// The playing stream's feed: the showcase photo, sent at 30 fps.
-pub(super) fn demo_stream_feed(cx: &mut App) -> Option<DemoFeed> {
+pub(in crate::ui) fn demo_stream_feed(cx: &mut App) -> Option<DemoFeed> {
     let path = demo_media_allowlist().join("showcase/p2.jpg");
     let rgba = image::open(path).ok()?.to_rgba8();
     let width = u16::try_from(rgba.width()).ok()?;

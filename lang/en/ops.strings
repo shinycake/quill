@@ -429,7 +429,6 @@
 "qll_ops_connect_to_export_your_data" = "Connect to export your data";
 "qll_ops_connected" = "Connected";
 "qll_ops_connecting_audio" = "Connecting audio…";
-"qll_ops_connecting_video" = "Connecting video…";
 "qll_ops_copy_address" = "Copy Address";
 "qll_ops_copy_card_number" = "Copy Card Number";
 "qll_ops_copy_date" = "Copy Date";
@@ -507,9 +506,6 @@
 "qll_ops_couldn_t_load_call_history" = "Couldn’t load call history.";
 "qll_ops_couldn_t_save_call_settings" = "couldn’t save call settings: {err}";
 "qll_ops_couldn_t_save_the_notification" = "couldn’t save the notification setting: {err}";
-"qll_ops_couldnt_decode_the_camera_preview" = "Couldn't decode the camera preview";
-"qll_ops_couldnt_decode_the_peers_screen" = "Couldn't decode the peer's screen";
-"qll_ops_couldnt_decode_the_peers_video" = "Couldn't decode the peer's video";
 "qll_ops_couldnt_leave_the_call" = "Couldn't leave the call.";
 "qll_ops_couldnt_open_the_call_window" = "Couldn't open the call window";
 "qll_ops_couldnt_open_the_system_sound" = "Couldn't open the system sound settings.";
@@ -810,8 +806,6 @@
 "qll_ops_paid_media_off" = "paid media off";
 "qll_ops_pause_download" = "Pause download";
 "qll_ops_paused" = "Paused";
-"qll_ops_peers_camera_is_off" = "Peer's camera is off";
-"qll_ops_peers_screen" = "🖥 Peer's screen";
 "qll_ops_people_will_have_to_transfer" = "People will have to transfer this amount of Stars to your channel to view this media.";
 "qll_ops_performed_an_action" = "performed an action";
 "qll_ops_period" = "Period";
@@ -895,7 +889,6 @@
 "qll_ops_screen_portal_missing" = "Screen sharing needs xdg-desktop-portal and PipeWire.";
 "qll_ops_screen_share_off" = "screen share off";
 "qll_ops_screen_share_on" = "screen share on";
-"qll_ops_screen_share_paused_by_peer" = "Screen share paused by peer";
 "qll_ops_screen_unsupported" = "Screen sharing needs Windows 10 version 1903 or later.";
 "qll_ops_search" = "Search";
 "qll_ops_search_chats" = "Search chats";
@@ -940,7 +933,6 @@
 "qll_ops_shared_media_closed" = "shared media closed";
 "qll_ops_shared_with" = "shared with {bot_name}";
 "qll_ops_sharing_needs_a_live_connection" = "sharing needs a live connection (demo)";
-"qll_ops_sharing_screen" = "Sharing screen";
 "qll_ops_sharing_with_a_bot_needs" = "sharing with a bot needs a live connection (demo)";
 "qll_ops_sharing_your_screen" = "Sharing your screen";
 "qll_ops_show" = "Show";
@@ -967,7 +959,6 @@
 "qll_ops_start_page_2" = "start page";
 "qll_ops_start_time" = "Start Time";
 "qll_ops_start_with" = "Start {kind} with {name}?";
-"qll_ops_starting_camera" = "Starting camera…";
 "qll_ops_starting_video_call" = "starting video call…";
 "qll_ops_sticker" = "Sticker";
 "qll_ops_stop" = "Stop";
@@ -1045,7 +1036,6 @@
 "qll_ops_video_call_4" = "{what} video call";
 "qll_ops_video_call_again" = "Video call again";
 "qll_ops_video_connecting_tiles_fill_in" = "Video connecting — tiles fill in as cameras stream.";
-"qll_ops_video_paused_by_peer" = "Video paused by peer";
 "qll_ops_video_unavailable_no_camera_found" = "Video unavailable — no camera found.";
 "qll_ops_videos" = "Videos";
 "qll_ops_view" = "View";

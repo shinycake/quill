@@ -570,6 +570,7 @@ impl QuillApp {
         let view = cx.entity().downgrade();
         let mute_view = view.clone();
         let full_view = view.clone();
+        let pip_view = view.clone();
         let actions = LiveActions {
             toggle_mute: Rc::new(move |_, cx| {
                 let _ = mute_view.update(cx, |this, cx| this.toggle_stream_mute(cx));
@@ -578,9 +579,11 @@ impl QuillApp {
                 toggle_stream_full(window);
                 let _ = full_view.update(cx, |_, cx| cx.notify());
             })),
-            // No live PiP until the next PR; the window's own pin on top
-            // stays where it is.
-            pip: None,
+            // The live PiP (`calls::live_pip`); the window's own pin on
+            // top stays where it is.
+            pip: Some(Rc::new(move |window, cx| {
+                let _ = pip_view.update(cx, |this, cx| this.open_stream_pip(window, cx));
+            })),
             hover: Some(Rc::new(move |inside, window, cx| {
                 let active = window.is_window_active();
                 let _ = view.update(cx, |this, cx| {
@@ -907,7 +910,7 @@ fn title_row(
 
 #[cfg(feature = "demo-capture")]
 #[path = "group_call_stream_demo.rs"]
-mod demo;
+pub(super) mod demo;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

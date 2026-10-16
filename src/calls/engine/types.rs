@@ -22,25 +22,6 @@ pub enum RemoteVideoState {
     Active,
 }
 
-/// Phase C2e: one decoded video frame. `rgba` is RGBA8 row-major with the
-/// frame rotation already applied; `is_local` marks the local camera
-/// preview, `false` marks the peer's camera or screen share
-/// (disambiguated by `is_screen`).
-/// `is_screen` marks the peer's screen-share stream
-/// (`NTG_STREAM_DEVICE_SCREEN`). Only 1:1 calls use this: group calls and
-/// streams hand their planes to a live feed ([`crate::calls::live_video`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VideoFrame {
-    pub seq: u64,
-    pub width: u16,
-    pub height: u16,
-    pub rgba: Vec<u8>,
-    pub is_local: bool,
-    pub is_screen: bool,
-}
-
-pub type VideoFrameCallback = Arc<dyn Fn(i32, VideoFrame) + Send + Sync + 'static>;
-
 pub type RemoteVideoStateCallback = Arc<dyn Fn(i32, RemoteVideoState) + Send + Sync + 'static>;
 
 /// The peer's microphone in a 1:1 call: `(call id, muted)`, from the
@@ -223,7 +204,6 @@ pub(crate) struct CallbackShared {
     pub(crate) user_to_call: Mutex<HashMap<i64, i32>>,
     pub(crate) hook: Mutex<Option<SignalingEmittedCallback>>,
     pub(crate) transport_hook: Mutex<Option<TransportStateCallback>>,
-    pub(crate) frame_hook: Mutex<Option<VideoFrameCallback>>,
     pub(crate) remote_video_hook: Mutex<Option<RemoteVideoStateCallback>>,
     /// Phase C2j: peer 1:1 screen-share state hook.
     pub(crate) remote_screen_hook: Mutex<Option<RemoteVideoStateCallback>>,
@@ -240,7 +220,8 @@ pub(crate) struct CallbackShared {
     pub(crate) stream_chats: Mutex<HashSet<i64>>,
     /// Broadcast timestamp and part requests (stream mode).
     pub(crate) engine_event_hook: Mutex<Option<EngineEventCallback>>,
-    /// Group-call and stream pictures, as I420 planes.
+    /// Every decoded picture (group-call tracks, streams, 1:1 calls), as
+    /// I420 planes.
     pub(crate) live_frame_hook: Mutex<Option<LiveFrameCallback>>,
 }
 
@@ -262,7 +243,6 @@ impl CallbackShared {
             user_to_call: Mutex::new(HashMap::new()),
             hook: Mutex::new(None),
             transport_hook: Mutex::new(None),
-            frame_hook: Mutex::new(None),
             remote_video_hook: Mutex::new(None),
             remote_screen_hook: Mutex::new(None),
             remote_audio_hook: Mutex::new(None),

@@ -215,9 +215,10 @@ pub enum EngineEvent {
 
 pub type EngineEventCallback = Arc<dyn Fn(EngineEvent) + Send + Sync + 'static>;
 
-/// Group-call and stream pictures as ntgcalls decoded them: I420 planes
-/// and the rotation flag, keyed by the feed they belong to. The hook runs
-/// on an ntgcalls thread and only stores the frame.
+/// Every picture ntgcalls decoded (group-call tracks, streams, 1:1
+/// calls): I420 planes and the rotation flag, keyed by the feed they
+/// belong to. The hook runs on an ntgcalls thread and only stores the
+/// frame.
 pub type LiveFrameCallback = Arc<dyn Fn(LiveKey, LiveFrame) + Send + Sync + 'static>;
 
 /// Where a group-call frame goes.

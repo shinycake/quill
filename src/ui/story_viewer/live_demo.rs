@@ -15,6 +15,7 @@ use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::calls::engine::{GroupCallMode, StreamState};
+use quill::calls::group_call_create::LeaveText;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
 use quill::live_story::PendingLiveReaction;
@@ -58,6 +59,11 @@ register_demos![
         "screenshot demo — live story with a portrait stream filling the frame"
     )
     .setup(QuillApp::demo_live_story_portrait),
+    DemoSpec::chats(
+        "ready-live-story-leave",
+        "screenshot demo — live story asking to leave another call"
+    )
+    .setup(QuillApp::demo_live_story_leave),
 ];
 
 impl QuillApp {
@@ -88,6 +94,13 @@ impl QuillApp {
     fn demo_live_story_portrait(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.seed_demo_live_story(cx);
         self.stories.live.demo_feed = demo_stream_feed(true, cx);
+        cx.notify();
+    }
+
+    fn demo_live_story_leave(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.seed_demo_live_story(cx);
+        // The join was refused: another call holds the slot.
+        self.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
         cx.notify();
     }
 

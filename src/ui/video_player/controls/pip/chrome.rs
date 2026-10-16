@@ -105,7 +105,7 @@ impl VideoPip {
         }
     }
 
-    fn icon_button(
+    pub(super) fn icon_button(
         &self,
         id: &'static str,
         control: Control,
@@ -183,7 +183,9 @@ impl Render for VideoPip {
             return div().size_full().bg(gpui_kit::black()).into_any_element();
         };
         // A clip that fails closes the window (`handleStreamingError`).
-        if player.state() == PlayState::Failed {
+        // A live picture that ended (the stream, or the call) closes too.
+        let ended = self.live.is_some() && player.state() == PlayState::Ended;
+        if player.state() == PlayState::Failed || ended {
             self.close(window, cx);
             return div().size_full().bg(gpui_kit::black()).into_any_element();
         }
@@ -191,7 +193,9 @@ impl Render for VideoPip {
         if self.step_slide(window, cx) {
             window.request_animation_frame();
         }
-        self.sync_lines(window, cx);
+        if self.live.is_none() {
+            self.sync_lines(window, cx);
+        }
         // Transport changes (an end, a stall) redraw this window.
         player.watch(cx.entity_id());
         let transport = player.transport();
@@ -251,97 +255,107 @@ impl Render for VideoPip {
         .absolute()
         .inset_0();
 
-        let playing = transport.is_playing();
-        let total = transport.total();
-        let position = self
-            .seek_preview
-            .map_or(transport.position, |fraction| fraction * total.max(0.0));
-        let play_icon = if playing {
-            IconName::Pause
+        let (controls, badge) = if let Some(live) = self.live.clone() {
+            let active = (close_active, enlarge_active, volume_active);
+            let (controls, badge) = self.live_controls(&live, &layout, shown, active, cx);
+            (controls, Some(badge))
         } else {
-            IconName::Play
-        };
-        let muted = transport.volume <= 0.0;
-        let volume_label = if muted {
-            tr(keys::Q_MISC_UNMUTE)
-        } else {
-            tr(keys::Q_MISC_MUTE)
-        };
-        let fraction = |position: f64| {
-            if total > 0.0 && position.is_finite() {
-                (position / total).clamp(0.0, 1.0) as f32
+            let playing = transport.is_playing();
+            let total = transport.total();
+            let position = self
+                .seek_preview
+                .map_or(transport.position, |fraction| fraction * total.max(0.0));
+            let play_icon = if playing {
+                IconName::Pause
             } else {
-                0.0
-            }
-        };
-        let playback = layout.playback;
-        let font = px(PLAYBACK_FONT);
-        let line_box = px(PLAYBACK_FONT + 2.0);
-        let viewport = place::to_rect(Bounds::new(Point::default(), window.viewport_size()));
-        let times = div()
-            .absolute()
-            .left(px((playback.area.x + PLAYBACK_TEXT_SKIP) as f32))
-            .right(px(
-                (viewport.w - playback.area.right() + PLAYBACK_TEXT_SKIP) as f32,
-            ))
-            .top(px(playback.icon.y as f32) - line_box)
-            .h(line_box)
-            .flex()
-            .justify_between()
-            .text_size(font)
-            .line_height(line_box)
-            .text_color(gpui_kit::white())
-            .child(elapsed_label(position))
-            .child(remaining_label(position, total));
+                IconName::Play
+            };
+            let muted = transport.volume <= 0.0;
+            let volume_label = if muted {
+                tr(keys::Q_MISC_UNMUTE)
+            } else {
+                tr(keys::Q_MISC_MUTE)
+            };
+            let fraction = |position: f64| {
+                if total > 0.0 && position.is_finite() {
+                    (position / total).clamp(0.0, 1.0) as f32
+                } else {
+                    0.0
+                }
+            };
+            let playback = layout.playback;
+            let font = px(PLAYBACK_FONT);
+            let line_box = px(PLAYBACK_FONT + 2.0);
+            let viewport = place::to_rect(Bounds::new(Point::default(), window.viewport_size()));
+            let times = div()
+                .absolute()
+                .left(px((playback.area.x + PLAYBACK_TEXT_SKIP) as f32))
+                .right(px(
+                    (viewport.w - playback.area.right() + PLAYBACK_TEXT_SKIP) as f32,
+                ))
+                .top(px(playback.icon.y as f32) - line_box)
+                .h(line_box)
+                .flex()
+                .justify_between()
+                .text_size(font)
+                .line_height(line_box)
+                .text_color(gpui_kit::white())
+                .child(elapsed_label(position))
+                .child(remaining_label(position, total));
 
-        let mut controls = div()
-            .absolute()
-            .inset_0()
-            .opacity(shown)
-            .child(
-                place_at(layout.play).child(
-                    Icon::new(play_icon)
-                        .with_size(px(layout.play.w as f32))
-                        .text_color(controls_fg(play_active)),
-                ),
-            )
-            .child(self.icon_button(
-                "pip-close",
-                layout.close,
-                IconName::X,
-                tr(keys::CLOSE),
-                PressAction::Close,
-                close_active,
-                cx,
-            ))
-            .child(self.icon_button(
-                "pip-enlarge",
-                layout.enlarge,
-                IconName::Maximize2,
-                tr(keys::Q_MEDIA_PIP_BACK_TO_VIEWER),
-                PressAction::Enlarge,
-                enlarge_active,
-                cx,
-            ))
-            .child(self.icon_button(
-                "pip-volume",
-                layout.volume_toggle,
-                volume_icon(transport.volume),
-                volume_label,
-                PressAction::ToggleVolume,
-                volume_active,
-                cx,
-            ))
-            .child(times)
-            .child(self.line(playback, &self.seek, fraction(position), playback_active));
-        if !layout.volume_controller.icon.is_empty() {
-            controls = controls.child(self.line(
-                layout.volume_controller,
-                &self.volume,
-                transport.volume.clamp(0.0, 1.0),
-                volume_active,
-            ));
-        }
+            let mut controls = div()
+                .absolute()
+                .inset_0()
+                .opacity(shown)
+                .child(
+                    place_at(layout.play).child(
+                        Icon::new(play_icon)
+                            .with_size(px(layout.play.w as f32))
+                            .text_color(controls_fg(play_active)),
+                    ),
+                )
+                .child(self.icon_button(
+                    "pip-close",
+                    layout.close,
+                    IconName::X,
+                    tr(keys::CLOSE),
+                    PressAction::Close,
+                    close_active,
+                    cx,
+                ))
+                .child(self.icon_button(
+                    "pip-enlarge",
+                    layout.enlarge,
+                    IconName::Maximize2,
+                    tr(keys::Q_MEDIA_PIP_BACK_TO_VIEWER),
+                    PressAction::Enlarge,
+                    enlarge_active,
+                    cx,
+                ))
+                .child(self.icon_button(
+                    "pip-volume",
+                    layout.volume_toggle,
+                    volume_icon(transport.volume),
+                    volume_label,
+                    PressAction::ToggleVolume,
+                    volume_active,
+                    cx,
+                ))
+                .child(times.debug_selector(|| "pip-times".into()))
+                .child(
+                    self.line(playback, &self.seek, fraction(position), playback_active)
+                        .debug_selector(|| "pip-playback".into()),
+                );
+            if !layout.volume_controller.icon.is_empty() {
+                controls = controls.child(self.line(
+                    layout.volume_controller,
+                    &self.volume,
+                    transport.volume.clamp(0.0, 1.0),
+                    volume_active,
+                ));
+            }
+            (controls, None)
+        };
         let spinner = waiting.then(|| {
             div()
                 .absolute()
@@ -389,6 +403,7 @@ impl Render for VideoPip {
             )
             .children(spinner)
             .child(controls)
+            .children(badge)
             .into_any_element()
     }
 }

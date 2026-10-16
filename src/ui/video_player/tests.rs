@@ -338,6 +338,10 @@ mod pip;
 #[cfg(feature = "demo-capture")]
 mod pip_lifetime;
 
+/// Live Picture-in-Picture: a stream's and a live story's.
+#[cfg(feature = "demo-capture")]
+mod live_pip;
+
 /// The viewer on a clip that is still opening: the transport shows it,
 /// and closing then drops the player without a crash.
 #[cfg(feature = "demo-capture")]

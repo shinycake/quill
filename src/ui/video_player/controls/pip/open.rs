@@ -22,6 +22,7 @@ pub(crate) fn open_pip_window(open: PipOpen, cx: &mut App) -> Option<PipWindow> 
         hooks,
         last_volume,
         display,
+        live,
     } = open;
     let displays = cx.displays();
     let main = display
@@ -89,6 +90,7 @@ pub(crate) fn open_pip_window(open: PipOpen, cx: &mut App) -> Option<PipWindow> 
                         dimensions,
                         hooks,
                         last_volume,
+                        live,
                         ratio,
                         placement,
                         window,

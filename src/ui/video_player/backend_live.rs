@@ -41,7 +41,7 @@ use super::transport::{BackendStatus, LiveStatus};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled, Purpose, VideoPlayer};
 use crate::ui::inline_video::INLINE_MAX_EDGE;
 use gpui_kit::*;
-use quill::calls::live_video::convert::paused_raster;
+use quill::calls::live_video::convert::{mirror_raster, paused_raster};
 use quill::calls::live_video::{LiveEnd, LiveFrame, LiveSink, LiveSnapshot, LiveState};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -177,6 +177,13 @@ pub(super) struct LiveCore {
     /// Every frame converts on the UI thread: a screenshot capture shows
     /// the first frame in its first draw.
     inline_always: bool,
+    /// Shown mirrored left to right (your camera preview), in the plane
+    /// copy each frame gets anyway.
+    mirrored: Cell<bool>,
+    /// Every picture is an image, never a pixel buffer: a small picture
+    /// over another one (your camera's corner preview) rounds its own
+    /// corners, which a surface can't do over a picture.
+    images_only: Cell<bool>,
     track: RefCell<Track>,
     /// The view the element draws in, redrawn when a frame lands. A live
     /// player is drawn in one view: a tile or the stage only in the call
@@ -233,6 +240,8 @@ impl LiveCore {
             sink,
             tile,
             inline_always: capture_mode(),
+            mirrored: Cell::new(false),
+            images_only: Cell::new(false),
             track: RefCell::new(Track::default()),
             view: Cell::new(None),
             painted: Cell::new(0),
@@ -282,11 +291,11 @@ impl LiveCore {
             return None;
         }
         let inline = self.inline_always;
+        let images = self.images_only.get();
         let frame = self
             .sink
-            .take_if(|frame| inline || !converts_in_background(frame))?;
-        let (width, height) = frame.shown_size();
-        let target = track.surfaces.target(width, height);
+            .take_if(|frame| inline || !(images || converts_in_background(frame)))?;
+        let target = self.target(&mut track, &frame);
         self.conversions.set(self.conversions.get().wrapping_add(1));
         Some((frame, target))
     }
@@ -297,11 +306,22 @@ impl LiveCore {
             return None;
         }
         let mut track = self.track.try_borrow_mut().ok()?;
-        let frame = self.sink.take_if(converts_in_background)?;
-        let (width, height) = frame.shown_size();
-        let target = track.surfaces.target(width, height);
+        let images = self.images_only.get();
+        let frame = self
+            .sink
+            .take_if(|frame| images || converts_in_background(frame))?;
+        let target = self.target(&mut track, &frame);
         self.conversions.set(self.conversions.get().wrapping_add(1));
         Some((frame, target))
+    }
+
+    /// What `frame` converts into.
+    fn target(&self, track: &mut Track, frame: &LiveFrame) -> Target {
+        if self.images_only.get() {
+            return Target::Bgra;
+        }
+        let (width, height) = frame.shown_size();
+        track.surfaces.target(width, height)
     }
 
     /// A frame converted off the UI thread, drawn on the next pull. One
@@ -439,7 +459,10 @@ impl LiveCore {
         {
             return Some(image.clone());
         }
-        let raster = paused_raster(&frame.i420()?, frame.rotation)?;
+        let mut raster = paused_raster(&frame.i420()?, frame.rotation)?;
+        if self.mirrored.get() {
+            mirror_raster(&mut raster);
+        }
         let image = live_picture::render_image(raster.bgra, raster.width, raster.height)?;
         if let Some((_, _, old)) = track.paused.replace((frame.seq, now, image.clone())) {
             let older = track.paused_previous.replace(old);
@@ -496,8 +519,9 @@ impl Backend for LiveBackend {
 
     fn take_picture(&mut self, _present: &Present) -> Pulled {
         let ready = self.core.take_ready();
+        let mirrored = self.core.mirrored.get();
         let inline = self.core.take_inline().and_then(|(frame, target)| {
-            live_picture::convert(&frame, target).map(|prepared| Landed {
+            live_picture::convert(&frame, target, mirrored).map(|prepared| Landed {
                 seq: frame.seq,
                 prepared,
             })
@@ -552,6 +576,30 @@ impl VideoPlayer {
             .live
             .as_ref()
             .is_some_and(|core| core.sink.latest().is_some())
+    }
+
+    /// Show the feed mirrored left to right (your camera preview, as
+    /// tdesktop's `setMirrored`), from the next frame on. The mirror is
+    /// made in the plane copy, not by turning the drawn picture.
+    pub(crate) fn set_live_mirrored(&self, mirrored: bool) {
+        if let Some(core) = self.0.live.as_ref() {
+            core.mirrored.set(mirrored);
+        }
+    }
+
+    /// Draw every picture as an image (see `LiveCore::images_only`), from
+    /// the next frame on.
+    pub(crate) fn set_live_images_only(&self, images_only: bool) {
+        if let Some(core) = self.0.live.as_ref() {
+            core.images_only.set(images_only);
+        }
+    }
+
+    /// Whether the feed is shown mirrored (tests).
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(crate) fn live_mirrored(&self) -> bool {
+        self.0.live.as_ref().is_some_and(|core| core.mirrored.get())
     }
 
     /// The newest frame shrunk to 90 px and blurred, as tdesktop draws a
@@ -662,12 +710,14 @@ fn spawn_waker(
                 let shown = VideoPlayer(player).shown_count();
                 let view = live.wake_view(shown, Instant::now());
                 let job = view.and_then(|_| live.take_background());
-                (view, job)
+                (view, job.map(|job| (job, live.mirrored.get())))
             };
-            if let Some((frame, target)) = job {
+            if let Some(((frame, target), mirrored)) = job {
                 let seq = frame.seq;
                 let prepared = cx
-                    .background_spawn(async move { live_picture::convert(&frame, target) })
+                    .background_spawn(
+                        async move { live_picture::convert(&frame, target, mirrored) },
+                    )
                     .await;
                 match core.upgrade() {
                     Some(live) => live.landed(prepared.map(|prepared| Landed { seq, prepared })),

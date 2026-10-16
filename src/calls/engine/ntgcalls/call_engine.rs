@@ -74,10 +74,6 @@ impl CallEngine for NtgcallsEngine {
         set_hook(&self.callback.transport_hook, callback);
     }
 
-    fn set_video_frame_callback(&mut self, callback: VideoFrameCallback) {
-        set_hook(&self.callback.frame_hook, callback);
-    }
-
     fn set_remote_video_state_callback(&mut self, callback: RemoteVideoStateCallback) {
         set_hook(&self.callback.remote_video_hook, callback);
     }

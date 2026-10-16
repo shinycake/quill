@@ -309,7 +309,7 @@ impl QuillApp {
 fn call_streams(call: &ActiveGroupCall, key: LiveKey) -> bool {
     match key {
         LiveKey::Local { .. } => call.is_my_video_enabled,
-        LiveKey::Stream { .. } => false,
+        LiveKey::Stream { .. } | LiveKey::Call { .. } => false,
         LiveKey::Video {
             user_id, screen, ..
         } => call.participants.iter().any(|participant| {

@@ -1,9 +1,188 @@
 use super::*;
-use crate::calls::engine::i420_to_rgba;
 use ntgcalls_sys::{
     NTG_VIDEO_ROTATION_VIDEO_ROTATION_0, NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
     NTG_VIDEO_ROTATION_VIDEO_ROTATION_180, NTG_VIDEO_ROTATION_VIDEO_ROTATION_270,
+    ntg_video_rotation,
 };
+
+/// Phase C2e: I420 planar byte size: Y (w*h) + U (cw*ch) + V (cw*ch).
+fn i420_frame_size(width: u16, height: u16) -> usize {
+    let (w, h) = (usize::from(width), usize::from(height));
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    w * h + 2 * cw * ch
+}
+
+/// The engine's former conversion (`engine::native::i420_to_rgba`, gone
+/// since every feed carries I420 planes), kept as the colour and rotation
+/// oracle: an I420 frame to RGBA8 with BT.601 full-range math,
+/// then apply the frame rotation. Returns `None` on invalid input so we
+/// never render garbage bytes.
+fn i420_to_rgba(
+    width: u16,
+    height: u16,
+    yuv: &[u8],
+    rotation: ntg_video_rotation,
+) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 || yuv.len() != i420_frame_size(width, height) {
+        return None;
+    }
+    let (w, h) = (usize::from(width), usize::from(height));
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let (y_plane, uv) = yuv.split_at(w * h);
+    let (u_plane, v_plane) = uv.split_at(cw * ch);
+
+    let mut rgba = vec![0u8; w * h * 4];
+    for (row, out_row) in rgba.chunks_exact_mut(w * 4).enumerate() {
+        for (col, px) in out_row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let chroma = (row / 2) * cw + col / 2;
+            let (Some(&y), Some(&u), Some(&v), [pr, pg, pb, pa]) = (
+                y_plane.get(row * w + col),
+                u_plane.get(chroma),
+                v_plane.get(chroma),
+                px,
+            ) else {
+                continue;
+            };
+            let (y, u, v) = (f32::from(y), f32::from(u), f32::from(v));
+            let r = y + 1.402 * (v - 128.0);
+            let g = y - 0.344_136 * (u - 128.0) - 0.714_136 * (v - 128.0);
+            let b = y + 1.772 * (u - 128.0);
+            *pr = r.clamp(0.0, 255.0).round() as u8;
+            *pg = g.clamp(0.0, 255.0).round() as u8;
+            *pb = b.clamp(0.0, 255.0).round() as u8;
+            *pa = 255;
+        }
+    }
+    Some(match rotation {
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90
+        | NTG_VIDEO_ROTATION_VIDEO_ROTATION_180
+        | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => rotate_rgba(&rgba, w, h, rotation),
+        _ => rgba,
+    })
+}
+
+/// Phase C2e: rotate an RGBA8 buffer (row-major, `w` x `h`) by the given
+/// frame rotation; 90/270 swap the dimensions.
+fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: ntg_video_rotation) -> Vec<u8> {
+    let (dw, dh) = match rotation {
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (h, w),
+        _ => (w, h),
+    };
+    let mut dst = vec![0u8; src.len()];
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = match rotation {
+                // 90° clockwise: the right column lands on top.
+                NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 => (y, w - 1 - x),
+                NTG_VIDEO_ROTATION_VIDEO_ROTATION_180 => (w - 1 - x, h - 1 - y),
+                NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (h - 1 - y, x),
+                _ => (x, y),
+            };
+            let src_off = (y * w + x) * 4;
+            let dst_off = (dy * dw + dx) * 4;
+            if let (Some(to), Some(from)) = (
+                dst.get_mut(dst_off..dst_off + 4),
+                src.get(src_off..src_off + 4),
+            ) {
+                to.copy_from_slice(from);
+            }
+        }
+    }
+    debug_assert_eq!(dw * dh, w * h);
+    dst
+}
+
+/// Phase C2e: validates the BT.601 conversion math. Neutral chroma
+/// passes Y straight through, so Y=235 ~ white and Y=16 ~ black.
+/// A saturated case with no clamping on red pins the 1.402 coefficient:
+/// Y=64, U=128, V=255 gives R = 64 + 1.402*127 ~ 242.
+#[test]
+fn i420_to_rgba_known_pixels() {
+    let white = i420_to_rgba(
+        2,
+        2,
+        &[235, 235, 235, 235, 128, 128],
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+    )
+    .expect("valid 2x2 frame");
+    assert_eq!(white.len(), 16);
+    let (pixels, _) = white.as_chunks::<4>();
+    for pixel in pixels {
+        assert_pixel_close(pixel, &[235, 235, 235, 255]);
+    }
+    let black = i420_to_rgba(
+        2,
+        2,
+        &[16, 16, 16, 16, 128, 128],
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+    )
+    .expect("valid 2x2 frame");
+    let (pixels, _) = black.as_chunks::<4>();
+    for pixel in pixels {
+        assert_pixel_close(pixel, &[16, 16, 16, 255]);
+    }
+    // I420 planes: Y(2x2) then U(1x1) then V(1x1).
+    let saturated = i420_to_rgba(
+        2,
+        2,
+        &[64, 64, 64, 64, 128, 255],
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+    )
+    .expect("valid 2x2 frame");
+    let (pixels, _) = saturated.as_chunks::<4>();
+    for pixel in pixels {
+        assert_pixel_close(pixel, &[242, 0, 64, 255]);
+    }
+}
+
+fn assert_pixel_close(actual: &[u8], expected: &[u8; 4]) {
+    assert_eq!(actual.len(), 4);
+    for (index, (&a, &e)) in actual.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (i16::from(a) - i16::from(e)).abs() <= 2,
+            "channel {index}: got {a}, want ~{e}"
+        );
+    }
+}
+
+/// Phase C2e: validates we never render garbage bytes.
+#[test]
+fn i420_to_rgba_rejects_bad_sizes() {
+    assert_eq!(
+        i420_to_rgba(2, 2, &[0; 5], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+        None
+    );
+    assert_eq!(
+        i420_to_rgba(2, 2, &[0; 7], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+        None
+    );
+    assert_eq!(
+        i420_to_rgba(0, 2, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+        None
+    );
+    assert_eq!(
+        i420_to_rgba(2, 0, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
+        None
+    );
+}
+
+/// Phase C2e: validates rotation handling. 2x1 with distinct pixels,
+/// rotated 90° clockwise, becomes 1x2 with the right column on top.
+#[test]
+fn i420_to_rgba_rotation_90() {
+    let rgba = i420_to_rgba(
+        2,
+        1,
+        &[235, 16, 128, 128],
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
+    )
+    .expect("valid 2x1 frame");
+    assert_eq!(
+        rgba,
+        vec![16, 16, 16, 255, 235, 235, 235, 255],
+        "black pixel (right column) lands on top"
+    );
+}
 
 /// A frame where every plane value differs: a gradient in Y, U and V.
 fn gradient(width: u16, height: u16) -> Vec<u8> {
@@ -88,6 +267,62 @@ fn turning_four_quarters_is_the_identity() {
         current = rotate_planes(&frame, LiveRotation::R90).expect("turned");
     }
     assert_eq!(current, (planes, w, h));
+}
+
+#[test]
+fn mirroring_reverses_every_row_of_every_plane() {
+    let (w, h) = (6u16, 4u16);
+    let planes = gradient(w, h);
+    let mut mirrored = planes.clone();
+    assert!(mirror_planes(&mut mirrored, w, h));
+    let src = I420::new(&planes, w, h).expect("frame");
+    let out = I420::new(&mirrored, w, h).expect("mirrored frame");
+    for (y, row) in out.y.as_chunks::<6>().0.iter().enumerate() {
+        for (x, value) in row.iter().enumerate() {
+            assert_eq!(Some(value), src.y.get(y * 6 + (5 - x)), "luma {x},{y}");
+        }
+    }
+    for (plane, source) in [(out.u, src.u), (out.v, src.v)] {
+        for (y, row) in plane.as_chunks::<3>().0.iter().enumerate() {
+            for (x, value) in row.iter().enumerate() {
+                assert_eq!(Some(value), source.get(y * 3 + (2 - x)), "chroma {x},{y}");
+            }
+        }
+    }
+    // The same picture as BGRA, mirrored pixel for pixel.
+    let bgra = i420_to_bgra(&src).expect("bgra");
+    let mirrored_bgra = i420_to_bgra(&out).expect("bgra");
+    for (row, mirrored_row) in bgra
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .zip(mirrored_bgra.as_chunks::<24>().0)
+    {
+        let mut reversed = row.as_chunks::<4>().0.to_vec();
+        reversed.reverse();
+        assert_eq!(mirrored_row.as_chunks::<4>().0, reversed.as_slice());
+    }
+    assert!(mirror_planes(&mut mirrored, w, h));
+    assert_eq!(mirrored, planes, "twice is the identity");
+}
+
+#[test]
+fn mirroring_leaves_a_malformed_frame_alone() {
+    let mut short = vec![7u8; i420_size(4, 4) - 1];
+    assert!(!mirror_planes(&mut short, 4, 4));
+    assert!(short.iter().all(|value| *value == 7));
+    assert!(!mirror_planes(&mut [], 0, 0));
+}
+
+#[test]
+fn a_mirrored_raster_reverses_its_pixels() {
+    let mut raster = Raster {
+        width: 2,
+        height: 1,
+        bgra: vec![1, 2, 3, 255, 4, 5, 6, 255],
+    };
+    mirror_raster(&mut raster);
+    assert_eq!(raster.bgra, vec![4, 5, 6, 255, 1, 2, 3, 255]);
 }
 
 #[test]

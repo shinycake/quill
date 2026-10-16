@@ -57,6 +57,7 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.group_call_playback_muted());
         let view = cx.entity().downgrade();
+        let pip_view = view.clone();
         let facts = LiveFacts {
             viewers: call.viewer_count,
             muted,
@@ -68,7 +69,9 @@ impl QuillApp {
                 let _ = view.update(cx, |this, cx| this.toggle_live_story_sound(cx));
             }),
             fullscreen: None,
-            pip: None,
+            pip: Some(Rc::new(move |window, cx| {
+                let _ = pip_view.update(cx, |this, cx| this.open_story_pip(window, cx));
+            })),
             hover: None,
         };
         Some(
@@ -163,7 +166,10 @@ impl QuillApp {
         item: &StoryViewerItem,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.stories.live.watching != Some((item.chat_id, item.story_id)) {
+        // Not joined while another call holds the slot: the frame asks.
+        if self.stories.live.watching != Some((item.chat_id, item.story_id))
+            || self.stories.live.leave_other.is_some()
+        {
             return None;
         }
         let key = item.chat_id.0;
@@ -286,6 +292,66 @@ impl QuillApp {
                 .children(effects)
                 .into_any_element(),
         )
+    }
+
+    /// Another call holds the call slot (Quill has one; see
+    /// `live_story`): the frame asks, in place of the picture, whether to
+    /// leave it, with tdesktop's `confirmLeaveCurrent` question.
+    /// "Leave call and watch" leaves the other call and joins the story
+    /// once the slot is free; Cancel (or Esc) brings the Join button back,
+    /// which asks again.
+    pub(super) fn live_leave_other_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(text) = self.stories.live.leave_other else {
+            return div().into_any_element();
+        };
+        let question = super::live_stars_box::leave_other_question(text);
+        div()
+            .id("live-story-leave-other-card")
+            .debug_selector(|| "live-story-leave-other-card".into())
+            // Its buttons' presses stop here: not the backdrop's close nor
+            // the media's hold-to-pause.
+            .occlude()
+            .role(Role::Group)
+            .w(px(296.))
+            .p(px(16.))
+            .rounded(px(10.))
+            .bg(chrome::compose_bg())
+            .flex()
+            .flex_col()
+            .gap(px(14.))
+            .child(
+                div()
+                    .debug_selector(|| "live-story-leave-other".into())
+                    .text_sm()
+                    .text_color(chrome::fg())
+                    .whitespace_normal()
+                    .child(tr(question)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap(px(8.))
+                    .child(
+                        Button::new("live-story-leave-other-cancel")
+                            .debug_selector(|| "live-story-leave-other-cancel".into())
+                            .label(tr(keys::CANCEL))
+                            .custom(chrome::ghost(cx))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_live_leave_other(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("live-story-leave-other-confirm")
+                            .debug_selector(|| "live-story-leave-other-confirm".into())
+                            .label(tr(keys::Q_MEDIA_LIVE_LEAVE_AND_WATCH))
+                            .custom(chrome::attention(cx))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.leave_other_call_for_live_story(cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// "Stars Sent!" with Undo and the seconds left, while your Stars wait

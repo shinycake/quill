@@ -21,6 +21,7 @@ use quill::live_story::{DEFAULT_STARS, QUICK_STARS, comment_text};
 use quill::paid_reaction::{SLIDER_STEPS, amount_for_step, step_for_amount};
 use quill::premium_hub::group_digits;
 use quill::state::{Session, unix_ms_now};
+use quill::telegram::envelope::StoryContentView;
 
 /// How long the join waits for the other call to be left.
 const RETRY_JOIN_LIMIT_MS: u64 = 10_000;
@@ -41,13 +42,16 @@ impl QuillApp {
     }
 
     /// Joins the live story the viewer shows and leaves the one it moved
-    /// away from. Runs on open, on every step and close, and on the tick.
-    pub(super) fn sync_live_story(&mut self, cx: &mut Context<Self>) {
-        let target = if self.stories.viewer.is_open() {
+    /// away from; one playing in Picture-in-Picture stays while the viewer
+    /// shows no other. Runs on open, on every step and close, on the tick
+    /// and when a live PiP goes.
+    pub(in crate::ui) fn sync_live_story(&mut self, cx: &mut Context<Self>) {
+        let shown = if self.stories.viewer.is_open() {
             live_item(self.stories.viewer.current())
         } else {
             None
         };
+        let target = shown.or_else(|| self.live_pip_story());
         let watching = self.stories.live.watching;
         if watching.is_some() && watching != target {
             self.leave_live_story_view(cx);
@@ -58,12 +62,53 @@ impl QuillApp {
         } else if self.stories.live.retry_join.is_some() && self.stories.live.watching.is_some() {
             self.join_watched_live_story(cx);
         }
+        self.check_asked_story_ended(cx);
         self.check_live_story_ended(cx);
     }
 
+    /// The frame asks to leave another call (`live_leave_other_card`).
+    pub(in crate::ui) fn live_leave_other_shown(&self) -> bool {
+        self.stories.viewer.is_open() && self.stories.live.leave_other.is_some()
+    }
+
+    /// The card's Cancel and Esc: nothing is left; the Join button asks
+    /// again.
+    pub(in crate::ui) fn cancel_live_leave_other(&mut self, cx: &mut Context<Self>) {
+        if self.stories.live.leave_other.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// While the frame asks, the story is not joined, so the stream's end
+    /// is not seen through the call (`check_live_story_ended`): a story
+    /// that is no longer live (it ended, or was deleted) closes the viewer
+    /// as an ended stream does, and the card goes with it.
+    fn check_asked_story_ended(&mut self, cx: &mut Context<Self>) {
+        let Some((chat_id, story_id)) = self
+            .stories
+            .live
+            .watching
+            .filter(|_| self.stories.live.leave_other.is_some())
+        else {
+            return;
+        };
+        let still_live = self.session().is_some_and(|session| {
+            session
+                .stories
+                .stories
+                .get(&(chat_id.0, story_id))
+                .is_some_and(|story| matches!(story.content, StoryContentView::Live { .. }))
+        });
+        if !still_live {
+            self.stories.live.leave_other = None;
+            self.close_story_viewer(cx);
+        }
+    }
+
     /// Joins the watched live story. When another call holds the slot the
-    /// viewer asks to leave it; until then the Join button stays.
-    fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
+    /// frame asks to leave it (`live_leave_other_card`); Cancel leaves the
+    /// Join button, which comes back here.
+    pub(super) fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
         let Some((chat_id, story_id)) = self.stories.live.watching else {
             return;
         };
@@ -75,19 +120,23 @@ impl QuillApp {
             return;
         }
         if let Some(since) = retrying {
-            // The other call is still being left; past the limit (a 1:1
-            // call stuck hanging up) the viewer says so and stops trying.
-            if unix_ms_now().saturating_sub(since) > RETRY_JOIN_LIMIT_MS {
-                self.stories.live.retry_join = None;
-                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
-                cx.notify();
+            // The other call is still being left. Past the limit (the
+            // leave failed, or a 1:1 call is stuck hanging up) the viewer
+            // says so, stops trying, and the frame asks again below while
+            // a call still holds the slot.
+            if unix_ms_now().saturating_sub(since) <= RETRY_JOIN_LIMIT_MS {
+                return;
             }
+            self.stories.live.retry_join = None;
+            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
+        } else if self.live.is_none() {
+            // The demo joins nothing and asks nothing on its own.
             return;
         }
-        let Some(live) = self.live.as_ref() else {
+        let Some(session) = self.session() else {
+            cx.notify();
             return;
         };
-        let session = &live.driver.session;
         let to_channel = session
             .chats
             .get(&chat_id.0)
