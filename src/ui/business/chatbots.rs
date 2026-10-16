@@ -366,36 +366,37 @@ impl QuillApp {
             );
         }
         if let Some(warning) = warning {
-            body =
-                body.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .p_2()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(cx.theme().warning)
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_semibold()
-                                .child(tr(keys::CHATBOTS_WARNING_TITLE)),
-                        )
-                        .child(div().text_sm().child(warning))
-                        .child(div().flex().justify_end().child(
-                            Button::new("business-bot-warning-ok").label("OK").on_click(
-                                cx.listener(|this, _, _, cx| {
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().warning)
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(tr(keys::CHATBOTS_WARNING_TITLE)),
+                    )
+                    .child(div().text_sm().child(warning))
+                    .child(
+                        div().flex().justify_end().child(
+                            Button::new("business-bot-warning-ok")
+                                .label(tr(keys::BOX_OK))
+                                .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(bot) =
                                         this.business_mut().and_then(|d| d.chatbot.as_mut())
                                     {
                                         bot.warning = None;
                                     }
                                     cx.notify();
-                                }),
-                            ),
-                        )),
-                );
+                                })),
+                        ),
+                    ),
+            );
         }
         if confirm_leave {
             body = body.child(

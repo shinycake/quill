@@ -10,6 +10,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::business_start_page::added_line;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// The start page of `user_id`, when the user set one. `None` keeps
@@ -80,7 +81,7 @@ impl QuillApp {
                                 .child(added_line(&name))
                                 .child(
                                     Button::new("business-start-page-how")
-                                        .label("How?")
+                                        .label(tr(keys::Q_BUSINESS_START_PAGE_HOW))
                                         .ghost()
                                         .xsmall()
                                         .on_click(cx.listener(|this, _, window, cx| {

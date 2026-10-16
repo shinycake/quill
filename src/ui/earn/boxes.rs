@@ -225,7 +225,7 @@ impl QuillApp {
                     .w_full()
                     .on_click(move |_, _, cx| cx.open_url(&url)),
                 None => Button::new("earn-tx-ok")
-                    .label("OK")
+                    .label(tr(keys::BOX_OK))
                     .primary()
                     .w_full()
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -259,7 +259,7 @@ impl QuillApp {
             let body = crate::ui::premium_ui::star_tx_facts(session, &tx, cx);
             let footer = div().flex().w_full().child(
                 Button::new("earn-receipt-ok")
-                    .label("OK")
+                    .label(tr(keys::BOX_OK))
                     .primary()
                     .w_full()
                     .on_click(cx.listener(|this, _, window, cx| {

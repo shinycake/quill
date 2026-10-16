@@ -8,6 +8,7 @@
 //! date" is a Monday-first month grid computed from civil dates.
 #![deny(clippy::indexing_slicing)]
 
+use crate::lang::{keys, tr};
 use crate::local_time::{CivilTime, civil_local, utc_offset_at};
 
 /// `searchMessagesChatTypeFilter*` (schema 1.8.67, lines 6335-6341) — the
@@ -27,10 +28,10 @@ impl SearchChatType {
     /// tdesktop `lng_search_filter_*`.
     pub fn label(self) -> &'static str {
         match self {
-            Self::All => "All chats",
-            Self::Private => "Private chats",
-            Self::Groups => "Group chats",
-            Self::Channels => "Channels",
+            Self::All => tr(keys::SEARCH_FILTER_ALL),
+            Self::Private => tr(keys::SEARCH_FILTER_PRIVATE),
+            Self::Groups => tr(keys::SEARCH_FILTER_GROUP),
+            Self::Channels => tr(keys::SEARCH_FILTER_CHANNEL),
         }
     }
 
@@ -53,7 +54,7 @@ pub enum SearchMediaKind {
     All,
     Media,
     /// Photos only and videos only: the global search tabs split what the
-    /// in-chat "Media" chip joins (tdesktop `MediaType::Photo` / `Video`).
+    /// in-chat tr(keys::MEDIA_TYPE_MEDIA) chip joins (tdesktop `MediaType::Photo` / `Video`).
     Photos,
     Videos,
     Links,
@@ -74,14 +75,14 @@ impl SearchMediaKind {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::All => "All",
+            Self::All => tr(keys::FILTERS_ALL_SHORT),
             Self::Media => "Media",
-            Self::Photos => "Photos",
-            Self::Videos => "Videos",
-            Self::Links => "Links",
-            Self::Files => "Files",
-            Self::Music => "Music",
-            Self::Voice => "Voice",
+            Self::Photos => tr(keys::MEDIA_TYPE_PHOTOS),
+            Self::Videos => tr(keys::MEDIA_TYPE_VIDEOS),
+            Self::Links => tr(keys::ALL_LINKS),
+            Self::Files => tr(keys::MEDIA_TYPE_FILES),
+            Self::Music => tr(keys::RIGHTS_CHAT_MUSIC),
+            Self::Voice => tr(keys::Q_SEARCH_VOICE),
         }
     }
 
@@ -118,11 +119,11 @@ impl SearchDateRange {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Any => "Any time",
-            Self::Week => "Past week",
-            Self::Month => "Past month",
-            Self::Year => "Past year",
-            Self::Older => "Older",
+            Self::Any => tr(keys::Q_SEARCH_DATE_ANY),
+            Self::Week => tr(keys::Q_SEARCH_DATE_WEEK),
+            Self::Month => tr(keys::Q_SEARCH_DATE_MONTH),
+            Self::Year => tr(keys::Q_SEARCH_DATE_YEAR),
+            Self::Older => tr(keys::Q_SEARCH_DATE_OLDER),
         }
     }
 
@@ -180,10 +181,10 @@ impl SearchScope {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::MyMessages => "My messages",
-            Self::PublicPosts => "Public posts",
-            Self::Apps => "Apps",
-            Self::Downloads => "Downloads",
+            Self::MyMessages => tr(keys::SEARCH_TAB_MY_MESSAGES),
+            Self::PublicPosts => tr(keys::SEARCH_TAB_PUBLIC_POSTS),
+            Self::Apps => tr(keys::RECENT_APPS),
+            Self::Downloads => tr(keys::DOWNLOADS_SECTION),
         }
     }
 

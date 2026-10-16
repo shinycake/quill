@@ -85,7 +85,7 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
     assert_eq!(result.dest_chat_id, ChatId(12));
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![MessageId(80)]);
-    assert_eq!(result.success_label(), "Forwarded to Bob");
+    assert_eq!(result.success_label(), "Message forwarded to Bob.");
     let dest = session
         .histories
         .get(&12)

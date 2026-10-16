@@ -1028,11 +1028,11 @@ mod tests {
         );
         assert_eq!(
             call_status(&pending(true, true), false, None, 0).0,
-            "is calling you..."
+            "is calling you…"
         );
         assert_eq!(
             call_status(&CallState::ExchangingKeys, true, None, 0).0,
-            "exchanging encryption keys..."
+            "exchanging encryption keys…"
         );
         let ready = |t| call_status(&CallState::Ready, true, t, 75);
         assert_eq!(

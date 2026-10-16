@@ -618,7 +618,11 @@ impl QuillApp {
                     div()
                         .w(px(56.))
                         .flex_none()
-                        .py_1()
+                        // Same height as an xsmall chip, so the label sits on
+                        // the chips' first line.
+                        .h_5()
+                        .flex()
+                        .items_center()
                         .text_xs()
                         .text_color(muted)
                         .child(label),

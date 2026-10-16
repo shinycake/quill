@@ -538,7 +538,7 @@ impl QuillApp {
             )
             .child(
                 Button::new("translate-ok")
-                    .label("OK")
+                    .label(tr(keys::BOX_OK))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.close_translate_dialog(cx);
                         this.close_kit_dialog_if_done(DialogKind::Translate, window, cx);

@@ -30,7 +30,48 @@ impl QuillApp {
             })
             .collect();
         let wheel_handle = handle.clone();
-        div()
+        // Edge fades say "more this way": a clipped strip with no cue reads
+        // as a bug (Design Guides, scroll regions need a deliberate edge).
+        let offset = handle.offset().x;
+        let max = handle.max_offset().x;
+        let fade_left = offset < px(-1.);
+        // Before the first layout the strip's size is unknown: assume it
+        // overflows (six or more tabs) and re-render once measured.
+        let measured = handle.bounds().size.width > px(0.);
+        let fade_right = if measured {
+            max > px(1.) && offset > -max + px(1.)
+        } else {
+            let entity = cx.entity();
+            cx.defer(move |cx| entity.update(cx, |_, cx| cx.notify()));
+            chips.len() >= 6
+        };
+        let bg = cx.theme().background;
+        let fade = |id: &'static str, toward_right: bool| {
+            let (from, to) = if toward_right {
+                (bg.opacity(0.), bg)
+            } else {
+                (bg, bg.opacity(0.))
+            };
+            div()
+                .id(id)
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .w(px(40.))
+                .map(|this| {
+                    if toward_right {
+                        this.right_0()
+                    } else {
+                        this.left_0()
+                    }
+                })
+                .bg(linear_gradient(
+                    90.,
+                    linear_color_stop(from, 0.),
+                    linear_color_stop(to, 1.),
+                ))
+        };
+        let strip = div()
             .id("search-tabs")
             .w_full()
             .flex()
@@ -50,7 +91,18 @@ impl QuillApp {
                     cx.stop_propagation();
                 }
             })
-            .children(chips)
+            .children(chips);
+        div()
+            .id("search-tabs-frame")
+            .relative()
+            .w_full()
+            .child(strip)
+            .when(fade_left, |this| {
+                this.child(fade("search-tabs-fade-left", false))
+            })
+            .when(fade_right, |this| {
+                this.child(fade("search-tabs-fade-right", true))
+            })
             .into_any_element()
     }
 

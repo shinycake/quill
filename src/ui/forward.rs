@@ -9,7 +9,7 @@ use gpui_kit::*;
 use quill::composer::{ForwardDraft, cancel_forward_draft};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with, trn};
+use quill::lang::{keys, tr, trn};
 use quill::state::{ForwardResult, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
@@ -200,23 +200,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let label = result.success_label();
-        let detail = tr_with(
-            keys::Q_MISC_IDS,
-            &[
-                ("0", &result.from_chat_id.0.to_string()),
-                ("dest_title", &result.dest_title.to_string()),
-                (
-                    "join",
-                    &(result
-                        .forwarded_ids
-                        .iter()
-                        .map(|id| id.0.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "))
-                    .to_string(),
-                ),
-            ],
-        );
         div()
             .id("forward-success")
             .flex()
@@ -230,24 +213,14 @@ impl QuillApp {
             .border_color(success())
             .bg(success_bg_subtle())
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(success())
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(text_primary())
-                            .truncate()
-                            .child(super::bidi_line::one_line_plain(detail)),
-                    ),
+                div().flex().flex_col().min_w_0().child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .text_color(success())
+                        .truncate()
+                        .child(super::bidi_line::one_line_plain(label)),
+                ),
             )
             .child(
                 Button::new("dismiss-forward-success")

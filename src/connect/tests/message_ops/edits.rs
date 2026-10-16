@@ -379,7 +379,7 @@ fn driver_forward_messages_shape_and_dest_result() {
         .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![MessageId(80), MessageId(81)]);
-    assert_eq!(result.success_label(), "Forwarded 2 messages to Bob");
+    assert_eq!(result.success_label(), "Messages forwarded to Bob.");
     assert!(
         driver
             .session

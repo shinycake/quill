@@ -290,15 +290,17 @@ pub fn active_custom_keyboard(
 }
 
 impl ForwardResult {
+    /// The toast text: tdesktop's `lng_share_message(s)_to_chat` without its
+    /// bold markers, or a failure line when nothing was forwarded.
     pub fn success_label(&self) -> String {
-        let n = self.forwarded_ids.len();
-        if n == 0 {
-            format!("Could not forward to {}", self.dest_title)
-        } else if n == 1 {
-            format!("Forwarded to {}", self.dest_title)
-        } else {
-            format!("Forwarded {n} messages to {}", self.dest_title)
-        }
+        use crate::lang::{keys, tr_with};
+        let tags = [("chat", self.dest_title.as_ref())];
+        let key = match self.forwarded_ids.len() {
+            0 => return tr_with(keys::Q_FORWARD_FAILED, &tags),
+            1 => keys::SHARE_MESSAGE_TO_CHAT,
+            _ => keys::SHARE_MESSAGES_TO_CHAT,
+        };
+        tr_with(key, &tags).replace("**", "")
     }
 }
 

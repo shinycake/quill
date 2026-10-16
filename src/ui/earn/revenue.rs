@@ -356,7 +356,7 @@ impl QuillApp {
             .child(
                 Button::new("earn-collect")
                     .debug_selector(|| "earn-collect".into())
-                    .label("COLLECT")
+                    .label(tr(keys::CHANNEL_EARN_BALANCE_BUTTON).to_uppercase())
                     .primary()
                     .w_full()
                     .disabled(!enabled)

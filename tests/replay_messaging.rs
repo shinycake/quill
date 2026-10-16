@@ -484,7 +484,7 @@ fn replay_forward_messages_result_and_attribution() {
         .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![quill::ids::MessageId(80)]);
-    assert_eq!(result.success_label(), "Forwarded to Bob");
+    assert_eq!(result.success_label(), "Message forwarded to Bob.");
     let dest = session
         .histories
         .get(&8)

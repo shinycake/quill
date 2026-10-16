@@ -172,7 +172,7 @@ impl QuillApp {
                 .child(
                     div().flex().justify_end().child(
                         Button::new("sponsored-about-ok")
-                            .label("OK")
+                            .label(tr(keys::BOX_OK))
                             .primary()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_sponsored_about(cx);

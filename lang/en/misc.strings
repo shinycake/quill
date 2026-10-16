@@ -335,7 +335,6 @@
 "qll_misc_icon" = "Icon";
 "qll_misc_icon_2" = "Icon {emoji}";
 "qll_misc_icons" = "Icons";
-"qll_misc_ids" = "{0} → {dest_title} (ids {join})";
 "qll_misc_ignore" = "Ignore";
 "qll_misc_image_4_3" = "image 4:3";
 "qll_misc_import_theme_file" = "Import theme file…";
@@ -667,3 +666,6 @@
 "qll_misc_your_color" = "Your color";
 "qll_misc_your_color_2" = "Your color…";
 "qll_misc_zoom_out" = "Zoom out";
+"lng_share_message_to_chat" = "Message forwarded to **{chat}**.";
+"lng_share_messages_to_chat" = "Messages forwarded to **{chat}**.";
+"qll_forward_failed" = "Could not forward to {chat}.";
