@@ -194,6 +194,9 @@ impl QuillApp {
                     ..primary
                 };
                 colors.button_primary_foreground = gpui_kit::white();
+                // The kit's red is 3.8:1 on white: keep destructive text
+                // and fills at WCAG AA.
+                super::app_theme::kit_colors::ensure_danger_aa(colors, dark);
             }
             // The rem size stays at the kit's default: the interface scale
             // zooms whole windows instead (below), so scaling rems too

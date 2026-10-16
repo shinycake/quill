@@ -22,6 +22,7 @@ pub(crate) fn chat_list_preview_line(
     emoji: &std::collections::HashMap<i64, ImageSource>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
     chat_list_preview_line_layered(
         icon,
         preview,
@@ -29,7 +30,7 @@ pub(crate) fn chat_list_preview_line(
         emoji,
         &std::collections::HashMap::new(),
         None,
-        cx,
+        muted,
     )
 }
 
@@ -46,12 +47,12 @@ pub(crate) fn chat_list_preview_line_layered(
     // `Ui::Text::String`, so a Latin name makes the paragraph left-to-right); the caller
     // draws the prefix itself for every other preview.
     prefix: Option<String>,
-    cx: &mut Context<QuillApp>,
+    // Text colour (the selected row passes a higher-contrast one).
+    muted: Hsla,
 ) -> AnyElement {
     // One line, as in Telegram Desktop: line breaks read as spaces (same
     // byte length, so entity offsets still hold).
     let preview = preview.replace(['\n', '\r'], " ");
-    let muted = cx.theme().muted_foreground;
     // Emoji the active set draws need the run-by-run row below; the
     // system font keeps the single text node.
     let sprites =

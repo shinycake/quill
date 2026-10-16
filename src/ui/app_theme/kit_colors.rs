@@ -26,6 +26,58 @@ fn lighter(color: Hsla, by: f32) -> Hsla {
     }
 }
 
+fn rgb_of(color: Hsla) -> u32 {
+    let rgba = Rgba::from(color);
+    let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+    (byte(rgba.r) << 16) | (byte(rgba.g) << 8) | byte(rgba.b)
+}
+
+/// `color` moved in lightness away from `against` until it reaches WCAG AA
+/// (4.5:1), alpha kept.
+fn readable_hsla(color: Hsla, against: Hsla) -> Hsla {
+    let rgb = quill::theme_colorize::readable(
+        rgb_of(color),
+        rgb_of(against),
+        quill::theme_colorize::WCAG_AA,
+    );
+    Hsla {
+        a: color.a,
+        ..Hsla::from(Rgba {
+            r: ((rgb >> 16) & 0xff) as f32 / 255.,
+            g: ((rgb >> 8) & 0xff) as f32 / 255.,
+            b: (rgb & 0xff) as f32 / 255.,
+            a: 1.,
+        })
+    }
+}
+
+/// Destructive colours keep WCAG AA whatever the source red is (the kit's
+/// own red is 3.8:1 on white, Day's attention red 3.8:1 too): the text
+/// colour against the background, the button fill against its label.
+/// Hover and pressed states follow the corrected colours.
+pub(crate) fn ensure_danger_aa(colors: &mut ThemeColor, dark: bool) {
+    let step = if dark { 0.05 } else { -0.04 };
+    // Outline danger buttons draw this text on a wash of the same red
+    // (0.1 idle, 0.2 hovered): correct against the hovered wash, the worst case.
+    let wash = |danger: Hsla| {
+        let (d, b) = (Rgba::from(danger), Rgba::from(colors.background));
+        let mix = |x: f32, y: f32| x * 0.2 + y * 0.8;
+        Hsla::from(Rgba {
+            r: mix(d.r, b.r),
+            g: mix(d.g, b.g),
+            b: mix(d.b, b.b),
+            a: 1.,
+        })
+    };
+    let on_background = readable_hsla(colors.danger, colors.background);
+    colors.danger = readable_hsla(on_background, wash(on_background));
+    colors.danger_hover = lighter(colors.danger, step);
+    colors.danger_active = lighter(colors.danger, if dark { 0.06 } else { -0.06 });
+    colors.button_danger = readable_hsla(colors.button_danger, colors.button_danger_foreground);
+    colors.button_danger_hover = lighter(colors.button_danger, step);
+    colors.button_danger_active = lighter(colors.button_danger, if dark { 0.06 } else { -0.06 });
+}
+
 /// Write `palette` into the kit colours.
 pub(crate) fn apply(colors: &mut ThemeColor, palette: &Palette) {
     use PaletteKey as K;
@@ -156,17 +208,16 @@ pub(crate) fn apply(colors: &mut ThemeColor, palette: &Palette) {
     colors.slider_thumb = on_active;
     colors.progress_bar = active;
     colors.danger = c(K::AttentionButtonFg);
-    colors.danger_hover = lighter(colors.danger, if dark { 0.05 } else { -0.04 });
-    colors.danger_active = pressed(colors.danger);
     colors.button_danger = colors.danger;
-    colors.button_danger_hover = colors.danger_hover;
-    colors.button_danger_active = colors.danger_active;
     colors.button_danger_foreground = on_active;
+    ensure_danger_aa(colors, dark);
 }
 
 #[cfg(test)]
 mod tests {
     use super::{apply, hsla};
+
+    use super::rgb_of as hsla_to_rgb;
     use gpui_kit::component::theme::ThemeColor;
     use quill::app_theme::{BuiltinTheme, PaletteKey};
 
@@ -193,7 +244,40 @@ mod tests {
             colors.muted_foreground,
             hsla((readable << 8) | (sub & 0xff))
         );
+        // Destructive text and button fills keep WCAG AA.
+        let bg = palette.rgba(PaletteKey::WindowBg) >> 8;
+        let danger = hsla_to_rgb(colors.danger);
+        assert!(quill::theme_colorize::contrast(danger, bg) >= 4.5);
+        let button = hsla_to_rgb(colors.button_danger);
+        let label = palette.rgba(PaletteKey::WindowFgActive) >> 8;
+        assert!(quill::theme_colorize::contrast(button, label) >= 4.5);
         // Alpha survives: the scroll bar thumb is translucent.
         assert!(colors.scrollbar_thumb.a < 0.5);
+    }
+
+    /// The kit's own reds (Quill Light / Dark draw from them) reach AA once
+    /// corrected, on a light and on a dark surface.
+    #[test]
+    fn danger_colours_reach_aa() {
+        for (dark, bg) in [(false, 0xffffffu32), (true, 0x0d1117)] {
+            let mut colors = ThemeColor {
+                background: hsla((bg << 8) | 0xff),
+                danger: hsla(0xef4444ff),
+                button_danger: hsla(0xef4444ff),
+                button_danger_foreground: hsla(0xffffffff),
+                ..ThemeColor::default()
+            };
+            super::ensure_danger_aa(&mut colors, dark);
+            let text = hsla_to_rgb(colors.danger);
+            assert!(
+                quill::theme_colorize::contrast(text, bg) >= 4.5,
+                "dark={dark}"
+            );
+            let fill = hsla_to_rgb(colors.button_danger);
+            assert!(
+                quill::theme_colorize::contrast(fill, 0xffffff) >= 4.5,
+                "dark={dark}"
+            );
+        }
     }
 }

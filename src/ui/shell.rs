@@ -389,6 +389,10 @@ where
     move |content, window, cx| {
         let available = (window.viewport_size().height - px(180.)).max(px(80.));
         let body = build(DialogContent::new(), window, cx);
+        // A hairline under the scroll region and a little padding above it
+        // make the end of the visible area a deliberate boundary, so
+        // content that continues below reads as scrolled, not cut off.
+        let border = cx.theme().border;
         content.min_h_0().child(
             div()
                 .id("dialog-body-scroll")
@@ -397,6 +401,9 @@ where
                 .w_full()
                 .max_h(available)
                 .overflow_y_scroll()
+                .pb_2()
+                .border_b_1()
+                .border_color(border)
                 .child(body),
         )
     }

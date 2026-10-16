@@ -2,6 +2,12 @@ use super::super::app::QuillApp;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+/// One-line fields.
+const SINGLE_LINE: (usize, usize) = (1, 1);
+/// The bio shows at least three lines and grows with its content, so a
+/// long bio is never cut mid-line (a fixed 40 px box showed 1.5 lines).
+pub(crate) const BIO_ROWS: (usize, usize) = (3, 8);
+
 /// A5: edit-profile dialog — the profile edit UI entry point
 /// (`parity:auth-edit-name`). One dialog with per-section saves, mirroring
 /// TGX's edit-profile rows: name (`setName`), bio (`setBio`), username
@@ -33,22 +39,35 @@ impl EditProfileDialog {
             cx: &mut Context<QuillApp>,
             placeholder: &str,
             value: &str,
+            rows: (usize, usize),
         ) -> Entity<TextareaState> {
             cx.new(|cx| {
                 let mut state = TextareaState::new(window, cx)
                     .placeholder(placeholder)
-                    .auto_grow(1, 1)
+                    .auto_grow(rows.0, rows.1)
                     .submit_on_enter(false);
                 state.set_value(value, window, cx);
                 state
             })
         }
         Self {
-            first_name_input: field(window, cx, tr(keys::Q_OPS_FIRST_NAME), first_name),
-            last_name_input: field(window, cx, tr(keys::Q_OPS_LAST_NAME), last_name),
-            bio_input: field(window, cx, tr(keys::INFO_BIO_LABEL), bio),
-            username_input: field(window, cx, "username", username),
-            photo_path_input: field(window, cx, "/path/to/photo.jpg", ""),
+            first_name_input: field(
+                window,
+                cx,
+                tr(keys::Q_OPS_FIRST_NAME),
+                first_name,
+                SINGLE_LINE,
+            ),
+            last_name_input: field(
+                window,
+                cx,
+                tr(keys::Q_OPS_LAST_NAME),
+                last_name,
+                SINGLE_LINE,
+            ),
+            bio_input: field(window, cx, tr(keys::INFO_BIO_LABEL), bio, BIO_ROWS),
+            username_input: field(window, cx, "username", username, SINGLE_LINE),
+            photo_path_input: field(window, cx, "/path/to/photo.jpg", "", SINGLE_LINE),
             sources: Default::default(),
         }
     }
@@ -63,5 +82,14 @@ impl EditProfileDialog {
         let text = Self::text(&self.username_input, cx);
         let text = text.trim();
         text.strip_prefix('@').unwrap_or(text).to_string()
+    }
+}
+
+#[cfg(test)]
+mod bio_rows_tests {
+    /// The bio box starts at three lines (it was one fixed 40 px box).
+    #[test]
+    fn bio_shows_at_least_three_rows() {
+        assert!(super::BIO_ROWS.0 >= 3 && super::BIO_ROWS.1 > super::BIO_ROWS.0);
     }
 }
