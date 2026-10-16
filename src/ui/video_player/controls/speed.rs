@@ -15,6 +15,7 @@ use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::{ActiveTheme, Icon, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::viewer_extras::{SPEED_PRESETS, equal_speeds, speed_label};
 use std::rc::Rc;
 
@@ -51,14 +52,18 @@ pub(crate) fn speed_trigger(
 ) -> Button {
     let button = Button::new(id)
         .custom(overlay_button(cx))
-        .tooltip("Playback speed")
-        .accessibility_label(format!(
-            "Playback speed {}",
-            speed_label(if boosted {
-                quill::media_viewer::SPEED_BOOST_RATE
-            } else {
-                speed
-            })
+        .tooltip(tr(keys::Q_AV_PLAYBACK_SPEED_2))
+        .accessibility_label(tr_with(
+            keys::Q_AV_PLAYBACK_SPEED_3,
+            &[(
+                "speed_label",
+                &(speed_label(if boosted {
+                    quill::media_viewer::SPEED_BOOST_RATE
+                } else {
+                    speed
+                }))
+                .to_string(),
+            )],
         ));
     match speed_badge(speed, boosted) {
         SpeedBadge::Normal => button.icon(IconName::Gauge).with_size(SIDE_BUTTON),
@@ -145,7 +150,7 @@ impl RenderOnce for SpeedMenu {
                     .justify_between()
                     .text_xs()
                     .text_color(muted)
-                    .child("Speed")
+                    .child(tr(keys::Q_AV_SPEED))
                     .child(speed_label(self.current)),
             )
             .child(div().px_2().py_1().child(Slider::new(&self.slider)))

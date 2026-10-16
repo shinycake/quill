@@ -4,6 +4,7 @@ use super::*;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 /// Which kind of track the shared in-process player is playing (Phase 4.6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PlaybackKind {
@@ -64,7 +65,11 @@ pub(crate) fn row_playback_controls(
         .child(
             super::message_media::inline_link(
                 SharedString::from(format!("{kind}-mute-{row_key}")),
-                if seek.muted { "Unmute" } else { "Mute" },
+                if seek.muted {
+                    tr(keys::Q_AV_UNMUTE)
+                } else {
+                    tr(keys::GROUP_CALL_CONTEXT_MUTE)
+                },
                 accent,
             )
             .on_click(cx.listener(|this, _, _, cx| {

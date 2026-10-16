@@ -38,6 +38,7 @@ use metrics::{
     PLAY_BUTTON, PROGRESS_INSET, PROGRESS_SKIP, SCRUBBER_ROW_TOP, SIDE_BUTTON, VOLUME_LEFT,
     VOLUME_SKIP, VOLUME_WIDTH,
 };
+use quill::lang::{keys, tr};
 use quill::media_viewer::{BoostState, waiting_wait};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -319,9 +320,9 @@ impl RenderOnce for VideoController {
 
         let toggle_play = actions.toggle_play.clone();
         let (play_icon, play_label) = if playing {
-            (IconName::Pause, "Pause")
+            (IconName::Pause, tr(keys::MAC_MENU_PLAYER_PAUSE))
         } else {
-            (IconName::Play, "Play")
+            (IconName::Play, tr(keys::Q_AV_PLAY))
         };
         let play = div()
             .id(("viewer-play-tip", row_id))
@@ -337,7 +338,11 @@ impl RenderOnce for VideoController {
 
         let toggle_mute = actions.toggle_mute.clone();
         let muted = self.level <= 0.0;
-        let mute_label = if muted { "Unmute" } else { "Mute" };
+        let mute_label = if muted {
+            tr(keys::Q_AV_UNMUTE)
+        } else {
+            tr(keys::GROUP_CALL_CONTEXT_MUTE)
+        };
         let volume = div()
             .flex()
             .items_center()
@@ -363,17 +368,21 @@ impl RenderOnce for VideoController {
 
         let fullscreen = actions.fullscreen.clone();
         let (fs_icon, fs_label, fs_key) = if self.fullscreen {
-            (IconName::Minimize, "Exit full screen", "escape")
+            (
+                IconName::Minimize,
+                tr(keys::Q_AV_EXIT_FULL_SCREEN),
+                "escape",
+            )
         } else {
-            (IconName::Maximize, "Full screen", "alt-enter")
+            (IconName::Maximize, tr(keys::Q_AV_FULL_SCREEN), "alt-enter")
         };
         let pip = actions.pip.clone().map(|pip| {
             Button::new(("media-viewer-pip", row_id))
                 .icon(IconName::PictureInPicture2)
                 .custom(variant)
                 .with_size(SIDE_BUTTON)
-                .tooltip("Picture-in-Picture")
-                .accessibility_label("Picture-in-Picture")
+                .tooltip(tr(keys::Q_AV_PICTURE_IN_PICTURE))
+                .accessibility_label(tr(keys::Q_AV_PICTURE_IN_PICTURE))
                 .on_click(move |_, window, cx| pip(window, cx))
         });
         let right = div()
@@ -437,7 +446,7 @@ impl RenderOnce for VideoController {
             .id(("media-viewer-player", row_id))
             .test_support()
             .role(Role::Group)
-            .aria_label("Video controls")
+            .aria_label(tr(keys::Q_AV_VIDEO_CONTROLS))
             .relative()
             .w(PANEL_WIDTH)
             .max_w_full()

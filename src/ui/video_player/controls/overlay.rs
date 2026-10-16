@@ -14,6 +14,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 
 /// What shows over the picture.
 pub(crate) enum PictureState {
@@ -66,7 +67,7 @@ impl RenderOnce for PictureOverlay {
                 .id(("viewer-waiting", row_id))
                 .test_support()
                 .role(Role::ProgressIndicator)
-                .aria_label("Loading video")
+                .aria_label(tr(keys::Q_AV_LOADING_VIDEO))
                 .child(Spinner::new().with_size(SPINNER).color(white))
                 .into_any_element(),
             PictureState::Downloading {
@@ -83,7 +84,7 @@ impl RenderOnce for PictureOverlay {
                     .rounded_full()
                     .bg(panel_background())
                     .role(Role::Button)
-                    .aria_label("Cancel download")
+                    .aria_label(tr(keys::Q_AV_CANCEL_DOWNLOAD))
                     .on_click(move |_, window, cx| on_cancel(window, cx))
                     .child(
                         ProgressCircle::new(("viewer-download-progress", row_id))
@@ -91,7 +92,7 @@ impl RenderOnce for PictureOverlay {
                             .color(white)
                             .loading(progress.is_none())
                             .value(progress.unwrap_or(0.0).clamp(0.0, 1.0) * 100.0)
-                            .accessibility_label("Downloading")
+                            .accessibility_label(tr(keys::SR_MESSAGE_DOWNLOADING))
                             .child(
                                 div()
                                     .size_full()
@@ -111,8 +112,8 @@ impl RenderOnce for PictureOverlay {
                 .custom(overlay_button(cx).color(panel_background()))
                 .rounded(PROGRESS_RING / 2.)
                 .with_size(PROGRESS_RING)
-                .tooltip("Download")
-                .accessibility_label("Download")
+                .tooltip(tr(keys::MEDIA_DOWNLOAD))
+                .accessibility_label(tr(keys::MEDIA_DOWNLOAD))
                 .on_click(move |_, window, cx| on_start(window, cx))
                 .into_any_element(),
             PictureState::Failed { detail, open } => div()
@@ -135,13 +136,13 @@ impl RenderOnce for PictureOverlay {
                         .text_sm()
                         .font_semibold()
                         .text_color(white)
-                        .child("This video can't be played"),
+                        .child(tr(keys::Q_AV_THIS_VIDEO_CANT_BE_PLAYED_2)),
                 )
                 .child(div().text_xs().text_color(white.opacity(0.8)).child(detail))
                 .when_some(open, |this, open| {
                     this.child(
                         Button::new(("media-viewer-open-externally", row_id))
-                            .label("Open externally")
+                            .label(tr(keys::Q_AV_OPEN_EXTERNALLY))
                             .small()
                             .custom(overlay_button(cx))
                             .mt_1()

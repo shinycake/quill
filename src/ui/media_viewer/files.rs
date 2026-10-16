@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::ui::image_decode::{self, READ_BYTES_LIMIT, Sniffed};
+use quill::lang::{keys, tr, tr_with};
 use quill::media_viewer::{collect_file_items, opens_as_picture};
 use quill::telegram::envelope::{DocumentContent, MessageContent};
 use std::io::Read as _;
@@ -156,7 +157,7 @@ impl FileCard {
                 .file_name
                 .clone()
                 .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| "File".to_string()),
+                .unwrap_or_else(|| tr(keys::Q_AV_FILE).to_string()),
             size: file.map(ParsedFile::display_size).unwrap_or(0),
             state,
         }
@@ -174,10 +175,11 @@ impl FileCard {
             state,
         } = self;
         let status = match state {
-            FileState::Downloading(Some(progress)) => {
-                format!("Downloading… {}%", (progress * 100.0).round() as i32)
-            }
-            FileState::Downloading(None) => "Downloading…".to_string(),
+            FileState::Downloading(Some(progress)) => tr_with(
+                keys::Q_AV_DOWNLOADING_3,
+                &[("round", &((progress * 100.0).round() as i32).to_string())],
+            ),
+            FileState::Downloading(None) => tr(keys::Q_AV_DOWNLOADING_4).to_string(),
             _ => format_bytes(size),
         };
         let act = move |action: fn(&mut QuillApp, FileId, &mut Context<QuillApp>)| {
@@ -193,22 +195,24 @@ impl FileCard {
                 .text_color(gpui_kit::white())
         };
         let actions = match state {
-            FileState::Remote => div().child(button("viewer-file-download", "Download").on_click(
-                act(|this, id, cx| this.request_media_download(id, None, cx)),
-            )),
+            FileState::Remote => div().child(
+                button("viewer-file-download", tr(keys::MEDIA_DOWNLOAD)).on_click(act(
+                    |this, id, cx| this.request_media_download(id, None, cx),
+                )),
+            ),
             FileState::Downloading(_) => div().child(
-                button("viewer-file-cancel", "Cancel")
+                button("viewer-file-cancel", tr(keys::MEDIA_CANCEL))
                     .on_click(act(|this, id, cx| this.cancel_media_download(id, cx))),
             ),
             FileState::Local => div()
                 .flex()
                 .gap_1()
                 .child(
-                    button("viewer-file-open", "Open in another app")
+                    button("viewer-file-open", tr(keys::Q_AV_OPEN_IN_ANOTHER_APP))
                         .on_click(act(|this, id, cx| this.open_downloaded_file(id, cx))),
                 )
                 .child(
-                    button("viewer-file-reveal", "Show in folder")
+                    button("viewer-file-reveal", tr(keys::Q_AV_SHOW_IN_FOLDER_2))
                         .on_click(act(|this, id, cx| this.reveal_downloaded_file(id, cx))),
                 ),
         };

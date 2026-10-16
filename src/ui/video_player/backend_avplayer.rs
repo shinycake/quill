@@ -32,6 +32,7 @@ use objc2_core_video::{
     kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
+use quill::lang::{keys, tr};
 use std::ops::Range;
 use std::path::Path;
 #[cfg(feature = "demo-capture")]
@@ -85,14 +86,11 @@ impl AvPlayerBackend {
     /// says `readyToPlay` (the player polls it while opening).
     pub(super) fn open(path: &Path) -> Result<Self, PlayerError> {
         let mtm = MainThreadMarker::new().ok_or_else(|| {
-            PlayerError::new(
-                ErrorKind::Open,
-                "video playback must start on the main thread",
-            )
+            PlayerError::new(ErrorKind::Open, tr(keys::Q_AV_VIDEO_PLAYBACK_MUST_START_ON))
         })?;
-        let path = path
-            .to_str()
-            .ok_or_else(|| PlayerError::new(ErrorKind::Open, "video path is not valid UTF-8"))?;
+        let path = path.to_str().ok_or_else(|| {
+            PlayerError::new(ErrorKind::Open, tr(keys::Q_AV_VIDEO_PATH_IS_NOT_VALID))
+        })?;
         // SAFETY: plain AVFoundation object construction on the main thread
         // (checked above); every argument is a valid, retained object, and
         // the pixel format key is a CoreVideo constant (a CFString, which
@@ -352,7 +350,7 @@ impl Backend for AvPlayerBackend {
                     .item
                     .error()
                     .map(|err| err.localizedDescription().to_string())
-                    .unwrap_or_else(|| "This video can't be played.".to_string());
+                    .unwrap_or_else(|| tr(keys::Q_AV_THIS_VIDEO_CANT_BE_PLAYED).to_string());
                 PlayerError::new(ErrorKind::Decode, detail)
             })
         }

@@ -2,6 +2,7 @@
 //! backdrop and the playing picture.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Phase 4.5 / MED1: the viewer panel: top bar, the media box (its
@@ -93,9 +94,9 @@ impl QuillApp {
         let profile_view = self.viewer.state.source() == ViewerSource::Profile;
         let kind_label = if profile_view {
             if self.viewer.extra.profile_personal == Some(item.message_id.0) {
-                "Photo set by you"
+                tr(keys::MEDIAVIEW_PROFILE_PHOTO_BY_YOU)
             } else {
-                "Profile photo"
+                tr(keys::Q_AV_PROFILE_PHOTO)
             }
         } else if ttl.is_some() {
             quill::media_viewer::disappearing_label(item.kind)
@@ -153,9 +154,9 @@ impl QuillApp {
                     .iter()
                     .any(|id| history.iter().any(|m| m.id == *id && m.is_pinned));
                 Some(if any_pinned {
-                    "Unpin album".to_string()
+                    tr(keys::Q_AV_UNPIN_ALBUM).to_string()
                 } else {
-                    "Pin album".to_string()
+                    tr(keys::Q_AV_PIN_ALBUM).to_string()
                 })
             });
         // The visual fills the window between the top bar and the bottom
@@ -255,7 +256,10 @@ impl QuillApp {
                             .items_center()
                             .justify_center()
                             .text_color(gpui_kit::white())
-                            .child(format!("{kind_label} — could not render"))
+                            .child(tr_with(
+                                keys::Q_AV_COULD_NOT_RENDER,
+                                &[("kind_label", kind_label)],
+                            ))
                             .into_any_element()
                     })
                     .into_any_element()
@@ -271,18 +275,24 @@ impl QuillApp {
                     .map(|p| (p * 100.0).round() as i32)
                     .next();
                 let downloading_label = match progress_pct {
-                    Some(pct) => format!("downloading… {pct}%"),
-                    None => "downloading…".to_string(),
+                    Some(pct) => tr_with(keys::Q_AV_DOWNLOADING, &[("pct", &pct.to_string())]),
+                    None => tr(keys::Q_AV_DOWNLOADING_2).to_string(),
                 };
                 let status = match (&item.duration_label, downloading_now) {
                     (Some(duration), true) => {
                         format!("{kind_label} · {duration} — {downloading_label}")
                     }
-                    (Some(duration), false) => {
-                        format!("{kind_label} · {duration} — not downloaded")
-                    }
+                    (Some(duration), false) => tr_with(
+                        keys::Q_AV_NOT_DOWNLOADED,
+                        &[
+                            ("kind_label", kind_label),
+                            ("duration", &duration.to_string()),
+                        ],
+                    ),
                     (None, true) => format!("{kind_label} — {downloading_label}"),
-                    (None, false) => format!("{kind_label} — not downloaded"),
+                    (None, false) => {
+                        tr_with(keys::Q_AV_NOT_DOWNLOADED_2, &[("kind_label", kind_label)])
+                    }
                 };
                 div()
                     .id(("media-viewer-loading", row_id))
@@ -331,9 +341,14 @@ impl QuillApp {
             let menu_rotate_video = self.viewer_video_rotatable();
             let menu_share_at: Option<String> = (self.viewer_can_share_at_time() && !protected)
                 .then(|| {
-                    format!(
-                        "Share at {}",
-                        quill::message_menu::timecode_text(f64::from(self.viewer_share_position()))
+                    tr_with(
+                        keys::MEDIAVIEW_SHARE_AT_TIME,
+                        &[(
+                            "time",
+                            &quill::message_menu::timecode_text(f64::from(
+                                self.viewer_share_position(),
+                            )),
+                        )],
                     )
                 });
             // `photo.has_stickers` / `video.has_stickers`: stickers were
@@ -427,35 +442,39 @@ impl QuillApp {
                     };
                     let mut menu = menu;
                     if menu_set_main {
-                        menu = menu.item(item("Set as Main Photo", |this, _, cx| {
+                        menu = menu.item(item(tr(keys::Q_AV_SET_AS_MAIN_PHOTO), |this, _, cx| {
                             this.set_viewer_photo_as_main(cx)
                         }));
                     }
                     if menu_can_report {
-                        menu = menu.item(item("Report", |this, _, cx| {
+                        menu = menu.item(item(tr(keys::Q_AV_REPORT), |this, _, cx| {
                             this.report_viewer_profile_photo(cx)
                         }));
                     }
                     if !menu_protected && !menu_profile {
-                        menu = menu.item(item("Forward", |this, window, cx| {
+                        menu = menu.item(item(tr(keys::Q_AV_FORWARD), |this, window, cx| {
                             this.share_viewer_media(window, cx)
                         }));
                     }
                     if menu_can_delete {
-                        menu = menu.item(item("Delete", |this, window, cx| {
+                        menu = menu.item(item(tr(keys::BOX_DELETE), |this, window, cx| {
                             this.delete_viewer_media(window, cx)
                         }));
                     }
                     if !menu_protected {
                         menu = menu
                             .item(PopupMenuItem::separator())
-                            .item(item("Save As…", |this, _, cx| this.save_viewer_media(cx)));
+                            .item(item(tr(keys::Q_AV_SAVE_AS_2), |this, _, cx| {
+                                this.save_viewer_media(cx)
+                            }));
                         if is_photo {
-                            menu =
-                                menu.item(item("Copy", |this, _, cx| this.copy_viewer_photo(cx)));
+                            menu = menu.item(item(tr(keys::Q_AV_COPY), |this, _, cx| {
+                                this.copy_viewer_photo(cx)
+                            }));
                         } else if menu_playable {
-                            menu = menu
-                                .item(item("Copy Frame", |this, _, cx| this.copy_viewer_frame(cx)));
+                            menu = menu.item(item(tr(keys::Q_AV_COPY_FRAME), |this, _, cx| {
+                                this.copy_viewer_frame(cx)
+                            }));
                         }
                     }
                     if let Some(label) = menu_share_at.clone() {
@@ -468,12 +487,12 @@ impl QuillApp {
                             }));
                     }
                     if menu_attached {
-                        menu = menu.item(item("Attached Stickers", |this, _, cx| {
+                        menu = menu.item(item(tr(keys::Q_AV_ATTACHED_STICKERS), |this, _, cx| {
                             this.show_viewer_attached_stickers(cx)
                         }));
                     }
                     if !menu_profile {
-                        menu = menu.item(item("Show in Chat", |this, _, cx| {
+                        menu = menu.item(item(tr(keys::Q_AV_SHOW_IN_CHAT), |this, _, cx| {
                             this.show_viewer_in_chat(cx)
                         }));
                     }
@@ -486,18 +505,22 @@ impl QuillApp {
                     if is_photo {
                         menu = menu
                             .item(PopupMenuItem::separator())
-                            .item(item("Rotate", |this, _, cx| this.rotate_viewer_photo(cx)))
-                            .item(item("Flip Horizontally", |this, _, cx| {
+                            .item(item(tr(keys::Q_AV_ROTATE), |this, _, cx| {
+                                this.rotate_viewer_photo(cx)
+                            }))
+                            .item(item(tr(keys::Q_AV_FLIP_HORIZONTALLY), |this, _, cx| {
                                 this.flip_viewer_horizontal(cx)
                             }))
-                            .item(item("Flip Vertically", |this, _, cx| {
+                            .item(item(tr(keys::Q_AV_FLIP_VERTICALLY), |this, _, cx| {
                                 this.flip_viewer_vertical(cx)
                             }));
                     }
                     if menu_rotate_video {
                         menu = menu
                             .item(PopupMenuItem::separator())
-                            .item(item("Rotate", |this, _, cx| this.rotate_viewer_video(cx)));
+                            .item(item(tr(keys::Q_AV_ROTATE), |this, _, cx| {
+                                this.rotate_viewer_video(cx)
+                            }));
                     }
                     menu
                 })
@@ -582,7 +605,7 @@ impl QuillApp {
                     .text_color(gpui_kit::white())
                     .when_some(sender_profile, |this, profile| {
                         this.role(Role::Button)
-                            .aria_label("Open profile")
+                            .aria_label(tr(keys::Q_AV_OPEN_PROFILE))
                             .cursor_pointer()
                             .hover(|style| style.opacity(0.8))
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -629,7 +652,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-rotate", row_id),
                                 gpui_kit::assets::IconName::RotateCw,
-                                "Rotate",
+                                tr(keys::Q_AV_ROTATE),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.rotate_viewer_photo(cx);
@@ -643,7 +666,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-set-main", row_id),
                                 gpui_kit::assets::IconName::Images,
-                                "Set as main photo",
+                                tr(keys::Q_AV_SET_AS_MAIN_PHOTO_2),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.set_viewer_photo_as_main(cx);
@@ -655,7 +678,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-report", row_id),
                                 gpui_kit::assets::IconName::Flag,
-                                "Report",
+                                tr(keys::Q_AV_REPORT),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.report_viewer_profile_photo(cx);
@@ -667,7 +690,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-share", row_id),
                                 gpui_kit::assets::IconName::Forward,
-                                "Share",
+                                tr(keys::Q_AV_SHARE),
                             )
                             .on_click(cx.listener(
                                 |this, _, window, cx| {
@@ -681,7 +704,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-save", row_id),
                                 gpui_kit::assets::IconName::Download,
-                                "Save",
+                                tr(keys::SETTINGS_SAVE),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.save_viewer_media(cx);
@@ -693,7 +716,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-show-in-chat", row_id),
                                 gpui_kit::assets::IconName::MessageSquare,
-                                "Show in chat",
+                                tr(keys::Q_AV_SHOW_IN_CHAT_2),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_viewer_in_chat(cx);
@@ -718,7 +741,7 @@ impl QuillApp {
                             icon_action(
                                 ("media-viewer-delete", row_id),
                                 gpui_kit::assets::IconName::Trash,
-                                "Delete",
+                                tr(keys::BOX_DELETE),
                             )
                             .on_click(cx.listener(
                                 |this, _, window, cx| {
@@ -731,7 +754,7 @@ impl QuillApp {
                         icon_action(
                             ("media-viewer-close", row_id),
                             gpui_kit::assets::IconName::X,
-                            "Close media viewer",
+                            tr(keys::Q_AV_CLOSE_MEDIA_VIEWER),
                         )
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.close_media_viewer(cx);
@@ -763,7 +786,7 @@ impl QuillApp {
             nav_arrow(
                 "media-viewer-prev",
                 gpui_kit::assets::IconName::ChevronLeft,
-                "Previous",
+                tr(keys::Q_AV_PREVIOUS),
                 -1,
                 cx,
             )
@@ -772,7 +795,7 @@ impl QuillApp {
             nav_arrow(
                 "media-viewer-next",
                 gpui_kit::assets::IconName::ChevronRight,
-                "Next",
+                tr(keys::Q_AV_NEXT),
                 1,
                 cx,
             )
@@ -882,7 +905,7 @@ impl QuillApp {
                                     .when(can_open, |row| {
                                         row.child(
                                             Button::new(("media-viewer-open-externally", row_id))
-                                                .label("Open externally")
+                                                .label(tr(keys::Q_AV_OPEN_EXTERNALLY))
                                                 .ghost()
                                                 .text_color(gpui_kit::white())
                                                 .on_click(cx.listener(|this, _, _, cx| {

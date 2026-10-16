@@ -24,6 +24,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::media_session::{self, Command, NowPlaying};
 use quill::playback::PlaybackClock;
 use quill::playlist::{self, Move, OrderMode, RepeatMode, ShuffleState, Step, VoiceEntry};
@@ -85,7 +86,7 @@ impl QuillApp {
                     .into_iter()
                     .find(|t| !t.trim().is_empty())
                     .cloned()
-                    .unwrap_or_else(|| "Audio".into()),
+                    .unwrap_or_else(|| tr(keys::Q_AV_AUDIO).into()),
                 subtitle: track.performer.clone(),
             };
         }
@@ -96,14 +97,14 @@ impl QuillApp {
                         .into_iter()
                         .find(|t| !t.trim().is_empty())
                         .cloned()
-                        .unwrap_or_else(|| "Audio".into());
+                        .unwrap_or_else(|| tr(keys::Q_AV_AUDIO).into());
                     return TrackMeta {
                         title,
                         subtitle: audio.performer.clone(),
                     };
                 }
                 TrackMeta {
-                    title: "Audio".into(),
+                    title: tr(keys::Q_AV_AUDIO).into(),
                     subtitle: String::new(),
                 }
             }
@@ -111,15 +112,15 @@ impl QuillApp {
                 title: session
                     .sender_name_and_accent(m.sender)
                     .0
-                    .unwrap_or_else(|| "Voice message".into()),
-                subtitle: "Voice message".into(),
+                    .unwrap_or_else(|| tr(keys::Q_AV_VOICE_MESSAGE).into()),
+                subtitle: tr(keys::Q_AV_VOICE_MESSAGE).into(),
             },
             (PlaybackKind::Voice, None) => TrackMeta {
-                title: "Voice message".into(),
+                title: tr(keys::Q_AV_VOICE_MESSAGE).into(),
                 subtitle: String::new(),
             },
             (PlaybackKind::Audio, None) => TrackMeta {
-                title: "Audio".into(),
+                title: tr(keys::Q_AV_AUDIO).into(),
                 subtitle: String::new(),
             },
         }
@@ -324,7 +325,7 @@ impl QuillApp {
             (Some(meta), _) => meta.clone(),
             (None, Some(chat)) => self.track_meta_for(chat, id, self.active_playback_kind()),
             (None, None) => TrackMeta {
-                title: "Audio".into(),
+                title: tr(keys::Q_AV_AUDIO).into(),
                 subtitle: String::new(),
             },
         };
@@ -363,9 +364,9 @@ impl QuillApp {
             (None, Some(chat)) => self.track_meta_for(chat, id, kind),
             (None, None) => TrackMeta {
                 title: if kind == PlaybackKind::Audio {
-                    "Audio".into()
+                    tr(keys::Q_AV_AUDIO).into()
                 } else {
-                    "Voice message".into()
+                    tr(keys::Q_AV_VOICE_MESSAGE).into()
                 },
                 subtitle: String::new(),
             },
@@ -403,7 +404,7 @@ impl QuillApp {
             .flex_1()
             .min_w_0()
             .role(Role::Button)
-            .aria_label("Go to message")
+            .aria_label(tr(keys::Q_AV_GO_TO_MESSAGE))
             .tab_index(0)
             .cursor_pointer()
             .on_click(cx.listener(|this, _, window, cx| this.jump_to_playing(window, cx)))
@@ -438,14 +439,18 @@ impl QuillApp {
                 .border_color(cx.theme().border)
                 .bg(bg_canvas())
                 .role(Role::Group)
-                .aria_label("Now playing")
+                .aria_label(tr(keys::Q_AV_NOW_PLAYING))
                 .when(music, |this| {
                     this.child(
-                        icon_button("player-bar-prev", IconName::SkipBack, "Previous track")
-                            .disabled(!can_previous)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.player_step(Step::Previous, cx);
-                            })),
+                        icon_button(
+                            "player-bar-prev",
+                            IconName::SkipBack,
+                            tr(keys::Q_AV_PREVIOUS_TRACK),
+                        )
+                        .disabled(!can_previous)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.player_step(Step::Previous, cx);
+                        })),
                     )
                 })
                 .child(
@@ -456,17 +461,25 @@ impl QuillApp {
                         } else {
                             IconName::Play
                         },
-                        if playing { "Pause" } else { "Play" },
+                        if playing {
+                            tr(keys::MAC_MENU_PLAYER_PAUSE)
+                        } else {
+                            tr(keys::Q_AV_PLAY)
+                        },
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_active_playback(cx))),
                 )
                 .when(music, |this| {
                     this.child(
-                        icon_button("player-bar-next", IconName::SkipForward, "Next track")
-                            .disabled(!can_next)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.player_step(Step::Next, cx);
-                            })),
+                        icon_button(
+                            "player-bar-next",
+                            IconName::SkipForward,
+                            tr(keys::Q_AV_NEXT_TRACK),
+                        )
+                        .disabled(!can_next)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.player_step(Step::Next, cx);
+                        })),
                     )
                 })
                 .child(title_block)
@@ -477,7 +490,7 @@ impl QuillApp {
                             .flex_none()
                             .w(px(140.))
                             .role(Role::Group)
-                            .aria_label("Playback position")
+                            .aria_label(tr(keys::Q_AV_PLAYBACK_POSITION))
                             .child(Slider::new(&slider).bg(accent()).text_color(accent())),
                     )
                 })
@@ -497,7 +510,11 @@ impl QuillApp {
                         } else {
                             IconName::Volume2
                         },
-                        if muted { "Unmute" } else { "Mute" },
+                        if muted {
+                            tr(keys::Q_AV_UNMUTE)
+                        } else {
+                            tr(keys::GROUP_CALL_CONTEXT_MUTE)
+                        },
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_playback_mute(cx))),
                 )
@@ -511,9 +528,9 @@ impl QuillApp {
                                 IconName::Repeat
                             },
                             match repeat {
-                                RepeatMode::Off => "Repeat: off",
-                                RepeatMode::One => "Repeat: this track",
-                                RepeatMode::All => "Repeat: all tracks",
+                                RepeatMode::Off => tr(keys::Q_AV_REPEAT_OFF),
+                                RepeatMode::One => tr(keys::Q_AV_REPEAT_THIS_TRACK),
+                                RepeatMode::All => tr(keys::Q_AV_REPEAT_ALL_TRACKS),
                             },
                         )
                         .selected(repeat != RepeatMode::Off)
@@ -531,9 +548,9 @@ impl QuillApp {
                                 IconName::ArrowDownUp
                             },
                             match order {
-                                OrderMode::InOrder => "Order: in order",
-                                OrderMode::Reverse => "Order: newest first",
-                                OrderMode::Shuffle => "Order: shuffle",
+                                OrderMode::InOrder => tr(keys::Q_AV_ORDER_IN_ORDER),
+                                OrderMode::Reverse => tr(keys::Q_AV_ORDER_NEWEST_FIRST),
+                                OrderMode::Shuffle => tr(keys::Q_AV_ORDER_SHUFFLE),
                             },
                         )
                         .selected(order != OrderMode::InOrder)
@@ -545,7 +562,7 @@ impl QuillApp {
                     )
                 })
                 .child(
-                    icon_button("player-bar-close", IconName::X, "Close player")
+                    icon_button("player-bar-close", IconName::X, tr(keys::Q_AV_CLOSE_PLAYER))
                         .on_click(cx.listener(|this, _, _, cx| this.close_player(cx))),
                 )
                 .into_any_element(),

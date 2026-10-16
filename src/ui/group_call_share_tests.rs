@@ -123,7 +123,10 @@ fn the_box_copies_the_speaker_or_listener_link(cx: &mut TestAppContext) {
 
     app.update_in(vcx, |app, _, cx| app.close_group_call_share_links(cx));
     assert!(!overlay_shown(&app, vcx));
-    assert_eq!(LINK_COPIED, "Invite link copied to clipboard.");
+    assert_eq!(
+        quill::lang::tr(LINK_COPIED),
+        "Invite link copied to clipboard."
+    );
 }
 
 #[gpui_kit::test]

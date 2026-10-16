@@ -3,6 +3,7 @@
 //! `playbackControlsRotate`, `shareAtTime` and `playbackControlsQualities`).
 
 use super::*;
+use quill::lang::{keys, tr};
 use quill::media_viewer::{VideoQualityOption, current_quality};
 
 /// Remember a video's turns for this run (tdesktop keeps them per document);
@@ -34,7 +35,7 @@ impl QuillApp {
     /// 90 degrees each time and remembers it per file).
     pub(in crate::ui) fn rotate_viewer_video(&mut self, cx: &mut Context<Self>) {
         if !self.viewer_video_rotatable() {
-            self.connection.status_note = "this video can't be rotated".into();
+            self.connection.status_note = tr(keys::Q_AV_THIS_VIDEO_CANT_BE_ROTATED).into();
             cx.notify();
             return;
         }
@@ -116,10 +117,10 @@ impl QuillApp {
         };
         self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.get_message_link_at(chat_id, message_id, secs) {
-                Ok(_) => "fetching message link…".into(),
-                Err(_) => "could not get message link".into(),
+                Ok(_) => tr(keys::Q_AV_FETCHING_MESSAGE_LINK).into(),
+                Err(_) => tr(keys::Q_AV_COULD_NOT_GET_MESSAGE_LINK).into(),
             },
-            None => "no live connection".into(),
+            None => tr(keys::Q_AV_NO_LIVE_CONNECTION).into(),
         };
         cx.notify();
         true
@@ -169,7 +170,7 @@ impl QuillApp {
         let current: Option<VideoQualityOption> = current_quality(item).cloned();
         let options = item.quality_options.clone();
         let button_label = current.as_ref().map_or_else(
-            || "Auto".to_string(),
+            || tr(keys::Q_AV_AUTO).to_string(),
             |option| format!("{}p", option.height),
         );
         let view = cx.entity().downgrade();
@@ -180,8 +181,8 @@ impl QuillApp {
                     Button::new(("media-viewer-quality-button", row_id as usize))
                         .label(button_label)
                         .custom(crate::ui::video_player::controls::overlay_button(cx))
-                        .tooltip("Video quality")
-                        .accessibility_label("Video quality"),
+                        .tooltip(tr(keys::Q_AV_VIDEO_QUALITY))
+                        .accessibility_label(tr(keys::Q_AV_VIDEO_QUALITY)),
                 )
                 .content(move |_state, _window, cx| {
                     let popover = cx.entity();
@@ -207,7 +208,7 @@ impl QuillApp {
                                 .into_any_element(),
                         );
                     };
-                    push(0, "Auto".to_string(), saved == 0, 0);
+                    push(0, tr(keys::Q_AV_AUTO).to_string(), saved == 0, 0);
                     for option in &options {
                         push(
                             option.height as usize,

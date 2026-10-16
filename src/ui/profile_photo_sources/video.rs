@@ -9,6 +9,7 @@ use super::{QuillApp, run_ffmpeg, work_dir};
 use crate::ui::shell::DialogKind;
 use crate::ui::video_editor::EditorTarget;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::profile_photo_video::{encode_args, main_frame_secs};
 
 impl QuillApp {
@@ -17,7 +18,7 @@ impl QuillApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose Video".into()),
+            prompt: Some(tr(keys::Q_AV_CHOOSE_VIDEO).into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
@@ -51,7 +52,7 @@ impl QuillApp {
         let edits = editor.edits;
         let input = editor.source.to_string_lossy().into_owned();
         editor.busy = true;
-        editor.note = Some("Preparing the video…".into());
+        editor.note = Some(tr(keys::Q_AV_PREPARING_THE_VIDEO).into());
         editor.serial += 1;
         let serial = editor.serial;
         let output = work_dir().join(format!("avatar-{serial}.mp4"));
@@ -74,17 +75,22 @@ impl QuillApp {
                 let sent = result.and_then(|()| {
                     let path = output.to_string_lossy().into_owned();
                     let Some(live) = this.live.as_mut() else {
-                        return Err("Profile edits need a signed-in account.".to_string());
+                        return Err(tr(keys::Q_AV_PROFILE_EDITS_NEED_A_SIGNED).to_string());
                     };
                     live.driver.session.users_state.profile_edit_error = None;
                     live.driver
                         .set_profile_photo_video(&path, main_frame_secs(&edits))
                         .map(|_| ())
-                        .map_err(|err| format!("Couldn't set the photo: {err:?}"))
+                        .map_err(|err| {
+                            tr_with(
+                                keys::Q_AV_COULDNT_SET_THE_PHOTO,
+                                &[("error", &format!("{err:?}"))],
+                            )
+                        })
                 });
                 match sent {
                     Ok(()) => {
-                        this.connection.status_note = "Photo update requested.".into();
+                        this.connection.status_note = tr(keys::Q_AV_PHOTO_UPDATE_REQUESTED).into();
                         this.close_video_editor(cx);
                         this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
                     }

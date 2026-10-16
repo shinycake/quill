@@ -17,6 +17,7 @@ use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::tile_pin::{TileKey, stage_tile};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 
@@ -117,7 +118,7 @@ impl QuillApp {
                             participant: participant.participant_id,
                             screen: true,
                         },
-                        name: format!("{name} · screen"),
+                        name: tr_with(keys::Q_AV_SCREEN, &[("name", &name.to_string())]),
                         picture,
                         paused,
                     });
@@ -198,7 +199,11 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
     let pinned = large;
     let label = SharedString::from(format!(
         "{} {}",
-        if pinned { "Unpin" } else { "Pin" },
+        if pinned {
+            tr(keys::Q_AV_UNPIN)
+        } else {
+            tr(keys::CONTEXT_PIN_MSG)
+        },
         tile.name
     ));
     let id = SharedString::from(format!("group-tile-{:?}-{}", key.participant, key.screen));
@@ -249,7 +254,7 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                     .justify_center()
                     .text_color(white())
                     .role(Role::Button)
-                    .aria_label("Full screen")
+                    .aria_label(tr(keys::Q_AV_FULL_SCREEN))
                     .swallow_press()
                     .on_click(
                         cx.listener(|this, _, window, cx| this.enter_group_call_stage(window, cx)),
@@ -345,14 +350,14 @@ fn stage_view(tile: Tile, cx: &mut Context<QuillApp>) -> AnyElement {
                 .gap(px(8.))
                 .child(stage_button(
                     "group-stage-unpin",
-                    "Unpin",
+                    tr(keys::Q_AV_UNPIN),
                     IconName::PinOff,
                     cx,
                     move |this, _, cx| this.toggle_group_call_tile_pin(key, cx),
                 ))
                 .child(stage_button(
                     "group-stage-exit",
-                    "Exit full screen",
+                    tr(keys::Q_AV_EXIT_FULL_SCREEN),
                     IconName::Minimize,
                     cx,
                     |this, window, cx| this.leave_group_call_stage(window, cx),

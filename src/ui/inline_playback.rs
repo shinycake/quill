@@ -10,6 +10,7 @@ use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use gpui_kit::*;
 use quill::ids::{FileId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::MessageContent;
 use std::path::PathBuf;
@@ -94,7 +95,7 @@ impl QuillApp {
         self.playback.autoplayed_gifs.insert(message_id);
         if self.playback.playing_animation == Some(message_id) {
             self.stop_animation_playback();
-            self.connection.status_note = "GIF paused".into();
+            self.connection.status_note = tr(keys::Q_AV_GIF_PAUSED).into();
             cx.notify();
             return;
         }
@@ -142,7 +143,7 @@ impl QuillApp {
         self.playback.pending_gif_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection.status_note = "GIF file is outside the account files".into();
+            self.connection.status_note = tr(keys::Q_AV_GIF_FILE_IS_OUTSIDE_THE).into();
             cx.notify();
             return;
         };
@@ -151,7 +152,7 @@ impl QuillApp {
         self.stop_audio_playback();
         self.stop_viewer_video();
         self.playback.playing_animation = Some(message_id);
-        self.connection.status_note = "Loading GIF playback…".into();
+        self.connection.status_note = tr(keys::Q_AV_LOADING_GIF_PLAYBACK).into();
         self.spawn_gif_decode(message_id, file_id, safe, cx);
         cx.notify();
     }
@@ -223,7 +224,7 @@ impl QuillApp {
             Ok(clip) => {
                 self.playback.gif = Some(Rc::new(clip));
                 self.playback.gif_started_at = Some(Instant::now());
-                self.connection.status_note = "Playing GIF".into();
+                self.connection.status_note = tr(keys::Q_AV_PLAYING_GIF).into();
             }
             // Started again after this decode saw the stop: decode anew.
             Err(GifError::Cancelled) => {
@@ -239,7 +240,7 @@ impl QuillApp {
             }
             Err(_) => {
                 self.stop_animation_playback();
-                self.connection.status_note = "Could not play GIF.".into();
+                self.connection.status_note = tr(keys::Q_AV_COULD_NOT_PLAY_GIF).into();
             }
         }
         self.notify_conversation(cx);
