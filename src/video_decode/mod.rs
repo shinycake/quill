@@ -594,6 +594,35 @@ pub struct Player {
     /// The newest picture handed out, for the end position.
     last_pts: Option<f64>,
     ended: bool,
+    /// The decode thread. Dropping the player detaches it (it exits within
+    /// one decode step); tests join it.
+    #[cfg(test)]
+    thread: Option<std::thread::JoinHandle<Option<()>>>,
+}
+
+/// Dropped as the decode thread ends. When that was not a stop request, it
+/// records an error if none was set (a panic, or an unexpected return),
+/// marks the end, and releases the picture queue and the sound end.
+struct ExitReport(Arc<Shared>);
+
+impl Drop for ExitReport {
+    fn drop(&mut self) {
+        let (tap, audio) = {
+            let mut state = lock(&self.0.state);
+            if state.stop {
+                return;
+            }
+            if state.error.is_none() {
+                state.error = Some("Video playback stopped unexpectedly".to_string());
+            }
+            state.eof = true;
+            state.video.clear();
+            (state.tap.take(), state.audio.take())
+        };
+        // Outside the lock: the tap's drop locks it again.
+        drop(tap);
+        drop(audio);
+    }
 }
 
 impl Player {
@@ -630,12 +659,19 @@ impl Player {
         });
         let thread_shared = shared.clone();
         let want_audio = options.want_audio;
-        crate::thread_guard::spawn_guarded("quill-video", move || match opener() {
-            Ok(demuxer) => decode_loop(demuxer, thread_shared, want_audio),
-            Err(err) => {
-                let mut state = lock(&thread_shared.state);
-                state.error = Some(err);
-                state.eof = true;
+        #[cfg_attr(not(test), allow(unused_variables))]
+        let thread = crate::thread_guard::spawn_guarded("quill-video", move || {
+            // Runs on every exit, unwinding included: a decode thread that
+            // ends without being asked to leaves the player in its error
+            // state instead of "loading" forever.
+            let _exit = ExitReport(thread_shared.clone());
+            match opener() {
+                Ok(demuxer) => decode_loop(demuxer, thread_shared, want_audio),
+                Err(err) => {
+                    let mut state = lock(&thread_shared.state);
+                    state.error = Some(err);
+                    state.eof = true;
+                }
             }
         })
         .map_err(|err| err.to_string())?;
@@ -645,7 +681,17 @@ impl Player {
             first: true,
             last_pts: None,
             ended: false,
+            #[cfg(test)]
+            thread: Some(thread),
         })
+    }
+
+    /// Wait for the decode thread to end (tests); true when it returned
+    /// without panicking.
+    #[cfg(test)]
+    fn join_thread(&mut self) -> Option<bool> {
+        let handle = self.thread.take()?;
+        Some(matches!(handle.join(), Ok(Some(()))))
     }
 
     /// What the file holds, once the decode thread has opened it.
