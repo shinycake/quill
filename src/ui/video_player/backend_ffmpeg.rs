@@ -68,10 +68,10 @@ fn options(purpose: Purpose) -> OpenOptions {
 /// How long a backend shows images after its window refused a surface,
 /// before it tries NV12 again (the renderer retries textures on about the
 /// same schedule).
-const NV12_RETRY: Duration = Duration::from_secs(2);
+pub(super) const NV12_RETRY: Duration = Duration::from_secs(2);
 
 /// NV12 again once the pause after a refused surface is over.
-fn nv12_allowed(paused_until: Option<Instant>, now: Instant) -> bool {
+pub(super) fn nv12_allowed(paused_until: Option<Instant>, now: Instant) -> bool {
     paused_until.is_none_or(|until| now >= until)
 }
 

@@ -26,6 +26,8 @@ mod backend_still;
 pub(crate) mod controls;
 mod element;
 mod live_picture;
+#[cfg(any(target_os = "windows", test))]
+mod live_surface;
 pub(super) mod pacing;
 mod picture;
 mod rotate;

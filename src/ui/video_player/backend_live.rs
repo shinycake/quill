@@ -6,10 +6,11 @@
 //! the [`LiveSink`]. A waker task arms the sink after each wake and, when
 //! a frame lands, redraws the one view the element draws in, so nothing
 //! polls and an idle feed costs nothing. A frame is converted once, into
-//! the platform picture (`live_picture.rs`): on macOS on the UI thread
-//! for small tiles (NV12, a few microseconds) and on the background
-//! executor above [`INLINE_MAX_EDGE`]; on Windows and Linux, where the
-//! picture is BGRA (about 0.5 ms for a 640 × 360 tile), always on the
+//! the platform picture (`live_picture.rs`): on macOS and Windows on the
+//! UI thread for small tiles (NV12, a few microseconds) and on the
+//! background executor above [`INLINE_MAX_EDGE`]; a frame that becomes
+//! BGRA (Linux, about 0.5 ms for a 640 × 360 tile; on Windows an odd size
+//! or the pause after a refused surface, `live_surface.rs`) always on the
 //! background executor. One conversion at a time; the newest frame wins.
 //!
 //! The transport is live ([`TransportMachine::live`]): Opening until the
@@ -74,8 +75,10 @@ const UNSEEN_PROBE_PICTURE: Duration = Duration::from_millis(250);
 /// Pixel buffers kept after they were shown, so the pool does not refill
 /// one a frame still in flight may read: GPUI's Metal renderer drops the
 /// plane textures once encoded (`metal_renderer.rs`, `draw_surfaces`) and
-/// keeps up to three drawables (`set_maximum_drawable_count(3)`).
-const SURFACES_HELD: usize = 3;
+/// keeps up to three drawables (`set_maximum_drawable_count(3)`). A
+/// Windows NV12 frame is never written again once made (its pool buffer
+/// is reused only when no frame holds it), so the one on screen is enough.
+const SURFACES_HELD: usize = if cfg!(target_os = "macos") { 3 } else { 1 };
 /// The paused picture (and the live story's backdrop) is made again at
 /// most this often.
 const PAUSED_REFRESH: Duration = Duration::from_millis(500);
@@ -157,16 +160,35 @@ pub(super) fn stall_check_at(
     latest_at?.checked_add(gaps.stall_after())
 }
 
-/// Whether a frame converts on the background executor: a large one,
-/// and every one where the picture is BGRA.
-fn converts_in_background(frame: &LiveFrame) -> bool {
-    live_picture::bgra_only() || u32::from(frame.width.max(frame.height)) > INLINE_MAX_EDGE
+/// A frame too large to convert during the draw, whatever it becomes.
+fn large(frame: &LiveFrame) -> bool {
+    u32::from(frame.width.max(frame.height)) > INLINE_MAX_EDGE
 }
 
-/// A converted frame and its sequence number.
+/// A converted frame, its sequence number and what converting it took
+/// (the `QUILL_TRACE_VIDEO` `VF` line).
 pub(super) struct Landed {
     pub(super) seq: u64,
     pub(super) prepared: Prepared,
+    pub(super) convert_us: u32,
+}
+
+impl Landed {
+    fn stats(&self) -> super::PictureStats {
+        let (format, width, height, bytes) = self.prepared.trace();
+        super::PictureStats {
+            format,
+            width,
+            height,
+            bytes,
+            convert_us: self.convert_us,
+        }
+    }
+}
+
+/// Microseconds since `since`, for the trace.
+fn elapsed_us(since: Instant) -> u32 {
+    u32::try_from(since.elapsed().as_micros()).unwrap_or(u32::MAX)
 }
 
 /// The live state shared by the backend, the player and the waker task.
@@ -184,6 +206,9 @@ pub(super) struct LiveCore {
     /// over another one (your camera's corner preview) rounds its own
     /// corners, which a surface can't do over a picture.
     images_only: Cell<bool>,
+    /// Pictures are NV12 surface frames (Windows, `live_surface.rs`).
+    #[cfg(any(target_os = "windows", test))]
+    nv12: Cell<bool>,
     track: RefCell<Track>,
     /// The view the element draws in, redrawn when a frame lands. A live
     /// player is drawn in one view: a tile or the stage only in the call
@@ -206,6 +231,10 @@ pub(super) struct LiveCore {
 struct Track {
     gaps: ArrivalGaps,
     surfaces: Surfaces,
+    /// NV12 buffers, the pause after a refused frame and the NV12 frame
+    /// on screen (Windows).
+    #[cfg(any(target_os = "windows", test))]
+    nv12: super::live_surface::LiveNv12,
     /// A large frame converted off the UI thread, not drawn yet.
     ready: Option<Landed>,
     /// The newest frame shown; pictures of older ones are dropped.
@@ -234,6 +263,16 @@ struct Track {
     quiet: bool,
 }
 
+impl Track {
+    /// `image` is shown now; the one before it stays (the last drawn
+    /// frame may still use it) and the one before that is retired.
+    fn keep_image(&mut self, image: Arc<RenderImage>) {
+        let shown = self.shown_image.replace(image);
+        let older = std::mem::replace(&mut self.previous_image, shown);
+        self.retired.extend(older);
+    }
+}
+
 impl LiveCore {
     fn new(sink: LiveSink, tile: bool) -> Self {
         Self {
@@ -242,6 +281,8 @@ impl LiveCore {
             inline_always: capture_mode(),
             mirrored: Cell::new(false),
             images_only: Cell::new(false),
+            #[cfg(any(target_os = "windows", test))]
+            nv12: Cell::new(super::live_surface::nv12_live()),
             track: RefCell::new(Track::default()),
             view: Cell::new(None),
             painted: Cell::new(0),
@@ -291,10 +332,9 @@ impl LiveCore {
             return None;
         }
         let inline = self.inline_always;
-        let images = self.images_only.get();
         let frame = self
             .sink
-            .take_if(|frame| inline || !(images || converts_in_background(frame)))?;
+            .take_if(|frame| inline || !(self.makes_image(&track, frame) || large(frame)))?;
         let target = self.target(&mut track, &frame);
         self.conversions.set(self.conversions.get().wrapping_add(1));
         Some((frame, target))
@@ -306,13 +346,32 @@ impl LiveCore {
             return None;
         }
         let mut track = self.track.try_borrow_mut().ok()?;
-        let images = self.images_only.get();
         let frame = self
             .sink
-            .take_if(|frame| images || converts_in_background(frame))?;
+            .take_if(|frame| self.makes_image(&track, frame) || large(frame))?;
         let target = self.target(&mut track, &frame);
         self.conversions.set(self.conversions.get().wrapping_add(1));
         Some((frame, target))
+    }
+
+    /// Whether `frame` becomes a BGRA image (converted off the UI thread
+    /// whatever its size): images only, the BGRA platforms, and on
+    /// Windows an odd size or the pause after a refused surface. A macOS
+    /// pool that failed converts its BGRA during the draw, as before.
+    fn makes_image(&self, track: &Track, frame: &LiveFrame) -> bool {
+        if self.images_only.get() {
+            return true;
+        }
+        // As `target` decides: NV12 first (off unless the platform draws
+        // it, `live_surface::nv12_live`).
+        #[cfg(any(target_os = "windows", test))]
+        if self.nv12.get() {
+            let (width, height) = frame.shown_size();
+            return !track.nv12.takes(width, height, self.time(Instant::now()));
+        }
+        #[cfg(not(any(target_os = "windows", test)))]
+        let _ = (track, frame);
+        live_picture::bgra_only()
     }
 
     /// What `frame` converts into.
@@ -321,6 +380,14 @@ impl LiveCore {
             return Target::Bgra;
         }
         let (width, height) = frame.shown_size();
+        #[cfg(any(target_os = "windows", test))]
+        if self.nv12.get() {
+            let now = self.time(Instant::now());
+            return track
+                .nv12
+                .buffer(width, height, now)
+                .map_or(Target::Bgra, Target::Nv12);
+        }
         track.surfaces.target(width, height)
     }
 
@@ -353,25 +420,41 @@ impl LiveCore {
         if track.shown_seq.is_some_and(|shown| landed.seq <= shown) {
             return None;
         }
-        let (picture, image) = landed.prepared.into_picture()?;
+        let shown = landed.prepared.into_picture()?;
         track.shown_seq = Some(landed.seq);
-        let older = match image {
-            Some(image) => {
-                let shown = track.shown_image.replace(image);
-                std::mem::replace(&mut track.previous_image, shown)
-            }
-            // A surface after images (a pool that failed earlier): the
-            // images go.
+        #[cfg(any(target_os = "windows", test))]
+        track.nv12.shown(shown.nv12);
+        let picture = shown.picture;
+        match shown.image {
+            Some(image) => track.keep_image(image),
+            // A surface after images (a pool that failed earlier, or the
+            // pause after a refused NV12 frame ended): the images go.
             None => {
                 track.held_surfaces.push_back(picture.clone());
                 while track.held_surfaces.len() > SURFACES_HELD {
                     track.held_surfaces.pop_front();
                 }
-                track.shown_image.take().or(track.previous_image.take())
+                let images = track.shown_image.take().into_iter();
+                let images = images.chain(track.previous_image.take());
+                track.retired.extend(images);
             }
-        };
-        track.retired.extend(older);
+        }
         Some(picture)
+    }
+
+    /// The feed ended (no frame converts any more) or the player goes
+    /// (`gone`): its NV12 buffers go.
+    fn release_buffers(&self, gone: bool) {
+        #[cfg(any(target_os = "windows", test))]
+        if let Ok(mut track) = self.track.try_borrow_mut() {
+            if gone {
+                track.nv12.release();
+            } else {
+                track.nv12.feed_ended();
+            }
+        }
+        #[cfg(not(any(target_os = "windows", test)))]
+        let _ = gone;
     }
 
     fn take_retired(&self) -> Vec<Arc<RenderImage>> {
@@ -521,9 +604,11 @@ impl Backend for LiveBackend {
         let ready = self.core.take_ready();
         let mirrored = self.core.mirrored.get();
         let inline = self.core.take_inline().and_then(|(frame, target)| {
+            let started = Instant::now();
             live_picture::convert(&frame, target, mirrored).map(|prepared| Landed {
                 seq: frame.seq,
                 prepared,
+                convert_us: elapsed_us(started),
             })
         });
         // The newer of the two; the other's buffer goes back to the pool.
@@ -531,16 +616,29 @@ impl Backend for LiveBackend {
             (Some(ready), Some(inline)) if ready.seq > inline.seq => Some(ready),
             (ready, inline) => inline.or(ready),
         };
+        let stats = newest.as_ref().map(Landed::stats);
+        let picture = newest.and_then(|landed| self.core.show(landed));
         Pulled {
-            picture: newest.and_then(|landed| self.core.show(landed)),
+            stats: stats.filter(|_| picture.is_some()),
+            picture,
             item_secs: 0.0,
             display_secs: None,
-            stats: None,
         }
     }
 
     fn next_due(&self, now: Instant, _interval: Duration) -> Option<Instant> {
+        // The renderer has not answered for the NV12 frame on screen yet:
+        // the next display frame looks (and replaces it if refused).
+        #[cfg(any(target_os = "windows", test))]
+        if self.core.nv12_unsettled() {
+            return None;
+        }
         self.core.status(now).1
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    fn replace_refused(&mut self, now: Instant) -> Option<Picture> {
+        self.core.replace_refused(now)
     }
 
     fn error(&self) -> Option<PlayerError> {
@@ -649,7 +747,9 @@ impl VideoPlayer {
     }
 
     /// The player is going: drop its images from every window's atlas
-    /// now, rather than at the main window's next sweep.
+    /// now, rather than at the main window's next sweep, and its NV12
+    /// buffers (Windows; the renderer frees a surface's textures itself
+    /// once no frame draws it).
     pub(crate) fn release_live(&self, cx: &mut App) {
         let Some(core) = self.0.live.as_ref() else {
             return;
@@ -657,6 +757,7 @@ impl VideoPlayer {
         for image in core.take_all_images() {
             cx.drop_image(image, None);
         }
+        core.release_buffers(true);
     }
 
     /// How many frames this player converted (tests).
@@ -715,13 +816,19 @@ fn spawn_waker(
             };
             if let Some(((frame, target), mirrored)) = job {
                 let seq = frame.seq;
-                let prepared = cx
-                    .background_spawn(
-                        async move { live_picture::convert(&frame, target, mirrored) },
-                    )
+                let (prepared, convert_us) = cx
+                    .background_spawn(async move {
+                        let started = Instant::now();
+                        let prepared = live_picture::convert(&frame, target, mirrored);
+                        (prepared, elapsed_us(started))
+                    })
                     .await;
                 match core.upgrade() {
-                    Some(live) => live.landed(prepared.map(|prepared| Landed { seq, prepared })),
+                    Some(live) => live.landed(prepared.map(|prepared| Landed {
+                        seq,
+                        prepared,
+                        convert_us,
+                    })),
                     None => return,
                 }
             }
@@ -730,6 +837,9 @@ fn spawn_waker(
             };
             let retired = live.take_retired();
             let ended = live.sink.snapshot().end.is_some();
+            if ended {
+                live.release_buffers(false);
+            }
             drop(live);
             cx.update(|cx| {
                 for image in retired {
@@ -745,6 +855,10 @@ fn spawn_waker(
         }
     })
 }
+
+#[cfg(any(target_os = "windows", test))]
+#[path = "live_nv12.rs"]
+mod nv12;
 
 #[cfg(test)]
 #[path = "live_tests.rs"]

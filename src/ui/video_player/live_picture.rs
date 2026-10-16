@@ -5,8 +5,12 @@
 //!   copying the Y plane and interleaving U and V (`i420_to_nv12`), and
 //!   painted through `surface()` like AVPlayer's pictures. The pool is
 //!   made again when the frame size changes.
-//! - Windows and Linux: one `i420_to_bgra` into a `RenderImage`. Windows
-//!   keeps this path until NV12 surfaces come to it (video player PR 9).
+//! - Windows: an NV12 `SurfaceFrame` packed from the planes (the same
+//!   `i420_to_nv12` interleave) into a pooled buffer (`live_surface.rs`),
+//!   uploaded and converted to RGB by the vendored DirectX renderer. A
+//!   frame the renderer refuses is shown as a BGRA image instead.
+//! - Linux (and macOS or Windows with `QUILL_LIVE_BGRA=1`): one
+//!   `i420_to_bgra` into a `RenderImage`.
 //!
 //! Frames the sender turned (a phone camera) are turned in the plane copy
 //! first (`rotate_planes`), and a mirrored feed (your camera preview) is
@@ -30,6 +34,10 @@ pub(super) enum Target {
     /// A pixel buffer fresh from the pool.
     #[cfg(target_os = "macos")]
     Surface(SendBuffer),
+    /// A buffer for a packed NV12 frame (Windows), from the backend's
+    /// pool; no frame holds it.
+    #[cfg(any(target_os = "windows", test))]
+    Nv12(Arc<[u8]>),
     /// A new BGRA buffer.
     Bgra,
 }
@@ -38,6 +46,8 @@ pub(super) enum Target {
 pub(super) enum Prepared {
     #[cfg(target_os = "macos")]
     Surface(SendBuffer),
+    #[cfg(any(target_os = "windows", test))]
+    Nv12(super::live_surface::Nv12Picture),
     Bgra {
         bgra: Vec<u8>,
         width: u32,
@@ -78,8 +88,8 @@ fn upright(frame: &LiveFrame, mirrored: bool) -> Option<(Cow<'_, [u8]>, u16, u16
 }
 
 /// Convert `frame` into `target`, mirrored when `mirrored`; a pixel
-/// buffer that can't be filled falls back to BGRA. `None` for a malformed
-/// frame.
+/// buffer or NV12 buffer that can't be filled falls back to BGRA. `None`
+/// for a malformed frame.
 pub(super) fn convert(frame: &LiveFrame, target: Target, mirrored: bool) -> Option<Prepared> {
     let (planes, width, height) = upright(frame, mirrored)?;
     let src = I420::new(&planes, width, height)?;
@@ -88,6 +98,12 @@ pub(super) fn convert(frame: &LiveFrame, target: Target, mirrored: bool) -> Opti
         Target::Surface(buffer) => {
             if fill_nv12(&buffer.0, &src) {
                 return Some(Prepared::Surface(buffer));
+            }
+        }
+        #[cfg(any(target_os = "windows", test))]
+        Target::Nv12(bytes) => {
+            if let Some(picture) = super::live_surface::fill(&src, bytes) {
+                return Some(Prepared::Nv12(picture));
             }
         }
         Target::Bgra => {}
@@ -99,20 +115,73 @@ pub(super) fn convert(frame: &LiveFrame, target: Target, mirrored: bool) -> Opti
     })
 }
 
+/// A converted frame made into what the element draws.
+pub(super) struct Shown {
+    pub(super) picture: Picture,
+    /// The image it made, for the backend to retire.
+    pub(super) image: Option<Arc<RenderImage>>,
+    /// The NV12 frame and its buffer (Windows), for the backend to keep.
+    #[cfg(any(target_os = "windows", test))]
+    pub(super) nv12: Option<super::live_surface::Nv12Shown>,
+}
+
+impl Shown {
+    fn new(picture: Picture, image: Option<Arc<RenderImage>>) -> Self {
+        Self {
+            picture,
+            image,
+            #[cfg(any(target_os = "windows", test))]
+            nv12: None,
+        }
+    }
+}
+
 impl Prepared {
-    /// The picture, and the image it made (for the backend to retire).
-    pub(super) fn into_picture(self) -> Option<(Picture, Option<Arc<RenderImage>>)> {
+    /// The picture, and what the backend keeps of it.
+    pub(super) fn into_picture(self) -> Option<Shown> {
         match self {
             #[cfg(target_os = "macos")]
-            Prepared::Surface(buffer) => Some((Picture::Surface(buffer.0), None)),
+            Prepared::Surface(buffer) => Some(Shown::new(Picture::Surface(buffer.0), None)),
+            #[cfg(any(target_os = "windows", test))]
+            Prepared::Nv12(picture) => {
+                let (picture, image, nv12) = picture.into_shown()?;
+                Some(Shown {
+                    picture,
+                    image,
+                    nv12: Some(nv12),
+                })
+            }
             Prepared::Bgra {
                 bgra,
                 width,
                 height,
             } => {
                 let image = render_image(bgra, width, height)?;
-                Some((Picture::Image(image.clone()), Some(image)))
+                Some(Shown::new(Picture::Image(image.clone()), Some(image)))
             }
+        }
+    }
+
+    /// The `QUILL_TRACE_VIDEO` `VF` columns: the layout, its size and the
+    /// bytes the renderer uploads.
+    pub(super) fn trace(&self) -> (&'static str, u32, u32, usize) {
+        match self {
+            #[cfg(target_os = "macos")]
+            Prepared::Surface(buffer) => {
+                let (width, height) = super::surface::surface_size(&buffer.0);
+                let luma = (width as usize).saturating_mul(height as usize);
+                ("nv12", width, height, luma.saturating_add(luma / 2))
+            }
+            #[cfg(any(target_os = "windows", test))]
+            Prepared::Nv12(picture) => {
+                let (width, height) = picture.size();
+                ("nv12", width, height, picture.byte_len())
+            }
+            Prepared::Bgra {
+                bgra,
+                width,
+                height,
+            } => ("bgra", *width, *height, bgra.len()),
         }
     }
 }
@@ -146,11 +215,11 @@ pub(crate) fn take_made_images() -> Vec<std::sync::Weak<RenderImage>> {
     MADE.with(|made| std::mem::take(&mut *made.borrow_mut()))
 }
 
-/// Whether every picture is BGRA: on Windows and Linux, and on macOS
-/// with `QUILL_LIVE_BGRA=1` in a demo-capture build, to run the other
-/// platforms' path (its memory, its atlas) here.
+/// Whether every picture is BGRA: on Linux, and on macOS and Windows
+/// with `QUILL_LIVE_BGRA=1` in a demo-capture build, to run the image
+/// path (its memory, its atlas) there.
 pub(crate) fn bgra_only() -> bool {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
         return true;
     }
     #[cfg(feature = "demo-capture")]
