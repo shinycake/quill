@@ -97,6 +97,8 @@ pub(super) enum AudioError {
     Unsupported,
     /// No audio output device.
     NoOutput,
+    /// A seek has waited too long on the output device.
+    DeviceStalled,
 }
 
 impl fmt::Display for AudioError {
@@ -105,6 +107,7 @@ impl fmt::Display for AudioError {
             AudioError::Open => f.write_str("couldn't open the audio file"),
             AudioError::Unsupported => f.write_str("this audio format can't be played"),
             AudioError::NoOutput => f.write_str("no audio output device"),
+            AudioError::DeviceStalled => f.write_str("the audio device isn't responding"),
         }
     }
 }

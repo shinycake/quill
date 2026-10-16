@@ -188,6 +188,7 @@ impl QuillApp {
             .is_some()
             .then(|| super::audio::Simulation {
                 fail: std::env::var_os("QUILL_DEMO_AUDIO_FAIL").is_some(),
+                stall: std::env::var_os("QUILL_DEMO_AUDIO_STALL").is_some(),
             });
         self.playback.audio.set_simulation(simulation);
         match self.playback.audio.start(
@@ -304,6 +305,7 @@ impl QuillApp {
                         // The sound is the authority on where the track
                         // ends (its real length can differ from TDLib's
                         // rounded duration).
+                        this.playback.audio.settle();
                         let finished = this.playback.audio.is_ended();
                         if finished && !this.playback.seek_scrubbing {
                             // Capture the id first: the stops below save the
@@ -624,6 +626,7 @@ fn audio_error_text(error: super::audio::AudioError) -> String {
         AudioError::Open => tr(keys::Q_AV_COULDNT_OPEN_THE_AUDIO_FILE),
         AudioError::Unsupported => tr(keys::Q_AV_THIS_AUDIO_FORMAT_CANT_BE_PLAYED),
         AudioError::NoOutput => tr(keys::Q_AV_NO_AUDIO_OUTPUT_DEVICE),
+        AudioError::DeviceStalled => tr(keys::Q_AV_THE_AUDIO_DEVICE_ISNT_RESPONDING),
     }
     .to_string()
 }

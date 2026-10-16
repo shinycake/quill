@@ -206,7 +206,10 @@ mod tests {
         let mut ui = ui_without_output();
         ui.playing_audio = Some(MessageId(1));
         ui.track_length = Some(5.0);
-        ui.audio.set_simulation(Some(Simulation { fail: false }));
+        ui.audio.set_simulation(Some(Simulation {
+            fail: false,
+            stall: false,
+        }));
         ui.audio
             .start(Path::new("a.ogg"), 5.0, 1.0, 1.0, 5.0)
             .unwrap();

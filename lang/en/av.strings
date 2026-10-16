@@ -299,6 +299,7 @@
 "qll_av_stopping_the_recording" = "Stopping the recording…";
 "qll_av_stream_keys_need_a_live" = "Stream keys need a live connection.";
 "qll_av_stream_with_another_app" = "Stream with another app";
+"qll_av_the_audio_device_isnt_responding" = "The audio device isn't responding.";
 "qll_av_the_gif_leaves_the_album" = "The GIF leaves the album and goes out on its own";
 "qll_av_this_audio_format_cant_be_played" = "This audio format can't be played.";
 "qll_av_this_isnt_a_video_quill" = "This isn't a video Quill can read.";
