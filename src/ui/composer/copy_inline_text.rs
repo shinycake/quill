@@ -138,7 +138,7 @@ impl QuillApp {
             || self.composer_ui.pending_edit.is_some()
             // tdesktop: `_replyTo` keeps Up for scrolling.
             || self.composer_ui.pending_reply.is_some()
-            || !self.composer_ui.pending_attachments.is_empty()
+            || !self.pending_attachments().is_empty()
             || self.composer_ui.command_menu_open
             || !self.mention_menu_items(cx).is_empty()
         {
@@ -162,7 +162,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.composer_ui.pending_attachments.clear();
+        self.clear_pending_attachments();
         self.composer_ui.edit_replace_as_file = false;
         let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.

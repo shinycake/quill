@@ -161,12 +161,6 @@ impl UpdatesSync {
     }
 }
 
-/// Whether the next send is silent: the manual toggle, or the chat's
-/// default unless the user switched it off for this chat.
-pub fn effective_silent(manual: bool, chat_default: bool, loud_override: bool) -> bool {
-    manual || (chat_default && !loud_override)
-}
-
 /// Turning on "Show 18+ Content" needs the age verification prompt while
 /// the server asks for one and the user has not started it yet.
 pub fn age_gate_blocks(turning_on: bool, verification_needed: bool, started: bool) -> bool {

@@ -182,7 +182,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(attachment) = self.composer_ui.pending_attachments.get(index) else {
+        let Some(attachment) = self.pending_attachments().get(index) else {
             return;
         };
         if attachment.kind != AttachmentKind::Video {
@@ -540,8 +540,8 @@ impl QuillApp {
         };
         let note = match target {
             Some(EditorTarget::Tray(index)) => {
-                let several = self.composer_ui.pending_attachments.len() > 1;
-                let Some(attachment) = self.composer_ui.pending_attachments.get_mut(index) else {
+                let several = self.pending_attachments().len() > 1;
+                let Some(attachment) = self.pending_attachment_mut(index) else {
                     return;
                 };
                 if is_editor_copy(&attachment.path) && attachment.path != output {

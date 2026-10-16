@@ -84,13 +84,14 @@ impl QuillApp {
         };
         match plan_drop(action, paths, &folder_files) {
             DropPlan::Attach(planned) => {
-                self.connection.status_note = match ComposerAttachment::append_planned(
-                    &mut self.composer_ui.pending_attachments,
-                    &planned,
-                ) {
-                    Ok(count) => trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count),
-                    Err(note) => note.into(),
+                let Some(tray) = self.pending_attachments_mut() else {
+                    return;
                 };
+                self.connection.status_note =
+                    match ComposerAttachment::append_planned(tray, &planned) {
+                        Ok(count) => trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count),
+                        Err(note) => note.into(),
+                    };
                 cx.notify();
             }
             DropPlan::Reject(note) => {
@@ -133,8 +134,11 @@ impl QuillApp {
                     }
                     return;
                 }
+                let Some(tray) = self.pending_attachments_mut() else {
+                    return;
+                };
                 self.connection.status_note = match ComposerAttachment::append_planned(
-                    &mut self.composer_ui.pending_attachments,
+                    tray,
                     &[(path, AttachmentKind::Document)],
                 ) {
                     Ok(_) => tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO).into(),

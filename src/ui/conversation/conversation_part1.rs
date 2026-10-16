@@ -143,7 +143,7 @@ impl QuillApp {
                 // composer shows Send instead of the mic.
                 let sendable = !show_attach
                     || self.forward_bar_here()
-                    || !self.composer_ui.pending_attachments.is_empty()
+                    || !self.pending_attachments().is_empty()
                     || !self.composer.read(cx).value().trim().is_empty();
                 this.child(
                     div()
@@ -194,7 +194,7 @@ impl QuillApp {
                             this.child(self.record_bar(cx))
                         })
                         .when(
-                            show_attach && !self.composer_ui.pending_attachments.is_empty(),
+                            show_attach && !self.pending_attachments().is_empty(),
                             |this| this.child(self.composer_attachment_tray(cx)),
                         )
                         .when_some(self.share.forward_result.clone(), |this, result| {

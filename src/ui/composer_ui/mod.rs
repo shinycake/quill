@@ -642,7 +642,7 @@ impl QuillApp {
     pub(super) fn composer_attachment_tray(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut group =
             AttachmentGroup::new("composer-attachments").with_edge_fade(cx.theme().background);
-        for (index, attachment) in self.composer_ui.pending_attachments.iter().enumerate() {
+        for (index, attachment) in self.pending_attachments().iter().enumerate() {
             let (icon, kind) = match attachment.kind {
                 AttachmentKind::Photo => (IconName::Image, tr(keys::Q_CHAT_PHOTO)),
                 AttachmentKind::Video => (IconName::Film, tr(keys::Q_CHAT_VIDEO)),
@@ -733,15 +733,13 @@ impl QuillApp {
                     }),
             );
         }
-        let several = self.composer_ui.pending_attachments.len() >= 2;
+        let several = self.pending_attachments().len() >= 2;
         let grouped = self.composer_group_media_effective();
         // Telegram Desktop's "Send without compression".
-        let can_files =
-            ComposerAttachment::can_send_as_files(&self.composer_ui.pending_attachments);
+        let can_files = ComposerAttachment::can_send_as_files(self.pending_attachments());
         let as_files = can_files
             && self
-                .composer_ui
-                .pending_attachments
+                .pending_attachments()
                 .iter()
                 .all(|attachment| attachment.kind == AttachmentKind::Document);
         let remember = self
@@ -750,7 +748,7 @@ impl QuillApp {
             .unwrap_or(false);
         let timer = self.self_destruct_picker_visible().then(|| {
             let owner = cx.entity().downgrade();
-            let current = self.composer_ui.self_destruct;
+            let current = self.pending_send().self_destruct;
             Button::new("self-destruct-menu")
                 .icon(IconName::Timer)
                 .label(self.self_destruct_button_label())
@@ -804,10 +802,9 @@ impl QuillApp {
                                 .label(tr(keys::Q_CHAT_SEND_WITHOUT_COMPRESSION))
                                 .checked(as_files)
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    ComposerAttachment::set_send_as_files(
-                                        &mut this.composer_ui.pending_attachments,
-                                        !as_files,
-                                    );
+                                    if let Some(tray) = this.pending_attachments_mut() {
+                                        ComposerAttachment::set_send_as_files(tray, !as_files);
+                                    }
                                     // Back to media: read the videos again.
                                     this.composer_ui.send_box.sound_checked.clear();
                                     this.check_tray_videos(cx);

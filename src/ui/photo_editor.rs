@@ -302,7 +302,7 @@ impl PhotoEditor {
 impl QuillApp {
     /// Open the editor on a pending photo attachment.
     pub(super) fn open_photo_editor(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(attachment) = self.composer_ui.pending_attachments.get(index) else {
+        let Some(attachment) = self.pending_attachments().get(index) else {
             return;
         };
         let path = attachment.path.clone();
@@ -359,7 +359,7 @@ impl QuillApp {
         let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
         let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
         let saved = super::edit_media_tools::write_edited_png(&edited);
-        match (saved, self.composer_ui.pending_attachments.get_mut(index)) {
+        match (saved, self.pending_attachment_mut(index)) {
             (Some(path), Some(attachment)) => {
                 let stem = attachment
                     .path

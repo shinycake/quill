@@ -227,7 +227,7 @@ impl QuillApp {
     ) {
         let now = now_unix();
         let existing = match target {
-            ScheduleTarget::Composer => match self.composer_ui.scheduling {
+            ScheduleTarget::Composer => match self.pending_send().scheduling {
                 ComposerScheduling::SendAtDate(date) => Some(date),
                 _ => None,
             },
@@ -246,9 +246,9 @@ impl QuillApp {
             }),
         };
         // The change dialog starts from the repeat chosen before.
-        let repeat = match (target, self.composer_ui.scheduling) {
+        let repeat = match (target, self.pending_send().scheduling) {
             (ScheduleTarget::Composer, ComposerScheduling::SendAtDate(_)) => {
-                self.composer_ui.schedule_repeat
+                self.pending_send().schedule_repeat
             }
             _ => 0,
         };
@@ -336,8 +336,10 @@ impl QuillApp {
         self.composer_ui.schedule_picker = None;
         match target {
             ScheduleTarget::Composer => {
-                self.composer_ui.scheduling = scheduling;
-                self.composer_ui.schedule_repeat = repeat;
+                if let Some(send) = self.pending_send_mut() {
+                    send.scheduling = scheduling;
+                    send.schedule_repeat = repeat;
+                }
                 self.connection.status_note = match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => tr_with(
                         keys::Q_OPS_REMINDER_SET_FOR,

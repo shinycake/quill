@@ -80,7 +80,7 @@ impl WindowSlot {
         Self {
             history: HistoryUi::new(cx),
             composer,
-            composer_ui: ComposerUi::new(Vec::new()),
+            composer_ui: ComposerUi::new(),
             message_ui: MessageUi::new(window, cx),
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(),

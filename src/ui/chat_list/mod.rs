@@ -156,46 +156,7 @@ impl QuillApp {
             .filter(|reply| reply.target_chat == Some(chat_id));
         // Choosing a chat from the list ends the peek at it.
         self.chat_list.forum_chats_peek = false;
-        // Phase B4: the TTL picker belongs to the previous chat.
-        self.notify.ttl_picker_open = false;
-        if self
-            .composer_ui
-            .pending_reply
-            .as_ref()
-            .is_some_and(|reply| !reply.belongs_to(chat_id))
-        {
-            self.composer_ui.pending_reply = None;
-        }
-        if self
-            .composer_ui
-            .pending_edit
-            .as_ref()
-            .is_some_and(|edit| edit.chat_id != chat_id)
-        {
-            self.composer_ui.pending_edit = None;
-            self.composer_ui.saved_edit_draft.clear();
-            self.composer_ui.saved_edit_reply = None;
-        }
-        if self
-            .message_ui
-            .pending_delete
-            .as_ref()
-            .is_some_and(|confirm| confirm.chat_id != chat_id)
-        {
-            self.message_ui.pending_delete = None;
-        }
-        // B4: a pending stop-poll confirm belongs to its own chat.
-        if self
-            .message_ui
-            .pending_stop_poll
-            .is_some_and(|(id, _, _)| id != chat_id)
-        {
-            self.message_ui.pending_stop_poll = None;
-        }
-        self.dismiss_forward_for_chat(chat_id);
-        if self.recording_active() {
-            self.cancel_recording(cx);
-        }
+        self.dismiss_cross_chat_state(chat_id, cx);
         // Voice notes and music keep playing across chats (the player bar
         // follows, as in Telegram Desktop).
         self.stop_animation_playback();

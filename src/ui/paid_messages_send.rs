@@ -55,7 +55,7 @@ impl QuillApp {
             || tr(keys::Q_MONEY_THIS_USER).to_string(),
             |chat| chat.title.clone(),
         );
-        let messages = self.composer_ui.pending_attachments.len().max(1) as i64;
+        let messages = self.pending_attachments().len().max(1) as i64;
         self.paid_messages.confirm = Some(PaidConfirm {
             chat_id: chat_id.0,
             name,

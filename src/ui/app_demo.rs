@@ -282,7 +282,8 @@ impl QuillApp {
             frame: super::frame_state::FrameUi::new(cx),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
             screen_share: Default::default(),
-            composer_ui: super::composer_state::ComposerUi::new(pending_attachments),
+            composer_ui: super::composer_state::ComposerUi::new(),
+            composer_sends: Default::default(),
             pickers: super::pickers_state::PickerUi::new(
                 window,
                 cx,
@@ -347,6 +348,7 @@ impl QuillApp {
         }
         if let Some(demo) = demo {
             demo.setup(&mut app, window, cx);
+            app.seed_demo_attachments(pending_attachments);
         }
 
         let menu_app = cx.weak_entity();

@@ -40,7 +40,7 @@ fn fixture(name: &str) -> PathBuf {
 
 fn attach(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, path: PathBuf) {
     app.update_in(vcx, |app, _, _| {
-        app.composer_ui.pending_attachments = vec![ComposerAttachment {
+        *app.pending_attachments_mut().expect("an open chat") = vec![ComposerAttachment {
             file_name: "pic".into(),
             path,
             kind: AttachmentKind::Photo,
