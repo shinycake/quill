@@ -41,7 +41,11 @@ fn the_volume_reaches_the_engine_once_per_change() {
     driver.set_stream_volume(0.4);
     driver.set_stream_volume(7.0);
     assert_eq!(handle.stream_volumes().get(before..), Some(&[0.4, 1.0][..]));
-    assert_eq!(driver.stream_volume(), 1.0, "the stream range ends at 100 %");
+    assert_eq!(
+        driver.stream_volume(),
+        1.0,
+        "the stream range ends at 100 %"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

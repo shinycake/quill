@@ -365,7 +365,8 @@ impl NtgcallsEngine {
         // Everyone else's voices: the call mixes them into its playback
         // "microphone" receiver, which names the output device. A stream
         // Quill plays always keeps its description: the mute is its gain.
-        let mut speaker_audio = external.unwrap_or_else(|| audio_description(speaker_input.as_ref()));
+        let mut speaker_audio =
+            external.unwrap_or_else(|| audio_description(speaker_input.as_ref()));
         // Every picture (a stream's, and participants' camera and screen
         // share in a normal video chat) reaches the frames callback only
         // through external playback writers: ntgcalls v3.0.3

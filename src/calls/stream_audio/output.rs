@@ -87,14 +87,17 @@ fn output_config(device: &cpal::Device) -> Result<SupportedStreamConfig, String>
     if default.sample_rate() == PREFERRED_RATE {
         return Ok(default);
     }
-    let preferred = device.supported_output_configs().ok().and_then(|mut ranges| {
-        ranges.find_map(|range| {
-            (range.channels() == default.channels()
-                && range.sample_format() == default.sample_format())
-            .then(|| range.try_with_sample_rate(PREFERRED_RATE))
-            .flatten()
-        })
-    });
+    let preferred = device
+        .supported_output_configs()
+        .ok()
+        .and_then(|mut ranges| {
+            ranges.find_map(|range| {
+                (range.channels() == default.channels()
+                    && range.sample_format() == default.sample_format())
+                .then(|| range.try_with_sample_rate(PREFERRED_RATE))
+                .flatten()
+            })
+        });
     Ok(preferred.unwrap_or(default))
 }
 
@@ -145,7 +148,11 @@ where
 fn spread<T: Sample + FromSample<f32>>(frame: &[i16], out: &mut [T], factor: f32) {
     let mono = frame.len() == 1;
     for (channel, sample) in out.iter_mut().enumerate() {
-        let source = if mono { frame.first() } else { frame.get(channel) };
+        let source = if mono {
+            frame.first()
+        } else {
+            frame.get(channel)
+        };
         *sample = T::from_sample(source.map_or(0.0, |&value| scaled(value, factor)));
     }
 }

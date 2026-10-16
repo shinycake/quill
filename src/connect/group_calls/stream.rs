@@ -210,7 +210,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             eprintln!("quill: warning: {line}");
             crate::advanced::debug_mode::debug_log(&line);
             if let Err(err) = engine.use_device_playback(group_call_id) {
-                eprintln!("quill: stream sound fallback for group call {group_call_id} failed: {err}");
+                eprintln!(
+                    "quill: stream sound fallback for group call {group_call_id} failed: {err}"
+                );
             }
         }
     }

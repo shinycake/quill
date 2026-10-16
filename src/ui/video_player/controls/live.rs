@@ -12,8 +12,11 @@
 //!   followed by "{n} viewers" (`lng_group_call_rtmp_viewers`, hidden at
 //!   0; `setVideoStreamViewers` in `media_stories_header.cpp`);
 //! - mute, and a volume slider only where the engine can set the
-//!   picture's volume (ntgcalls cannot for a stream; see the decision
-//!   doc), so the slider is absent rather than disabled;
+//!   picture's volume (a stream Quill plays itself,
+//!   `docs/decisions/stream-volume.md`), so the slider is absent rather
+//!   than disabled: beside mute in the bar, and in the header a pill
+//!   that grows down from the sound toggle while the pointer is on it
+//!   (tdesktop `Header::createVolumeToggle`);
 //! - full screen, and Picture-in-Picture when the host has it.
 //!
 //! Two layouts, because the hosts keep their tdesktop chrome:
@@ -61,6 +64,14 @@ const LIVE_RED: u32 = 0xdc2626;
 /// Between the pill and the viewer count (`groupCallMessageBadge`
 /// skip in the story header).
 pub(crate) const BADGE_GAP: f32 = 4.;
+/// `mediaviewSaveMsgBg`: the header's volume pill.
+const VOLUME_PILL_BG: u32 = 0x000000b2;
+/// `storiesVolumeSize` / `storiesVolumeBottom`: the pill's slider and the
+/// space under it.
+const VOLUME_PILL_SLIDER: f32 = 75.;
+const VOLUME_PILL_BOTTOM: f32 = 20.;
+/// Room for half the kit thumb, which overhangs the slider at 100 %.
+const VOLUME_PILL_THUMB_SKIP: f32 = 8.;
 
 /// What one draw of the live controller needs.
 pub(crate) struct LiveFacts {
@@ -69,7 +80,8 @@ pub(crate) struct LiveFacts {
     /// The picture's sound is muted for you.
     pub(crate) muted: bool,
     /// The volume slider (0–100), only where the engine can set the
-    /// volume; `None` leaves it out.
+    /// volume; `None` leaves it out. The header shows it in its pill, so
+    /// a header host passes it only while the pill is open.
     pub(crate) volume: Option<Entity<SliderState>>,
     /// The host is full screen (or maximized, for the stream window).
     pub(crate) fullscreen: bool,
@@ -84,6 +96,19 @@ pub(crate) struct LiveActions {
     pub(crate) pip: Option<Handler>,
     /// The pointer entered or left the controls (the fade's hover).
     pub(crate) hover: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
+    /// The pointer entered or left the header's sound toggle or its
+    /// volume pill; `None`: the picture has no volume.
+    pub(crate) volume_hover: Option<VolumeHoverHandler>,
+}
+
+pub(crate) type VolumeHoverHandler = Rc<dyn Fn(VolumePart, bool, &mut Window, &mut App)>;
+
+/// The header's two hover targets: the pill stays open while the
+/// pointer is on either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VolumePart {
+    Toggle,
+    Pill,
 }
 
 /// How the live controller lays itself out (see the module docs).
@@ -347,6 +372,17 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
     let (icon, label) = mute_look(this.facts.muted);
     let variant = this.variant.unwrap_or_else(|| overlay_button(cx));
     let toggle_mute = this.actions.toggle_mute.clone();
+    let mute = move |id: &'static str| {
+        let toggle_mute = toggle_mute.clone();
+        Button::new((id, row_id))
+            .icon(icon)
+            .custom(variant)
+            .small()
+            .tab_index(0)
+            .tooltip(label)
+            .accessibility_label(label)
+            .on_click(move |_, window, cx| toggle_mute(window, cx))
+    };
     let pip = this.actions.pip.map(|pip| {
         Button::new(("live-pip", row_id))
             .icon(IconName::PictureInPicture2)
@@ -357,6 +393,50 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
             .accessibility_label(tr(keys::Q_AV_PICTURE_IN_PICTURE))
             .on_click(move |_, window, cx| pip(window, cx))
     });
+    let hover = this.actions.volume_hover;
+    let pill = this.facts.volume.map(|slider| {
+        let hover = hover.clone();
+        // Deferred so it paints over the picture below the header.
+        deferred(
+            div()
+                .id(("live-volume", row_id))
+                .debug_selector(|| "live-story-volume".into())
+                .absolute()
+                .top_0()
+                .left_0()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(VOLUME_PILL_THUMB_SKIP))
+                .pb(px(VOLUME_PILL_BOTTOM))
+                .rounded_full()
+                .bg(rgba(VOLUME_PILL_BG))
+                .when_some(hover, |pill, hover| {
+                    pill.on_hover(move |inside: &bool, window, cx| {
+                        hover(VolumePart::Pill, *inside, window, cx)
+                    })
+                })
+                .child(mute("live-volume-mute"))
+                .child(
+                    Slider::new(&slider)
+                        .vertical()
+                        .h(px(VOLUME_PILL_SLIDER))
+                        .bg(crate::ui::chat_theme::accent())
+                        .text_color(crate::ui::chat_theme::text_on_fill()),
+                ),
+        )
+        .priority(1)
+    });
+    let toggle = div()
+        .id(("live-volume-toggle", row_id))
+        .relative()
+        .when_some(hover, |toggle, hover| {
+            toggle.on_hover(move |inside: &bool, window, cx| {
+                hover(VolumePart::Toggle, *inside, window, cx)
+            })
+        })
+        .child(mute("live-mute"))
+        .children(pill);
     div()
         .id(("live-controller", row_id))
         .flex()
@@ -364,26 +444,8 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
         .gap(px(BADGE_GAP))
         .child(live_badge(this.facts.viewers))
         .children(this.leading)
-        .child(
-            Button::new(("live-mute", row_id))
-                .icon(icon)
-                .custom(variant)
-                .small()
-                .tab_index(0)
-                .tooltip(label)
-                .accessibility_label(label)
-                .on_click(move |_, window, cx| toggle_mute(window, cx)),
-        )
+        .child(toggle)
         .children(pip)
-        .when_some(this.facts.volume, |row, slider| {
-            row.child(
-                div().w(super::metrics::VOLUME_WIDTH).child(
-                    Slider::new(&slider)
-                        .bg(crate::ui::chat_theme::accent())
-                        .text_color(crate::ui::chat_theme::text_on_fill()),
-                ),
-            )
-        })
         .children(this.trailing)
         .into_any_element()
 }
@@ -394,12 +456,15 @@ pub(crate) enum LiveKeyAction {
     /// Taken and ignored: Space pauses nothing on a live picture.
     Nothing,
     ToggleMute,
+    /// Up (`true`) or Down: the volume by a step.
+    Volume(bool),
     ToggleFullscreen,
     LeaveFullscreen,
 }
 
 /// The live keys: Space does nothing (there is nothing to pause), M
-/// mutes, F toggles full screen, Esc leaves full screen. The seek, speed
+/// mutes, Up and Down change the volume, F toggles full screen, Esc
+/// leaves full screen. The seek, speed
 /// and frame-step keys of the file viewer mean nothing here and pass on.
 /// `None`: not a live key (Esc outside full screen closes what it would
 /// otherwise close).
@@ -412,6 +477,8 @@ pub(crate) fn live_key_action(
     match key {
         "space" if plain => Some(LiveKeyAction::Nothing),
         "m" if plain && !modifiers.shift => Some(LiveKeyAction::ToggleMute),
+        "up" if plain && !modifiers.shift => Some(LiveKeyAction::Volume(true)),
+        "down" if plain && !modifiers.shift => Some(LiveKeyAction::Volume(false)),
         "f" if plain && !modifiers.shift => Some(LiveKeyAction::ToggleFullscreen),
         "escape" if fullscreen => Some(LiveKeyAction::LeaveFullscreen),
         _ => None,
@@ -437,6 +504,14 @@ mod tests {
         assert_eq!(
             live_key_action("f", &none, true),
             Some(LiveKeyAction::ToggleFullscreen)
+        );
+        assert_eq!(
+            live_key_action("up", &none, false),
+            Some(LiveKeyAction::Volume(true))
+        );
+        assert_eq!(
+            live_key_action("down", &none, true),
+            Some(LiveKeyAction::Volume(false))
         );
         assert_eq!(
             live_key_action("escape", &none, true),

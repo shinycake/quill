@@ -37,7 +37,12 @@ impl PlaybackWatch {
     /// or waiting for a broadcaster, when no sound is expected). Returns
     /// a reason the first time the stream should fall back, and `None`
     /// on every call after that.
-    pub fn observe(&mut self, now: Instant, live: bool, health: PlaybackHealth) -> Option<FallBack> {
+    pub fn observe(
+        &mut self,
+        now: Instant,
+        live: bool,
+        health: PlaybackHealth,
+    ) -> Option<FallBack> {
         if self.fell_back {
             return None;
         }
@@ -78,7 +83,11 @@ mod tests {
             watch.observe(start + NO_SOUND_LIMIT, true, SILENT),
             Some(FallBack::NoSound)
         );
-        assert_eq!(watch.observe(start + NO_SOUND_LIMIT * 3, true, SILENT), None, "once");
+        assert_eq!(
+            watch.observe(start + NO_SOUND_LIMIT * 3, true, SILENT),
+            None,
+            "once"
+        );
     }
 
     #[test]
@@ -86,15 +95,27 @@ mod tests {
         let start = Instant::now();
         let mut watch = PlaybackWatch::default();
         // Ten seconds of connecting, or of nobody broadcasting.
-        assert_eq!(watch.observe(start + Duration::from_secs(10), false, SILENT), None);
+        assert_eq!(
+            watch.observe(start + Duration::from_secs(10), false, SILENT),
+            None
+        );
         let live = start + Duration::from_secs(11);
         assert_eq!(watch.observe(live, true, SILENT), None);
-        assert_eq!(watch.observe(live + Duration::from_secs(4), true, SILENT), None);
+        assert_eq!(
+            watch.observe(live + Duration::from_secs(4), true, SILENT),
+            None
+        );
         // Going back to waiting restarts the clock.
-        assert_eq!(watch.observe(live + Duration::from_secs(4), false, SILENT), None);
+        assert_eq!(
+            watch.observe(live + Duration::from_secs(4), false, SILENT),
+            None
+        );
         let again = live + Duration::from_secs(6);
         assert_eq!(watch.observe(again, true, SILENT), None);
-        assert_eq!(watch.observe(again + NO_SOUND_LIMIT, true, SILENT), Some(FallBack::NoSound));
+        assert_eq!(
+            watch.observe(again + NO_SOUND_LIMIT, true, SILENT),
+            Some(FallBack::NoSound)
+        );
     }
 
     #[test]
@@ -106,7 +127,10 @@ mod tests {
             output_failed: false,
         };
         assert_eq!(watch.observe(start, true, playing), None);
-        assert_eq!(watch.observe(start + Duration::from_secs(60), true, playing), None);
+        assert_eq!(
+            watch.observe(start + Duration::from_secs(60), true, playing),
+            None
+        );
     }
 
     #[test]
@@ -117,7 +141,10 @@ mod tests {
             frames: 500,
             output_failed: true,
         };
-        assert_eq!(watch.observe(start, true, failed), Some(FallBack::OutputFailed));
+        assert_eq!(
+            watch.observe(start, true, failed),
+            Some(FallBack::OutputFailed)
+        );
         assert_eq!(watch.observe(start, true, failed), None);
     }
 }

@@ -170,7 +170,10 @@ pub trait CallEngine {
     /// How the stream in group call `group_call_id` plays through the
     /// engine's own output; `None` when the engine does not play it
     /// (not a stream, device playback, no output), so it has no volume.
-    fn stream_sound_health(&self, group_call_id: i32) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
+    fn stream_sound_health(
+        &self,
+        group_call_id: i32,
+    ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
         let _ = group_call_id;
         None
     }

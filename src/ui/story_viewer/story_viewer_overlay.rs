@@ -288,7 +288,8 @@ impl QuillApp {
         });
         // Phase 9.2: own-story interaction counters under the caption.
         let counts: Option<String> = self.story_viewer_counts().filter(|_| !live_watch);
-        let live_header = self.live_story_header(cx);
+        let live_volume = self.live_story_volume(cx);
+        let live_header = self.live_story_header(live_volume, cx);
         let live_composer = self.live_story_composer(cx);
         div()
             .id("story-viewer-overlay")

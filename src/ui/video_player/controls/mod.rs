@@ -34,8 +34,9 @@ mod tests;
 pub(crate) use fade::cursor_hides;
 pub(crate) use fade::{ControlsFade, hide_cursor};
 pub(crate) use live::{
-    BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, LiveActions, LiveFacts, LiveKeyAction, bar_disc,
-    live_key_action, live_label, live_pill, live_pill_text_size, live_pill_width,
+    BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, LiveActions, LiveFacts, LiveKeyAction, VolumeHoverHandler,
+    VolumePart, bar_disc, live_key_action, live_label, live_pill, live_pill_text_size,
+    live_pill_width,
 };
 pub(crate) use live_overlay::{LiveInput, LiveOverlayClock};
 pub(crate) use overlay::{LiveOverlayParts, PictureOverlay, PictureState, stream_label_box};
