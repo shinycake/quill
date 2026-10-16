@@ -16,7 +16,8 @@
 //! - One sound at a time: it closes a file PiP and a file PiP closes it,
 //!   and so does any other sound starting (`QuillApp::sound_starts`).
 //! - It goes on lock, on logout of its account, and when its call or
-//!   stream ends.
+//!   stream ends. A rejoin or a restart does not close it: the window
+//!   plays the new feed (`live_pip_follow`).
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -264,6 +265,12 @@ impl QuillApp {
             self.close_live_pip(cx);
             return;
         }
+        // A rejoin or a restart gave the source a new feed: the window
+        // plays it (`live_pip_follow`).
+        self.follow_live_pip_feed(cx);
+        let Some(link) = self.group_call.live_pip.as_ref() else {
+            return;
+        };
         let shown_again =
             match source {
                 LivePipSource::Stream { .. } => self.group_call.window.is_some(),
@@ -281,7 +288,12 @@ impl QuillApp {
 
     /// The PiP's call is still there and its picture not over: the stream
     /// or live story's call is tracked, not left, and not ended; a live
-    /// story is still the one watched.
+    /// story is still the one watched. A stream's call being rejoined
+    /// on its own (`ActiveGroupCall::rejoining`: TDLib's `need_rejoin`
+    /// or the driver's rejoin, while attempts are left) counts: its new
+    /// feed comes into the same window. Once the attempts are spent the
+    /// PiP closes, as for a left call; the stream window keeps the
+    /// manual Rejoin.
     fn live_pip_source_alive(&self, source: LivePipSource) -> bool {
         let Some(calls) = self.session().map(|s| &s.calls) else {
             return false;
@@ -290,7 +302,7 @@ impl QuillApp {
         match source {
             LivePipSource::Stream { call_id } => call.is_some_and(|call| {
                 call.id == call_id
-                    && call.is_joined
+                    && (call.is_joined || call.rejoining())
                     && calls.left_group_call != Some(call_id)
                     && call.stream != StreamState::Ended
             }),
@@ -362,7 +374,11 @@ fn live_pip_hooks(app: WeakEntity<QuillApp>) -> PipHooks {
 /// The live controls' facts and mute, read from the app.
 fn live_pip_controls(app: WeakEntity<QuillApp>, source: LivePipSource) -> LivePip {
     let facts = app.clone();
+    let feed_left = app.clone();
     LivePip {
+        feed_left: Rc::new(move |cx| {
+            let _ = feed_left.update(cx, |app, cx| app.check_live_pip(cx));
+        }),
         facts: Rc::new(move |cx| {
             facts
                 .upgrade()

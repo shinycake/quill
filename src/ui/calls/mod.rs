@@ -887,5 +887,6 @@ pub(super) mod demo_feed;
 pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]
 mod live_pip_demo;
+mod live_pip_follow;
 pub(super) mod stream_title;
 pub(super) mod stream_view;

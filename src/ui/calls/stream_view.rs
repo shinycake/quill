@@ -26,7 +26,7 @@ use crate::ui::group_call_stream_layout::stream_full;
 use crate::ui::video_player::controls::{
     LiveInput, LiveOverlayClock, LiveOverlayParts, PictureOverlay, PictureState,
 };
-use crate::ui::video_player::{Purpose, VideoPlayer, WidthReport, video_frame};
+use crate::ui::video_player::{VideoPlayer, WidthReport, follow_live_slot, video_frame};
 use gpui_kit::*;
 use quill::calls::engine::StreamState;
 use quill::calls::live_video::{LiveKey, LiveSink};
@@ -57,7 +57,7 @@ pub(crate) struct StreamPictureParts {
 
 impl QuillApp {
     /// The stream's feed: the driver's, or a demo fixture's.
-    fn stream_sink(&self, chat_id: i64) -> Option<LiveSink> {
+    pub(crate) fn stream_sink(&self, chat_id: i64) -> Option<LiveSink> {
         match self.live.as_ref() {
             Some(live) => live.driver.live_sink(LiveKey::Stream { chat_id }),
             None => self
@@ -95,18 +95,7 @@ impl QuillApp {
             })
             .and_then(|call| call.transport_error.clone());
         let stream = &mut self.group_call.stream;
-        let same = match (stream.player.as_ref(), sink.as_ref()) {
-            (Some(player), Some(sink)) => player.live_sink().is_some_and(|own| own.same_as(sink)),
-            (None, None) => true,
-            _ => false,
-        };
-        if !same {
-            if let Some(old) = stream.player.take() {
-                old.release_live(cx);
-            }
-            stream.player =
-                sink.map(|sink| VideoPlayer::live(sink, Purpose::Live { tile: false }, cx));
-        }
+        follow_live_slot(&mut stream.player, sink.as_ref(), cx);
         Some(StreamPictureParts {
             chat_id,
             player: stream.player.clone(),

@@ -4,11 +4,13 @@
 //! enlarge and mute fade in with the pointer like the file PiP's buttons.
 //! The whole picture moves the window: there is no line to press.
 
+use super::super::super::{PlayState, VideoPlayer};
 use super::super::live::live_badge;
 use super::super::volume_icon;
 use super::{LivePip, VideoPip};
 use gpui_kit::assets::IconName;
 use gpui_kit::*;
+use quill::calls::live_video::LiveEnd;
 use quill::lang::{keys, tr};
 use quill::media_viewer::pip::layout::{ControlsLayout, OverState, PLAYBACK_SKIP, PressAction};
 use quill::media_viewer::pip::panel::PipPoint;
@@ -18,7 +20,44 @@ use std::rc::Rc;
 /// picture.
 const BADGE_BACKING: f32 = 0.34;
 
+/// What the player's state means for the window, on each draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EndCheck {
+    Plays,
+    /// A live feed was left, not ended: the connecting state shows until
+    /// the owner swaps the player or closes the window.
+    Gap,
+    /// A clip that failed (`handleStreamingError`), or a live picture
+    /// that failed or whose stream is over.
+    Close,
+}
+
 impl VideoPip {
+    /// See [`EndCheck`]. The first draw of a gap tells the owner
+    /// (`LivePip::feed_left`), deferred, once per player.
+    pub(super) fn end_check(&mut self, player: &VideoPlayer, cx: &mut Context<Self>) -> EndCheck {
+        match player.state() {
+            PlayState::Failed => EndCheck::Close,
+            PlayState::Ended => {
+                let Some(live) = self.live.as_ref() else {
+                    return EndCheck::Plays;
+                };
+                let left = player
+                    .live_sink()
+                    .is_some_and(|sink| sink.snapshot().end == Some(LiveEnd::Left));
+                if !left {
+                    return EndCheck::Close;
+                }
+                if !std::mem::replace(&mut self.feed_left_told, true) {
+                    let feed_left = live.feed_left.clone();
+                    cx.defer(move |cx| feed_left(cx));
+                }
+                EndCheck::Gap
+            }
+            _ => EndCheck::Plays,
+        }
+    }
+
     /// What the pointer is over at `local` (a live window's layout has
     /// no lines: `ControlsLayout::live`).
     pub(super) fn over_at(&self, window: &Window, local: PipPoint) -> OverState {

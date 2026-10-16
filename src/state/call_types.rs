@@ -113,6 +113,11 @@ pub struct GroupCallVerificationState {
 /// program). State follows TDLib's `groupCall` (schema 1.8.67, line
 /// 7154) and its participant updates (`updateGroupCall` 10819,
 /// `updateGroupCallParticipant` 10824, `updateGroupCallParticipants`
+/// Phase C2f: group-call rejoins Quill tries on its own after
+/// `need_rejoin` (the C2d 1:1 reconnect discipline). Past them only the
+/// manual Rejoin is left.
+pub const MAX_GROUP_CALL_REJOIN_ATTEMPTS: usize = 3;
+
 /// 10830, `updateGroupCallVerificationState` 10836).
 #[derive(Debug, Clone)]
 pub struct ActiveGroupCall {
@@ -253,6 +258,16 @@ impl ActiveGroupCall {
             .iter()
             .find(|p| p.is_current_user)
             .is_some_and(|me| me.is_muted_for_all_users && !me.can_unmute_self)
+    }
+
+    /// Dropped by the network and still being rejoined on its own: a
+    /// rejoin is due or under way and attempts are left. A rejoin whose
+    /// answer is pending (`reconnecting` cleared) still counts, the last
+    /// one included; once the last one failed (`reconnecting` set again
+    /// with no attempts left) the call waits for the manual Rejoin.
+    pub fn rejoining(&self) -> bool {
+        (self.need_rejoin || self.reconnecting)
+            && (self.rejoin_attempts < MAX_GROUP_CALL_REJOIN_ATTEMPTS || !self.reconnecting)
     }
 
     /// Blank tracked call for a newly seen call id. Participant state

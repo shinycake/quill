@@ -126,7 +126,7 @@ impl Session {
                         // Keep the banner + manual Rejoin
                         // available even after exhaustion.
                         call.reconnecting = true;
-                        if call.rejoin_attempts >= 3 {
+                        if call.rejoin_attempts >= crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS {
                             self.calls.group_call_error =
                                 Some("Reconnect attempts exhausted.".to_string());
                         }

@@ -356,7 +356,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             call.rejoin_attempts = 0;
         }
         let (group_call_id, is_muted) = match &self.session.calls.active_group_call {
-            Some(call) if call.reconnecting && call.rejoin_attempts < 3 => {
+            Some(call)
+                if call.reconnecting
+                    && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS =>
+            {
                 (call.id, call.is_muted_self)
             }
             _ => return Err(ConnectSendError::InvalidRequest),
@@ -427,7 +430,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.reconnecting && call.rejoin_attempts < 3);
+            .is_some_and(|call| {
+                call.reconnecting
+                    && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS
+            });
         if wants {
             let _ = self.rejoin_group_call(false);
         }
