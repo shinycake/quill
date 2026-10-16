@@ -113,8 +113,8 @@ struct DirectXRenderPipelines {
     subpixel_sprites: PipelineState<SubpixelSprite>,
     poly_sprites: PipelineState<PolychromeSprite>,
     hdr_surfaces: HdrSurfaces,
-    /// Quill: `None` when the NV12 pipeline couldn't be made (NV12 is then
-    /// not offered, `surface_support`).
+    /// Quill: `None` when the NV12 pipeline couldn't be made (this window
+    /// then refuses NV12 frames).
     yuv_surfaces: Option<YuvSurfaces>,
 }
 
@@ -359,10 +359,6 @@ impl DirectXRenderer {
         self.devices = Some(devices);
         self.resources = Some(resources);
         self.globals = globals;
-        // A recovered device with a working NV12 pipeline offers NV12 again.
-        if pipelines.yuv_surfaces.is_some() {
-            crate::surface_support::set_nv12_available(true);
-        }
         self.pipelines = pipelines;
         self.direct_composition = direct_composition;
         // The new swap chain is 8-bit; the next frame switches again if needed.
@@ -407,6 +403,10 @@ impl DirectXRenderer {
             .as_ref()
             .and_then(|devices| devices.annotation.clone())
             .filter(|annotation| unsafe { annotation.GetStatus().as_bool() });
+        // Quill: the NV12 frames this frame draws keep their textures.
+        if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
+            yuv.begin_frame(&scene.surfaces);
+        }
         for batch in scene.batches() {
             let _annotation = annotation
                 .as_ref()
@@ -887,11 +887,10 @@ impl DirectXRenderer {
                     .pipelines
                     .hdr_surfaces
                     .draw(devices, slice::from_ref(surface))?,
-                SurfaceFormat::Nv12 => {
-                    if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
-                        yuv.draw(devices, surface)?;
-                    }
-                }
+                SurfaceFormat::Nv12 => match self.pipelines.yuv_surfaces.as_mut() {
+                    Some(yuv) => yuv.draw(devices, surface)?,
+                    None => surface.frame.mark_refused(),
+                },
             }
         }
         Ok(())
@@ -1075,13 +1074,12 @@ impl DirectXRenderPipelines {
             create_blend_state(device)?,
         )?;
         let hdr_surfaces = HdrSurfaces::new(device)?;
-        // Quill: without the NV12 pipeline the window still draws; video
-        // falls back to BGRA images.
+        // Quill: without the NV12 pipeline the window still draws; its NV12
+        // frames are refused and their producers show images instead.
         let yuv_surfaces = match YuvSurfaces::new(device) {
             Ok(yuv) => Some(yuv),
             Err(error) => {
                 log::warn!("NV12 surface pipeline unavailable: {error:#}");
-                crate::surface_support::set_nv12_available(false);
                 None
             }
         };

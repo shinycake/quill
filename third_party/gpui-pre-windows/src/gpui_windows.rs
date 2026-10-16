@@ -20,7 +20,7 @@ pub mod hdr_output;
 mod keyboard;
 pub mod native_frame;
 pub mod notification_extras;
-pub mod surface_support;
+mod surface_support;
 mod platform;
 mod system_notifications;
 mod system_settings;

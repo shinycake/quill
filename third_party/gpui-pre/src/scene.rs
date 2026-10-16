@@ -916,8 +916,9 @@ impl YuvColor {
 /// Which platforms draw them: Windows (the vendored DirectX renderer)
 /// draws both formats. Linux (the registry gpui-pre-wgpu renderer) draws
 /// no surfaces, and macOS draws CoreVideo buffers instead, so a producer
-/// asks the platform first (Quill: `gpui_windows::surface_support`) and
-/// keeps to images elsewhere.
+/// hands these over only on Windows and keeps to images elsewhere. The
+/// renderer reports each frame's [`SurfaceDrawState`]; a producer replaces
+/// a refused frame with an image.
 #[derive(Debug)]
 pub struct SurfaceFrame {
     id: u64,
@@ -929,6 +930,8 @@ pub struct SurfaceFrame {
     yuv: YuvColor,
     /// f32 bits of the display headroom to tone-map to (1.0 = SDR).
     headroom: std::sync::atomic::AtomicU32,
+    /// [`SurfaceDrawState`]: 0 pending, 1 drawn, 2 refused.
+    draw_state: std::sync::atomic::AtomicU8,
 }
 
 impl SurfaceFrame {
@@ -957,6 +960,7 @@ impl SurfaceFrame {
             bytes,
             yuv: YuvColor::default(),
             headroom: std::sync::atomic::AtomicU32::new(1.0_f32.to_bits()),
+            draw_state: std::sync::atomic::AtomicU8::new(0),
         })
     }
 
@@ -1018,6 +1022,47 @@ impl SurfaceFrame {
         self.headroom
             .store(headroom.to_bits(), std::sync::atomic::Ordering::Relaxed);
     }
+
+    /// What the renderer last did with the frame (renderers that draw
+    /// this format report it; see [`SurfaceDrawState`]).
+    pub fn draw_state(&self) -> SurfaceDrawState {
+        match self.draw_state.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => SurfaceDrawState::Drawn,
+            2 => SurfaceDrawState::Refused,
+            _ => SurfaceDrawState::Pending,
+        }
+    }
+
+    /// Renderer: the frame is on screen.
+    pub fn mark_drawn(&self) {
+        // A refusal stays: the producer replaces the frame.
+        let _ = self.draw_state.compare_exchange(
+            0,
+            1,
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// Renderer: the frame could not be drawn (its textures failed, or the
+    /// pipeline is missing); the producer should show it another way.
+    pub fn mark_refused(&self) {
+        self.draw_state
+            .store(2, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// QUILL: what a renderer did with a [`SurfaceFrame`], so its producer can
+/// replace a frame this window can't draw (with an image) without a
+/// process-wide switch: each window's renderer answers for itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceDrawState {
+    /// Not drawn yet.
+    Pending,
+    /// Drawn at least once.
+    Drawn,
+    /// The renderer could not draw it.
+    Refused,
 }
 
 impl PartialEq for SurfaceFrame {

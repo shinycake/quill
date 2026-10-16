@@ -40,4 +40,10 @@ DirectX renderer as YUV instead of BGRA (`docs/decisions/video-player-nv12.md`):
   `SurfaceFrame::nv12_planes` splits the two planes.
 - Only the vendored Windows renderer draws NV12. macOS keeps CoreVideo
   surfaces and Linux (gpui-pre-wgpu) draws no surfaces, so Quill produces
-  NV12 frames on Windows only, after asking `gpui_windows::surface_support`.
+  NV12 frames on Windows only.
+- `SurfaceFrame::draw_state` / `mark_drawn` / `mark_refused` and
+  `SurfaceDrawState { Pending, Drawn, Refused }`: the renderer that draws a
+  frame says what happened to it, so the producer can replace a frame its
+  window can't draw (with an image) and knows when a paused picture is on
+  screen. The answer belongs to the frame, so each window answers for
+  itself.
