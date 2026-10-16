@@ -200,6 +200,31 @@ BGRA run did not grow, so the images are freed while the main window
 idles. The sampling script is a `ps` loop over the demo binary run with
 `QUILL_DEMO_LINGER_MS=75000`.
 
+**The same run after the review**, rebased on main with the image-budget
+fix (#870, main at `1e412823`), release build. The BGRA run had
+`QUILL_TRACE_TICKS=1`: 29 to 31 picture redraws a second, and after the
+first second no other slice.
+
+| t | NV12 surfaces (macOS) RSS | CPU | BGRA images (`QUILL_LIVE_BGRA=1`) RSS | CPU |
+|---|---|---|---|---|
+| 0 s | 151.0 MB | 3.2 % | 153.1 MB | 10.4 % |
+| 5 s | 153.3 MB | 5.8 % | 154.2 MB | 11.3 % |
+| 10 s | 153.4 MB | 2.4 % | 154.2 MB | 10.5 % |
+| 15 s | 153.4 MB | 2.8 % | 154.3 MB | 9.9 % |
+| 20 s | 153.4 MB | 2.9 % | 154.2 MB | 10.8 % |
+| 25 s | 153.5 MB | 3.0 % | 154.2 MB | 10.5 % |
+| 30 s | 153.5 MB | 3.3 % | 154.2 MB | 10.5 % |
+| 35 s | 153.5 MB | 3.2 % | 154.2 MB | 10.7 % |
+| 40 s | 147.9 MB | 3.4 % | 154.2 MB | 9.5 % |
+| 45 s | 147.9 MB | 3.6 % | 154.2 MB | 10.7 % |
+| 50 s | 147.9 MB | 3.4 % | 154.2 MB | 10.0 % |
+| 55 s | 147.9 MB | 3.7 % | 154.2 MB | 11.0 % |
+| 60 s | 147.8 MB | 3.5 % | 151.9 MB | 10.9 % |
+
+Both stay flat: NV12 moves within 6 MB, BGRA within 2.4 MB over the
+minute (KB figures from `ps`, rounded). The first run fell further
+because macOS trimmed the process early; neither run grows.
+
 ## Deviations from the design
 
 1. **Color range.** The pool is
@@ -226,8 +251,12 @@ idles. The sampling script is a `ps` loop over the demo binary run with
      only `QuillApp::render` runs it. The stream window draws in its own
      window while the main window idles. That pattern measured 199 live
      images (699 MiB) before.
-   - A fix that calls `sweep` from slices and the anim layer (in
-     progress on main) still would not cover the stream window's root.
+   - The leak fix that landed on main (#870,
+     `docs/decisions/retired-images-sidebar-bursts.md`) changes what
+     `sweep` may drop, not where it runs. `QuillApp::render` runs on
+     every frame the main window draws, but an idle main window draws
+     none, so it still would not free the stream window's images. This
+     branch is rebased on it; nothing here depends on it.
    - When the owner drops the player, `release_live` drops the rest
      (shown, previous, paused pictures) the same way. `retire_all`
      from `LiveCore::drop` is only the fallback for a player dropped
