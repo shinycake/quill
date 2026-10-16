@@ -17,7 +17,6 @@
 use super::spa_pod::{NegotiatedFormat, PARAM_FORMAT, parse_video_format, video_enum_format};
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::os::fd::{IntoRawFd, OwnedFd};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
@@ -231,7 +230,7 @@ unsafe fn with_data(data: *mut c_void, body: impl FnOnce(&mut CallbackData)) {
     let Some(data) = (unsafe { data.cast::<CallbackData>().as_mut() }) else {
         return;
     };
-    let _ = catch_unwind(AssertUnwindSafe(|| body(data)));
+    crate::thread_guard::ffi_boundary((), || body(data));
 }
 
 unsafe extern "C" fn on_state_changed(
@@ -273,20 +272,28 @@ unsafe extern "C" fn on_param_changed(data: *mut c_void, id: u32, param: *const 
 
 unsafe extern "C" fn on_process(data: *mut c_void) {
     // SAFETY: called by PipeWire with our data, on its thread with the
-    // loop locked: buffers dequeued here are ours until queued back.
-    unsafe {
-        with_data(data, |data| {
-            let buffer = (data.api.stream_dequeue_buffer)(data.stream);
-            if buffer.is_null() {
-                return;
-            }
-            let planes = planes_of(buffer);
-            if !planes.is_empty() {
-                data.handler.frame(&planes);
-            }
-            (data.api.stream_queue_buffer)(data.stream, buffer);
-        });
+    // loop locked; `data` is the `CallbackData` the stream was registered
+    // with (see `with_data`).
+    let Some(data) = (unsafe { data.cast::<CallbackData>().as_mut() }) else {
+        return;
+    };
+    // SAFETY: buffers dequeued here are ours until queued back.
+    let buffer = unsafe { (data.api.stream_dequeue_buffer)(data.stream) };
+    if buffer.is_null() {
+        return;
     }
+    // A panic in the handler must not lose the buffer: PipeWire would run
+    // out of them and the stream would stall. The queue-back sits outside
+    // the guarded closure for that reason.
+    crate::thread_guard::ffi_boundary((), || {
+        // SAFETY: `buffer` was just dequeued and is not queued yet.
+        let planes = unsafe { planes_of(buffer) };
+        if !planes.is_empty() {
+            data.handler.frame(&planes);
+        }
+    });
+    // SAFETY: the buffer is ours until this call hands it back.
+    unsafe { (data.api.stream_queue_buffer)(data.stream, buffer) };
 }
 
 /// The mapped data blocks of a dequeued buffer; empty when any is not

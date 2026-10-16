@@ -217,6 +217,9 @@ impl Drop for TdJson {
     }
 }
 
+/// The verbosity TDLib logs fatal errors at.
+const FATAL_LOG_VERBOSITY: c_int = 0;
+
 static NATIVE_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
 
 fn is_ok_response(body: &str) -> bool {
@@ -228,10 +231,15 @@ fn is_ok_response(body: &str) -> bool {
         .is_some_and(|t| t == "ok")
 }
 
-unsafe extern "C" fn redacted_native_log(_verbosity: c_int, _message: *const c_char) {
+unsafe extern "C" fn redacted_native_log(verbosity: c_int, _message: *const c_char) {
     // Do not call any TDLib function from this callback.
     // Do not inspect `_message`; native logs can contain account data.
     NATIVE_LOG_COUNT.fetch_add(1, Ordering::Relaxed);
+    if verbosity == FATAL_LOG_VERBOSITY {
+        // TDLib aborts once this returns. Leave a breadcrumb (no message
+        // text) so the next launch can say what happened.
+        crate::thread_guard::ffi_boundary((), crate::crash_log::note_native_fatal);
+    }
 }
 
 #[cfg(test)]
