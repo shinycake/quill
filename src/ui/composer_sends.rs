@@ -19,6 +19,7 @@ use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
 };
 use quill::ids::{AccountKey, ChatId};
+use quill::telegram::envelope::AuthorizationState;
 use quill::telegram::requests::SelfDestructSend;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -193,6 +194,14 @@ impl ComposerSends {
             .filter(move |attachment| attachment.path == path)
     }
 
+    /// Every attachment of every tray, in any account and chat.
+    pub(super) fn attachments(&self) -> impl Iterator<Item = &ComposerAttachment> + '_ {
+        self.accounts
+            .values()
+            .flat_map(|account| account.slots.values())
+            .flat_map(|send| send.attachments.iter())
+    }
+
     /// Some tray, in any account and chat, holds `path`.
     pub(super) fn holds(&self, path: &Path) -> bool {
         self.accounts
@@ -261,6 +270,17 @@ impl ComposerSends {
             .map(|account| account.slots.len())
             .sum()
     }
+}
+
+/// The auth state went from signed in to signed out.
+fn session_ended(prev: &AuthorizationState, now: &AuthorizationState) -> bool {
+    matches!(
+        prev,
+        AuthorizationState::Ready | AuthorizationState::LoggingOut
+    ) && matches!(
+        now,
+        AuthorizationState::WaitPhoneNumber | AuthorizationState::Closed
+    )
 }
 
 impl QuillApp {
@@ -360,6 +380,34 @@ impl QuillApp {
             })
             .unwrap_or_default();
         self.forget_tray_checks(&dropped);
+    }
+
+    /// Whether `slot` can still be sent from: its account is on screen
+    /// with the chat in its list, or is signed in in the background.
+    pub(super) fn send_slot_exists(&self, slot: &SendSlot) -> bool {
+        match self.session() {
+            Some(session) if session.account == slot.account => {
+                session.chats.contains_key(&slot.draft.chat_id)
+            }
+            _ => self.background.client(&slot.account).is_some(),
+        }
+    }
+
+    /// The account on screen left `Ready` for good (`logOut`, an expired
+    /// or terminated session, a lost bridge ending in `Closed`): its
+    /// choices go, whether or not `LoggingOut` was seen on the way.
+    pub(in crate::ui) fn forget_sends_after_auth(
+        &mut self,
+        prev: &AuthorizationState,
+        saw_logging_out: bool,
+    ) {
+        let Some(session) = self.session() else {
+            return;
+        };
+        if saw_logging_out || session_ended(prev, &session.auth) {
+            let account = session.account.clone();
+            self.forget_account_sends(&account);
+        }
     }
 
     /// `account` logged out or was removed: drop its choices.

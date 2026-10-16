@@ -30,8 +30,8 @@ impl QuillApp {
     /// sound checks.
     pub(super) fn prepare_tray_file_thumbnails(&mut self, cx: &mut Context<Self>) {
         let paths: Vec<PathBuf> = self
-            .pending_attachments()
-            .iter()
+            .composer_sends
+            .attachments()
             .filter(|attachment| attachment.kind == AttachmentKind::Document)
             .filter(|attachment| attachment.extras.file_thumbnail.is_none())
             .filter(|attachment| is_image_file(&attachment.file_name, ""))

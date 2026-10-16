@@ -110,9 +110,11 @@ impl QuillApp {
     /// `modifications.gif = !hasAudio`). Sending waits for the reads. Also
     /// starts the thumbnails of pictures sent as files.
     pub(super) fn check_tray_videos(&mut self, cx: &mut Context<Self>) {
+        // Every tray, not just the open one: a picker can answer into
+        // another chat's tray.
         let paths: Vec<std::path::PathBuf> = self
-            .pending_attachments()
-            .iter()
+            .composer_sends
+            .attachments()
             .filter(|attachment| attachment.needs_sound_check())
             .map(|attachment| attachment.path.clone())
             .filter(|path| {

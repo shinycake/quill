@@ -6,6 +6,7 @@ use super::actions::{
     FormatStrikethrough, FormatUnderline,
 };
 use super::app::{PaneMode, QuillApp};
+use super::composer_sends::SendSlot;
 use super::demo::demo_media_allowlist;
 use super::message_text::rich_block_element;
 use super::nested_click::SwallowPress;
@@ -627,19 +628,52 @@ impl QuillApp {
             multiple: true,
             prompt: Some(tr(keys::Q_CHAT_CHOOSE_FILES).into()),
         });
-        // The picker answers later: attach into the composer of the
-        // window that asked (`chat_window::slot`).
+        // The picker answers later (the Linux portal's is not modal):
+        // the files belong to the chat and account it was opened in, not
+        // to whatever the window shows by then.
         let window_chat = self.windows.scope;
+        let asked_in = self.send_slot();
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await {
+            if let (Ok(Ok(Some(paths))), Some(asked_in)) = (picker.await, asked_in) {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(window_chat, cx, |this, cx| {
-                        this.attach_picked(paths, as_files, cx)
+                        this.attach_picked_in(&asked_in, paths, as_files, cx)
                     })
                 });
             }
         })
         .detach();
+    }
+
+    /// A picker answer for `asked_in`. In the slot on screen it is the
+    /// ordinary path; in another one it joins that tray without touching
+    /// the open chat, and a slot whose account or chat is gone drops it.
+    pub(super) fn attach_picked_in(
+        &mut self,
+        asked_in: &SendSlot,
+        paths: Vec<PathBuf>,
+        as_files: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.send_slot().as_ref() == Some(asked_in) {
+            self.attach_picked(paths, as_files, cx);
+            return;
+        }
+        if !self.send_slot_exists(asked_in) {
+            return;
+        }
+        let appended = self.composer_sends.update(asked_in, |send| {
+            let appended = ComposerAttachment::append_dropped_files(&mut send.attachments, &paths);
+            if as_files {
+                ComposerAttachment::set_send_as_files(&mut send.attachments, true);
+            }
+            appended
+        });
+        if let Err(note) = appended {
+            self.connection.status_note = note.into();
+        }
+        self.check_tray_videos(cx);
+        cx.notify();
     }
 
     fn attach_picked(&mut self, paths: Vec<PathBuf>, as_files: bool, cx: &mut Context<Self>) {

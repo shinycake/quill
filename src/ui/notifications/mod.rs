@@ -465,8 +465,8 @@ impl QuillApp {
                 .map(|live| live.driver.session.account.clone())
         {
             self.video_pip_account_ended(&account, cx);
-            self.forget_account_sends(&account);
         }
+        self.forget_sends_after_auth(&prev_auth, saw_logging_out);
         if ingested {
             self.check_video_pip(cx);
             // The tray, the badge and the OS menus follow what was applied.
