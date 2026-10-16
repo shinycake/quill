@@ -5,6 +5,7 @@ Comment=Unofficial Telegram desktop client
 Exec=quill %u
 Icon=quill
 Terminal=false
+StartupWMClass=org.shinycake.quill
 Categories=Network;Chat;
 MimeType=x-scheme-handler/tg;
 Actions=quit;

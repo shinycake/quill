@@ -15,7 +15,7 @@ ICONS="$PREFIX/share/icons/hicolor"
 
 if [[ "$MODE" == uninstall ]]; then
   rm -rf "$DEST"
-  rm -f "$PREFIX/bin/quill" "$APPS/quill.desktop" "$ICONS"/*/apps/quill.png
+  rm -f "$PREFIX/bin/quill" "$APPS/quill.desktop" "$APPS/org.shinycake.quill.desktop" "$ICONS"/*/apps/quill.png
   echo "Removed Quill from $PREFIX (account data under ~/.local/share is untouched)."
   exit 0
 fi
@@ -28,7 +28,14 @@ mv "$DEST.new" "$DEST"
 ln -sf "$DEST/quill" "$PREFIX/bin/quill"
 # The entry's own Exec takes links; its "Quit Quill" action passes --quit.
 sed -e "s|^Exec=quill --quit$|Exec=$DEST/quill --quit|" -e "s|^Exec=quill %u$|Exec=$DEST/quill %u|" \
-  "$HERE/share/applications/quill.desktop" > "$APPS/quill.desktop"
+  "$HERE/share/applications/org.shinycake.quill.desktop" > "$APPS/org.shinycake.quill.desktop"
+# Older installs (and a tg:// default chosen with them) used quill.desktop. The
+# window app_id is org.shinycake.quill, so the new name is the real entry; keep
+# the old name as a hidden alias only where it already existed.
+if [ -f "$APPS/quill.desktop" ]; then
+  { cat "$APPS/org.shinycake.quill.desktop"; echo "NoDisplay=true"; } > "$APPS/quill.desktop.new"
+  mv "$APPS/quill.desktop.new" "$APPS/quill.desktop"
+fi
 for icon in "$HERE"/share/icons/hicolor/*/apps/quill.png; do
   size="$(basename "$(dirname "$(dirname "$icon")")")"
   mkdir -p "$ICONS/$size/apps"

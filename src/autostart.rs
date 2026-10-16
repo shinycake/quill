@@ -76,9 +76,23 @@ fn platform() -> Option<Platform> {
 
 /// The autostart file for `platform` under `home` (no HOME lookup — the
 /// caller supplies it, which keeps this testable).
+#[cfg(test)]
 fn autostart_path_in(home: &Path, platform: Platform) -> PathBuf {
+    autostart_path_with(home, None, platform)
+}
+
+/// Like [`autostart_path_in`], with the `XDG_CONFIG_HOME` value (Linux). Per
+/// the XDG spec a relative or empty value is ignored.
+fn autostart_path_with(home: &Path, xdg_config: Option<&str>, platform: Platform) -> PathBuf {
     match platform {
-        Platform::Linux => home.join(".config/autostart/quill.desktop"),
+        Platform::Linux => {
+            let config = xdg_config
+                .map(str::trim)
+                .map(Path::new)
+                .filter(|dir| dir.is_absolute())
+                .map_or_else(|| home.join(".config"), Path::to_path_buf);
+            config.join("autostart/quill.desktop")
+        }
         Platform::MacOs => home.join("Library/LaunchAgents/com.quill.app.plist"),
     }
 }
@@ -191,13 +205,19 @@ pub fn is_enabled() -> bool {
         .flatten()
         .is_some_and(|value| !value.is_empty());
     #[cfg(not(windows))]
-    std::env::var("HOME")
-        .ok()
-        .is_some_and(|home| is_enabled_in(Path::new(&home)))
+    std::env::var("HOME").ok().is_some_and(|home| {
+        let xdg = std::env::var("XDG_CONFIG_HOME").ok();
+        is_enabled_with(Path::new(&home), xdg.as_deref())
+    })
 }
 
+#[cfg(test)]
 fn is_enabled_in(home: &Path) -> bool {
-    platform().is_some_and(|p| autostart_path_in(home, p).exists())
+    is_enabled_with(home, None)
+}
+
+fn is_enabled_with(home: &Path, xdg_config: Option<&str>) -> bool {
+    platform().is_some_and(|p| autostart_path_with(home, xdg_config, p).exists())
 }
 
 /// Enable or disable autostart on login.
@@ -222,12 +242,22 @@ fn set_enabled_windows(enabled: bool) -> Result<(), AutostartError> {
 #[cfg(not(windows))]
 fn set_enabled_home(enabled: bool) -> Result<(), AutostartError> {
     let home = std::env::var("HOME").map_err(|_| AutostartError::Unsupported)?;
-    set_enabled_in(Path::new(&home), enabled)
+    let xdg = std::env::var("XDG_CONFIG_HOME").ok();
+    set_enabled_with(Path::new(&home), xdg.as_deref(), enabled)
 }
 
+#[cfg(test)]
 fn set_enabled_in(home: &Path, enabled: bool) -> Result<(), AutostartError> {
+    set_enabled_with(home, None, enabled)
+}
+
+fn set_enabled_with(
+    home: &Path,
+    xdg_config: Option<&str>,
+    enabled: bool,
+) -> Result<(), AutostartError> {
     let platform = platform().ok_or(AutostartError::Unsupported)?;
-    let path = autostart_path_in(home, platform);
+    let path = autostart_path_with(home, xdg_config, platform);
     if enabled {
         let exe = std::env::current_exe().map_err(|e| AutostartError::Io(e.to_string()))?;
         write_file(&path, platform, &exe).map_err(|e| AutostartError::Io(e.to_string()))
@@ -390,6 +420,29 @@ mod tests {
         if let Some(previous) = before {
             crate::winreg::set_string(RUN_KEY, RUN_VALUE_NAME, &previous).unwrap();
         }
+    }
+
+    // Unix paths: "/cfg" is not absolute on Windows.
+    #[cfg(unix)]
+    #[test]
+    fn linux_autostart_honours_xdg_config_home() {
+        let home = Path::new("/home/a");
+        assert_eq!(
+            autostart_path_with(home, Some("/cfg"), Platform::Linux),
+            Path::new("/cfg/autostart/quill.desktop")
+        );
+        // Unset, empty and relative values fall back to ~/.config.
+        for bad in [None, Some(""), Some("  "), Some("relative/cfg")] {
+            assert_eq!(
+                autostart_path_with(home, bad, Platform::Linux),
+                Path::new("/home/a/.config/autostart/quill.desktop")
+            );
+        }
+        // macOS ignores it.
+        assert_eq!(
+            autostart_path_with(home, Some("/cfg"), Platform::MacOs),
+            Path::new("/home/a/Library/LaunchAgents/com.quill.app.plist")
+        );
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
