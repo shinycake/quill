@@ -221,7 +221,10 @@ mod tests {
         crate::settings::set_active_account(&root, &test).unwrap();
         assert!(active_account_is_test(&root));
         crate::settings::delete_account_folder(&root, &test).unwrap();
-        assert!(!active_account_is_test(&root), "the marker went with the folder");
+        assert!(
+            !active_account_is_test(&root),
+            "the marker went with the folder"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
