@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn hover_tints_the_stretch_between_progress_and_pointer() {
-        let tint = 0.25 + 0.3 * 0.75;
+        let tint = 0.25 + 0.5 * 0.75;
         // Pointer ahead: the unplayed part up to it brightens.
         let ahead = zones(100., 1., 0.25, Some(0.6), 0.25);
         assert_eq!(
