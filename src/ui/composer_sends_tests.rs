@@ -570,3 +570,111 @@ fn a_file_another_tray_holds_keeps_its_checks_when_one_tray_drops_it(cx: &mut Te
         );
     });
 }
+
+#[gpui_kit::test]
+fn a_file_picker_answered_after_a_chat_switch_fills_the_chat_it_was_opened_in(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let file = picture("late.png");
+        app.select_listed_chat(A, window, cx);
+        let asked_in = app.send_slot().expect("an open chat");
+        app.select_listed_chat(B, window, cx);
+        app.attach_picked_in(&asked_in, vec![file.clone()], true, cx);
+        assert!(app.pending_attachments().is_empty(), "B stays empty");
+        let in_a = app.composer_sends.get(&asked_in);
+        assert_eq!(in_a.attachments.len(), 1, "A got the file");
+        assert!(in_a.attachments.iter().all(|a| a.path == file));
+        app.select_listed_chat(A, window, cx);
+        assert_eq!(app.pending_attachments().len(), 1);
+    });
+}
+
+#[gpui_kit::test]
+fn a_file_picker_answer_for_a_gone_account_or_chat_is_dropped(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let file = picture("gone.png");
+        app.select_listed_chat(A, window, cx);
+        let account = app.send_slot().expect("an open chat").account;
+        // No such chat in the account on screen.
+        let no_chat = slot_of(&account, ChatId(9_999));
+        app.attach_picked_in(&no_chat, vec![file.clone()], false, cx);
+        assert!(app.composer_sends.get(&no_chat).attachments.is_empty());
+        // An account that is neither on screen nor in the background.
+        let other = slot_of(&second_account(), B);
+        app.attach_picked_in(&other, vec![file], false, cx);
+        assert!(app.composer_sends.get(&other).attachments.is_empty());
+        assert_eq!(app.composer_sends.slot_count(), 0);
+    });
+}
+
+#[gpui_kit::test]
+fn the_choices_go_when_the_session_leaves_ready_without_a_logout(cx: &mut TestAppContext) {
+    use quill::telegram::envelope::AuthorizationState as Auth;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(A, window, cx);
+        choose_everything(app);
+        // Still signed in: Ready to Ready keeps them.
+        app.forget_sends_after_auth(&Auth::Ready, false);
+        assert_eq!(app.pending_attachments().len(), 1);
+        // A phone-number prompt that was never a Ready session keeps them.
+        app.demo_session.as_mut().expect("demo").auth = Auth::WaitPhoneNumber;
+        app.forget_sends_after_auth(&Auth::WaitTdlibParameters, false);
+        assert_eq!(app.pending_attachments().len(), 1);
+        // Ready to WaitPhoneNumber (session terminated): gone.
+        app.forget_sends_after_auth(&Auth::Ready, false);
+        assert_eq!(app.composer_sends.slot_count(), 0);
+        assert_nothing_chosen(app, "after the session ended");
+        // Ready to Closed (bridge lost): gone too.
+        choose_everything(app);
+        app.demo_session.as_mut().expect("demo").auth = Auth::Closed;
+        app.forget_sends_after_auth(&Auth::Ready, false);
+        assert_eq!(app.composer_sends.slot_count(), 0);
+    });
+}
+
+#[gpui_kit::test]
+fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(A, window, cx);
+        let in_a = photo("checking-a.mp4");
+        app.update_pending_send(|send| send.attachments.push(in_a.clone()))
+            .expect("an open chat");
+        let send_box = &mut app.composer_ui.send_box;
+        send_box.sound_checking.insert(in_a.path.clone());
+        send_box.thumbnailing.insert(in_a.path.clone(), 1);
+        assert!(app.tray_videos_checking(), "A waits on its own file");
+        assert!(app.tray_thumbnails_pending());
+        app.select_listed_chat(B, window, cx);
+        assert!(!app.tray_videos_checking(), "B is not held by A's probe");
+        assert!(!app.tray_thumbnails_pending());
+        app.select_listed_chat(A, window, cx);
+        assert!(app.tray_videos_checking());
+    });
+}
+
+#[gpui_kit::test]
+fn a_session_closing_over_two_polls_ends_like_one_that_closed_at_once(cx: &mut TestAppContext) {
+    use quill::telegram::envelope::AuthorizationState as Auth;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(A, window, cx);
+        choose_everything(app);
+        // Poll 1: Ready to Closing keeps them (still on its way out).
+        app.demo_session.as_mut().expect("demo").auth = Auth::Closing;
+        app.forget_sends_after_auth(&Auth::Ready, false);
+        assert_eq!(app.pending_attachments().len(), 1);
+        // Poll 2: Closing to Closed drops them.
+        app.demo_session.as_mut().expect("demo").auth = Auth::Closed;
+        app.forget_sends_after_auth(&Auth::Closing, false);
+        assert_eq!(app.composer_sends.slot_count(), 0);
+        // Batched Ready to Closed drops them too.
+        choose_everything(app);
+        app.forget_sends_after_auth(&Auth::Ready, false);
+        assert_eq!(app.composer_sends.slot_count(), 0);
+    });
+}

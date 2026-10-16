@@ -110,9 +110,11 @@ impl QuillApp {
     /// `modifications.gif = !hasAudio`). Sending waits for the reads. Also
     /// starts the thumbnails of pictures sent as files.
     pub(super) fn check_tray_videos(&mut self, cx: &mut Context<Self>) {
+        // Every tray, not just the open one: a picker can answer into
+        // another chat's tray.
         let paths: Vec<std::path::PathBuf> = self
-            .pending_attachments()
-            .iter()
+            .composer_sends
+            .attachments()
             .filter(|attachment| attachment.needs_sound_check())
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
@@ -154,9 +156,13 @@ impl QuillApp {
         self.prepare_tray_file_thumbnails(cx);
     }
 
-    /// Videos in the tray are still being read.
+    /// Videos in the open slot's tray are still being read (a probe for
+    /// another chat's tray does not count).
     pub(super) fn tray_videos_checking(&self) -> bool {
-        !self.composer_ui.send_box.sound_checking.is_empty()
+        let checking = &self.composer_ui.send_box.sound_checking;
+        self.pending_attachments()
+            .iter()
+            .any(|attachment| checking.contains(&attachment.path))
     }
 
     /// The options row of the tray: High quality and the price.

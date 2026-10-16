@@ -606,60 +606,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The attach menu's "Photo or video" / "File": Telegram Desktop's
-    /// "Choose Files" dialog. Picked photos and videos join the album;
-    /// anything else, or everything when `as_files`, goes as files.
-    /// `QUILL_ATTACH_PHOTO` / `QUILL_ATTACH_FILE` skip the dialog for live
-    /// testing; the offline demo attaches its fixtures instead.
-    pub(super) fn pick_attachments(&mut self, as_files: bool, cx: &mut Context<Self>) {
-        let env_key = if as_files {
-            "QUILL_ATTACH_FILE"
-        } else {
-            "QUILL_ATTACH_PHOTO"
-        };
-        let preset = std::env::var_os(env_key).map(PathBuf::from).or_else(|| {
-            (self.live.is_none() && self.demo_session.is_some()).then(|| {
-                demo_media_allowlist().join(if as_files {
-                    "demo-notes.txt"
-                } else {
-                    "demo-thumb.png"
-                })
-            })
-        });
-        if let Some(path) = preset {
-            self.attach_picked(vec![path], as_files, cx);
-            return;
-        }
-        let picker = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: true,
-            prompt: Some(tr(keys::Q_CHAT_CHOOSE_FILES).into()),
-        });
-        // The picker answers later: attach into the composer of the
-        // window that asked (`chat_window::slot`).
-        let window_chat = self.windows.scope;
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = picker.await {
-                let _ = this.update(cx, |this, cx| {
-                    this.in_window_scope(window_chat, cx, |this, cx| {
-                        this.attach_picked(paths, as_files, cx)
-                    })
-                });
-            }
-        })
-        .detach();
-    }
-
-    fn attach_picked(&mut self, paths: Vec<PathBuf>, as_files: bool, cx: &mut Context<Self>) {
-        self.attach_dropped_files(&paths, cx);
-        if as_files {
-            self.update_pending_attachments(|tray| {
-                ComposerAttachment::set_send_as_files(tray, true)
-            });
-        }
-    }
-
     /// Parity slice (platform-paste-image): on Paste, if the composer has
     /// focus and the clipboard holds an image, attach it as a photo. The kit
     /// Textarea's own paste runs first on the focused element and only handles
@@ -979,6 +925,7 @@ impl QuillApp {
     }
 }
 
+mod attach_picker;
 mod command_menu;
 mod copy_inline_text;
 mod toggle_composer_silent;

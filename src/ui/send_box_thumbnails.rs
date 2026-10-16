@@ -30,8 +30,8 @@ impl QuillApp {
     /// sound checks.
     pub(super) fn prepare_tray_file_thumbnails(&mut self, cx: &mut Context<Self>) {
         let paths: Vec<PathBuf> = self
-            .pending_attachments()
-            .iter()
+            .composer_sends
+            .attachments()
             .filter(|attachment| attachment.kind == AttachmentKind::Document)
             .filter(|attachment| attachment.extras.file_thumbnail.is_none())
             .filter(|attachment| is_image_file(&attachment.file_name, ""))
@@ -81,9 +81,12 @@ impl QuillApp {
         }
     }
 
-    /// Thumbnails of tray files are still being made.
+    /// Thumbnails of the open slot's tray files are still being made.
     pub(super) fn tray_thumbnails_pending(&self) -> bool {
-        !self.composer_ui.send_box.thumbnailing.is_empty()
+        let making = &self.composer_ui.send_box.thumbnailing;
+        self.pending_attachments()
+            .iter()
+            .any(|attachment| making.contains_key(&attachment.path))
     }
 }
 
