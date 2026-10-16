@@ -71,6 +71,12 @@ impl QuillApp {
                     cx.notify();
                     return;
                 }
+                // Re-check the targets at send time: a reply to a deleted
+                // message is dropped (the text stays), an edit of one is
+                // cancelled and nothing is sent.
+                if self.cancel_gone_composer_targets(window, cx) {
+                    return;
+                }
                 if self.composer_ui.pending_edit.is_some() {
                     self.submit_edit(text, window, cx);
                     return;
@@ -445,6 +451,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.cancel_gone_composer_targets(window, cx) {
+            return;
+        }
         // Callers only open the rich editor with a live session.
         let Some(live) = self.live.as_ref() else {
             return;

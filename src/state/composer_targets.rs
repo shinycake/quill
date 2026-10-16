@@ -38,8 +38,9 @@ impl Session {
             .is_some_and(|history| history.is_tombstone(message_id))
     }
 
-    /// The text or caption an edit shows now, from the live message. `None`
-    /// while the message is not loaded.
+    /// The text or caption an edit shows now, from the live message (the
+    /// chat history, the open thread or topic). `None` while the message is
+    /// not loaded: an edit must not begin on a blank field.
     pub fn edit_target_text(&self, edit: &ComposerEdit) -> Option<String> {
         let content = if edit.scheduled {
             &self
@@ -49,12 +50,7 @@ impl Session {
                 .find(|m| m.chat_id == edit.chat_id && m.id == edit.message_id)?
                 .content
         } else {
-            &self
-                .histories
-                .get(&edit.chat_id.0)?
-                .messages
-                .get(&edit.message_id.0)?
-                .content
+            &self.reply_target(edit.chat_id, edit.message_id)?.content
         };
         ComposerEdit::editable_text(content).map(|(_, text)| text)
     }
@@ -70,13 +66,5 @@ impl Session {
                 .any(|m| m.chat_id == edit.chat_id && m.id == edit.message_id);
         }
         self.message_deleted(edit.chat_id, edit.message_id)
-    }
-
-    /// Whether a picked message still exists in `chat_id`'s history. A chat
-    /// whose history is not loaded cannot say, so its ids stay.
-    pub fn message_still_there(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        self.histories
-            .get(&chat_id.0)
-            .is_none_or(|history| history.contains(message_id))
     }
 }

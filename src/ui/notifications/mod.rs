@@ -424,6 +424,8 @@ impl QuillApp {
                 .iter()
                 .any(|f| f.id == folder_id)
         {
+            // (Same rule as `set_chat_list_view`; `live` is borrowed here.)
+            self.chat_list.selected.clear();
             self.folders.tab = None;
         }
         let err = live.driver.session.auth_state.last_auth_error;

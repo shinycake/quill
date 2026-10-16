@@ -410,6 +410,7 @@ impl QuillApp {
                 return;
             }
         };
+        self.cancel_gone_reply(cx);
         let reply = self.composer_ui.pending_reply.clone();
         let reply_to = self.recording_send_reply();
         if let Some(live) = self.live.as_mut() {
@@ -518,6 +519,7 @@ impl QuillApp {
                 return;
             }
         };
+        self.cancel_gone_reply(cx);
         let reply = self.composer_ui.pending_reply.clone();
         let reply_to = self.recording_send_reply();
         if let Some(live) = self.live.as_mut() {

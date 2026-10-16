@@ -237,9 +237,8 @@ impl QuillApp {
         community_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.folders.tab = None;
         self.chat_list.contacts_tab_open = false;
-        self.chat_list.filter = ChatListFilter::Community(community_id);
+        self.set_chat_list_view(ChatListFilter::Community(community_id), None);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.get_community_full_info(community_id)
         {
@@ -253,7 +252,7 @@ impl QuillApp {
     /// also exits it — they overwrite `chat_filter`.
     pub(super) fn exit_community_chat_list_mode(&mut self, cx: &mut Context<Self>) {
         if matches!(self.chat_list.filter, ChatListFilter::Community(_)) {
-            self.chat_list.filter = ChatListFilter::All;
+            self.set_chat_list_view(ChatListFilter::All, self.folders.tab);
             cx.notify();
         }
     }
@@ -578,8 +577,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
-        self.folders.tab = folder;
-        self.chat_list.filter = ChatListFilter::All;
+        self.set_chat_list_view(ChatListFilter::All, folder);
         self.chat_list.contacts_tab_open = false;
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)

@@ -131,7 +131,7 @@ impl QuillApp {
             Err(err) => format!("could not delete folder: {err:?}"),
         };
         if self.folders.tab == Some(confirm.folder_id) {
-            self.folders.tab = None;
+            self.set_chat_list_view(self.chat_list.filter, None);
         }
         cx.notify();
     }

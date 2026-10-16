@@ -273,7 +273,8 @@ impl QuillApp {
                         // check instead of opening the chat. Defined
                         // once here so the select bar, the main loop,
                         // and the archive loop all see it.
-                        let selected_chats = self.selected_chat_ids();
+                        let mut archived: Vec<&ChatSummary> = self.listed_archived_chats();
+                        let selected_chats = self.selected_among_listed(&chats, &archived);
                         let selecting = !selected_chats.is_empty();
                         // Slice CL3: multi-select action bar (TGX
                         // `ChatsController` selection header): the
@@ -497,7 +498,6 @@ impl QuillApp {
                         if folder.is_none()
                             && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread)
                         {
-                            let mut archived: Vec<&ChatSummary> = self.listed_archived_chats();
                             if filter != ChatListFilter::Unread
                                 && let Some(reorder) = self.chat_list.pin_reorder.as_ref()
                                 && reorder.dragging().is_some()

@@ -162,16 +162,20 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The field starts from the live message. Not loaded yet: refuse, so
+        // a submit can never blank the message with an empty field.
+        let Some(original) = self
+            .session()
+            .and_then(|session| session.edit_target_text(&edit))
+        else {
+            return;
+        };
         self.clear_pending_attachments();
         self.composer_ui.edit_replace_as_file = false;
         let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
         let reply = self.composer_ui.pending_reply.take();
-        let original = self
-            .session()
-            .and_then(|session| session.edit_target_text(&edit))
-            .unwrap_or_default();
         let (edit, field, saved, stashed) =
             begin_edit_keeping_reply(current, edit, original, reply);
         self.composer_ui.pending_edit = Some(edit);
@@ -224,6 +228,13 @@ impl QuillApp {
         let Some(edit) = self.composer_ui.pending_edit.clone() else {
             return;
         };
+        if self
+            .session()
+            .is_some_and(|session| session.edit_target_gone(&edit))
+        {
+            self.clear_edit(window, cx);
+            return;
+        }
         // A media message still being sent keeps the new caption until
         // it has its real id (tdesktop edits the local item).
         let pending = self.session().is_some_and(|s| {

@@ -86,19 +86,51 @@ fn a_selected_message_stops_counting_when_it_is_deleted() {
     let alive = |session: &Session, draft: &ForwardDraft| {
         draft
             .clone()
-            .retaining(|id| session.message_still_there(ChatId(7), id))
+            .retaining(|id| !session.message_deleted(ChatId(7), id))
             .message_ids
     };
-    // 51 was never loaded: with the chat's history loaded it is not there.
-    assert_eq!(alive(&session, &draft), vec![MessageId(50)]);
+    // 51 is not loaded but was not deleted either: it stays picked.
+    assert_eq!(alive(&session, &draft), vec![MessageId(50), MessageId(51)]);
     apply_json(&mut session, &seq, &sink, DELETED);
-    assert!(alive(&session, &draft).is_empty());
+    assert_eq!(alive(&session, &draft), vec![MessageId(51)]);
     // A chat with no loaded history cannot say: its ids stay.
     assert_eq!(
         draft
             .clone()
-            .retaining(|id| session.message_still_there(ChatId(99), id))
+            .retaining(|id| !session.message_deleted(ChatId(99), id))
             .count(),
         2
     );
+}
+
+const NEWER: &str = r#"{"@type":"updateNewMessage","message":{"id":60,"chat_id":7,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"later","entities":[]}}}}"#;
+
+#[test]
+fn a_selection_survives_the_window_trim_and_a_window_reset() {
+    let (mut session, sink, seq) = seeded();
+    apply_json(&mut session, &seq, &sink, NEWER);
+    let mut draft = ForwardDraft::from_message(ChatId(7), MessageId(50), false).expect("sent id");
+    draft.toggle(ChatId(7), MessageId(60), false);
+    let alive = |session: &Session, draft: &ForwardDraft| {
+        draft
+            .clone()
+            .retaining(|id| !session.message_deleted(ChatId(7), id))
+            .count()
+    };
+    // The oldest row falls out of the window: unloaded, not deleted.
+    let trimmed = session
+        .histories
+        .get_mut(&7)
+        .map(|h| h.trim_window_end(WindowEnd::Oldest, 1, 1));
+    assert_eq!(trimmed, Some(1));
+    assert!(session.reply_target(ChatId(7), MessageId(50)).is_none());
+    assert_eq!(alive(&session, &draft), 2, "a trim does not unselect");
+    // A jump replaces the whole window.
+    if let Some(history) = session.histories.get_mut(&7) {
+        history.reset_window();
+    }
+    assert_eq!(alive(&session, &draft), 2, "nor does a window reset");
+    // A real delete does.
+    apply_json(&mut session, &seq, &sink, DELETED);
+    assert_eq!(alive(&session, &draft), 1);
 }

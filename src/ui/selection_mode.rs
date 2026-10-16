@@ -704,7 +704,7 @@ impl QuillApp {
             .copied()
             .filter(|id| {
                 self.session()
-                    .is_none_or(|session| session.message_still_there(chat_id, *id))
+                    .is_none_or(|session| !session.message_deleted(chat_id, *id))
             })
             .collect();
         let ids = ids.as_slice();

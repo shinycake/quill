@@ -29,6 +29,7 @@ impl QuillApp {
         let Some(chat_id) = chat_id else {
             return;
         };
+        self.cancel_gone_reply(cx);
         // Phase A1: slow-mode gate applies to sticker sends too.
         if self.slow_mode_blocked(chat_id, cx) {
             return;

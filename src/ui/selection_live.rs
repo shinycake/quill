@@ -1,7 +1,9 @@
 //! The message selection is a set of picked ids. What it counts and acts
-//! on is those ids that are still in the history: a message deleted while
-//! it is selected drops out of the count, the forward bar and every bulk
-//! action without anyone updating a copy.
+//! on is those ids that were not deleted: a message deleted while it is
+//! selected (a tombstone in its chat history, tdesktop `itemRemoved`) drops
+//! out of the count, the forward bar and every bulk action without anyone
+//! updating a copy. A message that only left the loaded window (trimmed, or a
+//! jump replaced the window) stays picked: unloaded is not gone.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -15,7 +17,7 @@ impl QuillApp {
         let draft = self.share.pending_forward.as_ref()?;
         let session = self.session();
         let live = draft.clone().retaining(|id| {
-            session.is_none_or(|session| session.message_still_there(draft.from_chat_id, id))
+            session.is_none_or(|session| !session.message_deleted(draft.from_chat_id, id))
         });
         (!live.is_empty()).then_some(live)
     }

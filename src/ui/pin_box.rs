@@ -158,7 +158,7 @@ impl QuillApp {
                             // Skip what was deleted while the box was open.
                             let there = this
                                 .session()
-                                .is_none_or(|session| session.message_still_there(chat_id, id));
+                                .is_none_or(|session| !session.message_deleted(chat_id, id));
                             if there {
                                 this.unpin_from_banner(chat_id, id, cx);
                             }

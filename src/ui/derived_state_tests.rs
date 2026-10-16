@@ -174,10 +174,7 @@ fn a_toggle_after_a_delete_does_not_revive_the_deleted_id(cx: &mut TestAppContex
     assert_eq!(ids, vec![MessageId(103)], "the stored set holds no ghost");
 }
 
-#[gpui_kit::test]
-fn a_chat_that_leaves_the_filter_drops_out_of_the_bulk_selection(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx, "ready-chats");
-    let vcx = &mut vcx;
+fn read_and_unread_chats(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (ChatId, ChatId) {
     let (read, unread) = app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
         let listed = session.ordered_chats();
@@ -185,42 +182,175 @@ fn a_chat_that_leaves_the_filter_drops_out_of_the_bulk_selection(cx: &mut TestAp
         let unread = listed.iter().find(|c| c.is_unread()).map(|c| c.id);
         (read, unread)
     });
-    let (read, unread) = (
+    (
         read.expect("the demo lists a read chat"),
         unread.expect("the demo lists an unread chat"),
-    );
+    )
+}
+
+#[gpui_kit::test]
+fn changing_the_filter_or_folder_ends_the_chat_selection(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let (read, unread) = read_and_unread_chats(&app, vcx);
     app.update(vcx, |app, cx| {
         app.enter_select_mode(read, cx);
         app.toggle_chat_selected(unread, cx);
     });
+    frames(vcx);
     assert_eq!(
         app.read_with(vcx, |app, _| app.selected_chat_ids().len()),
         2,
         "both chats are listed on All"
     );
 
+    // Unread, then back to All: the checks do not come back.
     app.update(vcx, |app, cx| {
-        app.chat_list.filter = ChatListFilter::Unread;
+        app.set_chat_list_view(ChatListFilter::Unread, None);
         cx.notify();
     });
     frames(vcx);
-    assert_eq!(
-        app.read_with(vcx, |app, _| app.selected_chat_ids()),
-        vec![unread],
-        "the read chat is no longer listed: not counted"
-    );
-    let pinned_targets = app.read_with(vcx, |app, _| {
-        app.selected_chat_pin_states()
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect::<Vec<_>>()
+    assert!(!app.read_with(vcx, |app, _| app.selecting_chats()));
+    app.update(vcx, |app, cx| {
+        app.set_chat_list_view(ChatListFilter::All, None);
+        cx.notify();
     });
-    assert_eq!(pinned_targets, vec![unread], "a bulk action skips it");
+    frames(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.selecting_chats()),
+        "returning to All does not re-enter select mode"
+    );
+    assert!(app.read_with(vcx, |app, _| app.chat_list.selected.is_empty()));
+
+    // The same view again keeps the checks.
+    app.update(vcx, |app, cx| app.enter_select_mode(read, cx));
+    app.update(vcx, |app, _| {
+        app.set_chat_list_view(ChatListFilter::All, None)
+    });
     assert!(app.read_with(vcx, |app, _| app.selecting_chats()));
 
-    // The only visible checked chat unchecked: the mode ends although the
-    // hidden chat is still in the stored set.
-    app.update(vcx, |app, cx| app.toggle_chat_selected(unread, cx));
+    // A folder change ends it too.
+    app.update(vcx, |app, _| {
+        app.set_chat_list_view(ChatListFilter::All, Some(1))
+    });
+    assert!(!app.read_with(vcx, |app, _| app.selecting_chats()));
+}
+
+#[gpui_kit::test]
+fn a_chat_that_leaves_the_list_drops_out_of_the_bulk_selection(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let (read, unread) = read_and_unread_chats(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.enter_select_mode(read, cx);
+        app.toggle_chat_selected(unread, cx);
+        // A chat id that is not listed (archived or left) is not counted.
+        app.chat_list.selected.insert(9_999);
+    });
+    frames(vcx);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.selected_chat_ids().len()),
+        2
+    );
+    assert!(app.read_with(vcx, |app, _| app.selecting_chats()));
+    let rows = app.read_with(vcx, |app, _| app.rows_selecting());
+    assert!(rows, "the drawn rows agree with the count");
+    // Unchecking the last listed one ends the mode and prunes the ghost.
+    app.update(vcx, |app, cx| {
+        app.toggle_chat_selected(read, cx);
+        app.toggle_chat_selected(unread, cx);
+    });
     assert!(!app.read_with(vcx, |app, _| app.selecting_chats()));
     assert!(app.read_with(vcx, |app, _| app.chat_list.selected.is_empty()));
+}
+
+fn history_len(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
+    app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.histories.get(&CHAT.0))
+            .map_or(0, |h| h.messages.len())
+    })
+}
+
+#[gpui_kit::test]
+fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-reply");
+    let vcx = &mut vcx;
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_some()));
+    // Deleted, and no frame ran: the bar still holds the reply.
+    app.update(vcx, |app, _| app.demo_delete_message(CHAT, REPLIED));
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_some()));
+    let ids = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .and_then(|s| s.histories.get(&CHAT.0))
+                .map(|h| h.messages.keys().copied().collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+    };
+    let before = ids(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.submit_composer("sounds good".into(), window, cx)
+        })
+    });
+    assert!(
+        app.read_with(vcx, |app, _| app.composer_ui.pending_reply.is_none()),
+        "the reply is dropped at send time"
+    );
+    let replies_to_deleted = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.histories.get(&CHAT.0))
+            .map(|h| {
+                h.messages
+                    .iter()
+                    .filter(|(id, _)| !before.contains(id))
+                    .filter(|(_, m)| m.reply_to.as_ref().is_some_and(|r| r.message_id == REPLIED))
+                    .count()
+            })
+            .unwrap_or_default()
+    });
+    assert_eq!(
+        replies_to_deleted, 0,
+        "nothing new replies to the deleted id"
+    );
+    assert!(
+        ids(&app, vcx).len() > before.len(),
+        "the text was still sent"
+    );
+}
+
+#[gpui_kit::test]
+fn submitting_an_edit_of_a_deleted_message_sends_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-edit-delete");
+    let vcx = &mut vcx;
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_some()));
+    app.update(vcx, |app, _| app.demo_delete_message(CHAT, MessageId(102)));
+    let before = history_len(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.submit_composer("new words".into(), window, cx)
+        })
+    });
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()));
+    assert_eq!(history_len(&app, vcx), before, "no edit and no new message");
+}
+
+#[gpui_kit::test]
+fn an_edit_of_a_message_that_is_not_loaded_does_not_begin(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let unloaded = ComposerEdit::from_own_content(
+        CHAT,
+        MessageId(424_242),
+        true,
+        false,
+        &MessageContent::Text("never loaded".into()),
+    )
+    .expect("text is editable");
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.begin_edit(unloaded, window, cx)));
+    assert!(
+        app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()),
+        "no edit starts on an empty field"
+    );
 }

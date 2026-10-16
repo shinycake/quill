@@ -504,7 +504,7 @@ impl QuillApp {
         // or community, else go back to the open chat, else to the first
         // folder.
         if self.chat_list.filter == ChatListFilter::Archived {
-            self.chat_list.filter = ChatListFilter::All;
+            self.set_chat_list_view(ChatListFilter::All, self.folders.tab);
             cx.notify();
         } else if matches!(self.chat_list.filter, ChatListFilter::Community(_)) {
             self.exit_community_chat_list_mode(cx);

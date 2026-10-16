@@ -125,6 +125,6 @@ impl QuillApp {
 
     fn demo_ready_chats_select_filtered(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         self.demo_chats_checked();
-        self.chat_list.filter = ChatListFilter::Unread;
+        self.set_chat_list_view(ChatListFilter::Unread, None);
     }
 }

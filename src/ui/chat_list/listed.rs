@@ -1,7 +1,8 @@
 //! Which chats the list shows right now, and the multi-select checks that
-//! still count. The checks are chat ids; a chat that leaves the view (the
-//! folder or the Unread filter changed, it was archived or left) drops out
-//! of the count and of every bulk action without anything pruning the set.
+//! still count. The checks are chat ids, made in one view: changing the
+//! folder or the category ends the selection (`set_chat_list_view`). A chat
+//! that leaves the view meanwhile (archived, left) drops out of the count and
+//! of every bulk action.
 
 use super::*;
 use std::collections::HashSet;
@@ -62,22 +63,49 @@ impl QuillApp {
         archived
     }
 
-    /// The checked chats that are in the list now, in id order. This is
-    /// the selection: its length is the count, and the bulk actions and
-    /// the select bar read it.
+    /// Show another folder or category. The multi-select belongs to the view
+    /// it was made in, so changing the view ends it (tdesktop
+    /// `changeOpenedFolder` clears the selection). Every place that moves
+    /// the folder tab or the category goes through here.
+    pub(in crate::ui) fn set_chat_list_view(&mut self, filter: ChatListFilter, tab: Option<i32>) {
+        if self.chat_list.filter != filter || self.folders.tab != tab {
+            self.chat_list.selected.clear();
+        }
+        self.chat_list.filter = filter;
+        self.folders.tab = tab;
+    }
+
+    /// The checked chats among `listed`. The one definition of what is
+    /// selected: a checked chat that is not in the rows (archived, left)
+    /// does not count.
+    fn checked_among<'a>(
+        &'a self,
+        listed: impl Iterator<Item = ChatId> + 'a,
+    ) -> impl Iterator<Item = ChatId> + 'a {
+        listed.filter(|id| self.chat_list.selected.contains(&id.0))
+    }
+
+    /// The selection as the list was built this frame: pass the chats the
+    /// render already collected instead of listing them again.
+    pub(in crate::ui) fn selected_among_listed(
+        &self,
+        main: &[&ChatSummary],
+        archived: &[&ChatSummary],
+    ) -> Vec<ChatId> {
+        let mut ids: Vec<ChatId> = self
+            .checked_among(main.iter().chain(archived).map(|chat| chat.id))
+            .collect();
+        ids.sort_by_key(|id| id.0);
+        ids
+    }
+
+    /// The checked chats that are in the list now, in id order. Its length
+    /// is the count, and the bulk actions read it.
     pub(in crate::ui) fn selected_chat_ids(&self) -> Vec<ChatId> {
         if self.chat_list.selected.is_empty() {
             return Vec::new();
         }
-        let mut ids: Vec<ChatId> = self
-            .listed_main_chats()
-            .into_iter()
-            .chain(self.listed_archived_chats())
-            .map(|chat| chat.id)
-            .filter(|id| self.chat_list.selected.contains(&id.0))
-            .collect();
-        ids.sort_by_key(|id| id.0);
-        ids
+        self.selected_among_listed(&self.listed_main_chats(), &self.listed_archived_chats())
     }
 
     /// Multi-select mode shows while a checked chat is in the list.
@@ -85,17 +113,19 @@ impl QuillApp {
         !self.selected_chat_ids().is_empty()
     }
 
-    /// Multi-select mode as the drawn rows see it: a checked chat is among
-    /// the rows this frame laid out (`chat_list.items`).
+    /// The same question for a drawn row: a checked chat is among the rows
+    /// laid out (`chat_list.items`), without listing the chats again for
+    /// every row.
     pub(in crate::ui) fn rows_selecting(&self) -> bool {
-        !self.chat_list.selected.is_empty()
-            && self.chat_list.items.iter().any(|item| {
-                matches!(item, ChatListItem::Chat { id, .. } if self.chat_list.selected.contains(&id.0))
-            })
+        let rows = self.chat_list.items.iter().filter_map(|item| match item {
+            ChatListItem::Chat { id, .. } => Some(*id),
+            _ => None,
+        });
+        self.checked_among(rows).next().is_some()
     }
 
-    /// Before a change builds on the checks, forget the ones no longer in
-    /// the list so a toggle cannot revive a stale one.
+    /// Before a change builds on the checks, forget the ones that left the
+    /// list (archived, left) so a toggle cannot revive a stale one.
     pub(super) fn drop_unlisted_selection(&mut self) {
         let keep: HashSet<i64> = self.selected_chat_ids().iter().map(|id| id.0).collect();
         self.chat_list.selected = keep;
