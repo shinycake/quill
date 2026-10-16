@@ -76,3 +76,18 @@ through the chat history and sponsored rows is gone; rows ask
 `open_chat_media_downloads` (a redraw hint pruned to the requested ids) and
 `download_extras` (request id to file id) are separate indexes, not download
 status, and stay.
+
+## Review round
+
+- Per-frame cost: the downloads manager, tab strip and media signature read
+  `user_count`, `requested_count` and `failed_ids` every frame, and the old
+  versions scanned every thumbnail and avatar record. `DownloadIntents` now
+  keeps a requested counter, a user-id set and a failed-id set, all updated
+  by `put`, the single writer of the entries map, so the counts are O(1) and
+  the lists O(user entries). They are not a copy kept elsewhere.
+- `should_download` also refuses a file TDLib reports as actively downloading
+  with no record here (another device, a resume), so no duplicate transfer.
+- Tests: counts stay right across begin, end, cancel, settle, forget, adopt
+  and clear; an auto-download failure never yields Failed or a Retry row; an
+  active transfer with no record is not requested again, and is once it
+  stalls.

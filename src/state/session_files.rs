@@ -117,6 +117,15 @@ impl Session {
             return false;
         }
         match self.media.files.get(&file_id.0) {
+            // A transfer TDLib already runs with no request of ours (another
+            // device, a resume) is not requested a second time. After our
+            // own request ended, TDLib's idle update is what clears it.
+            Some(file)
+                if file.local.is_downloading_active
+                    && !self.media.downloads.has_record(file_id.0) =>
+            {
+                false
+            }
             Some(file) => file.needs_download(),
             None => true,
         }

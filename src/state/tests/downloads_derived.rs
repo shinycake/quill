@@ -190,3 +190,96 @@ fn closing_the_session_forgets_every_download() {
         0
     );
 }
+
+#[test]
+fn an_auto_download_failure_never_shows_failed() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_download(FileId(77));
+    session.begin_download(FileId(77));
+    apply_json(&mut session, &seq, &sink, &update_file(77, true, false, 5));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"network"}}"#,
+            extra.0
+        ),
+    );
+    apply_json(&mut session, &seq, &sink, &update_file(77, false, false, 5));
+    assert_ne!(status(&session, 77), DownloadStatus::Failed);
+    assert!(!session.media.downloads.is_failed(77));
+    assert!(session.media.downloads.is_stalled_auto(77));
+    assert_eq!(
+        session
+            .media
+            .downloads
+            .failed_ids(&session.media.files)
+            .count(),
+        0
+    );
+    assert_eq!(session.media.downloads.user_count(), 0);
+}
+
+#[test]
+fn a_transfer_tdlib_already_runs_is_not_requested_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    assert!(session.should_download(FileId(78)));
+    // Started on another device: active, with no record here.
+    apply_json(&mut session, &seq, &sink, &update_file(78, true, false, 10));
+    assert!(!session.media.downloads.is_requested(78));
+    assert!(!session.should_download(FileId(78)));
+    // It stalled: the automatic path may ask again.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &update_file(78, false, false, 10),
+    );
+    assert!(session.should_download(FileId(78)));
+}
+
+#[test]
+fn counts_follow_every_mutation() {
+    let mut d = DownloadIntents::default();
+    let files = HashMap::new();
+    let counts = |d: &DownloadIntents| {
+        (
+            d.requested_count(),
+            d.user_count(),
+            d.failed_ids(&files).count(),
+        )
+    };
+    d.begin(1, DownloadOrigin::User);
+    d.begin(2, DownloadOrigin::Auto);
+    d.begin(3, DownloadOrigin::User);
+    assert_eq!(counts(&d), (3, 2, 0));
+    // Begin again over the same id does not double count.
+    d.begin(1, DownloadOrigin::User);
+    assert_eq!(counts(&d), (3, 2, 0));
+    d.set_paused(1, true);
+    assert_eq!(counts(&d), (3, 2, 0));
+    d.end(1);
+    assert_eq!(counts(&d), (2, 1, 1));
+    d.end(2);
+    assert_eq!(counts(&d), (1, 1, 1));
+    d.cancel(3);
+    assert_eq!(counts(&d), (0, 0, 1));
+    d.confirm_cancel(3);
+    d.begin(1, DownloadOrigin::Auto);
+    assert_eq!(counts(&d), (1, 0, 0));
+    d.begin(1, DownloadOrigin::User);
+    d.settle(1);
+    assert_eq!(counts(&d), (0, 0, 0));
+    d.adopt(4, false);
+    d.end_as(5, DownloadOrigin::User);
+    assert_eq!(counts(&d), (1, 1, 1));
+    d.forget(5);
+    assert_eq!(counts(&d), (1, 1, 0));
+    d.clear_stalled(2);
+    d.clear();
+    assert_eq!(counts(&d), (0, 0, 0));
+    assert_eq!(d.user_ids().count(), 0);
+}
