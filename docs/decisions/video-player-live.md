@@ -26,14 +26,22 @@ the player draws the newest frame on the next display frame.
 - **Feeds.** `quill::calls::live_video`: `LiveSource` (engine side,
   `Send`) and `LiveSink` (UI side) share one slot: the newest frame, the
   sender's state, the end, and an armed waker. The driver keeps one feed
-  per key (`connect/group_calls/live_feeds.rs`). A track's feed is made
-  on first use while its call is tracked; all feeds of a call close when
-  it is left.
+  per key (`connect/group_calls/live_feeds.rs`).
+  - A track's feed is made when the UI asks for it, and only while the
+    tracked call has that video on (`call_has_video`). The engine hook
+    fills feeds that exist and makes none.
+  - When TDLib reports a camera, a screen or your own camera off, its
+    feed ends and goes (`sync_call_feeds`, after every reducer update).
+    Turned on again, the video gets a new, empty feed, so no frame from
+    before shows. All of a call's feeds close when it is left.
 - **Player.** `VideoPlayer::live(sink, Purpose::Live { tile })`
   (`video_player/backend_live.rs`).
-  - A waker task arms the sink. When a frame lands it converts large
-    frames off the UI thread, then notifies the one view the element
-    drew in.
+  - A waker task arms the sink. When a frame lands, the off-screen
+    policy decides first (below). Only then does it convert a large
+    frame off the UI thread and notify the one view the element drew in.
+  - Each converted picture carries its frame's sequence number. A
+    picture older than the one shown is dropped, so a large frame still
+    converting when a newer small one was drawn never replaces it.
   - The transport is live: Opening, then Playing on the first frame;
     Buffering after 1.5 s without a frame (the picture stays); Paused
     while the sender paused; Ended and Failed when the feed ends.
@@ -51,9 +59,12 @@ the player draws the newest frame on the next display frame.
   - `video_frame(&player)` gains `.paused_overlay(bool)`, which draws the
     feed's 90 px blurred last frame while the sender is paused, and
     `.on_width(report)`, which keeps `report_stream_tile_width` working.
-  - Live players never hibernate. A live tile painted off screen for two
-    wakes stops redrawing and stops asking the frame clock; it looks
-    again once a second.
+  - Live players never hibernate. A live picture painted off screen, or
+    not painted at all for 500 ms, for two wakes stops redrawing,
+    converting and asking the frame clock. Its frame waits in the feed.
+    A tile looks again once a second, a stream or a story four times a
+    second. Painted in sight again, it wakes its waker at once and draws
+    the waiting frame.
 - **Stream window.**
   - The picture is its own view (`calls/stream_view.rs`). It is a cached
     sibling under the cached panel, in a new window root
@@ -62,10 +73,16 @@ the player draws the newest frame on the next display frame.
   - Before the first frame it shows the chat's photo blurred, or the
     chat's initials when it has no photo (an open item from #852).
 - **Live story.** The player is drawn behind the story chrome. The
-  backdrop is `player.paused_picture()`.
+  backdrop is `player.paused_picture()`, made again at most every
+  500 ms.
 - **Tiles and stage.** There is one player per feed, kept in
   `group_call.players`. A player goes when its call or stream goes. Pin,
   name and shadow are unchanged.
+- **Releasing.** Whoever drops a live player calls
+  `VideoPlayer::release_live(cx)` first: the stream window's `clear`, a
+  stream or story player replaced for a new feed, the live story's
+  stop, and both tile prunes. Its images leave every window's atlas at
+  once instead of at the main window's next sweep.
 - **Removed:** `stream_picture.rs`, `stream_tile.rs`,
   `cached_paused_image`, `cached_group_video_image` and the tile image
   maps.
@@ -96,7 +113,28 @@ from the GPUI tests and a run of the demo binary.
 
 The paused picture (90 px, blurred) costs 118 µs from a 1080p
 frame. A paused tile makes it once. The live story's backdrop makes it
-again for each new frame while the picture is shown whole.
+again for a new frame at most every 500 ms (it was every frame before
+the review), so at most 236 µs a second.
+
+**Frames converted by a hidden tile, 30 frames**
+(`a_hidden_tile_converts_nothing_and_catches_up_in_sight`, a tile at
+y = 5000 in a window that clips, drawn after every frame)
+
+| Path | Before the review | After |
+|---|---|---|
+| BGRA (`QUILL_LIVE_BGRA=1`, the Windows/Linux path) | 30 | 1 |
+| NV12 (macOS) | 30 | 1 |
+
+The "before" column is the same test with the waker put back in its old
+order (convert, then decide) and without the quiet check on the pull.
+On the BGRA path the old waker converted every frame on the background
+executor whether or not anything drew it. On macOS small frames convert
+only when the view draws. The test draws after every frame, which is
+what a call panel redrawn for other reasons does, so 30 there is the
+worst case. The one conversion after the fix is the first frame,
+before the tile counted as unseen. Scrolled back into sight, the tile
+converts the frame waiting in the feed at once (one more), then every
+frame again.
 
 **Bytes written per 1080p frame**
 
@@ -124,8 +162,13 @@ counted, because the trace hook did not exist then.
 - Before this series: 199 images alive (699 MiB).
 - After, macOS: 0 images made, 0 alive. Every frame is a pooled
   pixel buffer.
-- After, Windows/Linux: at most 2 alive. This is asserted, but on this
-  Mac it was only checked through `QUILL_LIVE_BGRA=1` in the run below.
+- After, Windows/Linux: at most 3 alive (the shown image, the one
+  before it, and the one the last draw retired, which the next wake
+  drops), and at most 1 after `release_live` (the player's own current
+  picture). This is asserted, but on this Mac it was checked only
+  through `QUILL_LIVE_BGRA=1` (this test and the run below). The first
+  version of this doc said 2. The test asserted it only on macOS, where
+  no images are made, so it never checked the BGRA count.
 
 **Resident memory, stream window demo, 60 s at a 30 fps feed**
 (`ready-rtmp-live`, release build, `ps -o rss=` every 5 s, main window
@@ -185,16 +228,36 @@ idles. The sampling script is a `ps` loop over the demo binary run with
      images (699 MiB) before.
    - A fix that calls `sweep` from slices and the anim layer (in
      progress on main) still would not cover the stream window's root.
+   - When the owner drops the player, `release_live` drops the rest
+     (shown, previous, paused pictures) the same way. `retire_all`
+     from `LiveCore::drop` is only the fallback for a player dropped
+     some other way.
 4. **The feed types live in the library** (`quill::calls::live_video`),
    not in `video_player/`, because the engine and the driver push into
    them.
-5. **The off-screen policy counts wakes, not pulls.** A tile is off
-   screen after two wakes at least 100 ms after its last redraw without
-   a paint in view. The 100 ms grace stops frames that arrive faster than
-   the window draws from counting. An off-screen tile is looked at once a
-   second: a window coming back from behind another replays its cached
-   views without painting, so `note_shown` alone would never bring the
-   tile back.
+5. **The off-screen policy counts wakes, and runs before the
+   conversion.**
+   - At each wake the policy reads two counts the element keeps: paints
+     in sight (`note_shown`) and all paints (`note_live_paint`).
+     - A paint in sight since the last wake resets it.
+     - A paint out of sight counts the wake as unseen.
+     - No paint at all counts only once 500 ms have passed without one.
+       This covers a minimized window. A slow window that draws a few
+       times a second keeps its pictures (`a_slow_window_keeps_its_pictures`).
+   - After two unseen wakes the frame is neither converted nor redrawn.
+     A redraw for another reason converts nothing either: the pull
+     checks the same quiet flag. The frame stays in the feed.
+   - A tile looks again once a second, a stream or a story every
+     250 ms. A window coming back from behind another replays its
+     cached views without painting, so the paint counts alone would
+     never bring the picture back.
+   - A paint in sight while quiet wakes the waker at once
+     (`LiveSink::poke`), which draws the waiting frame.
+   - The first version of this PR ran the policy after the conversion,
+     so a hidden tile on the BGRA path still converted every frame
+     (measured above). It also used a 100 ms grace after the last
+     redraw instead of the paint counts, which starved a visible tile
+     in a window drawing at under 10 fps.
 6. **Background threshold.**
    - macOS converts frames above 800 px (`INLINE_MAX_EDGE`, as the
      brief says) off the UI thread, not above 512 px. NV12 for a
@@ -221,6 +284,19 @@ idles. The sampling script is a `ps` loop over the demo binary run with
 11. **`set_volume` does nothing on a live player.** Stream volume is PR 8.
 12. **The design's 120 Hz display** in the slice test is not simulated:
     the test draws one display frame per feed frame.
+13. **A frame before the UI asks for its feed is dropped.** Feeds are
+    made on demand, so the first frame of a camera just turned on can
+    arrive before the call window asks for it. The next frame (33 ms
+    later at 30 fps, up to a second for a still screen share) is drawn.
+14. **macOS holds the last three pixel buffers shown**, not one. The
+    player keeps them so the pool does not refill a buffer that a frame
+    still in flight may read (see "Not verified").
+15. **Each live player is drawn in one view.** The core keeps a single
+    view to notify, not a set. Tiles and the stage are drawn only in the
+    call window's panel (`group_call_panel.rs`), the stream picture
+    only in `StreamPictureView`, and the live story only in the story
+    viewer. A later view of the same player (the window opened again)
+    takes over from the old one, which is gone by then.
 
 ## tdesktop
 
@@ -247,3 +323,32 @@ idles. The sampling script is a `ps` loop over the demo binary run with
   conversion time was.
 - PR 6 (Windows NV12 surfaces) has not merged. When it does, Windows
   live pictures can move to it in PR 9.
+- **Pool reuse while the GPU reads.** It is not known whether GPUI's
+  Metal path keeps a `CVPixelBuffer` from going back to its pool until
+  the GPU is done with it.
+  - `draw_surfaces` (`third_party/gpui-pre-apple/src/metal_renderer.rs`,
+    about lines 1206 to 1365) makes a `CVMetalTexture` per plane per
+    frame and drops it as soon as the draw is encoded.
+  - The command buffer is a plain `new_command_buffer()` (about line
+    744), so Metal retains the `MTLTexture` objects until it completes
+    (the comment near line 1842 relies on the same rule for buffers).
+  - Apple's guidance is to keep the `CVMetalTexture` itself alive until
+    the command buffer completes. Whether a retained `MTLTexture` alone
+    keeps the IOSurface from being refilled by the pool is not
+    documented, and it was not tested.
+  - The player holds the last three buffers shown (the layer keeps up
+    to three drawables, about line 192), so the pool can refill a buffer
+    only after three newer frames were shown. A torn or wrong-frame tile
+    under GPU load would point here. The fix would be a completed
+    handler in the renderer that holds the textures.
+- **The 800 px quality switch.** A sender moving between a large size
+  (converted in the background) and a small one (converted during the
+  draw) is covered by the ordering rule and by unit and GPUI tests
+  (`an_older_picture_never_replaces_a_newer_one`,
+  `a_size_change_mid_stream_redraws_at_the_new_size`). No real sender
+  switching qualities was seen, and the cost of making a new pixel-buffer
+  pool on each switch was not measured. A failed pool is retried after
+  a second, not on every frame.
+- The off-screen thresholds (two wakes, 500 ms without a paint, the
+  250 ms and 1 s looks) were not tuned on a slow machine or with a
+  real minimized window.
