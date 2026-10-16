@@ -11,15 +11,15 @@ ntgcalls, rlottie, the Visual C++ runtime) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 664
+- MIT License: 666
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
 - BSD 3-Clause "New" or "Revised" License: 16
 - Mozilla Public License 2.0: 16
 - BSD Zero Clause License: 4
+- zlib License: 4
 - Creative Commons Zero v1.0 Universal: 3
-- zlib License: 3
 - BSD 2-Clause "Simplified" License: 1
 - Community Data License Agreement Permissive 2.0: 1
 - The Unlicense: 1
@@ -4437,6 +4437,7 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 - [backtrace 0.3.76](https://github.com/rust-lang/backtrace-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
+- [filetime 0.2.29](https://github.com/alexcrichton/filetime)
 - [rustc-demangle 0.1.28](https://github.com/rust-lang/rustc-demangle)
 - [scoped-tls 1.0.1](https://github.com/alexcrichton/scoped-tls)
 
@@ -9053,6 +9054,40 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
+- [tar 0.4.46](https://github.com/composefs/tar-rs)
+
+````text
+Copyright (c) The tar-rs Project Contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+````
+
+### MIT License
+
+Used by:
 - [arrayvec 0.7.8](https://github.com/bluss/arrayvec)
 
 ````text
@@ -13612,6 +13647,34 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <http://unlicense.org/>
+
+````
+
+### zlib License
+
+Used by:
+- [zlib-rs 0.6.8](https://github.com/trifectatechfoundation/zlib-rs)
+
+````text
+(C) 2024 Trifecta Tech Foundation 
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
 
 ````
 
