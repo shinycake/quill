@@ -166,3 +166,124 @@ fn the_test_picture_is_a_frame_and_moves() {
     assert_ne!(first, gradient_frame(64, 36, 10));
     assert_eq!(gradient_frame(7, 5, 3).len(), i420_size(7, 5));
 }
+
+/// The median of `runs` timings of `work`, in microseconds.
+fn median_us(runs: usize, mut work: impl FnMut()) -> u128 {
+    let mut times: Vec<u128> = (0..runs)
+        .map(|_| {
+            let started = std::time::Instant::now();
+            work();
+            started.elapsed().as_micros()
+        })
+        .collect();
+    times.sort_unstable();
+    times.get(runs / 2).copied().unwrap_or(0)
+}
+
+/// What a 1080p frame costs before and after the live player, per step
+/// (`docs/decisions/video-player-live.md`). Run in release:
+/// `cargo test --release --no-default-features --lib -- --ignored
+/// measure_1080p --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn measure_1080p_frame_costs() {
+    use std::hint::black_box;
+    let (w, h) = (1920u16, 1080u16);
+    let ntgcalls = gradient(w, h);
+    let runs = 61;
+    // Engine thread, before: copy out of ntgcalls, then I420 to RGBA.
+    let old_engine = median_us(runs, || {
+        let bytes = black_box(&ntgcalls).to_vec();
+        black_box(i420_to_rgba(
+            w,
+            h,
+            &bytes,
+            NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+        ));
+    });
+    let rgba = i420_to_rgba(w, h, &ntgcalls, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0).expect("rgba");
+    // UI side, before (`stream_picture::frame_image`): clone and swap to BGRA.
+    let old_ui = median_us(runs, || {
+        let mut bgra = black_box(&rgba).clone();
+        for pixel in bgra.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        black_box(bgra);
+    });
+    // Engine thread, after: the copy only.
+    let new_engine = median_us(runs, || {
+        black_box(black_box(&ntgcalls).to_vec());
+    });
+    let frame = I420::new(&ntgcalls, w, h).expect("frame");
+    // Background executor, after, macOS: into an NV12 buffer (a pool
+    // buffer's rows are 64-byte aligned).
+    let stride = usize::from(w).next_multiple_of(64);
+    let mut y = vec![0u8; stride * usize::from(h)];
+    let mut uv = vec![0u8; stride * usize::from(h).div_ceil(2)];
+    let new_nv12 = median_us(runs, || {
+        black_box(i420_to_nv12(&frame, &mut y, stride, &mut uv, stride));
+    });
+    // Background executor, after, Windows and Linux: into BGRA.
+    let new_bgra = median_us(runs, || {
+        black_box(i420_to_bgra(&frame));
+    });
+    // A 640 × 360 tile converts on the UI thread, during the draw.
+    let (tw, th) = (640u16, 360u16);
+    let tile = gradient(tw, th);
+    let tile = I420::new(&tile, tw, th).expect("tile");
+    let tile_stride = usize::from(tw).next_multiple_of(64);
+    let mut tile_y = vec![0u8; tile_stride * usize::from(th)];
+    let mut tile_uv = vec![0u8; tile_stride * usize::from(th).div_ceil(2)];
+    let tile_nv12 = median_us(runs, || {
+        black_box(i420_to_nv12(
+            &tile,
+            &mut tile_y,
+            tile_stride,
+            &mut tile_uv,
+            tile_stride,
+        ));
+    });
+    let tile_bgra = median_us(runs, || {
+        black_box(i420_to_bgra(&tile));
+    });
+    let tile_planes = gradient(tw, th);
+    let old_tile_engine = median_us(runs, || {
+        black_box(i420_to_rgba(
+            tw,
+            th,
+            &tile_planes,
+            NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
+        ));
+    });
+    let tile_rgba =
+        i420_to_rgba(tw, th, &tile_planes, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0).expect("rgba");
+    let old_tile_ui = median_us(runs, || {
+        let mut bgra = black_box(&tile_rgba).clone();
+        for pixel in bgra.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        black_box(bgra);
+    });
+    eprintln!(
+        "MEASURE 640x360 tile before: engine {old_tile_engine} us, UI {old_tile_ui} us; after: nv12 {tile_nv12} us, bgra {tile_bgra} us"
+    );
+    let paused = median_us(runs, || {
+        black_box(paused_raster(&frame, LiveRotation::None));
+    });
+    eprintln!("MEASURE 1080p paused picture (90 px, blurred): {paused} us");
+    let mb = |bytes: usize| bytes as f64 / 1e6;
+    let (planes, picture) = (ntgcalls.len(), rgba.len());
+    eprintln!("MEASURE 1080p before: engine {old_engine} us, UI {old_ui} us");
+    eprintln!(
+        "MEASURE 1080p after: engine {new_engine} us, nv12 {new_nv12} us, bgra {new_bgra} us"
+    );
+    eprintln!(
+        "MEASURE bytes written per frame: before {:.1} MB copy + {:.1} MB RGBA + {:.1} MB BGRA; after {:.1} MB copy + {:.1} MB NV12 (macOS) or {:.1} MB BGRA",
+        mb(planes),
+        mb(picture),
+        mb(picture),
+        mb(planes),
+        mb(y.len() + uv.len()),
+        mb(picture)
+    );
+}
