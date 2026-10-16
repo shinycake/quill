@@ -518,6 +518,15 @@ impl Session {
 }
 
 impl Session {
+    /// When the first pending bot message expires (unix ms), if any.
+    pub fn next_pending_bot_expiry_ms(&self) -> Option<u64> {
+        self.messages
+            .pending_bot_messages
+            .values()
+            .map(|pending| pending.expires_at_ms)
+            .min()
+    }
+
     pub fn expire_pending_bot_messages(&mut self, now_ms: u64) -> bool {
         let before = self.messages.pending_bot_messages.len();
         self.messages

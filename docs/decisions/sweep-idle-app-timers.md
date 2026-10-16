@@ -58,7 +58,7 @@ waits, so nothing is lost. `ui::sleep_or_wake` races a timer against a signal.
 - **Passcode.** The task parks (300 s safety net) when there is no passcode,
   the app is locked without a flood countdown, or it is a demo. With
   auto-lock on, it sleeps until the deadline computed from the idle time
-  (`autolock_sleep_ms`, 1 to 60 s), so activity re-arms it on the next wake.
+  (`autolock_sleep_ms`, 1 to 5 s), so activity re-arms it on the next wake.
   `IdleTracker::plan_sleep` tells the suspend detector that a long gap was
   intended, and `reset` clears stale history when the task wakes from a park.
   Enabling, disabling, changing the timeout, locking, unlocking and a failed
@@ -111,6 +111,32 @@ sample the main thread's timer fires without a real session).
 - Passcode: `a_planned_long_sleep_is_not_a_suspend` (a deliberate 60 s sleep
   must not count as a laptop suspend and lock early) and
   `autolock_sleeps_until_the_deadline_and_parks_when_off`.
+
+## Review follow-up
+
+- Stream-mode group calls: the ntgcalls event hook pokes `wake::UPDATES`
+  after queueing a segment or time request, so live streams do not wait out
+  the idle sleep (`an_engine_stream_request_wakes_the_poll_loop`).
+- Auto-lock after a laptop sleep: monotonic timers pause in system sleep, so
+  the auto-lock sleep is capped at 5 s (0.2 wakes/s, was 60 s) and window
+  activation pokes `UPDATES`, `PASSCODE` and `CHROME` (`wake::poke_on_activation`,
+  from the activation observer in `app_demo.rs`). No NSWorkspace wake observer
+  exists in the code base, so the cap bounds the lateness on resume without
+  a window activation (`a_laptop_wake_after_a_planned_sleep_locks_on_the_next_check`).
+- `IdleTracker::effective_idle` no longer counts the planned sleep twice: a
+  suspend adds `gap - planned`, since the OS idle time already holds the
+  planned part.
+- Off-thread queues now poke: the export worker after sending a request and
+  the system-proxy reader when the detected value changes. The camera
+  scanner for device linking has no thread (the child process is polled), so
+  its result can wait up to 2 s; not changed.
+- The poll loop's idle sleep is `min(POLL_IDLE_MAX, earliest deadline)`
+  (`ConnectDriver::next_deadline`: next flood retry due, next pending bot
+  message expiry; `cap_at_deadline`, never below 10 ms). Tests:
+  `a_due_deadline_caps_the_idle_poll_sleep`,
+  `a_due_flood_retry_is_a_known_deadline_for_the_poll_sleep`.
+- Presence after activation: activation pokes `UPDATES`, so the poll runs at
+  once.
 
 ## Limits and risks
 

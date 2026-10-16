@@ -82,6 +82,12 @@ pub(super) fn next_poll_delay(prev: Duration, busy: bool, redraw_held_back: bool
     }
 }
 
+/// Caps a poll sleep at the earliest known deadline (a due flood retry, a
+/// pending bot message expiring), never below [`POLL_BUSY`].
+pub(super) fn cap_at_deadline(delay: Duration, deadline: Option<Duration>) -> Duration {
+    deadline.map_or(delay, |d| delay.min(d.max(POLL_BUSY)))
+}
+
 /// What the TDLib poll has asked to redraw and not drawn yet.
 ///
 /// Urgent updates ([`RedrawNeed::Now`]) redraw the whole window at once
@@ -188,9 +194,16 @@ impl QuillApp {
                         }
                         let busy = this.poll_live(cx);
                         let held_back = this.notify.polled_redraw.pending();
-                        this.live
-                            .is_some()
-                            .then_some(next_poll_delay(delay, busy, held_back))
+                        let next = next_poll_delay(delay, busy, held_back);
+                        this.live.as_ref().map(|live| {
+                            cap_at_deadline(
+                                next,
+                                live.driver.next_deadline(
+                                    std::time::Instant::now(),
+                                    quill::state::unix_ms_now(),
+                                ),
+                            )
+                        })
                     })
                     .ok()
                     .flatten();
@@ -966,11 +979,23 @@ mod spawn_call_notification;
 mod tests {
     use super::{
         POLL_BUSY, POLL_HELD_BACK_MAX, POLL_IDLE_MAX, POLL_START, PolledAction, PolledRedraw,
-        bridge_lost, logout_restart_trigger, next_poll_delay,
+        bridge_lost, cap_at_deadline, logout_restart_trigger, next_poll_delay,
     };
     use quill::state::RedrawNeed;
     use quill::telegram::envelope::AuthorizationState;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_due_deadline_caps_the_idle_poll_sleep() {
+        assert_eq!(cap_at_deadline(POLL_IDLE_MAX, None), POLL_IDLE_MAX);
+        assert_eq!(cap_at_deadline(POLL_IDLE_MAX, Some(ms(300))), ms(300));
+        assert_eq!(cap_at_deadline(ms(40), Some(ms(300))), ms(40));
+        // Already due: run again at the busy cadence, not in a spin.
+        assert_eq!(
+            cap_at_deadline(POLL_IDLE_MAX, Some(Duration::ZERO)),
+            POLL_BUSY
+        );
+    }
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)

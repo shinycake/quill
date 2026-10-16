@@ -669,7 +669,10 @@ impl IdleTracker {
         if let Some(last) = self.last_tick_ms {
             let gap = now_ms.saturating_sub(last);
             if gap > SUSPEND_GAP_MS.saturating_add(self.planned_ms) {
-                self.suspended_ms = self.suspended_ms.saturating_add(gap);
+                // The planned sleep is already idle time on the OS clock.
+                self.suspended_ms = self
+                    .suspended_ms
+                    .saturating_add(gap.saturating_sub(self.planned_ms));
             }
         }
         self.last_tick_ms = Some(now_ms);
@@ -690,9 +693,10 @@ impl IdleTracker {
 }
 
 /// Longest sleep between auto-lock checks. The check re-reads the OS idle
-/// time, so a sleep up to the deadline is exact when the user stays away,
-/// and wakes once per timeout at most when they keep working.
-pub const AUTOLOCK_MAX_SLEEP_MS: u64 = 60_000;
+/// time, and a laptop's sleep pauses the monotonic timer, so the cap bounds
+/// how late the lock can be after a resume (window activation also pokes
+/// the task). 0.2 wakes a second at most.
+pub const AUTOLOCK_MAX_SLEEP_MS: u64 = 5_000;
 /// Shortest sleep between auto-lock checks.
 pub const AUTOLOCK_MIN_SLEEP_MS: u64 = 1_000;
 

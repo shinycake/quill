@@ -103,6 +103,15 @@ pub static PASSCODE: Signal = Signal::new();
 /// The "save power on low battery" switch changed.
 pub static BATTERY: Signal = Signal::new();
 
+/// The main window came to the front (or the OS resumed): everything that
+/// sleeps on a long timeout re-checks now, since monotonic timers pause in
+/// system sleep and time-driven work (presence, auto-lock) may be overdue.
+pub fn poke_on_activation() {
+    UPDATES.poke();
+    PASSCODE.poke();
+    CHROME.poke();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +161,14 @@ mod tests {
         let _ = poker.join();
         let waited = waited.unwrap_or(Duration::from_secs(99));
         assert!(waited < Duration::from_millis(1000), "waited {waited:?}");
+    }
+
+    #[test]
+    fn activation_wakes_the_poll_loop_and_the_passcode_timer() {
+        let (updates, passcode, chrome) = (UPDATES.epoch(), PASSCODE.epoch(), CHROME.epoch());
+        poke_on_activation();
+        assert!(UPDATES.epoch() != updates);
+        assert!(PASSCODE.epoch() != passcode);
+        assert!(CHROME.epoch() != chrome);
     }
 }
