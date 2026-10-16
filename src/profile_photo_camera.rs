@@ -67,12 +67,15 @@ pub struct CameraStream {
 }
 
 impl CameraStream {
-    /// Start ffmpeg on the default camera. `log` receives its errors.
-    pub fn start(log: &Path) -> Result<Self, String> {
+    /// Start ffmpeg on the picked camera (`choice`; else the default). `log` receives its errors.
+    pub fn start(
+        log: &Path,
+        choice: &crate::capture_choice::CaptureChoice,
+    ) -> Result<Self, String> {
         if !crate::media_tools::is_installed("ffmpeg") {
             return Err(crate::media_tools::ffmpeg_missing_message("The camera"));
         }
-        let input = crate::media_tools::capture_input()?;
+        let input = crate::media_tools::capture_input(choice)?;
         let args = stream_args(
             &crate::profile_photo_sources::video_only_input(&input.args),
             LIVE_SIDE,

@@ -1,40 +1,18 @@
 //! Which camera and microphone ffmpeg captures from (round videos, the
-//! profile-photo camera). The in-call device menu publishes the user's pick
-//! here by device name; a pick that is no longer plugged in falls back to
-//! the first device, as before.
+//! profile-photo camera). The pick lives in the connect driver
+//! (`ConnectDriver::capture_choice` reads it from the selected device ids and
+//! the device list); callers pass it to `media_tools::capture_input`. A pick
+//! that is no longer plugged in falls back to the first device, as before.
 #![deny(clippy::indexing_slicing)]
 
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
 
 /// Names (as the call engine lists them) of the camera and microphone the
-/// user picked. `None` means the system default.
+/// user picked in the call device menu. `None` means the system default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CaptureChoice {
     pub camera: Option<String>,
     pub microphone: Option<String>,
-}
-
-static CHOICE: Mutex<CaptureChoice> = Mutex::new(CaptureChoice {
-    camera: None,
-    microphone: None,
-});
-
-/// Publish the camera pick (`None` clears it).
-pub fn set_camera(name: Option<String>) {
-    let mut guard = CHOICE.lock().unwrap_or_else(|e| e.into_inner());
-    guard.camera = name;
-}
-
-/// Publish the microphone pick (`None` clears it).
-pub fn set_microphone(name: Option<String>) {
-    let mut guard = CHOICE.lock().unwrap_or_else(|e| e.into_inner());
-    guard.microphone = name;
-}
-
-/// The current pick.
-pub fn current() -> CaptureChoice {
-    CHOICE.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 fn same_name(wanted: &str, name: &str) -> bool {
@@ -50,8 +28,14 @@ pub fn pick_device<'a>(preferred: Option<&str>, available: &'a [String]) -> Opti
         .or_else(|| available.first())
 }
 
-/// Same for V4L2 nodes; a pick matches the node path or its file name.
-pub fn pick_v4l2<'a>(preferred: Option<&str>, nodes: &'a [PathBuf]) -> Option<&'a PathBuf> {
+/// Same for V4L2 nodes. A pick matches the node path, its file name, or the
+/// card name `card_of` reports for it (the engine lists cameras by their
+/// human-readable name, not by `/dev/videoN`).
+pub fn pick_v4l2<'a>(
+    preferred: Option<&str>,
+    nodes: &'a [PathBuf],
+    card_of: impl Fn(&Path) -> Option<String>,
+) -> Option<&'a PathBuf> {
     preferred
         .and_then(|wanted| {
             nodes.iter().find(|path| {
@@ -59,6 +43,7 @@ pub fn pick_v4l2<'a>(preferred: Option<&str>, nodes: &'a [PathBuf]) -> Option<&'
                     || path
                         .file_name()
                         .is_some_and(|file| same_name(wanted, &file.to_string_lossy()))
+                    || card_of(path).is_some_and(|card| same_name(wanted, &card))
             })
         })
         .or_else(|| nodes.first())
@@ -104,9 +89,7 @@ pub fn avf_index(preferred: Option<&str>, list: &[(usize, String)]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        avf_index, parse_avfoundation_devices, pick_device, pick_v4l2, set_camera, set_microphone,
-    };
+    use super::{avf_index, parse_avfoundation_devices, pick_device, pick_v4l2};
     use std::path::PathBuf;
 
     fn names(list: &[&str]) -> Vec<String> {
@@ -138,15 +121,33 @@ mod tests {
     #[test]
     fn no_devices_yields_none() {
         assert_eq!(pick_device(Some("x"), &[]), None);
-        assert_eq!(pick_v4l2(Some("x"), &[]), None);
+        assert_eq!(pick_v4l2(Some("x"), &[], |_| None), None);
     }
 
     #[test]
     fn v4l2_matches_path_or_file_name() {
         let nodes = vec![PathBuf::from("/dev/video0"), PathBuf::from("/dev/video2")];
-        assert_eq!(pick_v4l2(Some("video2"), &nodes), nodes.get(1));
-        assert_eq!(pick_v4l2(Some("/dev/video2"), &nodes), nodes.get(1));
-        assert_eq!(pick_v4l2(Some("/dev/video9"), &nodes), nodes.first());
+        let none = |_: &std::path::Path| None;
+        assert_eq!(pick_v4l2(Some("video2"), &nodes, none), nodes.get(1));
+        assert_eq!(pick_v4l2(Some("/dev/video2"), &nodes, none), nodes.get(1));
+        assert_eq!(pick_v4l2(Some("/dev/video9"), &nodes, none), nodes.first());
+    }
+
+    #[test]
+    fn v4l2_matches_the_card_name_the_engine_lists() {
+        let nodes = vec![PathBuf::from("/dev/video0"), PathBuf::from("/dev/video2")];
+        // Fixture for /sys/class/video4linux/videoN/name.
+        let card = |path: &std::path::Path| match path.to_str() {
+            Some("/dev/video0") => Some("Integrated Camera: Integrated C".to_string()),
+            Some("/dev/video2") => Some("Logitech BRIO\n".trim().to_string()),
+            _ => None,
+        };
+        assert_eq!(pick_v4l2(Some("logitech brio"), &nodes, card), nodes.get(1));
+        assert_eq!(
+            pick_v4l2(Some("Integrated Camera: Integrated C"), &nodes, card),
+            nodes.first()
+        );
+        assert_eq!(pick_v4l2(Some("Unplugged"), &nodes, card), nodes.first());
     }
 
     #[test]
@@ -168,17 +169,5 @@ mod tests {
             avf_index(Some("MacBook Pro Microphone"), &devices.audio),
             "0"
         );
-    }
-
-    #[test]
-    fn published_choice_round_trips() {
-        set_camera(Some("Cam".into()));
-        set_microphone(Some("Mic".into()));
-        let choice = super::current();
-        assert_eq!(choice.camera.as_deref(), Some("Cam"));
-        assert_eq!(choice.microphone.as_deref(), Some("Mic"));
-        set_camera(None);
-        set_microphone(None);
-        assert_eq!(super::current(), Default::default());
     }
 }

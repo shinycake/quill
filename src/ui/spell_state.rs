@@ -29,12 +29,15 @@ pub(crate) struct SpellUi {
     pub(super) engine_task: Option<Task<()>>,
 }
 
-pub(super) type EngineBuilder = fn(
-    &[String],
-) -> (
-    std::sync::Arc<quill::spellcheck::SpellChecker>,
-    super::spellcheck_ui::SpellInfo,
-);
+pub(super) type EngineBuilder = std::sync::Arc<
+    dyn Fn(
+            &[String],
+        ) -> (
+            std::sync::Arc<quill::spellcheck::SpellChecker>,
+            super::spellcheck_ui::SpellInfo,
+        ) + Send
+        + Sync,
+>;
 
 impl SpellUi {
     pub(super) fn new(
@@ -51,7 +54,7 @@ impl SpellUi {
             misspellings: Vec::new(),
             checked_text: String::new(),
             task: None,
-            engine_builder: super::app::QuillApp::build_spell_engine,
+            engine_builder: std::sync::Arc::new(super::app::QuillApp::build_spell_engine),
             engine_task: None,
         }
     }

@@ -99,11 +99,12 @@ pub struct CaptureInput {
 /// PulseAudio (or ALSA) on Linux, the first DirectShow pair on Windows.
 /// Linux picks only the camera: PulseAudio source names differ from the
 /// call engine's microphone names, so audio stays on `default`.
-pub fn capture_input() -> Result<CaptureInput, String> {
+pub fn capture_input(
+    choice: &crate::capture_choice::CaptureChoice,
+) -> Result<CaptureInput, String> {
     let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect();
-    let choice = crate::capture_choice::current();
     if cfg!(target_os = "macos") {
-        let (video, audio) = avfoundation_inputs(&choice);
+        let (video, audio) = avfoundation_inputs(choice);
         let mut list: Vec<String> = args(&[
             "-f",
             "avfoundation",
@@ -121,8 +122,9 @@ pub fn capture_input() -> Result<CaptureInput, String> {
         })
     } else if cfg!(target_os = "linux") {
         let nodes = v4l2_capture_devices();
-        let camera = crate::capture_choice::pick_v4l2(choice.camera.as_deref(), &nodes)
-            .ok_or("No camera found.")?;
+        let camera =
+            crate::capture_choice::pick_v4l2(choice.camera.as_deref(), &nodes, v4l2_card_name)
+                .ok_or("No camera found.")?;
         let audio = linux_audio_backend();
         Ok(CaptureInput {
             args: vec![
@@ -161,6 +163,43 @@ pub fn capture_input() -> Result<CaptureInput, String> {
     }
 }
 
+/// How long a device-listing ffmpeg may run. Capture starts on the UI
+/// thread, so a stuck device probe must not hang the app.
+const DEVICE_LIST_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Run `cmd` and return what it prints on stderr, or `None` when it cannot
+/// start or does not finish within `limit` (it is killed then). ffmpeg's
+/// device lists go to stderr and the command itself "fails", so the exit
+/// status is ignored.
+fn stderr_within(cmd: &mut Command, limit: std::time::Duration) -> Option<String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let mut pipe = child.stderr.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reader = std::thread::Builder::new()
+        .name("quill-device-list".into())
+        .spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            let _ = tx.send(bytes);
+        });
+    let bytes = match reader {
+        Ok(_) => rx.recv_timeout(limit).ok(),
+        Err(_) => None,
+    };
+    if bytes.is_none() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    bytes.map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// AVFoundation `(video, audio)` input specifiers: the picked devices'
 /// indices, `default` for an unset or vanished pick. Lists the devices only
 /// when something was picked.
@@ -168,21 +207,29 @@ fn avfoundation_inputs(choice: &crate::capture_choice::CaptureChoice) -> (String
     if choice.camera.is_none() && choice.microphone.is_none() {
         return ("default".into(), "default".into());
     }
-    let listing = command("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-f",
-            "avfoundation",
-            "-list_devices",
-            "true",
-            "-i",
-            "",
-        ])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
-        .unwrap_or_default();
-    let devices = crate::capture_choice::parse_avfoundation_devices(&listing);
+    let mut list = command("ffmpeg");
+    list.args([
+        "-hide_banner",
+        "-f",
+        "avfoundation",
+        "-list_devices",
+        "true",
+        "-i",
+        "",
+    ]);
+    let listing = stderr_within(&mut list, DEVICE_LIST_LIMIT).unwrap_or_default();
+    avfoundation_specifiers(
+        choice,
+        &crate::capture_choice::parse_avfoundation_devices(&listing),
+    )
+}
+
+/// The `(video, audio)` AVFoundation specifiers for `choice` among the
+/// listed `devices`: the picked device's index, `default` when unset or gone.
+pub fn avfoundation_specifiers(
+    choice: &crate::capture_choice::CaptureChoice,
+    devices: &crate::capture_choice::AvfDevices,
+) -> (String, String) {
     (
         crate::capture_choice::avf_index(choice.camera.as_deref(), &devices.video),
         crate::capture_choice::avf_index(choice.microphone.as_deref(), &devices.audio),
@@ -215,6 +262,20 @@ fn pick_audio_backend(devices_listing: &str) -> &'static str {
     } else {
         "alsa"
     }
+}
+
+/// The V4L2 card name of `/dev/videoN` (what the call engine lists).
+#[cfg(target_os = "linux")]
+fn v4l2_card_name(path: &Path) -> Option<String> {
+    let file = path.file_name()?;
+    let name = std::fs::read_to_string(Path::new("/sys/class/video4linux").join(file).join("name"))
+        .ok()?;
+    Some(name.trim().to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn v4l2_card_name(_path: &Path) -> Option<String> {
+    None
 }
 
 /// `/dev/video*` nodes that can capture video, in numeric order. A camera
@@ -285,23 +346,20 @@ pub struct DshowDevices {
 /// `ffmpeg -list_devices true -f dshow -i dummy` (it prints the list on
 /// stderr and then fails, which is expected).
 pub fn list_dshow_devices() -> Result<DshowDevices, String> {
-    let output = command("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-list_devices",
-            "true",
-            "-f",
-            "dshow",
-            "-i",
-            "dummy",
-        ])
-        .stdin(std::process::Stdio::null())
-        .no_console()
-        .output()
-        .map_err(|err| format!("Couldn't run ffmpeg ({err})."))?;
-    Ok(parse_dshow_devices(&String::from_utf8_lossy(
-        &output.stderr,
-    )))
+    let mut list = command("ffmpeg");
+    list.args([
+        "-hide_banner",
+        "-list_devices",
+        "true",
+        "-f",
+        "dshow",
+        "-i",
+        "dummy",
+    ])
+    .no_console();
+    let stderr = stderr_within(&mut list, DEVICE_LIST_LIMIT)
+        .ok_or("Couldn't list the cameras and microphones.")?;
+    Ok(parse_dshow_devices(&stderr))
 }
 
 /// Parse ffmpeg's DirectShow device list, in both layouts: newer builds tag
@@ -676,38 +734,23 @@ dummy: Immediate exit requested\n";
         assert_eq!(capture_failure(&log, true), "Couldn't start the camera.");
         let _ = std::fs::remove_dir_all(&dir);
     }
-    /// Real-ffmpeg check of the saved pick on macOS (skipped without ffmpeg).
-    #[cfg(target_os = "macos")]
+
     #[test]
-    fn macos_capture_input_honors_saved_pick_and_falls_back() {
-        if !is_installed("ffmpeg") {
+    fn stderr_within_returns_output_and_gives_up_on_a_stuck_command() {
+        if cfg!(windows) {
             return;
         }
-        let listing = command("ffmpeg")
-            .args([
-                "-hide_banner",
-                "-f",
-                "avfoundation",
-                "-list_devices",
-                "true",
-                "-i",
-                "",
-            ])
-            .output()
-            .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
-            .unwrap_or_default();
-        let devices = crate::capture_choice::parse_avfoundation_devices(&listing);
-        let Some((index, name)) = devices.video.last().cloned() else {
-            return;
-        };
-        crate::capture_choice::set_camera(Some(name.clone()));
-        let picked = capture_input().map(|input| input.args.last().cloned());
-        println!("saved pick {name:?} -> {picked:?}");
-        assert_eq!(picked, Ok(Some(format!("{index}:default"))));
-        crate::capture_choice::set_camera(Some("Unplugged Camera".into()));
-        let missing = capture_input().map(|input| input.args.last().cloned());
-        println!("missing pick -> {missing:?}");
-        assert_eq!(missing, Ok(Some("default:default".to_string())));
-        crate::capture_choice::set_camera(None);
+        let mut quick = Command::new("sh");
+        quick.args(["-c", "echo listed >&2"]);
+        let out = stderr_within(&mut quick, std::time::Duration::from_secs(10));
+        assert_eq!(out.as_deref().map(str::trim), Some("listed"));
+        let mut stuck = Command::new("sh");
+        stuck.args(["-c", "sleep 30"]);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            stderr_within(&mut stuck, std::time::Duration::from_millis(100)),
+            None
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
     }
 }
