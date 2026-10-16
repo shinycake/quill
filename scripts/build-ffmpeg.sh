@@ -83,7 +83,7 @@ case "$OS" in
   # which still backs clock_gettime/nanosleep) linked statically: the DLLs
   # import only the system (UCRT/KERNEL32/bcrypt) — check-bundle-pe.ps1.
   # DirectShow cameras and microphones; the H.264 encoder is Media Foundation's.
-  windows) CONFIG+=(--target-os=mingw32 --disable-pthreads --enable-w32threads --enable-mediafoundation --enable-encoder=h264_mf --enable-indev=dshow "--extra-ldflags=-static-libgcc -static") ;;
+  windows) CONFIG+=(--target-os=mingw32 --disable-pthreads --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-encoder=h264_mf --enable-indev=dshow "--extra-ldflags=-static-libgcc -static") ;;
 esac
 if [[ "$OS" == linux ]] && ! command -v pkg-config >/dev/null; then
   echo "error: pkg-config is required to find libpulse/libasound (apt install pkg-config libpulse-dev libasound2-dev)" >&2

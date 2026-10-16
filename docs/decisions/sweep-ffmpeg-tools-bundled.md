@@ -39,7 +39,7 @@ a codec cannot take the window with it), so the tools have to ship.
   protocol, and the `lavfi` input (test sources). Device inputs per platform: DirectShow
   (Windows), V4L2 + ALSA + PulseAudio (Linux). zlib is enabled for PNG.
 - There is no H.264 encoder in an LGPL build (libx264 is GPL). Windows gets Media Foundation's
-  `h264_mf` (the operating system's, `--enable-mediafoundation`). Linux has none and no VP9
+  `h264_mf` (the operating system's, `--enable-mediafoundation`, which FFmpeg 9 builds only with `--enable-d3d11va`; `d3d11.dll` and `dxgi.dll` are system DLLs). Linux has none and no VP9
   encoder either; see "Encoders" below.
 - `scripts/windows-package.ps1` puts `ffmpeg.exe`, `ffprobe.exe` and the two new DLLs
   (`avfilter-N`, `avdevice-N`) next to `quill.exe`; `check-bundle-pe.ps1` requires them and the
