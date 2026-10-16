@@ -107,13 +107,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Enter in the share box search: tick the first match, or send when
-    /// something is already ticked (tdesktop `ShareBox::keyPressEvent`).
+    /// Enter in the share box search toggles the first match, which is the
+    /// only result once the query narrows the list (tdesktop
+    /// `ShareBox::Inner::selectActive`). Ctrl/Cmd+Enter sends instead
+    /// (`setSubmittedCallback`), see `submit_share_from_search`.
     pub(super) fn activate_first_forward_destination(&mut self, cx: &mut Context<Self>) {
-        if !self.share.selection.is_empty() {
-            self.submit_share(ShareSend::Normal, cx);
-            return;
-        }
         let query = self.share.search_input.read(cx).value().to_string();
         let first = self
             .session()
@@ -121,6 +119,13 @@ impl QuillApp {
             .map(|chat| chat.id);
         if let Some(first) = first {
             self.toggle_share_destination(first, cx);
+        }
+    }
+
+    /// Ctrl/Cmd+Enter in the share box search: send to the ticked chats.
+    pub(super) fn submit_share_from_search(&mut self, cx: &mut Context<Self>) {
+        if !self.share.selection.is_empty() {
+            self.submit_share(ShareSend::Normal, cx);
         }
     }
 
@@ -548,24 +553,26 @@ impl QuillApp {
                         )
                     })
                     .child(div().flex_1())
-                    .child(
-                        Button::new("share-schedule")
-                            .label(schedule_label)
-                            .ghost()
-                            .disabled(selected == 0)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_schedule_picker(ScheduleTarget::Share, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("share-silent")
-                            .label(tr(keys::Q_OPS_SEND_WITHOUT_SOUND))
-                            .ghost()
-                            .disabled(selected == 0)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_share(ShareSend::Silent, cx);
-                            })),
-                    )
+                    // tdesktop `ShareBox::createButtons`: Send exists only
+                    // while a chat is ticked, so no disabled copies here.
+                    .when(selected > 0, |row| {
+                        row.child(
+                            Button::new("share-schedule")
+                                .label(schedule_label)
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_schedule_picker(ScheduleTarget::Share, window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("share-silent")
+                                .label(tr(keys::Q_OPS_SEND_WITHOUT_SOUND))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.submit_share(ShareSend::Silent, cx);
+                                })),
+                        )
+                    })
                     .when(selected == 1, |row| {
                         row.child(
                             Button::new("share-continue")
@@ -575,15 +582,16 @@ impl QuillApp {
                                 })),
                         )
                     })
-                    .child(
-                        Button::new("share-send")
-                            .label(tr(keys::SHARE_CONFIRM))
-                            .primary()
-                            .disabled(selected == 0)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_share(ShareSend::Normal, cx);
-                            })),
-                    ),
+                    .when(selected > 0, |row| {
+                        row.child(
+                            Button::new("share-send")
+                                .label(tr(keys::SHARE_CONFIRM))
+                                .primary()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.submit_share(ShareSend::Normal, cx);
+                                })),
+                        )
+                    }),
             )
     }
 

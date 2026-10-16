@@ -99,11 +99,11 @@ pub(super) fn call_status(
             is_received,
         } => (
             if !is_created {
-                "requesting..."
+                tr(keys::CALL_STATUS_REQUESTING)
             } else if *is_received {
-                "ringing..."
+                tr(keys::CALL_STATUS_RINGING)
             } else {
-                "waiting..."
+                tr(keys::CALL_STATUS_WAITING)
             }
             .into(),
             true,
@@ -112,7 +112,7 @@ pub(super) fn call_status(
         CallState::Ready => match transport {
             Some(TransportState::Connected) => (duration_text(connected_secs), false),
             Some(TransportState::Failed) => (tr(keys::CALL_STATUS_FAILED).into(), false),
-            _ => ("connecting...".into(), true),
+            _ => (tr(keys::CALL_STATUS_CONNECTING).into(), true),
         },
         CallState::HangingUp => (tr(keys::CALL_STATUS_HANGING).into(), false),
         _ => (tr(keys::CALL_STATUS_ENDED).into(), false),
@@ -1016,15 +1016,15 @@ mod tests {
         };
         assert_eq!(
             call_status(&pending(false, false), true, None, 0).0,
-            "requesting..."
+            "requesting…"
         );
         assert_eq!(
             call_status(&pending(true, false), true, None, 0).0,
-            "waiting..."
+            "waiting…"
         );
         assert_eq!(
             call_status(&pending(true, true), true, None, 0).0,
-            "ringing..."
+            "ringing…"
         );
         assert_eq!(
             call_status(&pending(true, true), false, None, 0).0,
@@ -1039,7 +1039,7 @@ mod tests {
             ready(Some(TransportState::Connected)),
             ("1:15".to_string(), false)
         );
-        assert_eq!(ready(None), ("connecting...".to_string(), true));
+        assert_eq!(ready(None), ("connecting…".to_string(), true));
         assert_eq!(ready(Some(TransportState::Failed)).0, "failed to connect");
     }
 

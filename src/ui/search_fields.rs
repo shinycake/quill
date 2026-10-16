@@ -32,7 +32,10 @@ impl QuillApp {
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
+                    if *secondary && !*shift && marked.is_none() && !this.share.reply_elsewhere_open
+                    {
+                        this.submit_share_from_search(cx);
+                    } else if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                         // Not a chat composer: the send-key setting does not apply.
                         SendKeyMode::Enter,
@@ -69,7 +72,10 @@ impl QuillApp {
                 }
                 if let InputEvent::PressEnter { secondary, shift } = event {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if should_send_on_enter(
+                    if *secondary && !*shift && marked.is_none() && !this.share.reply_elsewhere_open
+                    {
+                        this.submit_share_from_search(cx);
+                    } else if should_send_on_enter(
                         quill::composer::enter_event_from_kit(*shift, *secondary, marked),
                         // Not a chat composer: the send-key setting does not apply.
                         SendKeyMode::Enter,
