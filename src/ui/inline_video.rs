@@ -446,7 +446,7 @@ impl QuillApp {
 /// (`[top-left, top-right, bottom-right, bottom-left]`, in points): laid
 /// over a native video surface, which GPUI can't clip, it rounds the video
 /// to match the bubble. Rendered at twice the size for Retina edges.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(super) fn corner_mask(
     width: u32,
     height: u32,

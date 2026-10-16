@@ -109,6 +109,7 @@ impl Backend for StillBackend {
             display_secs: picture.as_ref().map(|_| self.position),
             picture,
             item_secs: self.position,
+            stats: None,
         }
     }
 

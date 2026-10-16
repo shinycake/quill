@@ -315,6 +315,7 @@ impl Backend for AvPlayerBackend {
             picture: buffer.map(Picture::Surface),
             item_secs,
             display_secs,
+            stats: None,
         }
     }
 

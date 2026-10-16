@@ -8,11 +8,20 @@
 //! time lets the frame clock sleep until just before it. Every new picture
 //! becomes a new `RenderImage`; the one it replaces is retired to
 //! `image_budget`, which drops it from the GPU atlas once no frame shows it.
+//!
+//! On Windows the decoder is asked for NV12 instead while the DirectX
+//! renderer offers it ([`surface::nv12_wanted`]): pictures the stream
+//! allows (8-bit 4:2:0, BT.601/709, even sides) skip the decoder's BGRA
+//! conversion and become surface frames the renderer converts on the GPU;
+//! the rest stay images. If the renderer stops offering NV12, the decoder
+//! goes back to BGRA, NV12 pictures still queued are converted on the CPU,
+//! and the surface on screen is replaced by an image of it.
 #![deny(clippy::indexing_slicing)]
 
+use super::surface;
 use super::transport::BackendStatus;
-use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled, Purpose};
-use quill::video_decode::{OpenOptions, Player, VideoFrame};
+use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
+use quill::video_decode::{OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -38,7 +47,7 @@ pub(super) fn preferred_on_macos() -> bool {
 }
 
 fn options(purpose: Purpose) -> OpenOptions {
-    match purpose {
+    let options = match purpose {
         Purpose::Viewer => OpenOptions::viewer(),
         Purpose::ViewerLoop => OpenOptions {
             want_audio: false,
@@ -47,6 +56,20 @@ fn options(purpose: Purpose) -> OpenOptions {
         Purpose::Inline { max_edge } => OpenOptions::inline(max_edge.max(16)),
         // Live players never open files.
         Purpose::Story | Purpose::Live { .. } => OpenOptions::viewer(),
+    };
+    OpenOptions {
+        output: wanted_output(),
+        ..options
+    }
+}
+
+/// The picture layout to decode into now: NV12 while the renderer draws
+/// it (Windows), BGRA otherwise.
+fn wanted_output() -> PixelOutput {
+    if surface::nv12_wanted() {
+        PixelOutput::Nv12
+    } else {
+        PixelOutput::Bgra
     }
 }
 
@@ -59,6 +82,11 @@ pub(super) struct FfmpegBackend {
     rate: f64,
     playing: bool,
     image: Option<Arc<RenderImage>>,
+    /// The surface picture on screen (Windows NV12), to show as an image
+    /// instead if the renderer stops drawing NV12.
+    surface: Option<Picture>,
+    /// The layout last asked of the decoder.
+    output: PixelOutput,
     /// A picture stepped to while paused, shown on the next pull.
     pending_step: Option<VideoFrame>,
 }
@@ -71,6 +99,7 @@ impl FfmpegBackend {
             .map_err(|err| PlayerError::new(ErrorKind::Unsupported, err))?;
         Ok(Self {
             path: path.to_path_buf(),
+            output: options.output,
             options,
             player,
             sound: None,
@@ -78,6 +107,7 @@ impl FfmpegBackend {
             rate: 1.0,
             playing: false,
             image: None,
+            surface: None,
             pending_step: None,
         })
     }
@@ -92,13 +122,96 @@ impl FfmpegBackend {
         }
     }
 
-    fn show(&mut self, frame: VideoFrame) -> Option<Picture> {
+    /// Ask the decoder for the layout the renderer draws now.
+    fn sync_output(&mut self) {
+        let wanted = wanted_output();
+        if wanted != self.output {
+            self.player.set_output(wanted);
+            self.output = wanted;
+        }
+    }
+
+    fn show(&mut self, frame: VideoFrame) -> Option<(Picture, PictureStats)> {
+        self.sync_output();
+        let started = Instant::now();
+        let (width, height, decoded_us) = (frame.width, frame.height, frame.convert_us);
+        let frame = match self.surface_picture(frame) {
+            Ok(shown) => return Some(shown),
+            Err(frame) => frame,
+        };
         let image = render_image(frame)?;
-        if let Some(old) = self.image.replace(image.clone()) {
+        self.show_image(image.clone());
+        let stats = PictureStats {
+            format: "bgra",
+            width,
+            height,
+            bytes: (width as usize)
+                .saturating_mul(height as usize)
+                .saturating_mul(4),
+            // A CPU conversion from NV12 (renderer fallback) counts too.
+            convert_us: decoded_us.saturating_add(elapsed_us(started)),
+        };
+        Some((Picture::Image(image), stats))
+    }
+
+    fn show_image(&mut self, image: Arc<RenderImage>) {
+        if let Some(old) = self.image.replace(image) {
             super::super::image_budget::retire_all([old]);
         }
+        self.surface = None;
+    }
+
+    /// An NV12 picture as a surface, while the renderer draws them; the
+    /// picture back otherwise (it becomes an image).
+    #[cfg(target_os = "windows")]
+    fn surface_picture(
+        &mut self,
+        frame: VideoFrame,
+    ) -> Result<(Picture, PictureStats), VideoFrame> {
+        if !surface::nv12_wanted() {
+            return Err(frame);
+        }
+        let (width, height, convert_us) = (frame.width, frame.height, frame.convert_us);
+        let surface = surface::surface_frame(frame)?;
+        let stats = PictureStats {
+            format: "nv12",
+            width,
+            height,
+            bytes: surface.bytes().len(),
+            convert_us,
+        };
+        if let Some(old) = self.image.take() {
+            super::super::image_budget::retire_all([old]);
+        }
+        let picture = Picture::Surface(surface);
+        self.surface = Some(picture.clone());
+        Ok((picture, stats))
+    }
+
+    /// Off Windows every picture is an image.
+    #[cfg(not(target_os = "windows"))]
+    fn surface_picture(
+        &mut self,
+        frame: VideoFrame,
+    ) -> Result<(Picture, PictureStats), VideoFrame> {
+        Err(frame)
+    }
+
+    /// The renderer stopped drawing NV12 while a surface is on screen:
+    /// the same picture as an image.
+    fn surface_as_image(&mut self) -> Option<Picture> {
+        if self.surface.is_none() || surface::nv12_wanted() {
+            return None;
+        }
+        self.sync_output();
+        let image = self.surface.take()?.snapshot()?;
+        self.show_image(image.clone());
         Some(Picture::Image(image))
     }
+}
+
+fn elapsed_us(since: Instant) -> u32 {
+    u32::try_from(since.elapsed().as_micros()).unwrap_or(u32::MAX)
 }
 
 impl Backend for FfmpegBackend {
@@ -152,6 +265,7 @@ impl Backend for FfmpegBackend {
         self.volume = volume.clamp(0.0, 1.0);
         if self.volume > 0.0 && !self.options.want_audio {
             self.options.want_audio = true;
+            self.options.output = self.output;
             let position = self.player.position();
             if let Ok(mut player) = Player::open(&self.path, self.options.clone()) {
                 player.set_rate(self.rate);
@@ -194,11 +308,15 @@ impl Backend for FfmpegBackend {
             None => self.player.take_frame_at(present.at),
         };
         let display_secs = frame.as_ref().map(|frame| frame.pts);
-        let picture = frame.and_then(|frame| self.show(frame));
+        let (picture, stats) = match frame.and_then(|frame| self.show(frame)) {
+            Some((picture, stats)) => (Some(picture), Some(stats)),
+            None => (self.surface_as_image(), None),
+        };
         Pulled {
             picture,
             item_secs,
             display_secs,
+            stats,
         }
     }
 
@@ -221,9 +339,14 @@ impl Drop for FfmpegBackend {
     }
 }
 
-/// A decoded BGRA picture as a GPUI image (no copy: the buffer moves in).
+/// A decoded picture as a GPUI image (no copy for BGRA: the buffer moves
+/// in; NV12 is converted on the CPU first).
 pub(super) fn render_image(frame: VideoFrame) -> Option<Arc<RenderImage>> {
-    let buffer = image::RgbaImage::from_raw(frame.width, frame.height, frame.bgra)?;
+    let frame = frame.into_bgra()?;
+    let Pixels::Bgra(bgra) = frame.pixels else {
+        return None;
+    };
+    let buffer = image::RgbaImage::from_raw(frame.width, frame.height, bgra)?;
     Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(buffer),
     ]))))

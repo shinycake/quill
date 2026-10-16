@@ -5,7 +5,10 @@
 //! - macOS: AVPlayer decodes in hardware ([`backend_avplayer`]); pictures
 //!   are GPU pixel buffers drawn through GPUI's `surface`.
 //! - Linux and Windows (and macOS with `QUILL_VIDEO_BACKEND=ffmpeg`): the
-//!   bundled FFmpeg shim ([`backend_ffmpeg`]); pictures are BGRA images.
+//!   bundled FFmpeg shim ([`backend_ffmpeg`]); pictures are BGRA images,
+//!   except on Windows, where the decoder hands over NV12 and the DirectX
+//!   renderer converts it on the GPU ([`surface`],
+//!   `docs/decisions/video-player-nv12.md`).
 //! - Live feeds (streams, live stories, video chat tracks): frames pushed
 //!   by the call engine ([`backend_live`], [`VideoPlayer::live`]).
 //!
@@ -25,6 +28,7 @@ mod element;
 mod live_picture;
 pub(super) mod pacing;
 mod rotate;
+mod surface;
 mod transport;
 
 #[cfg(target_os = "macos")]
@@ -74,21 +78,30 @@ pub(crate) enum Purpose {
     Live { tile: bool },
 }
 
+/// What a surface picture holds: a GPU pixel buffer from AVPlayer on
+/// macOS; NV12 pixels the DirectX renderer uploads and converts on
+/// Windows. Linux has no surface pictures (its renderer draws none).
+#[cfg(target_os = "macos")]
+pub(crate) type SurfaceHandle = objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>;
+#[cfg(target_os = "windows")]
+pub(crate) type SurfaceHandle = Arc<SurfaceFrame>;
+
 /// A picture to draw.
 #[derive(Clone)]
 pub(crate) enum Picture {
-    /// A GPU pixel buffer (AVPlayer), drawn by GPUI's `surface`.
-    #[cfg(target_os = "macos")]
-    Surface(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>),
+    /// Drawn by GPUI's `surface`: an AVPlayer pixel buffer (macOS) or an
+    /// NV12 frame (Windows, FFmpeg).
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    Surface(SurfaceHandle),
     /// A decoded BGRA image (FFmpeg, still frames), drawn by `img`.
     Image(Arc<RenderImage>),
 }
 
-// `Picture` has one variant off macOS, so its matches are split by
+// `Picture` has one variant on Linux, so its matches are split by
 // platform instead of carrying a cfg'd arm.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Picture {
-    /// The decoded image, when the picture is one (not a GPU surface).
-    #[cfg(target_os = "macos")]
+    /// The decoded image, when the picture is one (not a surface).
     pub(crate) fn image(&self) -> Option<Arc<RenderImage>> {
         match self {
             Picture::Image(image) => Some(image.clone()),
@@ -96,41 +109,48 @@ impl Picture {
         }
     }
 
-    /// The decoded image (every picture is one off macOS).
-    #[cfg(not(target_os = "macos"))]
+    /// The picture as an image to copy out: the image, or a CPU surface
+    /// converted (Windows NV12); `None` for a GPU buffer (macOS: no
+    /// readback).
+    pub(crate) fn snapshot(&self) -> Option<Arc<RenderImage>> {
+        match self {
+            Picture::Image(image) => Some(image.clone()),
+            Picture::Surface(surface) => surface::snapshot(surface),
+        }
+    }
+
+    /// A surface, which GPUI can't clip (corners are masked instead).
+    pub(crate) fn is_surface(&self) -> bool {
+        matches!(self, Picture::Surface(_))
+    }
+
+    /// The picture's size in pixels (as shown, after any turn).
+    pub(crate) fn size(&self) -> (u32, u32) {
+        match self {
+            Picture::Image(image) => image_size(image),
+            Picture::Surface(surface) => surface::surface_size(surface),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+impl Picture {
+    /// The decoded image (every picture is one on Linux).
     pub(crate) fn image(&self) -> Option<Arc<RenderImage>> {
         let Picture::Image(image) = self;
         Some(image.clone())
     }
 
-    /// A GPU surface, which GPUI can't clip (corners are masked instead).
-    #[cfg(target_os = "macos")]
-    pub(crate) fn is_surface(&self) -> bool {
-        matches!(self, Picture::Surface(_))
+    /// The picture as an image to copy out.
+    pub(crate) fn snapshot(&self) -> Option<Arc<RenderImage>> {
+        self.image()
     }
 
-    #[cfg(not(target_os = "macos"))]
     pub(crate) fn is_surface(&self) -> bool {
         false
     }
 
     /// The picture's size in pixels (as shown, after any turn).
-    #[cfg(target_os = "macos")]
-    pub(crate) fn size(&self) -> (u32, u32) {
-        match self {
-            Picture::Image(image) => image_size(image),
-            Picture::Surface(buffer) => {
-                let side = |pixels: usize| u32::try_from(pixels).unwrap_or(u32::MAX);
-                (
-                    side(objc2_core_video::CVPixelBufferGetWidth(buffer)),
-                    side(objc2_core_video::CVPixelBufferGetHeight(buffer)),
-                )
-            }
-        }
-    }
-
-    /// The picture's size in pixels (as shown, after any turn).
-    #[cfg(not(target_os = "macos"))]
     pub(crate) fn size(&self) -> (u32, u32) {
         let Picture::Image(image) = self;
         image_size(image)
@@ -194,6 +214,22 @@ pub(super) struct Pulled {
     item_secs: f64,
     /// The new picture's own time (seconds).
     display_secs: Option<f64>,
+    /// What the new picture cost to make (decoded pictures only).
+    stats: Option<PictureStats>,
+}
+
+/// The `QUILL_TRACE_VIDEO` `VF` line's columns for a new picture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PictureStats {
+    /// `bgra` or `nv12`: what the renderer uploads.
+    pub(super) format: &'static str,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    /// Bytes the renderer uploads for it.
+    pub(super) bytes: usize,
+    /// Microseconds spent converting it (decoder conversion or plane copy,
+    /// packing, and any CPU fallback conversion).
+    pub(super) convert_us: u32,
 }
 
 /// A decoder. Every call is made on the main thread.
@@ -703,6 +739,9 @@ impl VideoPlayer {
                     rate
                 )
             );
+            if let Some(stats) = pulled.stats {
+                eprintln!("{}", picture_trace_line(id, &stats));
+            }
         }
         if let Some(picture) = pulled.picture {
             let (turns, mirrored) = self
@@ -814,7 +853,7 @@ impl Drop for Inner {
 
 /// The picture turned for the orientation; `None` when it needs no turn
 /// or turning failed (the picture is shown as it is).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
     if turns == 0 && !mirrored {
         return None;
@@ -823,13 +862,13 @@ fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
         Picture::Image(image) => {
             rotate::turn_render_image(image, turns, mirrored).map(Picture::Image)
         }
-        Picture::Surface(buffer) => {
-            rotate::turn_surface(buffer, turns, mirrored).map(Picture::Surface)
+        Picture::Surface(surface) => {
+            surface::turn_surface(surface, turns, mirrored).map(Picture::Surface)
         }
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
     if turns == 0 && !mirrored {
         return None;
@@ -935,5 +974,15 @@ pub(crate) fn trace_line(
         item_secs * 1000.0,
         u8::from(fresh),
         display_secs.map_or(-1000.0, |secs| secs * 1000.0),
+    )
+}
+
+/// One `QUILL_TRACE_VIDEO` picture line, printed after the `VT` line of
+/// the pull that took a new decoded picture:
+/// `VF,<player>,<format>,<width>,<height>,<bytes>,<convert_us>`.
+pub(super) fn picture_trace_line(player: u64, stats: &PictureStats) -> String {
+    format!(
+        "VF,{player},{},{},{},{},{}",
+        stats.format, stats.width, stats.height, stats.bytes, stats.convert_us
     )
 }
