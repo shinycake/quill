@@ -14,7 +14,7 @@ impl QuillApp {
         };
         let path = self.viewer_clip_path(&item);
         // The player opens the file itself: there are no frames to wait for.
-        match decide_viewer_video_start(&item, path.is_some(), true) {
+        match decide_viewer_video_start(&item, path.is_some()) {
             ViewerVideoStart::Nothing => {}
             ViewerVideoStart::ParkDownload => {
                 if let Some(play_id) = item.play_file_id {
@@ -22,7 +22,7 @@ impl QuillApp {
                     self.request_media_download(play_id, None, cx);
                 }
             }
-            ViewerVideoStart::PlayNow | ViewerVideoStart::ExtractFrames => {
+            ViewerVideoStart::PlayNow => {
                 self.viewer.pending_play = None;
                 // `decide_viewer_video_start` only plays a local clip.
                 let Some(path) = path else {
@@ -64,38 +64,8 @@ impl QuillApp {
             .is_some_and(|item| item.kind.loops())
     }
 
-    /// Decode extracted viewer frame PNGs into pre-loaded GPUI image handles.
-    ///
-    /// `img()` resolves `ImageSource::Render` synchronously — the pinned
-    /// `gpui-pre-0.3.5` `src/elements/img.rs` `use_data` returns
-    /// `Some(Ok(data.to_owned()))` for `Render` immediately — so cycling
-    /// frames on the 125 ms tick renders without the async fs-read +
-    /// PNG-decode round trip that made path-based (`ImageSource::Resource`)
-    /// sources flicker and lag (each new path re-entered
-    /// `window.use_asset::<ImgResourceLoader>`, which returns `None` until
-    /// the load completes, while the tick fired independently).
-    pub(in crate::ui) fn decode_viewer_frames(
-        paths: &[PathBuf],
-    ) -> Result<Vec<Arc<RenderImage>>, String> {
-        paths
-            .iter()
-            .map(|path| {
-                let mut rgba = image::open(path)
-                    .map_err(|err| format!("{}: {err}", path.display()))?
-                    .into_rgba8();
-                // RenderImage stores BGRA, as does the shared call-frame decoder below.
-                for pixel in rgba.as_chunks_mut::<4>().0 {
-                    pixel.swap(0, 2);
-                }
-                Ok(Arc::new(RenderImage::new(SmallVec::from_buf([
-                    image::Frame::new(rgba),
-                ]))))
-            })
-            .collect()
-    }
-
-    /// Phase C2e: decode a `VideoFrame`'s RGBA8 bytes into a GPUI image
-    /// handle, exactly like `decode_viewer_frames`. `None` on malformed
+    /// Phase C2e: decode a call `VideoFrame`'s RGBA8 bytes into a GPUI
+    /// image handle (BGRA, as `RenderImage` holds). `None` on malformed
     /// bytes — never render garbage.
     pub(in crate::ui) fn video_render_image(
         frame: &quill::calls::engine::VideoFrame,
@@ -243,7 +213,6 @@ impl QuillApp {
         }
         self.stop_voice_playback();
         self.stop_audio_playback();
-        self.stop_video_playback();
         self.stop_animation_playback();
         self.viewer.player = None;
         self.viewer.gif = None;

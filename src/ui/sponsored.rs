@@ -209,8 +209,6 @@ pub(super) fn sponsored_message_row(
                     files,
                     downloading,
                     media_roots,
-                    false,
-                    None,
                     None,
                     Some((chat_id, message.message_id)),
                     None,

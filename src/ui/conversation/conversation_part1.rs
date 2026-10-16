@@ -849,10 +849,7 @@ impl QuillApp {
         if self.live.is_none() && super::demo::demo_stress_size().is_none() {
             return None;
         }
-        if self.active_playback_id().is_some()
-            || self.playback.playing_animation.is_some()
-            || self.playback.playing_video.is_some()
-        {
+        if self.active_playback_id().is_some() || self.playback.playing_animation.is_some() {
             return None;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();

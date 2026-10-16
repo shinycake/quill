@@ -10,9 +10,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::inline_players::InlineVideos;
+use super::inline_players::{Demand, InlineVideos};
 use super::video_player::VideoPlayer;
 use gpui_kit::*;
+use quill::ids::{ChatId, FileId, MessageId};
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
 use std::rc::Rc;
@@ -66,7 +67,7 @@ impl LiveSource {
 /// that they are decoded at the tile's own size in device pixels
 /// ([`InlineTile::decode_edge`]); the AVPlayer backend draws its own
 /// buffers and ignores it.
-const INLINE_MAX_EDGE: u32 = 800;
+pub(super) const INLINE_MAX_EDGE: u32 = 800;
 const INLINE_MIN_EDGE: u32 = 16;
 
 /// Telegram Desktop's `kMaxInlineArea` (`history_view_gif.cpp`): a clip
@@ -169,10 +170,46 @@ impl InlineTile {
 }
 
 impl QuillApp {
+    /// The caption's width for a video or GIF tile: it widens the frame
+    /// (`media_frame_for`); its skip block is counted as if the caption
+    /// ended the bubble, so the decoded pictures are never smaller than
+    /// the frame they fill. 0 for other content.
+    pub(super) fn inline_caption_width(
+        &self,
+        message: &HistoryMessage,
+        cx: &mut Context<Self>,
+    ) -> i32 {
+        if !matches!(
+            message.content,
+            MessageContent::Video(_) | MessageContent::Animation(_)
+        ) {
+            return 0;
+        }
+        super::history::bubble_width::caption_width(
+            cx,
+            &message.content,
+            self.bubble_look(cx).font,
+            Some(
+                super::message_text::FooterMeta::of(
+                    message,
+                    quill::state::OutboxReceipt::None,
+                    message
+                        .interaction_info
+                        .as_ref()
+                        .map(|info| info.view_count)
+                        .filter(|&count| count > 0),
+                    None,
+                )
+                .reserve(super::synthetic::footer_reserve(message.is_outgoing)),
+            ),
+        )
+    }
+
     /// The inline frame for a history row's video or GIF, when it should
-    /// autoplay: the native player is available, autoplay is on for its
-    /// kind, data saver is off, it isn't secret or behind a spoiler, the
-    /// clip is downloaded, and no viewer covers the chat.
+    /// play: the native player is available, no viewer covers the chat,
+    /// it isn't secret or behind a spoiler, the clip is downloaded, and
+    /// either autoplay is on for its kind with data saver off, or a click
+    /// asked for it ([`Demand`]: a round video, an MP4 GIF).
     pub(super) fn inline_frame(
         &self,
         message: &HistoryMessage,
@@ -186,41 +223,15 @@ impl QuillApp {
         }
         let session = self.session()?;
         let prefs = &session.settings.media_prefs;
-        if prefs.data_saver {
-            return None;
-        }
-        // The caption widens the frame (`media_frame_for`); its skip block
-        // is counted as if the caption ended the bubble, so the decoded
-        // pictures are never smaller than the frame they fill.
-        let measured = matches!(
-            message.content,
-            MessageContent::Video(_) | MessageContent::Animation(_)
-        );
-        let caption_width = if !measured {
-            0
-        } else {
-            super::history::bubble_width::caption_width(
-                cx,
-                &message.content,
-                self.bubble_look(cx).font,
-                Some(
-                    super::message_text::FooterMeta::of(
-                        message,
-                        quill::state::OutboxReceipt::None,
-                        message
-                            .interaction_info
-                            .as_ref()
-                            .map(|info| info.view_count)
-                            .filter(|&count| count > 0),
-                        None,
-                    )
-                    .reserve(super::synthetic::footer_reserve(message.is_outgoing)),
-                ),
-            )
-        };
-        let (file_id, tile, duration) = match &message.content {
+        let key = (message.chat_id.0, message.id.0);
+        let demand = self.playback.inline_videos.demand(key);
+        let autoplay_videos = prefs.autoplay_videos && !prefs.data_saver;
+        let autoplay_gifs = prefs.autoplay_gifs && !prefs.data_saver;
+        let caption_width = self.inline_caption_width(message, cx);
+        // `viewed`: a round video, whether it was watched.
+        let (file_id, tile, duration, autoplay, viewed) = match &message.content {
             MessageContent::Video(video)
-                if prefs.autoplay_videos && !video.is_secret && !video.has_spoiler =>
+                if autoplay_videos && !video.is_secret && !video.has_spoiler =>
             {
                 (
                     video.play_file_id()?,
@@ -231,20 +242,29 @@ impl QuillApp {
                         caption_width,
                     ),
                     video.duration,
+                    true,
+                    None,
                 )
             }
-            // The player takes Telegram's MP4 GIFs; true `image/gif`
-            // files keep the frame-extraction path.
-            MessageContent::VideoNote(note) if prefs.autoplay_videos && !note.is_secret => (
-                note.play_file_id()?,
-                InlineTile::round(note.length),
-                note.duration,
-            ),
+            MessageContent::VideoNote(note)
+                if !note.is_secret && (autoplay_videos || demand.is_some()) =>
+            {
+                (
+                    note.play_file_id()?,
+                    InlineTile::round(note.length),
+                    note.duration,
+                    autoplay_videos,
+                    Some(note.is_viewed),
+                )
+            }
+            // The player takes Telegram's MP4 GIFs (true `image/gif` files
+            // loop in `inline_playback`, unless their bytes turned out to
+            // be a video, which asks for them here on demand).
             MessageContent::Animation(animation)
-                if prefs.autoplay_gifs
-                    && !animation.is_secret
+                if !animation.is_secret
                     && !animation.has_spoiler
-                    && animation.mime_type != "image/gif" =>
+                    && (demand.is_some()
+                        || (autoplay_gifs && animation.mime_type != "image/gif")) =>
             {
                 (
                     animation.play_file_id()?,
@@ -255,6 +275,8 @@ impl QuillApp {
                         caption_width,
                     ),
                     animation.duration,
+                    autoplay_gifs && animation.mime_type != "image/gif",
+                    None,
                 )
             }
             _ => return None,
@@ -267,8 +289,13 @@ impl QuillApp {
         if file.usable_path().is_none() {
             // Like Telegram Desktop, fetch a clip that should autoplay
             // (within a size cap) in the background; it starts once local.
+            // A clip asked for by a click was asked to download then.
             let size = file.size.max(file.expected_size);
-            if size > 0 && size <= AUTOPLAY_PREFETCH_MAX && session.should_download(file_id) {
+            if autoplay
+                && size > 0
+                && size <= AUTOPLAY_PREFETCH_MAX
+                && session.should_download(file_id)
+            {
                 let app = cx.weak_entity();
                 cx.defer(move |cx| {
                     let _ = app.update(cx, |this, _| {
@@ -282,13 +309,41 @@ impl QuillApp {
         }
         let (chat_id, message_id) = (message.chat_id, message.id);
         let duration = (duration > 0).then_some(f64::from(duration));
-        let frame = self.playback.inline_videos.frame(
-            (chat_id.0, message_id.0),
+        let videos = &self.playback.inline_videos;
+        let mut frame = videos.frame(
+            key,
             tile,
             duration,
             || self.playable_clip_path(chat_id, message_id, file_id),
             cx,
         );
+        if demand == Some(Demand::Sound) && frame.is_some() {
+            if videos.start_demand(key) {
+                // Clicked: once from the start with sound, as a click on a
+                // muted loop does.
+                if videos.toggle_sound(key.0, key.1) {
+                    let app = cx.weak_entity();
+                    let viewed = viewed.unwrap_or(true);
+                    cx.defer(move |cx| {
+                        let _ = app.update(cx, |this, cx| {
+                            this.round_sound_started(key, cx);
+                            if !viewed {
+                                this.mark_voice_opened(chat_id, message_id);
+                            }
+                            cx.notify();
+                        });
+                    });
+                }
+                frame = videos.current(key);
+            } else if frame.as_ref().is_some_and(|frame| !frame.sound) {
+                // Played to its end: done; with autoplay off it rests on
+                // its still again.
+                videos.end_demand(key);
+                if !autoplay {
+                    return None;
+                }
+            }
+        }
         // A muted loop in the conversation is drawn by its animation layer
         // while the history replays: its `video_frame` asks the layer for
         // frames. A clip with sound or a seek ring stays with the history,
@@ -312,7 +367,7 @@ impl QuillApp {
         let backdrop = self.wallpaper_backdrop(cx);
         let live = layered.then(|| LiveSource {
             videos: self.playback.inline_videos.clone(),
-            key: (chat_id.0, message_id.0),
+            key,
             backdrop,
         });
         frame.map(|frame| InlineFrame {
@@ -320,6 +375,69 @@ impl QuillApp {
             live,
             ..frame
         })
+    }
+
+    /// Play `message_id`'s clip on the inline player on demand (a click
+    /// with autoplay off or data saver on, or on a clip not downloaded
+    /// yet): downloaded first if need be, it starts once its row renders
+    /// it local. Without an in-process player the viewer opens instead,
+    /// and says why it can't play.
+    pub(super) fn play_inline_on_demand(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        file_id: FileId,
+        demand: Demand,
+        cx: &mut Context<Self>,
+    ) {
+        if !super::video_player::supported() {
+            self.open_media_viewer(chat_id, message_id, cx);
+            return;
+        }
+        self.playback
+            .inline_videos
+            .request((chat_id.0, message_id.0), demand);
+        let local = self.session().is_some_and(|session| {
+            session
+                .media
+                .files
+                .get(&file_id.0)
+                .and_then(|file| file.usable_path())
+                .is_some()
+        });
+        if !local {
+            self.request_media_download(file_id, None, cx);
+        }
+        self.notify_conversation(cx);
+        cx.notify();
+    }
+
+    /// A click (or Space) on a round video message: a playing one plays
+    /// once with sound, pauses or resumes ([`InlineVideos::toggle_sound`]);
+    /// one not playing inline yet plays with sound on demand.
+    pub(super) fn play_video_note(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        note: &quill::telegram::envelope::VideoNoteContent,
+        cx: &mut Context<Self>,
+    ) {
+        if note.is_secret {
+            return;
+        }
+        let key = (chat_id.0, message_id.0);
+        if self.playback.inline_videos.toggle_sound(key.0, key.1) {
+            self.round_sound_started(key, cx);
+            if !note.is_viewed {
+                self.mark_voice_opened(chat_id, message_id);
+            }
+            cx.notify();
+            return;
+        }
+        let Some(play_id) = note.play_file_id() else {
+            return;
+        };
+        self.play_inline_on_demand(chat_id, message_id, play_id, Demand::Sound, cx);
     }
 }
 

@@ -532,17 +532,13 @@ mod tests {
         assert_eq!(gif.play_file_id, Some(FileId(10)));
         assert_eq!(gif.display_file_ids, vec![FileId(11)]);
         assert_eq!(gif.natural_size, Some((320, 240)));
-        // An animation starts like a video: download, extract, or play.
+        // An animation starts like a video: download, or play.
         assert_eq!(
-            decide_viewer_video_start(gif, false, false),
+            decide_viewer_video_start(gif, false),
             ViewerVideoStart::ParkDownload
         );
         assert_eq!(
-            decide_viewer_video_start(gif, true, false),
-            ViewerVideoStart::ExtractFrames
-        );
-        assert_eq!(
-            decide_viewer_video_start(gif, true, true),
+            decide_viewer_video_start(gif, true),
             ViewerVideoStart::PlayNow
         );
     }

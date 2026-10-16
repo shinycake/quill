@@ -527,8 +527,6 @@ pub(super) fn album_tile(
         MessageContent::Video(video) => {
             let play_id = video.play_file_id().unwrap_or(FileId(0));
             let thumb_id = video.thumb_file_id().unwrap_or(FileId(0));
-            let mime = video.mime_type.clone();
-            let start_timestamp = video.start_timestamp;
             let message_id = message.id;
             let visual = [thumb_id, play_id].into_iter().find_map(|id| {
                 if id.0 == 0 {
@@ -602,14 +600,7 @@ pub(super) fn album_tile(
                         // tile's own click also opens the viewer.
                         .swallow_press()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_video_playback(
-                                message_id,
-                                play_id,
-                                mime.clone(),
-                                start_timestamp,
-                                None,
-                                cx,
-                            );
+                            this.open_media_viewer_at(chat_id, message_id, item_offset, cx);
                         })),
                 )
                 .into_any_element()

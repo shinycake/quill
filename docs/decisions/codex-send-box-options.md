@@ -75,14 +75,16 @@ Parity items `parity:composer-send-options` and (with Edit Video)
   `transpose`, `crop`) ahead of the scale. The crop is two range sliders with
   a frame drawn over the picture, where tdesktop drags handles. Rotate
   clears the crop. Playback uses `NativeVideo`; its picture is turned for
-  Rotate, a flip shows in the still picture only.
+  Rotate, a flip shows in the still picture only. *Since the video player
+  (`video-player-legacy.md`): playback is a `VideoPlayer`, which turns
+  and mirrors its picture (`set_orientation`), so the flip shows in
+  playback too.*
 
 ## Differences from tdesktop
 
 - The crop is set with sliders, not by dragging handles on the picture.
-- `NativeVideo` can only turn the picture, not mirror it, so playback does
-  not show a flip (the still picture does), and the estimated file size tdesktop shows
-  is not shown.
+- The estimated file size tdesktop shows is not shown. (`NativeVideo`
+  could not mirror, so playback did not show a flip; `VideoPlayer` does.)
 - Clearing "Edit Cover" does not open tdesktop's photo editor on the cover
   image.
 

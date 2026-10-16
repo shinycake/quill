@@ -3,10 +3,9 @@
 
 use super::attachments;
 use crate::ui::app::QuillApp;
-use crate::ui::demo::demo_media_allowlist;
+use crate::ui::demos::video_fixtures::{apply_ready_video_note_send, apply_ready_video_send};
 use crate::ui::drafts::apply_ready_drafts;
 use crate::ui::history::apply_ready_albums;
-use crate::ui::inline_playback::{apply_ready_video_note_send, apply_ready_video_send};
 use crate::ui::message_text::{apply_ready_link_preview, apply_ready_text_entities};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::*;
@@ -209,17 +208,11 @@ impl QuillApp {
         }
     }
 
-    fn demo_ready_video_note_send(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_ready_video_note_send(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_note_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.playback.playing_video = Some(MessageId(721));
-        self.playback.video_frames = vec![
-            demo_media_allowlist().join("demo-gif-1.png"),
-            demo_media_allowlist().join("demo-gif-2.png"),
-        ];
-        self.spawn_video_tick(cx);
         self.connection.status_note = "screenshot demo — video note attach · own round note".into();
     }
 
@@ -231,12 +224,6 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.playback.playing_video = Some(MessageId(701));
-        self.playback.video_frames = vec![
-            demo_media_allowlist().join("demo-gif-1.png"),
-            demo_media_allowlist().join("demo-gif-2.png"),
-        ];
-        self.spawn_video_tick(cx);
         self.connection.status_note = "screenshot demo — attach video · own clip playing".into();
     }
 

@@ -1,179 +1,22 @@
-//! inline animation/voice playback ticks.
+//! The history's looping GIF (a true `image/gif` file, decoded in process by
+//! `gif_clip`) and the voice recording tick. Video, round video and MP4 GIFs
+//! play on the shared player (`video_player`, `inline_video`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
+use super::gif_clip::{GifClip, GifError};
+use super::inline_players::Demand;
+use super::inline_video::InlineTile;
+use super::message_media::MediaFrameKind;
 use gpui_kit::*;
-use quill::diagnostics::{DiagnosticSink, MemorySink};
-use quill::ids::{ChatId, FileId, MessageId};
+use quill::ids::{FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
-use quill::locks::LockExt;
-use quill::state::{RequestPurpose, Session};
-use quill::telegram::client::copy_and_parse;
+use quill::telegram::envelope::MessageContent;
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
-pub(super) fn apply_ready_gifs(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let frame = demo_media_allowlist()
-        .join("demo-gif-1.png")
-        .to_string_lossy()
-        .into_owned();
-    let clip = demo_media_allowlist()
-        .join("demo-gif.gif")
-        .to_string_lossy()
-        .into_owned();
-    let thumb = demo_file_json(61, &frame, true);
-    let pending = demo_file_json(62, "", false);
-    let local_clip = demo_file_json(63, &clip, true);
-    let history = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":501,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":1,"width":240,"height":140,"file_name":"demo-gif.gif","mime_type":"image/gif","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"animation":{local_clip}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
-    );
-    let waiting = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":502,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageAnimation","animation":{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"saved.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{pending}}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
-    );
-    for json in [history, waiting] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-    session.stickers.gifs.open = true;
-    session.stickers.gifs.loading = true;
-    let extra = session.request(RequestPurpose::GetSavedAnimations, None);
-    let saved = format!(
-        r#"{{"@type":"animations","@extra":"{}","animations":[{{"@type":"animation","duration":1,"width":240,"height":140,"file_name":"demo-gif.gif","mime_type":"image/gif","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"animation":{local_clip}}},{{"@type":"animation","duration":2,"width":240,"height":140,"file_name":"saved.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{pending}}}]}}"#,
-        extra.0
-    );
-    if let Some(owned) = copy_and_parse(&saved, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-}
-
-pub(super) fn apply_ready_video(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let thumb_path = demo_thumb_png_path();
-    let clip_path = demo_media_allowlist()
-        .join("demo-gif.gif")
-        .to_string_lossy()
-        .into_owned();
-    let thumb = demo_file_json(71, &thumb_path, true);
-    let clip = demo_file_json(72, &clip_path, true);
-    let pending = demo_file_json(73, "", false);
-    let playing = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":601,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":640,"height":360,"file_name":"clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Beach clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
-    );
-    let waiting = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":602,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":3,"width":320,"height":180,"file_name":"pending.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":false,"minithumbnail":null,"thumbnail":null,"video":{pending}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
-    );
-    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
-    for json in [playing, waiting, drop_seed.to_string()] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-/// Demo fixture (Parity slice 5): inject a downloaded video message into
-/// chat 11 of a Media-seeded demo session. The thumbnail (file 97) and the
-/// full clip (file 96, `demo-clip.mp4`) are both local/completed so the
-/// viewer opens straight onto playback. The 12 s duration is fixture data
-/// for the screenshot — the real fixture clip is 1 s.
-pub(super) fn apply_ready_video_viewer(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let clip_path = demo_media_allowlist()
-        .join("demo-clip-12s.mp4")
-        .to_string_lossy()
-        .into_owned();
-    let thumb_path = demo_thumb_png_path();
-    let clip = demo_file_json(96, &clip_path, true);
-    let thumb = demo_file_json(97, &thumb_path, true);
-    let json = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":204,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":320,"height":180,"file_name":"demo-clip-12s.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Demo clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
-    );
-    if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-        session.apply(owned);
-    }
-}
-
-pub(super) fn apply_ready_video_note(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let thumb_path = demo_thumb_png_path();
-    let clip_path = demo_media_allowlist()
-        .join("demo-clip.mp4")
-        .to_string_lossy()
-        .into_owned();
-    let thumb = demo_file_json(91, &thumb_path, true);
-    let clip = demo_file_json(92, &clip_path, true);
-    let pending = demo_file_json(93, "", false);
-    let playing = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":611,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":8,"waveform":"","length":240,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":120,"height":120,"file":{thumb}}},"speech_recognition_result":null,"video":{clip}}},"is_viewed":false,"is_secret":false}}}}}}"#
-    );
-    let waiting = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":612,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":3,"waveform":"","length":240,"minithumbnail":null,"thumbnail":null,"speech_recognition_result":null,"video":{pending}}},"is_viewed":true,"is_secret":false}}}}}}"#
-    );
-    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
-    for json in [playing, waiting, drop_seed.to_string()] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-pub(super) fn apply_ready_video_note_send(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let clip_path = demo_media_allowlist()
-        .join("demo-video-note.mp4")
-        .to_string_lossy()
-        .into_owned();
-    let thumb_path = demo_thumb_png_path();
-    let clip = demo_file_json(94, &clip_path, true);
-    let thumb = demo_file_json(95, &thumb_path, true);
-    let sent = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":721,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideoNote","video_note":{{"@type":"videoNote","duration":1,"waveform":"","length":240,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":240,"file":{thumb}}},"speech_recognition_result":null,"video":{clip}}},"is_viewed":true,"is_secret":false}}}}}}"#
-    );
-    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
-    for json in [sent, drop_seed.to_string()] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
-
-pub(super) fn apply_ready_video_send(
-    session: &mut Session,
-    sink: &Arc<MemorySink>,
-    seq: &AtomicU64,
-) {
-    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let clip_path = demo_media_allowlist()
-        .join("demo-clip.mp4")
-        .to_string_lossy()
-        .into_owned();
-    let thumb_path = demo_thumb_png_path();
-    let clip = demo_file_json(81, &clip_path, true);
-    let thumb = demo_file_json(82, &thumb_path, true);
-    let sent = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":701,"chat_id":11,"is_outgoing":true,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":1,"width":320,"height":180,"file_name":"demo-clip.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Sent clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
-    );
-    let drop_seed = r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[101,102,103],"is_permanent":true,"from_cache":false}"#;
-    for json in [sent, drop_seed.to_string()] {
-        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
-            session.apply(owned);
-        }
-    }
-}
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 impl QuillApp {
     pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -181,7 +24,6 @@ impl QuillApp {
             || self.playback.pending_gif_play.is_some()
             || self.playback.playing_voice.is_some()
             || self.playback.playing_audio.is_some()
-            || self.playback.playing_video.is_some()
             || self.recording_active()
             || self.viewer.state.is_open()
             || self.stories.viewer.is_open()
@@ -201,15 +43,15 @@ impl QuillApp {
         {
             return;
         }
-        let quill::telegram::envelope::MessageContent::Animation(animation) = &row.message.content
-        else {
+        let MessageContent::Animation(animation) = &row.message.content else {
             return;
         };
         if animation.is_secret || animation.has_spoiler {
             return;
         }
-        // MP4 GIFs autoplay on the native inline player (`inline_video`).
-        if super::native_video::supported() && animation.mime_type != "image/gif" {
+        // MP4 GIFs autoplay on the shared player (`inline_video`); only
+        // true `.gif` files are decoded here.
+        if animation.mime_type != "image/gif" {
             return;
         }
         let Some(file_id) = animation.play_file_id().filter(|id| {
@@ -223,87 +65,25 @@ impl QuillApp {
             return;
         };
         let (id, mime) = (row.message.id, animation.mime_type.clone());
-        // ponytail: the existing player supports one visible GIF at a time; concurrent clips need independent playback slots.
+        // One GIF plays at a time; the others wait for it to stop.
         self.playback.autoplayed_gifs.insert(id);
         self.toggle_animation_playback(id, file_id, mime, cx);
     }
 
     pub(super) fn stop_animation_playback(&mut self) {
-        if let Some(cancel) = self.playback.animation_extract_cancel.take() {
-            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        if let Some(slot) = self.playback.animation_extract_child.take() {
-            let child = slot.lock_or_recover().take();
-            if let Some(mut child) = child {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-        self.playback.animation_extract_epoch =
-            self.playback.animation_extract_epoch.wrapping_add(1);
-        if let Some(file_id) = self.playback.animation_cache_file.take() {
-            quill::animation::discard_frame_cache(file_id);
+        // A decode still running stops before its next frame.
+        for cancel in self.playback.gif_decodes.values() {
+            cancel.store(true, Ordering::Relaxed);
         }
         self.playback.playing_animation = None;
-        super::image_budget::retire_all(self.playback.animation_frames.drain(..));
-        self.playback.animation_frame = 0;
-        self.playback.animation_started_at = None;
-        self.playback.animation_tick = false;
+        // The clip hands its pictures to the atlas sweeper when it drops.
+        self.playback.gif = None;
+        self.playback.gif_started_at = None;
         self.playback.pending_gif_play = None;
     }
 
-    pub(super) fn spawn_animation_tick(&mut self, cx: &mut Context<Self>) {
-        if self.playback.animation_tick {
-            return;
-        }
-        self.playback.animation_tick = true;
-        let epoch = self.playback.animation_extract_epoch;
-        self.playback.animation_started_at = Some(std::time::Instant::now());
-        cx.spawn(async move |this, cx| {
-            loop {
-                let delay = this
-                    .update(cx, |this, _| {
-                        Duration::from_secs_f64(1.0 / this.playback.animation_fps.max(0.01))
-                    })
-                    .unwrap_or(Duration::from_millis(125));
-                cx.background_executor().timer(delay).await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        if this.playback.animation_extract_epoch != epoch {
-                            return false;
-                        }
-                        let playing = this.playback.playing_animation.is_some()
-                            && this.playback.animation_frames.len() > 1;
-                        // Muted GIFs hold still behind another app, like
-                        // tdesktop; activation redraws.
-                        if playing && this.frame.window_active.get() {
-                            let elapsed = this
-                                .playback
-                                .animation_started_at
-                                .map(|t| t.elapsed().as_secs_f64())
-                                .unwrap_or(0.0);
-                            this.playback.animation_frame = (elapsed * this.playback.animation_fps)
-                                as usize
-                                % this.playback.animation_frames.len();
-                            // Only the history shows the GIF.
-                            this.notify_conversation(cx);
-                        }
-                        this.playback.playing_animation.is_some()
-                    })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
-            }
-            let _ = this.update(cx, |this, _| {
-                if this.playback.animation_extract_epoch == epoch {
-                    this.playback.animation_tick = false;
-                }
-            });
-        })
-        .detach();
-    }
-
+    /// The GIF's play disc: an `image/gif` file loops here, decoded in
+    /// process; an MP4 GIF plays on demand on the inline player.
     pub(super) fn toggle_animation_playback(
         &mut self,
         message_id: MessageId,
@@ -318,6 +98,34 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        if mime != "image/gif" {
+            self.play_open_chat_clip(message_id, file_id, Demand::Loop, cx);
+            return;
+        }
+        self.play_gif_file(message_id, file_id, mime, cx);
+    }
+
+    /// A clip of the open chat on demand on the inline player.
+    fn play_open_chat_clip(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        demand: Demand,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+            return;
+        };
+        self.play_inline_on_demand(chat_id, message_id, file_id, demand, cx);
+    }
+
+    fn play_gif_file(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        mime: String,
+        cx: &mut Context<Self>,
+    ) {
         let path = self.session().and_then(|session| {
             session
                 .media
@@ -341,183 +149,101 @@ impl QuillApp {
         self.stop_animation_playback();
         self.stop_voice_playback();
         self.stop_audio_playback();
-        self.stop_video_playback();
         self.stop_viewer_video();
-        let epoch = self.playback.animation_extract_epoch;
-        let cache = quill::animation::gif_frame_cache_dir(file_id.0).join(epoch.to_string());
-        self.playback.animation_cache_file = Some(file_id.0);
         self.playback.playing_animation = Some(message_id);
         self.connection.status_note = "Loading GIF playback…".into();
-        let slot = Arc::new(std::sync::Mutex::new(None));
-        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.playback.animation_extract_child = Some(slot.clone());
-        self.playback.animation_extract_cancel = Some(cancel.clone());
-        let cache_for_task = cache.clone();
-        cx.spawn(async move |this, cx| {
-            let extracted = cx.background_executor().spawn(async move {
-                let result = quill::animation::full_playback_frames_cancelable(&safe, &mime, &cache_for_task, &slot, &cancel).and_then(|frames| {
-                    let decoded = Self::decode_viewer_frames(&frames.frames)?;
-                    Ok((decoded, frames.fps))
-                });
-                if result.is_err() { let _ = std::fs::remove_dir_all(&cache_for_task); }
-                result
-            }).await;
-            let applied = this.update(cx, |this, cx| {
-                if this.playback.animation_extract_epoch != epoch || this.playback.playing_animation != Some(message_id) { return false; }
-                this.playback.animation_extract_child = None;
-                this.playback.animation_extract_cancel = None;
-                match extracted {
-                    Ok((frames, fps)) => {
-                        this.playback.animation_frames = frames;
-                        this.playback.animation_fps = fps;
-                        this.playback.animation_frame = 0;
-                        this.spawn_animation_tick(cx);
-                        this.connection.status_note = "Playing GIF".into();
-                    }
-                    Err(_) => {
-                        this.stop_animation_playback();
-                        this.connection.status_note = "Could not play GIF. Check that ffmpeg and ffprobe are installed, then retry.".into();
-                    }
-                }
-                cx.notify();
-                true
-            }).unwrap_or(false);
-            if !applied { let _ = std::fs::remove_dir_all(&cache); }
-        }).detach();
+        self.spawn_gif_decode(message_id, file_id, safe, cx);
         cx.notify();
     }
 
-    pub(super) fn stop_video_playback(&mut self) {
-        if let Some(file_id) = self.playback.video_cache_file.take() {
-            quill::video::discard_frame_cache(file_id);
-        }
-        self.playback.playing_video = None;
-        self.playback.video_frames.clear();
-        self.playback.video_frame = 0;
-        self.playback.pending_video_play = None;
-    }
-
-    pub(super) fn spawn_video_tick(&mut self, cx: &mut Context<Self>) {
-        if self.playback.video_tick {
+    /// Decode the GIF off the UI thread. One decode per GIF: one still
+    /// running (stopped, then started again before it saw the stop) is
+    /// taken back instead of starting a second.
+    fn spawn_gif_decode(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(cancel) = self.playback.gif_decodes.get(&message_id) {
+            cancel.store(false, Ordering::Relaxed);
             return;
         }
-        self.playback.video_tick = true;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.playback.gif_decodes.insert(message_id, cancel.clone());
+        let max_edge = self.gif_decode_edge(message_id, cx);
         cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(400))
-                    .await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        let playing = this.playback.playing_video.is_some()
-                            && this.playback.video_frames.len() > 1;
-                        if playing && this.frame.window_active.get() {
-                            this.playback.video_frame =
-                                (this.playback.video_frame + 1) % this.playback.video_frames.len();
-                            // Only the history shows the clip.
-                            this.notify_conversation(cx);
-                        }
-                        this.playback.playing_video.is_some()
-                    })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
-            }
-            let _ = this.update(cx, |this, _| {
-                this.playback.video_tick = false;
+            let decoded = cx
+                .background_executor()
+                .spawn(async move { GifClip::decode(&path, max_edge, &cancel) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.gif_decoded(message_id, file_id, decoded, cx);
             });
         })
         .detach();
     }
 
-    pub(super) fn toggle_video_playback(
+    /// The longer side to decode the GIF at: its tile in device pixels
+    /// (`InlineTile::decode_edge`, capped at `INLINE_MAX_EDGE`).
+    fn gif_decode_edge(&self, message_id: MessageId, cx: &mut Context<Self>) -> u32 {
+        let scale = self.playback.inline_videos.scale();
+        let message = self.session().and_then(|session| {
+            let chat = session.open_chat?;
+            session.histories.get(&chat.0)?.messages.get(&message_id.0)
+        });
+        let (width, height, caption) = match message {
+            Some(message) => match &message.content {
+                MessageContent::Animation(animation) => (
+                    animation.width,
+                    animation.height,
+                    self.inline_caption_width(message, cx),
+                ),
+                _ => (0, 0, 0),
+            },
+            None => (0, 0, 0),
+        };
+        InlineTile::media(MediaFrameKind::Gif, width, height, caption).decode_edge(scale)
+    }
+
+    fn gif_decoded(
         &mut self,
         message_id: MessageId,
         file_id: FileId,
-        mime: String,
-        start_timestamp: i32,
-        mark_opened: Option<ChatId>,
+        decoded: Result<GifClip, GifError>,
         cx: &mut Context<Self>,
     ) {
-        if self.playback.playing_video == Some(message_id) {
-            self.stop_video_playback();
-            self.connection.status_note = "video paused".into();
-            cx.notify();
+        self.playback.gif_decodes.remove(&message_id);
+        if self.playback.playing_animation != Some(message_id) || self.playback.gif.is_some() {
+            // Stopped or replaced meanwhile: the pictures were never shown.
             return;
         }
-        let path = self.session().and_then(|session| {
-            session
-                .media
-                .files
-                .get(&file_id.0)
-                .and_then(|file| file.usable_path())
-                .map(str::to_string)
-        });
-        let Some(path) = path else {
-            self.playback.pending_video_play =
-                Some((message_id, file_id, mime, start_timestamp, mark_opened));
-            self.request_media_download(file_id, None, cx);
-            return;
-        };
-        self.playback.pending_video_play = None;
-        let roots = self.media_display_roots();
-        let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection.status_note = "video file is outside the account files".into();
-            cx.notify();
-            return;
-        };
-        let cache = quill::video::video_frame_cache_dir(file_id.0);
-        match quill::video::playback_frames(&safe, &mime, &cache, start_timestamp) {
-            Ok(frames) if !frames.is_empty() => {
-                self.stop_voice_playback();
-                self.stop_audio_playback();
+        match decoded {
+            Ok(clip) => {
+                self.playback.gif = Some(Rc::new(clip));
+                self.playback.gif_started_at = Some(Instant::now());
+                self.connection.status_note = "Playing GIF".into();
+            }
+            // Started again after this decode saw the stop: decode anew.
+            Err(GifError::Cancelled) => {
+                self.playback.playing_animation = None;
+                self.play_gif_file(message_id, file_id, "image/gif".into(), cx);
+                return;
+            }
+            // Labelled `image/gif`, but a video: the inline player takes it.
+            Err(GifError::NotGif) => {
                 self.stop_animation_playback();
-                self.stop_viewer_video();
-                self.sound_starts(cx);
-                self.playback.pending_video_play = None;
-                if self
-                    .playback
-                    .video_cache_file
-                    .is_some_and(|id| id != file_id.0)
-                    && let Some(old) = self.playback.video_cache_file.take()
-                {
-                    quill::video::discard_frame_cache(old);
-                }
-                self.playback.video_cache_file = Some(file_id.0);
-                self.playback.playing_video = Some(message_id);
-                self.playback.video_frames = frames;
-                self.playback.video_frame = 0;
-                self.spawn_video_tick(cx);
-                if let Some(chat_id) = mark_opened {
-                    self.mark_voice_opened(chat_id, message_id);
-                }
-                self.connection.status_note = "playing video".into();
+                self.play_open_chat_clip(message_id, file_id, Demand::Loop, cx);
+                return;
             }
-            _ => {
-                self.connection.status_note = "could not play video".into();
+            Err(_) => {
+                self.stop_animation_playback();
+                self.connection.status_note = "Could not play GIF.".into();
             }
         }
+        self.notify_conversation(cx);
         cx.notify();
-    }
-
-    pub(super) fn resume_pending_video(&mut self, cx: &mut Context<Self>) {
-        let Some((message_id, file_id, mime, start_timestamp, mark_opened)) =
-            self.playback.pending_video_play.clone()
-        else {
-            return;
-        };
-        let ready = self.session().is_some_and(|session| {
-            session
-                .media
-                .files
-                .get(&file_id.0)
-                .and_then(|file| file.usable_path())
-                .is_some()
-        });
-        if ready {
-            self.toggle_video_playback(message_id, file_id, mime, start_timestamp, mark_opened, cx);
-        }
     }
 
     pub(super) fn resume_pending_gif(&mut self, cx: &mut Context<Self>) {

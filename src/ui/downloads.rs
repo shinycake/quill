@@ -45,9 +45,6 @@ impl QuillApp {
             .pending_gif_play
             .take_if(|(_, id, _)| *id == file_id);
         self.playback
-            .pending_video_play
-            .take_if(|(_, id, ..)| *id == file_id);
-        self.playback
             .pending_audio_play
             .take_if(|(_, _, id, _)| *id == file_id);
         self.playback
@@ -62,10 +59,6 @@ impl QuillApp {
                 .pending_gif_play
                 .as_ref()
                 .map(|(_, id, _)| *id),
-            self.playback
-                .pending_video_play
-                .as_ref()
-                .map(|(_, id, ..)| *id),
             self.playback
                 .pending_audio_play
                 .as_ref()

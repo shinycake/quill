@@ -149,11 +149,11 @@ pub struct MediaViewerItem {
     /// Video only: `video.duration` in whole seconds, driving the playback
     /// clock and the elapsed/total label. `None` for photos.
     pub duration_secs: Option<i32>,
-    /// Video only: `video.mime_type`, for frame-extraction validation.
-    /// `None` for photos.
+    /// Video and GIF: the file's MIME type, which tells an `image/gif`
+    /// file from an MP4 GIF (`viewer_is_gif_file`). `None` for photos.
     pub mime_type: Option<String>,
-    /// Video only: `messageVideo.start_timestamp` — seconds to seek before
-    /// extracting playback frames. `None` for photos.
+    /// Video only: `messageVideo.start_timestamp`, the second the sender
+    /// marked as the start (0 for GIFs). `None` for photos.
     pub start_timestamp: Option<i32>,
     pub caption: String,
     pub caption_entities: Vec<TextEntity>,

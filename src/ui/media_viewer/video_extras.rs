@@ -22,7 +22,7 @@ pub(super) fn share_position_secs(elapsed: f64) -> i32 {
 
 impl QuillApp {
     /// Rotate works on the player's pictures (turned in
-    /// `native_video_rotate`).
+    /// `video_player::rotate`).
     pub(in crate::ui) fn viewer_video_rotatable(&self) -> bool {
         self.viewer
             .state

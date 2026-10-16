@@ -272,25 +272,11 @@ impl QuillApp {
                             _ => None,
                         };
                         let animation_playing = self.playback.playing_animation == Some(message.id);
-                        let animation_frame = if animation_playing {
-                            self.playback
-                                .animation_frames
-                                .get(self.playback.animation_frame)
-                                .cloned()
-                                .or_else(|| self.playback.animation_frames.first().cloned())
-                        } else {
-                            None
-                        };
-                        let video_playing = self.playback.playing_video == Some(message.id);
-                        let video_frame = if video_playing {
-                            self.playback
-                                .video_frames
-                                .get(self.playback.video_frame)
-                                .cloned()
-                                .or_else(|| self.playback.video_frames.first().cloned())
-                        } else {
-                            None
-                        };
+                        // Drawn at its own cadence by the row (and its
+                        // animation layer) while the row renders.
+                        let animation = animation_playing
+                            .then(|| self.playback.gif_play())
+                            .flatten();
                         let row_day_label = day_label(message.date);
                         let row_unread_divider = first_unread(&message);
                         rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
@@ -316,9 +302,7 @@ impl QuillApp {
                             via_bot: session.and_then(|s| s.via_bot_label(&message)),
                             seek_bar,
                             animation_playing,
-                            animation_frame,
-                            video_playing,
-                            video_frame,
+                            animation,
                             is_secret,
                             vanishing: self.vanish_progress(message.id),
                             message,
@@ -345,9 +329,7 @@ impl QuillApp {
                     via_bot: None,
                     seek_bar: None,
                     animation_playing: false,
-                    animation_frame: None,
-                    video_playing: false,
-                    video_frame: None,
+                    animation: None,
                     is_secret: false,
                     vanishing: None,
                     message,

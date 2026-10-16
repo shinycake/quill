@@ -3,7 +3,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::demo::seed_ready_media_session;
-use crate::ui::inline_playback::apply_ready_video_viewer;
+use crate::ui::demos::video_fixtures::apply_ready_video_viewer;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};

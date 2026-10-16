@@ -5,7 +5,7 @@
 //! `StartPremiumPayment` (`purchase.rs`).
 
 use super::*;
-use crate::ui::native_video::{NativeVideo, Purpose};
+use crate::ui::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::assets::IconName;
 use quill::ids::FileId;
 use quill::lang::{keys, tr, tr_with};
@@ -477,48 +477,37 @@ impl QuillApp {
 }
 
 impl QuillApp {
-    /// The current frame of the preview clip, opening the muted looping
-    /// player once the clip is a local sandboxed file.
-    fn preview_picture(&self, file_id: i32) -> Option<crate::ui::native_video::VideoPicture> {
+    /// The muted looping player of the preview clip, opened once the clip
+    /// is a local sandboxed file; `None` while it is not, or if it failed.
+    fn preview_player(&self, file_id: i32, cx: &mut Context<Self>) -> Option<VideoPlayer> {
         if self.premium_preview.file_id.get() != Some(file_id) {
             self.premium_preview.stop();
         }
-        // A re-entrant borrow skips opening this frame (the slot below fails too).
-        if self
-            .premium_preview
-            .video
-            .try_borrow()
-            .is_ok_and(|video| video.is_none())
-        {
-            let roots = self.media_display_roots();
-            let path = self
-                .session()?
-                .media
-                .files
-                .get(&file_id)
-                .and_then(|file| file.usable_path())
-                .and_then(|path| sandboxed_display_path(path, &roots))?;
-            let mut video = NativeVideo::open(&path, Purpose::Inline { max_edge: 720 }).ok()?;
-            video.set_volume(0.0);
-            video.play();
-            let Ok(mut slot) = self.premium_preview.video.try_borrow_mut() else {
-                return None;
-            };
-            *slot = Some(video);
-            drop(slot);
-            self.premium_preview.file_id.set(Some(file_id));
-        }
-        // A re-entrant borrow skips this frame instead of aborting.
-        let mut slot = self.premium_preview.video.try_borrow_mut().ok()?;
-        let video = slot.as_mut()?;
-        if video.error().is_some() {
-            return None;
-        }
-        // Loop: `play` rewinds a clip that reached its end.
-        if !video.is_playing() {
-            video.play();
-        }
-        video.frame()
+        // A re-entrant borrow skips this frame (the slot below fails too).
+        let open = self.premium_preview.video.try_borrow().ok()?.clone();
+        let video = match open {
+            Some(video) => video,
+            None => {
+                let roots = self.media_display_roots();
+                let path = self
+                    .session()?
+                    .media
+                    .files
+                    .get(&file_id)
+                    .and_then(|file| file.usable_path())
+                    .and_then(|path| sandboxed_display_path(path, &roots))?;
+                let video =
+                    VideoPlayer::open(&path, Purpose::Inline { max_edge: 720 }, None, cx).ok()?;
+                video.set_volume(0.0);
+                video.set_looping(true);
+                video.play();
+                video.watch(cx.entity_id());
+                *self.premium_preview.video.try_borrow_mut().ok()? = Some(video.clone());
+                self.premium_preview.file_id.set(Some(file_id));
+                video
+            }
+        };
+        (video.state() != PlayState::Failed).then_some(video)
     }
 
     /// One feature with its promotion clip and paging to the others.
@@ -553,12 +542,14 @@ impl QuillApp {
         let picture = if feature.title == STICKERS_FEATURE {
             None
         } else {
-            clip.as_ref().and_then(|c| self.preview_picture(c.file_id))
+            clip.as_ref()
+                .and_then(|c| self.preview_player(c.file_id, cx))
         };
+        // Rounded as the clip over it is (`corner_radii` below).
         let stage = div()
             .w(side)
             .h(height)
-            .rounded_lg()
+            .rounded(px(12.))
             .overflow_hidden()
             .flex()
             .items_center()
@@ -569,10 +560,14 @@ impl QuillApp {
                 linear_color_stop(rgb(0xe46ace), 1.),
             ));
         let stage = match picture {
-            Some(picture) => {
-                self.request_animation_tick(30, cx);
-                stage.child(picture.element(side, height, ObjectFit::Cover, Corners::all(px(12.))))
-            }
+            Some(player) => stage.child(
+                div().w(side).h(height).child(
+                    video_frame(&player)
+                        .object_fit(ObjectFit::Cover)
+                        // The dialog shows behind the rounded corners.
+                        .corner_radii(Corners::all(px(12.)), cx.theme().background),
+                ),
+            ),
             None if feature.title == STICKERS_FEATURE && preview_stickers(hub).next().is_some() => {
                 let roots = self.media_display_roots();
                 let mut grid = div()

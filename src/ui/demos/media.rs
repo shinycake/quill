@@ -8,7 +8,7 @@ use crate::ui::demo::demo_media_allowlist;
 use crate::ui::demo::{
     seed_ready_custom_emoji_session, seed_ready_downloads_session, seed_ready_media_session,
 };
-use crate::ui::inline_playback::{
+use crate::ui::demos::video_fixtures::{
     apply_ready_gifs, apply_ready_video, apply_ready_video_note, apply_ready_video_viewer,
 };
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
@@ -118,8 +118,6 @@ impl QuillApp {
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         // Exercise failed playback recovery without a network request.
         self.playback.pending_gif_play = Some((MessageId(205), FileId(26), String::new()));
-        self.playback.pending_video_play =
-            Some((MessageId(205), FileId(26), String::new(), 0, None));
         self.playback.pending_audio_play = Some((ChatId(11), MessageId(205), FileId(26), 1.));
         self.viewer.pending_play = Some((MessageId(205), FileId(26)));
         self.playback.pending_voice_play =
@@ -127,7 +125,6 @@ impl QuillApp {
         self.discard_stopped_media_playback(cx);
         assert!(
             self.playback.pending_gif_play.is_none()
-                && self.playback.pending_video_play.is_none()
                 && self.playback.pending_audio_play.is_none()
                 && self.viewer.pending_play.is_none()
                 && self.playback.pending_voice_play.is_none()
@@ -179,31 +176,19 @@ impl QuillApp {
         }
     }
 
-    fn demo_ready_video(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_ready_video(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.playback.playing_video = Some(MessageId(601));
-        self.playback.video_frames = vec![
-            demo_media_allowlist().join("demo-gif-1.png"),
-            demo_media_allowlist().join("demo-gif-2.png"),
-        ];
-        self.spawn_video_tick(cx);
         self.connection.status_note = "screenshot demo — video · playing".into();
     }
 
-    fn demo_ready_video_note(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_ready_video_note(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_note(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.playback.playing_video = Some(MessageId(611));
-        self.playback.video_frames = vec![
-            demo_media_allowlist().join("demo-gif-1.png"),
-            demo_media_allowlist().join("demo-gif-2.png"),
-        ];
-        self.spawn_video_tick(cx);
         self.connection.status_note = "screenshot demo — video note · playing".into();
     }
 

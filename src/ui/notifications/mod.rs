@@ -696,7 +696,6 @@ impl QuillApp {
         self.redraw_polled(need, deliver, cx);
         self.discard_stopped_media_playback(cx);
         self.resume_pending_gif(cx);
-        self.resume_pending_video(cx);
         self.resume_pending_audio(cx);
         self.resume_pending_voice(cx);
         // Parity slice 5: a viewer video whose clip just finished downloading.

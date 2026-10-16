@@ -51,6 +51,14 @@ impl QuillApp {
             HistoryRow::Single(inputs) => {
                 let message = &inputs.message;
                 let inline = self.inline_frame(message, cx);
+                // A looping GIF outside an animation layer is redrawn with
+                // the history, at the GIF's own cadence.
+                if let Some(gif) = inputs.animation.as_ref()
+                    && super::anim_layer::current().is_none()
+                    && gif.fps() > 0
+                {
+                    self.request_animation_tick(gif.fps(), cx);
+                }
                 // A covered spoiler's dust shimmers (gently: 20 fps).
                 let spoiler = match &message.content {
                     MessageContent::Photo(photo) => photo.has_spoiler,
@@ -91,7 +99,7 @@ impl QuillApp {
                     inputs.via_bot.clone(),
                     inputs.seek_bar.clone(),
                     inputs.animation_playing,
-                    inputs.animation_frame.clone(),
+                    inputs.animation.clone(),
                     match &message.content {
                         MessageContent::Sticker(sticker) => {
                             self.history_sticker(sticker.file_id, sticker.format, cx)
@@ -125,8 +133,6 @@ impl QuillApp {
                         _ => Vec::new(),
                     },
                     self.message_custom_emoji_frames(message, cx),
-                    inputs.video_playing,
-                    inputs.video_frame.clone(),
                     inline,
                     &self.message_ui.spoiler_revealed,
                     inputs.is_secret,

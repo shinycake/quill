@@ -490,7 +490,6 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        self.stop_video_playback();
         let offset = self
             .playback
             .positions
@@ -566,7 +565,6 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        self.stop_video_playback();
         self.stop_animation_playback();
         let offset = self
             .playback

@@ -81,7 +81,7 @@ pub(super) fn open_pip_on(
     app.update_in(vcx_ref, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             app.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            crate::ui::inline_playback::apply_ready_video_viewer(
+            crate::ui::demos::video_fixtures::apply_ready_video_viewer(
                 session,
                 &app.demo_ui.sink,
                 &app.demo_ui.seq,

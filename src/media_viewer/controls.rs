@@ -5,40 +5,29 @@ use super::*;
 
 /// Parity slice 5: viewer video start decision (pure, testable).
 ///
-/// `clip_local` is whether the clip file (`play_file_id`) is downloaded;
-/// `frames_ready` is whether decoded frames for this file are already
-/// cached. The UI layer (`maybe_autoplay_viewer_video`,
+/// `clip_local` is whether the clip file (`play_file_id`) is downloaded.
+/// The UI layer (`maybe_autoplay_viewer_video`,
 /// `resume_pending_viewer_video`, `toggle_viewer_video`) routes through
-/// this so every start path agrees: a local clip without cached frames
-/// must go through extraction, never straight to playback with an empty
-/// frame cache.
+/// this so every start path agrees. The player opens the file itself, so a
+/// local clip plays at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewerVideoStart {
-    /// Clip local and frames cached: start playback immediately.
+    /// Clip local: start playback immediately.
     PlayNow,
-    /// Clip local but no cached frames: extract frames (async) first.
-    ExtractFrames,
     /// Clip not downloaded: park the request, download, resume later.
     ParkDownload,
     /// Not a video item, or no playable file: do nothing.
     Nothing,
 }
 
-pub fn decide_viewer_video_start(
-    item: &MediaViewerItem,
-    clip_local: bool,
-    frames_ready: bool,
-) -> ViewerVideoStart {
+pub fn decide_viewer_video_start(item: &MediaViewerItem, clip_local: bool) -> ViewerVideoStart {
     if !item.kind.is_playable() || item.play_file_id.is_none() {
         return ViewerVideoStart::Nothing;
     }
-    if !clip_local {
-        return ViewerVideoStart::ParkDownload;
-    }
-    if frames_ready {
+    if clip_local {
         ViewerVideoStart::PlayNow
     } else {
-        ViewerVideoStart::ExtractFrames
+        ViewerVideoStart::ParkDownload
     }
 }
 
@@ -198,22 +187,10 @@ mod tests {
     }
 
     #[test]
-    fn decide_start_downloaded_clip_without_frames_extracts() {
-        // Blocking-1 regression: a clip that just finished downloading has
-        // no cached frames yet — playback must go through extraction, never
-        // straight to play with an empty frame cache.
+    fn decide_start_local_clip_plays_now() {
         let item = video_item_with_clip();
         assert_eq!(
-            decide_viewer_video_start(&item, true, false),
-            ViewerVideoStart::ExtractFrames
-        );
-    }
-
-    #[test]
-    fn decide_start_cached_frames_play_now() {
-        let item = video_item_with_clip();
-        assert_eq!(
-            decide_viewer_video_start(&item, true, true),
+            decide_viewer_video_start(&item, true),
             ViewerVideoStart::PlayNow
         );
     }
@@ -222,12 +199,7 @@ mod tests {
     fn decide_start_undownloaded_clip_parks_for_download() {
         let item = video_item_with_clip();
         assert_eq!(
-            decide_viewer_video_start(&item, false, false),
-            ViewerVideoStart::ParkDownload
-        );
-        // Cached frames for another file don't help an undownloaded clip.
-        assert_eq!(
-            decide_viewer_video_start(&item, false, true),
+            decide_viewer_video_start(&item, false),
             ViewerVideoStart::ParkDownload
         );
     }
@@ -236,12 +208,12 @@ mod tests {
     fn decide_start_photo_or_missing_clip_does_nothing() {
         let photo = item(MediaViewerKind::Photo, 10);
         assert_eq!(
-            decide_viewer_video_start(&photo, true, false),
+            decide_viewer_video_start(&photo, true),
             ViewerVideoStart::Nothing
         );
         let no_clip = item(MediaViewerKind::Video, 21);
         assert_eq!(
-            decide_viewer_video_start(&no_clip, true, false),
+            decide_viewer_video_start(&no_clip, true),
             ViewerVideoStart::Nothing
         );
     }

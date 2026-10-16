@@ -217,7 +217,8 @@ animated `img`.
     viewer's fallback is replaced: there is no fallback, and a viewer
     without the shim shows an error.
   - `NativeVideo` and `ffmpeg_video.rs` remain for inline tiles, round
-    videos, GIFs and stories until PR 3 and PR 5.
+    videos, GIFs and stories until PR 3 and PR 5. (Both files were
+    deleted in PR 5, `video-player-legacy.md`.)
 - **`codex-viewer-video-extras.md`, "What changed":**
   - Rotate now applies to any playing viewer video through
     `VideoPlayer::set_orientation`. The player turns each new picture
@@ -288,7 +289,7 @@ animated `img`.
   this PR. The 4-picture video queue is in.
 - **`ViewerVideoStart::ExtractFrames` stays as a dead variant.** The viewer
   treats it like `PlayNow`. It goes with the rest of the legacy extraction
-  code in PR 5.
+  code in PR 5. (Removed in PR 5.)
 - **Muted loops decode no sound.** GIF-style loops in the viewer open the
   FFmpeg backend with `want_audio = false` (`Purpose::ViewerLoop`).
 - **Frame step has no key binding yet.** It is in the player

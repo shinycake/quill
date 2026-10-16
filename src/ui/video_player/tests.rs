@@ -324,6 +324,11 @@ fn the_trace_line_has_the_documented_columns() {
 #[cfg(feature = "demo-capture")]
 mod inline;
 
+/// With autoplay off: a clicked round video plays with sound (downloaded
+/// first), a clicked MP4 GIF loops on the inline player.
+#[cfg(feature = "demo-capture")]
+mod on_demand;
+
 /// Picture-in-Picture: handed over, paused, snapped, closed, handed back.
 #[cfg(feature = "demo-capture")]
 mod pip;
@@ -387,7 +392,7 @@ mod viewer {
         app.update_in(vcx, |app, _, cx| {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-                crate::ui::inline_playback::apply_ready_video_viewer(
+                crate::ui::demos::video_fixtures::apply_ready_video_viewer(
                     session,
                     &app.demo_ui.sink,
                     &app.demo_ui.seq,
@@ -606,7 +611,7 @@ mod viewer {
         app.update_in(vcx_ref, |app, window, cx| {
             if let Some(session) = app.demo_session.as_mut() {
                 app.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-                crate::ui::inline_playback::apply_ready_video_viewer(
+                crate::ui::demos::video_fixtures::apply_ready_video_viewer(
                     session,
                     &app.demo_ui.sink,
                     &app.demo_ui.seq,

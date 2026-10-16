@@ -9,10 +9,6 @@ use quill::ids::MessageId;
 use quill::playback::PlaybackClock;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Child;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 pub(crate) struct PlaybackUi {
@@ -46,33 +42,22 @@ pub(crate) struct PlaybackUi {
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<MessageId, f64>,
-    /// History row whose GIF is looping (tdesktop clip / Unigram player).
+    /// Animated stickers in the history and the panels.
     pub(super) sticker_playback: super::sticker_playback::StickerPlayback,
     /// Animated custom emoji (smaller frames, more clips).
     pub(super) emoji_playback: super::sticker_playback::StickerPlayback,
+    /// History row whose `image/gif` file is looping (`inline_playback`).
     pub(super) playing_animation: Option<MessageId>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
-    pub(super) animation_frames: Vec<Arc<RenderImage>>,
-    pub(super) animation_frame: usize,
-    pub(super) animation_tick: bool,
-    pub(super) animation_fps: f64,
-    pub(super) animation_started_at: Option<Instant>,
-    pub(super) animation_extract_child: Option<Arc<Mutex<Option<Child>>>>,
-    pub(super) animation_extract_cancel: Option<Arc<AtomicBool>>,
-    pub(super) animation_extract_epoch: u64,
-    /// File whose extracted frames should be deleted when playback stops.
-    pub(super) animation_cache_file: Option<i32>,
+    /// The playing GIF's held pictures (`gif_clip`), once decoded. Shared
+    /// with the history row (and its animation layer) that draws it.
+    pub(super) gif: Option<std::rc::Rc<super::gif_clip::GifClip>>,
+    pub(super) gif_started_at: Option<Instant>,
+    /// The GIF decodes running, by message, and their cancel flags (set
+    /// when playback stops; one decode per GIF at a time).
+    pub(super) gif_decodes: HashMap<MessageId, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Play was tapped before the clip was local. Resume when `downloadFile` finishes.
     pub(super) pending_gif_play: Option<(MessageId, FileId, String)>,
-    /// History row whose video preview is looping.
-    pub(super) playing_video: Option<MessageId>,
-    pub(super) video_frames: Vec<PathBuf>,
-    pub(super) video_frame: usize,
-    pub(super) video_tick: bool,
-    pub(super) video_cache_file: Option<i32>,
-    /// Play was tapped before the video was local. Resume when `downloadFile` finishes.
-    /// The last field is the chat to mark opened (`openMessageContent`) once playback starts.
-    pub(super) pending_video_play: Option<(MessageId, FileId, String, i32, Option<ChatId>)>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, polls waited).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,
@@ -93,6 +78,15 @@ pub(crate) struct PlaybackUi {
 }
 
 impl PlaybackUi {
+    /// The playing GIF, for its history row.
+    pub(super) fn gif_play(&self) -> Option<super::gif_clip::GifPlay> {
+        let clip = self.gif.clone()?;
+        Some(super::gif_clip::GifPlay::new(
+            clip,
+            self.gif_started_at.unwrap_or_else(Instant::now),
+        ))
+    }
+
     pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
         Self {
             player: Default::default(),
@@ -114,22 +108,10 @@ impl PlaybackUi {
             emoji_playback: Default::default(),
             playing_animation: None,
             autoplayed_gifs: Default::default(),
-            animation_frames: Vec::new(),
-            animation_frame: 0,
-            animation_tick: false,
-            animation_fps: 8.0,
-            animation_started_at: None,
-            animation_extract_child: None,
-            animation_extract_cancel: None,
-            animation_extract_epoch: 0,
-            animation_cache_file: None,
+            gif: None,
+            gif_started_at: None,
+            gif_decodes: HashMap::new(),
             pending_gif_play: None,
-            playing_video: None,
-            video_frames: Vec::new(),
-            video_frame: 0,
-            video_tick: false,
-            video_cache_file: None,
-            pending_video_play: None,
             pending_media_seek: None,
             inline_videos: Default::default(),
             speed: 1.0,
