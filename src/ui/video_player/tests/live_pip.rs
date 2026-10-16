@@ -26,10 +26,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
-const CALL: i32 = 4601;
+pub(super) const CALL: i32 = 4601;
 
 /// A joined RTMP stream on chat 11 whose feed has one picture.
-fn seed_stream(app: &mut QuillApp) {
+pub(super) fn seed_stream(app: &mut QuillApp) {
     if let Some(session) = app.demo_session.as_mut() {
         if let Some(chat) = session.chats.get_mut(&11) {
             chat.video_chat = Some(VideoChatInfo {
@@ -63,7 +63,7 @@ fn seed_stream(app: &mut QuillApp) {
 }
 
 /// The stream window over the seeded stream, drawn (its player made).
-fn open_stream(
+pub(super) fn open_stream(
     app: &Entity<QuillApp>,
     main: &mut VisualTestContext,
     cx: &mut TestAppContext,
@@ -82,12 +82,15 @@ fn open_stream(
     stream
 }
 
-fn stream_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<VideoPlayer> {
+pub(super) fn stream_player(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+) -> Option<VideoPlayer> {
     app.read_with(vcx, |app, _| app.group_call.stream.player.clone())
 }
 
 /// The live PiP's window, drawn.
-fn live_pip_window(
+pub(super) fn live_pip_window(
     app: &Entity<QuillApp>,
     main: &mut VisualTestContext,
     cx: &mut TestAppContext,
@@ -107,7 +110,7 @@ fn live_pip_window(
 }
 
 /// The stream window's PiP button.
-fn open_stream_pip(
+pub(super) fn open_stream_pip(
     app: &Entity<QuillApp>,
     stream: &mut VisualTestContext,
     main: &mut VisualTestContext,
@@ -119,7 +122,7 @@ fn open_stream_pip(
     live_pip_window(app, main, cx)
 }
 
-fn live_pip_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+pub(super) fn live_pip_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     app.read_with(vcx, |app, _| app.group_call.live_pip.is_some())
 }
 
@@ -343,7 +346,7 @@ fn one_sound_at_a_time_with_a_file_pip(cx: &mut TestAppContext) {
 }
 
 /// The live story demo, its viewer open on the story.
-fn open_live_story(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn open_live_story(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = Rc::new(RefCell::new(None));
