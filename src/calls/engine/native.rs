@@ -1,4 +1,4 @@
-//! Native helpers for the ntgcalls adapter: FFI trampolines, frame conversion, C strings.
+//! Native helpers for the ntgcalls adapter: FFI trampolines, frame routing, C strings.
 use super::*;
 use crate::locks::LockExt;
 use ntgcalls_sys::{
@@ -147,7 +147,7 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             .lock_or_recover()
             .get(&user_id)
             .copied();
-        let route = if let Some(group_call_id) = group_call {
+        let key = if let Some(group_call_id) = group_call {
             // Screen frames arrive as PLAYBACK+SCREEN; camera as
             // PLAYBACK+CAMERA. Slice calls-group-self-tile: the local
             // camera preview arrives as CAPTURE+CAMERA keyed by the chat id
@@ -168,19 +168,15 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
                     .copied()
             });
             match target {
-                Some(GroupVideoTarget::Local) => FrameRoute::Live(LiveKey::Local {
+                Some(GroupVideoTarget::Local) => LiveKey::Local {
                     call_id: group_call_id,
-                }),
-                Some(GroupVideoTarget::Participant { user_id, screen }) => {
-                    FrameRoute::Live(LiveKey::Video {
-                        call_id: group_call_id,
-                        user_id,
-                        screen,
-                    })
-                }
-                Some(GroupVideoTarget::Stream { chat_id }) => {
-                    FrameRoute::Live(LiveKey::Stream { chat_id })
-                }
+                },
+                Some(GroupVideoTarget::Participant { user_id, screen }) => LiveKey::Video {
+                    call_id: group_call_id,
+                    user_id,
+                    screen,
+                },
+                Some(GroupVideoTarget::Stream { chat_id }) => LiveKey::Stream { chat_id },
                 // Audio, the screen-share capture preview and unknown
                 // ssrcs have no tile: drop rather than misattribute.
                 None => return,
@@ -195,10 +191,11 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             let Some(call_id) = shared.user_to_call.lock_or_recover().get(&user_id).copied() else {
                 return;
             };
-            FrameRoute::OneToOne {
+            // A 1:1 call's picture goes to its live feed like every other.
+            LiveKey::Call {
                 call_id,
-                is_local,
-                is_screen,
+                local: is_local,
+                screen: is_screen,
             }
         };
         // SAFETY: frames is non-null with frames_len > 0 entries (checked at
@@ -214,67 +211,24 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
         let rotation = frame.frame_data.rotation;
         let (raw_width, raw_height) = (frame.frame_data.width, frame.frame_data.height);
         let seq = shared.frame_seq.fetch_add(1, Ordering::Relaxed);
-        match route {
-            FrameRoute::Live(key) => {
-                // The planes go over as they came: one copy out of
-                // ntgcalls' buffer, no conversion on this thread. The UI
-                // turns and converts only the frame it draws.
-                let Some(frame) = LiveFrame::new(
-                    seq,
-                    raw_width,
-                    raw_height,
-                    live_rotation(rotation),
-                    bytes,
-                    std::time::Instant::now(),
-                ) else {
-                    return;
-                };
-                let hook = shared.live_frame_hook.lock_or_recover().clone();
-                if let Some(hook) = hook {
-                    hook(key, frame);
-                }
-            }
-            FrameRoute::OneToOne {
-                call_id,
-                is_local,
-                is_screen,
-            } => {
-                // 1:1 calls keep their RGBA slots.
-                let Some(rgba) = i420_to_rgba(raw_width, raw_height, &bytes, rotation) else {
-                    return;
-                };
-                let (width, height) = match rotation {
-                    NTG_VIDEO_ROTATION_VIDEO_ROTATION_90
-                    | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (raw_height, raw_width),
-                    _ => (raw_width, raw_height),
-                };
-                let frame = VideoFrame {
-                    seq,
-                    width,
-                    height,
-                    rgba,
-                    is_local,
-                    is_screen,
-                };
-                let hook = shared.frame_hook.lock_or_recover().clone();
-                if let Some(hook) = hook {
-                    hook(call_id, frame);
-                }
-            }
+        // The planes go over as they came: one copy out of ntgcalls'
+        // buffer, no conversion on this thread. The UI turns and converts
+        // only the frame it draws.
+        let Some(frame) = LiveFrame::new(
+            seq,
+            raw_width,
+            raw_height,
+            live_rotation(rotation),
+            bytes,
+            std::time::Instant::now(),
+        ) else {
+            return;
+        };
+        let hook = shared.live_frame_hook.lock_or_recover().clone();
+        if let Some(hook) = hook {
+            hook(key, frame);
         }
     })
-}
-
-/// Where one decoded frame goes.
-enum FrameRoute {
-    /// A group call or a stream: the planes to its live feed.
-    Live(LiveKey),
-    /// A 1:1 call: RGBA into the call's slot.
-    OneToOne {
-        call_id: i32,
-        is_local: bool,
-        is_screen: bool,
-    },
 }
 
 /// ntgcalls' rotation flag as a live feed carries it.
@@ -407,91 +361,6 @@ pub(crate) fn remote_video_state_from(status: ntg_stream_status) -> RemoteVideoS
         NTG_STREAM_STATUS_PAUSED => RemoteVideoState::Paused,
         _ => RemoteVideoState::Inactive,
     }
-}
-
-/// Phase C2e: I420 planar byte size: Y (w*h) + U (cw*ch) + V (cw*ch).
-fn i420_frame_size(width: u16, height: u16) -> usize {
-    let (w, h) = (usize::from(width), usize::from(height));
-    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
-    w * h + 2 * cw * ch
-}
-
-/// Phase C2e: convert an I420 frame to RGBA8 with BT.601 full-range math,
-/// then apply the frame rotation. Returns `None` on invalid input so we
-/// never render garbage bytes.
-pub(crate) fn i420_to_rgba(
-    width: u16,
-    height: u16,
-    yuv: &[u8],
-    rotation: ntg_video_rotation,
-) -> Option<Vec<u8>> {
-    if width == 0 || height == 0 || yuv.len() != i420_frame_size(width, height) {
-        return None;
-    }
-    let (w, h) = (usize::from(width), usize::from(height));
-    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
-    let (y_plane, uv) = yuv.split_at(w * h);
-    let (u_plane, v_plane) = uv.split_at(cw * ch);
-
-    let mut rgba = vec![0u8; w * h * 4];
-    for (row, out_row) in rgba.chunks_exact_mut(w * 4).enumerate() {
-        for (col, px) in out_row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let chroma = (row / 2) * cw + col / 2;
-            let (Some(&y), Some(&u), Some(&v), [pr, pg, pb, pa]) = (
-                y_plane.get(row * w + col),
-                u_plane.get(chroma),
-                v_plane.get(chroma),
-                px,
-            ) else {
-                continue;
-            };
-            let (y, u, v) = (f32::from(y), f32::from(u), f32::from(v));
-            let r = y + 1.402 * (v - 128.0);
-            let g = y - 0.344_136 * (u - 128.0) - 0.714_136 * (v - 128.0);
-            let b = y + 1.772 * (u - 128.0);
-            *pr = r.clamp(0.0, 255.0).round() as u8;
-            *pg = g.clamp(0.0, 255.0).round() as u8;
-            *pb = b.clamp(0.0, 255.0).round() as u8;
-            *pa = 255;
-        }
-    }
-    Some(match rotation {
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90
-        | NTG_VIDEO_ROTATION_VIDEO_ROTATION_180
-        | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => rotate_rgba(&rgba, w, h, rotation),
-        _ => rgba,
-    })
-}
-
-/// Phase C2e: rotate an RGBA8 buffer (row-major, `w` x `h`) by the given
-/// frame rotation; 90/270 swap the dimensions.
-fn rotate_rgba(src: &[u8], w: usize, h: usize, rotation: ntg_video_rotation) -> Vec<u8> {
-    let (dw, dh) = match rotation {
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (h, w),
-        _ => (w, h),
-    };
-    let mut dst = vec![0u8; src.len()];
-    for y in 0..h {
-        for x in 0..w {
-            let (dx, dy) = match rotation {
-                // 90° clockwise: the right column lands on top.
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 => (y, w - 1 - x),
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_180 => (w - 1 - x, h - 1 - y),
-                NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (h - 1 - y, x),
-                _ => (x, y),
-            };
-            let src_off = (y * w + x) * 4;
-            let dst_off = (dy * dw + dx) * 4;
-            if let (Some(to), Some(from)) = (
-                dst.get_mut(dst_off..dst_off + 4),
-                src.get(src_off..src_off + 4),
-            ) {
-                to.copy_from_slice(from);
-            }
-        }
-    }
-    debug_assert_eq!(dw * dh, w * h);
-    dst
 }
 
 /// Phase C2e: honest no-camera decision for the driver (session 2): a video

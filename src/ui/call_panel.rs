@@ -7,30 +7,32 @@
 //! - The E2E emoji sit at the top.
 //! - A row of round buttons (44 pt, 11 pt labels) runs along the bottom.
 //! - With video, the peer fills the window and your camera floats in a
-//!   corner.
+//!   corner (`calls::call_video`, which also holds the window's root).
 //!
 //! Closing the window doesn't end the call: the main window's call bar
 //! brings it back.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::call_panel_backdrop::{backdrop, connecting_arc};
+use super::call_panel_backdrop::connecting_arc;
 use super::call_panel_devices::{self as devices, DeviceMenuTarget};
+use super::calls::call_video::{CallPicture, CallWindowRoot};
 use super::chat_row::chat_avatar;
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme, Icon, Root, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::calls::engine::{RemoteVideoState, TransportState};
+use quill::calls::engine::TransportState;
 use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::CallState;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// lib_ui `colors.palette`.
 const BG: u32 = 0x1b1f23;
+/// The window's dark ground, under the pictures.
+pub(crate) const CALL_BG: u32 = BG;
 const NAME_FG: u32 = 0xffffff;
 const STATUS_FG: u32 = 0xaaabac;
 const ANSWER_BG: u32 = 0x66c95b;
@@ -65,9 +67,10 @@ pub(super) struct CallSnap {
     emojis: Vec<String>,
     /// The peer's microphone is off (tdesktop `lng_call_microphone_off`).
     remote_muted: bool,
-    remote: Option<Arc<RenderImage>>,
-    local: Option<Arc<RenderImage>>,
-    backdrop: Option<Arc<RenderImage>>,
+    /// The peer's picture has a frame: it fills the window.
+    video: bool,
+    /// Your camera's preview has a frame.
+    preview: bool,
 }
 
 /// tdesktop `lng_call_microphone_off`.
@@ -138,18 +141,6 @@ impl QuillApp {
         let photo = session.user_photo_path(user_id).and_then(|path| {
             quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
         });
-        let colors: Vec<u32> = user
-            .filter(|u| u.profile_accent_color_id >= 0)
-            .and_then(|u| {
-                session
-                    .chats_state
-                    .profile_accent_colors
-                    .iter()
-                    .find(|color| color.id == u.profile_accent_color_id)
-            })
-            .map(|color| color.dark_colors.clone())
-            .unwrap_or_default();
-        let backdrop = backdrop(&colors);
         let Some(call) = call else {
             let summary = summary?;
             let busy = summary.busy;
@@ -176,9 +167,8 @@ impl QuillApp {
                 can_share_screen: false,
                 emojis: Vec::new(),
                 remote_muted: false,
-                remote: None,
-                local: None,
-                backdrop,
+                video: false,
+                preview: false,
             });
         };
         let (status, connecting) = call_status(
@@ -188,38 +178,6 @@ impl QuillApp {
             call.connected_secs(),
         );
         let ready = matches!(call.state, CallState::Ready);
-        let (remote_frame, local_frame) = match self.live.as_ref() {
-            Some(live) => (
-                live.driver.latest_video_frame(call.id, false),
-                live.driver.latest_video_frame(call.id, true),
-            ),
-            None => (
-                self.demo_ui.remote_frame.clone(),
-                self.demo_ui.local_frame.clone(),
-            ),
-        };
-        let screen_frame = if call.remote_screen == RemoteVideoState::Inactive {
-            None
-        } else if let Some(live) = self.live.as_ref() {
-            live.driver.latest_screen_frame(call.id)
-        } else {
-            self.demo_ui.screen_frame.clone()
-        };
-        let remote = if !ready {
-            None
-        } else if let Some(frame) =
-            screen_frame.filter(|_| call.remote_screen == RemoteVideoState::Active)
-        {
-            self.cached_video_image(false, &frame)
-        } else if call.remote_video == RemoteVideoState::Active {
-            remote_frame.and_then(|frame| self.cached_video_image(false, &frame))
-        } else {
-            None
-        };
-        let camera_on = self.call_camera_effective(&call);
-        let local = camera_on
-            .then(|| local_frame.and_then(|frame| self.cached_video_image(true, &frame)))
-            .flatten();
         Some(CallSnap {
             user_id,
             is_video,
@@ -242,9 +200,9 @@ impl QuillApp {
                 .map(|r| r.emojis.clone())
                 .unwrap_or_default(),
             remote_muted: ready && call.remote_audio_muted,
-            remote,
-            local,
-            backdrop,
+            // The root made the players follow the call before this draw.
+            video: self.call_picture_drawn(CallPicture::Remote),
+            preview: self.call_picture_drawn(CallPicture::Local),
         })
     }
 
@@ -297,6 +255,9 @@ impl QuillApp {
             }
             (None, None) => {}
         }
+        if wanted.is_none() {
+            self.release_call_players(cx);
+        }
         if ended && lingering && !busy {
             // Close once the linger is over.
             cx.spawn(async move |this, cx| {
@@ -341,12 +302,7 @@ impl QuillApp {
                         });
                         true
                     });
-                    let view = cx.new(|cx| CallPanel {
-                        owner: render_owner.downgrade(),
-                        _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
-                        pinned_on_top: false,
-                        devices_menu: None,
-                    });
+                    let view = cx.new(|cx| CallWindowRoot::new(&render_owner, cx));
                     cx.new(|cx| Root::new(view, window, cx))
                 },
             );
@@ -478,14 +434,25 @@ impl QuillApp {
     }
 }
 
-/// The call window's view.
-struct CallPanel {
+/// The call window's panel: everything over the pictures.
+pub(crate) struct CallPanel {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
     /// The window stays above the others (tdesktop "pin on top").
     pinned_on_top: bool,
     /// The open device menu (`call_panel_devices`).
     devices_menu: Option<DeviceMenuTarget>,
+}
+
+impl CallPanel {
+    pub(crate) fn new(owner: &Entity<QuillApp>, cx: &mut Context<Self>) -> Self {
+        Self {
+            owner: owner.downgrade(),
+            _observe: cx.observe(owner, |_, _, cx| cx.notify()),
+            pinned_on_top: false,
+            devices_menu: None,
+        }
+    }
 }
 
 /// One round control: a 44 pt disc and an 11 pt label (tdesktop
@@ -578,7 +545,7 @@ impl Render for CallPanel {
             return div().into_any_element();
         };
         let Some(snap) = owner.update(cx, |app, _| app.call_snapshot()) else {
-            return div().size_full().bg(rgb(BG)).into_any_element();
+            return div().size_full().into_any_element();
         };
         let app = self.owner.clone();
         let act = move |f: fn(&mut QuillApp, &mut Context<QuillApp>)| {
@@ -587,11 +554,11 @@ impl Render for CallPanel {
                 let _ = app.update(cx, f);
             }
         };
-        let video = snap.remote.is_some();
+        let video = snap.video;
         // The layout's own size (screen size shrinks by the interface scale).
         let bounds = window.viewport_size();
         let compact = bounds.height < px(480.);
-        let photo_size = if snap.local.is_some() && !video || compact {
+        let photo_size = if snap.preview && !video || compact {
             100.
         } else {
             160.
@@ -842,41 +809,6 @@ impl Render for CallPanel {
                 )
         });
 
-        let backdrop = match (&snap.remote, &snap.backdrop) {
-            (Some(remote), _) => img(ImageSource::Render(remote.clone()))
-                .absolute()
-                .inset_0()
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            (None, Some(image)) => img(ImageSource::Render(image.clone()))
-                .absolute()
-                .inset_0()
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            (None, None) => div().into_any_element(),
-        };
-
-        // Your camera, in a corner above the buttons.
-        let preview = snap.local.clone().map(|local| {
-            div()
-                .absolute()
-                .right(px(12.))
-                .bottom(px(99.))
-                .w(px(160.))
-                .h(px(110.))
-                .rounded(px(10.))
-                .shadow_lg()
-                // GPUI clips to rectangles: the image rounds itself.
-                .child(
-                    img(ImageSource::Render(local))
-                        .size_full()
-                        .rounded(px(10.))
-                        .object_fit(ObjectFit::Cover),
-                )
-        });
-
         let body = if video {
             // Over the peer's video: name and status up top, legible.
             div()
@@ -937,9 +869,7 @@ impl Render for CallPanel {
             .size_full()
             .relative()
             .overflow_hidden()
-            .bg(rgb(BG))
             .font_family(tr(keys::Q_OPS_SYSTEMUIFONT))
-            .child(backdrop)
             // Shades under the overlays when the peer's video fills it.
             .when(video, |this| {
                 this.child(div().absolute().top_0().left_0().right_0().h(px(124.)).bg(
@@ -965,7 +895,6 @@ impl Render for CallPanel {
             })
             .child(body)
             .children(fingerprint)
-            .children(preview)
             // tdesktop's pin-on-top control, in the corner under the title.
             .child(
                 super::window_control::pin_on_top_button(

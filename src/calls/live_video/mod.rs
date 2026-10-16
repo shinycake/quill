@@ -1,4 +1,5 @@
-//! Pushed video frames: streams, live stories and video chat tiles.
+//! Pushed video frames: streams, live stories, video chat tiles and 1:1
+//! calls.
 //!
 //! ntgcalls hands decoded I420 planes to the engine thread. A [`LiveSource`]
 //! (the engine side, `Send`) keeps only the newest one in a single slot
@@ -345,6 +346,13 @@ pub enum LiveKey {
     },
     /// Your own camera preview in a video chat.
     Local { call_id: i32 },
+    /// A 1:1 call's picture, by its call id: the peer's camera or screen
+    /// share, or your camera preview (`local`).
+    Call {
+        call_id: i32,
+        local: bool,
+        screen: bool,
+    },
 }
 
 impl LiveKey {
@@ -352,8 +360,17 @@ impl LiveKey {
     /// chat).
     pub fn call_id(self) -> Option<i32> {
         match self {
-            Self::Stream { .. } => None,
+            Self::Stream { .. } | Self::Call { .. } => None,
             Self::Video { call_id, .. } | Self::Local { call_id } => Some(call_id),
+        }
+    }
+
+    /// The 1:1 call this feed belongs to (`None` for a group call's or a
+    /// stream's; 1:1 and group call ids are separate number spaces).
+    pub fn one_to_one_call(self) -> Option<i32> {
+        match self {
+            Self::Call { call_id, .. } => Some(call_id),
+            _ => None,
         }
     }
 }

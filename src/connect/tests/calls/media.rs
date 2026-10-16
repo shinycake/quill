@@ -1,5 +1,7 @@
 //! Driver tests: call video frames, cameras and screen sharing.
 use super::*;
+use crate::calls::live_video::{LiveFrame, LiveKey, LiveRotation};
+use std::time::Instant;
 
 /// Phase C2e: the engine's peer camera state reaches the tracked
 /// call through the pump; emissions for other call ids are dropped.
@@ -23,72 +25,105 @@ fn remote_video_state_drain() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Phase C2e: only the newest frame per (call, side) is kept — the
-/// UI always sees the latest, never a backlog.
-#[test]
-fn frame_slots_latest_wins() {
-    let (dir, driver, handle, _sink, _seq) = ready_call_driver();
-    let frame = |is_local: bool| VideoFrame {
-        seq: 0,
-        width: 2,
-        height: 2,
-        rgba: vec![0u8; 16],
-        is_local,
-        is_screen: false,
-    };
-    handle.emit_video_frame(77, frame(false));
-    handle.emit_video_frame(77, frame(false));
-    let latest = driver.latest_video_frame(77, false).unwrap();
-    assert_eq!(latest.seq, 1);
-    assert!(driver.latest_video_frame(77, true).is_none());
-    let _ = std::fs::remove_dir_all(&dir);
+/// A 2 × 2 I420 picture.
+fn planes() -> LiveFrame {
+    LiveFrame::new(0, 2, 2, LiveRotation::None, vec![0; 6], Instant::now()).expect("frame")
 }
 
-/// Phase C2j: the peer's 1:1 screen share lands in its own slot and
-/// never clobbers the peer camera frame; latest-wins holds per slot.
-#[test]
-fn p2p_screen_frame_routes_to_own_slot() {
-    let (dir, driver, handle, _sink, _seq) = ready_call_driver();
-    let frame = |screen: bool| VideoFrame {
-        seq: 0,
-        width: 2,
-        height: 2,
-        rgba: vec![0u8; 16],
-        is_local: false,
-        is_screen: screen,
-    };
-    handle.emit_video_frame(77, frame(false));
-    handle.emit_video_frame(77, frame(true));
-    handle.emit_video_frame(77, frame(true));
-    let camera = driver.latest_video_frame(77, false).unwrap();
-    assert!(!camera.is_screen);
-    assert_eq!(camera.seq, 0);
-    let screen = driver.latest_screen_frame(77).unwrap();
-    assert!(screen.is_screen);
-    assert_eq!(screen.seq, 2);
-    assert!(driver.latest_video_frame(77, true).is_none());
-    let _ = std::fs::remove_dir_all(&dir);
+/// A 1:1 call 77 picture's feed key.
+fn call_key(local: bool, screen: bool) -> LiveKey {
+    LiveKey::Call {
+        call_id: 77,
+        local,
+        screen,
+    }
 }
 
-/// Phase C2j: when the peer's 1:1 screen share goes inactive the
-/// pump drops the retained screen frames (no stale picture can
-/// render) while the peer camera frame is untouched; a non-inactive
-/// state leaves the slot alone. Phase C2l: the pump also records
-/// the state on the call — the UI gates the screen tile on it,
-/// closing the race where a late frame arriving after Inactive
-/// would repopulate a stale slot.
+const PUMP: &str = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+
+/// The peer's camera and screen-share states as the engine reports them,
+/// pumped onto the tracked call.
+fn peer_states(
+    driver: &mut ConnectDriver<Arc<RecordingSender>>,
+    handle: &MockEngine,
+    seq: &AtomicU64,
+    sink: &Arc<dyn DiagnosticSink>,
+    camera: RemoteVideoState,
+    screen: RemoteVideoState,
+) {
+    handle.emit_remote_video_state(77, camera);
+    handle.emit_remote_screen_state(77, screen);
+    ingest_call_json(driver, seq, sink, PUMP);
+}
+
+/// A 1:1 picture goes to its live feed as I420 planes, only the newest
+/// frame waiting; a feed exists only while its video is on.
 #[test]
-fn remote_screen_state_inactive_clears_screen_slot() {
+fn one_to_one_pictures_go_to_live_feeds_newest_first() {
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();
-    let frame = |screen: bool| VideoFrame {
-        seq: 0,
-        width: 2,
-        height: 2,
-        rgba: vec![0u8; 16],
-        is_local: false,
-        is_screen: screen,
-    };
-    let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+    // The peer's camera is off: no feed, and a frame goes nowhere.
+    assert!(driver.live_sink(call_key(false, false)).is_none());
+    peer_states(
+        &mut driver,
+        &handle,
+        &seq,
+        &sink,
+        RemoteVideoState::Active,
+        RemoteVideoState::Inactive,
+    );
+    let camera = driver
+        .live_sink(call_key(false, false))
+        .expect("the peer's camera feed");
+    handle.emit_live_frame(call_key(false, false), planes());
+    handle.emit_live_frame(call_key(false, false), planes());
+    let snapshot = camera.snapshot();
+    assert_eq!(snapshot.pushed, 2);
+    assert_eq!(snapshot.dropped, 1, "an untaken frame is replaced");
+    assert_eq!(camera.take().map(|frame| frame.seq), Some(1));
+    // Your camera is off: no preview feed.
+    assert!(driver.live_sink(call_key(true, false)).is_none());
+    // Another call's id leaves nothing behind.
+    assert!(
+        driver
+            .live_sink(LiveKey::Call {
+                call_id: 78,
+                local: false,
+                screen: false
+            })
+            .is_none()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Your camera preview has its own feed while the camera is on; turning
+/// it off ends the feed, and on again starts a new one.
+#[test]
+fn the_camera_preview_feed_follows_the_camera() {
+    let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+    assert!(driver.set_call_camera(77, true).is_ok());
+    let preview = driver
+        .live_sink(call_key(true, false))
+        .expect("the preview feed");
+    handle.emit_live_frame(call_key(true, false), planes());
+    assert!(preview.latest().is_some());
+    assert!(driver.set_call_camera(77, false).is_ok());
+    assert!(preview.snapshot().end.is_some(), "the old feed ended");
+    assert!(driver.live_sink(call_key(true, false)).is_none());
+    assert!(driver.set_call_camera(77, true).is_ok());
+    let again = driver
+        .live_sink(call_key(true, false))
+        .expect("a new preview feed");
+    assert!(!again.same_as(&preview));
+    assert!(again.latest().is_none(), "no frame from before");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Phase C2j: the peer's 1:1 screen share has its own feed and never
+/// clobbers the camera's; when the share goes inactive its feed ends
+/// (no stale picture can render) and the camera's stays.
+#[test]
+fn the_screen_share_feed_ends_when_the_share_goes_inactive() {
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
     let remote_screen = |driver: &ConnectDriver<Arc<RecordingSender>>| {
         driver
             .session
@@ -99,19 +134,47 @@ fn remote_screen_state_inactive_clears_screen_slot() {
             .remote_screen
     };
     assert_eq!(remote_screen(&driver), RemoteVideoState::Inactive);
-    handle.emit_video_frame(77, frame(false));
-    handle.emit_video_frame(77, frame(true));
-    handle.emit_remote_screen_state(77, RemoteVideoState::Active);
-    ingest_call_json(&mut driver, &seq, &sink, pump);
+    peer_states(
+        &mut driver,
+        &handle,
+        &seq,
+        &sink,
+        RemoteVideoState::Active,
+        RemoteVideoState::Active,
+    );
     assert_eq!(remote_screen(&driver), RemoteVideoState::Active);
-    handle.emit_remote_screen_state(77, RemoteVideoState::Paused);
-    ingest_call_json(&mut driver, &seq, &sink, pump);
-    assert!(driver.latest_screen_frame(77).is_some());
-    handle.emit_remote_screen_state(77, RemoteVideoState::Inactive);
-    ingest_call_json(&mut driver, &seq, &sink, pump);
+    let camera = driver.live_sink(call_key(false, false)).expect("camera");
+    let screen = driver.live_sink(call_key(false, true)).expect("screen");
+    assert!(!camera.same_as(&screen));
+    handle.emit_live_frame(call_key(false, false), planes());
+    handle.emit_live_frame(call_key(false, true), planes());
+    handle.emit_live_frame(call_key(false, true), planes());
+    assert_eq!(camera.snapshot().pushed, 1);
+    assert_eq!(screen.snapshot().pushed, 2);
+    peer_states(
+        &mut driver,
+        &handle,
+        &seq,
+        &sink,
+        RemoteVideoState::Active,
+        RemoteVideoState::Paused,
+    );
+    assert!(
+        screen.snapshot().end.is_none(),
+        "a paused share keeps its feed"
+    );
+    peer_states(
+        &mut driver,
+        &handle,
+        &seq,
+        &sink,
+        RemoteVideoState::Active,
+        RemoteVideoState::Inactive,
+    );
     assert_eq!(remote_screen(&driver), RemoteVideoState::Inactive);
-    assert!(driver.latest_screen_frame(77).is_none());
-    assert!(driver.latest_video_frame(77, false).is_some());
+    assert!(screen.snapshot().end.is_some());
+    assert!(driver.live_sink(call_key(false, true)).is_none());
+    assert!(camera.snapshot().end.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -365,30 +428,30 @@ fn active_call_camera_on_from_is_video() {
     }
 }
 
-/// Phase C2e: frame slots for an ended call are dropped — the UI
-/// can never render a stale picture from a previous call.
+/// Phase C2e: an ended call's feeds end and go: the UI can never render
+/// a stale picture from a previous call.
 #[test]
-fn frame_slots_cleared_on_call_end() {
+fn feeds_end_with_the_call() {
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
-    handle.emit_video_frame(
-        77,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: false,
-            is_screen: false,
-        },
+    peer_states(
+        &mut driver,
+        &handle,
+        &seq,
+        &sink,
+        RemoteVideoState::Active,
+        RemoteVideoState::Inactive,
     );
-    assert!(driver.latest_video_frame(77, false).is_some());
+    let camera = driver.live_sink(call_key(false, false)).expect("camera");
+    handle.emit_live_frame(call_key(false, false), planes());
+    assert!(camera.latest().is_some());
     ingest_call_json(
         &mut driver,
         &seq,
         &sink,
         r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"99","user_id":41,"is_outgoing":true,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
     );
-    assert!(driver.latest_video_frame(77, false).is_none());
+    assert!(camera.snapshot().end.is_some());
+    assert!(driver.live_sink(call_key(false, false)).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

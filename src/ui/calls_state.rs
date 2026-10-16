@@ -1,18 +1,17 @@
-//! One-to-one call UI: the call window, tick, sounds, images and notifications.
+//! One-to-one call UI: the call window, tick, sounds, pictures and notifications.
 #![deny(clippy::indexing_slicing)]
 
+use super::video_player::VideoPlayer;
 use gpui_kit::*;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 pub(crate) struct CallUi {
-    /// Phase C2e/C2l: decoded video tiles cached by `(frame seq,
-    /// is_screen)`, rebuilt only when the key changes. The peer's
-    /// screen and camera streams share `seq` numbering (all demo
-    /// fixtures use seq 0), so `is_screen` is part of the key — a
-    /// seq-only key would cross-render.
-    pub(super) remote_image: Option<((u64, bool), Arc<RenderImage>)>,
-    pub(super) local_image: Option<((u64, bool), Arc<RenderImage>)>,
+    /// The call window's live players (`calls::call_video`): the peer's
+    /// screen share or camera, and your camera (mirrored), each following
+    /// its feed.
+    pub(super) remote_player: Option<VideoPlayer>,
+    pub(super) local_player: Option<VideoPlayer>,
     /// Accept / Decline / body picks on incoming-call notifications.
     pub(super) notify_clicks: Arc<Mutex<Vec<(i32, quill::notify_call::CallNotificationAction)>>>,
     /// The incoming call last announced with a system notification.
@@ -42,8 +41,8 @@ pub(crate) struct CallUi {
 impl CallUi {
     pub(super) fn new(audio_output: super::audio::SharedOutput) -> Self {
         Self {
-            remote_image: None,
-            local_image: None,
+            remote_player: None,
+            local_player: None,
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notified: None,
             tick_active: false,

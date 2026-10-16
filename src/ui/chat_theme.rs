@@ -358,11 +358,6 @@ pub fn bg_tile() -> Rgba {
     pick_key(K::WindowBg, 0x010409, 0xffffff, Some(0x0))
 }
 #[inline]
-pub fn bg_video() -> Rgba {
-    // Video surfaces stay dark in both modes (official-client behavior).
-    hex(0x161616)
-}
-#[inline]
 pub fn bg_black() -> Rgba {
     // Deliberate black chips stay black in both modes.
     hex(0x000000)
@@ -390,11 +385,6 @@ pub fn fill_muted() -> Rgba {
 #[inline]
 pub fn border() -> Rgba {
     pick_key(K::InputBorderFg, 0x30363d, 0xd0d7de, Some(0xffffff))
-}
-#[inline]
-pub fn border_video() -> Rgba {
-    // Video chrome stays dark in both modes.
-    hex(0x333333)
 }
 
 // --- scrims (modal dims) ---

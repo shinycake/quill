@@ -9,7 +9,9 @@
 //!   keeps this path until NV12 surfaces come to it (video player PR 9).
 //!
 //! Frames the sender turned (a phone camera) are turned in the plane copy
-//! first (`rotate_planes`), so surfaces need no turn of their own.
+//! first (`rotate_planes`), and a mirrored feed (your camera preview) is
+//! mirrored there too (`mirror_planes`), so surfaces need no turn of their
+//! own.
 //! [`convert`] runs on any thread; the pool buffer is taken on the UI
 //! thread ([`Surfaces::target`]) and the image is made there too
 //! ([`Prepared::into_picture`]).
@@ -18,7 +20,7 @@
 use super::Picture;
 use gpui_kit::RenderImage;
 use quill::calls::live_video::LiveFrame;
-use quill::calls::live_video::convert::{I420, i420_to_bgra, rotate_planes};
+use quill::calls::live_video::convert::{I420, i420_to_bgra, mirror_planes, rotate_planes};
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -57,19 +59,29 @@ pub(super) struct SendBuffer(
 #[cfg(target_os = "macos")]
 unsafe impl Send for SendBuffer {}
 
-/// The frame's planes as shown: turned when the sender turned them.
-fn upright(frame: &LiveFrame) -> Option<(Cow<'_, [u8]>, u16, u16)> {
+/// The frame's planes as shown: turned when the sender turned them, then
+/// mirrored when the feed is (one copy at most for each).
+fn upright(frame: &LiveFrame, mirrored: bool) -> Option<(Cow<'_, [u8]>, u16, u16)> {
     let src = frame.i420()?;
-    match rotate_planes(&src, frame.rotation) {
-        Some((planes, width, height)) => Some((Cow::Owned(planes), width, height)),
-        None => Some((Cow::Borrowed(&frame.planes), frame.width, frame.height)),
+    let (mut planes, width, height) = match rotate_planes(&src, frame.rotation) {
+        Some((planes, width, height)) => (Cow::Owned(planes), width, height),
+        None => (
+            Cow::Borrowed(frame.planes.as_slice()),
+            frame.width,
+            frame.height,
+        ),
+    };
+    if mirrored {
+        mirror_planes(planes.to_mut(), width, height);
     }
+    Some((planes, width, height))
 }
 
-/// Convert `frame` into `target`; a pixel buffer that can't be filled
-/// falls back to BGRA. `None` for a malformed frame.
-pub(super) fn convert(frame: &LiveFrame, target: Target) -> Option<Prepared> {
-    let (planes, width, height) = upright(frame)?;
+/// Convert `frame` into `target`, mirrored when `mirrored`; a pixel
+/// buffer that can't be filled falls back to BGRA. `None` for a malformed
+/// frame.
+pub(super) fn convert(frame: &LiveFrame, target: Target, mirrored: bool) -> Option<Prepared> {
+    let (planes, width, height) = upright(frame, mirrored)?;
     let src = I420::new(&planes, width, height)?;
     match target {
         #[cfg(target_os = "macos")]
@@ -348,7 +360,7 @@ mod tests {
             width,
             height,
             bgra,
-        }) = convert(&frame(64, 36, LiveRotation::R90), Target::Bgra)
+        }) = convert(&frame(64, 36, LiveRotation::R90), Target::Bgra, false)
         else {
             panic!("bgra");
         };
@@ -371,9 +383,11 @@ mod tests {
             CVPixelBufferGetPixelFormatType(&buffer.0),
             kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         );
-        let Some(Prepared::Surface(filled)) =
-            convert(&frame(64, 36, LiveRotation::None), Target::Surface(buffer))
-        else {
+        let Some(Prepared::Surface(filled)) = convert(
+            &frame(64, 36, LiveRotation::None),
+            Target::Surface(buffer),
+            false,
+        ) else {
             panic!("filled");
         };
         assert_eq!(
@@ -389,7 +403,11 @@ mod tests {
         assert_eq!(CVPixelBufferGetWidth(&bigger.0), 128);
         // A buffer of the wrong size is not filled: BGRA instead.
         assert!(matches!(
-            convert(&frame(64, 36, LiveRotation::None), Target::Surface(bigger)),
+            convert(
+                &frame(64, 36, LiveRotation::None),
+                Target::Surface(bigger),
+                false
+            ),
             Some(Prepared::Bgra { .. })
         ));
     }

@@ -1,10 +1,9 @@
 use super::*;
+use ntgcalls_sys::NTG_STREAM_STATUS_IDLING;
 use ntgcalls_sys::{
     NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_SCREEN, NTG_STREAM_MODE_CAPTURE,
     NTG_STREAM_MODE_PLAYBACK, NTG_STREAM_STATUS_ACTIVE, NTG_STREAM_STATUS_PAUSED,
-    NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
 };
-use ntgcalls_sys::{NTG_STREAM_STATUS_IDLING, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0};
 
 /// Phase C2g: the audio SSRC is the first `a=ssrc:` line of the
 /// audio `m=` section; video sections are ignored, and 0 is the
@@ -209,98 +208,6 @@ fn mock_engine_connect_and_device_selection_need_known_call() {
     assert!(engine.device_selections().is_empty());
 }
 
-/// Phase C2e: validates the BT.601 conversion math. Neutral chroma
-/// passes Y straight through, so Y=235 ~ white and Y=16 ~ black.
-/// A saturated case with no clamping on red pins the 1.402 coefficient:
-/// Y=64, U=128, V=255 gives R = 64 + 1.402*127 ~ 242.
-#[test]
-fn i420_to_rgba_known_pixels() {
-    let white = i420_to_rgba(
-        2,
-        2,
-        &[235, 235, 235, 235, 128, 128],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-    )
-    .expect("valid 2x2 frame");
-    assert_eq!(white.len(), 16);
-    let (pixels, _) = white.as_chunks::<4>();
-    for pixel in pixels {
-        assert_pixel_close(pixel, &[235, 235, 235, 255]);
-    }
-    let black = i420_to_rgba(
-        2,
-        2,
-        &[16, 16, 16, 16, 128, 128],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-    )
-    .expect("valid 2x2 frame");
-    let (pixels, _) = black.as_chunks::<4>();
-    for pixel in pixels {
-        assert_pixel_close(pixel, &[16, 16, 16, 255]);
-    }
-    // I420 planes: Y(2x2) then U(1x1) then V(1x1).
-    let saturated = i420_to_rgba(
-        2,
-        2,
-        &[64, 64, 64, 64, 128, 255],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_0,
-    )
-    .expect("valid 2x2 frame");
-    let (pixels, _) = saturated.as_chunks::<4>();
-    for pixel in pixels {
-        assert_pixel_close(pixel, &[242, 0, 64, 255]);
-    }
-}
-
-fn assert_pixel_close(actual: &[u8], expected: &[u8; 4]) {
-    assert_eq!(actual.len(), 4);
-    for (index, (&a, &e)) in actual.iter().zip(expected.iter()).enumerate() {
-        assert!(
-            (i16::from(a) - i16::from(e)).abs() <= 2,
-            "channel {index}: got {a}, want ~{e}"
-        );
-    }
-}
-
-/// Phase C2e: validates we never render garbage bytes.
-#[test]
-fn i420_to_rgba_rejects_bad_sizes() {
-    assert_eq!(
-        i420_to_rgba(2, 2, &[0; 5], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
-    assert_eq!(
-        i420_to_rgba(2, 2, &[0; 7], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
-    assert_eq!(
-        i420_to_rgba(0, 2, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
-    assert_eq!(
-        i420_to_rgba(2, 0, &[], NTG_VIDEO_ROTATION_VIDEO_ROTATION_0),
-        None
-    );
-}
-
-/// Phase C2e: validates rotation handling. 2x1 with distinct pixels,
-/// rotated 90° clockwise, becomes 1x2 with the right column on top.
-#[test]
-fn i420_to_rgba_rotation_90() {
-    let rgba = i420_to_rgba(
-        2,
-        1,
-        &[235, 16, 128, 128],
-        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90,
-    )
-    .expect("valid 2x1 frame");
-    assert_eq!(
-        rgba,
-        vec![16, 16, 16, 255, 235, 235, 235, 255],
-        "black pixel (right column) lands on top"
-    );
-}
-
 /// Phase C2i: validates the 1:1 screen-share toggle contract the
 /// UI will drive (mirrors `mock_camera_toggle_state_machine`).
 #[test]
@@ -389,38 +296,47 @@ fn mock_camera_toggle_state_machine() {
 /// Phase C2e: validates frame delivery and hook replacement.
 #[test]
 fn mock_frame_callback_plumbing() {
+    use crate::calls::live_video::{LiveFrame, LiveKey, LiveRotation};
     let mut engine = MockEngine::new();
     let first = Arc::new(Mutex::new(Vec::new()));
     let first_hook = first.clone();
-    engine.set_video_frame_callback(Arc::new(move |call_id, frame| {
+    engine.set_live_frame_callback(Arc::new(move |key, frame| {
         first_hook
             .lock()
             .expect("first frame hook")
-            .push((call_id, frame));
+            .push((key, frame));
     }));
-    let frame = VideoFrame {
-        seq: 999, // overwritten by the mock's internal counter
-        width: 2,
-        height: 2,
-        rgba: vec![1, 2, 3, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        is_local: true,
-        is_screen: false,
+    let frame = || {
+        // seq 999 is overwritten by the mock's internal counter.
+        LiveFrame::new(
+            999,
+            2,
+            2,
+            LiveRotation::None,
+            vec![0; 6],
+            std::time::Instant::now(),
+        )
+        .expect("a 2x2 frame")
     };
-    engine.emit_video_frame(77, frame.clone());
+    let local = LiveKey::Call {
+        call_id: 77,
+        local: true,
+        screen: false,
+    };
+    engine.emit_live_frame(local, frame());
     let second = Arc::new(Mutex::new(Vec::new()));
     let second_hook = second.clone();
-    engine.set_video_frame_callback(Arc::new(move |call_id, frame| {
+    engine.set_live_frame_callback(Arc::new(move |key, frame| {
         second_hook
             .lock()
             .expect("second frame hook")
-            .push((call_id, frame));
+            .push((key, frame));
     }));
-    engine.emit_video_frame(77, frame);
+    engine.emit_live_frame(local, frame());
 
     let first = first.lock().expect("first frame hook");
     assert_eq!(first.len(), 1);
-    assert_eq!(first[0].0, 77);
-    assert!(first[0].1.is_local);
+    assert_eq!(first[0].0, local);
     assert_eq!(first[0].1.seq, 0);
     let second = second.lock().expect("second frame hook");
     assert_eq!(second.len(), 1);

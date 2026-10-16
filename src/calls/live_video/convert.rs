@@ -1,10 +1,10 @@
-//! Pure conversions for pushed frames: I420 turned, interleaved into NV12
+//! Pure conversions for pushed frames: I420 turned or mirrored, interleaved into NV12
 //! (macOS pixel buffers), expanded to BGRA (GPUI images on Windows and
 //! Linux), shrunk and blurred for the paused tile, and back from RGBA for
 //! pictures Quill makes itself (your shared screen's preview, fixtures).
 //!
-//! The colour math is the engine's (`engine::native::i420_to_rgba`):
-//! BT.601 with full-range luma, which is also the matrix GPUI's surface
+//! The colour math is the one the engine's RGBA conversion used before
+//! every picture became a live feed: BT.601 with full-range luma, which is also the matrix GPUI's surface
 //! shader applies to a full-range NV12 buffer, so every path shows the
 //! same colours.
 #![deny(clippy::indexing_slicing)]
@@ -107,6 +107,43 @@ pub fn rotate_planes(src: &I420, rotation: LiveRotation) -> Option<(Vec<u8>, u16
     rotate_plane(src.u, cw, ch, rotation, u_out);
     rotate_plane(src.v, cw, ch, rotation, v_out);
     Some((out, out_w, out_h))
+}
+
+/// Mirror an I420 frame left to right in place (your camera preview, as
+/// tdesktop shows it). `false`, with nothing changed, unless `planes`
+/// holds exactly one `width × height` frame. Odd widths keep their chroma
+/// grid, as [`rotate_planes`] does.
+pub fn mirror_planes(planes: &mut [u8], width: u16, height: u16) -> bool {
+    if width == 0 || height == 0 || planes.len() != i420_size(width, height) {
+        return false;
+    }
+    let (w, h) = (usize::from(width), usize::from(height));
+    let cw = w.div_ceil(2);
+    let Some((y, chroma)) = planes.split_at_mut_checked(w * h) else {
+        return false;
+    };
+    for row in y.chunks_exact_mut(w) {
+        row.reverse();
+    }
+    for row in chroma.chunks_exact_mut(cw) {
+        row.reverse();
+    }
+    true
+}
+
+/// Mirror a BGRA raster left to right in place (the paused picture of a
+/// mirrored feed).
+pub fn mirror_raster(raster: &mut Raster) {
+    let Ok(width) = usize::try_from(raster.width) else {
+        return;
+    };
+    if width == 0 {
+        return;
+    }
+    for row in raster.bgra.chunks_exact_mut(width * 4) {
+        let (pixels, _) = row.as_chunks_mut::<4>();
+        pixels.reverse();
+    }
 }
 
 /// Copy the Y plane and interleave U and V into a bi-planar (NV12)

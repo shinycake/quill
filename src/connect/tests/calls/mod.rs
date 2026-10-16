@@ -3,9 +3,7 @@ use super::super::*;
 use super::*;
 use crate::calls::engine::CallEngine;
 use crate::calls::engine::{EngineError, TransportState};
-use crate::calls::engine::{
-    MediaDevice, MediaDeviceKind, MockEngine, RemoteVideoState, VideoFrame,
-};
+use crate::calls::engine::{MediaDevice, MediaDeviceKind, MockEngine, RemoteVideoState};
 use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::AccountKey;

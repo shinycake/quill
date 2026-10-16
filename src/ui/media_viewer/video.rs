@@ -65,54 +65,6 @@ impl QuillApp {
             .is_some_and(|item| item.kind.loops())
     }
 
-    /// Phase C2e: decode a call `VideoFrame`'s RGBA8 bytes into a GPUI
-    /// image handle (BGRA, as `RenderImage` holds). `None` on malformed
-    /// bytes — never render garbage.
-    pub(in crate::ui) fn video_render_image(
-        frame: &quill::calls::engine::VideoFrame,
-    ) -> Option<Arc<RenderImage>> {
-        let mut rgba = image::RgbaImage::from_raw(
-            u32::from(frame.width),
-            u32::from(frame.height),
-            frame.rgba.clone(),
-        )?;
-        // GPUI holds RenderImage pixels in BGRA (its own decoder swaps
-        // R<->B after into_rgba8); the engine delivers RGBA, so swap here.
-        for pixel in rgba.as_chunks_mut::<4>().0 {
-            pixel.swap(0, 2);
-        }
-        Some(Arc::new(RenderImage::new(SmallVec::from_buf([
-            image::Frame::new(rgba),
-        ]))))
-    }
-
-    /// Phase C2e/C2l: cached decoded tile for a video frame, rebuilt
-    /// only when the `(seq, is_screen)` key changed. `local` picks the
-    /// preview slot, otherwise the peer slot (the peer's camera and
-    /// screen share the slot; the key keeps the streams apart).
-    pub(in crate::ui) fn cached_video_image(
-        &mut self,
-        local: bool,
-        frame: &quill::calls::engine::VideoFrame,
-    ) -> Option<Arc<RenderImage>> {
-        let key = (frame.seq, frame.is_screen);
-        let slot = if local {
-            &mut self.calls.local_image
-        } else {
-            &mut self.calls.remote_image
-        };
-        if slot.as_ref().is_some_and(|(k, _)| *k == key) {
-            return slot.as_ref().map(|(_, image)| image.clone());
-        }
-        let image = Self::video_render_image(frame)?;
-        // The slot's previous frame stays in the atlas until the sweeper
-        // retires it; overwriting it silently would leak it there.
-        if let Some((_, old)) = slot.replace((key, image.clone())) {
-            crate::ui::image_budget::retire_all([old]);
-        }
-        Some(image)
-    }
-
     /// Resume a parked viewer play once `downloadFile` lands the clip.
     /// Routes through `maybe_autoplay_viewer_video`: it re-derives the
     /// current item, clears the pending flag, and either reuses cached

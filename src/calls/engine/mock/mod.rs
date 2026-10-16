@@ -23,8 +23,7 @@ struct MockInner {
     devices: Vec<MediaDevice>,
     hook: Option<SignalingEmittedCallback>,
     transport_hook: Option<TransportStateCallback>,
-    /// Phase C2e: video frame and peer camera-state hooks (replace semantics).
-    video_hook: Option<VideoFrameCallback>,
+    /// Phase C2e: the peer camera-state hook (replace semantics).
     remote_video_hook: Option<RemoteVideoStateCallback>,
     /// Phase C2j: peer 1:1 screen-share state hook (replace semantics).
     remote_screen_hook: Option<RemoteVideoStateCallback>,
@@ -241,19 +240,6 @@ impl MockEngine {
         }
     }
 
-    /// Phase C2e: deliver a synthetic video frame to the registered hook,
-    /// assigning the next sequence number from the internal counter.
-    pub fn emit_video_frame(&self, call_id: i32, mut frame: VideoFrame) {
-        let mut inner = self.inner.lock_or_recover();
-        frame.seq = inner.frame_seq;
-        inner.frame_seq += 1;
-        let hook = inner.video_hook.clone();
-        drop(inner);
-        if let Some(hook) = hook {
-            hook(call_id, frame);
-        }
-    }
-
     /// Phase C2e: deliver a synthetic peer camera state to the hook.
     pub fn emit_remote_video_state(&self, call_id: i32, state: RemoteVideoState) {
         let hook = self.inner.lock_or_recover().remote_video_hook.clone();
@@ -350,10 +336,6 @@ impl CallEngine for MockEngine {
 
     fn set_transport_state_callback(&mut self, callback: TransportStateCallback) {
         self.inner.lock_or_recover().transport_hook = Some(callback);
-    }
-
-    fn set_video_frame_callback(&mut self, callback: VideoFrameCallback) {
-        self.inner.lock_or_recover().video_hook = Some(callback);
     }
 
     fn set_remote_video_state_callback(&mut self, callback: RemoteVideoStateCallback) {

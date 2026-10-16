@@ -12,18 +12,11 @@ pub(crate) struct DemoUi {
     /// reported none.
     pub(super) call_devices: Option<Vec<quill::calls::engine::MediaDevice>>,
     pub(super) selected_devices: (Option<String>, Option<String>),
-    /// Phase C2e: synthetic demo video frames for the screenshot
-    /// fixture only — live frames come from the driver, never these.
-    pub(super) remote_frame: Option<quill::calls::engine::VideoFrame>,
-    pub(super) local_frame: Option<quill::calls::engine::VideoFrame>,
-    /// Phase C2l: synthetic demo screen-share frame (peer side) for the
-    /// screenshot fixture only — live frames come from the driver.
-    pub(super) screen_frame: Option<quill::calls::engine::VideoFrame>,
     /// Phase C2e: demo-mode camera pick (live picks go to the driver).
     pub(super) selected_camera: Option<String>,
-    /// Phase C2g: synthetic per-participant feeds injected by the
-    /// group-call demo fixture, by feed. Injected demo data, not real
-    /// media.
+    /// Synthetic feeds injected by the call demo fixtures, by feed: a
+    /// video chat's participants, a 1:1 call's pictures. Injected demo
+    /// data, not real media.
     pub(super) group_feeds:
         HashMap<quill::calls::live_video::LiveKey, super::calls::demo_feed::DemoFeed>,
     /// Demo captures can't go full screen: show the stage (and a stream
@@ -38,9 +31,6 @@ impl DemoUi {
         Self {
             call_devices: None,
             selected_devices: (None, None),
-            remote_frame: None,
-            local_frame: None,
-            screen_frame: None,
             selected_camera: None,
             group_feeds: HashMap::new(),
             group_stage: false,

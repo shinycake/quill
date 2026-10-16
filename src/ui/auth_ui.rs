@@ -208,8 +208,8 @@ impl QuillApp {
 /// QR format can't hold.
 pub(super) fn render_qr_image(link: &str) -> Option<Arc<RenderImage>> {
     let code = qrcode::QrCode::new(link.as_bytes()).ok()?;
-    // Grayscale is unchanged by the R<->B swap `video_render_image`
-    // applies to color frames, so no channel fixup is needed.
+    // Grayscale is unchanged by the R<->B swap GPUI images need for
+    // color pictures, so no channel fixup is needed.
     let luma = code
         .render::<image::Luma<u8>>()
         .quiet_zone(true)

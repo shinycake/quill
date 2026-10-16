@@ -1,6 +1,6 @@
 //! Connect gate types: blockers, parameters, driver state.
 use super::*;
-use crate::calls::engine::{CallEngine, ConnectParams, MediaDevice, VideoFrame};
+use crate::calls::engine::{CallEngine, ConnectParams, MediaDevice};
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{AccountKey, ChatId, RequestId};
@@ -225,12 +225,6 @@ pub enum InstantViewOutcome {
     Requested,
 }
 
-/// Phase C2e: latest decoded video frame per (call id, is_local,
-/// is_screen); only the newest frame is kept, so the UI never sees a
-/// backlog. The peer's screen share lives in its own slot so it can
-/// never clobber the peer camera frame (Phase C2j).
-type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool, bool), VideoFrame>>>;
-
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
@@ -255,11 +249,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_capture: super::call_capture::CallCapture,
     /// The shared screen Quill captures (`connect::call_screen`).
     pub(crate) call_screen: super::call_screen::CallScreen,
-    /// Phase C2e: latest decoded video frame per (call id, is_local,
-    /// is_screen).
-    pub(crate) video_frame_slots: VideoFrameSlots,
-    /// Group-call tracks and stream pictures: one live feed each, newest
-    /// frame only (`group_calls/live_feeds.rs`).
+    /// Every picture (group-call tracks, streams, 1:1 calls): one live
+    /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
     /// Phase C2g: last camera-enabled value issued to the engine per
     /// group call id; the engine is only re-issued on change.
