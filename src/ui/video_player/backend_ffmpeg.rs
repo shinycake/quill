@@ -9,13 +9,15 @@
 //! becomes a new `RenderImage`; the one it replaces is retired to
 //! `image_budget`, which drops it from the GPU atlas once no frame shows it.
 //!
-//! On Windows the decoder is asked for NV12 instead while the DirectX
-//! renderer offers it ([`surface::nv12_wanted`]): pictures the stream
-//! allows (8-bit 4:2:0, BT.601/709, even sides) skip the decoder's BGRA
-//! conversion and become surface frames the renderer converts on the GPU;
-//! the rest stay images. If the renderer stops offering NV12, the decoder
-//! goes back to BGRA, NV12 pictures still queued are converted on the CPU,
-//! and the surface on screen is replaced by an image of it.
+//! On Windows the decoder is asked for NV12 instead
+//! ([`surface::NV12_SURFACES`]): pictures the stream allows (8-bit 4:2:0,
+//! BT.601/709, even sides) skip the decoder's BGRA conversion and become
+//! surface frames the DirectX renderer converts on the GPU; the rest stay
+//! images. When the window's renderer refuses a surface (its NV12
+//! textures or pipeline failed), the player asks [`Backend::replace_refused`]
+//! for the same picture as an image, and this backend shows images for
+//! [`NV12_RETRY`]: the decoder goes back to BGRA, NV12 pictures still
+//! queued are converted on the CPU. Then it tries NV12 again.
 #![deny(clippy::indexing_slicing)]
 
 use super::surface;
@@ -24,7 +26,7 @@ use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pul
 use quill::video_decode::{OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::super::audio::StreamSound;
 use gpui_kit::RenderImage;
@@ -58,15 +60,23 @@ fn options(purpose: Purpose) -> OpenOptions {
         Purpose::Story | Purpose::Live { .. } => OpenOptions::viewer(),
     };
     OpenOptions {
-        output: wanted_output(),
+        output: output_for(surface::NV12_SURFACES),
         ..options
     }
 }
 
-/// The picture layout to decode into now: NV12 while the renderer draws
-/// it (Windows), BGRA otherwise.
-fn wanted_output() -> PixelOutput {
-    if surface::nv12_wanted() {
+/// How long a backend shows images after its window refused a surface,
+/// before it tries NV12 again (the renderer retries textures on about the
+/// same schedule).
+const NV12_RETRY: Duration = Duration::from_secs(2);
+
+/// NV12 again once the pause after a refused surface is over.
+fn nv12_allowed(paused_until: Option<Instant>, now: Instant) -> bool {
+    paused_until.is_none_or(|until| now >= until)
+}
+
+fn output_for(nv12: bool) -> PixelOutput {
+    if nv12 {
         PixelOutput::Nv12
     } else {
         PixelOutput::Bgra
@@ -83,10 +93,12 @@ pub(super) struct FfmpegBackend {
     playing: bool,
     image: Option<Arc<RenderImage>>,
     /// The surface picture on screen (Windows NV12), to show as an image
-    /// instead if the renderer stops drawing NV12.
+    /// instead if the renderer refuses it.
     surface: Option<Picture>,
     /// The layout last asked of the decoder.
     output: PixelOutput,
+    /// Images only until then: the window refused a surface.
+    nv12_paused_until: Option<Instant>,
     /// A picture stepped to while paused, shown on the next pull.
     pending_step: Option<VideoFrame>,
 }
@@ -108,8 +120,15 @@ impl FfmpegBackend {
             playing: false,
             image: None,
             surface: None,
+            nv12_paused_until: None,
             pending_step: None,
         })
+    }
+
+    /// Whether to hand over NV12 surfaces now: on Windows, unless the
+    /// window refused one less than [`NV12_RETRY`] ago.
+    fn nv12_now(&self, now: Instant) -> bool {
+        surface::NV12_SURFACES && nv12_allowed(self.nv12_paused_until, now)
     }
 
     /// Connect the soundtrack once the decoder found one.
@@ -122,20 +141,21 @@ impl FfmpegBackend {
         }
     }
 
-    /// Ask the decoder for the layout the renderer draws now.
-    fn sync_output(&mut self) {
-        let wanted = wanted_output();
+    /// Ask the decoder for NV12 or BGRA.
+    fn sync_output(&mut self, nv12: bool) {
+        let wanted = output_for(nv12);
         if wanted != self.output {
             self.player.set_output(wanted);
             self.output = wanted;
         }
     }
 
-    fn show(&mut self, frame: VideoFrame) -> Option<(Picture, PictureStats)> {
-        self.sync_output();
+    fn show(&mut self, frame: VideoFrame, now: Instant) -> Option<(Picture, PictureStats)> {
+        let nv12 = self.nv12_now(now);
+        self.sync_output(nv12);
         let started = Instant::now();
         let (width, height, decoded_us) = (frame.width, frame.height, frame.convert_us);
-        let frame = match self.surface_picture(frame) {
+        let frame = match self.surface_picture(frame, nv12) {
             Ok(shown) => return Some(shown),
             Err(frame) => frame,
         };
@@ -161,14 +181,15 @@ impl FfmpegBackend {
         self.surface = None;
     }
 
-    /// An NV12 picture as a surface, while the renderer draws them; the
+    /// An NV12 picture as a surface when `nv12` ([`Self::nv12_now`]); the
     /// picture back otherwise (it becomes an image).
     #[cfg(target_os = "windows")]
     fn surface_picture(
         &mut self,
         frame: VideoFrame,
+        nv12: bool,
     ) -> Result<(Picture, PictureStats), VideoFrame> {
-        if !surface::nv12_wanted() {
+        if !nv12 {
             return Err(frame);
         }
         let (width, height, convert_us) = (frame.width, frame.height, frame.convert_us);
@@ -193,20 +214,9 @@ impl FfmpegBackend {
     fn surface_picture(
         &mut self,
         frame: VideoFrame,
+        _nv12: bool,
     ) -> Result<(Picture, PictureStats), VideoFrame> {
         Err(frame)
-    }
-
-    /// The renderer stopped drawing NV12 while a surface is on screen:
-    /// the same picture as an image.
-    fn surface_as_image(&mut self) -> Option<Picture> {
-        if self.surface.is_none() || surface::nv12_wanted() {
-            return None;
-        }
-        self.sync_output();
-        let image = self.surface.take()?.snapshot()?;
-        self.show_image(image.clone());
-        Some(Picture::Image(image))
     }
 }
 
@@ -308,9 +318,10 @@ impl Backend for FfmpegBackend {
             None => self.player.take_frame_at(present.at),
         };
         let display_secs = frame.as_ref().map(|frame| frame.pts);
-        let (picture, stats) = match frame.and_then(|frame| self.show(frame)) {
+        let now = Instant::now();
+        let (picture, stats) = match frame.and_then(|frame| self.show(frame, now)) {
             Some((picture, stats)) => (Some(picture), Some(stats)),
-            None => (self.surface_as_image(), None),
+            None => (None, None),
         };
         Pulled {
             picture,
@@ -328,6 +339,16 @@ impl Backend for FfmpegBackend {
         self.player
             .error()
             .map(|err| PlayerError::new(ErrorKind::Decode, err))
+    }
+
+    /// The window refused the surface on screen: images for [`NV12_RETRY`],
+    /// starting with this picture converted on the CPU.
+    fn replace_refused(&mut self, now: Instant) -> Option<Picture> {
+        self.nv12_paused_until = now.checked_add(NV12_RETRY);
+        self.sync_output(false);
+        let image = self.surface.take()?.snapshot()?;
+        self.show_image(image.clone());
+        Some(Picture::Image(image))
     }
 }
 
@@ -374,4 +395,23 @@ pub(super) fn first_picture(path: &Path, at: f64) -> Option<(VideoFrame, Option<
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NV12_RETRY, nv12_allowed, output_for};
+    use quill::video_decode::PixelOutput;
+    use std::time::Instant;
+
+    #[test]
+    fn a_refused_surface_pauses_nv12_for_a_while() {
+        let now = Instant::now();
+        assert!(nv12_allowed(None, now));
+        let until = now + NV12_RETRY;
+        assert!(!nv12_allowed(Some(until), now));
+        assert!(!nv12_allowed(Some(until), now + NV12_RETRY / 2));
+        assert!(nv12_allowed(Some(until), until));
+        assert_eq!(output_for(true), PixelOutput::Nv12);
+        assert_eq!(output_for(false), PixelOutput::Bgra);
+    }
 }

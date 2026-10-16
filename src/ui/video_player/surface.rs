@@ -7,7 +7,7 @@
 //!
 //! The NV12 helpers build on every platform (a `SurfaceFrame` is plain
 //! data), so their tests run on any machine; only Windows asks the decoder
-//! for NV12 ([`nv12_wanted`]).
+//! for NV12 ([`NV12_SURFACES`]).
 #![deny(clippy::indexing_slicing)]
 // The NV12 frame helpers serve the Windows path only.
 #![cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -17,19 +17,10 @@ use gpui_kit::{RenderImage, SurfaceFormat, SurfaceFrame};
 use quill::video_decode::{Pixels, VideoFrame};
 use std::sync::Arc;
 
-/// Whether to decode into NV12 now: on Windows while the DirectX renderer
-/// offers NV12 surfaces (it stops after a texture or pipeline failure, and
-/// offers them again after a recovered device loss); never elsewhere.
-pub(super) fn nv12_wanted() -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        gpui_windows::surface_support::nv12_available()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        false
-    }
-}
+/// Whether this platform's renderer draws NV12 surfaces: Windows only.
+/// Each window's renderer then says per frame whether it drew it
+/// ([`draw_state`]); a refused frame is shown as an image.
+pub(super) const NV12_SURFACES: bool = cfg!(target_os = "windows");
 
 /// The decoder's colour description as the GPUI core's.
 pub(super) fn gpui_color(color: quill::video_decode::YuvColor) -> gpui_kit::YuvColor {
@@ -113,7 +104,7 @@ pub(super) fn turn_frame(
 }
 
 /// An NV12 frame converted to a BGRA image on the CPU (Copy Frame, and
-/// the picture on screen when the renderer stops drawing NV12).
+/// the picture on screen when the renderer refuses it).
 pub(super) fn frame_image(frame: &SurfaceFrame) -> Option<Arc<RenderImage>> {
     if frame.format() != SurfaceFormat::Nv12 {
         return None;
@@ -177,10 +168,22 @@ pub(super) fn snapshot(surface: &super::SurfaceHandle) -> Option<Arc<RenderImage
     frame_image(surface)
 }
 
+/// What the renderer did with the surface. macOS pixel buffers are always
+/// drawn, so they count as drawn.
+#[cfg(target_os = "macos")]
+pub(super) fn draw_state(_surface: &super::SurfaceHandle) -> gpui_kit::SurfaceDrawState {
+    gpui_kit::SurfaceDrawState::Drawn
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn draw_state(surface: &super::SurfaceHandle) -> gpui_kit::SurfaceDrawState {
+    surface.draw_state()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{frame_image, gpui_color, surface_frame, turn_frame};
-    use gpui_kit::{SurfaceFormat, SurfaceFrame, SurfaceFrameError};
+    use gpui_kit::{SurfaceDrawState, SurfaceFormat, SurfaceFrame, SurfaceFrameError};
     use quill::video_decode::{Pixels, VideoFrame, YuvColor, YuvMatrix};
     use std::sync::Arc;
 
@@ -239,6 +242,21 @@ mod tests {
             SurfaceFormat::Rgba16Float.byte_len(2, 0),
             Err(SurfaceFrameError::Empty)
         );
+    }
+
+    #[test]
+    fn a_frame_remembers_what_the_renderer_did_with_it() {
+        let frame = SurfaceFrame::new(4, 2, SurfaceFormat::Nv12, bytes(12)).expect("valid");
+        assert_eq!(frame.draw_state(), SurfaceDrawState::Pending);
+        frame.mark_drawn();
+        assert_eq!(frame.draw_state(), SurfaceDrawState::Drawn);
+        // Another window refusing it later still counts.
+        frame.mark_refused();
+        assert_eq!(frame.draw_state(), SurfaceDrawState::Refused);
+        // ... and a refusal is not undone by a draw elsewhere: the
+        // producer replaces the frame.
+        frame.mark_drawn();
+        assert_eq!(frame.draw_state(), SurfaceDrawState::Refused);
     }
 
     #[test]

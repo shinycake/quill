@@ -131,6 +131,25 @@ impl Picture {
             Picture::Surface(surface) => surface::surface_size(surface),
         }
     }
+
+    /// The renderer hasn't said yet what it did with this surface (Windows
+    /// NV12, painted but not drawn yet), or it refused it: the element
+    /// keeps asking for frames until the picture is settled on screen.
+    pub(crate) fn unsettled(&self) -> bool {
+        match self {
+            Picture::Image(_) => false,
+            Picture::Surface(surface) => surface::draw_state(surface) != SurfaceDrawState::Drawn,
+        }
+    }
+
+    /// The renderer could not draw this surface (Windows NV12): it has to
+    /// be shown as an image.
+    pub(crate) fn refused(&self) -> bool {
+        match self {
+            Picture::Image(_) => false,
+            Picture::Surface(surface) => surface::draw_state(surface) == SurfaceDrawState::Refused,
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -154,6 +173,15 @@ impl Picture {
     pub(crate) fn size(&self) -> (u32, u32) {
         let Picture::Image(image) = self;
         image_size(image)
+    }
+
+    /// Images are drawn as they are.
+    pub(crate) fn unsettled(&self) -> bool {
+        false
+    }
+
+    pub(crate) fn refused(&self) -> bool {
+        false
     }
 }
 
@@ -253,6 +281,12 @@ trait Backend {
     /// [`Self::status`] (`None`: a file).
     fn live_status(&mut self, now: Instant) -> Option<LiveStatus> {
         let _ = now;
+        None
+    }
+    /// The renderer refused the surface on screen (Windows NV12): the same
+    /// picture as an image, as decoded (the player turns it), and images
+    /// for a while. `None` when the backend has no such surface.
+    fn replace_refused(&mut self, _now: Instant) -> Option<Picture> {
         None
     }
 }
@@ -718,6 +752,7 @@ impl VideoPlayer {
             return self.current_picture();
         };
         self.update_status(now);
+        self.replace_refused(now);
         let state = self.state();
         let pulled = if matches!(state, PlayState::Opening | PlayState::Failed) {
             Pulled::default()
@@ -757,6 +792,39 @@ impl VideoPlayer {
         self.current_picture()
     }
 
+    /// The renderer refused the surface on screen (Windows NV12, this
+    /// window couldn't draw it): show the same picture as an image, from
+    /// the backend (which owns it and goes on with images for a while) or,
+    /// failing that, converted here.
+    fn replace_refused(&self, now: Instant) {
+        let refused = self
+            .read_inner(|inner| inner.shown.as_ref().is_some_and(Picture::refused))
+            .unwrap_or(false);
+        if !refused {
+            return;
+        }
+        let raw = self
+            .with_backend(|backend| backend.replace_refused(now))
+            .flatten();
+        let (turns, mirrored) = self
+            .read_inner(|inner| (inner.turns, inner.mirrored))
+            .unwrap_or((0, false));
+        if let Some(raw) = raw {
+            // Turning copies the picture: no borrow held meanwhile.
+            let turned = turn(&raw, turns, mirrored);
+            self.with_inner(|inner| inner.show(raw, turned));
+            return;
+        }
+        let image = self
+            .read_inner(|inner| inner.shown.as_ref().and_then(Picture::snapshot))
+            .flatten();
+        self.with_inner(|inner| match image {
+            // Already turned: kept as the turned image, so it is retired.
+            Some(image) => inner.show(Picture::Image(image.clone()), Some(Picture::Image(image))),
+            None => inner.shown = None,
+        });
+    }
+
     /// After the picture was painted: what the next frame request needs.
     pub(super) fn frame_demand(&self, now: Instant) -> FrameDemand {
         let interval = self
@@ -771,8 +839,12 @@ impl VideoPlayer {
                 transport.state == PlayState::Opening
                     || now.saturating_duration_since(since) < AWAIT_PICTURE
             });
+            // A surface the renderer hasn't drawn yet, or refused: another
+            // frame settles it (drawn, or replaced by an image), even while
+            // paused.
+            let settling = inner.shown.as_ref().is_some_and(Picture::unsettled);
             FrameDemand {
-                animates: (transport.state.animates() || awaiting)
+                animates: (transport.state.animates() || awaiting || settling)
                     && transport.state != PlayState::Failed
                     && !inner.asleep,
                 plays_sound: transport.has_sound && transport.volume > 0.0,
