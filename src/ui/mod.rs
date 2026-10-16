@@ -68,6 +68,7 @@ pub(crate) mod interface_zoom;
 mod links_state;
 mod lru;
 mod message_state;
+mod mini_image;
 mod motion;
 mod nested_click;
 mod new_contact;

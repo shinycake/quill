@@ -150,11 +150,9 @@ fn photo_tile(
     {
         Some(mini) => tile
             .child(
-                img(ImageSource::Image(std::sync::Arc::new(
-                    gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Jpeg, mini.data.clone()),
-                )))
-                .size(side)
-                .object_fit(ObjectFit::Cover),
+                img(super::mini_image::mini_image(mini))
+                    .size(side)
+                    .object_fit(ObjectFit::Cover),
             )
             .into_any_element(),
         None => tile.into_any_element(),

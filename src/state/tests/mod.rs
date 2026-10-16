@@ -22,6 +22,7 @@ mod group_admin;
 mod groups;
 mod groups_more;
 mod history_window_cap;
+mod history_window_cap_live;
 mod inline_members;
 mod main_profile_tab;
 mod masks;

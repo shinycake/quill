@@ -62,7 +62,7 @@ impl PlaybackSize {
     }
 
     /// Decoded frames kept, in bytes.
-    fn budget_bytes(self) -> usize {
+    pub(super) fn budget_bytes(self) -> usize {
         match self {
             Self::Sticker => 48 * 1024 * 1024,
             Self::Emoji => 32 * 1024 * 1024,
