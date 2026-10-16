@@ -448,7 +448,21 @@ fn stamp() -> u128 {
 }
 
 fn run_ffmpeg(args: &[String]) -> Result<(), String> {
-    let output = crate::media_tools::quiet_command("ffmpeg")
+    run_program(crate::media_tools::quiet_command("ffmpeg"), args)
+}
+
+/// Run an encode that names `libx264` on the first ffmpeg with an H.264
+/// encoder (`pixels` is the output's area, for the bitrate).
+fn run_h264(args: &[String], pixels: u32) -> Result<(), String> {
+    let job = crate::video_encoder::h264_job("Video edits", args, pixels)?;
+    run_program(
+        crate::video_encoder::quiet_command_for(&job.program),
+        &job.args,
+    )
+}
+
+fn run_program(mut command: std::process::Command, args: &[String]) -> Result<(), String> {
+    let output = command
         .args(args)
         .output()
         .map_err(|_| "ffmpeg isn't available".to_string())?;
@@ -475,7 +489,8 @@ pub fn render_edited(
         edits,
         source,
     );
-    run_ffmpeg(&args)?;
+    let (width, height) = edits.edited_size(source);
+    run_h264(&args, width.saturating_mul(height))?;
     crate::local_path::pick_send_path(&output).ok_or_else(|| "couldn't prepare the video".into())
 }
 

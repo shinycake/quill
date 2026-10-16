@@ -87,9 +87,51 @@ pub fn avf_index(preferred: Option<&str>, list: &[(usize, String)]) -> String {
         .map_or_else(|| "default".to_string(), |(index, _)| index.to_string())
 }
 
+/// A PulseAudio source `ffmpeg -sources pulse` lists: its name and the
+/// description in brackets (what the sound settings and the call engine
+/// show).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PulseSource {
+    pub name: String,
+    pub description: String,
+}
+
+/// Parse `ffmpeg -sources pulse`: a header line, then one source per line,
+/// `*` marking the default. Monitors of output devices are not microphones
+/// and are dropped.
+pub fn parse_pulse_sources(listing: &str) -> Vec<PulseSource> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim_start_matches(['*', ' ', '\t']).trim_end();
+            let (name, rest) = line.split_once(char::is_whitespace)?;
+            let description = rest.trim().strip_prefix('[')?.strip_suffix(']')?;
+            (!name.ends_with(".monitor")).then(|| PulseSource {
+                name: name.to_string(),
+                description: description.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The PulseAudio source for the picked microphone (matched by description
+/// or name), `default` when none is picked or it is not listed.
+pub fn pick_pulse_source(preferred: Option<&str>, sources: &[PulseSource]) -> String {
+    preferred
+        .and_then(|wanted| {
+            sources.iter().find(|source| {
+                same_name(wanted, &source.description) || same_name(wanted, &source.name)
+            })
+        })
+        .map_or_else(|| "default".to_string(), |source| source.name.clone())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{avf_index, parse_avfoundation_devices, pick_device, pick_v4l2};
+    use super::{
+        avf_index, parse_avfoundation_devices, parse_pulse_sources, pick_device, pick_pulse_source,
+        pick_v4l2,
+    };
     use std::path::PathBuf;
 
     fn names(list: &[&str]) -> Vec<String> {
@@ -169,5 +211,45 @@ mod tests {
             avf_index(Some("MacBook Pro Microphone"), &devices.audio),
             "0"
         );
+    }
+
+    const PULSE_LISTING: &str = "Auto-detected sources for pulse:\n\
+        * alsa_input.pci-0000_00_1f.3.analog-stereo [Built-in Audio Analog Stereo]\n\
+        \x20 alsa_input.usb-046d_C920-02.analog-stereo [C920 Analog Stereo]\n\
+        \x20 alsa_output.pci-0000_00_1f.3.analog-stereo.monitor [Monitor of Built-in Audio Analog Stereo]\n";
+
+    #[test]
+    fn pulse_listing_has_microphones_and_no_monitors() {
+        let sources = parse_pulse_sources(PULSE_LISTING);
+        let names: Vec<_> = sources.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "alsa_input.pci-0000_00_1f.3.analog-stereo",
+                "alsa_input.usb-046d_C920-02.analog-stereo"
+            ]
+        );
+        assert_eq!(
+            sources.get(1).map(|s| s.description.as_str()),
+            Some("C920 Analog Stereo")
+        );
+        assert!(parse_pulse_sources("").is_empty());
+        assert!(parse_pulse_sources("Cannot connect to pulse\n").is_empty());
+    }
+
+    #[test]
+    fn pulse_pick_matches_description_or_name_and_defaults() {
+        let sources = parse_pulse_sources(PULSE_LISTING);
+        assert_eq!(
+            pick_pulse_source(Some("c920 analog stereo"), &sources),
+            "alsa_input.usb-046d_C920-02.analog-stereo"
+        );
+        assert_eq!(
+            pick_pulse_source(Some("alsa_input.pci-0000_00_1f.3.analog-stereo"), &sources),
+            "alsa_input.pci-0000_00_1f.3.analog-stereo"
+        );
+        assert_eq!(pick_pulse_source(Some("Unplugged"), &sources), "default");
+        assert_eq!(pick_pulse_source(None, &sources), "default");
+        assert_eq!(pick_pulse_source(Some("C920"), &[]), "default");
     }
 }

@@ -6,7 +6,8 @@
 #     quill-webview.exe          mini apps (WebView2; the Evergreen runtime ships with Windows 10/11)
 #     tdjson.dll                         TDLib, OpenSSL and zlib linked in statically
 #     ntgcalls.dll rlottie.dll
-#     quillvideo.dll av{codec,format,util}-N.dll sw{scale,resample}-N.dll   in-process video (FFmpeg, LGPL-2.1+)
+#     quillvideo.dll av{codec,format,util,filter,device}-N.dll sw{scale,resample}-N.dll   in-process video (FFmpeg, LGPL-2.1+)
+#     ffmpeg.exe ffprobe.exe             the programs for video send/edit, photos, camera (same FFmpeg build, no libx264)
 #     licenses/ffmpeg/                   FFmpeg license texts + exact source and configure line
 #     README.txt LICENSE THIRD_PARTY.md THIRD_PARTY_LICENSES.md
 #     licenses/                          native-library license texts and notices
@@ -29,8 +30,11 @@ $ffmpeg = Pick $env:QUILL_FFMPEG_PREFIX 'vendor/ffmpeg/prefix'
 $out = Pick $env:OUT 'dist/windows'
 
 $videoDlls = @(Get-ChildItem -File (Join-Path $ffmpeg 'bin') -Filter *.dll -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '^(quillvideo|avcodec-\d+|avformat-\d+|avutil-\d+|swscale-\d+|swresample-\d+)\.dll$' })
-if ($videoDlls.Count -ne 6) { throw "expected quillvideo.dll and 5 FFmpeg DLLs in $ffmpeg/bin, found $($videoDlls.Name -join ', ')" }
+    Where-Object { $_.Name -match '^(quillvideo|avcodec-\d+|avformat-\d+|avutil-\d+|avfilter-\d+|avdevice-\d+|swscale-\d+|swresample-\d+)\.dll$' })
+if ($videoDlls.Count -ne 8) { throw "expected quillvideo.dll and 7 FFmpeg DLLs in $ffmpeg/bin, found $($videoDlls.Name -join ', ')" }
+foreach ($exe in 'ffmpeg.exe', 'ffprobe.exe') {
+    if (-not (Test-Path (Join-Path $ffmpeg "bin/$exe"))) { throw "missing $ffmpeg/bin/$exe" }
+}
 foreach ($f in @($bin, $webview, $ntg, $rlottie, (Join-Path $tdDir 'tdjson.dll'))) {
     if (-not (Test-Path $f)) { throw "missing input $f" }
 }
@@ -50,6 +54,9 @@ Copy-Item $rlottie (Join-Path $pkg 'rlottie.dll')
 # In-process video: the shim plus FFmpeg's DLLs, dynamically linked so they
 # stay replaceable (LGPL), with FFmpeg's license texts.
 foreach ($dll in $videoDlls) { Copy-Item $dll.FullName $pkg }
+# The command-line tools Quill runs for the video editor, photo downscale,
+# round videos and the camera (src/media_tools.rs finds them next to quill.exe).
+Copy-Item (Join-Path $ffmpeg 'bin/ffmpeg.exe'), (Join-Path $ffmpeg 'bin/ffprobe.exe') $pkg
 $lic = Join-Path $pkg 'licenses/ffmpeg'
 New-Item -ItemType Directory -Force $lic | Out-Null
 Copy-Item (Join-Path $ffmpeg 'share/quillvideo/*') $lic

@@ -51,7 +51,7 @@ jobs:
             zlib1g-dev libssl-dev libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libwebkit2gtk-4.1-dev libsoup-3.0-dev \
             libwayland-dev libxcb1-dev libx11-xcb-dev libxcb-xkb-dev libfontconfig-dev \
-            libfreetype-dev libasound2-dev libvulkan-dev libdbus-1-dev libclang-dev nasm
+            libfreetype-dev libasound2-dev libpulse-dev libvulkan-dev libdbus-1-dev libclang-dev nasm
       - name: restore TDLib build
         id: tdlib-cache
         uses: actions/cache/restore@v5
@@ -85,7 +85,7 @@ jobs:
           path: vendor/rlottie/prefix
           key: rlottie-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-rlottie.sh') }}
       # In-process video (docs/decisions/codex-video-cross-platform.md):
-      # FFmpeg (LGPL, shared, decoders only) + the quillvideo shim.
+      # FFmpeg (LGPL, shared) with the ffmpeg/ffprobe programs + the quillvideo shim.
       - name: restore FFmpeg build
         id: ffmpeg-cache
         uses: actions/cache/restore@v5
@@ -147,6 +147,8 @@ jobs:
           "$RUNNER_TEMP/extract/quill-linux-x86_64/quill" --version
           bash "$RUNNER_TEMP/extract/quill-linux-x86_64/install.sh" "$RUNNER_TEMP/prefix"
           "$RUNNER_TEMP/prefix/bin/quill" --version
+          bash scripts/check-ffmpeg-tools.sh "$RUNNER_TEMP/extract/quill-linux-x86_64" \
+            --expect-encoder mpeg4 --expect-encoder aac --expect-encoder mjpeg --expect-encoder png
           grep -q "^Exec=$RUNNER_TEMP/prefix/opt/quill/quill" "$RUNNER_TEMP/prefix/share/applications/org.shinycake.quill.desktop"
           grep -qx "Exec=$RUNNER_TEMP/prefix/opt/quill/quill --quit" "$RUNNER_TEMP/prefix/share/applications/org.shinycake.quill.desktop"
       # The in-app updater (src/updater.rs) downloads the bare executable named

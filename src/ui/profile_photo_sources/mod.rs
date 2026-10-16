@@ -54,15 +54,16 @@ fn work_dir() -> PathBuf {
 
 /// Run ffmpeg to completion; the error is a short sentence for the panel.
 fn run_ffmpeg(args: &[String], log: &Path) -> Result<(), String> {
-    if !quill::media_tools::is_installed("ffmpeg") {
-        return Err(quill::media_tools::ffmpeg_missing_message(tr(
-            keys::Q_PEOPLE_VIDEO_AVATARS,
-        )));
-    }
+    let side = quill::profile_photo_video::AVATAR_VIDEO_SIDE;
+    let job = quill::video_encoder::h264_job(
+        tr(keys::Q_PEOPLE_VIDEO_AVATARS),
+        args,
+        side.saturating_mul(side),
+    )?;
     let log_file = std::fs::File::create(log).map_err(|e| e.to_string())?;
-    let status = quill::media_tools::command("ffmpeg")
+    let status = quill::video_encoder::quiet_command_for(&job.program)
         .args(["-hide_banner", "-loglevel", "error"])
-        .args(args)
+        .args(&job.args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log_file)

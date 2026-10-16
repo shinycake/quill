@@ -145,51 +145,17 @@ pub fn get_default_profile_photo_custom_emoji_stickers(extra: RequestId) -> Stri
     .to_string()
 }
 
-/// The camera input of `media_tools::capture_input` without the
-/// microphone. `args` is the full list (video and audio inputs).
-pub fn video_only_input(args: &[String]) -> Vec<String> {
-    let mut kept = Vec::new();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        kept.push(arg.clone());
-        if arg == "-i" {
-            if let Some(device) = iter.next() {
-                kept.push(camera_device(device));
-            }
-            break;
-        }
-    }
-    kept
-}
-
-/// The camera part of an input name: AVFoundation's `video:audio` pair
-/// keeps the video and drops the sound, DirectShow's `video=..:audio=..`
-/// the same.
-fn camera_device(device: &str) -> String {
-    if let Some((video, _)) = device.split_once(":audio=") {
-        return video.to_string();
-    }
-    if let Some((video, _)) = device.split_once(':') {
-        return format!("{video}:none");
-    }
-    device.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         PhotoSticker, background_fill, gradient_preset, set_profile_photo_animation,
-        set_profile_photo_sticker, video_only_input,
+        set_profile_photo_sticker,
     };
     use crate::ids::RequestId;
     use serde_json::{Value, json};
 
     fn parse(text: String) -> Value {
         serde_json::from_str(&text).unwrap()
-    }
-
-    fn list(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
@@ -287,45 +253,5 @@ mod tests {
         assert_eq!(v["photo"]["animation"]["@type"], "inputFileLocal");
         assert_eq!(v["photo"]["animation"]["path"], "/tmp/avatar.mp4");
         assert_eq!(v["photo"]["main_frame_timestamp"], 2.5);
-    }
-
-    #[test]
-    fn camera_input_drops_the_microphone() {
-        let mac = list(&[
-            "-f",
-            "avfoundation",
-            "-framerate",
-            "30",
-            "-pixel_format",
-            "nv12",
-            "-i",
-            "default:default",
-        ]);
-        let kept = video_only_input(&mac);
-        assert_eq!(kept.last().unwrap(), "default:none");
-        assert_eq!(kept.len(), mac.len());
-
-        let linux = list(&[
-            "-f",
-            "v4l2",
-            "-framerate",
-            "15",
-            "-i",
-            "/dev/video0",
-            "-f",
-            "pulse",
-            "-i",
-            "default",
-        ]);
-        assert_eq!(
-            video_only_input(&linux),
-            list(&["-f", "v4l2", "-framerate", "15", "-i", "/dev/video0"])
-        );
-
-        let windows = list(&["-f", "dshow", "-i", "video=Cam:audio=Mic"]);
-        assert_eq!(
-            video_only_input(&windows),
-            list(&["-f", "dshow", "-i", "video=Cam"])
-        );
     }
 }

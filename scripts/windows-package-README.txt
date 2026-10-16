@@ -6,7 +6,11 @@ Unzip this folder anywhere and run quill.exe. Keep the DLLs next to it:
   ntgcalls.dll                       call media engine (LGPLv3 sidecar, loaded at runtime)
   rlottie.dll                        animated stickers
   quillvideo.dll, av*.dll, sw*.dll   video playback (FFmpeg, LGPL-2.1+; licenses\ffmpeg)
+  ffmpeg.exe, ffprobe.exe            sending and editing videos, photo resizing, round videos,
+                                     the profile photo camera (the same FFmpeg build; licenses\ffmpeg)
 
+ffmpeg.exe and ffprobe.exe must stay next to quill.exe with the DLLs. Quill uses them
+before any ffmpeg on your PATH. They need the Media Feature Pack on Windows N editions.
 Needs Windows 10 or newer. Nothing is installed or written outside your user
 profile. Account data lives in the per-user application data directory,
 never next to the executable.
