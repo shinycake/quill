@@ -202,7 +202,10 @@ impl QuillApp {
         } else {
             ObjectFit::Contain
         };
-        // The last frame small and blurred behind a picture shown whole.
+        // The last frame small and blurred behind a picture shown whole,
+        // cropped to the frame's shape from its center as tdesktop's
+        // `PrepareBlurredBackground` does (stretched, the band above the
+        // picture matched nothing in it).
         let backdrop = (!expands)
             .then(|| player.as_ref().and_then(VideoPlayer::paused_picture))
             .flatten()
@@ -216,7 +219,7 @@ impl QuillApp {
                             .absolute()
                             .inset_0()
                             .size_full()
-                            .object_fit(ObjectFit::Fill),
+                            .object_fit(ObjectFit::Cover),
                     )
                     .child(
                         div()

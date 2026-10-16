@@ -509,6 +509,10 @@ fn the_header_is_the_live_controller(cx: &mut TestAppContext) {
     assert!(!present(vcx, "viewer-scrubber"));
     assert!(!present(vcx, "media-viewer-play"));
     // A playing story draws no live overlay.
+    assert!(
+        find(vcx, "live-opening").is_none(),
+        "no placeholder over it"
+    );
     assert!(find(vcx, "live-spinner").is_none());
     assert!(find(vcx, "live-stalled").is_none());
 }
