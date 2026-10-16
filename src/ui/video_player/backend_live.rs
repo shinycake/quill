@@ -38,7 +38,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::live_picture::{self, Prepared, Surfaces, Target};
-use super::transport::{BackendStatus, LiveStatus};
+use super::transport::{BackendStatus, LiveStatus, Want};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled, Purpose, VideoPlayer};
 use crate::ui::inline_video::INLINE_MAX_EDGE;
 use gpui_kit::*;
@@ -593,11 +593,9 @@ impl Backend for LiveBackend {
     }
 
     // A live feed has no transport to drive.
-    fn play(&mut self, _rate: f64) {}
-    fn pause(&mut self) {}
+    fn sync(&mut self, _want: Want) {}
     fn seek(&mut self, _secs: f64) {}
     fn set_volume(&mut self, _volume: f32) {}
-    fn set_rate(&mut self, _rate: f64, _playing: bool) {}
     fn step_frame(&mut self, _forward: bool) {}
 
     fn take_picture(&mut self, _present: &Present) -> Pulled {

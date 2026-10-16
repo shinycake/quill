@@ -11,7 +11,7 @@
 //! player only calls its backend from the UI thread).
 #![deny(clippy::indexing_slicing)]
 
-use super::transport::BackendStatus;
+use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
 #[cfg(feature = "demo-capture")]
 use gpui_kit::RenderImage;
@@ -57,9 +57,8 @@ pub(super) struct AvPlayerBackend {
     output: Retained<AVPlayerItemVideoOutput>,
     /// The item's pitch algorithm as opened, restored at normal speed.
     default_pitch: Retained<AVAudioTimePitchAlgorithm>,
-    /// Play was asked for (AVPlayer's rate drops to 0 at the end).
-    playing: bool,
-    rate: f64,
+    /// The transport's intent as last synced.
+    want: Want,
     /// The present time of the last pull.
     last_present: Option<Instant>,
     /// The buffer state as last read, and when.
@@ -72,13 +71,6 @@ struct BufferState {
     empty: bool,
     keeps_up: bool,
     ranges: Vec<Range<f64>>,
-}
-
-/// AVPlayer drops its rate to 0 on a stall and, not waiting to minimize
-/// stalls, never raises it again: once the buffer keeps up while play is
-/// still wanted (and the clip is not at its end), it must be told again.
-fn resumes_after_stall(wants_play: bool, rate: f32, at_end: bool, keeps_up: bool) -> bool {
-    wants_play && rate == 0.0 && !at_end && keeps_up
 }
 
 impl AvPlayerBackend {
@@ -120,8 +112,7 @@ impl AvPlayerBackend {
                 item,
                 output,
                 default_pitch,
-                playing: false,
-                rate: 1.0,
+                want: Want::default(),
                 last_present: None,
                 buffer: BufferState::default(),
                 buffer_read: None,
@@ -139,6 +130,43 @@ impl AvPlayerBackend {
         // SAFETY: as above.
         let secs = unsafe { self.item.duration().seconds() };
         (secs.is_finite() && secs > 0.0).then_some(secs)
+    }
+
+    fn at_end_position(&self) -> bool {
+        let position = self.position();
+        self.duration()
+            .is_some_and(|total| position >= total - END_SLACK)
+    }
+
+    /// The item's status, and the player's rate (0 when idle).
+    fn engine_state(&self) -> (AVPlayerItemStatus, f32) {
+        // SAFETY: reading the status and rate of a live item and player on
+        // the main thread.
+        unsafe { (self.item.status(), self.player.rate()) }
+    }
+
+    /// Read the buffer state if [`BUFFER_POLL`] passed since the last read.
+    fn read_buffer(&mut self, now: Instant) {
+        if self
+            .buffer_read
+            .is_some_and(|at| now.saturating_duration_since(at) < BUFFER_POLL)
+        {
+            return;
+        }
+        // SAFETY: reading the buffer state of a live item on the main
+        // thread.
+        let (empty, keeps_up) = unsafe {
+            (
+                self.item.isPlaybackBufferEmpty(),
+                self.item.isPlaybackLikelyToKeepUp(),
+            )
+        };
+        self.buffer = BufferState {
+            empty,
+            keeps_up,
+            ranges: self.buffered(),
+        };
+        self.buffer_read = Some(now);
     }
 
     /// Time-domain stretching keeps voices intelligible away from 1x.
@@ -187,44 +215,16 @@ impl AvPlayerBackend {
 
 impl Backend for AvPlayerBackend {
     fn status(&mut self) -> BackendStatus {
-        let now = Instant::now();
-        if self
-            .buffer_read
-            .is_none_or(|at| now.saturating_duration_since(at) >= BUFFER_POLL)
-        {
-            // SAFETY: reading the buffer state of a live item on the main
-            // thread.
-            let (empty, keeps_up) = unsafe {
-                (
-                    self.item.isPlaybackBufferEmpty(),
-                    self.item.isPlaybackLikelyToKeepUp(),
-                )
-            };
-            self.buffer = BufferState {
-                empty,
-                keeps_up,
-                ranges: self.buffered(),
-            };
-            self.buffer_read = Some(now);
-        }
-        // SAFETY: reading the status and rate of a live item and player on
-        // the main thread.
-        let (status, rate) = unsafe { (self.item.status(), self.player.rate()) };
-        let ready = status == AVPlayerItemStatus::ReadyToPlay;
-        let position = self.position();
-        let duration = self.duration();
-        let at_end_position = duration.is_some_and(|total| position >= total - END_SLACK);
-        if ready && resumes_after_stall(self.playing, rate, at_end_position, self.buffer.keeps_up) {
-            // SAFETY: messaging a live AVPlayer on the main thread.
-            unsafe { self.player.setRate(self.rate as f32) };
-        }
+        self.read_buffer(Instant::now());
+        let (status, rate) = self.engine_state();
+        let playing = self.want.playing;
         BackendStatus {
-            ready,
+            ready: status == AVPlayerItemStatus::ReadyToPlay,
             failed: status == AVPlayerItemStatus::Failed,
-            position,
-            duration,
-            stalled: self.playing && self.buffer.empty && !self.buffer.keeps_up,
-            at_end: self.playing && rate == 0.0 && at_end_position,
+            position: self.position(),
+            duration: self.duration(),
+            stalled: playing && self.buffer.empty && !self.buffer.keeps_up,
+            at_end: playing && rate == 0.0 && self.at_end_position(),
             buffered: self.buffer.ranges.clone(),
             // AVPlayer mixes the soundtrack itself; a silent clip just
             // plays nothing.
@@ -232,19 +232,30 @@ impl Backend for AvPlayerBackend {
         }
     }
 
-    fn play(&mut self, rate: f64) {
-        self.rate = rate;
-        self.apply_pitch(rate);
-        // SAFETY: messaging a live AVPlayer on the main thread; a non-zero
-        // rate starts playback at that speed.
-        unsafe { self.player.setRate(rate as f32) };
-        self.playing = true;
-    }
-
-    fn pause(&mut self) {
-        // SAFETY: as above.
-        unsafe { self.player.pause() };
-        self.playing = false;
+    fn sync(&mut self, want: Want) {
+        if (want.rate - self.want.rate).abs() > RATE_TOLERANCE {
+            self.apply_pitch(want.rate);
+        }
+        self.want = want;
+        self.read_buffer(Instant::now());
+        let (status, rate) = self.engine_state();
+        let engine = Engine {
+            ready: status == AVPlayerItemStatus::ReadyToPlay,
+            running: rate != 0.0,
+            rate: f64::from(rate),
+            at_end: self.at_end_position(),
+            keeps_up: self.buffer.keeps_up,
+        };
+        match reconcile(want, engine) {
+            // SAFETY: messaging a live AVPlayer on the main thread; a
+            // non-zero rate plays at that speed.
+            Some(Correction::Start | Correction::Rate) => unsafe {
+                self.player.setRate(want.rate as f32)
+            },
+            // SAFETY: as above.
+            Some(Correction::Pause) => unsafe { self.player.pause() },
+            None => {}
+        }
     }
 
     fn seek(&mut self, secs: f64) {
@@ -256,20 +267,12 @@ impl Backend for AvPlayerBackend {
             self.player
                 .seekToTime_toleranceBefore_toleranceAfter(time, zero, zero);
         }
+        self.buffer_read = None;
     }
 
     fn set_volume(&mut self, volume: f32) {
         // SAFETY: messaging a live AVPlayer on the main thread.
         unsafe { self.player.setVolume(volume.clamp(0.0, 1.0)) };
-    }
-
-    fn set_rate(&mut self, rate: f64, playing: bool) {
-        self.rate = rate;
-        self.apply_pitch(rate);
-        if playing && self.playing {
-            // SAFETY: as above.
-            unsafe { self.player.setRate(rate as f32) };
-        }
     }
 
     fn step_frame(&mut self, forward: bool) {
@@ -324,7 +327,7 @@ impl Backend for AvPlayerBackend {
     /// item times of the next few vsyncs finds it exactly (none within
     /// eight frames: look again then).
     fn next_due(&self, _now: Instant, interval: Duration) -> Option<Instant> {
-        if !self.playing {
+        if !self.want.playing {
             return None;
         }
         let present = self.last_present?;
@@ -398,21 +401,4 @@ pub(super) fn still_picture(path: &Path, at: f64) -> Option<(Arc<RenderImage>, O
     }
     let image = RenderImage::new(smallvec::SmallVec::from_buf([image::Frame::new(rgba)]));
     Some((Arc::new(image), duration))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::resumes_after_stall;
-
-    #[test]
-    fn a_stalled_clip_is_told_to_play_again_once_the_buffer_keeps_up() {
-        // Play wanted, rate dropped by a stall, buffer caught up.
-        assert!(resumes_after_stall(true, 0.0, false, true));
-        // Still starved: wait.
-        assert!(!resumes_after_stall(true, 0.0, false, false));
-        // Paused on purpose, already playing, or ended: leave it.
-        assert!(!resumes_after_stall(false, 0.0, false, true));
-        assert!(!resumes_after_stall(true, 1.0, false, true));
-        assert!(!resumes_after_stall(true, 0.0, true, true));
-    }
 }

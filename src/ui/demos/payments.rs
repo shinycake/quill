@@ -55,7 +55,8 @@ impl QuillApp {
         // file 96), played by the viewer's player. Under
         // `QUILL_DEMO_CAPTURE` the player shows a still first picture
         // decoded synchronously (at most 2 s), so the capture is
-        // deterministic; otherwise it really plays (with sound).
+        // deterministic; otherwise (or with `QUILL_DEMO_REAL_PLAYER=1`,
+        // to capture real playback and seeks) it really plays (with sound).
         self.open_media_viewer(ChatId(11), MessageId(204), cx);
         if let Some(player) = &self.viewer.player {
             // A seek there and back: the picture shown is the decoded
