@@ -35,6 +35,7 @@ static ACTIONS: Mutex<Vec<TrayAction>> = Mutex::new(Vec::new());
 
 fn push_action(action: TrayAction) {
     ACTIONS.lock_or_recover().push(action);
+    crate::wake::CHROME.poke();
 }
 
 /// Drain pending tray menu / click actions.

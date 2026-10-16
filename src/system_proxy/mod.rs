@@ -105,7 +105,13 @@ pub fn latest(wanted: bool) -> Detected {
                         None => Detected::Direct,
                     };
                     if let Ok(mut guard) = writer.lock() {
+                        let changed = *guard != found;
                         *guard = found;
+                        drop(guard);
+                        if changed {
+                            // The poll loop applies it now, not at its next wake.
+                            crate::wake::UPDATES.poke();
+                        }
                     }
                 }
                 std::thread::sleep(REFRESH);

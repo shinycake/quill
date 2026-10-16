@@ -30,6 +30,8 @@ impl Tdlib for ChannelTdlib {
         self.requests
             .send(request)
             .map_err(|_| ExportError::Cancelled)?;
+        // The poll loop forwards the request; do not make it wait out a sleep.
+        crate::wake::UPDATES.poke();
         let started = Instant::now();
         loop {
             if cancelled() {

@@ -105,6 +105,7 @@ impl QuillApp {
                 .insert(message_id, clock.elapsed_secs());
         }
         self.playback.clock = None;
+        quill::wake::CHROME.poke();
         self.playback.path = None;
         self.playback.seek_slider = None;
         self.playback.player.slider = None;
@@ -156,6 +157,7 @@ impl QuillApp {
         clock.seek(offset_secs);
         clock.resume();
         self.playback.clock = Some(clock);
+        quill::wake::CHROME.poke();
         let slider = cx.new(|_| {
             SliderState::new()
                 .min(0.0)
@@ -213,6 +215,7 @@ impl QuillApp {
             }
         }
         self.playback.audio.pause();
+        quill::wake::CHROME.poke();
     }
 
     /// Resume the active track from the frozen clock position.
@@ -227,6 +230,7 @@ impl QuillApp {
                 if let Some(clock) = self.playback.clock.as_mut() {
                     clock.resume();
                 }
+                quill::wake::CHROME.poke();
             }
             _ => {
                 self.stop_voice_playback();

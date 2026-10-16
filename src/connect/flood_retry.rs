@@ -107,6 +107,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         changed
     }
 
+    /// How long until the earliest time-driven work here and in the session
+    /// is due (a flood retry, a pending bot message expiring), so the poll
+    /// loop can cap its idle sleep. `None` when nothing is scheduled.
+    pub fn next_deadline(&self, now: Instant, now_ms: u64) -> Option<Duration> {
+        let retry = self
+            .flood_retries
+            .iter()
+            .map(|r| r.due.saturating_duration_since(now))
+            .min();
+        let bot = self
+            .session
+            .next_pending_bot_expiry_ms()
+            .map(|at| Duration::from_millis(at.saturating_sub(now_ms)));
+        match (retry, bot) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
     /// The "Couldn't load messages · Retry" action: clear the failure and
     /// request the first page again.
     pub fn retry_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {

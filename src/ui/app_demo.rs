@@ -568,6 +568,9 @@ impl QuillApp {
         // update the gate now and redraw (the content asks for ticks again).
         cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active() || super::frame_clock::assume_active();
+            if active {
+                quill::wake::poke_on_activation();
+            }
             this.frame.window_active.set(active);
             this.viewer_window_activation(window, cx);
             this.playback

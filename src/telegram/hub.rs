@@ -82,6 +82,8 @@ impl Routes {
             return Delivery::Unrouted;
         };
         if tx.send(owned).is_ok() {
+            // Wake the UI's poll loop, which sleeps while nothing arrives.
+            crate::wake::UPDATES.poke();
             Delivery::Delivered
         } else {
             map.remove(&client_id);

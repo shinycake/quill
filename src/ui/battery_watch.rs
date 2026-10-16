@@ -1,7 +1,9 @@
 //! Watches the system battery saver (tdesktop `base::BatterySaving`) and
 //! forces every power-saving flag on while it is on.
 //!
-//! tdesktop is notified by the platform; here a task asks every few seconds.
+//! tdesktop is notified by the platform; here a task asks every half minute
+//! while the switch is on, and not at all while it is off (the first probe
+//! still runs so the switch is offered when the platform has a saver).
 //! The question can block (Linux runs `gdbus`), so it runs on the background
 //! executor. Only a change touches the UI: the flags and GPUI's reduced
 //! motion are updated and the windows redraw.
@@ -14,7 +16,13 @@
 use gpui_kit::*;
 use std::time::Duration;
 
-const POLL: Duration = Duration::from_secs(5);
+/// Between probes while "Save Power on Low Battery" is on. Each probe may
+/// spawn a process (Linux), and a battery saver is switched by hand, so half
+/// a minute is prompt enough.
+const POLL: Duration = Duration::from_secs(30);
+/// Between checks while the switch is off: nothing depends on the answer,
+/// so the task only waits to be poked when the switch comes back on.
+const PARKED: Duration = Duration::from_secs(600);
 
 /// Start the watcher; later calls do nothing.
 pub(crate) fn watch(cx: &mut App) {
@@ -27,13 +35,25 @@ pub(crate) fn watch(cx: &mut App) {
     watch_thermal(cx);
     cx.spawn(async move |cx| {
         loop {
+            let seen = quill::wake::BATTERY.epoch();
             let answer = cx
                 .background_executor()
                 .spawn(async { quill::battery_saving::probe() })
                 .await;
             let changed = cx.update(|cx| apply_answer(answer, cx));
             let _ = changed;
-            cx.background_executor().timer(POLL).await;
+            let wait = if quill::battery_saving::ignored() {
+                PARKED
+            } else {
+                POLL
+            };
+            super::wake_wait::sleep_or_wake(
+                cx.background_executor(),
+                &quill::wake::BATTERY,
+                seen,
+                wait,
+            )
+            .await;
         }
     })
     .detach();

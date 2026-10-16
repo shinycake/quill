@@ -59,6 +59,8 @@ impl QuillApp {
                 && let Ok(mut guard) = clicks.lock()
             {
                 guard.push((call_id, action));
+                // The poll loop sleeps while idle; wake it for the click.
+                quill::wake::UPDATES.poke();
             }
         });
         if spawn.is_err() {
@@ -328,6 +330,7 @@ impl QuillApp {
                     }
                 }
             }
+            quill::wake::UPDATES.poke();
         });
         if spawn.is_err() {
             self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);

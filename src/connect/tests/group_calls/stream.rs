@@ -74,6 +74,18 @@ fn stream_state(driver: &ConnectDriver<Arc<RecordingSender>>) -> (GroupCallMode,
 }
 
 #[test]
+fn an_engine_stream_request_wakes_the_poll_loop() {
+    let (dir, _driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
+    let seen = crate::wake::UPDATES.epoch();
+    handle.emit_engine_event(EngineEvent::BroadcastTimestampRequested { chat_id: 51 });
+    assert!(
+        crate::wake::UPDATES.epoch() != seen,
+        "the hook must poke so the request is not left for the idle sleep"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn connect_records_the_stream_mode() {
     let (dir, driver, ..) = joined_stream_call(GroupCallMode::Rtmp);
     assert_eq!(

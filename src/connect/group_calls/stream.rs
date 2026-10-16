@@ -132,6 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if events.send(event).is_err() {
                 eprintln!("quill: stream request after the driver closed; ignored");
             }
+            crate::wake::UPDATES.poke();
         }));
     }
 

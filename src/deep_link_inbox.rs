@@ -92,10 +92,11 @@ pub fn push_external_link(raw: &str) -> bool {
     };
     let mut inbox = inbox();
     inbox.activate = true;
-    if inbox.links.len() >= MAX_QUEUED || inbox.links.contains(&link) {
-        return true;
+    if inbox.links.len() < MAX_QUEUED && !inbox.links.contains(&link) {
+        inbox.links.push_back(link);
     }
-    inbox.links.push_back(link);
+    drop(inbox);
+    wake_ui();
     true
 }
 
@@ -107,6 +108,7 @@ pub fn handle_forwarded_launch(args: &[String]) {
     // tdesktop `CMD:quit`: the jump list's or desktop action's "Quit".
     if args.iter().any(|arg| arg == crate::start_files::QUIT_FLAG) {
         inbox().quit = true;
+        crate::wake::CHROME.poke();
         return;
     }
     let mut accepted = false;
@@ -122,6 +124,12 @@ pub fn handle_forwarded_launch(args: &[String]) {
 /// Asks the UI to raise the main window (a bare second launch).
 pub fn request_activation() {
     inbox().activate = true;
+    wake_ui();
+}
+
+/// Wake the inbox task, which sleeps while nothing arrives.
+fn wake_ui() {
+    crate::wake::LINKS.poke();
 }
 
 /// Consumes the pending "raise the window" request.
@@ -132,6 +140,11 @@ pub fn take_activation() -> bool {
 /// Consumes the pending "quit" request of a later `--quit` launch.
 pub fn take_quit_request() -> bool {
     std::mem::take(&mut inbox().quit)
+}
+
+/// Whether a link is queued and not handed out yet.
+pub fn has_pending_links() -> bool {
+    !inbox().links.is_empty()
 }
 
 /// Next queued link, oldest first.

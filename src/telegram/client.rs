@@ -160,6 +160,7 @@ fn injected_loop(
                 {
                     break;
                 }
+                crate::wake::UPDATES.poke();
             }
         }
     }
@@ -309,6 +310,28 @@ mod tests {
             EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_))
         ));
         assert_eq!(a.seq + 1, b.seq);
+    }
+
+    #[test]
+    fn an_update_wakes_the_ui_without_waiting_for_a_poll_tick() {
+        // The UI poll loop sleeps up to two seconds when idle; the receive
+        // side pokes `wake::UPDATES` after queueing, so the update is
+        // already readable when the loop wakes.
+        let sink = Arc::new(MemorySink::new());
+        let bridge = ReceiveBridge::spawn_injected(sink).unwrap();
+        let seen = crate::wake::UPDATES.epoch();
+        let start = std::time::Instant::now();
+        bridge
+            .inject(r#"{"@type":"updateOption","name":"x","value":{"@type":"optionValueEmpty"}}"#);
+        while crate::wake::UPDATES.epoch() == seen && start.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_ne!(crate::wake::UPDATES.epoch(), seen, "no wake-up");
+        assert!(start.elapsed() < Duration::from_millis(500));
+        assert!(
+            bridge.rx.try_recv().is_ok(),
+            "poked before the update was queued"
+        );
     }
 
     #[test]

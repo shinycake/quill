@@ -140,7 +140,12 @@ impl QuillApp {
         #[cfg(test)]
         quill::power_saving::isolate_for_tests();
         quill::power_saving::set(self.appearance.power_saving);
+        let ignored_before = quill::battery_saving::ignored();
         quill::battery_saving::set_ignore(self.appearance.ignore_battery_saving);
+        if ignored_before != self.appearance.ignore_battery_saving {
+            // The probe task parks while the switch is off.
+            quill::wake::BATTERY.poke();
+        }
         quill::battery_saving::apply();
         if self.demo_session.is_none() {
             super::battery_watch::watch(cx);

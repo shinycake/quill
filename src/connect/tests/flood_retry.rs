@@ -138,6 +138,28 @@ fn rate_limited_history_page_is_retried_after_the_wait() {
 }
 
 #[test]
+fn a_due_flood_retry_is_a_known_deadline_for_the_poll_sleep() {
+    let mut h = Harness::new();
+    let now = Instant::now();
+    let now_ms = quill_now_ms();
+    assert_eq!(h.driver.next_deadline(now, now_ms), None);
+    let extra = h.open_history();
+    h.flood(extra, "Too Many Requests: retry after 2");
+    let deadline = h.driver.next_deadline(Instant::now(), now_ms);
+    // 2 s wait plus the 1 s slack, well under the 2 s idle poll cap's reach
+    // only because the loop takes the minimum.
+    assert!(deadline.is_some_and(|d| d <= Duration::from_secs(3)));
+    let later = h
+        .driver
+        .next_deadline(Instant::now() + Duration::from_secs(10), now_ms);
+    assert_eq!(later, Some(Duration::ZERO), "already due");
+}
+
+fn quill_now_ms() -> u64 {
+    crate::state::unix_ms_now()
+}
+
+#[test]
 fn flood_retries_are_capped_and_then_surface() {
     let mut h = Harness::new();
     let extra = h.open_history();

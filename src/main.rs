@@ -8,6 +8,8 @@
 
 #[cfg(feature = "ui")]
 mod ui;
+#[cfg(feature = "ui")]
+use ui::link_inbox::{install_link_inbox, raise_main_window};
 
 #[cfg(feature = "ui")]
 mod quill_assets;
@@ -310,52 +312,6 @@ fn forwarded_to_running_instance(args: &[String]) -> bool {
     }
 }
 
-/// Drains links that arrived from the OS or a second launch: raises the
-/// window and hands the next link to the deep-link pump (one flow at a time).
-#[cfg(feature = "ui")]
-fn install_link_inbox(
-    window: &mut gpui_kit::Window,
-    cx: &mut gpui_kit::App,
-    view: &gpui_kit::Entity<ui::QuillApp>,
-) {
-    cx.spawn({
-        let view = view.downgrade();
-        let window_handle = window.window_handle();
-        async move |cx| {
-            loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(250))
-                    .await;
-                let alive = view
-                    .update(cx, |this, _| {
-                        if this.pending_deep_link.is_none() {
-                            this.pending_deep_link = quill::deep_link_inbox::pop_link();
-                        }
-                    })
-                    .is_ok();
-                if !alive {
-                    break;
-                }
-                if quill::deep_link_inbox::take_activation() {
-                    let _ = window_handle.update(cx, |_, window, cx| raise_main_window(window, cx));
-                }
-            }
-        }
-    })
-    .detach();
-}
-
-/// Brings the main window to the front, restoring it from the tray, the
-/// Dock (minimized) or a hidden app.
-#[cfg(feature = "ui")]
-fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
-    // Hidden to the tray (Windows, X11) or minimized (everywhere): show it
-    // again, then bring it to the front.
-    ui::window_control::set_visible(window, true);
-    cx.activate(true);
-    window.activate_window();
-}
-
 #[cfg(feature = "ui")]
 fn install_main_window_tray(
     window: &mut gpui_kit::Window,
@@ -417,10 +373,16 @@ fn install_main_window_tray(
         let tray_view = view.downgrade();
         let tray_window = window.window_handle();
         async move |cx| {
+            // Fallback for what no event announces (a tray host that
+            // appears late, the menu bar theme); everything else pokes
+            // `wake::CHROME` (applied updates, tray menu clicks, settings).
+            let mut wait = std::time::Duration::from_secs(10);
+            let mut seen = quill::wake::CHROME.epoch();
             loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_secs(1))
-                    .await;
+                ui::sleep_or_wake(cx.background_executor(), &quill::wake::CHROME, seen, wait).await;
+                // Taken before the work: a poke during it runs the loop again.
+                seen = quill::wake::CHROME.epoch();
+                wait = std::time::Duration::from_secs(10);
                 let alive = tray_view
                     .update(cx, |this, _| {
                         quill::tray::sync_tray(this.session());
@@ -450,6 +412,9 @@ fn install_main_window_tray(
                             if let Some(native) = view.window()
                                 && native.isMiniaturized()
                             {
+                                // Check again soon; a minimized window
+                                // has no event to announce its state.
+                                wait = std::time::Duration::from_secs(1);
                                 // Keep it minimized while hidden. Deminiaturizing
                                 // here would finish its animation by unhiding the app.
                                 cx.hide();

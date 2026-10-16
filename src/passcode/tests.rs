@@ -350,3 +350,70 @@ fn fixed_vector_sealed_blob_opens() {
     assert_eq!(plain, vec![0xa5u8; 32]);
     assert!(open(&fixed_master(), b"other-account", &sealed).is_err());
 }
+
+#[test]
+fn a_planned_long_sleep_is_not_a_suspend() {
+    let mut tracker = IdleTracker::default();
+    assert_eq!(tracker.effective_idle(1_000, 0), 0);
+    // The caller slept a minute on purpose, as planned: only the real idle
+    // time counts.
+    tracker.plan_sleep(60_000);
+    assert_eq!(tracker.effective_idle(61_000, 60_000), 60_000);
+    // A gap well past the plan is still a suspend; the planned part is
+    // already in the OS idle time and is not counted twice.
+    tracker.plan_sleep(60_000);
+    assert_eq!(
+        tracker.effective_idle(1_000_000, 60_100),
+        60_100 + (1_000_000 - 61_000 - 60_000)
+    );
+    // Forgetting the history drops a stale suspend and the stale tick time.
+    tracker.reset();
+    assert_eq!(tracker.effective_idle(9_000_000, 5), 5);
+}
+
+#[test]
+fn autolock_sleeps_until_the_deadline_and_parks_when_off() {
+    // Off, locked, or no timeout: nothing to time.
+    assert_eq!(autolock_sleep_ms(false, false, 300, 0), None);
+    assert_eq!(autolock_sleep_ms(true, true, 300, 0), None);
+    assert_eq!(autolock_sleep_ms(true, false, 0, 0), None);
+    // A five-minute lock after one idle minute: capped (a laptop sleep
+    // pauses the timer, so the lock is late by five seconds at most).
+    assert_eq!(autolock_sleep_ms(true, false, 300, 60_000), Some(5_000));
+    // Close to the deadline: sleep exactly until it.
+    assert_eq!(autolock_sleep_ms(true, false, 300, 297_000), Some(3_000));
+    // Never a busy loop.
+    assert_eq!(autolock_sleep_ms(true, false, 300, 299_900), Some(1_000));
+}
+
+#[test]
+fn an_idle_hour_with_auto_lock_on_wakes_every_five_seconds_at_most() {
+    // The user is away: each wake re-reads the idle time and sleeps until
+    // the deadline (the lock itself ends the schedule).
+    let timeout_secs = 3600;
+    let mut now_ms = 0u64;
+    let mut wakes = 0;
+    while !autolock_due(now_ms, timeout_secs) {
+        let sleep = autolock_sleep_ms(true, false, timeout_secs, now_ms).unwrap();
+        now_ms += sleep;
+        wakes += 1;
+    }
+    assert!(wakes <= 721, "{wakes} wakes in an idle hour");
+}
+
+#[test]
+fn a_laptop_wake_after_a_planned_sleep_locks_on_the_next_check() {
+    // Auto-lock after 5 minutes; the check sleeps at most the cap.
+    let timeout_secs = 300;
+    let planned = autolock_sleep_ms(true, false, timeout_secs, 0).unwrap_or(0);
+    assert!(planned <= 5_000, "the sleep is capped at {planned} ms");
+    let mut tracker = IdleTracker::default();
+    assert_eq!(tracker.effective_idle(1_000, 0), 0);
+    tracker.plan_sleep(planned);
+    // The lid was shut for an hour: the monotonic idle clock only saw the
+    // planned sleep, the wall clock saw the hour.
+    let now = 1_000 + 3_600_000;
+    let effective = tracker.effective_idle(now, planned);
+    assert!(autolock_due(effective, timeout_secs));
+    assert_eq!(effective, 3_600_000);
+}
