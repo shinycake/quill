@@ -8,9 +8,12 @@
 //! the `org.freedesktop.Notifications` `Inhibited` property. Quill does the
 //! same, and on Linux also checks GNOME's `show-banners` switch.
 //!
-//! Every query shells out or calls the OS, so none of them runs on the UI
+//! The query runs only when an alert is about to be decided (callers ask
+//! lazily, never per frame). macOS reads CFPreferences in-process like
+//! tdesktop; Linux shells out to gdbus/gsettings. Neither runs on the UI
 //! thread: [`dnd_active`] returns the last answer and, when it is stale,
-//! refreshes it on a short-lived worker. The parsers are pure and tested.
+//! refreshes it on a short-lived worker (macOS refreshes in place: the
+//! in-process read is cheap). The parsers are pure and tested.
 #![deny(clippy::indexing_slicing)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -32,9 +35,20 @@ fn now_ms() -> u64 {
 }
 
 /// Whether the OS is in Do Not Disturb / Focus right now (last known
-/// answer; `false` until the first refresh lands). Never blocks.
+/// answer; `false` until the first refresh lands). Never waits on another
+/// thread; on macOS a stale answer is re-read in place (cheap, in-process).
 pub fn dnd_active() -> bool {
     let checked = CHECKED_AT_MS.load(Ordering::Relaxed);
+    // macOS answers in-process from cfprefsd in well under a millisecond, and
+    // callers only ask when an alert is pending, so a stale answer (Focus
+    // toggled while Quill sat idle) is refreshed before it is used.
+    #[cfg(target_os = "macos")]
+    if now_ms().saturating_sub(checked) > FRESH_MS {
+        let dnd = query_os_dnd();
+        DND.store(dnd, Ordering::Relaxed);
+        CHECKED_AT_MS.store(now_ms(), Ordering::Relaxed);
+        return dnd;
+    }
     if now_ms().saturating_sub(checked) > FRESH_MS && !REFRESHING.swap(true, Ordering::AcqRel) {
         let spawned = crate::thread_guard::spawn_guarded("quill-dnd", || {
             DND.store(query_os_dnd(), Ordering::Relaxed);
@@ -46,6 +60,12 @@ pub fn dnd_active() -> bool {
         }
     }
     DND.load(Ordering::Relaxed)
+}
+
+/// Whether anything needs the Do Not Disturb answer: only an alert that is
+/// about to be decided does. Idle frames must not probe the OS.
+pub fn needs_probe(wants_attention: bool, queued: usize) -> bool {
+    wants_attention || queued > 0
 }
 
 /// Start the first query early so the first notification already knows.
@@ -92,7 +112,8 @@ pub fn attention_label() -> &'static str {
 }
 
 /// `defaults read com.apple.notificationcenterui doNotDisturb` prints `1`
-/// or `0`; a missing key is an error with no stdout.
+/// or `0`; a missing key is an error with no stdout. (macOS now reads the
+/// preference in-process; the parser stays for diagnostics and tests.)
 pub fn parse_defaults_bool(output: &str) -> bool {
     matches!(output.trim(), "1" | "true" | "YES")
 }
@@ -117,11 +138,36 @@ pub fn windows_state_is_dnd(state: i32) -> bool {
 
 #[cfg(target_os = "macos")]
 fn query_os_dnd() -> bool {
-    std::process::Command::new("defaults")
-        .args(["read", "com.apple.notificationcenterui", "doNotDisturb"])
-        .output()
-        .ok()
-        .is_some_and(|out| parse_defaults_bool(&String::from_utf8_lossy(&out.stdout)))
+    use core_foundation_sys::base::CFRelease;
+    use core_foundation_sys::preferences::{
+        CFPreferencesAppSynchronize, CFPreferencesGetAppBooleanValue,
+    };
+    use core_foundation_sys::string::{CFStringCreateWithCString, kCFStringEncodingUTF8};
+    // tdesktop (`notifications_manager_mac.mm`) reads the same preference
+    // in-process; no `defaults` child process.
+    let app = c"com.apple.notificationcenterui";
+    let key = c"doNotDisturb";
+    // SAFETY: both C strings are NUL-terminated literals; the created
+    // CFStrings are released exactly once below and not used afterwards.
+    unsafe {
+        let app_ref =
+            CFStringCreateWithCString(std::ptr::null(), app.as_ptr(), kCFStringEncodingUTF8);
+        let key_ref =
+            CFStringCreateWithCString(std::ptr::null(), key.as_ptr(), kCFStringEncodingUTF8);
+        let on = if app_ref.is_null() || key_ref.is_null() {
+            false
+        } else {
+            CFPreferencesAppSynchronize(app_ref);
+            CFPreferencesGetAppBooleanValue(key_ref, app_ref, std::ptr::null_mut()) != 0
+        };
+        if !app_ref.is_null() {
+            CFRelease(app_ref.cast());
+        }
+        if !key_ref.is_null() {
+            CFRelease(key_ref.cast());
+        }
+        on
+    }
 }
 
 #[cfg(windows)]
@@ -227,6 +273,20 @@ mod tests {
         assert!(gnome_banners_off("false\n"));
         assert!(!gnome_banners_off("true\n"));
         assert!(!gnome_banners_off("No such schema"));
+    }
+
+    #[test]
+    fn idle_frames_do_not_probe() {
+        assert!(!needs_probe(false, 0));
+        assert!(needs_probe(true, 0));
+        assert!(needs_probe(false, 2));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_query_runs_in_process() {
+        // Returns without spawning anything; the value depends on the host.
+        let _ = query_os_dnd();
     }
 
     #[test]
