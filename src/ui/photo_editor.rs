@@ -305,18 +305,27 @@ impl QuillApp {
         let Some(attachment) = self.composer_ui.pending_attachments.get(index) else {
             return;
         };
-        match image::open(&attachment.path) {
-            Ok(image) => {
-                self.viewer.photo_editor = Some(PhotoEditor::new(
-                    EditorPurpose::Attachment(index),
-                    image.to_rgba8(),
-                ));
-            }
-            Err(_) => {
-                self.connection.status_note = tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
-            }
-        }
-        cx.notify();
+        let path = attachment.path.clone();
+        self.decode_image_then(
+            path,
+            move |this, result, cx| {
+                match result {
+                    Ok(pixels) => {
+                        // Another editor opened while this one decoded: keep it.
+                        if this.viewer.photo_editor.is_none() {
+                            this.viewer.photo_editor =
+                                Some(PhotoEditor::new(EditorPurpose::Attachment(index), pixels));
+                        }
+                    }
+                    Err(_) => {
+                        this.connection.status_note =
+                            tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
+                    }
+                }
+                cx.notify();
+            },
+            cx,
+        );
     }
 
     pub(super) fn close_photo_editor(&mut self, cx: &mut Context<Self>) {

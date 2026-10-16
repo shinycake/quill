@@ -166,9 +166,8 @@ pub(super) fn menu_separator(order: u8) -> MenuRow {
 
 /// Decode an image file and encode it as PNG for the clipboard.
 fn png_bytes_from_file(path: &Path) -> Result<Vec<u8>, &'static str> {
-    let rgba = image::open(path)
-        .map_err(|_| tr(keys::Q_CHAT_COULDNT_COPY_THIS_IMAGE))?
-        .to_rgba8();
+    let rgba = super::image_decode::decode_file(path, super::image_decode::DecodeSize::FULL)
+        .map_err(|_| tr(keys::Q_CHAT_COULDNT_COPY_THIS_IMAGE))?;
     let mut bytes = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgba8(rgba)
         .write_to(&mut bytes, image::ImageFormat::Png)
@@ -465,17 +464,23 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        match png_bytes_from_file(&path) {
-            Ok(bytes) => {
-                cx.write_to_clipboard(ClipboardItem::new_image(&gpui_kit::Image::from_bytes(
-                    gpui_kit::ImageFormat::Png,
-                    bytes,
-                )));
-                self.connection.status_note = tr(keys::Q_CHAT_PHOTO_COPIED).into();
-            }
-            Err(note) => self.connection.status_note = note.into(),
-        }
-        cx.notify();
+        // Decode and encode off the UI thread; the clipboard write needs it.
+        self.run_off_ui_then(
+            move || png_bytes_from_file(&path),
+            |this, result, cx| {
+                match result {
+                    Ok(bytes) => {
+                        cx.write_to_clipboard(ClipboardItem::new_image(
+                            &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
+                        ));
+                        this.connection.status_note = tr(keys::Q_CHAT_PHOTO_COPIED).into();
+                    }
+                    Err(note) => this.connection.status_note = note.into(),
+                }
+                cx.notify();
+            },
+            cx,
+        );
     }
 
     /// "Add to GIFs" (`addSavedAnimation`).
@@ -618,5 +623,15 @@ mod tests {
         std::fs::write(&bad, b"not an image").unwrap();
         assert!(super::png_bytes_from_file(&bad).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Copy Image reads HEIC through the shared decoder (`image::open` could not).
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn copy_image_reads_heic() {
+        let heic = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/images/halves.heic");
+        let bytes = super::png_bytes_from_file(&heic).expect("png from heic");
+        assert_eq!(&bytes[..4], b"\x89PNG");
     }
 }

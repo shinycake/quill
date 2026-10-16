@@ -257,7 +257,17 @@ impl QuillApp {
 
         let audio_output = super::audio::SharedOutput::default();
         super::audio::share_output_with_video(&audio_output);
-        let (spellchecker, spell_info) = Self::new_spellchecker(true);
+        // Live: the wordlist answers at once and the platform engine
+        // (OS spell server, COM, dictionaries) is built on a background task
+        // below. Demo fixtures keep the synchronous engine so captures are
+        // deterministic.
+        let (spellchecker, spell_info, spell_chosen) = if demo.is_some() {
+            let (checker, info) = Self::new_spellchecker(true);
+            (checker, info, None)
+        } else {
+            let (checker, info, chosen) = Self::provisional_spellchecker();
+            (checker, info, Some(chosen))
+        };
         let mut app = Self {
             settings: super::settings_state::SettingsUi::new(cx, font_picker, accent_picker, demo),
             chat,
@@ -332,6 +342,9 @@ impl QuillApp {
             windows: super::chat_window::ChatWindows::new(cx),
         };
 
+        if let Some(chosen) = spell_chosen {
+            app.start_spell_engine(chosen, cx);
+        }
         if let Some(demo) = demo {
             demo.setup(&mut app, window, cx);
         }

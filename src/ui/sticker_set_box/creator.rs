@@ -181,15 +181,18 @@ impl QuillApp {
 
     /// Open `path` in the photo editor for the set: the image on a
     /// transparent square canvas (tdesktop `PrepareEditorState`).
-    pub(super) fn edit_image_for_set(
+    pub(in crate::ui) fn edit_image_for_set(
         &mut self,
         set_id: i64,
         kind: SetKind,
         path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
-        let pixels = image::open(path).ok().map(|image| image.to_rgba8());
-        self.edit_pixels_for_set(set_id, kind, pixels, cx);
+        self.decode_image_then(
+            path.to_path_buf(),
+            move |this, result, cx| this.edit_pixels_for_set(set_id, kind, result.ok(), cx),
+            cx,
+        );
     }
 
     /// The editor on `pixels` for the set, or the "Could not load image."

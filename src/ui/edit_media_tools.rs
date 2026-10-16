@@ -141,15 +141,24 @@ impl QuillApp {
             self.request_edit_image_download(cx);
             return;
         };
-        match image::open(&source) {
-            Ok(image) => {
-                self.viewer.photo_editor = Some(PhotoEditor::for_message_edit(image.to_rgba8()));
-            }
-            Err(_) => {
-                self.connection.status_note = tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
-            }
-        }
-        cx.notify();
+        self.decode_image_then(
+            source,
+            |this, result, cx| {
+                match result {
+                    Ok(pixels) => {
+                        if this.viewer.photo_editor.is_none() {
+                            this.viewer.photo_editor = Some(PhotoEditor::for_message_edit(pixels));
+                        }
+                    }
+                    Err(_) => {
+                        this.connection.status_note =
+                            tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
+                    }
+                }
+                cx.notify();
+            },
+            cx,
+        );
     }
 
     /// The photo isn't on disk yet: ask TDLib for it, then try again.

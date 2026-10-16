@@ -17,6 +17,18 @@
 
 use crate::locks::LockExt;
 use std::sync::{Mutex, mpsc};
+use std::time::Duration;
+
+/// How long `new` waits for COM and the language list to come up. Callers
+/// run it off the UI thread; the bound only keeps a stuck COM server from
+/// pinning the builder forever.
+const INIT_WAIT: Duration = Duration::from_secs(15);
+/// How long one check or suggestion waits for the COM thread before it
+/// gives up (no verdict, no underline, no suggestions). The suggestion menu
+/// asks from the UI thread, so this stays short.
+const CALL_WAIT: Duration = Duration::from_millis(750);
+/// The background re-check may wait for a cold dictionary load.
+const CHECK_WAIT: Duration = Duration::from_secs(5);
 
 use windows::Win32::Globalization::{
     CORRECTIVE_ACTION_GET_SUGGESTIONS, CORRECTIVE_ACTION_REPLACE, ISpellChecker,
@@ -125,7 +137,8 @@ impl WindowsSpellBackend {
     /// Starts the COM thread. `locales` are the user locale tags
     /// (`en-US`); `chosen` the user's explicit language picks (empty:
     /// automatic). `None` when ISpellChecker is unavailable or has no
-    /// supported language.
+    /// supported language. Blocks (up to [`INIT_WAIT`]) while COM starts:
+    /// call it from a background task, never the UI thread.
     pub fn new(locales: &[String], chosen: &[String]) -> Option<Self> {
         let (job_tx, job_rx) = mpsc::channel::<Job>();
         let (ready_tx, ready_rx) = mpsc::channel::<Option<(Vec<String>, Vec<String>)>>();
@@ -155,7 +168,7 @@ impl WindowsSpellBackend {
             }
         })
         .ok()?;
-        let (tags, available) = ready_rx.recv().ok()??;
+        let (tags, available) = ready_rx.recv_timeout(INIT_WAIT).ok()??;
         let languages = tags
             .into_iter()
             .filter_map(|tag| {
@@ -184,12 +197,20 @@ impl WindowsSpellBackend {
         &self,
         f: impl FnOnce(&mut Checkers) -> T + Send + 'static,
     ) -> Option<T> {
+        self.run_within(CALL_WAIT, f)
+    }
+
+    fn run_within<T: Send + 'static>(
+        &self,
+        wait: Duration,
+        f: impl FnOnce(&mut Checkers) -> T + Send + 'static,
+    ) -> Option<T> {
         let (tx, rx) = mpsc::channel();
         let job: Job = Box::new(move |c| {
             let _ = tx.send(f(c));
         });
         self.tx.lock_or_recover().send(job).ok()?;
-        rx.recv().ok()
+        rx.recv_timeout(wait).ok()
     }
 
     /// Which checkers apply to this word (by script).
@@ -227,7 +248,7 @@ impl SpellBackend for WindowsSpellBackend {
     fn is_correct(&self, word: &str) -> bool {
         let tags = self.tags_for(word);
         let word = word.to_string();
-        self.run(move |c| {
+        self.run_within(CHECK_WAIT, move |c| {
             let mut judged = false;
             for (tag, checker) in &c.list {
                 if !tags.contains(tag) {

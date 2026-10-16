@@ -22,6 +22,7 @@
 
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Sender};
+use std::time::Duration;
 
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSSpellChecker;
@@ -30,6 +31,12 @@ use quill::spellcheck::{Script, SpellBackend, locale_script, spelling_languages}
 
 /// `NSNotFound` (`NSIntegerMax`) as an `NSRange.location`.
 const NOT_FOUND: usize = isize::MAX as usize;
+
+/// How long a caller waits for the worker. Menu code asks from the UI
+/// thread; a worker stuck in the spelling server must not freeze the window.
+const CALL_WAIT: Duration = Duration::from_millis(750);
+/// The background re-check may wait for a cold dictionary load.
+const CHECK_WAIT: Duration = Duration::from_secs(5);
 
 type Job = Box<dyn FnOnce(&NSSpellChecker, isize) + Send>;
 
@@ -52,9 +59,16 @@ fn worker() -> &'static Sender<Job> {
     })
 }
 
-/// Runs `f` on the worker and waits for its result; `None` when the
-/// worker is gone.
+/// Runs `f` on the worker and waits (bounded) for its result; `None` when
+/// the worker is gone or too slow.
 fn with_checker<T: Send + 'static>(
+    f: impl FnOnce(&NSSpellChecker, isize) -> T + Send + 'static,
+) -> Option<T> {
+    with_checker_within(CALL_WAIT, f)
+}
+
+fn with_checker_within<T: Send + 'static>(
+    wait: Duration,
     f: impl FnOnce(&NSSpellChecker, isize) -> T + Send + 'static,
 ) -> Option<T> {
     let (tx, rx) = mpsc::channel();
@@ -62,7 +76,7 @@ fn with_checker<T: Send + 'static>(
         let _ = tx.send(f(checker, tag));
     });
     worker().send(job).ok()?;
-    rx.recv().ok()
+    rx.recv_timeout(wait).ok()
 }
 
 /// Queues `f` without waiting.
@@ -76,8 +90,9 @@ pub(super) struct SystemSpellBackend {
 }
 
 impl SystemSpellBackend {
-    /// Reads the user's spelling languages. Call on the main thread (the
-    /// shared checker is created here). `None` when no language with a
+    /// Reads the user's spelling languages. Runs off the UI thread (the
+    /// engine is built on a background task; the shared checker is safe to
+    /// create there, the worker uses it the same way). `None` when no language with a
     /// checkable script is configured.
     pub(super) fn new() -> Option<Self> {
         let languages: Vec<(String, Script)> = autoreleasepool(|_| {
@@ -163,7 +178,7 @@ impl SpellBackend for SystemSpellBackend {
     fn is_correct(&self, word: &str) -> bool {
         let langs = self.languages_for(word);
         let word = word.to_string();
-        with_checker(move |checker, tag| {
+        with_checker_within(CHECK_WAIT, move |checker, tag| {
             let ns_word = NSString::from_str(&word);
             langs.iter().any(|lang| {
                 let lang = NSString::from_str(lang);
