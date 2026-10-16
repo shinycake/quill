@@ -144,6 +144,7 @@ impl QuillApp {
                 outgoing,
                 effect_id,
                 WAIT,
+                cx.background_executor().now(),
             );
         }
     }
