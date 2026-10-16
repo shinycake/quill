@@ -39,7 +39,6 @@ impl Session {
             self.requests.invalidate_account();
             self.account_generation.bump();
             self.media.files.clear();
-            self.media.message_files.clear();
             self.media.downloading.clear();
             self.media.stalled_auto_downloads.clear();
             self.media.download_extras.clear();
@@ -165,14 +164,6 @@ impl Session {
     pub(crate) fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
         self.remember_files(&message.files);
         let chat_id = message.chat_id;
-        let file_ids: Vec<i32> = message.files.iter().map(|file| file.id.0).collect();
-        if file_ids.is_empty() {
-            self.media.message_files.remove(&(chat_id.0, message.id.0));
-        } else {
-            self.media
-                .message_files
-                .insert((chat_id.0, message.id.0), file_ids);
-        }
         // Slice bots-games: remember games seen in a bot's chat so the bot
         // info panel can offer to send them. Keyed by the chat's bot user
         // id — only short names TDLib actually delivered are cached, so

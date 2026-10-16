@@ -18,16 +18,10 @@ and `Ui::Animations` caches). Nothing grows with the length of a session.
   bar thumb) now use `image_budget::sized_image(SizedSource::Mini(..))`, the existing public API, so they leave with
   the rest of the bounded cache. `image_budget.rs` is untouched.
 - F10: `upsert_message` now trims the history of a chat that is not shown (not the open chat, not a window chat) with the
-  existing window cap, dropping the oldest messages and clearing `loaded_complete`. `media.files` entries that only the
-  dropped messages brought in are removed (new `media.message_files` map records what each message brought); kept are
-  files another loaded message also brought and any with a download in flight, paused, failed, stalled, or used as an
-  avatar. Page-driven trims of the open chat release files the same way. Cleared on logout.
+  existing window cap, dropping the oldest messages and clearing `loaded_complete`. `media.files` is left alone on purpose: a file a message brought can also be shown by a non-message surface (sticker panel, emoji, avatars, backgrounds, story thumbs), and dropping its entry would blank that surface until TDLib resent it. The entries are small metadata.
 
 ## Verified
 
-- Unit tests: `state::tests::history_window_cap_live` (cap on live updates, open chat untouched, in-flight download
-  and shared file kept), `ui::sticker_mirror` (byte budget eviction, dead sources dropped, source not pinned),
+- Unit tests: `state::tests::history_window_cap_live` (cap on live updates, open chat untouched), `ui::sticker_mirror` (byte budget eviction, dead sources dropped, source not pinned),
   `ui::mini_image` (not an `ImageSource::Image`).
 - Not measured on a running app: the memory numbers (~94 MB worst case for F7) are the audit's arithmetic.
-- Residual risk: a file that a trimmed message brought and that is also shown by a non-message surface (sticker panel)
-  is dropped from `media.files` until TDLib sends it again.
