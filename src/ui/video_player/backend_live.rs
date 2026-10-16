@@ -6,9 +6,11 @@
 //! the [`LiveSink`]. A waker task arms the sink after each wake and, when
 //! a frame lands, redraws the one view the element draws in, so nothing
 //! polls and an idle feed costs nothing. A frame is converted once, into
-//! the platform picture (`live_picture.rs`): on the UI thread for small
-//! tiles, on the background executor above [`INLINE_MAX_EDGE`], one
-//! conversion at a time with the newest frame winning.
+//! the platform picture (`live_picture.rs`): on macOS on the UI thread
+//! for small tiles (NV12, a few microseconds) and on the background
+//! executor above [`INLINE_MAX_EDGE`]; on Windows and Linux, where the
+//! picture is BGRA (about 0.5 ms for a 640 × 360 tile), always on the
+//! background executor. One conversion at a time; the newest frame wins.
 //!
 //! The transport is live ([`TransportMachine::live`]): Opening until the
 //! first frame, Playing while frames come, Buffering once none came for
@@ -136,9 +138,10 @@ pub(super) fn stall_check_at(
     latest_at?.checked_add(gaps.stall_after())
 }
 
-/// Whether a frame converts on the background executor.
+/// Whether a frame converts on the background executor: a large one,
+/// and every one where the picture is BGRA.
 fn converts_in_background(frame: &LiveFrame) -> bool {
-    u32::from(frame.width.max(frame.height)) > INLINE_MAX_EDGE
+    live_picture::bgra_only() || u32::from(frame.width.max(frame.height)) > INLINE_MAX_EDGE
 }
 
 /// The live state shared by the backend, the player and the waker task.

@@ -133,6 +133,23 @@ pub(crate) fn take_made_images() -> Vec<std::sync::Weak<RenderImage>> {
     MADE.with(|made| std::mem::take(&mut *made.borrow_mut()))
 }
 
+/// Whether every picture is BGRA: on Windows and Linux, and on macOS
+/// with `QUILL_LIVE_BGRA=1` in a demo-capture build, to run the other
+/// platforms' path (its memory, its atlas) here.
+pub(super) fn bgra_only() -> bool {
+    if !cfg!(target_os = "macos") {
+        return true;
+    }
+    #[cfg(feature = "demo-capture")]
+    {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *ON.get_or_init(|| std::env::var_os("QUILL_LIVE_BGRA").is_some()) {
+            return true;
+        }
+    }
+    false
+}
+
 /// The pixel-buffer pool (macOS); nothing elsewhere.
 #[derive(Default)]
 pub(super) struct Surfaces {
@@ -148,6 +165,9 @@ impl Surfaces {
     /// from the pool (made again for a new size), else BGRA.
     #[cfg(target_os = "macos")]
     pub(super) fn target(&mut self, width: u32, height: u32) -> Target {
+        if bgra_only() {
+            return Target::Bgra;
+        }
         if self
             .pool
             .as_ref()

@@ -25,6 +25,14 @@ fn feed(tile: bool) -> (Rc<LiveCore>, LiveSource) {
     (Rc::new(LiveCore::new(sink, tile)), source)
 }
 
+/// A feed whose every frame converts during the pull.
+fn inline_feed() -> (Rc<LiveCore>, LiveSource) {
+    let (sink, source) = LiveSink::new();
+    let mut core = LiveCore::new(sink, false);
+    core.inline_always = true;
+    (Rc::new(core), source)
+}
+
 fn present() -> Present {
     Present {
         at: Instant::now(),
@@ -188,7 +196,7 @@ fn an_engine_failure_fails_for_good_and_live_has_no_transport_to_drive() {
 
 #[test]
 fn a_late_frame_replaces_one_not_drawn_yet() {
-    let (core, source) = feed(false);
+    let (core, source) = inline_feed();
     let mut backend = LiveBackend { core: core.clone() };
     let t0 = Instant::now();
     source.push(frame(1, 64, 36, t0));
@@ -213,10 +221,16 @@ fn large_frames_wait_for_the_background_and_small_ones_convert_at_once() {
     assert_eq!(big.width, 1280);
     core.landed(live_picture::convert(&big, target));
     assert!(backend.take_picture(&present()).picture.is_some());
-    // A small tile frame converts during the pull.
+    // A small tile frame converts during the pull on macOS (NV12);
+    // elsewhere (BGRA) it waits for the background too.
     source.push(frame(2, 320, 180, t0));
-    assert!(core.take_background().is_none());
-    assert!(backend.take_picture(&present()).picture.is_some());
+    if !live_picture::bgra_only() {
+        assert!(core.take_background().is_none());
+        assert!(backend.take_picture(&present()).picture.is_some());
+    } else {
+        assert!(backend.take_picture(&present()).picture.is_none());
+        assert!(core.take_background().is_some());
+    }
 }
 
 #[test]
