@@ -118,7 +118,7 @@ impl QuillApp {
         if self.composer_ui.pending_edit.is_some() {
             self.clear_edit(window, cx);
         }
-        self.composer_ui.pending_reply = Some(reply);
+        self.composer_ui.set_reply(Some(reply));
         self.note_open_draft(true, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -137,7 +137,7 @@ impl QuillApp {
             || !self.composer.read(cx).value().is_empty()
             || self.composer_ui.pending_edit.is_some()
             // tdesktop: `_replyTo` keeps Up for scrolling.
-            || self.composer_ui.pending_reply.is_some()
+            || self.composer_ui.has_reply()
             || !self.pending_attachments().is_empty()
             || self.composer_ui.command_menu_open
             || !self.mention_menu_items(cx).is_empty()
@@ -163,11 +163,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // The field starts from the live message. Not loaded yet: refuse, so
-        // a submit can never blank the message with an empty field.
+        // a submit can never blank the message with an empty field, and say
+        // so with tdesktop's `lng_edit_error` toast.
         let Some(original) = self
             .session()
             .and_then(|session| session.edit_target_text(&edit))
         else {
+            self.set_status_note(tr(keys::EDIT_ERROR), cx);
             return;
         };
         self.clear_pending_attachments();
@@ -175,7 +177,7 @@ impl QuillApp {
         let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
-        let reply = self.composer_ui.pending_reply.take();
+        let reply = self.composer_ui.take_reply();
         let (edit, field, saved, stashed) =
             begin_edit_keeping_reply(current, edit, original, reply);
         self.composer_ui.pending_edit = Some(edit);
@@ -199,7 +201,7 @@ impl QuillApp {
         let stashed = self.composer_ui.saved_edit_reply.take();
         let (_, restored) = cancel_edit_draft(self.composer_ui.pending_edit.take(), saved);
         let (restored, reply) = cancel_edit_keeping_reply(restored, stashed);
-        self.composer_ui.pending_reply = reply;
+        self.composer_ui.set_reply(reply);
         self.set_composer_markup(&restored, window, cx);
         let restored = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&restored);
@@ -215,7 +217,7 @@ impl QuillApp {
         let saved = std::mem::take(&mut self.composer_ui.saved_edit_draft);
         let reply = self.composer_ui.saved_edit_reply.take();
         self.composer_ui.pending_edit = None;
-        self.composer_ui.pending_reply = reply;
+        self.composer_ui.set_reply(reply);
         self.set_composer_markup(&saved, window, cx);
     }
 
@@ -315,8 +317,8 @@ impl QuillApp {
 
     pub(in crate::ui) fn clear_reply(&mut self, cx: &mut Context<Self>) {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
-        self.composer_ui.pending_reply =
-            cancel_reply_draft(self.composer_ui.pending_reply.take(), String::new()).0;
+        let kept = cancel_reply_draft(self.composer_ui.take_reply(), String::new()).0;
+        self.composer_ui.set_reply(kept);
         self.share.reply_elsewhere_open = false;
         self.share.reply_quote_open = false;
         self.note_open_draft(true, cx);
@@ -327,7 +329,7 @@ impl QuillApp {
     /// Sticker/GIF/voice sends consume the composer reply. Drop it from the UI
     /// and from the stored draft, and keep any unsent text.
     pub(in crate::ui) fn consume_sent_reply(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.composer_ui.pending_reply = None;
+        self.composer_ui.set_reply(None);
         if self.composer_ui.pending_edit.is_some() {
             self.composer_ui.saved_edit_reply = None;
             return;

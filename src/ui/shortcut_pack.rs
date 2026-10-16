@@ -188,8 +188,7 @@ impl QuillApp {
         }
         if self
             .composer_ui
-            .pending_reply
-            .as_ref()
+            .reply()
             .is_some_and(|reply| reply.chat_id != chat_id)
         {
             return false;
@@ -208,11 +207,7 @@ impl QuillApp {
             })
             .map(|m| m.id.0)
             .collect();
-        let current = self
-            .composer_ui
-            .pending_reply
-            .as_ref()
-            .map(|reply| reply.message_id.0);
+        let current = self.composer_ui.reply().map(|reply| reply.message_id.0);
         match reply_nav(&ids, current, forward, !history.has_newer) {
             ReplyNav::Reply(id) => {
                 self.jump_to_replied_message(MessageId(id), cx);

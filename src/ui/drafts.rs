@@ -53,8 +53,7 @@ impl QuillApp {
         let text = self.composer_markup(cx);
         let reply = self
             .composer_ui
-            .pending_reply
-            .as_ref()
+            .reply()
             .and_then(|reply| reply.send_reply(chat_id));
         self.save_chat_draft(chat_id, topic, &text, reply, delayed, cx);
     }
@@ -81,8 +80,7 @@ impl QuillApp {
         (
             self.composer_markup(cx),
             self.composer_ui
-                .pending_reply
-                .as_ref()
+                .reply()
                 .and_then(|reply| reply.send_reply(chat_id)),
             now_ms,
         )
@@ -96,11 +94,10 @@ impl QuillApp {
         self.notify.ttl_picker_open = false;
         if self
             .composer_ui
-            .pending_reply
-            .as_ref()
+            .reply()
             .is_some_and(|reply| !reply.belongs_to(chat_id))
         {
-            self.composer_ui.pending_reply = None;
+            self.composer_ui.set_reply(None);
         }
         if self
             .composer_ui
@@ -160,8 +157,7 @@ impl QuillApp {
             (
                 self.composer_markup(cx),
                 self.composer_ui
-                    .pending_reply
-                    .as_ref()
+                    .reply()
                     .and_then(|reply| reply.send_reply(chat_id)),
             )
         };
@@ -279,7 +275,7 @@ impl QuillApp {
             .as_ref()
             .map(|draft| draft.text.clone())
             .unwrap_or_default();
-        self.composer_ui.pending_reply = preview.map(|id| {
+        let restored_reply = preview.map(|id| {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
             match draft.as_ref().and_then(|draft| draft.quote.clone()) {
@@ -289,6 +285,7 @@ impl QuillApp {
                 None => ComposerReplyTo::new(chat_id, id),
             }
         });
+        self.composer_ui.set_reply(restored_reply);
         self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.
         let text = self.composer.read(cx).value().to_string();

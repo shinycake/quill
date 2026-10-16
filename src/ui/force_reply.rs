@@ -76,7 +76,7 @@ impl QuillApp {
         let session = self.session()?;
         let chat_id = session.open_chat?;
         let history = session.histories.get(&chat_id.0)?;
-        let pending = self.composer_ui.pending_reply.as_ref()?;
+        let pending = self.composer_ui.reply()?;
         let force_reply_placeholder = |message_id: MessageId| {
             history
                 .messages

@@ -467,6 +467,10 @@ pub struct TopicHistory {
     /// Subsection tabs: `foundChatMessages.total_count` of the latest
     /// page — the topic header's "N messages".
     pub total_count: i32,
+    /// Ids deleted while this history was loaded (or when it was not): a
+    /// stale page cannot bring them back, and the composer reads them as
+    /// "the message is gone" (`Session::message_deleted`).
+    pub tombstones: HashSet<i64>,
 }
 
 impl Default for TopicHistory {
@@ -476,11 +480,24 @@ impl Default for TopicHistory {
             next_from_message_id: MessageId(0),
             loaded_complete: false,
             total_count: 0,
+            tombstones: HashSet::new(),
         }
     }
 }
 
 impl TopicHistory {
+    /// Drop a deleted row and remember the id.
+    pub(crate) fn remove(&mut self, id: MessageId, permanent: bool) {
+        self.messages.remove(&id.0);
+        if permanent {
+            self.tombstones.insert(id.0);
+        }
+    }
+
+    pub fn is_tombstone(&self, id: MessageId) -> bool {
+        self.tombstones.contains(&id.0)
+    }
+
     pub fn ordered(&self) -> Vec<&HistoryMessage> {
         self.messages.values().collect()
     }
@@ -490,6 +507,9 @@ impl TopicHistory {
     /// created by the `GetTopicHistory` fetch — upserting into a missing
     /// topic would corrupt the paging cursor.
     pub(crate) fn upsert(&mut self, message: HistoryMessage) {
+        if self.tombstones.contains(&message.id.0) {
+            return;
+        }
         self.messages.insert(message.id.0, message);
     }
 

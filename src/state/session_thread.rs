@@ -316,7 +316,7 @@ impl Session {
             && thread.chat_id == chat_id
         {
             for id in ids {
-                thread.history.messages.remove(&id.0);
+                thread.history.remove(*id, true);
             }
         }
     }

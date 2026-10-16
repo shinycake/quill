@@ -402,7 +402,7 @@ impl Session {
                 for ((topic_chat_id, _), topic) in self.threads.topic_histories.iter_mut() {
                     if *topic_chat_id == chat_id.0 {
                         for id in &message_ids {
-                            topic.messages.remove(&id.0);
+                            topic.remove(*id, true);
                         }
                     }
                 }

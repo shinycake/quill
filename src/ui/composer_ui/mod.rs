@@ -316,11 +316,7 @@ impl QuillApp {
         if self.deny_send(quill::send_rights::SendKind::Gifs, cx) {
             return;
         }
-        let reply = self
-            .composer_ui
-            .pending_reply
-            .as_ref()
-            .and_then(|reply| reply.send_target(chat_id));
+        let reply = self.send_reply_for(chat_id, cx);
         let sent = if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.send_animation(
                 chat_id,

@@ -165,7 +165,7 @@ impl QuillApp {
         if !ready {
             return;
         }
-        if self.composer_ui.pending_reply.is_some() {
+        if self.composer_ui.has_reply() {
             return;
         }
         self.begin_reply_to(

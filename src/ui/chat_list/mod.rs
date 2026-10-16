@@ -151,8 +151,8 @@ impl QuillApp {
         // restore below ("Reply in Another Chat").
         let carried_reply = self
             .composer_ui
-            .pending_reply
-            .clone()
+            .reply()
+            .cloned()
             .filter(|reply| reply.target_chat == Some(chat_id));
         // Choosing a chat from the list ends the peek at it.
         self.chat_list.forum_chats_peek = false;
@@ -196,7 +196,7 @@ impl QuillApp {
         }
         self.restore_open_draft(window, cx);
         if carried_reply.is_some() {
-            self.composer_ui.pending_reply = carried_reply;
+            self.composer_ui.set_reply(carried_reply);
         }
         let text = self.composer.read(cx).value().to_string();
         self.sync_composer_typing(&text);

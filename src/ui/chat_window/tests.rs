@@ -242,8 +242,8 @@ fn a_reply_started_in_a_chat_window_stays_in_that_window(cx: &mut TestAppContext
     h.settle(cx);
     let (window_reply, main_reply) = h.app.read_with(cx, |app, _| {
         let slot = app.windows.slot_for(OTHER).expect("slot");
-        let reply = slot.borrow().composer_ui.pending_reply.clone();
-        (reply, app.composer_ui.pending_reply.clone())
+        let reply = slot.borrow().composer_ui.reply().cloned();
+        (reply, app.composer_ui.reply().cloned())
     });
     assert_eq!(window_reply.map(|reply| reply.message_id), Some(OTHER_LAST));
     assert!(main_reply.is_none());

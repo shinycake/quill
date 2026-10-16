@@ -153,16 +153,12 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return;
         }
-        let reply_to = self
-            .composer_ui
-            .pending_reply
-            .as_ref()
-            .and_then(|reply| reply.send_target(chat_id));
+        let reply_to = self.send_reply_for(chat_id, cx);
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_checklist_draft(chat_id, &draft, reply_to) {
                 Ok(_) => {
                     self.composer_ui.checklist_dialog = None;
-                    self.composer_ui.pending_reply = None;
+                    self.composer_ui.set_reply(None);
                     self.connection.status_note = tr(keys::Q_MEDIA_SENDING_CHECKLIST).into();
                 }
                 Err(_) => {

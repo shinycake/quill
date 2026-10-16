@@ -72,7 +72,8 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_reply(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.composer_ui.pending_reply = Some(ComposerReplyTo::new(CHAT, REPLIED));
+        self.composer_ui
+            .set_reply(Some(ComposerReplyTo::new(CHAT, REPLIED)));
     }
 
     fn demo_ready_reply_edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -6,6 +6,9 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use quill::composer::ComposerReplyTo;
+use quill::ids::ChatId;
+use quill::telegram::SendReply;
 
 impl QuillApp {
     /// An edit comes before a reply: cancelling the edit hands the stashed
@@ -30,18 +33,35 @@ impl QuillApp {
         edit_gone
     }
 
-    /// Drop a reply to a deleted message and keep the text (tdesktop
-    /// cancels the reply when the item is removed). Every send re-checks it,
-    /// so a delete that lands between two frames never reaches TDLib.
-    pub(super) fn cancel_gone_reply(&mut self, cx: &mut Context<Self>) {
-        let reply_gone = self
-            .composer_ui
-            .pending_reply
-            .as_ref()
-            .zip(self.session())
-            .is_some_and(|(reply, session)| {
-                session.message_deleted(reply.chat_id, reply.message_id)
-            });
+    /// The reply a send carries. The only way a sender reads the reply: a
+    /// reply to a deleted message is dropped first (tdesktop cancels the
+    /// reply when the item is removed), so a delete that lands between two
+    /// frames never reaches TDLib. `ComposerUi` keeps the reply private, so a
+    /// new sender cannot skip this.
+    pub(super) fn reply_for_send(&mut self, cx: &mut Context<Self>) -> Option<ComposerReplyTo> {
+        self.cancel_gone_reply(cx);
+        self.composer_ui.reply().cloned()
+    }
+
+    /// [`Self::reply_for_send`] as the request's reply target for `chat_id`
+    /// (same-chat, or aimed here from another chat).
+    pub(super) fn send_reply_for(
+        &mut self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> Option<SendReply> {
+        self.reply_for_send(cx)
+            .and_then(|reply| reply.send_target(chat_id))
+    }
+
+    fn cancel_gone_reply(&mut self, cx: &mut Context<Self>) {
+        let reply_gone =
+            self.composer_ui
+                .reply()
+                .zip(self.session())
+                .is_some_and(|(reply, session)| {
+                    session.message_deleted(reply.chat_id, reply.message_id)
+                });
         if reply_gone {
             self.clear_reply(cx);
         }
