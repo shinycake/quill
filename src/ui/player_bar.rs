@@ -15,11 +15,13 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::message_media::{AudioScrubber, ScrubberFace};
 use super::playback::PlaybackKind;
+use super::playback_state::SeekSite;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -140,6 +142,7 @@ impl QuillApp {
         let offset = self.playback.active_position_secs().unwrap_or(0.0);
         let slider = cx.new(|_| {
             SliderState::new()
+                .label(tr(keys::Q_AV_PLAYBACK_POSITION))
                 .min(0.0)
                 .max(duration as f32)
                 .step(0.1)
@@ -369,6 +372,17 @@ impl QuillApp {
             format_voice_duration(elapsed as i32),
             format_voice_duration(duration as i32)
         );
+        let progress = if duration > 0.0 {
+            (elapsed / duration).clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
+        let hover = self
+            .playback
+            .seek_hover
+            .filter(|hover| hover.site == SeekSite::PlayerBar)
+            .map(|hover| hover.at);
+        let dragging = self.playback.seek_preview_secs.is_some();
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
@@ -477,13 +491,18 @@ impl QuillApp {
                 .child(title_block)
                 .when_some(self.playback.player.slider.clone(), |this, slider| {
                     this.child(
-                        div()
-                            .id("player-bar-seek")
-                            .flex_none()
-                            .w(px(140.))
-                            .role(Role::Group)
-                            .aria_label(tr(keys::Q_AV_PLAYBACK_POSITION))
-                            .child(Slider::new(&slider).bg(accent()).text_color(accent())),
+                        div().flex_none().w(px(140.)).child(
+                            AudioScrubber::new(
+                                "player-bar-seek",
+                                &slider,
+                                ScrubberFace::Line,
+                                accent(),
+                                QuillApp::seek_hover_handler(SeekSite::PlayerBar, cx),
+                            )
+                            .progress(progress)
+                            .hover(hover)
+                            .dragging(dragging),
+                        ),
                     )
                 })
                 .child(

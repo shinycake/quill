@@ -12,6 +12,7 @@ use crate::ui::demos::video_fixtures::{
     apply_ready_gifs, apply_ready_video, apply_ready_video_note, apply_ready_video_viewer,
 };
 use crate::ui::playback::PlaybackKind;
+use crate::ui::playback_state::{SeekHover, SeekSite};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -92,6 +93,14 @@ register_demos![
         "screenshot demo — voice record bar + history playback"
     )
     .setup(QuillApp::demo_ready_voice),
+    // The incoming voice note playing at ~40%: the waveform scrubber on
+    // the active row and the player bar. `QUILL_DEMO_SEEK_HOVER=<0..1>`
+    // puts the pointer over the row's scrubber.
+    DemoSpec::chats(
+        "ready-voice-playing",
+        "screenshot demo — playing voice note with the waveform scrubber"
+    )
+    .setup(QuillApp::demo_ready_voice_playing),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -125,7 +134,41 @@ impl QuillApp {
             &track,
             cx,
         );
+        self.demo_seek_hover();
         self.connection.status_note = "screenshot demo — audio".into();
+    }
+
+    fn demo_ready_voice_playing(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_ready_voice(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        }
+        // The incoming 12 s note (message 90), 40% in.
+        let track = demo_media_allowlist().join("demo-voice.ogg");
+        self.begin_track_playback(
+            PlaybackKind::Voice,
+            ChatId(11),
+            MessageId(90),
+            12.0,
+            4.8,
+            &track,
+            cx,
+        );
+        self.demo_seek_hover();
+        self.connection.status_note = "screenshot demo — voice note · playing".into();
+    }
+
+    /// `QUILL_DEMO_SEEK_HOVER=<0..1>`: the pointer over the active row's
+    /// scrubber, at that fraction.
+    fn demo_seek_hover(&mut self) {
+        self.playback.seek_hover = std::env::var("QUILL_DEMO_SEEK_HOVER")
+            .ok()
+            .and_then(|value| value.trim().parse::<f32>().ok())
+            .filter(|at| at.is_finite())
+            .map(|at| SeekHover {
+                site: SeekSite::Row,
+                at: at.clamp(0.0, 1.0),
+            });
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -250,11 +293,9 @@ impl QuillApp {
             2,
             bars,
         ));
-        self.playback.playing_voice = Some(MessageId(91));
         // MED2: demo shows the locked record bar + a transcribed note.
         self.recording.locked = true;
-        self.connection.status_note =
-            "screenshot demo — recording voice · locked · playing voice note".into();
+        self.connection.status_note = "screenshot demo — recording voice · locked".into();
     }
 
     fn demo_stickers(&mut self, demo: StickersDemo, _window: &mut Window, _cx: &mut Context<Self>) {

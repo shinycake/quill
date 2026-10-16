@@ -21,6 +21,7 @@ Open any chat from the chat list and scroll the history.
 | `ready-video-inline` | autoplaying video tile and round video |
 | `ready-video` / `ready-video-note` | video bubble / round note with Play/Pause |
 | `ready-voice` | voice record bar and playback |
+| `ready-voice-playing` | active voice note: waveform scrubber and player bar (`QUILL_DEMO_SEEK_HOVER=0.7` shows the hover tint and time; also works on `ready-audio`) |
 
 End state: bubble widths and tails match the reference metrics, media frames
 are drawn (not empty), the time footer sits inside the bubble.

@@ -9,6 +9,21 @@ use quill::ids::MessageId;
 use std::collections::HashMap;
 use std::time::Instant;
 
+/// Which seek control of the active track the pointer is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SeekSite {
+    /// The active voice or music row in the history.
+    Row,
+    PlayerBar,
+}
+
+/// The pointer over a seek control, as a fraction of its width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SeekHover {
+    pub(crate) site: SeekSite,
+    pub(crate) at: f32,
+}
+
 pub(crate) struct PlaybackUi {
     /// History row whose voice note is playing.
     pub(super) player: super::player_bar::PlayerBarState,
@@ -34,6 +49,8 @@ pub(crate) struct PlaybackUi {
     pub(super) seek_scrubbing: bool,
     /// Drag preview position in seconds, shown in the time label while scrubbing.
     pub(super) seek_preview_secs: Option<f64>,
+    /// Where the pointer rests over a seek control of the active track.
+    pub(super) seek_hover: Option<SeekHover>,
     /// Guard for the playback progress tick task.
     pub(super) tick: bool,
     /// Last known position per message, so rows keep their seek bar fill (and
@@ -121,6 +138,7 @@ impl PlaybackUi {
             seek_slider: None,
             seek_scrubbing: false,
             seek_preview_secs: None,
+            seek_hover: None,
             tick: false,
             positions: HashMap::new(),
             sticker_playback: Default::default(),
