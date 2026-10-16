@@ -23,6 +23,10 @@ pub(crate) struct FolderUi {
     pub(super) new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
     /// A folder limit box (or the tag Premium notice).
     pub(super) limit_box: Option<quill::folder_limits::FolderLimitKind>,
+    /// Scroll state of the top tab strip, shared with the kit `TabBar`.
+    pub(super) tabs_scroll: gpui_kit::ScrollHandle,
+    /// What the selected tab was last scrolled into view for.
+    pub(super) tabs_revealed: std::cell::Cell<Option<super::folder_tabs_fit::RevealKey>>,
 }
 
 impl FolderUi {
@@ -38,6 +42,8 @@ impl FolderUi {
             tab_menu: None,
             new_chats_dialog: None,
             limit_box: None,
+            tabs_scroll: gpui_kit::ScrollHandle::new(),
+            tabs_revealed: std::cell::Cell::new(None),
         }
     }
 }
