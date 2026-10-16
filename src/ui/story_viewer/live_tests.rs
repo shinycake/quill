@@ -32,6 +32,7 @@ fn message(id: i32, date: i32, stars: i64) -> ParsedGroupCallMessage {
         sender_id: MessageSender::User { user_id: 9 },
         date,
         text: "hi".to_string(),
+        entities: Vec::new(),
         paid_message_star_count: stars,
         is_from_owner: false,
         can_be_deleted: true,
@@ -238,9 +239,10 @@ fn the_stars_box_sets_the_next_comment_price(cx: &mut TestAppContext) {
     // Remove Stars from the send button's menu.
     let send = find(vcx, "live-story-send").expect("the send button");
     vcx.simulate_mouse_down(send.center(), MouseButton::Right, Modifiers::default());
+    vcx.simulate_mouse_up(send.center(), MouseButton::Right, Modifiers::default());
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.stories.live.send_menu));
-    app.update(vcx, |app, cx| app.clear_live_stars(cx));
+    // The kit's menu with Edit Stars and Remove Stars.
+    click(vcx, "live-story-remove-stars");
     assert_eq!(
         app.read_with(vcx, |app, _| app.stories.live.chosen_stars),
         0
@@ -273,8 +275,9 @@ fn a_comment_is_deleted_from_its_menu(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let row = find(vcx, "live-story-comment-2").expect("a comment");
     vcx.simulate_mouse_down(row.center(), MouseButton::Right, Modifiers::default());
+    vcx.simulate_mouse_up(row.center(), MouseButton::Right, Modifiers::default());
     frames(vcx);
-    assert_eq!(app.read_with(vcx, |app, _| app.stories.live.menu), Some(2));
+    // The kit's menu: the date, Copy Text and Delete.
     click(vcx, "live-comment-delete");
     assert!(app.read_with(vcx, |app, _| app.stories.live.delete.is_some()));
     app.update(vcx, |app, cx| app.confirm_delete_live_comment(cx));
@@ -307,4 +310,142 @@ fn an_ended_stream_closes_the_viewer(cx: &mut TestAppContext) {
     assert!(!app.read_with(vcx, |app, _| app.stories.viewer.is_open()));
     assert!(app.read_with(vcx, |app, _| app.stories.live.watching.is_none()));
     assert!(find(vcx, "live-story-frame").is_none());
+}
+
+#[gpui_kit::test]
+fn space_types_in_the_comment_field_and_does_not_pause(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    let field = find(vcx, "live-story-field").expect("the comment field");
+    vcx.simulate_click(field.center(), Modifiers::default());
+    frames(vcx);
+    let focused = app.update_in(vcx, |app, window, cx| {
+        app.story_text_input_open(window, cx)
+    });
+    assert!(focused, "the field has the keyboard");
+    vcx.simulate_keystrokes("a space b");
+    frames(vcx);
+    let value = app.read_with(vcx, |app, cx| {
+        app.stories.live.input.read(cx).value().to_string()
+    });
+    assert_eq!(value, "a b");
+    assert!(!app.read_with(vcx, |app, _| app.stories.pause.is_paused()));
+    // The placeholder goes once there is text.
+    assert!(find(vcx, "live-story-placeholder").is_none());
+}
+
+#[gpui_kit::test]
+fn a_landscape_stream_shows_whole_and_a_portrait_one_fills(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open_live(cx, "ready-live-story");
+    assert!(find(&mut vcx, "live-story-backdrop").is_some());
+    let (_app, mut vcx) = open_live(cx, "ready-live-story-portrait");
+    assert!(find(&mut vcx, "live-story-frame").is_some());
+    assert!(find(&mut vcx, "live-story-backdrop").is_none());
+}
+
+#[gpui_kit::test]
+fn the_composer_is_one_field_between_the_toggle_and_the_stars(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    let row = find(vcx, "live-story-composer").expect("the comment row");
+    let toggle = find(vcx, "live-story-comments-toggle").expect("the toggle");
+    let field = find(vcx, "live-story-field").expect("the field");
+    let stars = find(vcx, "live-story-stars").expect("the Stars button");
+    let edit = find(vcx, "live-story-edit-stars").expect("Edit Stars");
+    let send = find(vcx, "live-story-send").expect("Send");
+    // tdesktop: 8 px between the toggle, the field and the Stars button;
+    // Edit Stars and Send sit inside the field.
+    assert_eq!(field.left(), toggle.right() + px(8.));
+    assert_eq!(stars.left(), field.right() + px(8.));
+    assert_eq!(stars.right(), row.right());
+    assert!(edit.left() >= field.left() && edit.right() <= field.right());
+    assert!(send.left() >= field.left() && send.right() <= field.right());
+    // "Comment for 5 Stars" fits.
+    let placeholder = find(vcx, "live-story-placeholder").expect("the placeholder");
+    assert!(placeholder.right() <= edit.left());
+}
+
+#[gpui_kit::test]
+fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.balance =
+                Some(quill::premium_hub::StarAmount { stars: 3, nanos: 0 });
+        }
+        app.open_live_stars_box(StarsBoxMode::Reaction, 0, false, cx);
+    });
+    frames(vcx);
+    app.update_in(vcx, |app, window, cx| app.submit_live_stars_box(window, cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        let session = app.session().expect("the demo session");
+        assert!(session.payments.hub.stars_open, "the Stars box opens");
+        assert!(session.payments.star_packs.open, "with its packs");
+        assert!(
+            session
+                .stories
+                .live
+                .as_ref()
+                .is_some_and(|live| live.pending_reaction.is_none()),
+            "nothing waits to be sent"
+        );
+        assert!(app.connection.status_note.contains("Needed"));
+    });
+}
+
+#[gpui_kit::test]
+fn another_call_is_left_only_after_the_confirm(cx: &mut TestAppContext) {
+    use quill::calls::group_call_create::LeaveText;
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(find(vcx, "live-story-leave-other").is_some());
+    app.update(vcx, |app, cx| app.leave_other_call_for_live_story(cx));
+    frames(vcx);
+    assert!(find(vcx, "live-story-leave-other").is_none());
+    app.read_with(vcx, |app, _| {
+        assert!(app.stories.live.leave_other.is_none());
+        assert!(app.stories.live.retry_join, "the join is tried again");
+    });
+}
+
+#[gpui_kit::test]
+fn the_toast_goes_once_the_stars_are_due(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
+    let vcx = &mut vcx;
+    assert!(find(vcx, "live-story-toast").is_some());
+    app.update(vcx, |app, cx| {
+        if let Some(pending) = app
+            .demo_session
+            .as_mut()
+            .and_then(|s| s.stories.live.as_mut())
+            .and_then(|live| live.pending_reaction.as_mut())
+        {
+            pending.commit_at_ms = 1;
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(find(vcx, "live-story-toast").is_none());
+}
+
+#[gpui_kit::test]
+fn the_emoji_panel_closes_with_the_reply_row(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| app.toggle_live_emoji(cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.story_reply_panel_active()));
+    app.update(vcx, |app, cx| app.toggle_live_emoji(cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(!app.story_reply_panel_active());
+        assert!(!app.stories.reply_open, "the reply row is not left open");
+    });
 }

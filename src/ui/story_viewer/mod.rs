@@ -920,7 +920,9 @@ impl QuillApp {
     }
 }
 
+pub(in crate::ui) mod chrome;
 mod ensure_story_download;
+mod live_comments;
 mod live_composer;
 #[cfg(feature = "demo-capture")]
 mod live_demo;

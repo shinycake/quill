@@ -1,20 +1,32 @@
-//! The live story's comment row (tdesktop `Reply` in video stream mode):
-//! comments toggle, send-as, the field ("Comment" or "Comment for N
-//! Stars"), emoji, Edit Stars, Send (tinted with the Stars chosen), and
-//! the Stars button with everyone's total. With comments off the field is
-//! replaced by "Comments disabled."
+//! The live story's comment row (tdesktop `ComposeControls` in video
+//! stream mode, `updateControlsGeometry` / `paintBackground`): the
+//! comments toggle on its own round background, then one rounded field
+//! (`storiesComposeBg`, radius 21) holding send-as, the field ("Comment"
+//! or "Comment for N Stars"), emoji, Edit Stars and Send (tinted with the
+//! Stars chosen), and apart from it the Stars button with everyone's
+//! total. With comments off the field says "Comments disabled."
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::{StarsBoxMode, level_color};
 use super::live_view::sender_avatar;
 use super::*;
+use crate::ui::composer_field::field_doc;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use quill::lang::trn_with;
 use quill::live_story::{CommentsState, level_for_stars};
 use quill::premium_hub::group_digits;
 use quill::state::Session;
-use std::cell::Cell;
-use std::rc::Rc;
+
+/// The row's width: the story frame's.
+const ROW_W: f32 = 360.;
+/// The buttons' height. tdesktop's are 42 in a wider column; 36 keeps
+/// room for "Comment for 1,000 Stars" in the story's 360.
+const BUTTON: f32 = 36.;
+/// tdesktop `commentsSkip` / `starsSkip`.
+const SKIP: f32 = 8.;
+/// The field's text (`historyComposeField`).
+const FIELD_TEXT: f32 = 14.;
 
 impl QuillApp {
     /// The comment row, or `None` while the viewer has not joined.
@@ -37,51 +49,73 @@ impl QuillApp {
         let chosen = self.stories.live.chosen_stars;
         let total = live.stars_total();
         let toggle = comments_toggle(live.comments.state(), cx);
-        let send_as = self.live_send_as_button(session, cx);
-        let middle: AnyElement = if allowed || admin {
+        let main: AnyElement = if allowed || admin {
             self.live_field_row(price, chosen, admin, session, cx)
         } else {
             div()
                 .debug_selector(|| "live-story-comments-off".into())
                 .flex_1()
                 .min_w_0()
-                .h(px(40.))
+                .h(px(BUTTON))
                 .flex()
                 .items_center()
                 .px(px(12.))
-                .text_sm()
-                .text_color(text_muted())
+                .rounded(px(BUTTON / 2.))
+                .bg(chrome::compose_bg())
+                .text_size(px(FIELD_TEXT))
+                .text_color(chrome::gray_text())
                 .child(tr(keys::VIDEO_STREAM_COMMENTS_DISABLED))
                 .into_any_element()
         };
-        let stars = div()
-            .id("live-story-stars")
+        let stars = self.live_stars_button(total, admin, cx);
+        Some(
+            div()
+                .id("live-story-composer")
+                .debug_selector(|| "live-story-composer".into())
+                .occlude()
+                .relative()
+                .w(px(ROW_W))
+                .flex()
+                .items_center()
+                .children(toggle.map(|toggle| div().flex_none().mr(px(SKIP)).child(toggle)))
+                .child(main)
+                .child(div().flex_none().ml(px(SKIP)).child(stars))
+                .into_any_element(),
+        )
+    }
+
+    /// The Stars button: a star with everyone's total under it (tdesktop
+    /// `starsReaction` with `starsReactionCounter`). A click adds one Star,
+    /// a right click opens the box.
+    fn live_stars_button(&self, total: i64, admin: bool, cx: &mut Context<Self>) -> AnyElement {
+        Button::new("live-story-stars")
             .debug_selector(|| "live-story-stars".into())
-            .flex_none()
-            .h(px(36.))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .gap(px(4.))
+            .custom(chrome::compose(cx))
             .rounded_full()
-            .bg(rgba(0xffffff1f))
-            .cursor_pointer()
-            .role(gpui_kit::Role::Button)
-            .aria_label(tr(keys::PAID_REACTION_TITLE))
-            .text_color(rgb(0xffffff))
+            .size(px(BUTTON))
+            .tab_index(0)
+            .accessibility_label(tr(keys::PAID_REACTION_TITLE))
             .child(
-                Icon::new(IconName::StarFill)
-                    .with_size(px(18.))
-                    .text_color(rgb(0xffb800)),
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(
+                        Icon::new(IconName::StarFill)
+                            .with_size(px(if total > 0 { 16. } else { 20. }))
+                            .text_color(chrome::stars_gold()),
+                    )
+                    .when(total > 0, |this| {
+                        this.child(
+                            div()
+                                .text_size(px(9.))
+                                .line_height(px(10.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(chrome::gray_icon())
+                                .child(group_digits(total)),
+                        )
+                    }),
             )
-            .when(total > 0, |this| {
-                this.child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(group_digits(total)),
-                )
-            })
             .on_click(cx.listener(|this, _, _, cx| this.tap_live_stars(cx)))
             .on_mouse_down(
                 MouseButton::Right,
@@ -93,32 +127,11 @@ impl QuillApp {
                     };
                     this.open_live_stars_box(mode, 0, false, cx);
                 }),
-            );
-        let panel = self
-            .stories
-            .live
-            .send_as_open
-            .then(|| send_as_panel(session, cx));
-        Some(
-            div()
-                .id("live-story-composer")
-                .debug_selector(|| "live-story-composer".into())
-                .occlude()
-                .relative()
-                .w(px(360.))
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .children(toggle)
-                .children(send_as)
-                .child(middle)
-                .child(stars)
-                .children(panel)
-                .into_any_element(),
-        )
+            )
+            .into_any_element()
     }
 
-    /// The field with its emoji, Edit Stars and Send buttons.
+    /// The rounded field: send-as, the text, emoji, Edit Stars and Send.
     fn live_field_row(
         &self,
         price: i64,
@@ -128,71 +141,163 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let input = &self.stories.live.input;
-        let placeholder_price = self.stories.live.placeholder.clone();
-        let sync = placeholder_sync(input.clone(), placeholder_price, price);
+        let empty = input.read(cx).value().is_empty();
+        let placeholder = if price > 0 {
+            trn_with(
+                keys::VIDEO_STREAM_COMMENT_PAID_PH,
+                price,
+                &[("count", &group_digits(price))],
+            )
+        } else {
+            tr(keys::VIDEO_STREAM_COMMENT_PH).to_string()
+        };
         let level = level_for_stars(&session.live_levels(), chosen);
+        // Send, or the Stars chosen in the level's color; a right click
+        // offers Edit Stars and Remove Stars (tdesktop `SendMenu`).
+        let send_button = if chosen > 0 {
+            Button::new("live-story-send")
+                .custom(
+                    ButtonCustomVariant::new(cx)
+                        .color(level_color(level.first_color, 1.0))
+                        .foreground(chrome::fg())
+                        .hover(level_color(level.first_color, 0.9))
+                        .active(level_color(level.first_color, 0.8))
+                        .shadow(false),
+                )
+                .rounded_full()
+                .h(px(28.))
+                .px(px(10.))
+                .label(format!("\u{2605}{}", group_digits(chosen)))
+        } else {
+            Button::new("live-story-send")
+                .custom(chrome::compose(cx).foreground(chrome::blue()))
+                .rounded_full()
+                .size(px(BUTTON))
+                .icon(IconName::Send)
+        };
         let send = div()
             .id("live-story-send-wrap")
             .debug_selector(|| "live-story-send".into())
-            .relative()
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(|this, _, _, cx| {
-                    this.stories.live.send_menu = true;
-                    cx.notify();
-                }),
-            )
+            .flex_none()
             .child(
-                Button::new("live-story-send")
-                    .when(chosen > 0, |button| {
-                        button
-                            .label(format!("\u{2605}{}", group_digits(chosen)))
-                            .bg(level_color(level.first_color, 1.0))
-                    })
-                    .when(chosen == 0, |button| button.icon(IconName::Send).ghost())
-                    .text_color(rgb(0xffffff))
+                send_button
+                    .tab_index(0)
                     .accessibility_label(tr(keys::Q_MEDIA_SEND))
                     .on_click(
                         cx.listener(|this, _, window, cx| this.send_live_comment(window, cx)),
                     ),
-            )
-            .when(self.stories.live.send_menu, |this| {
-                this.child(send_menu(chosen, cx))
-            });
-        div()
+            );
+        let send = if admin {
+            send.into_any_element()
+        } else {
+            let owner = cx.entity().downgrade();
+            send.context_menu(move |menu, _, _| {
+                let edit = owner.clone();
+                let remove = owner.clone();
+                menu.item(
+                    PopupMenuItem::new(tr(keys::VIDEO_STREAM_EDIT_STARS)).on_click(
+                        move |_, _, cx| {
+                            let _ = edit.update(cx, |this, cx| {
+                                this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                            });
+                        },
+                    ),
+                )
+                .when(chosen > 0, |menu| {
+                    menu.item(
+                        PopupMenuItem::element(|_, _| {
+                            div()
+                                .debug_selector(|| "live-story-remove-stars".into())
+                                .child(tr(keys::VIDEO_STREAM_REMOVE_STARS))
+                        })
+                        .on_click(move |_, _, cx| {
+                            let _ = remove.update(cx, |this, cx| this.clear_live_stars(cx));
+                        }),
+                    )
+                })
+            })
+            .into_any_element()
+        };
+        let field = div()
+            .relative()
             .flex_1()
             .min_w_0()
+            .pl(px(10.))
+            .text_size(px(FIELD_TEXT))
+            .child(
+                Textarea::new(input)
+                    .appearance(false)
+                    .bordered(false)
+                    .text_color(chrome::fg())
+                    .aria_label(placeholder.clone())
+                    .token(self.field_token_renderer(input, cx))
+                    .h(px(BUTTON)),
+            )
+            // The placeholder in `storiesComposeGrayText` (the kit's takes
+            // the app theme's muted color).
+            .when(empty, |this| {
+                this.child(
+                    div()
+                        .debug_selector(|| "live-story-placeholder".into())
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(12.))
+                        .right_0()
+                        .flex()
+                        .items_center()
+                        .truncate()
+                        .text_color(chrome::gray_text())
+                        .child(placeholder),
+                )
+            });
+        let send_as = self.live_send_as_button(session, cx);
+        let icon_button = |id: &'static str, icon: IconName, label: &'static str| {
+            Button::new(id)
+                .custom(chrome::compose(cx))
+                .rounded_full()
+                .size(px(32.))
+                .icon(icon)
+                .tab_index(0)
+                .accessibility_label(label)
+        };
+        div()
+            .id("live-story-field")
+            .debug_selector(|| "live-story-field".into())
+            .flex_1()
+            .min_w_0()
+            .h(px(BUTTON))
             .flex()
             .items_center()
-            .gap(px(2.))
+            .rounded(px(BUTTON / 2.))
+            .bg(chrome::compose_bg())
+            .children(send_as)
+            .child(field)
             .child(
-                div().flex_1().min_w_0().child(
-                    Textarea::new(input)
-                        .aria_label(tr(keys::VIDEO_STREAM_COMMENT_PH))
-                        .h(px(40.)),
-                ),
-            )
-            .child(sync)
-            .child(
-                Button::new("live-story-emoji")
-                    .icon(IconName::FaceSlightlySmiling)
-                    .ghost()
-                    .text_color(text_bright())
-                    .accessibility_label(tr(keys::Q_MEDIA_EMOJI_STICKERS_AND_GIFS))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_live_emoji(cx))),
+                icon_button(
+                    "live-story-emoji",
+                    IconName::FaceSlightlySmiling,
+                    tr(keys::Q_MEDIA_EMOJI_STICKERS_AND_GIFS),
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_live_emoji(cx))),
             )
             .when(!admin, |this| {
                 this.child(
-                    Button::new("live-story-edit-stars")
+                    div()
                         .debug_selector(|| "live-story-edit-stars".into())
-                        .icon(IconName::Star)
-                        .ghost()
-                        .text_color(text_bright())
-                        .tooltip(tr(keys::VIDEO_STREAM_EDIT_STARS))
-                        .accessibility_label(tr(keys::VIDEO_STREAM_EDIT_STARS))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
-                        })),
+                        .child(
+                            icon_button(
+                                "live-story-edit-stars",
+                                IconName::Star,
+                                tr(keys::VIDEO_STREAM_EDIT_STARS),
+                            )
+                            .tooltip(tr(keys::VIDEO_STREAM_EDIT_STARS))
+                            .on_click(cx.listener(
+                                |this, _, _, cx| {
+                                    this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                                },
+                            )),
+                        ),
                 )
             })
             .child(send)
@@ -200,196 +305,107 @@ impl QuillApp {
     }
 
     /// Your avatar as the comment sender, when there is a choice (tdesktop
-    /// shows the send-as button for two or more senders).
+    /// shows the send-as button for two or more senders); a click opens
+    /// "Send message as...".
     fn live_send_as_button(&self, session: &Session, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let senders = session.stories.live.as_ref()?.message_senders.as_ref()?;
+        let senders = session.stories.live.as_ref()?.message_senders.clone()?;
         if senders.len() < 2 {
             return None;
         }
         let current = session.live_story_sender()?;
+        let owner = cx.entity().downgrade();
+        // The menu draws each sender's avatar and name; their labels and
+        // photos are read now.
+        let rows: Vec<(MessageSender, String, Option<String>, bool)> = senders
+            .iter()
+            .map(|offered| {
+                let sender = offered.sender;
+                let photo = match sender {
+                    MessageSender::User { user_id } => session.user_photo_path(user_id),
+                    MessageSender::Chat { chat_id } => session.chat_photo_path(ChatId(chat_id)),
+                };
+                (
+                    sender,
+                    session.sender_label(sender),
+                    photo.map(|path| path.to_string()),
+                    offered.needs_premium,
+                )
+            })
+            .collect();
         Some(
-            div()
-                .id("live-story-send-as")
+            Button::new("live-story-send-as")
+                .debug_selector(|| "live-story-send-as".into())
+                .custom(chrome::compose(cx))
+                .rounded_full()
+                .size(px(BUTTON))
                 .flex_none()
-                .cursor_pointer()
-                .role(gpui_kit::Role::Button)
-                .aria_label(tr(keys::SEND_AS_TITLE))
+                .tab_index(0)
+                .accessibility_label(tr(keys::SEND_AS_TITLE))
                 .child(sender_avatar(session, current, 28.))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.stories.live.send_as_open = !this.stories.live.send_as_open;
-                    cx.notify();
-                }))
+                .dropdown_menu_with_anchor(Anchor::BottomLeft, move |menu, _, _| {
+                    let mut menu = menu.label(tr(keys::SEND_AS_TITLE));
+                    for (sender, name, photo, needs_premium) in rows.clone() {
+                        let owner = owner.clone();
+                        menu = menu.item(
+                            PopupMenuItem::element(move |_, _| {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(10.))
+                                    .child(crate::ui::message_text::kit_avatar_element(
+                                        &name,
+                                        photo.as_deref().map(std::path::Path::new),
+                                        px(28.),
+                                    ))
+                                    .child(div().min_w_0().truncate().child(name.clone()))
+                            })
+                            .checked(sender == current)
+                            .disabled(needs_premium)
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |this, cx| this.pick_live_sender(sender, cx));
+                            }),
+                        );
+                    }
+                    menu
+                })
                 .into_any_element(),
         )
     }
 }
 
-/// Sets the field's placeholder for the comment price once it changes
-/// (setting it needs the window, which the draw has).
-fn placeholder_sync(
-    input: Entity<gpui_kit::component::input::TextareaState>,
-    shown: Rc<Cell<i64>>,
-    price: i64,
-) -> AnyElement {
-    canvas(
-        |_, _, _| {},
-        move |_, (), window, _| {
-            if shown.get() == price {
-                return;
-            }
-            shown.set(price);
-            let input = input.clone();
-            window.on_next_frame(move |window, cx| {
-                let text = if price > 0 {
-                    trn_with(
-                        keys::VIDEO_STREAM_COMMENT_PAID_PH,
-                        price,
-                        &[("count", &group_digits(price))],
-                    )
-                } else {
-                    tr(keys::VIDEO_STREAM_COMMENT_PH).to_string()
-                };
-                input.update(cx, |input, cx| input.set_placeholder(text, window, cx));
-            });
-        },
-    )
-    .size_0()
-    .into_any_element()
-}
-
-/// The comments toggle; hidden while there are none (tdesktop
-/// `CommentsState::Empty`).
+/// The comments toggle on its own round background; hidden while there
+/// are none (tdesktop `CommentsState::Empty`).
 fn comments_toggle(state: CommentsState, cx: &mut Context<QuillApp>) -> Option<AnyElement> {
-    let icon = match state {
+    let (icon, label) = match state {
         CommentsState::Empty => return None,
-        CommentsState::Shown => IconName::MessageSquare,
-        CommentsState::Hidden => IconName::MessageSquareOff,
-        CommentsState::WithNew => IconName::MessageSquareDot,
+        CommentsState::Shown => (IconName::MessageSquare, tr(keys::Q_LIVE_STORY_HIDE_COMMENTS)),
+        CommentsState::Hidden => (
+            IconName::MessageSquareOff,
+            tr(keys::Q_LIVE_STORY_SHOW_COMMENTS),
+        ),
+        CommentsState::WithNew => (
+            IconName::MessageSquareDot,
+            tr(keys::Q_LIVE_STORY_SHOW_COMMENTS),
+        ),
     };
     Some(
         Button::new("live-story-comments-toggle")
+            .debug_selector(|| "live-story-comments-toggle".into())
+            .custom(chrome::compose(cx))
+            .rounded_full()
+            .size(px(BUTTON))
             .icon(icon)
-            .ghost()
-            .text_color(text_bright())
-            .selected(state == CommentsState::Shown)
-            .accessibility_label(tr(keys::Q_MEDIA_LIVE_STORY))
+            .tab_index(0)
+            .accessibility_label(label)
             .on_click(cx.listener(|this, _, _, cx| this.toggle_live_comments(cx)))
             .into_any_element(),
     )
 }
 
-/// "Send message as..." with the senders TDLib offers.
-fn send_as_panel(session: &Session, cx: &mut Context<QuillApp>) -> AnyElement {
-    let current = session.live_story_sender();
-    let senders = session
-        .stories
-        .live
-        .as_ref()
-        .and_then(|live| live.message_senders.clone())
-        .unwrap_or_default();
-    let rows = senders.into_iter().enumerate().map(|(index, offered)| {
-        let sender = offered.sender;
-        let chosen = current == Some(sender);
-        div()
-            .id(("live-story-sender", index as u64))
-            .flex()
-            .items_center()
-            .gap(px(10.))
-            .px(px(12.))
-            .py(px(6.))
-            .cursor_pointer()
-            .when(chosen, |this| this.bg(rgba(0xffffff14)))
-            .hover(|style| style.bg(rgba(0xffffff1a)))
-            .role(gpui_kit::Role::MenuItem)
-            .child(sender_avatar(session, sender, 32.))
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .child(session.sender_label(sender)),
-            )
-            .when(!offered.needs_premium, |this| {
-                this.on_click(cx.listener(move |this, _, _, cx| this.pick_live_sender(sender, cx)))
-            })
-    });
-    div()
-        .id("live-story-send-as-panel")
-        .absolute()
-        .bottom(px(48.))
-        .left(px(0.))
-        .occlude()
-        .w(px(260.))
-        .py(px(6.))
-        .rounded(px(8.))
-        .bg(rgb(0x2c333d))
-        .shadow_md()
-        .text_color(rgb(0xffffff))
-        .child(
-            div()
-                .px(px(12.))
-                .py(px(6.))
-                .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(tr(keys::SEND_AS_TITLE)),
-        )
-        .children(rows)
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-            this.stories.live.send_as_open = false;
-            cx.notify();
-        }))
-        .into_any_element()
-}
-
-/// The send button's menu: Edit Stars, and Remove Stars once some are
-/// chosen.
-fn send_menu(chosen: i64, cx: &mut Context<QuillApp>) -> AnyElement {
-    let item = |id: &'static str, label: &'static str| {
-        div()
-            .id(id)
-            .px(px(12.))
-            .py(px(6.))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgba(0xffffff1a)))
-            .role(gpui_kit::Role::MenuItem)
-            .child(label)
-    };
-    div()
-        .id("live-story-send-menu")
-        .absolute()
-        .bottom(px(44.))
-        .right(px(0.))
-        .occlude()
-        .min_w(px(150.))
-        .py(px(4.))
-        .rounded(px(6.))
-        .bg(rgb(0x2c333d))
-        .shadow_md()
-        .text_sm()
-        .text_color(rgb(0xffffff))
-        .child(
-            item("live-story-menu-edit", tr(keys::VIDEO_STREAM_EDIT_STARS)).on_click(cx.listener(
-                |this, _, _, cx| {
-                    this.stories.live.send_menu = false;
-                    this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
-                },
-            )),
-        )
-        .when(chosen > 0, |this| {
-            this.child(
-                item(
-                    "live-story-menu-remove",
-                    tr(keys::VIDEO_STREAM_REMOVE_STARS),
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.stories.live.send_menu = false;
-                    this.clear_live_stars(cx);
-                })),
-            )
-        })
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-            this.stories.live.send_menu = false;
-            cx.notify();
-        }))
-        .into_any_element()
+impl QuillApp {
+    /// The comment field as composer markup (formatting and custom emoji
+    /// become the comment's entities when it is sent).
+    pub(super) fn live_comment_markup(&self, cx: &App) -> String {
+        field_doc(self.stories.live.input.read(cx)).to_markup()
+    }
 }

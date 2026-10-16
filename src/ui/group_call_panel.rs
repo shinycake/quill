@@ -30,7 +30,7 @@ use std::time::Duration;
 pub(super) const BG: u32 = 0x1a2026;
 pub(super) const MEMBERS_BG: u32 = 0x2c333d;
 pub(super) const MEMBERS_BG_OVER: u32 = 0x323a45;
-const ACTIVE_FG: u32 = 0x4db8ff;
+pub(super) const ACTIVE_FG: u32 = 0x4db8ff;
 pub(super) const MEMBER_ACTIVE: u32 = 0x8deb90;
 pub(super) const MEMBER_INACTIVE_ICON: u32 = 0x84888f;
 pub(super) const MEMBER_INACTIVE_STATUS: u32 = 0x61c0ff;

@@ -270,6 +270,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// button stays the manual fallback either way.
     pub(crate) fn maybe_join_live_story(&mut self) -> Result<(), ConnectSendError> {
         self.maybe_fetch_live_story_extras()?;
+        self.maybe_resolve_live_story_custom_emoji()?;
         let intent = match self.session.calls.pending_live_story_join {
             Some(intent) => intent,
             None => return Ok(()),

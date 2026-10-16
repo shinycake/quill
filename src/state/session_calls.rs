@@ -172,6 +172,9 @@ impl Session {
     /// Everything here is signaling — `join_payload` is stored, never
     /// consumed (no media transport until Phase C2).
     pub(crate) fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
+        if !self.group_call_update_may_take_slot(group_call) {
+            return;
+        }
         if !group_call.is_active {
             // Phase C2h: a scheduled (not yet started) video chat is
             // still tracked — the overlay shows "starts in …" plus an
@@ -192,7 +195,6 @@ impl Session {
                 tracked.is_video_chat = group_call.is_video_chat;
                 tracked.is_live_story = group_call.is_live_story;
                 tracked.is_rtmp_stream = group_call.is_rtmp_stream;
-                tracked.is_rtmp_stream = group_call.is_rtmp_stream;
                 tracked.scheduled_start_date = group_call.scheduled_start_date;
                 tracked.enabled_start_notification = group_call.enabled_start_notification;
                 return;
@@ -212,16 +214,6 @@ impl Session {
                     note: "call-ended-tracked-cleared",
                 });
             }
-            return;
-        }
-        // A call you are in is not replaced by one you only looked up (a
-        // `getGroupCall` or an update for another chat's call).
-        if self
-            .calls
-            .active_group_call
-            .as_ref()
-            .is_some_and(|c| c.id != group_call.id && c.is_joined && !group_call.is_joined)
-        {
             return;
         }
         let tracked = self
@@ -450,6 +442,30 @@ impl Session {
 
     /// Phase C3a: drop the tracked group call after the local user
     /// leaves or ends it.
+    /// Whether an update (or a `getGroupCall` answer) for `group_call`
+    /// may take the single call slot. An update for the tracked call
+    /// always may. One you are not in never replaces:
+    /// - a call you are in, scheduled updates included (a looked-up
+    ///   `getGroupCall` or another chat's call);
+    /// - the live story the viewer watches, joined or not yet.
+    ///
+    /// And a live story call the viewer no longer watches (a late
+    /// `getGroupCall` answer after it stepped past) is not tracked at all.
+    fn group_call_update_may_take_slot(&self, group_call: &ParsedGroupCall) -> bool {
+        if group_call.is_joined {
+            return true;
+        }
+        let watched = self.stories.live.as_ref().map(|live| live.group_call_id);
+        let tracked = self.calls.active_group_call.as_ref();
+        if tracked.is_some_and(|c| c.id == group_call.id) {
+            return true;
+        }
+        if tracked.is_some_and(|c| c.is_joined || Some(c.id) == watched) {
+            return false;
+        }
+        !(group_call.is_live_story && watched != Some(group_call.id))
+    }
+
     pub fn leave_group_call_local(&mut self) {
         self.calls.active_group_call = None;
         self.calls.call_link = None;

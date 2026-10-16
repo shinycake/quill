@@ -516,6 +516,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         self.group_video_frame_slots
             .lock_or_recover()
-            .insert((group_call_id, user_id, true), frame);
+            .insert((group_call_id, user_id, true), Arc::new(frame));
     }
 }

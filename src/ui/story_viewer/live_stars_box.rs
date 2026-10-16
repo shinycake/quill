@@ -1,6 +1,8 @@
 //! The live story's boxes: the Stars box (tdesktop `VideoStreamStarsBox` →
-//! `PaidReactionsBox` in video stream mode) and the comment delete box
-//! (`ShowDeleteMessageConfirmation`).
+//! `PaidReactionsBox` in video stream mode), the comment delete box
+//! (`ShowDeleteMessageConfirmation` with Report Spam, Delete All and Ban
+//! User) and the confirm to leave another call for the live story
+//! (`confirmLeaveCurrent`).
 //!
 //! The Stars box has three modes. Choosing Stars for a comment shows what
 //! the level gives (pin time, characters, emoji) above "Highlight and
@@ -16,6 +18,7 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::slider::Slider;
+use quill::calls::group_call_create::LeaveText;
 use quill::lang::trn;
 use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
@@ -314,6 +317,12 @@ impl QuillApp {
                         tr_with(keys::DELETE_ALL_FROM_USER, &[("user", &delete.name)]),
                         delete.delete_all,
                         |d, on| d.delete_all = on,
+                    ))
+                    .child(check(
+                        "live-story-delete-ban",
+                        tr(keys::BAN_USER).to_string(),
+                        delete.ban,
+                        |d, on| d.ban = on,
                     ));
             }
             body = body.child(
@@ -356,6 +365,115 @@ impl QuillApp {
     }
 }
 
+impl QuillApp {
+    pub(super) fn build_live_leave_other_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close = QuillShell::on_close_kind(
+            app,
+            shell,
+            DialogKind::LiveStoryLeaveOther,
+            |this, _, cx| {
+                this.stories.live.leave_other = None;
+                cx.notify();
+            },
+        );
+        app.update(cx, |this, cx| {
+            let Some(text) = this.stories.live.leave_other else {
+                return dialog.on_close(on_close);
+            };
+            let (question, button) = leave_other_words(text);
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap(px(12.))
+                .child(
+                    div()
+                        .debug_selector(|| "live-story-leave-other".into())
+                        .text_sm()
+                        .whitespace_normal()
+                        .child(tr(question)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(px(8.))
+                        .child(
+                            Button::new("live-story-leave-other-cancel")
+                                .label(tr(keys::CANCEL))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.stories.live.leave_other = None;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("live-story-leave-other-confirm")
+                                .label(tr(button))
+                                .danger()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.leave_other_call_for_live_story(cx);
+                                })),
+                        ),
+                );
+            dialog
+                .overlay(true)
+                .content(crate::ui::shell::scrollable_dialog_content({
+                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    move |content, _, _| {
+                        let body = body
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| div().into_any_element());
+                        content.child(body)
+                    }
+                }))
+                .on_close(on_close)
+        })
+    }
+}
+
+/// tdesktop `confirmLeaveCurrent`'s question and button for a live story.
+fn leave_other_words(text: LeaveText) -> (quill::lang::Key, quill::lang::Key) {
+    match text {
+        LeaveText::EndCall { to_channel: false } => {
+            (keys::CALL_LEAVE_TO_OTHER_SURE, keys::CALL_BAR_HANGUP)
+        }
+        LeaveText::EndCall { to_channel: true } => {
+            (keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL, keys::CALL_BAR_HANGUP)
+        }
+        LeaveText::LeaveGroupCall {
+            from_channel: true,
+            to_channel: true,
+        } => (
+            keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE_CHANNEL,
+            keys::GROUP_CALL_LEAVE,
+        ),
+        LeaveText::LeaveGroupCall {
+            from_channel: true,
+            to_channel: false,
+        } => (
+            keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE,
+            keys::GROUP_CALL_LEAVE,
+        ),
+        LeaveText::LeaveGroupCall {
+            from_channel: false,
+            to_channel: true,
+        } => (
+            keys::GROUP_CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
+            keys::GROUP_CALL_LEAVE,
+        ),
+        LeaveText::LeaveGroupCall {
+            from_channel: false,
+            to_channel: false,
+        } => (keys::GROUP_CALL_LEAVE_TO_OTHER_SURE, keys::GROUP_CALL_LEAVE),
+    }
+}
+
 crate::ui::shell::register_dialogs! {
     /// The live story's Stars box.
     LiveStoryStars => DialogSpec::new(
@@ -368,5 +486,11 @@ crate::ui::shell::register_dialogs! {
         3853,
         |app| app.stories.live.delete.is_some(),
         QuillApp::build_live_delete_dialog,
+    ),
+    /// Leaving another call to watch a live story.
+    LiveStoryLeaveOther => DialogSpec::new(
+        3854,
+        |app| app.stories.live.leave_other.is_some(),
+        QuillApp::build_live_leave_other_dialog,
     ),
 }

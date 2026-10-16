@@ -1,7 +1,8 @@
 //! The story viewer's state for the live story it plays: the stream
-//! picture, the comment field, the Stars the composer will add, the boxes
-//! and menus it opened and the Star effects in flight. The call, the
-//! comments and the donors live in the session (`stories.live`).
+//! picture and its blurred backdrop, the comment field, the Stars the
+//! composer will add, the boxes it opened and the Star effects in flight.
+//! The call, the comments and the donors live in the session
+//! (`stories.live`). The menus are the kit's and keep their own state.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -10,11 +11,10 @@ use crate::ui::calls::stream_tile::StreamTileState;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
+use quill::calls::group_call_create::LeaveText;
 use quill::ids::ChatId;
 use quill::live_story::{level_for_stars, pin_finish};
 use quill::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// tdesktop `StarEffect`: a badge rises from the Stars button for 2 s.
@@ -59,6 +59,7 @@ pub(in crate::ui) struct LiveDelete {
     pub(super) name: String,
     pub(super) report_spam: bool,
     pub(super) delete_all: bool,
+    pub(super) ban: bool,
 }
 
 /// One Stars effect on screen.
@@ -73,26 +74,27 @@ pub(in crate::ui) struct LiveStoryUi {
     /// The comment field.
     pub(in crate::ui) input: Entity<TextareaState>,
     pub(super) picture: StreamPicture,
+    /// The picture small and blurred, behind a picture shown whole
+    /// (tdesktop `DecideFrameResize`).
+    pub(super) backdrop: StreamPicture,
     pub(super) tile: StreamTileState,
     /// The live story the viewer joined: `(poster, story)`.
-    pub(super) watching: Option<(ChatId, i32)>,
+    pub(in crate::ui) watching: Option<(ChatId, i32)>,
     /// The call was seen tracked since the join (so its end is noticed).
     pub(super) seen_call: bool,
     /// Stars the next comment carries (0 = free; tdesktop `_starsToSend`).
     pub(super) chosen_stars: i64,
-    /// The comment price the field's placeholder shows (-1 = not set).
-    pub(super) placeholder: Rc<Cell<i64>>,
-    pub(super) send_as_open: bool,
     pub(super) stars_box: Option<LiveStarsBox>,
-    /// The comment whose context menu is open.
-    pub(super) menu: Option<i32>,
     pub(super) delete: Option<LiveDelete>,
+    /// Another call holds the call slot: the confirm to leave it.
+    pub(super) leave_other: Option<LeaveText>,
+    /// The other call is being left: the join is tried again each tick.
+    pub(super) retry_join: bool,
     pub(super) flying: Vec<FlyingStars>,
-    /// The comments list, kept at its newest comment.
+    /// The comments list; it follows new comments while at the bottom.
     pub(super) scroll: ScrollHandle,
-    pub(super) seen_comments: usize,
-    /// The send button's menu (Edit Stars, Remove Stars) is open.
-    pub(super) send_menu: bool,
+    /// The newest comment seen.
+    pub(super) last_comment: Option<i32>,
     /// The screenshot demo's still picture (no driver, no stream).
     pub(super) demo_frame: Option<std::sync::Arc<quill::calls::engine::VideoFrame>>,
 }
@@ -108,32 +110,34 @@ impl LiveStoryUi {
         cx.subscribe_in(
             &input,
             window,
-            |this, state, event: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { secondary, shift } = event {
+            |this, state, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { secondary, shift } => {
                     let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
                     if marked.is_none() && !*shift && !*secondary {
                         this.send_live_comment(window, cx);
                     }
                 }
+                // The placeholder follows the text.
+                InputEvent::Change => cx.notify(),
+                InputEvent::Focus | InputEvent::Blur => {}
             },
         )
         .detach();
         Self {
             input,
             picture: StreamPicture::default(),
+            backdrop: StreamPicture::default(),
             tile: StreamTileState::default(),
             watching: None,
             seen_call: false,
             chosen_stars: 0,
-            placeholder: Rc::new(Cell::new(-1)),
-            send_as_open: false,
             stars_box: None,
-            menu: None,
             delete: None,
+            leave_other: None,
+            retry_join: false,
             flying: Vec::new(),
             scroll: ScrollHandle::new(),
-            seen_comments: 0,
-            send_menu: false,
+            last_comment: None,
             demo_frame: None,
         }
     }
@@ -143,14 +147,12 @@ impl LiveStoryUi {
         self.watching = None;
         self.seen_call = false;
         self.chosen_stars = 0;
-        self.placeholder.set(-1);
-        self.send_as_open = false;
         self.stars_box = None;
-        self.menu = None;
         self.delete = None;
+        self.leave_other = None;
+        self.retry_join = false;
         self.flying.clear();
-        self.seen_comments = 0;
-        self.send_menu = false;
+        self.last_comment = None;
     }
 
     /// Queue effects, keeping the newest four.

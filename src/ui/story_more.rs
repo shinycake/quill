@@ -27,7 +27,8 @@ use quill::telegram::envelope::{ChatKind, StoryListView};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use super::chat_theme::{danger, text_bright, text_muted};
+use super::chat_theme::danger;
+use super::story_viewer::chrome;
 use quill::lang::{keys, tr, tr_with};
 
 /// How long a video story waits for its clip to start downloading before
@@ -37,13 +38,16 @@ const VIDEO_WAIT: Duration = Duration::from_secs(6);
 impl QuillApp {
     /// A text field of the viewer owns the keyboard: Space and the arrows
     /// belong to it, not to playback.
-    pub(super) fn story_text_input_open(&self) -> bool {
+    pub(super) fn story_text_input_open(&self, window: &Window, cx: &App) -> bool {
         self.stories.reply_open
             || self.stories.report_open
             || self.stories.share_open
             || self.stories.close_friends_edit.is_some()
             || self.stories.privacy_edit.is_some()
             || self.stories.cover_target.is_some()
+            // The live story's comment field, while it has the keyboard.
+            || (self.stories.live.watching.is_some()
+                && self.stories.live.input.focus_handle(cx).is_focused(window))
     }
 
     /// The current video story's clip, once it is a local sandboxed file.
@@ -562,8 +566,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-mute")
                     .label(label)
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_story_mute(cx))),
             );
         }
@@ -574,16 +577,14 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_MEDIA_PAUSE)
                 })
-                .ghost()
-                .text_color(text_bright())
+                .custom(chrome::ghost(cx))
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_story_pause(cx))),
         );
         if can_share {
             row = row.child(
                 Button::new("story-share")
                     .label(tr(keys::Q_MEDIA_SHARE))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.toggle_story_share(window, cx);
                     })),
@@ -592,16 +593,14 @@ impl QuillApp {
         row = row.child(
             Button::new("story-copy-link")
                 .label(tr(keys::CONTEXT_COPY_LINK))
-                .ghost()
-                .text_color(text_bright())
+                .custom(chrome::ghost(cx))
                 .on_click(cx.listener(|this, _, _, cx| this.copy_story_link(cx))),
         );
         if can_save {
             row = row.child(
                 Button::new("story-save-media")
                     .label(tr(keys::SETTINGS_SAVE))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| this.save_story_media(cx))),
             );
         }
@@ -609,8 +608,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-hide-peer")
                     .label(hide_label(hidden))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_hide_story_peer(cx))),
             );
         }
@@ -618,8 +616,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-close-friends")
                     .label(tr(keys::Q_MEDIA_CLOSE_FRIENDS))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_close_friends_editor(window, cx);
                     })),
@@ -629,8 +626,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-profile")
                     .label(profile_label(posted))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_story_profile(cx))),
             );
         }
@@ -642,7 +638,7 @@ impl QuillApp {
             column = column.child(self.close_friends_panel(cx));
         }
         if let Some(notice) = self.stories.notice.clone() {
-            column = column.child(div().text_xs().text_color(text_muted()).child(notice));
+            column = column.child(div().text_xs().text_color(chrome::secondary()).child(notice));
         }
         if let Some(op) = self.session().and_then(|s| s.stories.page_op.clone()) {
             use quill::story_page::StoryPageOpState as S;
@@ -651,7 +647,7 @@ impl QuillApp {
                     column = column.child(
                         div()
                             .text_xs()
-                            .text_color(text_muted())
+                            .text_color(chrome::secondary())
                             .child(format!("{}…", op.label)),
                     );
                 }
@@ -687,7 +683,7 @@ impl QuillApp {
             list = list.child(
                 div()
                     .text_sm()
-                    .text_color(text_muted())
+                    .text_color(chrome::secondary())
                     .child(tr(keys::Q_MEDIA_NO_CHATS_FOUND)),
             );
         }
@@ -701,7 +697,7 @@ impl QuillApp {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(text_bright())
+                            .text_color(chrome::fg())
                             .truncate()
                             .child(title),
                     )
@@ -723,7 +719,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .font_semibold()
-                    .text_color(text_bright())
+                    .text_color(chrome::fg())
                     .child(tr(keys::Q_MEDIA_SHARE_STORY_TO)),
             )
             .child(
@@ -753,7 +749,7 @@ impl QuillApp {
             list = list.child(
                 div()
                     .text_sm()
-                    .text_color(text_muted())
+                    .text_color(chrome::secondary())
                     .child(tr(keys::Q_MEDIA_NO_CONTACTS_FOUND)),
             );
         }
@@ -776,7 +772,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .font_semibold()
-                    .text_color(text_bright())
+                    .text_color(chrome::fg())
                     .child(tr_with(
                         keys::Q_MEDIA_CLOSE_FRIENDS_SELECTED,
                         &[("count", &(edit.count()).to_string())],
@@ -805,8 +801,7 @@ impl QuillApp {
                     .child(
                         Button::new("story-close-friends-cancel")
                             .label(tr(keys::CANCEL))
-                            .ghost()
-                            .text_color(text_bright())
+                            .custom(chrome::ghost(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.stories.close_friends_edit = None;
                                 this.refresh_story_pause(cx);
@@ -830,7 +825,7 @@ impl QuillApp {
                 .h(h)
                 .rounded_md()
                 .overflow_hidden()
-                .bg(super::chat_theme::bg_deep())
+                .bg(chrome::frame_bg())
                 .children(still.map(|path| {
                     img(path)
                         .absolute()

@@ -27,6 +27,7 @@ mod controls;
 mod join;
 mod link;
 mod live_story;
+mod live_story_extras;
 mod rtmp_start;
 pub(crate) mod stream;
 

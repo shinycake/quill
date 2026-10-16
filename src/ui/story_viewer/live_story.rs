@@ -2,6 +2,12 @@
 //! leaving when the viewer moves on (tdesktop `Controller::show` /
 //! `unfocusReply` → `GroupCall::leave`), closing the viewer when the
 //! stream ends, and the composer's and Stars button's actions.
+//!
+//! Quill has one call slot. tdesktop plays a live story as a call of its
+//! own beside the one you are in (`Calls::Instance` keeps video streams
+//! apart from the current call); here a joined call or a 1:1 call keeps
+//! the slot, and the viewer asks first to leave it (tdesktop's
+//! `confirmLeaveCurrent` box and words).
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::{LiveDelete, LiveStarsBox, SendAction, StarsBoxMode, send_action};
@@ -9,7 +15,10 @@ use super::*;
 use crate::ui::media_panel::PanelTab;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use quill::calls::engine::StreamState;
-use quill::live_story::{DEFAULT_STARS, QUICK_STARS, flatten_comment};
+use quill::calls::group_call_create::{BeforeCreate, before_create};
+use quill::lang::trn_with;
+use quill::live_story::{DEFAULT_STARS, QUICK_STARS, comment_text};
+use quill::premium_hub::group_digits;
 use quill::paid_reaction::{SLIDER_STEPS, amount_for_step, step_for_amount};
 use quill::state::{Session, unix_ms_now};
 
@@ -42,15 +51,55 @@ impl QuillApp {
         }
         if target.is_some() && self.stories.live.watching.is_none() {
             self.stories.live.watching = target;
-            if let (Some(live), Some((chat_id, story_id))) = (self.live.as_mut(), target) {
-                // A 1:1 call or another group call keeps the slot: the Join
-                // button stays as the fallback (`qll_media_could_not_join…`).
-                if live.driver.join_live_story(chat_id, story_id).is_err() {
-                    self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
-                }
-            }
+            self.join_watched_live_story(cx);
+        } else if self.stories.live.retry_join && self.stories.live.watching.is_some() {
+            self.join_watched_live_story(cx);
         }
         self.check_live_story_ended(cx);
+    }
+
+    /// Joins the watched live story. When another call holds the slot the
+    /// viewer asks to leave it; until then the Join button stays.
+    fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
+        let Some((chat_id, story_id)) = self.stories.live.watching else {
+            return;
+        };
+        let retrying = self.stories.live.retry_join;
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if live.driver.join_live_story(chat_id, story_id).is_ok() {
+            self.stories.live.retry_join = false;
+            return;
+        }
+        if retrying {
+            // The other call is still being left.
+            return;
+        }
+        let session = &live.driver.session;
+        let to_channel = session
+            .chats
+            .get(&chat_id.0)
+            .is_some_and(|chat| chat.kind.is_channel());
+        match before_create(session.current_call_for_create(None), chat_id, to_channel) {
+            BeforeCreate::Ask(text) => self.stories.live.leave_other = Some(text),
+            BeforeCreate::Proceed | BeforeCreate::ShowCurrent => {
+                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
+            }
+        }
+        cx.notify();
+    }
+
+    /// The confirm's Leave / End call: the other call goes and the join is
+    /// tried on each tick until the slot is free.
+    pub(super) fn leave_other_call_for_live_story(&mut self, cx: &mut Context<Self>) {
+        if self.stories.live.leave_other.take().is_none() {
+            return;
+        }
+        self.end_current_call_for_create(cx);
+        self.stories.live.retry_join = true;
+        self.join_watched_live_story(cx);
+        cx.notify();
     }
 
     /// tdesktop closes the viewer when the stream's call finishes or fails.
@@ -90,8 +139,19 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.end_live_story();
         }
-        for image in self.stories.live.picture.clear() {
+        for image in self
+            .stories
+            .live
+            .picture
+            .clear()
+            .into_iter()
+            .chain(self.stories.live.backdrop.clear())
+        {
             cx.drop_image(image, None);
+        }
+        // The emoji panel the comment field opened goes with it.
+        if self.stories.reply_open {
+            self.end_story_reply(cx);
         }
         self.stories.live.reset();
     }
@@ -116,15 +176,21 @@ impl QuillApp {
             self.stories.live.fly(effect.sender, effect.stars, now);
         }
         self.stories.live.prune_flying(now);
-        // New comments scroll the list to the newest.
-        let count = self
+        // A new comment scrolls the list to it while the list is at its
+        // newest; scrolled up, it stays put.
+        let newest = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
-            .map_or(0, |call| call.messages.len());
-        if count != self.stories.live.seen_comments {
-            self.stories.live.seen_comments = count;
-            self.stories.live.scroll.scroll_to_bottom();
+            .and_then(|call| call.messages.last())
+            .map(|message| message.message_id);
+        if newest != self.stories.live.last_comment {
+            let first = self.stories.live.last_comment.is_none();
+            self.stories.live.last_comment = newest;
+            if first || scrolled_to_bottom(&self.stories.live.scroll) {
+                self.stories.live.scroll.scroll_to_bottom();
+            }
         }
+        self.ensure_live_custom_emoji_downloads();
     }
 
     /// The comments toggle.
@@ -159,7 +225,8 @@ impl QuillApp {
     /// The send button (or Enter): send the comment, or open the Stars
     /// box when it needs more Stars (tdesktop `Reply::send`).
     pub(super) fn send_live_comment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.stories.live.input.read(cx).value().to_string();
+        let markup = self.live_comment_markup(cx);
+        let text = comment_text(&markup).0;
         let Some(session) = self.session() else {
             return;
         };
@@ -179,12 +246,16 @@ impl QuillApp {
                 self.open_live_stars_box(StarsBoxMode::Comment, required, true, cx);
             }
             SendAction::Send => {
-                if flatten_comment(&text).is_empty() {
+                if text.trim().is_empty() {
                     return;
                 }
                 let stars = if admin { 0 } else { chosen };
+                if self.session().is_some_and(|s| s.live_needs_top_up(stars)) {
+                    self.live_top_up(stars, cx);
+                    return;
+                }
                 let sent = match self.live.as_mut() {
-                    Some(live) => live.driver.send_live_story_comment(&text, stars).is_ok(),
+                    Some(live) => live.driver.send_live_story_comment(&markup, stars).is_ok(),
                     None => {
                         self.connection.status_note =
                             tr(keys::Q_MEDIA_DEMO_LIVE_STORIES_JOIN_WITH).into();
@@ -228,6 +299,10 @@ impl QuillApp {
 
     fn add_live_stars(&mut self, stars: i64, cx: &mut Context<Self>) {
         let now = unix_ms_now();
+        if self.session().is_some_and(|s| s.live_needs_top_up(stars)) {
+            self.live_top_up(stars, cx);
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             if live.driver.add_live_story_reaction(stars, now).is_err() {
                 self.surface_live_note();
@@ -242,6 +317,32 @@ impl QuillApp {
                 stars,
                 now,
             ));
+        }
+        cx.notify();
+    }
+
+    /// Not enough Stars (tdesktop `MaybeRequestBalanceIncrease`): "N Stars
+    /// Needed" and Quill's Stars top-up, the Stars box with its packs open.
+    /// The comment or reaction stays for another try once the balance is
+    /// up.
+    fn live_top_up(&mut self, stars: i64, cx: &mut Context<Self>) {
+        let have = self
+            .session()
+            .and_then(Session::live_spendable_stars)
+            .unwrap_or(0);
+        let needed = stars.saturating_sub(have).max(1);
+        self.connection.status_note = trn_with(
+            keys::CREDITS_SMALL_BALANCE_TITLE,
+            needed,
+            &[("count", &group_digits(needed))],
+        );
+        self.open_stars(cx);
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.payments.star_packs.open = true;
+            let _ = live.driver.maybe_fetch_star_packs();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.payments.hub.stars_open = true;
+            session.payments.star_packs.open = true;
         }
         cx.notify();
     }
@@ -319,6 +420,12 @@ impl QuillApp {
         let Some(boxed) = self.stories.live.stars_box.take() else {
             return;
         };
+        if boxed.mode != StarsBoxMode::Admin
+            && self.session().is_some_and(|s| s.live_needs_top_up(boxed.stars))
+        {
+            self.live_top_up(boxed.stars, cx);
+            return;
+        }
         match boxed.mode {
             StarsBoxMode::Admin => {}
             StarsBoxMode::Reaction => self.add_live_stars(boxed.stars, cx),
@@ -340,7 +447,6 @@ impl QuillApp {
 
     /// "Send message as...": who comments are sent as.
     pub(super) fn pick_live_sender(&mut self, sender: MessageSender, cx: &mut Context<Self>) {
-        self.stories.live.send_as_open = false;
         if let Some(live) = self.live.as_mut() {
             if live.driver.set_live_story_sender(sender).is_err() {
                 self.surface_live_note();
@@ -357,7 +463,6 @@ impl QuillApp {
 
     /// Copy Text from a comment's menu.
     pub(super) fn copy_live_comment(&mut self, text: String, cx: &mut Context<Self>) {
-        self.stories.live.menu = None;
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         cx.notify();
     }
@@ -369,7 +474,6 @@ impl QuillApp {
         sender: MessageSender,
         cx: &mut Context<Self>,
     ) {
-        self.stories.live.menu = None;
         let name = self
             .session()
             .map(|s| s.sender_label(sender))
@@ -380,6 +484,7 @@ impl QuillApp {
             name,
             report_spam: false,
             delete_all: false,
+            ban: false,
         });
         cx.notify();
     }
@@ -390,11 +495,18 @@ impl QuillApp {
         };
         let all_from = delete.delete_all.then_some(delete.sender);
         if let Some(live) = self.live.as_mut() {
-            if live
+            let deleted = live
                 .driver
                 .delete_live_story_comment(delete.message_id, delete.report_spam, all_from)
-                .is_err()
-            {
+                .is_ok();
+            // tdesktop `deleteConfirmed`: Ban User bans the sender from the
+            // channel, or blocks them on a user's live story.
+            let banned = !delete.ban
+                || live
+                    .driver
+                    .ban_live_story_commenter(delete.sender)
+                    .is_ok();
+            if !deleted || !banned {
                 self.surface_live_note();
             }
         } else if let Some(call) = self
@@ -422,9 +534,21 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The emoji button opens the shared panel for the comment field.
+    /// The emoji button opens the shared panel for the comment field
+    /// (emoji only: tdesktop's video stream field takes no stickers or
+    /// GIFs). Closing it lets the reply row go too.
     pub(super) fn toggle_live_emoji(&mut self, cx: &mut Context<Self>) {
         self.stories.reply_open = true;
         self.toggle_story_reply_panel(PanelTab::Emoji, cx);
+        if !self.story_reply_panel_active() {
+            self.stories.reply_open = false;
+        }
     }
+}
+
+/// Whether the comments list shows its newest comment (within a couple of
+/// pixels), so a new one may scroll it.
+fn scrolled_to_bottom(scroll: &ScrollHandle) -> bool {
+    let max = scroll.max_offset().y;
+    -scroll.offset().y >= max - px(2.)
 }

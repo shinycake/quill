@@ -132,6 +132,31 @@ pub fn pin_finish(levels: &[GroupCallMessageLevel], date: i32, stars: i64) -> i6
     i64::from(date).saturating_add(i64::from(level_for_stars(levels, stars).pin_duration))
 }
 
+/// A comment as typed (Quill's field markup) as text and the entities a
+/// comment carries: bold, italic, underline, strikethrough and spoiler
+/// (tdesktop `MessageField` `allowMarkdownTags`), custom emoji and dates.
+/// Line feeds become spaces first.
+pub fn comment_text(markup: &str) -> (String, Vec<crate::composer::ComposerEntity>) {
+    use crate::composer::FormatKind;
+    let (text, entities) = crate::composer::parse_format_markup(&flatten_comment(markup));
+    let entities = entities
+        .into_iter()
+        .filter(|entity| {
+            matches!(
+                entity.kind,
+                FormatKind::Bold
+                    | FormatKind::Italic
+                    | FormatKind::Underline
+                    | FormatKind::Strikethrough
+                    | FormatKind::Spoiler
+                    | FormatKind::CustomEmoji
+                    | FormatKind::DateTime
+            )
+        })
+        .collect();
+    (text, entities)
+}
+
 /// Live story comments cannot hold line feeds (TDLib `sendGroupCallMessage`).
 pub fn flatten_comment(text: &str) -> String {
     text.trim()

@@ -5,7 +5,7 @@
 //! Nothing here spends Stars unless the viewer asked for it.
 use super::*;
 use crate::calls::engine::VideoFrame;
-use crate::live_story::{PendingLiveReaction, flatten_comment};
+use crate::live_story::{PendingLiveReaction, comment_text};
 use crate::paid_reaction::Refusal;
 use crate::state::{LiveStoryPurpose, StoriesPurpose};
 use crate::telegram::requests::{
@@ -140,19 +140,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let max = self.session.live_max_stars();
-        let balance = self.session.payments.hub.balance.map(|b| b.stars);
-        let reserved = self.session.payments.paid.total_pending();
+        let short = self.session.live_needs_top_up(stars);
         let Some(live) = self.session.live_story_mut(group_call_id) else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let pending = live.pending_reaction.map_or(0, |p| p.stars);
         let refusal = if pending.saturating_add(stars) > max {
             Some(Refusal::TooMany)
+        } else if short {
+            Some(Refusal::NotEnough)
         } else {
-            match balance {
-                Some(have) if have - reserved - pending < stars => Some(Refusal::NotEnough),
-                _ => None,
-            }
+            None
         };
         if let Some(refusal) = refusal {
             live.note = Some(refusal.message().to_string());
@@ -198,10 +196,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(live) = self.session.stories.live.as_mut() else {
             return false;
         };
-        let Some(pending) = live.pending_reaction.filter(|p| p.due(now_ms)) else {
+        if !live.pending_reaction.is_some_and(|p| p.due(now_ms)) {
+            return false;
+        }
+        let Some(pending) = live.commit_reaction() else {
             return false;
         };
-        live.pending_reaction = None;
         let group_call_id = live.group_call_id;
         // tdesktop `addStars(from, stars, mine)` at send time: your Stars
         // fly up from the button as the reaction goes out.
@@ -218,22 +218,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_err()
             && let Some(live) = self.session.live_story_mut(group_call_id)
         {
+            live.committed_stars = live.committed_stars.saturating_sub(pending.stars);
             live.note = Some(Refusal::NotEnough.message().to_string());
         }
         true
     }
 
-    /// Sends a comment with the Stars the viewer chose (0 on your own live
-    /// story). Line feeds become spaces; an empty comment is refused.
+    /// Sends a comment (Quill's field markup) with the Stars the viewer
+    /// chose (0 on your own live story). Line feeds become spaces; only the
+    /// entities a comment may carry go out (`comment_text`); an empty
+    /// comment is refused.
     pub fn send_live_story_comment(
         &mut self,
-        text: &str,
+        markup: &str,
         stars: i64,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() || stars < 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let text = flatten_comment(text);
+        let (text, entities) = comment_text(markup);
         let Some((group_call_id, manage, allowed)) = self
             .watched_live_call()
             .map(|call| (call.id, call.can_be_managed, call.are_messages_allowed))
@@ -244,15 +247,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let stars = if manage { 0 } else { stars };
-        let balance = self.session.payments.hub.balance.map(|b| b.stars);
-        if stars > 0 && balance.is_some_and(|have| have < stars) {
+        // Stars waiting on a reaction (or on messages) are already spent.
+        if self.session.live_needs_top_up(stars) {
             if let Some(live) = self.session.live_story_mut(group_call_id) {
                 live.note = Some(Refusal::NotEnough.message().to_string());
             }
             return Err(ConnectSendError::InvalidRequest);
         }
         self.live_story_request(LiveStoryPurpose::SendComment { group_call_id }, |extra| {
-            send_live_story_comment(extra, group_call_id, &text, stars)
+            send_live_story_comment(extra, group_call_id, &text, &entities, stars)
         })
     }
 
@@ -352,11 +355,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.id == group_call_id);
-        if tracked {
-            self.leave_group_call()?;
-            self.session.calls.active_group_call = None;
+        if !tracked {
+            return Ok(());
         }
-        Ok(())
+        // Not joined yet: TDLib has nothing to leave (and would answer an
+        // error), so the tracker is only dropped.
+        let left = if self.session.group_call_joined_or_joining(None) {
+            self.leave_group_call().map(|_| ())
+        } else {
+            Ok(())
+        };
+        self.session.leave_group_call_local();
+        left
     }
 
     /// Where the live story's picture comes from: the stream slot of the
@@ -398,8 +408,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .group_video_frame_slots
                 .lock_or_recover()
                 .get(&(call, key, screen))
-                .cloned()
-                .map(Arc::new),
+                .cloned(),
         }
     }
 }

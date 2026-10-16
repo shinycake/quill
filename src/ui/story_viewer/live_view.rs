@@ -1,24 +1,21 @@
-//! The live story's frame in the story viewer: the stream picture (Cover)
-//! with the comments over its lower half, the pinned paid comments, the
-//! "Stars Sent!" toast and the Stars effects; and the header's LIVE badge,
-//! viewer count and sound toggle (tdesktop `Header::setVideoStreamViewers`,
-//! `Calls::Group::MessagesUi` in video stream mode).
+//! The live story's frame in the story viewer: the stream picture fitted
+//! as tdesktop's `DecideFrameResize` fits it, with the comments over its
+//! lower half (`live_comments`), the pinned paid comments, the "Stars
+//! Sent!" toast and the Stars effects; and the header's LIVE badge, viewer
+//! count and sound toggle (tdesktop `Header::setVideoStreamViewers`).
 #![deny(clippy::indexing_slicing)]
 
-use super::live_state::{
-    ADMIN_BADGE_OPACITY, ADMIN_BG_OPACITY, DARK_OVER_OPACITY, PAID_BG_OPACITY, Pinned,
-    effect_progress, level_color, pinned_comments,
-};
+use super::live_comments::{MESSAGE_SKIP, live_pinned_strip};
+use super::live_state::{effect_progress, level_color, pinned_comments};
 use super::*;
-use crate::ui::calls::stream_picture::frame_image;
-use crate::ui::calls::stream_tile::StreamTile;
-use crate::ui::group_call_panel::BG as GROUP_CALL_BG;
+use crate::ui::calls::stream_picture::{frame_backdrop, frame_image};
+use crate::ui::calls::stream_tile::{StreamTile, frame_expands};
 use crate::ui::message_text::kit_avatar_element;
 use crate::ui::screen_chooser::split_bold;
 use gpui_kit::assets::IconName;
 use quill::calls::engine::{StreamState, VideoFrame};
 use quill::lang::{trn, trn_with};
-use quill::live_story::{MAX_TOP_SHOWN, level_for_stars};
+use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
 use quill::state::{Session, unix_ms_now};
 use quill::telegram::envelope::{GroupCallMessageLevel, ParsedGroupCallMessage};
@@ -27,15 +24,10 @@ use std::sync::Arc;
 /// The story frame (the viewer's media box).
 pub(super) const FRAME_W: f32 = 360.;
 pub(super) const FRAME_H: f32 = 640.;
-/// tdesktop `groupCallMessagePadding` and `groupCallMessageSkip`.
-const MESSAGE_SKIP: f32 = 8.;
-/// tdesktop `groupCallUserpic` / `groupCallPinnedUserpic`.
-const USERPIC: f32 = 20.;
-const PINNED_USERPIC: f32 = 22.;
-/// tdesktop `groupCallPinnedMaxWidth`.
-const PINNED_MAX_TEXT: f32 = 96.;
-/// The comment text size (`messageTextStyle`).
-const TEXT_SIZE: f32 = 13.;
+/// The box the backdrop takes its proportions from.
+const BACKDROP_BOX: (u32, u32) = (360, 640);
+/// tdesktop `FillBlurredBackground` darkens the backdrop by 48 / 255.
+const BACKDROP_SHADE: f32 = 48. / 255.;
 
 /// A sender's avatar: photo when downloaded, else initials.
 pub(super) fn sender_avatar(session: &Session, sender: MessageSender, size: f32) -> AnyElement {
@@ -61,8 +53,16 @@ pub(super) fn live_badge(cx: &App) -> Div {
         .text_size(px(8.))
         .line_height(px(11.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(0xffffff))
+        .text_color(chrome::fg())
         .child(tr(keys::VIDEO_STREAM_LIVE).to_uppercase())
+}
+
+/// The pictures to draw: the frame, and its blurred backdrop when the
+/// frame is shown whole.
+struct LivePictures {
+    picture: Option<Arc<RenderImage>>,
+    backdrop: Option<Arc<RenderImage>>,
+    size: Option<(u16, u16)>,
 }
 
 impl QuillApp {
@@ -89,7 +89,9 @@ impl QuillApp {
                 .items_center()
                 .gap(px(4.))
                 .child(live_badge(cx))
-                .children(viewers.map(|text| div().text_xs().text_color(text_bright()).child(text)))
+                .children(
+                    viewers.map(|text| div().text_xs().text_color(chrome::secondary()).child(text)),
+                )
                 .child(
                     Button::new("live-story-sound")
                         .icon(if muted {
@@ -97,20 +99,25 @@ impl QuillApp {
                         } else {
                             IconName::Volume2
                         })
-                        .ghost()
+                        .custom(chrome::ghost(cx))
                         .small()
-                        .text_color(text_bright())
-                        .accessibility_label(tr(keys::Q_MEDIA_LIVE_STORY))
+                        .tab_index(0)
+                        .accessibility_label(if muted {
+                            tr(keys::Q_MEDIA_SOUND_OFF)
+                        } else {
+                            tr(keys::Q_MEDIA_SOUND_ON)
+                        })
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_live_story_sound(cx))),
                 )
                 .into_any_element(),
         )
     }
 
-    /// The newest picture of the live story, converted off the UI thread
-    /// (one conversion at a time; the image from two frames back leaves
-    /// the atlas, [`StreamPicture`](crate::ui::calls::stream_picture)).
-    fn live_story_picture(&mut self, key: i64, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+    /// The newest picture of the live story and its backdrop, converted
+    /// off the UI thread (one conversion at a time; the images from two
+    /// frames back leave the atlas,
+    /// [`StreamPicture`](crate::ui::calls::stream_picture)).
+    fn live_story_pictures(&mut self, key: i64, cx: &mut Context<Self>) -> LivePictures {
         let seq = match self.live.as_ref() {
             Some(live) => live.driver.live_story_frame_seq(),
             None => self.stories.live.demo_frame.as_ref().map(|f| f.seq),
@@ -126,29 +133,60 @@ impl QuillApp {
             // the capture's first frame shows it.
             let inline = self.live.is_none() && !cfg!(test);
             if let Some(frame) = frame.as_ref().filter(|_| inline) {
-                let image = frame_image(frame);
-                let picture = &mut self.stories.live.picture;
-                picture.start(key, frame.seq, Task::ready(()));
-                if let Some(old) = picture.finish(key, frame.seq, image) {
-                    cx.drop_image(old, None);
-                }
+                let (image, backdrop) = (frame_image(frame), frame_backdrop(frame, BACKDROP_BOX));
+                self.finish_live_pictures(key, frame.seq, image, backdrop, cx);
             } else if let Some(frame) = frame {
                 let seq = frame.seq;
                 let task = cx.spawn(async move |this, cx| {
-                    let image = cx
-                        .background_spawn(async move { frame_image(&frame) })
+                    let (image, backdrop) = cx
+                        .background_spawn(async move {
+                            (frame_image(&frame), frame_backdrop(&frame, BACKDROP_BOX))
+                        })
                         .await;
                     let _ = this.update(cx, |app, cx| {
-                        if let Some(old) = app.stories.live.picture.finish(key, seq, image) {
-                            cx.drop_image(old, None);
-                        }
+                        app.finish_live_pictures(key, seq, image, backdrop, cx);
                         cx.notify();
                     });
                 });
                 self.stories.live.picture.start(key, seq, task);
             }
         }
-        self.stories.live.picture.current(key)
+        LivePictures {
+            picture: self.stories.live.picture.current(key),
+            backdrop: self.stories.live.backdrop.current(key),
+            size: self
+                .stories
+                .live
+                .picture
+                .current(key)
+                .map(|image| image.size(0))
+                .and_then(|size| {
+                    Some((
+                        u16::try_from(size.width.0).ok()?,
+                        u16::try_from(size.height.0).ok()?,
+                    ))
+                }),
+        }
+    }
+
+    fn finish_live_pictures(
+        &mut self,
+        key: i64,
+        seq: u64,
+        image: Option<Arc<RenderImage>>,
+        backdrop: Option<Arc<RenderImage>>,
+        cx: &mut Context<Self>,
+    ) {
+        let live = &mut self.stories.live;
+        // The inline path and the backdrop start no task of their own.
+        live.picture.start_if_idle(key, seq);
+        if let Some(old) = live.picture.finish(key, seq, image) {
+            cx.drop_image(old, None);
+        }
+        live.backdrop.start_if_idle(key, seq);
+        if let Some(old) = live.backdrop.finish(key, seq, backdrop) {
+            cx.drop_image(old, None);
+        }
     }
 
     /// The live story's frame, or `None` while the viewer has not joined
@@ -162,7 +200,7 @@ impl QuillApp {
             return None;
         }
         let key = item.chat_id.0;
-        let picture = self.live_story_picture(key, cx);
+        let pictures = self.live_story_pictures(key, cx);
         let session = self.session()?;
         let live = session.stories.live.as_ref()?;
         let call = session
@@ -184,10 +222,42 @@ impl QuillApp {
         let toast = self.live_stars_toast(session, cx);
         let pinned_strip = (!pinned.is_empty()).then(|| live_pinned_strip(session, &pinned, cx));
         let effects = self.live_effects_layer(session, &levels, cx);
+        // tdesktop `DecideFrameResize`: cover when little is cut off, else
+        // the whole picture over its blurred copy.
+        let expands = pictures.size.is_none_or(|(width, height)| {
+            frame_expands((FRAME_W, FRAME_H), (f32::from(width), f32::from(height)))
+        });
+        let fit = if expands {
+            ObjectFit::Cover
+        } else {
+            ObjectFit::Contain
+        };
+        let backdrop = (!expands)
+            .then_some(pictures.backdrop)
+            .flatten()
+            .map(|image| {
+                div()
+                    .debug_selector(|| "live-story-backdrop".into())
+                    .absolute()
+                    .inset_0()
+                    .child(
+                        img(ImageSource::Render(image))
+                            .absolute()
+                            .inset_0()
+                            .size_full()
+                            .object_fit(ObjectFit::Fill),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .bg(hsla(0., 0., 0., BACKDROP_SHADE)),
+                    )
+            });
         let tile = StreamTile::new(("live-story-tile", key as u64), &self.stories.live.tile)
-            .picture(picture)
-            .fit(ObjectFit::Cover)
-            .frame(px(6.), hsla(0., 0., 0., 1.))
+            .picture(pictures.picture)
+            .fit(fit)
+            .frame(px(6.), hsla(0., 0., 0., 0.))
             .playing(playing);
         let unsupported_label = unsupported.then(|| {
             div()
@@ -199,7 +269,7 @@ impl QuillApp {
                 .px(px(24.))
                 .text_sm()
                 .text_center()
-                .text_color(text_bright())
+                .text_color(chrome::fg())
                 .child(tr(keys::Q_LIVE_STORY_UNSUPPORTED))
         });
         Some(
@@ -214,6 +284,8 @@ impl QuillApp {
                 .h(px(FRAME_H))
                 .rounded(px(6.))
                 .overflow_hidden()
+                .bg(chrome::compose_bg())
+                .children(backdrop)
                 .child(tile)
                 .children(unsupported_label)
                 .child(
@@ -234,68 +306,17 @@ impl QuillApp {
         )
     }
 
-    /// The comments over the lower half of the frame, newest at the
-    /// bottom (tdesktop: left 8, width frame − 16, at most half the frame).
-    fn live_comments(
-        &self,
-        session: &Session,
-        messages: &[ParsedGroupCallMessage],
-        levels: &[GroupCallMessageLevel],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let live = session.stories.live.as_ref();
-        let top: Vec<MessageSender> = live
-            .and_then(|live| live.donors.as_ref())
-            .map(|donors| {
-                donors
-                    .top_donors
-                    .iter()
-                    .filter(|donor| !donor.is_anonymous)
-                    .filter_map(|donor| donor.sender)
-                    .take(MAX_TOP_SHOWN)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let failed = live.map(|live| live.failed.clone()).unwrap_or_default();
-        let rows: Vec<AnyElement> = messages
-            .iter()
-            .filter(|m| !m.text.is_empty())
-            .map(|message| {
-                let place = top.iter().position(|s| *s == message.sender_id);
-                comment_row(
-                    session,
-                    message,
-                    levels,
-                    place,
-                    failed.contains(&message.message_id),
-                    self.stories.live.menu == Some(message.message_id),
-                    cx,
-                )
-            })
-            .collect();
-        div()
-            .id("live-story-comments")
-            .debug_selector(|| "live-story-comments".into())
-            .absolute()
-            .left(px(8.))
-            .bottom(px(MESSAGE_SKIP))
-            .w(px(FRAME_W - 16.))
-            .max_h(px(FRAME_H / 2.))
-            .overflow_y_scroll()
-            .track_scroll(&self.stories.live.scroll)
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap(px(MESSAGE_SKIP))
-            .children(rows)
-            .into_any_element()
-    }
-
     /// "Stars Sent!" with Undo and the seconds left, while your Stars wait
-    /// (tdesktop `PaidReactionToast`).
+    /// (tdesktop `PaidReactionToast`). It goes once they are due: the
+    /// Stars are being sent and Undo could not take them back.
     fn live_stars_toast(&self, session: &Session, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let pending = session.stories.live.as_ref()?.pending_reaction?;
         let now = unix_ms_now();
+        let pending = session
+            .stories
+            .live
+            .as_ref()?
+            .pending_reaction
+            .filter(|pending| pending.commit_at_ms > now)?;
         let seconds = pending.seconds_left(now);
         let (text, bold) = split_bold(&trn_with(
             keys::PAID_REACT_TOAST_TEXT,
@@ -317,12 +338,12 @@ impl QuillApp {
                 .px(px(12.))
                 .py(px(6.))
                 .rounded(px(8.))
-                .bg(rgba(0x000000b3))
-                .text_color(rgb(0xffffff))
+                .bg(hsla(0., 0., 0., 0.7))
+                .text_color(chrome::fg())
                 .child(
                     Icon::new(IconName::StarFill)
                         .with_size(px(24.))
-                        .text_color(rgb(0xffb800)),
+                        .text_color(chrome::stars_gold()),
                 )
                 .child(
                     div()
@@ -351,12 +372,13 @@ impl QuillApp {
                         .gap(px(6.))
                         .cursor_pointer()
                         .role(gpui_kit::Role::Button)
+                        .tab_index(0)
                         .aria_label(tr(keys::PAID_REACT_UNDO))
                         .child(
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(0x5eb5f7))
+                                .text_color(chrome::blue())
                                 .child(tr(keys::PAID_REACT_UNDO)),
                         )
                         .child(countdown_ring(seconds, pending.elapsed_fraction(now)))
@@ -398,7 +420,7 @@ impl QuillApp {
                 1.0
             };
             let rise = progress * (FRAME_H / 2. - 40.);
-            let right = 8. + (index % 2) as f32 * 24.;
+            let right = MESSAGE_SKIP + (index % 2) as f32 * 24.;
             let burst = (0..6).map(move |ray| {
                 let angle = ray as f32 * std::f32::consts::TAU / 6.0 + progress;
                 let reach = 10. + progress * 36.;
@@ -407,7 +429,7 @@ impl QuillApp {
                     .left(px(30. + angle.cos() * reach))
                     .top(px(8. + angle.sin() * reach))
                     .text_size(px(10.))
-                    .text_color(rgb(0xffd54f))
+                    .text_color(chrome::stars_gold())
                     .opacity((1.0 - progress).clamp(0.0, 1.0))
                     .child("\u{2605}")
             });
@@ -428,7 +450,7 @@ impl QuillApp {
                             .py(px(1.))
                             .rounded_full()
                             .bg(level_color(color, 1.0))
-                            .text_color(rgb(0xffffff))
+                            .text_color(chrome::fg())
                             .text_size(px(12.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(sender_avatar(session, effect.sender, 18.))
@@ -480,7 +502,7 @@ fn countdown_ring(seconds: u64, gone: f32) -> AnyElement {
                     if left > 0.0
                         && let Ok(path) = path.build()
                     {
-                        window.paint_path(path, rgb(0x5eb5f7));
+                        window.paint_path(path, chrome::blue());
                     }
                 },
             )
@@ -488,261 +510,5 @@ fn countdown_ring(seconds: u64, gone: f32) -> AnyElement {
             .inset_0(),
         )
         .child(seconds.to_string())
-        .into_any_element()
-}
-
-/// One comment: userpic, "**Name** text", the price, on the background of
-/// its kind (tdesktop `MessagesUi::setupMessagesWidget` paint).
-fn comment_row(
-    session: &Session,
-    message: &ParsedGroupCallMessage,
-    levels: &[GroupCallMessageLevel],
-    place: Option<usize>,
-    failed: bool,
-    menu_open: bool,
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let stars = message.paid_message_star_count;
-    let admin = message.is_from_owner;
-    let line = px(TEXT_SIZE * 1.4);
-    let radius = (3. + TEXT_SIZE * 1.4 + 2.) / 2.;
-    let level = level_for_stars(levels, stars);
-    let background = if stars > 0 {
-        Some(level_color(level.first_color, PAID_BG_OPACITY))
-    } else if admin {
-        Some(level_color(GROUP_CALL_BG, ADMIN_BG_OPACITY))
-    } else {
-        None
-    };
-    let name = session.sender_label(message.sender_id);
-    let body: AnyElement = if failed {
-        div()
-            .italic()
-            .child(tr(keys::Q_LIVE_STORY_FAILED))
-            .into_any_element()
-    } else {
-        let full = format!("{name} {}", message.text);
-        let bold = HighlightStyle {
-            font_weight: Some(FontWeight::SEMIBOLD),
-            ..Default::default()
-        };
-        StyledText::new(full)
-            .with_highlights(vec![(0..name.len(), bold)])
-            .into_any_element()
-    };
-    let crown = place.map(|place| {
-        div()
-            .flex()
-            .items_center()
-            .text_size(px(9.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(0xffd54f))
-            .child(Icon::new(IconName::Crown).with_size(px(11.)))
-            .child((place + 1).to_string())
-    });
-    let price = (stars > 0).then(|| {
-        div()
-            .flex_none()
-            .px(px(5.))
-            .rounded_full()
-            .bg(hsla(0., 0., 0., DARK_OVER_OPACITY))
-            .text_size(px(12.))
-            .child(format!("\u{2605}{}", group_digits(stars)))
-    });
-    let admin_badge = admin.then(|| {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .child(live_badge(cx))
-            .child(
-                div()
-                    .text_size(px(11.))
-                    .opacity(ADMIN_BADGE_OPACITY)
-                    .child(tr(keys::ADMIN_BADGE)),
-            )
-    });
-    let message_id = message.message_id;
-    let sender = message.sender_id;
-    let text = message.text.clone();
-    let date = message.date;
-    let can_delete = message.can_be_deleted;
-    let menu = menu_open.then(|| comment_menu(message_id, sender, text, date, can_delete, cx));
-    div()
-        .id(("live-story-comment", message_id as u64))
-        .debug_selector(move || format!("live-story-comment-{message_id}"))
-        .relative()
-        .max_w(px(FRAME_W - 16.))
-        .flex()
-        .items_start()
-        .gap(px(4.))
-        .pl(px(2.))
-        .pr(px(8.))
-        .pt(px(2.))
-        .pb(px(2.))
-        .rounded(px(radius))
-        .when_some(background, |this, bg| this.bg(bg))
-        .text_size(px(TEXT_SIZE))
-        .line_height(line)
-        .text_color(rgb(0xffffff))
-        .when(!failed, |this| {
-            this.child(
-                div()
-                    .flex_none()
-                    .child(sender_avatar(session, sender, USERPIC)),
-            )
-        })
-        .when(failed, |this| this.pl(px(8.)))
-        .child(
-            div()
-                .min_w_0()
-                .pt(px(1.))
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .children(crown)
-                        .child(div().min_w_0().child(body)),
-                )
-                .children(admin_badge),
-        )
-        .children(price)
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |this, _, _, cx| {
-                this.stories.live.menu = Some(message_id);
-                cx.notify();
-            }),
-        )
-        .children(menu)
-        .into_any_element()
-}
-
-/// The comment's context menu: the date, Copy Text and Delete (tdesktop
-/// `MessagesUi::showContextMenu`).
-fn comment_menu(
-    message_id: i32,
-    sender: MessageSender,
-    text: String,
-    date: i32,
-    can_delete: bool,
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let when = quill::message_menu::sent_label(
-        &quill::local_time::civil_local(i64::from(date)),
-        &quill::local_time::civil_local(quill::local_time::now_unix()),
-    );
-    let item = |id: &'static str, label: &'static str| {
-        div()
-            .id((id, message_id as u64))
-            .px(px(12.))
-            .py(px(6.))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgba(0xffffff1a)))
-            .role(gpui_kit::Role::MenuItem)
-            .child(label)
-    };
-    div()
-        .id(("live-story-comment-menu", message_id as u64))
-        .absolute()
-        .top(px(0.))
-        .left(px(40.))
-        .occlude()
-        .min_w(px(160.))
-        .py(px(4.))
-        .rounded(px(6.))
-        .bg(rgb(0x2c333d))
-        .shadow_md()
-        .text_sm()
-        .text_color(rgb(0xffffff))
-        .child(
-            div()
-                .px(px(12.))
-                .py(px(4.))
-                .text_xs()
-                .text_color(rgba(0xffffff99))
-                .child(when),
-        )
-        .child(
-            item("live-comment-copy", tr(keys::CONTEXT_COPY_TEXT)).on_click(
-                cx.listener(move |this, _, _, cx| this.copy_live_comment(text.clone(), cx)),
-            ),
-        )
-        .when(can_delete, |this| {
-            this.child(
-                item("live-comment-delete", tr(keys::BOX_DELETE))
-                    .debug_selector(|| "live-comment-delete".into())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.ask_delete_live_comment(message_id, sender, cx)
-                    })),
-            )
-        })
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-            this.stories.live.menu = None;
-            cx.notify();
-        }))
-        .into_any_element()
-}
-
-/// The pinned paid comments in a row at the top: userpic, a short text and
-/// the pin time running out (tdesktop `MessagesUi::setupPinnedWidget`).
-fn live_pinned_strip(
-    session: &Session,
-    pinned: &[Pinned],
-    cx: &mut Context<QuillApp>,
-) -> AnyElement {
-    let pills = pinned.iter().map(|pin| {
-        let name = session.sender_label(pin.sender);
-        let text = if pin.text.is_empty() {
-            format!("\u{2605}{}", group_digits(pin.stars))
-        } else {
-            pin.text.clone()
-        };
-        div()
-            .id(("live-story-pinned", pin.message_id as u64))
-            .relative()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .pl(px(2.))
-            .pr(px(10.))
-            .py(px(2.))
-            .rounded_full()
-            .overflow_hidden()
-            .bg(level_color(pin.color, PAID_BG_OPACITY))
-            .cursor_pointer()
-            .role(gpui_kit::Role::Button)
-            .aria_label(name)
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left_0()
-                    .w(relative(pin.gone))
-                    .bg(hsla(0., 0., 0., DARK_OVER_OPACITY)),
-            )
-            .child(sender_avatar(session, pin.sender, PINNED_USERPIC))
-            .child(
-                div()
-                    .max_w(px(PINNED_MAX_TEXT))
-                    .truncate()
-                    .text_size(px(TEXT_SIZE))
-                    .text_color(rgb(0xffffff))
-                    .child(text),
-            )
-            .on_click(cx.listener(|this, _, _, cx| this.show_live_comments(cx)))
-    });
-    div()
-        .id("live-story-pinned-strip")
-        .debug_selector(|| "live-story-pinned-strip".into())
-        .flex()
-        .gap(px(MESSAGE_SKIP))
-        .overflow_x_scroll()
-        .children(pills)
         .into_any_element()
 }

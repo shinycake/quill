@@ -54,8 +54,8 @@ impl Drop for Harness {
     }
 }
 
-/// A driver watching the live story (7, 6) on call 4242, joined.
-fn watching() -> Harness {
+/// A ready driver with no live story yet.
+fn harness() -> Harness {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -73,6 +73,12 @@ fn watching() -> Harness {
     h.ingest(
         r#"{"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":1}}"#,
     );
+    h
+}
+
+/// A driver watching the live story (7, 6) on call 4242, joined.
+fn watching() -> Harness {
+    let mut h = harness();
     h.ingest(
         r#"{"@type":"story","id":6,"poster_chat_id":7,"date":1700000000,"content":{"@type":"storyContentLive","group_call_id":4242,"is_rtmp_stream":false},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
     );
@@ -321,4 +327,197 @@ fn a_looked_up_call_does_not_replace_the_joined_one() {
             .map(|c| c.id),
         Some(4242)
     );
+}
+
+/// Another live story, (7, 8) on call 4343.
+const OTHER_LIVE_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":4343,"title":"Other live","is_active":true,"is_video_chat":true,"is_live_story":true,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"participant_count":3,"can_send_messages":true,"are_messages_allowed":true}}"#;
+
+fn add_other_live_story(h: &mut Harness) {
+    h.ingest(
+        r#"{"@type":"story","id":8,"poster_chat_id":7,"date":1700000000,"content":{"@type":"storyContentLive","group_call_id":4343,"is_rtmp_stream":false},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
+    );
+}
+
+fn tracked_id(h: &Harness) -> Option<i32> {
+    h.driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .map(|c| c.id)
+}
+
+#[test]
+fn stepping_past_a_live_story_before_its_call_arrives_joins_the_next() {
+    let mut h = harness();
+    h.ingest(
+        r#"{"@type":"story","id":6,"poster_chat_id":7,"date":1700000000,"content":{"@type":"storyContentLive","group_call_id":4242,"is_rtmp_stream":false},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
+    );
+    add_other_live_story(&mut h);
+    // Open (7, 6), step past it before `getGroupCall` answers.
+    h.driver.join_live_story(ChatId(7), 6).unwrap();
+    h.driver.leave_live_story().unwrap();
+    h.driver.join_live_story(ChatId(7), 8).unwrap();
+    // The late answer for the first call is not tracked.
+    h.ingest(&LIVE_CALL.replace("JOINED", "false"));
+    assert_eq!(tracked_id(&h), None);
+    h.ingest(OTHER_LIVE_CALL);
+    assert_eq!(tracked_id(&h), Some(4343));
+    assert_eq!(h.sent("joinLiveStory"), 1);
+    assert_eq!(
+        sent_request(&h.recorder, "joinLiveStory")["group_call_id"],
+        4343
+    );
+    // Nothing was joined, so nothing was left.
+    assert_eq!(h.sent("leaveGroupCall"), 0);
+}
+
+#[test]
+fn a_looked_at_video_chat_gives_way_to_a_live_story() {
+    let mut h = watching();
+    h.driver.leave_live_story().unwrap();
+    // Joining (the request is out): left with `leaveGroupCall`.
+    assert_eq!(h.sent("leaveGroupCall"), 1);
+    // A video chat you only looked at.
+    h.ingest(
+        r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Chat","is_active":true,"is_video_chat":true,"is_joined":false}}"#,
+    );
+    assert_eq!(tracked_id(&h), Some(555));
+    add_other_live_story(&mut h);
+    h.driver.join_live_story(ChatId(7), 8).unwrap();
+    assert_eq!(tracked_id(&h), None, "the looked-at chat is dropped");
+    h.ingest(OTHER_LIVE_CALL);
+    assert_eq!(tracked_id(&h), Some(4343));
+    assert_eq!(h.sent("leaveGroupCall"), 1, "nothing more to leave");
+}
+
+#[test]
+fn a_joined_video_chat_keeps_the_slot() {
+    let mut h = watching();
+    h.driver.leave_live_story().unwrap();
+    h.ingest(
+        r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Chat","is_active":true,"is_video_chat":true,"is_joined":true}}"#,
+    );
+    add_other_live_story(&mut h);
+    assert_invalid(h.driver.join_live_story(ChatId(7), 8));
+    // A scheduled update for another call does not replace it either.
+    h.ingest(
+        r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":556,"title":"Later","is_active":false,"scheduled_start_date":1900000000,"is_video_chat":true,"is_joined":false}}"#,
+    );
+    assert_eq!(tracked_id(&h), Some(555));
+}
+
+#[test]
+fn another_live_call_does_not_replace_the_watched_one() {
+    let mut h = watching();
+    // Not joined yet, and an update for another live story's call lands.
+    h.ingest(OTHER_LIVE_CALL);
+    assert_eq!(tracked_id(&h), Some(4242));
+    // Nor a scheduled call, nor a looked-up video chat.
+    h.ingest(
+        r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":556,"title":"Later","is_active":false,"scheduled_start_date":1900000000,"is_video_chat":true,"is_joined":false}}"#,
+    );
+    h.ingest(
+        r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Chat","is_active":true,"is_video_chat":true,"is_joined":false}}"#,
+    );
+    assert_eq!(tracked_id(&h), Some(4242));
+}
+
+#[test]
+fn pending_star_reactions_count_against_a_paid_comment() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.driver.session.payments.hub.balance =
+        Some(crate::premium_hub::StarAmount { stars: 60, nanos: 0 });
+    h.driver.add_live_story_reaction(20, 0).unwrap();
+    // 60 less 20 waiting leaves 40: a 50 Star comment needs a top-up.
+    assert!(h.driver.session.live_needs_top_up(50));
+    assert_invalid(h.driver.send_live_story_comment("hi", 50));
+    assert_eq!(h.sent("sendGroupCallMessage"), 0);
+    h.driver.send_live_story_comment("hi", 40).unwrap();
+}
+
+#[test]
+fn the_stars_total_holds_between_the_commit_and_the_donors() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.ingest(
+        r#"{"@type":"updateLiveStoryTopDonors","group_call_id":4242,"donors":{"@type":"liveStoryDonors","total_star_count":100,"top_donors":[]}}"#,
+    );
+    h.driver.add_live_story_reaction(5, 0).unwrap();
+    let total = |h: &Harness| {
+        h.driver
+            .session
+            .stories
+            .live
+            .as_ref()
+            .map(|l| l.stars_total())
+    };
+    assert_eq!(total(&h), Some(105));
+    assert!(h.driver.live_story_reaction_tick(ACCUMULATE_MS));
+    assert_eq!(total(&h), Some(105), "no dip after the commit");
+    h.ingest(
+        r#"{"@type":"updateLiveStoryTopDonors","group_call_id":4242,"donors":{"@type":"liveStoryDonors","total_star_count":105,"top_donors":[]}}"#,
+    );
+    assert_eq!(total(&h), Some(105));
+}
+
+#[test]
+fn comments_send_and_keep_their_formatting() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.driver
+        .send_live_story_comment("**bold** `code` ||secret||", 0)
+        .unwrap();
+    let sent = sent_request(&h.recorder, "sendGroupCallMessage");
+    assert_eq!(sent["text"]["text"], "bold code secret");
+    let kinds: Vec<String> = sent["text"]["entities"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|e| e["type"]["@type"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    // Code is not allowed in a comment (tdesktop `allowMarkdownTags`).
+    assert_eq!(kinds, vec!["textEntityTypeBold", "textEntityTypeSpoiler"]);
+
+    h.ingest(
+        r#"{"@type":"updateNewGroupCallMessage","group_call_id":4242,"message":{"@type":"groupCallMessage","message_id":9,"sender_id":{"@type":"messageSenderUser","user_id":7},"date":1700000000,"text":{"@type":"formattedText","text":"hi 😀","entities":[{"@type":"textEntity","offset":0,"length":2,"type":{"@type":"textEntityTypeItalic"}},{"@type":"textEntity","offset":3,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"77"}}]},"paid_message_star_count":0,"is_from_owner":false,"can_be_deleted":true}}"#,
+    );
+    let entities = h
+        .driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .and_then(|c| c.messages.first())
+        .map(|m| m.entities.len());
+    assert_eq!(entities, Some(2));
+    // The custom emoji's sticker is looked up.
+    assert_eq!(
+        sent_request(&h.recorder, "getCustomEmojiStickers")["custom_emoji_ids"],
+        serde_json::json!(["77"])
+    );
+}
+
+#[test]
+fn ban_user_bans_from_the_channel_or_blocks() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    // Only on your own live story.
+    assert_invalid(h.driver.ban_live_story_commenter(MessageSender::User { user_id: 9 }));
+    h.ingest(&LIVE_CALL.replace("JOINED", "true").replace(
+        r#""can_send_messages""#,
+        r#""can_be_managed":true,"can_send_messages""#,
+    ));
+    // Chat 7 is a private chat: the user is blocked.
+    h.driver
+        .ban_live_story_commenter(MessageSender::User { user_id: 9 })
+        .unwrap();
+    assert_eq!(
+        sent_request(&h.recorder, "setMessageSenderBlockList")["sender_id"]["user_id"],
+        9
+    );
+    assert_invalid(h.driver.ban_live_story_commenter(MessageSender::Chat { chat_id: -5 }));
 }

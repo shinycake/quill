@@ -2,8 +2,9 @@
 //! Telegram, no call, no Stars): the demo channel's live story playing a
 //! still picture with the LIVE badge, three top donors, four comments (one
 //! paid and pinned) and a paid comment price; the same with your Stars
-//! waiting under the Undo toast and their effect rising; and the Stars box
-//! for a comment.
+//! waiting under the Undo toast and their effect rising; the Stars box for
+//! a comment; and a portrait stream that fills the frame (the landscape
+//! one is shown whole over its blurred copy).
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::StarsBoxMode;
@@ -20,6 +21,7 @@ use quill::paid_reaction::PaidReactor;
 use quill::state::{ActiveGroupCall, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{LiveStoryDonors, MessageSender, ParsedGroupCallMessage};
+use quill::text::{TextEntity, TextEntityKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -50,6 +52,11 @@ register_demos![
         "screenshot demo — live story Stars box for a comment"
     )
     .setup(QuillApp::demo_live_story_box),
+    DemoSpec::chats(
+        "ready-live-story-portrait",
+        "screenshot demo — live story with a portrait stream filling the frame"
+    )
+    .setup(QuillApp::demo_live_story_portrait),
 ];
 
 impl QuillApp {
@@ -77,6 +84,12 @@ impl QuillApp {
         self.open_live_stars_box(StarsBoxMode::Comment, 50, false, cx);
     }
 
+    fn demo_live_story_portrait(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.seed_demo_live_story(cx);
+        self.stories.live.demo_frame = demo_stream_frame(true).map(Arc::new);
+        cx.notify();
+    }
+
     fn seed_demo_live_story(&mut self, cx: &mut Context<Self>) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -85,7 +98,7 @@ impl QuillApp {
         apply_ready_channels(session, &self.demo_ui.sink, &self.demo_ui.seq);
         let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         seed_live_story(session, &sink, &self.demo_ui.seq);
-        self.stories.live.demo_frame = demo_stream_frame().map(Arc::new);
+        self.stories.live.demo_frame = demo_stream_frame(false).map(Arc::new);
         let items = quill::story_viewer::collect_found_story_items(
             &[(CHANNEL, STORY)],
             &session.stories.stories,
@@ -115,6 +128,19 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
         r#"{{"@type":"story","id":{STORY},"poster_chat_id":{CHANNEL},"date":1700000000,"content":{{"@type":"storyContentLive","group_call_id":{CALL},"is_rtmp_stream":false}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}"#
     ));
     let now = i32::try_from(unix_ms_now() / 1000).unwrap_or(i32::MAX);
+    // "Hello" in italics, "Haifa" in bold.
+    let formatted = vec![
+        TextEntity {
+            utf8_start: 0,
+            utf8_end: 5,
+            kind: TextEntityKind::Italic,
+        },
+        TextEntity {
+            utf8_start: 11,
+            utf8_end: 16,
+            kind: TextEntityKind::Bold,
+        },
+    ];
     let comment =
         |id: i32, user_id: i64, text: &str, stars: i64, owner: bool| ParsedGroupCallMessage {
             message_id: id,
@@ -125,6 +151,7 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
             },
             date: now - 40 + id,
             text: text.to_string(),
+            entities: Vec::new(),
             paid_message_star_count: stars,
             is_from_owner: owner,
             can_be_deleted: true,
@@ -141,7 +168,10 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
         viewer_count: 2_318,
         messages: vec![
             comment(1, 802, "The light over the harbour is unreal", 0, false),
-            comment(2, 803, "Hello from Haifa!", 0, false),
+            ParsedGroupCallMessage {
+                entities: formatted,
+                ..comment(2, 803, "Hello from Haifa!", 0, false)
+            },
             comment(3, 0, "Thanks for watching, questions in a minute", 0, true),
             comment(4, 801, "Can you show the boats again?", 250, false),
         ],
@@ -172,10 +202,17 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
     }
 }
 
-/// A still picture for the stream: a showcase photo as a frame.
-fn demo_stream_frame() -> Option<VideoFrame> {
+/// A still picture for the stream: a showcase photo as a frame, or its
+/// middle at 9:16 for a portrait stream.
+fn demo_stream_frame(portrait: bool) -> Option<VideoFrame> {
     let path = demo_media_allowlist().join("showcase/p2.jpg");
-    let rgba = image::open(path).ok()?.to_rgba8();
+    let mut rgba = image::open(path).ok()?.to_rgba8();
+    if portrait {
+        let height = rgba.height();
+        let width = (height * 9 / 16).min(rgba.width());
+        let left = (rgba.width() - width) / 2;
+        rgba = image::imageops::crop_imm(&rgba, left, 0, width, height).to_image();
+    }
     Some(VideoFrame {
         seq: 1,
         width: u16::try_from(rgba.width()).ok()?,

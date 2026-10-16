@@ -30,6 +30,7 @@ fn comment(id: i32, sender: i64, text: &str, stars: i64) -> ParsedGroupCallMessa
         sender_id: user(sender),
         date: 1,
         text: text.to_string(),
+        entities: Vec::new(),
         paid_message_star_count: stars,
         is_from_owner: false,
         can_be_deleted: false,

@@ -233,7 +233,9 @@ type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool, bool), VideoFrame>>>;
 
 /// Phase C2g: latest decoded group video frame per (group call id,
 /// participant user id, is_screen).
-type GroupVideoFrameSlots = Arc<Mutex<HashMap<(i32, i64, bool), VideoFrame>>>;
+/// Each frame behind an `Arc`: a reader takes it without copying the
+/// picture while the slot is locked.
+type GroupVideoFrameSlots = Arc<Mutex<HashMap<(i32, i64, bool), Arc<VideoFrame>>>>;
 
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
 pub struct ConnectDriver<S: JsonSender> {

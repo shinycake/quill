@@ -57,6 +57,9 @@ pub struct LiveStoryState {
     pub message_senders: Option<Vec<AvailableMessageSender>>,
     /// Stars tapped and not committed yet.
     pub pending_reaction: Option<PendingLiveReaction>,
+    /// Stars committed and not yet in a donors update: the total on the
+    /// Stars button keeps them until TDLib counts them.
+    pub committed_stars: i64,
     /// New Stars to show as effects, taken by the viewer.
     pub effects: Vec<LiveStarEffect>,
     /// Your comments TDLib could not send.
@@ -77,6 +80,7 @@ impl LiveStoryState {
             donors: None,
             message_senders: None,
             pending_reaction: None,
+            committed_stars: 0,
             effects: Vec::new(),
             failed: HashSet::new(),
             comments: CommentsTracker::default(),
@@ -84,13 +88,33 @@ impl LiveStoryState {
         }
     }
 
-    /// Stars on the Stars button: everyone's total plus your pending ones
-    /// (tdesktop `starsLocalState().total`).
+    /// Stars on the Stars button: everyone's total plus your pending and
+    /// just committed ones (tdesktop `starsLocalState().total`).
     pub fn stars_total(&self) -> i64 {
         self.donors
             .as_ref()
             .map_or(0, |donors| donors.total_star_count)
-            .saturating_add(self.pending_reaction.map_or(0, |p| p.stars))
+            .saturating_add(self.unconfirmed_stars())
+    }
+
+    /// Your Stars the donors list does not count yet.
+    fn unconfirmed_stars(&self) -> i64 {
+        self.pending_reaction
+            .map_or(0, |p| p.stars)
+            .saturating_add(self.committed_stars)
+    }
+
+    /// The pending Stars went out.
+    pub(crate) fn commit_reaction(&mut self) -> Option<PendingLiveReaction> {
+        let pending = self.pending_reaction.take()?;
+        self.committed_stars = self.committed_stars.saturating_add(pending.stars);
+        Some(pending)
+    }
+
+    /// New donors from TDLib: they count everything committed so far.
+    pub(crate) fn set_donors(&mut self, donors: LiveStoryDonors) {
+        self.donors = Some(donors);
+        self.committed_stars = 0;
     }
 
     /// Queues a Stars effect, keeping the newest four.
@@ -109,7 +133,7 @@ impl LiveStoryState {
             .as_ref()
             .and_then(|donors| donors.top_donors.iter().find(|d| d.is_me))
             .map_or(0, |mine| mine.star_count)
-            .saturating_add(self.pending_reaction.map_or(0, |p| p.stars))
+            .saturating_add(self.unconfirmed_stars())
     }
 }
 
@@ -161,6 +185,27 @@ impl Session {
             .max(2)
     }
 
+    /// Stars you can still spend on the watched live story: the balance
+    /// less the Stars waiting on messages and on this story's reaction
+    /// (tdesktop counts both against `starsLocalState`). `None` while the
+    /// balance is unknown.
+    pub fn live_spendable_stars(&self) -> Option<i64> {
+        let balance = self.payments.hub.balance.map(|b| b.stars)?;
+        let reaction = self
+            .stories
+            .live
+            .as_ref()
+            .and_then(|live| live.pending_reaction)
+            .map_or(0, |p| p.stars);
+        Some(balance - self.payments.paid.total_pending() - reaction)
+    }
+
+    /// Whether `stars` more would go past what you can spend (tdesktop
+    /// `MaybeRequestBalanceIncrease` then asks for a top-up).
+    pub fn live_needs_top_up(&self, stars: i64) -> bool {
+        stars > 0 && self.live_spendable_stars().is_some_and(|have| have < stars)
+    }
+
     /// Who your live story comments are sent as: the call's choice, else
     /// yourself.
     pub fn live_story_sender(&self) -> Option<MessageSender> {
@@ -189,14 +234,14 @@ impl Session {
                 donors,
             } => {
                 if let Some(live) = self.live_story_mut(group_call_id) {
-                    live.donors = Some(donors);
+                    live.set_donors(donors);
                 }
             }
             LiveStoryPayload::Donors(donors) => {
                 if let Some(LiveStoryPurpose::GetTopDonors { group_call_id }) = asked
                     && let Some(live) = self.live_story_mut(group_call_id)
                 {
-                    live.donors = Some(donors);
+                    live.set_donors(donors);
                 }
             }
             LiveStoryPayload::UpdateMessageLevels(levels) => {
@@ -336,6 +381,7 @@ impl Session {
                 live.note = Some(format!("Stars were not sent: {reason}"));
             }
             LiveStoryPurpose::CommitPendingReactions { .. } => {
+                live.committed_stars = 0;
                 live.note = Some(format!("Stars were not sent: {reason}"));
             }
             LiveStoryPurpose::SendComment { .. } => {

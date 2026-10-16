@@ -6,6 +6,7 @@ fn message(id: i32, sender: i64, date: i32, stars: i64) -> ParsedGroupCallMessag
         sender_id: MessageSender::User { user_id: sender },
         date,
         text: "hi".to_string(),
+        entities: Vec::new(),
         paid_message_star_count: stars,
         is_from_owner: false,
         can_be_deleted: false,

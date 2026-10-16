@@ -60,7 +60,11 @@ impl QuillApp {
             .chain(std::iter::once(&item.download_file_id))
             .any(|id| file_is_downloading(*id, &files, &downloading));
         let kind_label = item.kind.label();
-        let header_label = if total > 1 {
+        // A live story's header is its poster, the LIVE badge and the
+        // viewer count (tdesktop `Header::setVideoStreamViewers`).
+        let header_label = if item.kind == StoryViewerKind::Live && item.live_call.is_some() {
+            poster.to_string()
+        } else if total > 1 {
             tr_with(
                 keys::Q_MEDIA_OF,
                 &[
@@ -91,17 +95,17 @@ impl QuillApp {
                 .aspect_ratio(px(360.) / px(640.))
                 .rounded_md()
                 .object_fit(ObjectFit::Contain)
-                .bg(bg_deep())
+                .bg(chrome::frame_bg())
                 .with_fallback(move || {
                     div()
                         .w(px(360.))
                         .h(px(640.))
                         .rounded_md()
-                        .bg(bg_deep())
+                        .bg(chrome::frame_bg())
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_color(text_bright())
+                        .text_color(chrome::fg())
                         .child(tr_with(
                             keys::Q_MEDIA_COULD_NOT_RENDER_2,
                             &[("kind_label", kind_label)],
@@ -143,7 +147,7 @@ impl QuillApp {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(text_bright())
+                            .text_color(chrome::fg())
                             .child(tr(keys::Q_MEDIA_LIVE_STORY)),
                     )
                     .child(
@@ -165,7 +169,7 @@ impl QuillApp {
                 };
                 div()
                     .text_sm()
-                    .text_color(text_bright())
+                    .text_color(chrome::fg())
                     .child(status)
                     .into_any_element()
             };
@@ -174,7 +178,7 @@ impl QuillApp {
                 .w(px(360.))
                 .h(px(640.))
                 .rounded_md()
-                .bg(bg_deep())
+                .bg(chrome::frame_bg())
                 .flex()
                 .items_center()
                 .justify_center()
@@ -336,7 +340,7 @@ impl QuillApp {
                             .child(
                                 div()
                                     .font_semibold()
-                                    .text_color(text_bright())
+                                    .text_color(chrome::fg())
                                     .min_w_0()
                                     .truncate()
                                     .child(super::bidi_line::one_line_plain(header_label)),
@@ -353,7 +357,7 @@ impl QuillApp {
                                     .px_2()
                                     .py_1()
                                     .rounded_md()
-                                    .text_color(text_bright())
+                                    .text_color(chrome::fg())
                                     .child(tr(keys::CLOSE))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_story_viewer(cx);
@@ -362,14 +366,14 @@ impl QuillApp {
                     )
                     .child(visual)
                     .when_some(caption, |this, caption| {
-                        this.child(div().text_color(text_bright()).child(caption))
+                        this.child(div().text_color(chrome::fg()).child(caption))
                     })
                     .when_some(counts, |this, counts| {
-                        this.child(div().text_xs().text_color(text_muted()).child(counts))
+                        this.child(div().text_xs().text_color(chrome::secondary()).child(counts))
                     })
                     // Phase 9.5: "Reposted from …" / "edited" marker.
                     .when_some(self.story_viewer_meta_line(), |this, meta| {
-                        this.child(div().text_xs().text_color(text_muted()).child(meta))
+                        this.child(div().text_xs().text_color(chrome::secondary()).child(meta))
                     })
                     .when(!live_watch, |this| {
                         this.child(self.story_more_row(cx))
@@ -383,8 +387,7 @@ impl QuillApp {
                             .child(
                                 Button::new("story-viewer-prev")
                                     .label(tr(keys::Q_MEDIA_PREV))
-                                    .ghost()
-                                    .text_color(text_bright())
+                                    .custom(chrome::ghost(cx))
                                     .disabled(position <= 1)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(-1, cx);
@@ -393,8 +396,7 @@ impl QuillApp {
                             .child(
                                 Button::new("story-viewer-next")
                                     .label(tr(keys::Q_MEDIA_NEXT))
-                                    .ghost()
-                                    .text_color(text_bright())
+                                    .custom(chrome::ghost(cx))
                                     .disabled(position >= total)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(1, cx);

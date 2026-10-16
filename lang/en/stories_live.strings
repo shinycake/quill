@@ -1,10 +1,13 @@
 // stories_live: the live story in the story viewer (tdesktop English).
 "lng_admin_badge" = "admin";
+"lng_ban_user" = "Ban User";
 "lng_box_delete" = "Delete";
 "lng_box_ok" = "OK";
 "lng_cancel" = "Cancel";
 "lng_context_copy_text" = "Copy Text";
 "lng_credits_balance_me" = "your balance";
+"lng_credits_small_balance_title#one" = "{count} Star Needed";
+"lng_credits_small_balance_title#other" = "{count} Stars Needed";
 "lng_delete_all_from_user" = "Delete all from {user}";
 "lng_hours_tiny#one" = "{count}h";
 "lng_hours_tiny#other" = "{count}h";
@@ -44,4 +47,6 @@
 "lng_video_stream_live" = "LIVE";
 "lng_video_stream_remove_stars" = "Remove Stars";
 "qll_live_story_failed" = "Failed to send the message.";
+"qll_live_story_hide_comments" = "Hide comments";
+"qll_live_story_show_comments" = "Show comments";
 "qll_live_story_unsupported" = "This live story can't be played in Quill yet.";

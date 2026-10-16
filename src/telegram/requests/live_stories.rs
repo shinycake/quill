@@ -59,13 +59,18 @@ pub fn send_live_story_comment(
     extra: RequestId,
     group_call_id: i32,
     text: &str,
+    entities: &[crate::composer::ComposerEntity],
     paid_message_star_count: i64,
 ) -> String {
+    let entities: Vec<serde_json::Value> = entities
+        .iter()
+        .map(crate::telegram::requests::format_entity_json)
+        .collect();
     json!({
         "@type": "sendGroupCallMessage",
         "@extra": extra.as_extra(),
         "group_call_id": group_call_id,
-        "text": { "@type": "formattedText", "text": text, "entities": [] },
+        "text": { "@type": "formattedText", "text": text, "entities": entities },
         "paid_message_star_count": paid_message_star_count,
     })
     .to_string()
@@ -157,7 +162,7 @@ mod tests {
         let streamer = parse(&get_live_story_streamer(extra, 42));
         assert_eq!(streamer["@type"], "getLiveStoryStreamer");
         assert_eq!(streamer["group_call_id"], 42);
-        let comment = parse(&send_live_story_comment(extra, 42, "hi", 30));
+        let comment = parse(&send_live_story_comment(extra, 42, "hi", &[], 30));
         assert_eq!(comment["text"]["text"], "hi");
         assert_eq!(comment["paid_message_star_count"], 30);
         let add = parse(&add_pending_live_story_reaction(extra, 42, 5));

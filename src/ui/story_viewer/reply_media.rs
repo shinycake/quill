@@ -282,16 +282,18 @@ impl QuillApp {
             return false;
         }
         let fallback = if fallback.is_empty() { "⭐" } else { fallback };
-        if self.stories.live.watching.is_some() {
-            // Live story comments are sent as plain text.
-            return self.route_story_reply_emoji(fallback, window, cx);
-        }
         let text = fallback.to_string();
         let len = text.len();
         let content = InputContent::new(text.clone())
             .with_token(0..len, emoji_token(custom_emoji_id, &text))
             .unwrap_or_else(|_| InputContent::new(text));
-        self.stories.reply_input.update(cx, |input, cx| {
+        // A live story comment carries custom emoji too (its entities).
+        let field = if self.stories.live.watching.is_some() {
+            self.stories.live.input.clone()
+        } else {
+            self.stories.reply_input.clone()
+        };
+        field.update(cx, |input, cx| {
             let range = input.selected_range();
             if input
                 .replace_range_with_content(range, content.clone(), window, cx)
