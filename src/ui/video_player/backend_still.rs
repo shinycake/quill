@@ -6,7 +6,7 @@
 //! on a seek.
 #![deny(clippy::indexing_slicing)]
 
-use super::transport::BackendStatus;
+use super::transport::{BackendStatus, Want};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
 use gpui_kit::RenderImage;
 use quill::lang::{keys, tr};
@@ -76,9 +76,7 @@ impl Backend for StillBackend {
         }
     }
 
-    fn play(&mut self, _rate: f64) {}
-
-    fn pause(&mut self) {}
+    fn sync(&mut self, _want: Want) {}
 
     fn seek(&mut self, secs: f64) {
         self.position = secs.max(0.0);
@@ -86,8 +84,6 @@ impl Backend for StillBackend {
     }
 
     fn set_volume(&mut self, _volume: f32) {}
-
-    fn set_rate(&mut self, _rate: f64, _playing: bool) {}
 
     fn step_frame(&mut self, _forward: bool) {}
 

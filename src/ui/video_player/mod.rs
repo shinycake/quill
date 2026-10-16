@@ -61,7 +61,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use transport::{BackendStatus, Command, LiveStatus, PlayStart, TransportMachine};
+use transport::{BackendStatus, Command, LiveStatus, PlayStart, TransportMachine, Want};
 
 /// What a clip is opened for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,13 +156,15 @@ pub(super) struct PictureStats {
 
 /// A decoder. Every call is made on the main thread.
 trait Backend {
-    /// Poll: open state, position, stalls, end, buffered ranges.
+    /// Poll: open state, position, stalls, end, buffered ranges. Stalls
+    /// and the end are judged against the last [`Self::sync`]'s `want`.
     fn status(&mut self) -> BackendStatus;
-    fn play(&mut self, rate: f64);
-    fn pause(&mut self);
+    /// Bring the engine in line with the transport's intent
+    /// ([`transport::reconcile`]). Called after every poll and every user
+    /// action; a second call changes nothing.
+    fn sync(&mut self, want: Want);
     fn seek(&mut self, secs: f64);
     fn set_volume(&mut self, volume: f32);
-    fn set_rate(&mut self, rate: f64, playing: bool);
     /// One picture forward or back, while paused.
     fn step_frame(&mut self, forward: bool);
     /// The picture due at `present`, when it changed.
@@ -393,31 +395,25 @@ impl VideoPlayer {
         self.0.inner.try_borrow().ok().map(|inner| f(&inner))
     }
 
+    /// Hand the backend the transport's play intent.
+    fn sync(&self) {
+        if let Some(want) = self.read_inner(|inner| inner.machine.want()) {
+            self.with_backend(|backend| backend.sync(want));
+        }
+    }
+
     pub(crate) fn play(&self) {
         let now = Instant::now();
-        let Some((start, rate)) =
-            self.with_inner(|inner| (inner.machine.play(now), inner.machine.rate()))
-        else {
-            return;
-        };
-        match start {
-            PlayStart::Now => {
-                self.with_backend(|backend| backend.play(rate));
-            }
-            PlayStart::FromStart => {
-                self.with_backend(|backend| {
-                    backend.seek(0.0);
-                    backend.play(rate);
-                });
-            }
-            PlayStart::Already | PlayStart::Later => {}
+        if self.with_inner(|inner| inner.machine.play(now)) == Some(PlayStart::FromStart) {
+            self.with_backend(|backend| backend.seek(0.0));
         }
+        self.sync();
     }
 
     pub(crate) fn pause(&self) {
         let now = Instant::now();
         self.with_inner(|inner| inner.machine.pause(now));
-        self.with_backend(|backend| backend.pause());
+        self.sync();
     }
 
     /// Drop the backend (its decoder, buffers and thread) and every
@@ -448,6 +444,7 @@ impl VideoPlayer {
             return;
         };
         self.with_backend(|backend| backend.seek(target));
+        self.sync();
     }
 
     /// One picture forward (`true`) or back, while paused (the viewer's
@@ -474,13 +471,8 @@ impl VideoPlayer {
     /// Playback speed (1.0 = normal).
     pub(crate) fn set_rate(&self, rate: f64) {
         let now = Instant::now();
-        let Some((rate, playing)) = self.with_inner(|inner| {
-            let rate = inner.machine.set_rate(rate, now);
-            (rate, inner.machine.wants_play())
-        }) else {
-            return;
-        };
-        self.with_backend(|backend| backend.set_rate(rate, playing));
+        self.with_inner(|inner| inner.machine.set_rate(rate, now));
+        self.sync();
     }
 
     /// Loop at the end instead of ending (GIFs).
@@ -575,8 +567,8 @@ impl VideoPlayer {
         self.with_inner(|inner| inner.error.take()).flatten()
     }
 
-    /// Poll the backend and fold its status into the transport; carry out
-    /// what that asks of the backend (start once open, loop at the end).
+    /// Poll the backend, fold its status into the transport, loop at the
+    /// end when it says so, and sync the backend to the result.
     fn update_status(&self, now: Instant) {
         let Some(status) = self.with_backend(|backend| match backend.live_status(now) {
             Some(live) => (Polled::Live(live), backend.error()),
@@ -598,23 +590,12 @@ impl VideoPlayer {
                     return None;
                 }
             };
-            inner
-                .machine
-                .observe(&status, now)
-                .map(|command| (command, inner.machine.rate()))
+            inner.machine.observe(&status, now)
         });
-        match command.flatten() {
-            Some((Command::Play, rate)) => {
-                self.with_backend(|backend| backend.play(rate));
-            }
-            Some((Command::Loop, rate)) => {
-                self.with_backend(|backend| {
-                    backend.seek(0.0);
-                    backend.play(rate);
-                });
-            }
-            None => {}
+        if let Some(Command::Loop) = command.flatten() {
+            self.with_backend(|backend| backend.seek(0.0));
         }
+        self.sync();
     }
 
     /// The draw that contains the picture started at `now`: predict when

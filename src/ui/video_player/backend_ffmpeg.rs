@@ -21,7 +21,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::surface;
-use super::transport::BackendStatus;
+use super::transport::{BackendStatus, Correction, Engine, Want, reconcile};
 use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
 use quill::video_decode::{OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
@@ -89,8 +89,8 @@ pub(super) struct FfmpegBackend {
     player: Player,
     sound: Option<StreamSound>,
     volume: f32,
-    rate: f64,
-    playing: bool,
+    /// The transport's intent as last synced (its rate is the decoder's).
+    want: Want,
     image: Option<Arc<RenderImage>>,
     /// The surface picture on screen (Windows NV12), to show as an image
     /// instead if the renderer refuses it.
@@ -116,8 +116,7 @@ impl FfmpegBackend {
             player,
             sound: None,
             volume: 1.0,
-            rate: 1.0,
-            playing: false,
+            want: Want::default(),
             image: None,
             surface: None,
             nv12_paused_until: None,
@@ -137,7 +136,8 @@ impl FfmpegBackend {
             return;
         }
         if let Some(tap) = self.player.take_audio_tap() {
-            self.sound = StreamSound::start(tap, self.volume, self.rate, self.playing);
+            let running = self.player.is_playing();
+            self.sound = StreamSound::start(tap, self.volume, self.want.rate, running);
         }
     }
 
@@ -229,36 +229,50 @@ impl Backend for FfmpegBackend {
         self.attach_sound();
         let info = self.player.info();
         let duration = self.player.duration();
-        let running = self.player.is_playing();
         BackendStatus {
             ready: info.is_some(),
             failed: self.player.error().is_some(),
             position: self.player.position(),
             duration,
             stalled: self.player.starved(),
-            // The decoder stopped its clock at the end while play was on.
-            at_end: self.playing && !running,
+            at_end: self.want.playing && self.player.ended(),
             // A local file: everything is there once it is open.
             buffered: duration.map(|end| vec![0.0..end]).unwrap_or_default(),
             has_sound: self.sound.is_some(),
         }
     }
 
-    fn play(&mut self, rate: f64) {
-        self.set_rate(rate, true);
-        self.player.play();
-        self.playing = true;
-        self.attach_sound();
-        if let Some(sound) = &self.sound {
-            sound.play();
+    fn sync(&mut self, want: Want) {
+        if (want.rate - self.want.rate).abs() > f64::EPSILON {
+            self.player.set_rate(want.rate);
+            if let Some(sound) = &self.sound {
+                sound.set_speed(want.rate);
+            }
         }
-    }
-
-    fn pause(&mut self) {
-        self.player.pause();
-        self.playing = false;
-        if let Some(sound) = &self.sound {
-            sound.pause();
+        self.want = want;
+        let engine = Engine {
+            ready: self.player.info().is_some(),
+            running: self.player.is_playing(),
+            rate: want.rate,
+            at_end: self.player.ended(),
+            // A starved decoder keeps its clock playing: nothing to restart.
+            keeps_up: true,
+        };
+        match reconcile(want, engine) {
+            Some(Correction::Start) => {
+                self.player.play();
+                self.attach_sound();
+                if let Some(sound) = &self.sound {
+                    sound.play();
+                }
+            }
+            Some(Correction::Pause) => {
+                self.player.pause();
+                if let Some(sound) = &self.sound {
+                    sound.pause();
+                }
+            }
+            Some(Correction::Rate) | None => {}
         }
     }
 
@@ -277,10 +291,11 @@ impl Backend for FfmpegBackend {
             self.options.want_audio = true;
             self.options.output = self.output;
             let position = self.player.position();
+            let running = self.player.is_playing();
             if let Ok(mut player) = Player::open(&self.path, self.options.clone()) {
-                player.set_rate(self.rate);
+                player.set_rate(self.want.rate);
                 player.seek(position);
-                if self.playing {
+                if running {
                     player.play();
                 }
                 self.player = player;
@@ -289,14 +304,6 @@ impl Backend for FfmpegBackend {
         }
         if let Some(sound) = &self.sound {
             sound.set_volume(self.volume);
-        }
-    }
-
-    fn set_rate(&mut self, rate: f64, _playing: bool) {
-        self.rate = rate;
-        self.player.set_rate(rate);
-        if let Some(sound) = &self.sound {
-            sound.set_speed(rate);
         }
     }
 

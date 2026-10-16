@@ -3,7 +3,7 @@
 //! viewer opening a clip and closing while it still opens.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use super::transport::BackendStatus;
+use super::transport::{BackendStatus, Correction, Engine, Want, reconcile};
 use super::{
     Backend, ErrorKind, Picture, PictureStats, PlayState, PlayerError, Present, Pulled,
     VideoPlayer, WATCH_INTERVAL, picture_trace_line, trace_line,
@@ -51,6 +51,10 @@ struct Script {
     duration: Option<f64>,
     position: f64,
     at_end: bool,
+    /// The engine's clock runs (it stops at the end).
+    running: bool,
+    /// The engine's rate (1 when unset).
+    rate: Option<f64>,
     /// Every call, in order.
     calls: Vec<String>,
     /// The present time of every pull.
@@ -82,7 +86,10 @@ fn image() -> Arc<RenderImage> {
 
 impl Backend for Scripted {
     fn status(&mut self) -> BackendStatus {
-        let script = self.0.borrow();
+        let mut script = self.0.borrow_mut();
+        if script.at_end {
+            script.running = false;
+        }
         BackendStatus {
             ready: script.ready,
             position: script.position,
@@ -94,11 +101,32 @@ impl Backend for Scripted {
             has_sound: true,
         }
     }
-    fn play(&mut self, rate: f64) {
-        self.0.borrow_mut().calls.push(format!("play {rate}"));
-    }
-    fn pause(&mut self) {
-        self.0.borrow_mut().calls.push("pause".into());
+    /// The engine follows `want` as the file backends' engines do: the
+    /// rate applies at once, starts and pauses through `reconcile`.
+    fn sync(&mut self, want: Want) {
+        let mut script = self.0.borrow_mut();
+        if (script.rate.unwrap_or(1.0) - want.rate).abs() > f64::EPSILON {
+            script.rate = Some(want.rate);
+            script.calls.push(format!("rate {}", want.rate));
+        }
+        let engine = Engine {
+            ready: script.ready,
+            running: script.running,
+            rate: want.rate,
+            at_end: script.at_end,
+            keeps_up: !script.stalled,
+        };
+        match reconcile(want, engine) {
+            Some(Correction::Start) => {
+                script.running = true;
+                script.calls.push(format!("play {}", want.rate));
+            }
+            Some(Correction::Pause) => {
+                script.running = false;
+                script.calls.push("pause".into());
+            }
+            Some(Correction::Rate) | None => {}
+        }
     }
     fn seek(&mut self, secs: f64) {
         let mut script = self.0.borrow_mut();
@@ -108,12 +136,6 @@ impl Backend for Scripted {
     }
     fn set_volume(&mut self, volume: f32) {
         self.0.borrow_mut().calls.push(format!("volume {volume}"));
-    }
-    fn set_rate(&mut self, rate: f64, playing: bool) {
-        self.0
-            .borrow_mut()
-            .calls
-            .push(format!("rate {rate} {playing}"));
     }
     fn step_frame(&mut self, forward: bool) {
         self.0.borrow_mut().calls.push(format!("step {forward}"));
@@ -244,7 +266,6 @@ fn the_transport_loops_at_the_end_and_steps_only_while_paused() {
 
 /// The clip ends, the transport moves to Ended (no play wanted), then the
 /// scrubber seeks back: the engine must stay paused there.
-#[cfg(target_os = "macos")]
 #[test]
 fn a_seek_after_the_end_leaves_the_engine_paused() {
     let (player, script) = scripted(true);
@@ -258,23 +279,20 @@ fn a_seek_after_the_end_leaves_the_engine_paused() {
     player.pull(Instant::now(), None);
     assert_eq!(player.state(), PlayState::Ended);
     assert!(!player.wants_play());
+    calls(&script);
     player.seek(3.0);
+    player.pull(Instant::now(), None);
+    player.pull(Instant::now(), None);
     assert!(!player.wants_play());
-    // What the backend was told to want: its last play or pause.
-    let backend_wants_play = calls(&script)
-        .iter()
-        .rev()
-        .find_map(|call| match call.as_str() {
-            "pause" => Some(false),
-            call if call.starts_with("play") => Some(true),
-            _ => None,
-        })
-        .unwrap_or(false);
-    // AVPlayer after the seek: idle, off the end, the buffer keeps up.
+    assert_eq!(calls(&script), ["seek 3"]);
     assert!(
-        !super::backend_avplayer::resumes_after_stall(backend_wants_play, 0.0, false, true),
+        !script.borrow().running,
         "the engine restarts after the seek while the transport is paused"
     );
+    // Play from there starts it once.
+    player.play();
+    player.pull(Instant::now(), None);
+    assert_eq!(calls(&script), ["play 1"]);
 }
 
 #[test]
@@ -514,12 +532,9 @@ mod viewer {
         space_up(vcx);
         assert_eq!(state(vcx), (false, false));
         let calls = std::mem::take(&mut script.borrow_mut().calls);
+        assert!(calls.iter().any(|c| c == "rate 2"), "boosted: {calls:?}");
         assert!(
-            calls.iter().any(|c| c.starts_with("rate 2 ")),
-            "boosted: {calls:?}"
-        );
-        assert!(
-            calls.last().is_some_and(|c| c.starts_with("rate 1 ")),
+            calls.last().is_some_and(|c| c == "rate 1"),
             "restored: {calls:?}"
         );
         assert!(!calls.iter().any(|c| c.starts_with("play")), "{calls:?}");
@@ -547,10 +562,7 @@ mod viewer {
         settle(vcx);
         assert!(!app.read_with(vcx, |app, _| app.viewer.controls.boost.is_active()));
         let calls = std::mem::take(&mut script.borrow_mut().calls);
-        assert!(
-            calls.iter().any(|c| c.starts_with("rate 1 ")),
-            "restored: {calls:?}"
-        );
+        assert!(calls.iter().any(|c| c == "rate 1"), "restored: {calls:?}");
     }
 
     /// Layered mode (the picture on its own layer): the slice root takes

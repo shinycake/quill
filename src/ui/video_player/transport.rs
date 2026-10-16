@@ -99,13 +99,64 @@ pub(crate) struct LiveStatus {
     pub(crate) ended: Option<bool>,
 }
 
-/// What the player must do to the backend after a status update.
+/// What the player must do to the backend after a status update, besides
+/// syncing it to the [`Want`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
-    /// Start the backend playing (it became ready while play was wanted).
-    Play,
-    /// The clip ended on a looping player: seek to 0 and keep playing.
+    /// The clip ended on a looping player: seek to 0 (the sync plays on).
     Loop,
+}
+
+/// The transport's play intent, which a backend's engine follows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Want {
+    pub(crate) playing: bool,
+    pub(crate) rate: f64,
+}
+
+impl Default for Want {
+    fn default() -> Self {
+        Self {
+            playing: false,
+            rate: 1.0,
+        }
+    }
+}
+
+/// What a backend's engine is doing, as the backend reads it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Engine {
+    /// Open and able to play.
+    pub(crate) ready: bool,
+    /// The clock runs.
+    pub(crate) running: bool,
+    pub(crate) rate: f64,
+    /// Stopped at the end of the clip.
+    pub(crate) at_end: bool,
+    /// The buffer holds enough to play on. AVPlayer drops its rate to 0 on
+    /// a stall and, not waiting to minimize stalls, never raises it again.
+    pub(crate) keeps_up: bool,
+}
+
+/// What a backend does to its engine to follow the [`Want`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Correction {
+    Start,
+    Pause,
+    Rate,
+}
+
+/// The decision behind every backend's sync. Idempotent: a sync on every
+/// poll corrects drift (a stall, the end) and otherwise changes nothing.
+pub(crate) fn reconcile(want: Want, engine: Engine) -> Option<Correction> {
+    match (want.playing, engine.running) {
+        (true, false) if engine.ready && !engine.at_end && engine.keeps_up => {
+            Some(Correction::Start)
+        }
+        (true, true) if (engine.rate - want.rate).abs() > 1e-3 => Some(Correction::Rate),
+        (false, true) => Some(Correction::Pause),
+        _ => None,
+    }
 }
 
 /// A looping player starts over this close to the end (seconds), without
@@ -180,6 +231,14 @@ impl TransportMachine {
 
     pub(crate) fn wants_play(&self) -> bool {
         self.wants_play
+    }
+
+    /// What the backend's engine must do now.
+    pub(crate) fn want(&self) -> Want {
+        Want {
+            playing: self.wants_play && self.state != PlayState::Failed,
+            rate: self.rate,
+        }
     }
 
     /// The duration to show: the backend's, else the message's.
@@ -338,11 +397,11 @@ impl TransportMachine {
             }
             self.position = status.position.max(0.0);
             self.pulled_at = now;
-            if self.wants_play {
-                self.state = PlayState::Playing;
-                return Some(Command::Play);
-            }
-            self.state = PlayState::Ready;
+            self.state = if self.wants_play {
+                PlayState::Playing
+            } else {
+                PlayState::Ready
+            };
             return None;
         }
         // Only the backend's own duration (`self.duration`), never the
@@ -442,7 +501,10 @@ pub(crate) fn merge_ranges(mut ranges: Vec<Range<f64>>) -> Vec<Range<f64>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BackendStatus, Command, PlayStart, PlayState, TransportMachine, merge_ranges};
+    use super::{
+        BackendStatus, Command, Correction, Engine, PlayStart, PlayState, TransportMachine, Want,
+        merge_ranges, reconcile,
+    };
     use std::time::{Duration, Instant};
 
     fn ready(position: f64) -> BackendStatus {
@@ -488,7 +550,8 @@ mod tests {
         // Play before the file is open: it starts once ready.
         assert_eq!(machine.play(t0), PlayStart::Later);
         assert_eq!(machine.observe(&BackendStatus::default(), t0), None);
-        assert_eq!(machine.observe(&ready(0.0), t0), Some(Command::Play));
+        assert_eq!(machine.observe(&ready(0.0), t0), None);
+        assert!(machine.want().playing);
         assert_eq!(machine.state(), PlayState::Playing);
         assert_eq!(machine.duration(), Some(10.0));
         let stalled = BackendStatus {
@@ -681,6 +744,91 @@ mod tests {
         // Nothing revives a failed player.
         assert_eq!(machine.observe(&ready(0.0), t2), None);
         assert_eq!(machine.play(t2), PlayStart::Later);
+    }
+
+    fn idle() -> Engine {
+        Engine {
+            ready: true,
+            running: false,
+            rate: 1.0,
+            at_end: false,
+            keeps_up: true,
+        }
+    }
+
+    fn play(rate: f64) -> Want {
+        Want {
+            playing: true,
+            rate,
+        }
+    }
+
+    #[test]
+    fn a_stalled_clip_is_told_to_play_again_once_the_buffer_keeps_up() {
+        // Play wanted, rate dropped by a stall, buffer caught up.
+        assert_eq!(reconcile(play(1.0), idle()), Some(Correction::Start));
+        let starved = Engine {
+            keeps_up: false,
+            ..idle()
+        };
+        assert_eq!(reconcile(play(1.0), starved), None);
+        // Paused on purpose, already playing, ended, or not open yet.
+        assert_eq!(reconcile(Want::default(), idle()), None);
+        let running = Engine {
+            running: true,
+            ..idle()
+        };
+        assert_eq!(reconcile(play(1.0), running), None);
+        let ended = Engine {
+            at_end: true,
+            ..idle()
+        };
+        assert_eq!(reconcile(play(1.0), ended), None);
+        let opening = Engine {
+            ready: false,
+            ..idle()
+        };
+        assert_eq!(reconcile(play(1.0), opening), None);
+    }
+
+    #[test]
+    fn a_running_engine_pauses_and_follows_the_rate() {
+        let running = Engine {
+            running: true,
+            ..idle()
+        };
+        assert_eq!(reconcile(Want::default(), running), Some(Correction::Pause));
+        assert_eq!(reconcile(play(1.5), running), Some(Correction::Rate));
+        let at_speed = Engine {
+            rate: 1.5,
+            ..running
+        };
+        assert_eq!(reconcile(play(1.5), at_speed), None);
+    }
+
+    #[test]
+    fn the_end_and_a_seek_back_want_no_play() {
+        let t0 = Instant::now();
+        let mut machine = TransportMachine::new(None, t0);
+        machine.observe(&ready(0.0), t0);
+        machine.play(t0);
+        machine.set_rate(1.5, t0);
+        assert_eq!(machine.want(), play(1.5));
+        let end = BackendStatus {
+            at_end: true,
+            ..ready(10.0)
+        };
+        machine.observe(&end, t0);
+        assert_eq!(machine.state(), PlayState::Ended);
+        assert!(!machine.want().playing);
+        machine.seek(3.0, t0);
+        assert!(!machine.want().playing);
+        assert_eq!(reconcile(machine.want(), idle()), None);
+        // Failed: nothing plays, whatever was wanted.
+        let mut failed = TransportMachine::new(None, t0);
+        failed.play(t0);
+        failed.fail(t0);
+        assert!(!failed.want().playing);
     }
 
     #[test]

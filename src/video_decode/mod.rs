@@ -766,6 +766,12 @@ impl Player {
         self.clock.is_playing() && !self.ended
     }
 
+    /// Ran out at the end (until the next seek).
+    pub fn ended(&mut self) -> bool {
+        self.update_ended();
+        self.ended
+    }
+
     pub fn set_rate(&mut self, rate: f64) {
         self.clock.set_rate(rate, Instant::now());
     }
