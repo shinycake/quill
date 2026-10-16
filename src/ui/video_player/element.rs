@@ -11,12 +11,23 @@
 //! A GPU surface (AVPlayer) can't be clipped by GPUI, so rounded corners
 //! over a surface are cut by painting the background color over the
 //! corner outsides (`inline_video::corner_mask`); images round themselves.
+//!
+//! A live player (`backend_live`) is redrawn by its feed when a frame
+//! lands; the element only records the view it is drawn in and asks the
+//! frame clock to notice a stall, and not at all while painted off
+//! screen. `.paused_overlay(true)` draws the feed's blurred 90 px picture
+//! while the sender paused; `.on_width(report)` reports the element's
+//! width whenever it changes (the stream's quality bucket).
 #![deny(clippy::indexing_slicing)]
 
 use super::super::frame_clock::{VideoFrameAsk, request_video_frame};
-use super::{Picture, VideoPlayer};
+use super::{Picture, PlayState, VideoPlayer};
 use gpui_kit::*;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+/// Called with the element's width in logical pixels when it changes.
+pub(crate) type WidthReport = Rc<dyn Fn(f32, &mut App)>;
 
 /// The picture of `player`, filling its parent.
 pub(crate) fn video_frame(player: &VideoPlayer) -> VideoFrame {
@@ -26,6 +37,8 @@ pub(crate) fn video_frame(player: &VideoPlayer) -> VideoFrame {
         radii: Corners::default(),
         behind: None,
         keep_alive: false,
+        paused_overlay: false,
+        on_width: None,
     }
 }
 
@@ -38,6 +51,8 @@ pub(crate) struct VideoFrame {
     /// bottom-left), painted over a surface's corner outsides.
     behind: Option<[Hsla; 4]>,
     keep_alive: bool,
+    paused_overlay: bool,
+    on_width: Option<WidthReport>,
 }
 
 impl VideoFrame {
@@ -67,6 +82,20 @@ impl VideoFrame {
         self.keep_alive = keep_alive;
         self
     }
+
+    /// While a live sender paused, draw its last frame small and blurred
+    /// over the picture, cropped to fill (tdesktop's paused tile; the
+    /// caller adds the shade and the pause icon).
+    pub(crate) fn paused_overlay(mut self, paused_overlay: bool) -> Self {
+        self.paused_overlay = paused_overlay;
+        self
+    }
+
+    /// Report the element's width on every paint where it changed.
+    pub(crate) fn on_width(mut self, report: WidthReport) -> Self {
+        self.on_width = Some(report);
+        self
+    }
 }
 
 impl RenderOnce for VideoFrame {
@@ -76,19 +105,47 @@ impl RenderOnce for VideoFrame {
         self.player.set_refresh_period(period);
         let picture = self.player.pull(now, hint);
         let target = window.current_view();
+        self.player.note_live_view(target);
         let surface = picture.as_ref().is_some_and(Picture::is_surface);
         let picture = picture.map(|picture| picture_element(picture, self.fit, self.radii));
+        let paused = (self.paused_overlay && self.player.state() == PlayState::Paused)
+            .then(|| self.player.paused_picture())
+            .flatten()
+            .map(|image| {
+                img(ImageSource::Render(image))
+                    .debug_selector(|| "live-paused-picture".into())
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .rounded_tl(self.radii.top_left)
+                    .rounded_tr(self.radii.top_right)
+                    .rounded_br(self.radii.bottom_right)
+                    .rounded_bl(self.radii.bottom_left)
+            });
         let player = self.player;
         let keep_alive = self.keep_alive;
         let radii = self.radii;
         let mask = self.behind.filter(|_| surface && has_radius(radii));
+        let on_width = self.on_width;
         let pump = canvas(
             |_, _, _| {},
             move |bounds, (), window, cx| {
                 if let Some(colors) = mask {
                     paint_corner_mask(bounds, radii, colors, window);
                 }
-                if is_visible(bounds, window.content_mask().bounds) {
+                if let Some(report) = on_width {
+                    let width = f32::from(bounds.size.width);
+                    let last = player.reported_width();
+                    if (width - last.get()).abs() >= 0.5 {
+                        last.set(width);
+                        // Not while painting: the owner updates its state.
+                        window.on_next_frame(move |_, cx| report(width, cx));
+                    }
+                }
+                let visible = is_visible(bounds, window.content_mask().bounds);
+                if visible {
                     player.note_shown();
                 }
                 // An inline tile's row, painted under the copy the
@@ -99,7 +156,9 @@ impl RenderOnce for VideoFrame {
                 }
                 let now = Instant::now();
                 let demand = player.frame_demand(now);
-                if demand.animates {
+                // A live picture off screen asks nothing: its feed stops
+                // redrawing it too.
+                if demand.animates && (visible || !player.is_live()) {
                     request_video_frame(
                         target,
                         VideoFrameAsk {
@@ -135,6 +194,7 @@ impl RenderOnce for VideoFrame {
             .size_full()
             .overflow_hidden()
             .children(picture)
+            .children(paused)
             .child(pump)
     }
 }

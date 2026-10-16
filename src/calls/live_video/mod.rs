@@ -164,6 +164,8 @@ pub struct LiveSnapshot {
     pub dropped: u64,
     /// A frame is waiting to be taken.
     pub unshown: bool,
+    /// The newest frame's sequence number and arrival, taken or not.
+    pub latest: Option<(u64, Instant)>,
 }
 
 impl LiveSink {
@@ -176,12 +178,19 @@ impl LiveSink {
 
     /// The newest frame the UI has not taken yet.
     pub fn take(&self) -> Option<Arc<LiveFrame>> {
+        self.take_if(|_| true)
+    }
+
+    /// The newest frame not taken yet, when `wanted` says so; else it
+    /// stays for a later take.
+    pub fn take_if(&self, wanted: impl FnOnce(&LiveFrame) -> bool) -> Option<Arc<LiveFrame>> {
         let mut latest = self.0.lock_or_recover();
         if !latest.unshown {
             return None;
         }
+        let frame = latest.frame.clone().filter(|frame| wanted(frame))?;
         latest.unshown = false;
-        latest.frame.clone()
+        Some(frame)
     }
 
     /// The newest frame, taken or not.
@@ -197,6 +206,10 @@ impl LiveSink {
             pushed: latest.pushed,
             dropped: latest.dropped,
             unshown: latest.unshown,
+            latest: latest
+                .frame
+                .as_ref()
+                .map(|frame| (frame.seq, frame.arrived_at)),
         }
     }
 

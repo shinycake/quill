@@ -36,6 +36,7 @@ impl QuillApp {
                 rate: self.playback.speed,
                 volume: self.playback.volume,
                 has_sound: true,
+                live: false,
             });
         if transport.state == PlayState::Failed {
             return None;
