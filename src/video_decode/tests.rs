@@ -1,6 +1,6 @@
 use super::{
     AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, Clock, Demuxer, Item,
-    MediaInfo, OpenOptions, Player, VideoFrame, rotate_bgra, take_due, wants_more,
+    MediaInfo, OpenOptions, PixelOutput, Player, VideoFrame, rotate_bgra, take_due, wants_more,
 };
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -8,13 +8,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+mod nv12;
+
 fn frame(pts: f64) -> VideoFrame {
-    VideoFrame {
-        pts,
-        width: 1,
-        height: 1,
-        bgra: vec![0; 4],
-    }
+    VideoFrame::bgra(pts, 1, 1, vec![0; 4])
 }
 
 fn wait_until(mut done: impl FnMut() -> bool) -> bool {
@@ -237,6 +234,7 @@ fn scripted_player(frames: Option<usize>, audio: bool, queue: usize) -> (Player,
         threads: 1,
         want_audio: audio,
         video_frames: queue,
+        output: PixelOutput::Bgra,
     };
     (
         Player::with_demuxer(Box::new(demuxer), options).expect("spawn the decode thread"),
@@ -496,15 +494,11 @@ fn ffmpeg_decodes_h264_with_aac() {
     // Presentation order despite B-frames.
     assert!(frames.windows(2).all(|w| w[0].pts < w[1].pts));
     assert!(frames[0].pts.abs() < 1e-6);
-    assert_eq!(frames[0].bgra.len(), 96 * 64 * 4);
+    let bgra = frames[0].pixels.bgra().expect("BGRA by default");
+    assert_eq!(bgra.len(), 96 * 64 * 4);
     // testsrc2 is colourful and opaque.
-    assert!(frames[0].bgra.chunks(4).all(|px| px[3] == 255));
-    assert!(
-        frames[0]
-            .bgra
-            .chunks(4)
-            .any(|px| px[0] != px[1] || px[1] != px[2])
-    );
+    assert!(bgra.chunks(4).all(|px| px[3] == 255));
+    assert!(bgra.chunks(4).any(|px| px[0] != px[1] || px[1] != px[2]));
     // About a second of mono sound.
     assert!((40_000..=56_000).contains(&samples), "{samples} samples");
 }

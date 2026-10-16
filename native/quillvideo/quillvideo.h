@@ -22,7 +22,7 @@
 #endif
 
 /* Bumped whenever a struct or signature below changes. */
-#define QV_ABI_VERSION 1
+#define QV_ABI_VERSION 2
 
 typedef struct QvOptions {
   /* Scale video down (never up) to fit within this box, keeping the aspect
@@ -58,11 +58,23 @@ typedef struct QvInfo {
 #define QV_ITEM_VIDEO 1
 #define QV_ITEM_AUDIO 2
 
+/* Picture layouts (QvItem.format, qv_set_output). */
+#define QV_PIXEL_BGRA 0
+/* Bi-planar 4:2:0: `height` luma rows of `width` bytes at `data`, `stride`
+ * apart, then `height / 2` rows of `width / 2` interleaved (Cb, Cr) byte
+ * pairs at `chroma`, `chroma_stride` apart. Width and height are even. */
+#define QV_PIXEL_NV12 1
+
+/* YUV matrices (QvItem.matrix). */
+#define QV_MATRIX_BT601 1
+#define QV_MATRIX_BT709 2
+
 typedef struct QvItem {
   int32_t kind;
   /* Presentation time in seconds from the start of the file. */
   double pts;
-  /* Video: BGRA rows, `stride` bytes apart. Audio: interleaved f32.
+  /* Video: BGRA rows, `stride` bytes apart, or the NV12 luma plane (see
+   * QV_PIXEL_NV12). Audio: interleaved f32.
    * Owned by the context; valid until the next call on it. */
   const uint8_t *data;
   int32_t stride;
@@ -70,6 +82,18 @@ typedef struct QvItem {
   int32_t height;
   /* Audio: sample frames (per channel) in `data`. */
   int32_t samples;
+  /* Video (ABI 2): QV_PIXEL_BGRA or QV_PIXEL_NV12. */
+  int32_t format;
+  /* NV12: the interleaved chroma plane and its row stride in bytes. */
+  const uint8_t *chroma;
+  int32_t chroma_stride;
+  /* NV12: QV_MATRIX_BT601 or QV_MATRIX_BT709; 1 for full range samples
+   * (0-255), 0 for limited (16-235). */
+  int32_t matrix;
+  int32_t full_range;
+  /* Video: microseconds spent turning the decoded picture into this layout
+   * (sws_scale, or the plane copy for NV12). */
+  int32_t convert_us;
 } QvItem;
 
 #ifdef __cplusplus
@@ -83,6 +107,14 @@ QV_API void *qv_open(const char *path, const QvOptions *options, char *err,
                      int32_t err_len);
 
 QV_API void qv_info(void *ctx, QvInfo *out);
+
+/* The picture layout wanted from now on: QV_PIXEL_BGRA (the default) or
+ * QV_PIXEL_NV12. NV12 is a request: pictures that are 8-bit 4:2:0 YUV
+ * without alpha (yuv420p, yuvj420p, nv12), BT.601 or BT.709, with even
+ * output sides come out as NV12 without a colour conversion; the rest
+ * still come out as BGRA, so check QvItem.format. Returns 0, or < 0 for an
+ * unknown layout. */
+QV_API int32_t qv_set_output(void *ctx, int32_t format);
 
 /* Decode the next picture or audio chunk in presentation order per stream.
  * Returns 1 with `out` filled, 0 at the end of the file, < 0 on error. */

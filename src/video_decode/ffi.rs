@@ -7,12 +7,16 @@ use std::ffi::{CString, c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use super::nv12::{PixelOutput, Pixels, YuvColor, YuvMatrix, pack_nv12, plane_span};
 use super::{AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, VideoFrame, rotate_bgra};
 
 /// `QV_ABI_VERSION` in `quillvideo.h`.
-const ABI_VERSION: i32 = 1;
+const ABI_VERSION: i32 = 2;
 const ITEM_VIDEO: i32 = 1;
 const ITEM_AUDIO: i32 = 2;
+/// `QV_PIXEL_*` in `quillvideo.h`.
+const PIXEL_BGRA: i32 = 0;
+const PIXEL_NV12: i32 = 1;
 
 #[repr(C)]
 struct QvOptions {
@@ -46,6 +50,112 @@ struct QvItem {
     width: i32,
     height: i32,
     samples: i32,
+    format: i32,
+    chroma: *const u8,
+    chroma_stride: i32,
+    matrix: i32,
+    full_range: i32,
+    convert_us: i32,
+}
+
+impl QvItem {
+    fn empty() -> Self {
+        Self {
+            kind: 0,
+            pts: 0.0,
+            data: std::ptr::null(),
+            stride: 0,
+            width: 0,
+            height: 0,
+            samples: 0,
+            format: PIXEL_BGRA,
+            chroma: std::ptr::null(),
+            chroma_stride: 0,
+            matrix: 0,
+            full_range: 0,
+            convert_us: 0,
+        }
+    }
+}
+
+/// The shim's code for a layout.
+fn pixel_code(output: PixelOutput) -> i32 {
+    match output {
+        PixelOutput::Bgra => PIXEL_BGRA,
+        PixelOutput::Nv12 => PIXEL_NV12,
+    }
+}
+
+/// A picture item's planes, checked: sides, strides and pointers, and the
+/// bytes each plane spans (what the shim promises stays valid until the
+/// next call). Pure, so the rules are tested without the shim.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PictureLayout {
+    Bgra {
+        width: u32,
+        height: u32,
+        stride: usize,
+        len: usize,
+    },
+    Nv12 {
+        width: u32,
+        height: u32,
+        stride: usize,
+        len: usize,
+        chroma_stride: usize,
+        chroma_len: usize,
+    },
+}
+
+/// Check a picture item's layout fields; `Err` for anything a plane read
+/// could go wrong on (non-positive or odd sides, strides narrower than a
+/// row, null planes, an unknown layout, sizes that overflow).
+pub(super) fn picture_layout(
+    format: i32,
+    (width, height): (i32, i32),
+    (stride, chroma_stride): (i32, i32),
+    (data_null, chroma_null): (bool, bool),
+) -> Result<PictureLayout, &'static str> {
+    let malformed = "decoder returned a malformed picture";
+    let side = |v: i32| u32::try_from(v).ok().filter(|v| *v > 0);
+    let (Some(w), Some(h)) = (side(width), side(height)) else {
+        return Err(malformed);
+    };
+    let stride = usize::try_from(stride).map_err(|_| malformed)?;
+    if data_null {
+        return Err(malformed);
+    }
+    match format {
+        PIXEL_BGRA => {
+            let row = (w as usize).checked_mul(4).ok_or(malformed)?;
+            let len = plane_span(stride, h as usize, row).ok_or(malformed)?;
+            Ok(PictureLayout::Bgra {
+                width: w,
+                height: h,
+                stride,
+                len,
+            })
+        }
+        PIXEL_NV12 => {
+            if !w.is_multiple_of(2) || !h.is_multiple_of(2) || chroma_null {
+                return Err(malformed);
+            }
+            let chroma_stride = usize::try_from(chroma_stride).map_err(|_| malformed)?;
+            let len = plane_span(stride, h as usize, w as usize).ok_or(malformed)?;
+            // `width / 2` pairs of two bytes: `width` bytes a row.
+            let chroma_len =
+                plane_span(chroma_stride, h as usize / 2, w as usize).ok_or(malformed)?;
+            Ok(PictureLayout::Nv12 {
+                width: w,
+                height: h,
+                stride,
+                len,
+                chroma_stride,
+                chroma_len,
+            })
+        }
+        _ => Err("decoder returned an unknown picture layout"),
+    }
 }
 
 type OpenFn =
@@ -54,6 +164,7 @@ type InfoFn = unsafe extern "C" fn(*mut c_void, *mut QvInfo);
 type NextFn = unsafe extern "C" fn(*mut c_void, *mut QvItem) -> i32;
 type SeekFn = unsafe extern "C" fn(*mut c_void, f64) -> i32;
 type CloseFn = unsafe extern "C" fn(*mut c_void);
+type SetOutputFn = unsafe extern "C" fn(*mut c_void, i32) -> i32;
 
 struct Api {
     _library: libloading::Library,
@@ -62,6 +173,7 @@ struct Api {
     next: NextFn,
     seek: SeekFn,
     close: CloseFn,
+    set_output: SetOutputFn,
 }
 
 /// The library file name on this platform.
@@ -146,12 +258,15 @@ impl Api {
                 let next: NextFn = *library.get(b"qv_next\0").map_err(incompatible)?;
                 let seek: SeekFn = *library.get(b"qv_seek\0").map_err(incompatible)?;
                 let close: CloseFn = *library.get(b"qv_close\0").map_err(incompatible)?;
+                let set_output: SetOutputFn =
+                    *library.get(b"qv_set_output\0").map_err(incompatible)?;
                 return Ok(Self {
                     open,
                     info,
                     next,
                     seek,
                     close,
+                    set_output,
                     _library: library,
                 });
             }
@@ -264,15 +379,7 @@ impl Demuxer for FfiDemuxer {
     }
 
     fn next(&mut self) -> Result<Option<Item>, String> {
-        let mut item = QvItem {
-            kind: 0,
-            pts: 0.0,
-            data: std::ptr::null(),
-            stride: 0,
-            width: 0,
-            height: 0,
-            samples: 0,
-        };
+        let mut item = QvItem::empty();
         // SAFETY: live context, valid out pointer.
         let r = unsafe { (self.api.next)(self.ctx, &mut item) };
         if r == 0 {
@@ -283,29 +390,9 @@ impl Demuxer for FfiDemuxer {
         }
         let pts = if item.pts.is_finite() { item.pts } else { 0.0 };
         match item.kind {
-            ITEM_VIDEO => {
-                let (w, h, stride) = (item.width, item.height, item.stride);
-                if w <= 0 || h <= 0 || stride < w * 4 || item.data.is_null() {
-                    return Err("decoder returned a malformed picture".into());
-                }
-                let len = stride as usize * h as usize;
-                // SAFETY: the shim hands out `stride * height` bytes that
-                // stay valid until the next call on this context.
-                let rows = unsafe { std::slice::from_raw_parts(item.data, len) };
-                let (bgra, width, height) = rotate_bgra(
-                    rows,
-                    w as u32,
-                    h as u32,
-                    stride as usize,
-                    self.info.rotation,
-                );
-                Ok(Some(Item::Video(VideoFrame {
-                    pts,
-                    width,
-                    height,
-                    bgra,
-                })))
-            }
+            ITEM_VIDEO => self
+                .picture(&item, pts)
+                .map(|frame| Some(Item::Video(frame))),
             ITEM_AUDIO => {
                 let channels = usize::from(self.info.channels.max(1));
                 if item.samples <= 0 || item.data.is_null() {
@@ -339,6 +426,95 @@ impl Demuxer for FfiDemuxer {
         } else {
             Ok(())
         }
+    }
+
+    fn set_output(&mut self, output: PixelOutput) {
+        // SAFETY: live context; the shim checks the layout code. A refused
+        // code leaves the layout as it was (BGRA at worst).
+        let _ = unsafe { (self.api.set_output)(self.ctx, pixel_code(output)) };
+    }
+}
+
+impl FfiDemuxer {
+    /// The video item as an upright, tightly packed picture. Every length
+    /// is checked ([`picture_layout`]) before a plane is read.
+    fn picture(&self, item: &QvItem, pts: f64) -> Result<VideoFrame, String> {
+        let started = std::time::Instant::now();
+        let layout = picture_layout(
+            item.format,
+            (item.width, item.height),
+            (item.stride, item.chroma_stride),
+            (item.data.is_null(), item.chroma.is_null()),
+        )?;
+        let rotation = self.info.rotation;
+        let (pixels, width, height) = match layout {
+            PictureLayout::Bgra {
+                width,
+                height,
+                stride,
+                len,
+            } => {
+                // SAFETY: the shim hands out `height` rows `stride` bytes
+                // apart (`len` spans them) that stay valid until the next
+                // call on this context.
+                let rows = unsafe { std::slice::from_raw_parts(item.data, len) };
+                let (bgra, w, h) = rotate_bgra(rows, width, height, stride, rotation);
+                (Pixels::Bgra(bgra), w, h)
+            }
+            PictureLayout::Nv12 {
+                width,
+                height,
+                stride,
+                len,
+                chroma_stride,
+                chroma_len,
+            } => {
+                // SAFETY: as above for the luma plane (`len`) and the
+                // chroma plane (`chroma_len`: `height / 2` rows
+                // `chroma_stride` apart), both owned by the shim until the
+                // next call.
+                let (luma, chroma) = unsafe {
+                    (
+                        std::slice::from_raw_parts(item.data, len),
+                        std::slice::from_raw_parts(item.chroma, chroma_len),
+                    )
+                };
+                let (bytes, w, h) = pack_nv12(
+                    luma,
+                    stride,
+                    chroma,
+                    chroma_stride,
+                    (width, height),
+                    rotation,
+                )
+                .ok_or("decoder returned a malformed picture")?;
+                let color = YuvColor {
+                    matrix: YuvMatrix::from_shim(item.matrix, height),
+                    full_range: item.full_range != 0,
+                };
+                // Shared with the renderer without another copy.
+                (
+                    Pixels::Nv12 {
+                        bytes: bytes.into(),
+                        color,
+                    },
+                    w,
+                    h,
+                )
+            }
+        };
+        if pixels.is_empty() {
+            return Err("decoder returned a malformed picture".into());
+        }
+        let packed = u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX);
+        let shim = u32::try_from(item.convert_us).unwrap_or(0);
+        Ok(VideoFrame {
+            pts,
+            width,
+            height,
+            pixels,
+            convert_us: shim.saturating_add(packed),
+        })
     }
 }
 

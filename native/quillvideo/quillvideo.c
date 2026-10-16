@@ -1,9 +1,11 @@
 /*
  * quillvideo: see quillvideo.h. Demuxes one local file with libavformat,
  * decodes its best video and audio streams with libavcodec, converts
- * pictures to BGRA (libswscale, scaled into the caller's box) and sound to
- * interleaved f32 (libswresample). Quill runs one context per player on a
- * background thread and does all queueing, timing and A/V sync itself.
+ * pictures to BGRA (libswscale, scaled into the caller's box) or, when asked
+ * and the picture allows, hands them over as NV12 without a colour
+ * conversion, and sound to interleaved f32 (libswresample). Quill runs one
+ * context per player on a background thread and does all queueing, timing
+ * and A/V sync itself.
  */
 #include "quillvideo.h"
 
@@ -13,6 +15,7 @@
 #include <libavutil/display.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/time.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 
@@ -48,6 +51,14 @@ typedef struct Ctx {
   int sws_w, sws_h, sws_fmt, sws_ow, sws_oh, sws_cs, sws_range;
   uint8_t *rgb;
   size_t rgb_size;
+  /* The layout asked for (qv_set_output). */
+  int out_fmt;
+  /* NV12 pictures: a scaler for those that need resizing (no colour
+   * conversion), and the tightly packed output (luma, then chroma). */
+  struct SwsContext *nsws;
+  int nsws_w, nsws_h, nsws_fmt, nsws_ow, nsws_oh, nsws_cs, nsws_range;
+  uint8_t *nv12;
+  size_t nv12_size;
   /* Sound conversion. */
   SwrContext *swr;
   int swr_rate, swr_fmt, swr_channels;
@@ -161,7 +172,9 @@ void *qv_open(const char *path, const QvOptions *options, char *err,
   c->max_w = options->max_width;
   c->max_h = options->max_height;
   c->sws_fmt = -1;
+  c->nsws_fmt = -1;
   c->swr_fmt = -1;
+  c->out_fmt = QV_PIXEL_BGRA;
 
   /* Local files only: no network or other protocols, ever. */
   AVDictionary *opts = NULL;
@@ -261,6 +274,14 @@ void qv_info(void *ctx, QvInfo *out) {
     *out = ((Ctx *)ctx)->info;
 }
 
+int32_t qv_set_output(void *ctx, int32_t format) {
+  Ctx *c = ctx;
+  if (!c || (format != QV_PIXEL_BGRA && format != QV_PIXEL_NV12))
+    return AVERROR(EINVAL);
+  c->out_fmt = format;
+  return 0;
+}
+
 static double frame_duration(const Ctx *c, const AVStream *st,
                              const AVFrame *f) {
   if (f->duration > 0)
@@ -301,6 +322,118 @@ static int full_range(const AVFrame *f) {
          f->format == AV_PIX_FMT_YUVJ422P || f->format == AV_PIX_FMT_YUVJ444P;
 }
 
+static int32_t elapsed_us(int64_t since) {
+  int64_t us = av_gettime_relative() - since;
+  if (us < 0)
+    return 0;
+  return us > INT32_MAX ? INT32_MAX : (int32_t)us;
+}
+
+/* Whether the picture can be handed over as NV12 at `ow` x `oh`: 8-bit
+ * 4:2:0 without alpha, a BT.601 or BT.709 matrix, even sides. */
+static int nv12_eligible(const AVFrame *f, int cs, int ow, int oh) {
+  if (f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P &&
+      f->format != AV_PIX_FMT_NV12)
+    return 0;
+  if (cs != SWS_CS_ITU601 && cs != SWS_CS_ITU709)
+    return 0;
+  return ow > 0 && oh > 0 && ow % 2 == 0 && oh % 2 == 0 && f->width % 2 == 0 &&
+         f->height % 2 == 0;
+}
+
+/* Copy the decoded planes into the packed NV12 buffer as they are
+ * (interleaving Cb and Cr for yuv420p). 0 when the planes are laid out in
+ * a way this doesn't copy (the caller scales instead). */
+static int copy_nv12(const AVFrame *f, uint8_t *dst, int w, int h) {
+  if (!f->data[0] || f->linesize[0] < w)
+    return 0;
+  int cw = w / 2, ch = h / 2;
+  uint8_t *uv = dst + (size_t)w * (size_t)h;
+  if (f->format == AV_PIX_FMT_NV12) {
+    if (!f->data[1] || f->linesize[1] < w)
+      return 0;
+  } else if (!f->data[1] || !f->data[2] || f->linesize[1] < cw ||
+             f->linesize[2] < cw) {
+    return 0;
+  }
+  for (int y = 0; y < h; y++)
+    memcpy(dst + (size_t)y * (size_t)w,
+           f->data[0] + (size_t)y * (size_t)f->linesize[0], (size_t)w);
+  for (int y = 0; y < ch; y++) {
+    uint8_t *row = uv + (size_t)y * (size_t)w;
+    if (f->format == AV_PIX_FMT_NV12) {
+      memcpy(row, f->data[1] + (size_t)y * (size_t)f->linesize[1], (size_t)w);
+      continue;
+    }
+    const uint8_t *cb = f->data[1] + (size_t)y * (size_t)f->linesize[1];
+    const uint8_t *cr = f->data[2] + (size_t)y * (size_t)f->linesize[2];
+    for (int x = 0; x < cw; x++) {
+      row[2 * x] = cb[x];
+      row[2 * x + 1] = cr[x];
+    }
+  }
+  return 1;
+}
+
+/* Hand the picture over as NV12 (scaled into `ow` x `oh` when it must be,
+ * with no colour conversion either way): 1 done, 0 not possible (the caller
+ * converts to BGRA), < 0 error. */
+static int emit_nv12(Ctx *c, const AVFrame *f, int ow, int oh, int cs,
+                     int range, QvItem *out) {
+  int64_t started = av_gettime_relative();
+  size_t need = (size_t)ow * (size_t)oh * 3 / 2;
+  if (need > c->nv12_size) {
+    av_free(c->nv12);
+    c->nv12 = av_malloc(need);
+    c->nv12_size = c->nv12 ? need : 0;
+    if (!c->nv12)
+      return AVERROR(ENOMEM);
+  }
+  int copied = ow == f->width && oh == f->height && copy_nv12(f, c->nv12, ow, oh);
+  if (!copied) {
+    if (!c->nsws || c->nsws_w != f->width || c->nsws_h != f->height ||
+        c->nsws_fmt != f->format || c->nsws_ow != ow || c->nsws_oh != oh ||
+        c->nsws_cs != cs || c->nsws_range != range) {
+      sws_freeContext(c->nsws);
+      c->nsws = sws_getContext(f->width, f->height,
+                               (enum AVPixelFormat)f->format, ow, oh,
+                               AV_PIX_FMT_NV12, SWS_BILINEAR | SWS_ACCURATE_RND,
+                               NULL, NULL, NULL);
+      c->nsws_fmt = -1;
+      if (!c->nsws)
+        return 0;
+      /* Same matrix and range in and out: a resize, not a conversion. */
+      sws_setColorspaceDetails(c->nsws, sws_getCoefficients(cs), range,
+                               sws_getCoefficients(cs), range, 0, 1 << 16,
+                               1 << 16);
+      c->nsws_w = f->width;
+      c->nsws_h = f->height;
+      c->nsws_fmt = f->format;
+      c->nsws_ow = ow;
+      c->nsws_oh = oh;
+      c->nsws_cs = cs;
+      c->nsws_range = range;
+    }
+    uint8_t *dst[4] = {c->nv12, c->nv12 + (size_t)ow * (size_t)oh, NULL, NULL};
+    int dst_stride[4] = {ow, ow, 0, 0};
+    int rows = sws_scale(c->nsws, (const uint8_t *const *)f->data, f->linesize,
+                         0, f->height, dst, dst_stride);
+    if (rows <= 0)
+      return 0;
+  }
+  out->data = c->nv12;
+  out->stride = ow;
+  out->width = ow;
+  out->height = oh;
+  out->format = QV_PIXEL_NV12;
+  out->chroma = c->nv12 + (size_t)ow * (size_t)oh;
+  out->chroma_stride = ow;
+  out->matrix = cs == SWS_CS_ITU709 ? QV_MATRIX_BT709 : QV_MATRIX_BT601;
+  out->full_range = range ? 1 : 0;
+  out->convert_us = elapsed_us(started);
+  return 1;
+}
+
 /* Convert the decoded picture; 0 when it is skipped (seeking past it). */
 static int emit_video(Ctx *c, QvItem *out) {
   AVFrame *f = c->frame;
@@ -319,6 +452,15 @@ static int emit_video(Ctx *c, QvItem *out) {
   output_size(c, f->width, f->height, f->sample_aspect_ratio, &ow, &oh);
   int cs = colorspace_of(f);
   int range = full_range(f);
+  out->kind = QV_ITEM_VIDEO;
+  out->pts = pts;
+  out->samples = 0;
+  if (c->out_fmt == QV_PIXEL_NV12 && nv12_eligible(f, cs, ow, oh)) {
+    int r = emit_nv12(c, f, ow, oh, cs, range, out);
+    if (r != 0)
+      return r;
+  }
+  int64_t started = av_gettime_relative();
   if (!c->sws || c->sws_w != f->width || c->sws_h != f->height ||
       c->sws_fmt != f->format || c->sws_ow != ow || c->sws_oh != oh ||
       c->sws_cs != cs || c->sws_range != range) {
@@ -354,13 +496,16 @@ static int emit_video(Ctx *c, QvItem *out) {
                        f->height, dst, dst_stride);
   if (rows <= 0)
     return AVERROR(EINVAL);
-  out->kind = QV_ITEM_VIDEO;
-  out->pts = pts;
   out->data = c->rgb;
   out->stride = ow * 4;
   out->width = ow;
   out->height = oh;
-  out->samples = 0;
+  out->format = QV_PIXEL_BGRA;
+  out->chroma = NULL;
+  out->chroma_stride = 0;
+  out->matrix = 0;
+  out->full_range = 0;
+  out->convert_us = elapsed_us(started);
   return 1;
 }
 
@@ -440,6 +585,12 @@ static int emit_audio(Ctx *c, QvItem *out) {
   out->width = 0;
   out->height = 0;
   out->samples = n;
+  out->format = QV_PIXEL_BGRA;
+  out->chroma = NULL;
+  out->chroma_stride = 0;
+  out->matrix = 0;
+  out->full_range = 0;
+  out->convert_us = 0;
   return 1;
 }
 
@@ -550,6 +701,8 @@ void qv_close(void *ctx) {
   sws_freeContext(c->sws);
   swr_free(&c->swr);
   av_free(c->rgb);
+  sws_freeContext(c->nsws);
+  av_free(c->nv12);
   av_free(c->pcm);
   free(c);
 }

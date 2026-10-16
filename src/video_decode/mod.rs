@@ -11,14 +11,19 @@
 //!   [`AUDIO_HIGH_SECS`] of sound ahead and sleeps otherwise, so memory is
 //!   bounded and a paused clip costs nothing.
 //! - Pictures come out as BGRA (GPUI's image format), already scaled into
-//!   the caller's box and rotated upright.
+//!   the caller's box and rotated upright; with [`PixelOutput::Nv12`] the
+//!   ones the stream allows come out as NV12 instead ([`nv12`]), for a
+//!   renderer that converts on the GPU (Windows).
 //! - Time: with sound, the sound card is the master clock (the samples it
 //!   took, [`AudioTap`]); without, a wall clock that starts when the first
 //!   picture is shown ([`Clock`]). The picture shown is the newest one due.
 #![deny(clippy::indexing_slicing)]
 
 mod ffi;
+mod nv12;
 mod present;
+
+pub use nv12::{PixelOutput, Pixels, YuvColor, YuvMatrix, nv12_len, nv12_to_bgra, pack_nv12};
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -125,6 +130,8 @@ pub struct OpenOptions {
     pub want_audio: bool,
     /// Pictures decoded ahead (at least 1).
     pub video_frames: usize,
+    /// The picture layout to start with ([`Player::set_output`] changes it).
+    pub output: PixelOutput,
 }
 
 impl OpenOptions {
@@ -137,6 +144,7 @@ impl OpenOptions {
             threads: 1,
             want_audio: false,
             video_frames: 3,
+            output: PixelOutput::Bgra,
         }
     }
 
@@ -148,6 +156,7 @@ impl OpenOptions {
             threads: 0,
             want_audio: true,
             video_frames: 4,
+            output: PixelOutput::Bgra,
         }
     }
 
@@ -176,13 +185,43 @@ pub struct MediaInfo {
     pub audio_codec: String,
 }
 
-/// One decoded picture, upright BGRA, tightly packed.
+/// One decoded picture, upright, tightly packed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoFrame {
     pub pts: f64,
     pub width: u32,
     pub height: u32,
-    pub bgra: Vec<u8>,
+    pub pixels: Pixels,
+    /// Microseconds spent turning the decoded picture into `pixels` (the
+    /// shim's conversion or plane copy, plus packing and turning here):
+    /// the `QUILL_TRACE_VIDEO` convert column.
+    pub convert_us: u32,
+}
+
+impl VideoFrame {
+    /// A BGRA picture.
+    pub fn bgra(pts: f64, width: u32, height: u32, bgra: Vec<u8>) -> Self {
+        Self {
+            pts,
+            width,
+            height,
+            pixels: Pixels::Bgra(bgra),
+            convert_us: 0,
+        }
+    }
+
+    /// The picture as BGRA: as it is, or converted from NV12 on the CPU
+    /// (a renderer that can't draw NV12 after all). `None` when the NV12
+    /// bytes don't match the size.
+    pub fn into_bgra(self) -> Option<Self> {
+        let pixels = match self.pixels {
+            Pixels::Bgra(bytes) => Pixels::Bgra(bytes),
+            Pixels::Nv12 { bytes, color } => {
+                Pixels::Bgra(nv12_to_bgra(&bytes, self.width, self.height, color)?)
+            }
+        };
+        Some(Self { pixels, ..self })
+    }
 }
 
 /// Decoded sound: interleaved f32 at the clip's rate and channel count.
@@ -206,6 +245,9 @@ pub trait Demuxer: Send {
     fn next(&mut self) -> Result<Option<Item>, String>;
     /// Continue from `secs` (items before it are not returned).
     fn seek(&mut self, secs: f64) -> Result<(), String>;
+    /// The picture layout wanted from the next picture on. Demuxers that
+    /// only make BGRA ignore it.
+    fn set_output(&mut self, _output: PixelOutput) {}
 }
 
 /// Turn a BGRA picture (`stride` bytes per row) upright by `rotation`
@@ -218,52 +260,20 @@ pub fn rotate_bgra(
     stride: usize,
     rotation: u32,
 ) -> (Vec<u8>, u32, u32) {
-    let (w, h) = (width as usize, height as usize);
+    let mut out = Vec::new();
     // The last row may stop at its pixels, without the padding.
-    let fits = w.checked_mul(4).is_some_and(|row| {
-        row <= stride
-            && h.checked_sub(1)
-                .and_then(|rows| rows.checked_mul(stride))
-                .and_then(|before| before.checked_add(row))
-                .is_some_and(|need| need <= src.len())
-    });
-    if !fits {
+    if !nv12::turn_plane_into::<4>(
+        src,
+        (width as usize, height as usize),
+        stride,
+        rotation,
+        &mut out,
+    ) {
         return (Vec::new(), 0, 0);
     }
-    let px = |x: usize, y: usize| -> [u8; 4] {
-        let at = y * stride + x * 4;
-        src.get(at..at + 4)
-            .and_then(|p| p.try_into().ok())
-            .unwrap_or_default()
-    };
     match rotation {
-        90 | 180 | 270 => {
-            let (ow, oh) = if rotation == 180 { (w, h) } else { (h, w) };
-            let mut out = vec![0u8; ow * oh * 4];
-            for oy in 0..oh {
-                for ox in 0..ow {
-                    let (sx, sy) = match rotation {
-                        // Clockwise: the left column becomes the top row.
-                        90 => (oy, h - 1 - ox),
-                        180 => (w - 1 - ox, h - 1 - oy),
-                        _ => (w - 1 - oy, ox),
-                    };
-                    let at = (oy * ow + ox) * 4;
-                    if let Some(dst) = out.get_mut(at..at + 4) {
-                        dst.copy_from_slice(&px(sx, sy));
-                    }
-                }
-            }
-            (out, ow as u32, oh as u32)
-        }
-        _ => {
-            let row = w * 4;
-            let mut out = Vec::with_capacity(row * h);
-            for y in 0..h {
-                out.extend_from_slice(src.get(y * stride..y * stride + row).unwrap_or_default());
-            }
-            (out, width, height)
-        }
+        90 | 270 => (out, height, width),
+        _ => (out, width, height),
     }
 }
 
@@ -565,6 +575,8 @@ struct State {
     tap: Option<AudioTap>,
     video: VecDeque<VideoFrame>,
     video_cap: usize,
+    /// The picture layout asked for; the decode thread passes it on.
+    output: PixelOutput,
     seek: Option<f64>,
     /// Bumped by every seek: items decoded for an older one are dropped.
     epoch: u64,
@@ -611,6 +623,7 @@ impl Player {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 video_cap: options.video_frames.max(1),
+                output: options.output,
                 ..State::default()
             }),
             wake: Condvar::new(),
@@ -666,6 +679,23 @@ impl Player {
     /// Whether the soundtrack is playing out (it is the clock).
     pub fn has_sound(&self) -> bool {
         self.audio().is_some()
+    }
+
+    /// The picture layout to decode into from the next picture on.
+    /// Pictures already queued keep theirs.
+    pub fn set_output(&self, output: PixelOutput) {
+        let changed = {
+            let mut state = lock(&self.shared.state);
+            std::mem::replace(&mut state.output, output) != output
+        };
+        if changed {
+            self.shared.wake.notify_all();
+        }
+    }
+
+    /// The picture layout asked for.
+    pub fn output(&self) -> PixelOutput {
+        lock(&self.shared.state).output
     }
 
     pub fn play(&mut self) {
@@ -825,6 +855,8 @@ fn decode_loop(mut demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: b
         }
         state.info = Some(info);
     }
+    // The layout last passed to the demuxer (none yet).
+    let mut applied: Option<PixelOutput> = None;
     loop {
         let mut state = lock(&shared.state);
         if state.stop {
@@ -858,7 +890,12 @@ fn decode_loop(mut demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: b
             continue;
         }
         let epoch = state.epoch;
+        let output = state.output;
         drop(state);
+        if applied != Some(output) {
+            demuxer.set_output(output);
+            applied = Some(output);
+        }
         let item = demuxer.next();
         let mut state = lock(&shared.state);
         if state.epoch != epoch || state.seek.is_some() || state.stop {
