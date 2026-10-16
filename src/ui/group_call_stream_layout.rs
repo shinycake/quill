@@ -9,13 +9,16 @@
 //!   cropping on `groupCallMembersBg` (black full screen), corners rounded
 //!   6 px except full screen. No members list, no camera, screen or
 //!   microphone buttons.
-//! - Title row: the call's title (or the chat's name), a bullet and
-//!   "{count} viewers" (`lng_group_call_rtmp_viewers`, at least 1), placed
-//!   by [`title_layout`]. Full screen it slides with the controls on a
-//!   rounded backdrop.
-//! - Bottom bar (`updateButtonsGeometry`, wide RTMP branch): the "…" menu
-//!   for managers or Settings for viewers, the round button that toggles
-//!   full screen, Leave, on a rounded `groupCallBg` backdrop at 80 %.
+//! - Title row: the call's title (or the chat's name), a bullet, the red
+//!   LIVE pill and "{count} viewers" (`lng_group_call_rtmp_viewers`, at
+//!   least 1), placed by [`title_layout`]. Full screen it slides with the
+//!   controls on a rounded backdrop.
+//! - Bottom bar: the live controller (`VideoController::live`) in its bar
+//!   layout (`updateButtonsGeometry`, wide RTMP branch): the "…" menu for
+//!   managers or Settings for viewers, mute, the round button that
+//!   toggles full screen, Leave, on a rounded `groupCallBg` backdrop at
+//!   80 %. Keys: Space does nothing, M mutes, F toggles full screen, Esc
+//!   leaves it (`live_key_action`).
 //! - The picture is a live player in its own view
 //!   (`calls::stream_view`), under this layout, so a frame redraws only
 //!   the picture. Before the first picture it shows the chat's photo
@@ -23,7 +26,8 @@
 //!   broadcasting: a rounded label a third of the way down
 //!   (`setupEmptyRtmp`), with the admin text when the call knows its
 //!   RTMP server URL.
-//! - When the controls show: see [`StreamControls`].
+//! - When the controls show, and when the cursor hides with them full
+//!   screen: see [`ControlsFade`].
 //! - Not joined (Quill only: tdesktop never shows the panel unjoined):
 //!   the label holds a Join button, with the reason once a join failed.
 //!   The window joins by itself only for a stream you asked to watch
@@ -31,12 +35,16 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::calls::stream_controls::StreamControls;
 use super::calls::stream_title::{SEPARATOR_GAP, title_layout, title_rect};
 use super::calls::stream_view::blurred_photo;
-use super::group_call_panel::{LEAVE_BG, MEMBER_NOT_JOINED};
+use super::group_call_panel::LEAVE_BG;
 use super::group_call_stream_boxes::StreamOverlay;
 use super::video_player::VideoPlayer;
+use super::video_player::controls::{
+    BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, ControlsFade, LiveActions, LiveFacts, LiveKeyAction,
+    VideoController, hide_cursor, live_key_action, live_label, live_pill, live_pill_text_size,
+    live_pill_width, stream_label_box,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::{Icon, Sizable};
@@ -48,25 +56,15 @@ use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::MessageSender;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// `groupCallMuted1` / `groupCallMuted2`: the round button's gradient.
-const BUTTON_FROM: u32 = 0x0992ef;
-const BUTTON_TO: u32 = 0x16ccfb;
-/// `groupCallBg` at `kControlsBackgroundOpacity` (0.8).
-const CONTROLS_BG: u32 = 0x1a2026cc;
 /// `groupCallNarrowSkip`, `groupCallWideVideoTop`.
 const SKIP: f32 = 9.;
 const VIDEO_TOP: f32 = 24.;
-/// `groupCallButtonBottomSkipWide`; the buttons are 68 px tall.
+/// `groupCallButtonBottomSkipWide`.
 const BAR_BOTTOM: f32 = 108.;
-const BAR_HEIGHT: f32 = 68.;
-/// `st::groupCallWidth / 30` and `st::groupCallWidth`: the label's
-/// padding and widest text; the text keeps 24 px from each side.
-const LABEL_PADDING: f32 = 12.;
-const LABEL_WIDTH: f32 = 380.;
-const LABEL_SIDES: f32 = 48.;
 /// `groupCallTitleLabel` (semibold 14 px) and the backdrop's radius.
 const TITLE_SIZE: f32 = 14.;
 const TITLE_RADIUS: f32 = 6.;
@@ -110,7 +108,7 @@ pub(crate) struct StreamWindow {
     /// The blurred chat photo for a photo path (`None` while it blurs).
     pub(super) photo: Option<(String, Option<Arc<RenderImage>>)>,
     photo_task: Option<Task<()>>,
-    pub(super) controls: StreamControls,
+    pub(super) controls: ControlsFade,
     hide_task: Option<Task<()>>,
     hide_armed: bool,
     /// The open window was sized for this layout.
@@ -130,6 +128,8 @@ pub(crate) struct StreamWindow {
     title_pressed: Option<Point<Pixels>>,
     /// Screenshot fixtures and tests: the stream's feed without a driver.
     pub(super) demo_feed: Option<super::calls::demo_feed::DemoFeed>,
+    /// Screenshot fixtures and tests: "mute" without a call engine.
+    pub(super) demo_muted: bool,
 }
 
 impl StreamWindow {
@@ -359,7 +359,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> StreamBody {
-        let now = Instant::now();
+        let now = cx.background_executor().now();
         self.group_call.stream.controls.set_full(full, now);
         self.group_call.stream.controls.tick(now);
         self.arm_stream_hide_timer(cx);
@@ -407,12 +407,15 @@ impl QuillApp {
                 this.group_call
                     .stream
                     .controls
-                    .hover_picture(*inside, Instant::now());
+                    .hover_picture(*inside, cx.background_executor().now());
                 cx.notify();
             }))
             .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
                 if this.group_call.stream.controls.is_full() {
-                    this.group_call.stream.controls.mouse_moved(Instant::now());
+                    this.group_call
+                        .stream
+                        .controls
+                        .mouse_moved(cx.background_executor().now());
                     this.arm_stream_hide_timer(cx);
                     cx.notify();
                 }
@@ -420,7 +423,7 @@ impl QuillApp {
 
         let width = f32::from(window.viewport_size().width);
         let label = if facts.joined {
-            stream_label(facts, chat_name).map(|text| label_view(text, width, None))
+            stream_label(facts, chat_name).map(|text| stream_label_box(text, width, None))
         } else {
             Some(self.stream_join_label(facts, width, cx))
         };
@@ -430,7 +433,7 @@ impl QuillApp {
             viewers,
             &[("count", &quill::premium_hub::group_digits(viewers))],
         );
-        let title = title_row(&facts.title, &viewers, full, shown, window);
+        let title = title_row(&facts.title, &viewers, full, shown, window, cx);
         let bar = self
             .group_call_stream_bar(facts, full, shown, cx)
             .into_any_element();
@@ -521,7 +524,8 @@ impl QuillApp {
         .into_any_element()
     }
 
-    /// The bottom bar. It stays in the tree while hidden (slid below the
+    /// The bottom bar: the live controller with the menu before it and
+    /// Leave after it. It stays in the tree while hidden (slid below the
     /// window), so leaving it is always seen and no hover goes stale.
     fn group_call_stream_bar(
         &self,
@@ -538,38 +542,6 @@ impl QuillApp {
                 .items_center()
                 .justify_center()
         };
-        // A gradient disc: the kit's custom button takes one solid color.
-        let expand = slot(68.).child(
-            div()
-                .id("group-call-stream-fullscreen")
-                .size(px(42.))
-                .rounded_full()
-                .bg(linear_gradient(
-                    135.,
-                    linear_color_stop(rgb(BUTTON_FROM), 0.),
-                    linear_color_stop(rgb(BUTTON_TO), 1.),
-                ))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .role(Role::Button)
-                .aria_label(SharedString::from(tr(keys::Q_MISC_TOGGLE_FULL_SCREEN)))
-                .hover(|style| style.opacity(0.85))
-                .on_click(cx.listener(|_, _, window, cx| {
-                    toggle_stream_full(window);
-                    cx.notify();
-                }))
-                .child(
-                    Icon::new(if full {
-                        IconName::Minimize
-                    } else {
-                        IconName::Maximize
-                    })
-                    .with_size(px(20.))
-                    .text_color(white()),
-                ),
-        );
         let leave_facts = facts.clone();
         let leave = slot(60.).child(
             Button::new("group-call-stream-leave")
@@ -588,6 +560,38 @@ impl QuillApp {
                     this.stream_leave_clicked(&leave_facts, window, cx)
                 })),
         );
+        let view = cx.entity().downgrade();
+        let mute_view = view.clone();
+        let full_view = view.clone();
+        let actions = LiveActions {
+            toggle_mute: Rc::new(move |_, cx| {
+                let _ = mute_view.update(cx, |this, cx| this.toggle_stream_mute(cx));
+            }),
+            fullscreen: Some(Rc::new(move |window, cx| {
+                toggle_stream_full(window);
+                let _ = full_view.update(cx, |_, cx| cx.notify());
+            })),
+            // No live PiP until the next PR; the window's own pin on top
+            // stays where it is.
+            pip: None,
+            hover: Some(Rc::new(move |inside, _, cx| {
+                let _ = view.update(cx, |this, cx| {
+                    this.group_call
+                        .stream
+                        .controls
+                        .hover_controls(inside, cx.background_executor().now());
+                    this.arm_stream_hide_timer(cx);
+                    cx.notify();
+                });
+            })),
+        };
+        let live = LiveFacts {
+            viewers: facts.viewers.max(1),
+            muted: self.stream_muted(),
+            // ntgcalls has no gain for a stream's sound: mute only.
+            volume: None,
+            fullscreen: full,
+        };
         div()
             .absolute()
             .left_0()
@@ -596,28 +600,64 @@ impl QuillApp {
             .flex()
             .justify_center()
             .child(
-                div()
-                    .id("group-call-stream-bar")
-                    .debug_selector(|| "group-call-stream-bar".into())
-                    .h(px(BAR_HEIGHT))
-                    .px(px(10.))
-                    .rounded(px(12.))
-                    .bg(rgba(CONTROLS_BG))
-                    .flex()
-                    .items_center()
-                    .gap(px(5.))
-                    .on_hover(cx.listener(|this, inside: &bool, _, cx| {
-                        this.group_call
-                            .stream
-                            .controls
-                            .hover_controls(*inside, Instant::now());
-                        this.arm_stream_hide_timer(cx);
-                        cx.notify();
-                    }))
-                    .child(slot(60.).child(self.group_call_stream_menu(facts, cx)))
-                    .child(expand)
-                    .child(leave),
+                VideoController::live(u64::from(facts.id.unsigned_abs()), live, actions)
+                    .leading(slot(60.).child(self.group_call_stream_menu(facts, cx)))
+                    .trailing(leave),
             )
+    }
+
+    /// Whether you muted the stream's sound for yourself (tdesktop's
+    /// local mute, the Settings box's "Mute for me").
+    pub(super) fn stream_muted(&self) -> bool {
+        match self.live.as_ref() {
+            Some(live) => live.driver.group_call_playback_muted(),
+            None => self.group_call.stream.demo_muted,
+        }
+    }
+
+    /// The bar's mute button and the M key: the stream's sound off or on
+    /// for you only, through the call's playback (no gain exists).
+    pub(super) fn toggle_stream_mute(&mut self, cx: &mut Context<Self>) {
+        let muted = self.stream_muted();
+        match self.live.as_mut() {
+            Some(live) => {
+                if let Err(err) = live.driver.set_group_call_playback_muted(!muted) {
+                    self.connection.status_note = err.to_string();
+                }
+            }
+            None => self.group_call.stream.demo_muted = !muted,
+        }
+        cx.notify();
+    }
+
+    /// A key in the stream window (`live_key_action`): `true` when the
+    /// live controller took it. Not while a box or field is open over the
+    /// stream, where the keys are typing.
+    pub(super) fn stream_key_down(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let stream = &self.group_call.stream;
+        if stream.overlay.is_some()
+            || self.group_call.share_open
+            || self.group_call.title_dialog.is_some()
+        {
+            return false;
+        }
+        let full = window.is_fullscreen() || window.is_maximized();
+        let Some(action) = live_key_action(&keystroke.key, &keystroke.modifiers, full) else {
+            return false;
+        };
+        match action {
+            LiveKeyAction::Nothing => {}
+            LiveKeyAction::ToggleMute => self.toggle_stream_mute(cx),
+            LiveKeyAction::ToggleFullscreen => toggle_stream_full(window),
+            LiveKeyAction::LeaveFullscreen => leave_stream_full(window),
+        }
+        cx.notify();
+        true
     }
 
     /// Not joined: the label with a Join button, and the reason when a
@@ -638,7 +678,7 @@ impl QuillApp {
             .primary()
             .loading(joining)
             .on_click(cx.listener(move |this, _, _, cx| this.join_stream(id, cx)));
-        label_view(
+        stream_label_box(
             error.unwrap_or_default(),
             width,
             Some(button.into_any_element()),
@@ -697,13 +737,17 @@ impl QuillApp {
                 let Ok(Some(at)) = next else {
                     break;
                 };
-                let wait = at.saturating_duration_since(Instant::now());
+                let wait = at.saturating_duration_since(cx.background_executor().now());
                 cx.background_executor().timer(wait).await;
                 let more = this.update(cx, |app, cx| {
                     let controls = &mut app.group_call.stream.controls;
                     let was = controls.shown();
-                    controls.tick(Instant::now());
+                    controls.tick(cx.background_executor().now());
                     if was != controls.shown() {
+                        // tdesktop `setCursorShown(!_rtmpFull || shown)`.
+                        if controls.cursor_hidden() {
+                            hide_cursor();
+                        }
                         cx.notify();
                     }
                     controls.hide_at().is_some()
@@ -731,44 +775,13 @@ fn stream_label(facts: &StreamFacts, chat_name: &str) -> Option<String> {
     }
 }
 
-/// tdesktop's empty-stream label (`setupEmptyRtmp`): semibold
-/// `groupCallMemberNotJoinedStatus` text centered in a rounded box
-/// `min(width - 48, 380) + 24` wide, a third of the way down. `action`
-/// goes under the text.
-fn label_view(text: String, window_width: f32, action: Option<AnyElement>) -> AnyElement {
-    let inner = (window_width - LABEL_SIDES).clamp(0., LABEL_WIDTH);
-    div()
-        .absolute()
-        .inset_0()
-        .flex()
-        .flex_col()
-        .items_center()
-        .child(div().flex_grow(1.))
-        .child(
-            div()
-                .id("group-call-stream-label")
-                .debug_selector(|| "group-call-stream-label".into())
-                .w(px(inner + 2. * LABEL_PADDING))
-                .p(px(LABEL_PADDING))
-                .rounded(px(12.))
-                .bg(rgba(CONTROLS_BG))
-                .text_size(px(13.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(MEMBER_NOT_JOINED))
-                .text_center()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(10.))
-                .when(!text.is_empty(), |this| this.child(text))
-                .children(action),
-        )
-        .child(div().flex_grow(2.))
-        .into_any_element()
-}
-
 /// The natural width of `text` in the title's font.
 fn title_text_width(text: &str, window: &mut Window) -> f32 {
+    text_width(text, px(TITLE_SIZE), window)
+}
+
+/// The natural width of `text`, semibold at `size`.
+fn text_width(text: &str, size: Pixels, window: &mut Window) -> f32 {
     let mut font = window.text_style().font();
     font.weight = FontWeight::SEMIBOLD;
     let run = TextRun {
@@ -779,16 +792,15 @@ fn title_text_width(text: &str, window: &mut Window) -> f32 {
         underline: None,
         strikethrough: None,
     };
-    let line = window.text_system().shape_line(
-        SharedString::from(text.to_string()),
-        px(TITLE_SIZE),
-        &[run],
-        None,
-    );
+    let line =
+        window
+            .text_system()
+            .shape_line(SharedString::from(text.to_string()), size, &[run], None);
     f32::from(line.width).ceil()
 }
 
-/// The title, a bullet and the viewer count (`refreshTitleGeometry`).
+/// The title, a bullet, the LIVE pill and the viewer count
+/// (`refreshTitleGeometry`; the pill is the live controller's badge).
 /// Full screen it slides up with the controls on a backdrop rounded at
 /// the bottom (`refreshTitleBackground`).
 fn title_row(
@@ -797,11 +809,15 @@ fn title_row(
     full: bool,
     shown: f32,
     window: &mut Window,
-) -> impl IntoElement {
+    cx: &App,
+) -> AnyElement {
     let width = f32::from(window.viewport_size().width);
     let title_width = title_text_width(title, window);
     let bullet_width = title_text_width("\u{2022}", window);
-    let viewers_width = title_text_width(viewers, window);
+    // The pill and its gap travel with the count and never shrink.
+    let pill =
+        live_pill_width(text_width(&live_label(), live_pill_text_size(), window)) + BADGE_GAP;
+    let viewers_width = title_text_width(viewers, window) + pill;
     // Full screen the pin button is gone and its room goes to the line.
     let pin = if full { 0. } else { PIN_WIDTH };
     let rect = title_rect(width, pin, cfg!(target_os = "macos") && !full);
@@ -836,9 +852,19 @@ fn title_row(
         .child(
             div()
                 .w(px(layout.viewers))
-                .truncate()
-                .child(viewers.to_string()),
+                .flex()
+                .items_center()
+                .gap(px(BADGE_GAP))
+                .child(live_pill(cx))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .child(viewers.to_string()),
+                ),
         )
+        .into_any_element()
 }
 
 #[cfg(feature = "demo-capture")]

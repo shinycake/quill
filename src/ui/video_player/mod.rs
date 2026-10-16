@@ -36,8 +36,6 @@ mod live_view_tests;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
 pub(crate) use backend_live::STALL_AFTER;
 pub(crate) use element::{WidthReport, video_frame};
 #[cfg(test)]

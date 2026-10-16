@@ -2,8 +2,11 @@
 //! call window in the stream layout (title with viewers, the picture, the
 //! bar), the empty-stream label sits a third of the way down, the admin
 //! text shows once the server URL is known, the controls follow the mouse
-//! in a normal window, and an ended stream closes the window. Nothing
-//! reaches Telegram: the app has no connection and joins nothing.
+//! in a normal window, and an ended stream closes the window; the live
+//! controller (no scrubber, the LIVE pill, the keys), the stall, paused
+//! and no-stream states, and full screen hiding the controls and the
+//! cursor. Nothing reaches Telegram: the app has no connection and joins
+//! nothing.
 use super::StreamJoinIntent;
 use super::demo::{CALL, CHANNEL, seed_rtmp_stream};
 use crate::ui::app::QuillApp;
@@ -12,7 +15,8 @@ use crate::ui::frame_clock::take_slice_renders;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
-use crate::ui::video_player::{bgra_only, take_made_images};
+use crate::ui::video_player::controls::cursor_hides;
+use crate::ui::video_player::{PlayState, STALL_AFTER, bgra_only, take_made_images};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -21,11 +25,11 @@ use gpui_kit::{
 };
 use quill::calls::engine::StreamState;
 use quill::calls::live_video::convert::i420_size;
-use quill::calls::live_video::{LiveFrame, LiveRotation, LiveSource};
+use quill::calls::live_video::{LiveFrame, LiveRotation, LiveSource, LiveState};
 use quill::diagnostics::DiagnosticSink;
 use quill::state::ActiveGroupCall;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -474,4 +478,195 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     frames(&mut call);
     assert!(app.read_with(&call, |app, _| app.group_call.stream.joining.is_none()));
     assert!(error(&app, &mut call).is_some());
+}
+
+/// The row id the stream window's live controller and overlays use.
+fn row() -> u64 {
+    u64::from(CALL.unsigned_abs())
+}
+
+fn present(vcx: &mut VisualTestContext, id: (&'static str, u64)) -> bool {
+    vcx.update(|window, cx| {
+        window.render_frame(cx);
+        window.try_find(id).is_some()
+    })
+}
+
+/// The live controller: the LIVE pill by the viewers in the title, mute
+/// and full screen on the bar, and none of the file controller's
+/// scrubber, play button or time.
+#[gpui_kit::test]
+fn the_live_controller_has_no_scrubber_and_shows_the_badge(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    app.update(call, |app, cx| {
+        app.group_call.stream.controls.show_now();
+        cx.notify();
+    });
+    frames(call);
+    let title = find(call, "group-call-stream-title").expect("the title");
+    let pill = find(call, "live-pill").expect("the LIVE pill");
+    assert!(
+        pill.left() > title.left() && pill.right() < title.right(),
+        "the pill sits in the title, before the count"
+    );
+    assert_eq!(pill.size.height, px(11.), "groupCallMessageBadge height");
+    assert!(find(call, "group-call-stream-bar").is_some(), "the bar");
+    assert!(present(call, ("live-mute", row())), "mute");
+    assert!(
+        find(call, "group-call-stream-fullscreen").is_some(),
+        "full screen"
+    );
+    for id in [
+        "viewer-scrubber",
+        "media-viewer-play",
+        "media-viewer-speed",
+        "live-pip",
+    ] {
+        assert!(!present(call, (id, row())), "{id} is not on a live picture");
+    }
+}
+
+/// Space does nothing, M mutes, F toggles full screen and Esc leaves it.
+#[gpui_kit::test]
+fn the_live_keys_mute_and_toggle_full_screen(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    let muted = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.stream_muted())
+    };
+    let full = |vcx: &mut VisualTestContext| vcx.update(|window, _| window.is_fullscreen());
+    assert!(!muted(&app, call));
+    call.simulate_keystrokes("space");
+    frames(call);
+    assert!(!muted(&app, call) && !full(call), "Space does nothing");
+    call.simulate_keystrokes("m");
+    frames(call);
+    assert!(muted(&app, call), "M mutes");
+    call.simulate_keystrokes("m");
+    frames(call);
+    assert!(!muted(&app, call), "M again unmutes");
+    call.simulate_keystrokes("f");
+    frames(call);
+    assert!(full(call), "F goes full screen");
+    call.simulate_keystrokes("escape");
+    frames(call);
+    assert!(!full(call), "Esc leaves full screen");
+    assert!(
+        app.read_with(call, |app, _| app.group_call.window.is_some()),
+        "and does not close the window"
+    );
+}
+
+/// A feed that stops for the stall time keeps its last picture under the
+/// spinner; "Connecting…" follows 5 s after the last frame.
+#[gpui_kit::test]
+fn a_stalled_stream_keeps_its_picture_under_the_spinner(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    let source = manual_feed(&app, call);
+    let player = app
+        .read_with(call, |app, _| app.group_call.stream.player.clone())
+        .expect("the stream has a player");
+    let t0 = Instant::now();
+    player.set_live_clock(t0);
+    source.push(black_frame(1, 640, 360));
+    frames(call);
+    assert_eq!(player.state(), PlayState::Playing);
+    assert!(find(call, "live-stalled").is_none());
+    let size = player.picture_size();
+    // The stall time passes without a frame.
+    player.set_live_clock(t0 + STALL_AFTER + Duration::from_millis(200));
+    app.update(call, |_, cx| cx.notify());
+    frames(call);
+    assert_eq!(player.state(), PlayState::Buffering);
+    assert!(find(call, "live-stalled").is_some(), "the stall overlay");
+    assert!(find(call, "live-spinner").is_some(), "with the spinner");
+    assert!(
+        find(call, "live-connecting").is_none(),
+        "not yet Connecting"
+    );
+    assert!(player.has_live_frame(), "the picture stays");
+    assert_eq!(player.picture_size(), size);
+    // 5 s after the last frame: "Connecting…".
+    cx.executor().advance_clock(Duration::from_millis(3600));
+    frames(call);
+    assert!(find(call, "live-connecting").is_some(), "Connecting… shows");
+}
+
+/// The broadcaster paused: the blurred picture under the pause icon and
+/// "Video is paused".
+#[gpui_kit::test]
+fn a_paused_stream_shows_the_paused_overlay(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    let source = manual_feed(&app, call);
+    let player = app
+        .read_with(call, |app, _| app.group_call.stream.player.clone())
+        .expect("the stream has a player");
+    source.push(black_frame(1, 640, 360));
+    frames(call);
+    let sink = player.live_sink().expect("a live player");
+    sink.set_state(LiveState::Paused);
+    app.update(call, |_, cx| cx.notify());
+    frames(call);
+    assert_eq!(player.state(), PlayState::Paused);
+    assert!(find(call, "live-paused").is_some(), "the paused overlay");
+    sink.set_state(LiveState::Active);
+    app.update(call, |_, cx| cx.notify());
+    frames(call);
+    assert!(find(call, "live-paused").is_none());
+}
+
+/// Full screen the controls and the cursor hide after 5 idle seconds.
+#[gpui_kit::test]
+fn full_screen_hides_the_controls_and_the_cursor(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    let call = &mut call;
+    call.update(|window, _| window.toggle_fullscreen());
+    app.update(call, |_, cx| cx.notify());
+    frames(call);
+    let shown = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.group_call.stream.controls.shown())
+    };
+    assert!(shown(&app, call), "entering full screen shows them");
+    let hides = cursor_hides();
+    cx.executor().advance_clock(Duration::from_millis(4500));
+    frames(call);
+    assert!(shown(&app, call), "still shown before 5 s");
+    cx.executor().advance_clock(Duration::from_millis(700));
+    frames(call);
+    assert!(!shown(&app, call), "hidden after 5 s");
+    assert_eq!(cursor_hides(), hides + 1, "the cursor hides with them");
+    let height = call.update(|window, _| window.viewport_size().height);
+    cx.executor().advance_clock(Duration::from_millis(300));
+    frames(call);
+    let bar = find(call, "group-call-stream-bar").expect("the bar stays mounted");
+    assert!(bar.top() >= height, "slid out of sight");
+}
+
+/// Nobody broadcasting: tdesktop's no-stream text on the controls'
+/// backdrop, with no spinner (nothing is on its way).
+#[gpui_kit::test]
+fn nobody_broadcasting_shows_the_no_stream_text(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::NoStream);
+    let call = &mut call;
+    cx.executor().advance_clock(Duration::from_secs(1));
+    frames(call);
+    let text = app.update(call, |app, _| {
+        let facts = app.group_call_stream_facts().expect("a stream");
+        super::stream_label(&facts, "Quill News")
+    });
+    assert_eq!(
+        text.as_deref(),
+        Some(
+            quill::lang::tr_with(
+                quill::lang::keys::GROUP_CALL_NO_STREAM,
+                &[("group", "Quill News")]
+            )
+            .as_str()
+        )
+    );
+    assert!(find(call, "group-call-stream-label").is_some(), "the label");
+    assert!(find(call, "live-spinner").is_none(), "no spinner");
 }

@@ -9,14 +9,25 @@
 //! chat's initials when it has no photo. The element reports its width
 //! whenever it changes, so the driver can pick the quality bucket
 //! (tdesktop `updateRequestedVideoChannels`).
+//!
+//! Over the picture go the live controller's states
+//! (`video_player::controls`, `LiveOverlayClock`): the spinner after
+//! 500 ms while opening, the dimmed picture with the spinner and
+//! "Connecting…" while stalled, the paused shadow, the ended plate with
+//! Leave and the failed card with Retry. The view keeps the clock and
+//! redraws itself when a delay is up.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
 use crate::ui::chat_row::initials_avatar;
 use crate::ui::frame_clock::trace_slice_render;
 use crate::ui::group_call_panel::MEMBERS_BG;
+use crate::ui::video_player::controls::{
+    LiveInput, LiveOverlayClock, LiveOverlayParts, PictureOverlay, PictureState,
+};
 use crate::ui::video_player::{Purpose, VideoPlayer, WidthReport, video_frame};
 use gpui_kit::*;
+use quill::calls::engine::StreamState;
 use quill::calls::live_video::{LiveKey, LiveSink};
 use std::path::Path;
 use std::rc::Rc;
@@ -36,6 +47,11 @@ pub(crate) struct StreamPictureParts {
     /// The chat has a photo (blurring, or blurred).
     pub(crate) has_photo: bool,
     pub(crate) name: String,
+    /// Nothing is expected (not joined, nobody broadcasting, not
+    /// playable here): the placeholder shows without a spinner.
+    pub(crate) idle: bool,
+    /// The joined call's connect reported this error.
+    pub(crate) failure: Option<String>,
 }
 
 impl QuillApp {
@@ -62,6 +78,16 @@ impl QuillApp {
             .session()
             .and_then(|s| s.chat_photo_path(quill::ids::ChatId(chat_id)))
             .is_some();
+        let idle = !facts.joined
+            || matches!(
+                facts.stream,
+                StreamState::NoStream | StreamState::Unsupported
+            );
+        let failure = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .filter(|call| call.is_joined)
+            .and_then(|call| call.transport_error.clone());
         let stream = &mut self.group_call.stream;
         let same = match (stream.player.as_ref(), sink.as_ref()) {
             (Some(player), Some(sink)) => player.live_sink().is_some_and(|own| own.same_as(sink)),
@@ -81,7 +107,23 @@ impl QuillApp {
             photo: stream.photo.as_ref().and_then(|(_, image)| image.clone()),
             has_photo,
             name,
+            idle,
+            failure,
         })
+    }
+
+    /// The failed card's Retry: rejoin (the reconnect path when the call
+    /// asked for it, else the window's Join).
+    pub(crate) fn retry_stream(&mut self, cx: &mut Context<Self>) {
+        let call = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| (call.id, call.reconnecting));
+        match call {
+            Some((_, true)) => self.rejoin_active_group_call(cx),
+            Some((id, false)) => self.join_stream(id, cx),
+            None => {}
+        }
     }
 }
 
@@ -89,6 +131,8 @@ impl QuillApp {
 pub(crate) struct StreamPictureView {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
+    /// When the overlay's phase began, and its armed redraw.
+    pub(crate) overlay: LiveOverlayClock,
 }
 
 impl StreamPictureView {
@@ -100,6 +144,7 @@ impl StreamPictureView {
             // (the feed, the photo, the name) have no narrower signal.
             // Frames themselves come with the player's waker.
             _observe: cx.observe(owner, |_, _, cx| cx.notify()),
+            overlay: LiveOverlayClock::default(),
         }
     }
 }
@@ -131,7 +176,44 @@ impl Render for StreamPictureView {
             .player
             .as_ref()
             .is_some_and(VideoPlayer::has_live_frame);
-        let placeholder = (!drawn).then(|| placeholder(&parts));
+        let input = LiveInput {
+            state: parts.player.as_ref().map(VideoPlayer::state),
+            idle: parts.idle,
+            failed: parts.failure.is_some(),
+        };
+        let now = cx.background_executor().now();
+        let (overlay, due) = self.overlay.observe(input, now);
+        if let Some(due) = due {
+            let wait = due.saturating_duration_since(now);
+            let timer = cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            });
+            self.overlay.arm(due, timer);
+        }
+        let leave_owner = self.owner.clone();
+        let retry_owner = self.owner.clone();
+        let overlay_parts = LiveOverlayParts {
+            placeholder: (!drawn).then(|| placeholder(&parts)),
+            wide: true,
+            on_leave: Some(Rc::new(move |window, cx| {
+                let _ = leave_owner.update(cx, |app, cx| {
+                    if let Some(facts) = app.group_call_stream_facts() {
+                        app.stream_leave_clicked(&facts, window, cx);
+                    }
+                });
+            })),
+            on_retry: Some(Rc::new(move |_, cx| {
+                let _ = retry_owner.update(cx, |app, cx| app.retry_stream(cx));
+            })),
+            detail: parts.failure.clone().map(SharedString::from),
+        };
+        let state = PictureState::live(overlay, overlay_parts);
+        // The placeholder goes under the picture when the overlay does not
+        // draw it (a sender with no video yet, say).
+        let placeholder = (!drawn && !matches!(state, Some(PictureState::LiveOpening { .. })))
+            .then(|| placeholder(&parts));
+        let overlay = state.map(|state| PictureOverlay::new(parts.chat_id as u64, state));
         let report: WidthReport = {
             let owner = self.owner.clone();
             let chat_id = parts.chat_id;
@@ -149,7 +231,10 @@ impl Render for StreamPictureView {
                 .corner_radii(Corners::all(radius), background)
                 .on_width(report)
         });
-        frame.children(placeholder).children(picture)
+        frame
+            .children(placeholder)
+            .children(picture)
+            .children(overlay)
     }
 }
 

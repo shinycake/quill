@@ -173,6 +173,8 @@
 "qll_av_joining_voice_chat" = "Joining voice chat…";
 "qll_av_left_the_voice_chat" = "Left the voice chat.";
 "qll_av_left_the_voice_chat_local" = "Left the voice chat (local).";
+"qll_av_live_stream_ended" = "Live stream ended";
+"qll_av_live_stream_failed" = "This live stream can't be played";
 "qll_av_loading_gif_playback" = "Loading GIF playback…";
 "qll_av_loading_video" = "Loading video";
 "qll_av_louder" = "Louder ({volume}%)";
@@ -329,6 +331,7 @@
 "qll_av_volume" = "Volume {level_100}%.";
 "qll_av_volume_2" = "Volume";
 "qll_av_volume_needs_a_live_connection" = "Volume needs a live connection.";
+"qll_av_participant_volume" = "Volume for {name}";
 "qll_av_we_let_the_speakers_know" = "We let the speakers know";
 "qll_av_you" = "{name} (you)";
 "qll_av_you_cant_pin_messages_in" = "you can't pin messages in this chat";

@@ -342,18 +342,24 @@ impl Render for GroupCallPanel {
                 };
                 let key = event.keystroke.key.clone();
                 let exits = quill::calls::tile_pin::exits_fullscreen(&key);
-                if exits && owner.read(cx).group_call_is_stream() {
-                    // Esc closes an open box first, then leaves full
-                    // screen or the maximized window.
-                    if owner.read(cx).group_call.stream.overlay.is_some() {
+                if owner.read(cx).group_call_is_stream() {
+                    // Esc closes an open box first; then the live keys
+                    // (Esc leaves full screen or the maximized window,
+                    // F toggles it, M mutes, Space does nothing).
+                    if exits && owner.read(cx).group_call.stream.overlay.is_some() {
                         owner.update(cx, |app, cx| app.close_stream_overlay(cx));
                         cx.stop_propagation();
-                    } else if window.is_fullscreen() || window.is_maximized() {
-                        leave_stream_full(window);
+                        return;
+                    }
+                    let keystroke = event.keystroke.clone();
+                    if owner.update(cx, |app, cx| app.stream_key_down(&keystroke, window, cx)) {
                         cx.stop_propagation();
                         cx.notify();
+                        return;
                     }
-                    return;
+                    if exits {
+                        return;
+                    }
                 }
                 if exits && window.is_fullscreen() {
                     owner.update(cx, |app, cx| app.leave_group_call_stage(window, cx));
