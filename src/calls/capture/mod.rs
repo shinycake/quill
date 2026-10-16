@@ -10,7 +10,9 @@
 //! - `screen`: screen sources, the I420 conversions and the per-OS
 //!   [`screen::ScreenBackend`]; `screen_mac` is ScreenCaptureKit,
 //!   `screen_win` Windows.Graphics.Capture (`screen_bgra` converts its
-//!   BGRA frames).
+//!   BGRA frames), `screen_linux` the screen cast portal and PipeWire on
+//!   Wayland (`pipewire_dl`, `spa_pod`, `pipewire_frames`, `screen_yuv`)
+//!   and X11 capture elsewhere (`screen_x11`).
 //! - `system_audio`: "Share System Audio", mixed into the microphone
 //!   frames; `system_audio_cpal` is WASAPI loopback (Windows).
 //!
@@ -26,12 +28,21 @@ pub mod denoise;
 pub mod feeder;
 #[cfg(feature = "ui")]
 pub mod mic_cpal;
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub mod pipewire_dl;
+pub mod pipewire_frames;
 pub mod screen;
 pub mod screen_bgra;
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub mod screen_linux;
 #[cfg(all(feature = "ui", target_os = "macos"))]
 pub mod screen_mac;
 #[cfg(all(feature = "ui", windows))]
 pub mod screen_win;
+#[cfg(all(feature = "ui", target_os = "linux"))]
+pub mod screen_x11;
+pub mod screen_yuv;
+pub mod spa_pod;
 pub mod system_audio;
 #[cfg(all(feature = "ui", windows))]
 pub mod system_audio_cpal;

@@ -1,9 +1,9 @@
-//! BGRA pictures (what Windows.Graphics.Capture delivers) to the call's
-//! I420 frames and the chooser's RGBA thumbnails, plus the frame pacing
-//! the Windows capture needs (its frames come at the display's rate).
+//! Packed 32-bit pictures (BGRA from Windows.Graphics.Capture and X11,
+//! BGRx or RGBx from PipeWire) to the call's I420 frames and the
+//! chooser's RGBA thumbnails, plus the frame pacing captures that deliver
+//! at the display's rate need.
 //!
-//! Plain Rust with no OS calls, so it is unit-tested on every platform
-//! even though only `screen_win.rs` uses it today.
+//! Plain Rust with no OS calls, so it is unit-tested on every platform.
 #![deny(clippy::indexing_slicing)]
 
 use super::screen::{Thumbnail, fit_capture_size};
@@ -27,6 +27,15 @@ fn chroma((r, g, b): (i32, i32, i32)) -> (u8, u8) {
     (u.clamp(0, 255) as u8, v.clamp(0, 255) as u8)
 }
 
+/// Where red sits in a 32-bit pixel (the fourth byte is ignored).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PixelOrder {
+    /// Blue, green, red, then alpha or padding (BGRA, BGRx).
+    Bgr,
+    /// Red, green, blue, then alpha or padding (RGBA, RGBx).
+    Rgb,
+}
+
 /// A `src_w` x `src_h` BGRA picture (rows `stride` bytes apart) scaled to
 /// `dst_w` x `dst_h` (nearest pixel) as I420: Y, then U, then V, each
 /// chroma sample the average of its 2 x 2 block. `dst_w` and `dst_h` must
@@ -38,6 +47,17 @@ pub fn bgra_to_i420(
     src_h: usize,
     dst_w: usize,
     dst_h: usize,
+) -> Option<Vec<u8>> {
+    packed_to_i420(src, PixelOrder::Bgr, stride, (src_w, src_h), (dst_w, dst_h))
+}
+
+/// [`bgra_to_i420`] for either byte order.
+pub fn packed_to_i420(
+    src: &[u8],
+    order: PixelOrder,
+    stride: usize,
+    (src_w, src_h): (usize, usize),
+    (dst_w, dst_h): (usize, usize),
 ) -> Option<Vec<u8>> {
     if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
         return None;
@@ -78,7 +98,7 @@ pub fn bgra_to_i420(
             let (mut r, mut g, mut b) = (0, 0, 0);
             for (out_row, src_row) in [(top_pair, top), (bottom_pair, bottom)] {
                 for (out, &x) in out_row.iter_mut().zip(xs) {
-                    let rgb = row_pixel(src_row, x)?;
+                    let rgb = row_pixel(src_row, x, order)?;
                     *out = luma(rgb);
                     r += rgb.0;
                     g += rgb.1;
@@ -91,9 +111,13 @@ pub fn bgra_to_i420(
     Some(out)
 }
 
-/// The BGRA pixel at byte `x` of a row, as RGB.
-fn row_pixel(row: &[u8], x: usize) -> Option<(i32, i32, i32)> {
-    let [b, g, r, _] = *row.get(x..x.checked_add(4)?)?.first_chunk::<4>()?;
+/// The pixel at byte `x` of a row, as RGB.
+fn row_pixel(row: &[u8], x: usize, order: PixelOrder) -> Option<(i32, i32, i32)> {
+    let [first, g, third, _] = *row.get(x..x.checked_add(4)?)?.first_chunk::<4>()?;
+    let (r, b) = match order {
+        PixelOrder::Bgr => (third, first),
+        PixelOrder::Rgb => (first, third),
+    };
     Some((i32::from(r), i32::from(g), i32::from(b)))
 }
 
@@ -187,6 +211,15 @@ mod tests {
         assert!(i420[..16].iter().all(|&y| y == 16));
         let (red, stride) = solid(2, 2, 0, [255, 0, 0]);
         let i420 = bgra_to_i420(&red, stride, 2, 2, 2, 2).expect("i420");
+        assert_eq!(&i420[..1], &[82]);
+        assert_eq!(&i420[4..], &[90, 240]);
+    }
+
+    #[test]
+    fn rgb_order_reads_red_first() {
+        // Red in RGBx is blue in BGRx: the same bytes, the other order.
+        let (bytes, stride) = solid(2, 2, 0, [0, 0, 255]);
+        let i420 = packed_to_i420(&bytes, PixelOrder::Rgb, stride, (2, 2), (2, 2)).expect("i420");
         assert_eq!(&i420[..1], &[82]);
         assert_eq!(&i420[4..], &[90, 240]);
     }

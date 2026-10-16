@@ -3,9 +3,10 @@
 //! window into I420 frames for the call's external screen source.
 //!
 //! [`ScreenBackend`] is the per-OS part: ScreenCaptureKit on macOS
-//! (`screen_mac.rs`). Windows and Linux get theirs in later slices; until
-//! then [`native_backend`] returns `None` there and calls keep ntgcalls'
-//! own desktop capture. The conversions here are plain Rust and shared.
+//! (`screen_mac.rs`), Windows.Graphics.Capture on Windows
+//! (`screen_win.rs`), and on Linux the screen cast portal (Wayland) or
+//! X11 (`screen_linux.rs`). The conversions here are plain Rust and
+//! shared.
 //!
 //! Design: `docs/decisions/call-capture.md`.
 #![deny(clippy::indexing_slicing)]
@@ -71,9 +72,20 @@ pub enum ScreenAccess {
     Denied,
 }
 
+/// The source id of a backend whose OS shows its own picker when the
+/// capture starts (see [`ScreenBackend::system_picker`]).
+pub const SYSTEM_PICKER_SOURCE: &str = "system-picker";
+
 /// The per-OS screen capture. Listing and thumbnails run on a background
 /// thread of the UI; captures are started by the connect driver.
 pub trait ScreenBackend: Send + Sync {
+    /// Whether the OS asks what to share itself (the Wayland screen cast
+    /// portal; tdesktop `uniqueDesktopCaptureSource`). Then Quill shows
+    /// no chooser: the share button starts [`SYSTEM_PICKER_SOURCE`], or
+    /// stops a running share.
+    fn system_picker(&self) -> bool {
+        false
+    }
     /// Checked before the chooser opens (tdesktop
     /// `desktopCaptureAllowed`).
     fn access(&self) -> ScreenAccess;
@@ -110,7 +122,11 @@ pub fn native_backend() -> Option<Arc<dyn ScreenBackend>> {
     {
         Some(Arc::new(super::screen_win::WinScreen))
     }
-    #[cfg(not(all(feature = "ui", any(target_os = "macos", windows))))]
+    #[cfg(all(feature = "ui", target_os = "linux"))]
+    {
+        Some(Arc::new(super::screen_linux::LinuxScreen::detect()))
+    }
+    #[cfg(not(all(feature = "ui", any(target_os = "macos", windows, target_os = "linux"))))]
     {
         None
     }

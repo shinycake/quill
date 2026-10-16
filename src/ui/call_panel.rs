@@ -235,7 +235,11 @@ impl QuillApp {
             muted: call.muted,
             camera_on: call.camera_on,
             screen_sharing: call.screen_sharing,
-            can_share_screen: ready && cfg!(any(target_os = "macos", windows)),
+            // Linux shares only through Quill's own capture (the portal or
+            // X11), not ntgcalls' desktop capture.
+            can_share_screen: ready
+                && (cfg!(any(target_os = "macos", windows))
+                    || quill::calls::engine::external_screen_capture_enabled()),
             emojis: call
                 .ready
                 .as_ref()

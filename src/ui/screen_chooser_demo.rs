@@ -35,6 +35,8 @@ const SHARED: &str = "window:42";
 /// Four sources: two screens, a titled window and an untitled one.
 pub(super) struct DemoScreens {
     pub(super) access: ScreenAccess,
+    /// Act as the Wayland portal: no chooser (tests).
+    pub(super) system_picker: bool,
 }
 
 impl DemoScreens {
@@ -55,6 +57,10 @@ impl DemoScreens {
 }
 
 impl ScreenBackend for DemoScreens {
+    fn system_picker(&self) -> bool {
+        self.system_picker
+    }
+
     fn access(&self) -> ScreenAccess {
         self.access
     }
@@ -199,6 +205,7 @@ impl QuillApp {
             .group_frames
             .insert((other, false), frame(other, false, 1));
         self.screen_share.backend = Some(Arc::new(DemoScreens {
+            system_picker: false,
             access: if denied {
                 ScreenAccess::Denied
             } else {

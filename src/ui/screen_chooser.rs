@@ -13,6 +13,9 @@
 //!   it and opens the OS privacy settings (tdesktop
 //!   `ScreenSharingPrivacyRequestBox`).
 //!
+//! - Where the OS shows its own picker (the Wayland screen cast portal),
+//!   there is no chooser: the share button starts or stops sharing.
+//!
 //! Only builds with a screen backend (`calls::capture::screen`) show it.
 //! Elsewhere the share buttons keep ntgcalls' own desktop capture.
 #![deny(clippy::indexing_slicing)]
@@ -26,8 +29,8 @@ use gpui_kit::component::{ActiveTheme, Root};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::capture::screen::{
-    ScreenAccess, ScreenBackend, ScreenSource, SourceId, SourceKind, SourceLabel, Thumbnail,
-    native_backend, source_labels,
+    SYSTEM_PICKER_SOURCE, ScreenAccess, ScreenBackend, ScreenSource, SourceId, SourceKind,
+    SourceLabel, Thumbnail, native_backend, source_labels,
 };
 use quill::lang::{keys, tr, tr_with};
 use smallvec::SmallVec;
@@ -205,6 +208,12 @@ impl QuillApp {
             cx.notify();
             return true;
         }
+        if backend.system_picker() {
+            // The OS asks what to share (Wayland): no chooser, the button
+            // starts or stops (tdesktop `uniqueDesktopCaptureSource`).
+            self.share_with_system_picker(for_call, cx);
+            return true;
+        }
         self.screen_share.for_call = Some(for_call);
         if let Some(handle) = self.screen_share.window {
             // tdesktop `activate()`: one chooser per call, brought forward.
@@ -232,6 +241,18 @@ impl QuillApp {
         })
         .detach();
         true
+    }
+
+    /// Start the system picker's share, or stop the running one.
+    fn share_with_system_picker(&mut self, for_call: ScreenFor, cx: &mut Context<Self>) {
+        self.screen_share.for_call = Some(for_call);
+        if self.active_screen_source().is_some() {
+            self.stop_screen_source(cx);
+        } else {
+            self.screen_share.selected = Some(SourceId(SYSTEM_PICKER_SOURCE.into()));
+            self.screen_share.with_audio = false;
+            self.accept_screen_source(cx);
+        }
     }
 
     /// The sources are in: an empty list shows nothing (tdesktop destroys
