@@ -663,7 +663,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [x] Story statistics and public forwards <!-- parity:stories-statistics -->
 - [x] Live story stream playback: stream in the story frame, LIVE badge and viewers, comments with entities, paid comments, send-as, Stars reactions with Undo, pinned paid comments, top donors, moderation (#852; not tried on a live account) <!-- parity:stories-live-stream-playback -->
-- [ ] Watch a live story while in another call (tdesktop runs the stream as its own call; Quill shows a "Leave call and watch" card in the story and joins after you leave, #883) <!-- parity:stories-live-beside-call -->
+- [x] Watch a live story while in another call (tdesktop runs the stream as its own call; Quill shows a "Leave call and watch" card in the story and joins after you leave, #883) <!-- parity:stories-live-beside-call -->
 - [ ] Live story Stars reaction effect animation (tdesktop plays bundled Lottie effects; Quill draws its own burst) <!-- parity:stories-live-stars-effect -->
 
 ### Calls

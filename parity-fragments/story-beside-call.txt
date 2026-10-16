@@ -1,4 +1,0 @@
-# A live story plays in its own receive-only slot beside a 1:1 call or a
-# video chat; the leave card is gone.
-# README wording after the tick: Watch a live story while in another call (its own receive-only stream slot, like tdesktop's registerVideoStream)
-parity:stories-live-beside-call
