@@ -663,7 +663,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Search stories by hashtag, location or venue <!-- parity:stories-search -->
 - [x] Story statistics and public forwards <!-- parity:stories-statistics -->
 - [x] Live story stream playback: stream in the story frame, LIVE badge and viewers, comments with entities, paid comments, send-as, Stars reactions with Undo, pinned paid comments, top donors, moderation (#852; not tried on a live account) <!-- parity:stories-live-stream-playback -->
-- [ ] Watch a live story while in another call (tdesktop runs the stream as its own call; Quill asks to leave the current call first) <!-- parity:stories-live-beside-call -->
+- [ ] Watch a live story while in another call (tdesktop runs the stream as its own call; Quill shows a "Leave call and watch" card in the story and joins after you leave, #883) <!-- parity:stories-live-beside-call -->
 - [ ] Live story Stars reaction effect animation (tdesktop plays bundled Lottie effects; Quill draws its own burst) <!-- parity:stories-live-stars-effect -->
 
 ### Calls
@@ -692,7 +692,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Less data for calls setting (real TDLib setting `autoDownloadSettings.use_less_data_for_calls` pushed per network via `setAutoDownloadSettings`; one toggle in Call settings drives all three networks, refuses while prefs unseeded so the all-off defaults never silently disable auto-downloads; persisted server-side) <!-- parity:calls-less-data -->
 - [x] Use proxy for calls setting (persisted per-account call_prefs.json; client-side toggle — the TDLib schema has no such option; SOCKS5-only proxy selection for call media wired to the extent the ntgcalls C API allows) <!-- parity:calls-proxy -->
 - [x] Start video call with working video (video negotiated when a camera exists via `video_wanted`; peer frames flow through the engine callbacks to the video stage — verified in code + screenshot; real camera/peer still unverified) <!-- parity:calls-start-video -->
-- [x] Camera preview (local video tile) in video call (renders latest driver frame as a 160x120 PiP; "Starting camera…" / "Camera off" states when no frame) <!-- parity:calls-camera-preview -->
+- [x] Camera preview (local video tile) in video call (both 1:1 pictures play through the live video player from pushed I420 planes; the local preview is mirrored, 160x110 under the panel, #883) <!-- parity:calls-camera-preview -->
 - [x] Remote video frames in video call (peer camera as the main tile; Connecting/paused/off state text from `RemoteVideoState`) <!-- parity:calls-remote-video -->
 - [x] Switch camera during video call (camera on/off toggle drives `set_camera_enabled`; camera picker re-applies the selected device on the active call) <!-- parity:calls-camera-switch -->
 - [x] Camera device selection (Camera picker row with radio selection; "No camera found." when the engine reports none) <!-- parity:calls-camera-select -->
@@ -738,6 +738,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Watch channel live streams (RTMP): ntgcalls stream mode fed by getGroupCallStreamSegment, wide stream window, fullscreen, no-stream and connecting states, settings with speakers, stream key and revoke (#814, #823, #837; not tried on a live stream) <!-- parity:calls-rtmp-viewing -->
 - [ ] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
 - [x] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
+- [x] Picture-in-picture for live streams and live stories (LIVE badge with viewers, mute, enlarge back to the stream window or story, close; tdesktop has no live PiP, #883) <!-- parity:calls-live-pip -->
+- [ ] Live PiP follows a feed change (a rejoin or presenter switch keeps the old feed in the PiP until it is enlarged; it closes when that feed ends) <!-- parity:calls-live-pip-feed-follow -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
 - [x] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
