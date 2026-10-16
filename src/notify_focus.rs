@@ -12,7 +12,8 @@
 //! lazily, never per frame). macOS reads CFPreferences in-process like
 //! tdesktop; Linux shells out to gdbus/gsettings. Neither runs on the UI
 //! thread: [`dnd_active`] returns the last answer and, when it is stale,
-//! refreshes it on a short-lived worker. The parsers are pure and tested.
+//! refreshes it on a short-lived worker (macOS refreshes in place: the
+//! in-process read is cheap). The parsers are pure and tested.
 #![deny(clippy::indexing_slicing)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,9 +35,20 @@ fn now_ms() -> u64 {
 }
 
 /// Whether the OS is in Do Not Disturb / Focus right now (last known
-/// answer; `false` until the first refresh lands). Never blocks.
+/// answer; `false` until the first refresh lands). Never waits on another
+/// thread; on macOS a stale answer is re-read in place (cheap, in-process).
 pub fn dnd_active() -> bool {
     let checked = CHECKED_AT_MS.load(Ordering::Relaxed);
+    // macOS answers in-process from cfprefsd in well under a millisecond, and
+    // callers only ask when an alert is pending, so a stale answer (Focus
+    // toggled while Quill sat idle) is refreshed before it is used.
+    #[cfg(target_os = "macos")]
+    if now_ms().saturating_sub(checked) > FRESH_MS {
+        let dnd = query_os_dnd();
+        DND.store(dnd, Ordering::Relaxed);
+        CHECKED_AT_MS.store(now_ms(), Ordering::Relaxed);
+        return dnd;
+    }
     if now_ms().saturating_sub(checked) > FRESH_MS && !REFRESHING.swap(true, Ordering::AcqRel) {
         let spawned = crate::thread_guard::spawn_guarded("quill-dnd", || {
             DND.store(query_os_dnd(), Ordering::Relaxed);
