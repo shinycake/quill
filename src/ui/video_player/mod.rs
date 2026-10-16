@@ -246,6 +246,8 @@ struct Inner {
     turns: u8,
     mirrored: bool,
     error: Option<PlayerError>,
+    /// The backend was dropped by [`VideoPlayer::hibernate`].
+    asleep: bool,
     /// A new picture is wanted since then (opened, seeked, stepped): the
     /// element keeps drawing until it comes, even while paused.
     awaiting: Option<Instant>,
@@ -299,6 +301,7 @@ impl VideoPlayer {
                 turns: 0,
                 mirrored: false,
                 error: None,
+                asleep: false,
                 awaiting: Some(Instant::now()),
                 watchers: Vec::new(),
                 watched: None,
@@ -397,6 +400,24 @@ impl VideoPlayer {
         let now = Instant::now();
         self.with_inner(|inner| inner.machine.pause(now));
         self.with_backend(|backend| backend.pause());
+    }
+
+    /// Drop the backend (its decoder, buffers and thread) and every
+    /// picture, keeping the handle: the element paints nothing, asks for
+    /// no frames, and still counts being painted in view, so an inline
+    /// tile released off screen can be reopened once it is seen again
+    /// (`inline_players`). The open poll ends with the state.
+    pub(crate) fn hibernate(&self) {
+        let now = Instant::now();
+        self.with_inner(|inner| {
+            inner.machine.sleep(now);
+            inner.raw = None;
+            inner.shown = None;
+            inner.turned_image = None;
+            inner.awaiting = None;
+            inner.asleep = true;
+        });
+        drop(self.0.backend.take());
     }
 
     /// Seek precisely to `secs` (clamped to the clip).
@@ -647,7 +668,8 @@ impl VideoPlayer {
             });
             FrameDemand {
                 animates: (transport.state.animates() || awaiting)
-                    && transport.state != PlayState::Failed,
+                    && transport.state != PlayState::Failed
+                    && !inner.asleep,
                 plays_sound: transport.has_sound && transport.volume > 0.0,
                 next_due,
                 interval: inner.estimator.interval(),

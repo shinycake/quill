@@ -215,6 +215,31 @@ looping (`AVPlayerLooper`) is the follow-up below.
 this PR does not touch): conversation slice 23 to 24 renders/s before and
 after.
 
+## Follow-up (2026-10-16): released slots sleep instead of closing
+
+The review of this PR found that a row rendered just outside the visible
+area (the list's overdraw) reopened its decoder every `RELEASE_AFTER`:
+the sweep dropped the slot, the next history pass found the row rendering
+and opened a new player, held, and the sweep put it off screen again.
+
+Now `OffScreenStep::Release` keeps the slot and puts its player to sleep
+(`VideoPlayer::hibernate`: the backend and every picture go, the handle
+stays; `TransportMachine::sleep` leaves it paused and wanting no play).
+The tile keeps drawing the sleeping player, which paints nothing over the
+still, asks for no frames and only counts being painted in view. A row
+that keeps rendering in the overdraw therefore opens nothing. A sweep that
+sees a sleeping slot painted in view opens a new player for it from the
+slot's `Source` (path, decode edge, duration), within the budget, and
+notifies the history view once so the tile picks the new player up. The
+slot still goes when its row stops rendering, the chat changes or the
+scale changes, as before.
+
+Verified by the UI test `a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back`:
+after `RELEASE_AFTER` the backend is dropped and the slot sleeps; four more
+history passes and another `RELEASE_AFTER` open no new backend; scrolling
+back in view opens exactly one and plays it. `transport.rs` tests `sleep`
+from Opening, Playing and Failed.
+
 ## Supersedes
 
 - **`codex-inline-video.md`:**
