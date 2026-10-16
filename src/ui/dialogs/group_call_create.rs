@@ -412,7 +412,7 @@ impl QuillApp {
         }
         if !in_call {
             if let Some(live) = self.live.as_mut() {
-                live.driver.session.leave_group_call_local();
+                live.driver.drop_group_call_locally();
             } else if let Some(session) = self.demo_session.as_mut() {
                 session.leave_group_call_local();
             }

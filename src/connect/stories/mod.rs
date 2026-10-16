@@ -1,5 +1,6 @@
 //! Connect driver: stories.
 use super::*;
+use crate::calls::group_call_create::CurrentCall;
 use crate::ids::{ChatId, RequestId};
 use crate::state::LiveStoryJoinIntent;
 use crate::state::RequestPurpose;
@@ -98,10 +99,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Two-step, reusing the C3a machinery: `getGroupCall` (via the
     /// existing `fetch_group_call`) creates the unjoined tracker, and the
     /// ingest pump issues `join_video_chat` once the tracker exists
-    /// (`pending_live_story_join`). Refuses while a 1:1 call is active,
-    /// while another group call is tracked, or while a live-story join is
-    /// already pending — the group-call overlay's Join button stays the
-    /// manual fallback either way.
+    /// (`pending_live_story_join`). Refuses while a 1:1 call is active or
+    /// while another group call is current (joined, joining, reconnecting
+    /// or scheduled). A tracked call you only looked at, and a live story
+    /// join still waiting for its `getGroupCall` answer, are dropped
+    /// locally, native transport included: tdesktop has no current call
+    /// then and sends nothing. A second join for the same story
+    /// while its first is pending is refused.
     pub fn join_live_story(
         &mut self,
         chat_id: ChatId,
@@ -117,15 +121,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             None => return Err(ConnectSendError::InvalidRequest),
         };
+        // A 1:1 call, a joined, joining or reconnecting video chat, or a
+        // scheduled one (tdesktop's current call) keeps the slot: the
+        // viewer asks to leave it first.
         if self.session.calls.active_call.is_some()
-            || self.session.calls.active_group_call.is_some()
+            || self.session.current_call_for_create(None) != CurrentCall::None
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.calls.pending_live_story_join.is_some() {
+        // This story's join is already on its way.
+        if self
+            .session
+            .calls
+            .pending_live_story_join
+            .is_some_and(|join| join.group_call_id == group_call_id)
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.calls.active_group_call.is_some() {
+            self.drop_group_call_locally();
+        }
+        self.session.calls.pending_live_story_join = None;
         let extra = self.fetch_group_call(group_call_id)?;
+        self.session
+            .begin_live_story(chat_id.0, story_id, group_call_id);
         self.session.calls.pending_live_story_join = Some(LiveStoryJoinIntent {
             group_call_id,
             request: extra,

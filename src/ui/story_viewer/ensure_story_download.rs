@@ -292,8 +292,7 @@ impl QuillApp {
         row = row.child(
             Button::new("story-quick-react")
                 .label(quick_label)
-                .ghost()
-                .text_color(text_bright())
+                .custom(chrome::ghost(cx))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.quick_react_story(cx);
                 })),
@@ -339,8 +338,7 @@ impl QuillApp {
         row = row.child(
             Button::new("story-react-picker")
                 .label(tr(keys::Q_MEDIA_REACT))
-                .ghost()
-                .text_color(text_bright())
+                .custom(chrome::ghost(cx))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_story_reaction_picker(cx);
                 })),
@@ -349,8 +347,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-reply")
                     .label(tr(keys::Q_MEDIA_REPLY))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_reply(cx);
                     })),
@@ -360,8 +357,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-delete")
                     .label(tr(keys::BOX_DELETE))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.delete_story_viewer(cx);
                     })),
@@ -377,8 +373,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-viewers")
                     .label(tr(keys::Q_MEDIA_VIEWERS))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_viewers(cx);
                     })),
@@ -388,8 +383,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-statistics")
                     .label(tr(keys::Q_MEDIA_STATISTICS))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_stats(cx);
                     })),
@@ -399,8 +393,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-search-here")
                     .label(tr(keys::Q_MEDIA_STORIES_HERE))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.search_stories_from_viewer(query.clone(), window, cx);
                     })),
@@ -410,8 +403,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-report")
                     .label(tr(keys::Q_MEDIA_REPORT))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_story_report(cx);
                     })),
@@ -423,8 +415,7 @@ impl QuillApp {
         row = row.child(
             Button::new("story-stealth")
                 .label(stealth_label)
-                .ghost()
-                .text_color(text_bright())
+                .custom(chrome::ghost(cx))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_story_stealth(cx);
                 })),
@@ -437,8 +428,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-edit")
                     .label(tr(keys::Q_MEDIA_EDIT))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         let Some(item) = this.stories.viewer.current().cloned() else {
@@ -451,8 +441,7 @@ impl QuillApp {
                 row = row.child(
                     Button::new("story-cover")
                         .label(tr(keys::Q_MEDIA_COVER))
-                        .ghost()
-                        .text_color(text_bright())
+                        .custom(chrome::ghost(cx))
                         .disabled(manage_busy)
                         .on_click(cx.listener(|this, _, _, cx| {
                             let Some(item) = this.stories.viewer.current().cloned() else {
@@ -467,8 +456,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-privacy")
                     .label(tr(keys::Q_MEDIA_PRIVACY))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.toggle_story_privacy_edit(window, cx);
@@ -479,8 +467,7 @@ impl QuillApp {
             row = row.child(
                 Button::new("story-repost")
                     .label(tr(keys::Q_MEDIA_REPOST))
-                    .ghost()
-                    .text_color(text_bright())
+                    .custom(chrome::ghost(cx))
                     .disabled(manage_busy)
                     .on_click(cx.listener(|this, _, window, cx| {
                         let Some(item) = this.stories.viewer.current().cloned() else {
@@ -521,7 +508,12 @@ impl QuillApp {
             column = column.child(self.story_privacy_panel(cx));
         }
         if let Some(status) = self.story_manage_status() {
-            column = column.child(div().text_xs().text_color(text_muted()).child(status));
+            column = column.child(
+                div()
+                    .text_xs()
+                    .text_color(chrome::secondary())
+                    .child(status),
+            );
         }
         column.into_any_element()
     }

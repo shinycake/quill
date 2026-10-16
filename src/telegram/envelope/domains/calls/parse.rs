@@ -234,7 +234,7 @@ pub(crate) fn parse_calls_payload(
                 InviteGroupCallParticipantResult::UserWasBanned,
             ),
         )),
-        _ => return Ok(None),
+        _ => return parse_live_story_payload(type_name, value),
     };
     payload.map(Some)
 }

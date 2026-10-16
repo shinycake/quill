@@ -71,7 +71,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(user_id) = frame.participant_user_id {
                 group_video_frame_slots
                     .lock_or_recover()
-                    .insert((call_id, user_id, frame.is_screen), frame);
+                    .insert((call_id, user_id, frame.is_screen), Arc::new(frame));
             } else {
                 // Phase C2j: the screen share gets its own slot keyed on
                 // `is_screen` so it never clobbers the peer camera frame.
@@ -252,10 +252,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         user_id: i64,
         screen: bool,
     ) -> Option<VideoFrame> {
-        self.group_video_frame_slots
+        // The `Arc` is taken under the lock; the picture is copied after.
+        let frame = self
+            .group_video_frame_slots
             .lock_or_recover()
             .get(&(group_call_id, user_id, screen))
-            .cloned()
+            .cloned();
+        frame.map(Arc::unwrap_or_clone)
     }
 
     /// Phase C2e: selected camera device id; `None` is the engine default.

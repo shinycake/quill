@@ -442,15 +442,15 @@ impl Render for QuillApp {
             // propagates, so the keystroke reaches the focused input (an
             // action handler stops propagation unless told to propagate,
             // which used to eat the composer's arrow keys and "0").
-            .on_action(cx.listener(|this, _: &StoryTogglePause, _, cx| {
-                if this.stories.viewer.is_open() && !this.story_text_input_open() {
+            .on_action(cx.listener(|this, _: &StoryTogglePause, window, cx| {
+                if this.stories.viewer.is_open() && !this.story_text_input_open(window, cx) {
                     this.toggle_story_pause(cx);
                 } else {
                     cx.propagate();
                 }
             }))
-            .on_action(cx.listener(|this, _: &ViewerPrev, _, cx| {
-                if this.stories.viewer.is_open() && !this.story_text_input_open() {
+            .on_action(cx.listener(|this, _: &ViewerPrev, window, cx| {
+                if this.stories.viewer.is_open() && !this.story_text_input_open(window, cx) {
                     this.step_story_viewer(-1, cx);
                 } else if this.viewer.state.is_open() {
                     this.step_media_viewer(-1, cx);
@@ -458,8 +458,8 @@ impl Render for QuillApp {
                     cx.propagate();
                 }
             }))
-            .on_action(cx.listener(|this, _: &ViewerNext, _, cx| {
-                if this.stories.viewer.is_open() && !this.story_text_input_open() {
+            .on_action(cx.listener(|this, _: &ViewerNext, window, cx| {
+                if this.stories.viewer.is_open() && !this.story_text_input_open(window, cx) {
                     this.step_story_viewer(1, cx);
                 } else if this.viewer.state.is_open() {
                     this.step_media_viewer(1, cx);

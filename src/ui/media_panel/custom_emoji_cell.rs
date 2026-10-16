@@ -320,6 +320,9 @@ impl QuillApp {
     pub(in crate::ui) fn media_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
         self.sync_media_panel_rows(cx);
         let tab = self.pickers.media_panel.tab;
+        // A live story comment takes emoji only (tdesktop's video stream
+        // field has no sticker or GIF tabs).
+        let emoji_only = self.stories.live.watching.is_some() && self.story_reply_panel_active();
         let tabs = div().flex().items_center().gap_1().children(
             [
                 (PanelTab::Emoji, tr(keys::SWITCH_EMOJI)),
@@ -327,6 +330,7 @@ impl QuillApp {
                 (PanelTab::Gifs, "GIFs"),
             ]
             .into_iter()
+            .filter(|(value, _)| !emoji_only || *value == PanelTab::Emoji)
             .map(|(value, label)| {
                 Button::new(SharedString::from(format!("panel-tab-{label}")))
                     .label(label)

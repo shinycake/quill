@@ -172,6 +172,23 @@ fn stream_ask(now: Instant, state: &StreamTileState, keep_alive: bool) -> VideoF
     }
 }
 
+/// tdesktop `DecideFrameResize`: whether a picture fills the box
+/// (`expanding`, drawn `Cover`): when that crops nothing across and at
+/// most a quarter of its height. Otherwise it is shown whole (`Contain`)
+/// over its blurred copy.
+pub(crate) fn frame_expands(outer: (f32, f32), original: (f32, f32)) -> bool {
+    let (outer_w, outer_h) = outer;
+    let (width, height) = original;
+    if outer_w <= 0. || outer_h <= 0. || width <= 0. || height <= 0. {
+        return true;
+    }
+    // `scaled(outer, KeepAspectRatioByExpanding)`.
+    let scale = (outer_w / width).max(outer_h / height);
+    let (big_w, big_h) = (width * scale, height * scale);
+    // A rounding slack of half a pixel, as Qt rounds the sizes.
+    big_w <= outer_w + 0.5 && big_h * 3. <= outer_h * 4. + 0.5
+}
+
 /// The photo blurred as tdesktop's tile placeholder: decoded, blurred with
 /// radius 15 (lib_ui `BlurLargeImage` weights, `wallpaper_raster::blur`),
 /// as a GPUI image (BGRA). Runs off the UI thread.
@@ -196,8 +213,22 @@ pub(crate) fn blurred_photo(path: &Path) -> Option<Arc<RenderImage>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{STREAM_INTERVAL, StreamTileState, blurred_photo, stream_ask};
+    use super::{STREAM_INTERVAL, StreamTileState, blurred_photo, frame_expands, stream_ask};
     use std::time::Instant;
+
+    #[test]
+    fn a_picture_fills_the_story_only_when_little_is_cut_off() {
+        let story = (360., 640.);
+        // Portrait 9:16 fills it.
+        assert!(frame_expands(story, (720., 1280.)));
+        // 3:4 would be cut at the sides: shown whole.
+        assert!(!frame_expands(story, (960., 1280.)));
+        // Landscape is shown whole over the backdrop.
+        assert!(!frame_expands(story, (1280., 720.)));
+        // A tall picture loses at most a quarter of its height.
+        assert!(frame_expands(story, (360., 800.)));
+        assert!(!frame_expands(story, (360., 900.)));
+    }
 
     #[test]
     fn the_tile_asks_for_the_next_stream_picture() {

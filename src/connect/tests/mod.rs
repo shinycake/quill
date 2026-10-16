@@ -52,6 +52,7 @@ mod language;
 mod link_info;
 mod links_boosts;
 mod live_location;
+mod live_story;
 mod masks;
 mod media_library;
 mod member_moderation;

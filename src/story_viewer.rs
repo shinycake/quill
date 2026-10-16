@@ -110,8 +110,12 @@ impl StoryPlayback {
 
     /// Elapsed long enough to auto-advance (Telegram Desktop's
     /// `IsStoppedAtEnd`; Telegram Android's `timeProgress == 1f` switch).
+    /// A live story never ends on a timer: it plays until the stream ends
+    /// (tdesktop shows no progress for a video stream).
     pub fn finished(&self, item: &StoryViewerItem, now: Instant) -> bool {
-        self.is_running() && self.elapsed(item, now) >= Self::duration(item)
+        item.kind != StoryViewerKind::Live
+            && self.is_running()
+            && self.elapsed(item, now) >= Self::duration(item)
     }
 }
 
@@ -681,6 +685,9 @@ mod tests {
         // Past the end the fill stays pinned at 1.0, never over.
         assert_eq!(playback.progress(&item, now + Duration::from_secs(30)), 1.0);
         assert!(playback.finished(&item, now + Duration::from_secs(30)));
+        // A live story plays until its stream ends.
+        let live = playback_item(StoryViewerKind::Live, 6, None);
+        assert!(!playback.finished(&live, now + Duration::from_secs(300)));
     }
 
     #[test]

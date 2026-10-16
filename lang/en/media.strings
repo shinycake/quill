@@ -618,7 +618,6 @@
 "qll_media_resume" = "Resume";
 "qll_media_retry" = "Retry";
 "qll_media_right_click_a_sticker_to" = "Right-click a sticker to add it to favorites.";
-"qll_media_rtmp_playback_is_not_supported" = "{kind_label} — RTMP playback is not supported yet";
 "qll_media_save_story" = "Save story";
 "qll_media_saved" = "Saved.";
 "qll_media_saved_to" = "Saved to {display}";

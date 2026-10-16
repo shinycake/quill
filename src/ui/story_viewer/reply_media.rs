@@ -70,7 +70,7 @@ impl QuillApp {
         self.stories.reply_recording = false;
     }
 
-    fn toggle_story_reply_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
+    pub(super) fn toggle_story_reply_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.story_reply_panel_active() && self.pickers.media_panel.tab == tab {
             self.stories.reply_panel = false;
             self.close_media_panel(cx);
@@ -194,6 +194,11 @@ impl QuillApp {
         else {
             return false;
         };
+        // A live story takes text comments only (tdesktop's video stream
+        // field has no sticker or GIF sending).
+        if self.stories.live.watching.is_some() {
+            return true;
+        }
         if self.premium_sticker_blocked(file_id, cx) {
             return true;
         }
@@ -236,6 +241,11 @@ impl QuillApp {
         else {
             return false;
         };
+        // A live story takes text comments only (tdesktop's video stream
+        // field has no sticker or GIF sending).
+        if self.stories.live.watching.is_some() {
+            return true;
+        }
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
@@ -277,7 +287,13 @@ impl QuillApp {
         let content = InputContent::new(text.clone())
             .with_token(0..len, emoji_token(custom_emoji_id, &text))
             .unwrap_or_else(|_| InputContent::new(text));
-        self.stories.reply_input.update(cx, |input, cx| {
+        // A live story comment carries custom emoji too (its entities).
+        let field = if self.stories.live.watching.is_some() {
+            self.stories.live.input.clone()
+        } else {
+            self.stories.reply_input.clone()
+        };
+        field.update(cx, |input, cx| {
             let range = input.selected_range();
             if input
                 .replace_range_with_content(range, content.clone(), window, cx)
@@ -308,7 +324,12 @@ impl QuillApp {
         if !self.story_reply_panel_active() {
             return false;
         }
-        self.stories.reply_input.update(cx, |input, cx| {
+        let field = if self.stories.live.watching.is_some() {
+            self.stories.live.input.clone()
+        } else {
+            self.stories.reply_input.clone()
+        };
+        field.update(cx, |input, cx| {
             input.replace(emoji, window, cx);
             input.focus(window, cx);
         });

@@ -227,6 +227,10 @@ pub struct ActiveGroupCall {
     /// `participant_count` as the stream's "{count} viewers" (tdesktop
     /// shows no listener rows for RTMP streams).
     pub viewer_count: u32,
+    /// Live stories: the Stars each comment costs (0 = free).
+    pub paid_message_star_count: i64,
+    /// Live stories: who your comments are sent as.
+    pub message_sender_id: Option<MessageSender>,
 }
 
 /// stories-live-play: a pending "Join live" from the story viewer — the
@@ -290,6 +294,8 @@ impl ActiveGroupCall {
             stream_mode: Default::default(),
             stream: Default::default(),
             viewer_count: 0,
+            paid_message_star_count: 0,
+            message_sender_id: None,
         }
     }
 

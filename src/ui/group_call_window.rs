@@ -39,6 +39,8 @@ impl QuillApp {
         let call = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
+            // A live story plays in the story viewer, not in this window.
+            .filter(|call| !call.is_live_story)
             .map(|call| {
                 (
                     call.id,
@@ -69,6 +71,7 @@ impl QuillApp {
         let call = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
+            .filter(|call| !call.is_live_story)
             .map(|call| (call.id, uses_stream_layout(call)));
         let wanted = call.filter(|(id, _)| self.group_call.window_closed_by_user != Some(*id));
         self.prune_group_video_images(wanted.map(|(id, _)| id));

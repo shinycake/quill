@@ -30,7 +30,7 @@ use std::time::Duration;
 pub(super) const BG: u32 = 0x1a2026;
 pub(super) const MEMBERS_BG: u32 = 0x2c333d;
 pub(super) const MEMBERS_BG_OVER: u32 = 0x323a45;
-const ACTIVE_FG: u32 = 0x4db8ff;
+pub(super) const ACTIVE_FG: u32 = 0x4db8ff;
 pub(super) const MEMBER_ACTIVE: u32 = 0x8deb90;
 pub(super) const MEMBER_INACTIVE_ICON: u32 = 0x84888f;
 pub(super) const MEMBER_INACTIVE_STATUS: u32 = 0x61c0ff;
@@ -658,7 +658,8 @@ impl QuillApp {
     /// title and count, leave; a click brings the window back.
     pub(super) fn group_call_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
-        if !call.is_joined {
+        // A live story plays in the story viewer, without the call bar.
+        if !call.is_joined || call.is_live_story {
             return None;
         }
         let state = mute_state(call);

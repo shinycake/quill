@@ -44,10 +44,11 @@ impl Session {
 }
 
 impl Session {
-    /// Whether the tracked video chat is joined or its join is in flight
-    /// (a `joinVideoChat` request waits for its answer, or `joining`, the
-    /// UI's own join of that call). tdesktop's `inGroupCall()` is true from
-    /// the moment the join starts.
+    /// Whether the tracked video chat is joined, reconnecting, or its join
+    /// is in flight (a `joinVideoChat` request waits for its answer, or
+    /// `joining`, the UI's own join of that call). tdesktop's
+    /// `inGroupCall()` is true from the moment the join starts until the
+    /// call is left, rejoins after a network loss included.
     pub fn group_call_joined_or_joining(&self, joining: Option<i32>) -> bool {
         let Some(call) = self.calls.active_group_call.as_ref() else {
             return false;
@@ -56,6 +57,8 @@ impl Session {
             group_call_id: call.id,
         });
         call.is_joined
+            || call.need_rejoin
+            || call.reconnecting
             || joining == Some(call.id)
             || self.requests.pending.values().any(|p| p.purpose == purpose)
     }

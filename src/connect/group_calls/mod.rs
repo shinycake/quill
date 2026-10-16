@@ -26,6 +26,8 @@ mod admin;
 mod controls;
 mod join;
 mod link;
+mod live_story;
+mod live_story_extras;
 mod rtmp_start;
 pub(crate) mod stream;
 
@@ -185,6 +187,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .map(|call| group_video_sources(&call.participants))
             .unwrap_or_default();
+        // A live story's streamer may not be in the participant list (and
+        // may be a channel): subscribe to its video as well.
+        let mut sources = sources;
+        for source in self.live_story_video_sources(group_call_id) {
+            if !sources.iter().any(|s| s.endpoint == source.endpoint) {
+                sources.push(source);
+            }
+        }
         let Some(engine) = self.call_engine.as_deref_mut() else {
             return Ok(());
         };

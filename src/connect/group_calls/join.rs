@@ -112,6 +112,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) if call.id == group_call_id && !call.is_joined => call.is_muted_self,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
+        // Joining it again: its joined updates count once more.
+        if self.session.calls.left_group_call == Some(group_call_id) {
+            self.session.calls.left_group_call = None;
+        }
         // Phase C2g: the native group context is created inside
         // `group_join_params` so the join carries the real tgcalls offer.
         let params = self.group_join_params(group_call_id, is_muted_self);
@@ -164,8 +168,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The chat a tracked voice chat belongs to (`groupCall` carries no
-    /// chat id; the chat's `video_chat` association does).
-    pub(super) fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
+    /// chat id; the chat's `video_chat` association does). A live story
+    /// has no `video_chat`: its poster's chat is the one.
+    pub(crate) fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
         self.session
             .chats
             .values()
@@ -175,6 +180,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .is_some_and(|video_chat| video_chat.group_call_id == group_call_id)
             })
             .map(|chat| chat.id.0)
+            .or_else(|| {
+                self.session
+                    .stories
+                    .live
+                    .as_ref()
+                    .filter(|live| live.group_call_id == group_call_id)
+                    .map(|live| live.chat_id)
+            })
     }
 
     /// `getVideoChatAvailableParticipants`, once per unjoined chat-bound
@@ -260,6 +273,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed — a later tap can retry). The group-call overlay's Join
     /// button stays the manual fallback either way.
     pub(crate) fn maybe_join_live_story(&mut self) -> Result<(), ConnectSendError> {
+        self.maybe_fetch_live_story_extras()?;
+        self.maybe_resolve_live_story_custom_emoji()?;
         let intent = match self.session.calls.pending_live_story_join {
             Some(intent) => intent,
             None => return Ok(()),
@@ -434,16 +449,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The native call key is the chat id; resolve it through the
         // chat's `video_chat` association (schema `groupCall` carries no
         // chat id).
-        let chat_id = self
-            .session
-            .chats
-            .values()
-            .find(|chat| {
-                chat.video_chat
-                    .as_ref()
-                    .is_some_and(|video_chat| video_chat.group_call_id == group_call_id)
-            })
-            .map(|chat| chat.id.0);
+        let chat_id = self.group_call_chat_id(group_call_id);
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {
                 let offer = engine.create_group_call(group_call_id, chat_id);
@@ -508,10 +514,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.left_group_call = Some(group_call_id);
         // Phase C2g: tear the native group transport down eagerly; the
         // pump's before/after backstop covers server-driven ends.
         self.teardown_group_call_transport(group_call_id);
         Ok(extra)
+    }
+
+    /// Drop the tracked group call without a request (one only looked
+    /// at, or given up for another), and stop its native transport if it
+    /// has one: the pump's before/after check only sees reducer updates.
+    pub fn drop_group_call_locally(&mut self) {
+        let tracked = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .map(|call| call.id);
+        if let Some(group_call_id) = tracked {
+            self.teardown_group_call_transport(group_call_id);
+        }
+        self.session.leave_group_call_local();
     }
 
     /// Phase C2g: drop the native transport and retained frames for one
@@ -550,6 +573,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.left_group_call = Some(group_call_id);
         // Phase C2g: same native teardown as leaving; the server-driven
         // end also lands via the pump backstop.
         self.teardown_group_call_transport(group_call_id);
