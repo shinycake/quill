@@ -197,102 +197,80 @@ fn group_participant_video_syncs_subscriptions() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Phase C2g: frames with `participant_user_id` land in the group
-/// slots (camera vs screen), never in the 1:1 slots.
+fn planes() -> LiveFrame {
+    LiveFrame::new(0, 2, 2, LiveRotation::None, vec![0; 6], Instant::now()).expect("frame")
+}
+
+fn video(user_id: i64, screen: bool) -> LiveKey {
+    LiveKey::Video {
+        call_id: 555,
+        user_id,
+        screen,
+    }
+}
+
+/// Phase C2g: a participant's camera and screen each get their own live
+/// feed, never the 1:1 slots.
 #[test]
-fn group_video_frames_route_to_participant_slots() {
+fn group_video_frames_route_to_participant_feeds() {
     let (dir, driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
-    let frame = |screen: bool| VideoFrame {
-        seq: 0,
-        width: 2,
-        height: 2,
-        rgba: vec![0u8; 16],
-        is_local: false,
-        participant_user_id: Some(42),
-        is_screen: screen,
-    };
-    handle.emit_video_frame(555, frame(false));
-    handle.emit_video_frame(555, frame(true));
-    assert!(driver.latest_group_video_frame(555, 42, false).is_some());
-    assert!(driver.latest_group_video_frame(555, 42, true).is_some());
-    assert!(driver.latest_group_video_frame(555, 43, false).is_none());
+    handle.emit_live_frame(video(42, false), planes());
+    handle.emit_live_frame(video(42, true), planes());
+    let latest = |key| driver.live_sink(key).and_then(|sink| sink.latest());
+    assert!(latest(video(42, false)).is_some());
+    assert!(latest(video(42, true)).is_some());
+    assert!(latest(video(43, false)).is_none());
     assert!(driver.latest_video_frame(555, false).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Slice calls-group-self-tile: a group-local frame (`is_local`,
-/// no participant — what the engine now delivers for group
-/// CAPTURE frames) lands in the shared (call id, is_local) slots,
-/// never in the participant slots.
+/// Slice calls-group-self-tile: your camera preview in a group call goes
+/// to the call's local feed, not the 1:1 slots or a participant's feed.
 #[test]
-fn group_local_frame_routes_to_shared_local_slot() {
+fn group_local_frame_routes_to_the_local_feed() {
     let (dir, driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
-    handle.emit_video_frame(
-        555,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: true,
-            participant_user_id: None,
-            is_screen: false,
-        },
-    );
-    assert!(driver.latest_video_frame(555, true).is_some());
-    assert!(driver.latest_video_frame(555, false).is_none());
-    assert!(driver.latest_group_video_frame(555, 42, false).is_none());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Slice calls-group-self-tile: leaving the group call clears the
-/// self-tile slot along with the participant slots.
-#[test]
-fn group_call_leave_clears_local_frame_slot() {
-    let (dir, mut driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
-    handle.emit_video_frame(
-        555,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: true,
-            participant_user_id: None,
-            is_screen: false,
-        },
-    );
-    assert!(driver.latest_video_frame(555, true).is_some());
-    driver.leave_group_call().expect("leave");
+    handle.emit_live_frame(LiveKey::Local { call_id: 555 }, planes());
+    let local = driver
+        .live_sink(LiveKey::Local { call_id: 555 })
+        .expect("feed");
+    assert!(local.latest().is_some());
     assert!(driver.latest_video_frame(555, true).is_none());
+    let camera = driver.live_sink(video(42, false)).expect("feed");
+    assert!(camera.latest().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Phase C2g: leaving tears the native transport down and drops the
-/// retained frames.
+/// Slice calls-group-self-tile: leaving the group call ends the self
+/// tile's feed along with the participants'.
+#[test]
+fn group_call_leave_ends_the_local_feed() {
+    let (dir, mut driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
+    handle.emit_live_frame(LiveKey::Local { call_id: 555 }, planes());
+    let local = driver
+        .live_sink(LiveKey::Local { call_id: 555 })
+        .expect("feed");
+    driver.leave_group_call().expect("leave");
+    assert_eq!(local.snapshot().end, Some(LiveEnd::Left));
+    assert!(driver.live_sink(LiveKey::Local { call_id: 555 }).is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Phase C2g: leaving tears the native transport down and ends the
+/// call's feeds.
 #[test]
 fn group_call_leave_tears_down_transport_and_frames() {
     let (dir, mut driver, _recorder, mut handle, _sink, _seq) = ready_group_call_driver();
-    handle.emit_video_frame(
-        555,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: false,
-            participant_user_id: Some(42),
-            is_screen: false,
-        },
-    );
-    assert!(driver.latest_group_video_frame(555, 42, false).is_some());
+    handle.emit_live_frame(video(42, false), planes());
+    let camera = driver.live_sink(video(42, false)).expect("feed");
+    assert!(camera.latest().is_some());
     // Review fix: a live presentation is stopped before the call
     // (privacy — capture ends first).
     handle.start_screen_share(555).expect("mock presentation");
     driver.leave_group_call().expect("leave");
     assert_eq!(handle.group_leaves(), vec![555]);
     assert_eq!(handle.screen_share_stops(), vec![555]);
-    assert!(driver.latest_group_video_frame(555, 42, false).is_none());
+    assert_eq!(camera.snapshot().end, Some(LiveEnd::Left));
+    assert!(driver.live_sink(video(42, false)).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

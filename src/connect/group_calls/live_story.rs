@@ -4,7 +4,7 @@
 //! (tdesktop `Messages::reactionsPaidAdd`, `kPaidAccumulatePeriod`).
 //! Nothing here spends Stars unless the viewer asked for it.
 use super::*;
-use crate::calls::engine::VideoFrame;
+use crate::calls::live_video::LiveKey;
 use crate::live_story::{PendingLiveReaction, comment_text};
 use crate::paid_reaction::Refusal;
 use crate::state::{LiveStoryPurpose, StoriesPurpose};
@@ -14,7 +14,6 @@ use crate::telegram::requests::{
     get_live_story_available_message_senders, get_live_story_streamer, get_live_story_top_donors,
     remove_pending_live_story_reactions, send_live_story_comment, set_live_story_message_sender,
 };
-use std::sync::Arc;
 
 impl<S: JsonSender> ConnectDriver<S> {
     fn live_story_request(
@@ -369,51 +368,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         left
     }
 
-    /// Where the live story's picture comes from: the stream slot of the
-    /// poster's chat for an MTProto or RTMP stream, else the streamer's
-    /// camera (or screen) among the call's video.
-    fn live_story_picture_source(&self) -> Option<LivePictureSource> {
+    /// The feed the live story's picture comes from: the stream feed of
+    /// the poster's chat for an MTProto or RTMP stream, else the
+    /// streamer's camera (or screen) among the call's video.
+    pub fn live_story_live_key(&self) -> Option<LiveKey> {
         let live = self.session.stories.live.as_ref()?;
         let call = self.watched_live_call()?;
         if call.stream_mode.is_stream() {
-            return Some(LivePictureSource::Stream(live.chat_id));
+            return Some(LiveKey::Stream {
+                chat_id: live.chat_id,
+            });
         }
         let streamer = live.streamer.as_ref()?;
-        let key = match streamer.participant_id {
+        let user_id = match streamer.participant_id {
             MessageSender::User { user_id } => user_id,
             MessageSender::Chat { chat_id } => chat_id,
         };
         let screen = streamer.video_info.is_none() && streamer.screen_sharing_video_info.is_some();
-        Some(LivePictureSource::Video(call.id, key, screen))
+        Some(LiveKey::Video {
+            call_id: call.id,
+            user_id,
+            screen,
+        })
     }
-
-    /// The sequence number of the live story's newest picture, so the
-    /// viewer copies a picture only when it changed.
-    pub fn live_story_frame_seq(&self) -> Option<u64> {
-        match self.live_story_picture_source()? {
-            LivePictureSource::Stream(chat_id) => self.latest_stream_frame_seq(chat_id),
-            LivePictureSource::Video(call, key, screen) => self
-                .group_video_frame_slots
-                .lock_or_recover()
-                .get(&(call, key, screen))
-                .map(|frame| frame.seq),
-        }
-    }
-
-    /// The live story's newest picture and the slot key it is shown under.
-    pub fn live_story_frame(&self) -> Option<Arc<VideoFrame>> {
-        match self.live_story_picture_source()? {
-            LivePictureSource::Stream(chat_id) => self.latest_stream_frame(chat_id),
-            LivePictureSource::Video(call, key, screen) => self
-                .group_video_frame_slots
-                .lock_or_recover()
-                .get(&(call, key, screen))
-                .cloned(),
-        }
-    }
-}
-
-enum LivePictureSource {
-    Stream(i64),
-    Video(i32, i64, bool),
 }

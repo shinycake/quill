@@ -26,10 +26,9 @@ pub enum RemoteVideoState {
 /// frame rotation already applied; `is_local` marks the local camera
 /// preview, `false` marks the peer's camera or screen share
 /// (disambiguated by `is_screen`).
-/// Phase C2g: group-call frames carry `participant_user_id` (the TDLib
-/// user id the frame's ssrc was subscribed for); `None` for 1:1 calls
-/// and the local preview. `is_screen` marks frames from a participant's
-/// screen-share stream (`NTG_STREAM_DEVICE_SCREEN`).
+/// `is_screen` marks the peer's screen-share stream
+/// (`NTG_STREAM_DEVICE_SCREEN`). Only 1:1 calls use this: group calls and
+/// streams hand their planes to a live feed ([`crate::calls::live_video`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VideoFrame {
     pub seq: u64,
@@ -37,7 +36,6 @@ pub struct VideoFrame {
     pub height: u16,
     pub rgba: Vec<u8>,
     pub is_local: bool,
-    pub participant_user_id: Option<i64>,
     pub is_screen: bool,
 }
 
@@ -242,8 +240,8 @@ pub(crate) struct CallbackShared {
     pub(crate) stream_chats: Mutex<HashSet<i64>>,
     /// Broadcast timestamp and part requests (stream mode).
     pub(crate) engine_event_hook: Mutex<Option<EngineEventCallback>>,
-    /// Stream-mode pictures, one slot per chat.
-    pub(crate) stream_frame_hook: Mutex<Option<StreamFrameCallback>>,
+    /// Group-call and stream pictures, as I420 planes.
+    pub(crate) live_frame_hook: Mutex<Option<LiveFrameCallback>>,
 }
 
 impl CallbackShared {
@@ -273,7 +271,7 @@ impl CallbackShared {
             group_video_ssrc_to_user: Mutex::new(HashMap::new()),
             stream_chats: Mutex::new(HashSet::new()),
             engine_event_hook: Mutex::new(None),
-            stream_frame_hook: Mutex::new(None),
+            live_frame_hook: Mutex::new(None),
         }
     }
 }

@@ -100,7 +100,7 @@ pub trait CallEngine {
     /// Phase C2g: app -> engine; reconcile the engine's incoming-video
     /// subscriptions with the desired participant set (add new endpoints,
     /// remove stale ones). Frames for subscribed endpoints arrive on the
-    /// video frame hook with `participant_user_id` set.
+    /// live frame hook keyed `LiveKey::Video`.
     fn sync_group_video(
         &mut self,
         group_call_id: i32,
@@ -170,9 +170,9 @@ pub trait CallEngine {
         let _ = callback;
     }
 
-    /// Stream mode: engine -> app; register the hook receiving the picture
-    /// of a stream-mode call, keyed by chat id.
-    fn set_stream_frame_callback(&mut self, callback: StreamFrameCallback) {
+    /// Engine -> app; register the hook receiving group-call and stream
+    /// pictures as I420 planes, keyed by their live feed.
+    fn set_live_frame_callback(&mut self, callback: LiveFrameCallback) {
         let _ = callback;
     }
 

@@ -443,45 +443,35 @@ fn unsupported_code_from_another_operation_is_an_ordinary_error() {
     assert!(err.is_stream_unsupported());
 }
 
+fn planes() -> LiveFrame {
+    LiveFrame::new(0, 2, 2, LiveRotation::None, vec![0; 6], Instant::now()).expect("frame")
+}
+
 #[test]
-fn stream_pictures_land_in_the_chats_stream_slot() {
+fn stream_pictures_land_in_the_chats_stream_feed() {
     let (dir, driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
-    handle.emit_stream_frame(
-        51,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0; 16],
-            is_local: false,
-            participant_user_id: None,
-            is_screen: false,
-        },
-    );
-    let frame = driver.latest_stream_frame(51).expect("stream frame");
+    let sink = driver
+        .live_sink(LiveKey::Stream { chat_id: 51 })
+        .expect("the feeder opened a feed");
+    handle.emit_live_frame(LiveKey::Stream { chat_id: 51 }, planes());
+    let frame = sink.take().expect("stream frame");
     assert_eq!((frame.width, frame.height), (2, 2));
-    assert!(driver.latest_stream_frame(52).is_none());
+    assert!(driver.live_sink(LiveKey::Stream { chat_id: 52 }).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn a_picture_after_leaving_does_not_bring_the_slot_back() {
+fn a_picture_after_leaving_does_not_bring_the_feed_back() {
     let (dir, mut driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
+    let sink = driver
+        .live_sink(LiveKey::Stream { chat_id: 51 })
+        .expect("feed");
     driver.leave_group_call().expect("leave");
+    assert_eq!(sink.snapshot().end, Some(LiveEnd::Left));
     // ntgcalls can still deliver a frame between the drain and the stop.
-    handle.emit_stream_frame(
-        51,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0; 16],
-            is_local: false,
-            participant_user_id: None,
-            is_screen: false,
-        },
-    );
-    assert!(driver.latest_stream_frame(51).is_none());
+    handle.emit_live_frame(LiveKey::Stream { chat_id: 51 }, planes());
+    assert!(driver.live_sink(LiveKey::Stream { chat_id: 51 }).is_none());
+    assert!(sink.take().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -510,30 +500,23 @@ fn viewer_count_follows_participant_count() {
 #[test]
 fn the_newest_picture_is_known_by_its_sequence() {
     let (dir, driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
-    assert_eq!(driver.latest_stream_frame_seq(51), None);
+    let sink = driver
+        .live_sink(LiveKey::Stream { chat_id: 51 })
+        .expect("feed");
+    assert!(sink.latest().is_none());
     let mut seqs = Vec::new();
     for _ in 0..2 {
-        handle.emit_stream_frame(
-            51,
-            VideoFrame {
-                seq: 0,
-                width: 2,
-                height: 2,
-                rgba: vec![0; 16],
-                is_local: false,
-                participant_user_id: None,
-                is_screen: false,
-            },
-        );
+        handle.emit_live_frame(LiveKey::Stream { chat_id: 51 }, planes());
         // The engine numbers its pictures.
-        seqs.push(driver.latest_stream_frame(51).map(|frame| frame.seq));
+        seqs.push(sink.latest().map(|frame| frame.seq));
     }
     assert_ne!(seqs.first(), seqs.get(1), "each picture has its own number");
+    // Only the newest is kept: the first was replaced before it was shown.
+    assert_eq!(sink.snapshot().dropped, 1);
     assert_eq!(
-        driver.latest_stream_frame_seq(51),
+        sink.take().map(|frame| frame.seq),
         seqs.get(1).copied().flatten()
     );
-    assert_eq!(driver.latest_stream_frame_seq(52), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -544,9 +544,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.leave_group_call(group_call_id);
         }
-        self.group_video_frame_slots
-            .lock_or_recover()
-            .retain(|(slot_call_id, _, _), _| *slot_call_id != group_call_id);
+        self.close_call_feeds(group_call_id);
         // Slice calls-group-self-tile: the self tile lives in the
         // shared (call id, is_local) slots — clear it too.
         self.video_frame_slots

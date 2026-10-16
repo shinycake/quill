@@ -6,7 +6,7 @@ use super::*;
 use crate::calls::engine::{
     BroadcastPartAnswer, BroadcastPartStatus, CallEngine, EngineEvent, GroupCallMode, ReplyOutcome,
     SegmentFetch, StreamFeeder, StreamFetchError, StreamPort, StreamQualityTracker, StreamReply,
-    StreamState, VideoFrame,
+    StreamState,
 };
 use crate::state::Session;
 use crate::telegram::envelope::{CallsPayload, Envelope, EnvelopePayload, ErrorClass, TdError};
@@ -19,8 +19,9 @@ use std::time::Instant;
 /// Events handled per poll, so a burst never stalls the UI thread.
 const EVENTS_PER_TICK: usize = 64;
 
-/// The driver's stream-mode state: the event queue from the engine, a
-/// feeder per stream chat and the latest stream picture per chat.
+/// The driver's stream-mode state: the event queue from the engine and a
+/// feeder per stream chat (the pictures go to live feeds,
+/// `live_feeds.rs`).
 ///
 /// The queue is unbounded on purpose. ntgcalls never asks again for a
 /// request nobody answered: a part stays Downloading until its answer, and
@@ -33,10 +34,6 @@ pub(crate) struct GroupCallStreams {
     events_rx: Mutex<Receiver<EngineEvent>>,
     feeders: HashMap<i64, StreamFeeder>,
     quality: HashMap<i64, StreamQualityTracker>,
-    /// One slot per chat with a live feeder. The engine hook only fills
-    /// an existing slot, so a picture that arrives between the drain and
-    /// the native stop is dropped instead of bringing the slot back.
-    frames: Arc<Mutex<HashMap<i64, Option<Arc<VideoFrame>>>>>,
 }
 
 impl Default for GroupCallStreams {
@@ -47,7 +44,6 @@ impl Default for GroupCallStreams {
             events_rx: Mutex::new(events_rx),
             feeders: HashMap::new(),
             quality: HashMap::new(),
-            frames: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -137,33 +133,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 eprintln!("quill: stream request after the driver closed; ignored");
             }
         }));
-        let frames = self.group_call_streams.frames.clone();
-        engine.set_stream_frame_callback(Arc::new(move |chat_id, frame| {
-            if let Some(slot) = frames.lock_or_recover().get_mut(&chat_id) {
-                // Shared, not copied: the window converts it off the UI
-                // thread while the next picture replaces it here.
-                *slot = Some(Arc::new(frame));
-            }
-        }));
-    }
-
-    /// The newest picture of the stream-mode call in `chat_id`.
-    pub fn latest_stream_frame(&self, chat_id: i64) -> Option<Arc<VideoFrame>> {
-        self.group_call_streams
-            .frames
-            .lock_or_recover()
-            .get(&chat_id)
-            .and_then(Clone::clone)
-    }
-
-    /// The sequence number of the newest picture in `chat_id`'s stream
-    /// slot, so the window copies a picture only when it changed.
-    pub fn latest_stream_frame_seq(&self, chat_id: i64) -> Option<u64> {
-        self.group_call_streams
-            .frames
-            .lock_or_recover()
-            .get(&chat_id)
-            .and_then(|frame| frame.as_ref().map(|frame| frame.seq))
     }
 
     /// An RTMP join answer carries the stream's server URL and key when you
@@ -235,10 +204,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.group_call_streams
             .feeders
             .insert(chat_id, StreamFeeder::new(group_call_id, chat_id));
-        self.group_call_streams
-            .frames
-            .lock_or_recover()
-            .insert(chat_id, None);
+        self.open_stream_feed(chat_id);
     }
 
     /// `ntg_connect` refused the stream: a fatal join error shown as the
@@ -285,10 +251,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             feeder.drain(&mut port);
             self.group_call_streams.quality.remove(&chat_id);
-            self.group_call_streams
-                .frames
-                .lock_or_recover()
-                .remove(&chat_id);
+            self.close_stream_feed(chat_id);
         }
     }
 
@@ -444,14 +407,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !call.stream_mode.is_stream() || call.stream == StreamState::Unsupported {
             return;
         }
-        if let Some(feeder) = self
+        let Some(feeder) = self
             .group_call_streams
             .feeders
             .values()
             .find(|feeder| feeder.group_call_id() == call.id)
-        {
-            call.stream = feeder.stream_state();
-        }
+        else {
+            return;
+        };
+        call.stream = feeder.stream_state();
+        let (chat_id, state) = (feeder.chat_id(), call.stream);
+        self.sync_stream_feed(chat_id, state);
     }
 }
 
