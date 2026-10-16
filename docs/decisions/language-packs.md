@@ -456,6 +456,15 @@ playback, the player bar and playlists, the video editor, and group calls
 `group_call_panel.rs` and `group_call_window.rs` stay in the baseline
 until the live story viewer (#852) merges, since it changes both.
 
+## PR 17: the last group call files
+
+`group_call_panel.rs` and `group_call_window.rs` are converted now that
+the live story viewer merged, so the strings check baseline has no group
+call entries left. This PR ticks `parity:appearance-localization`. What
+stays English is listed in the baseline: page ids in `navigation.rs` that
+look like text, and a few strings in files where the text is data rather
+than interface copy.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),
