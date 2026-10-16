@@ -23,7 +23,7 @@ pub(in crate::ui) fn session_history_row(
     // Seek-bar view for audio/voice rows (`None` for other content).
     seek_bar: Option<SeekBarView>,
     animation_playing: bool,
-    animation_frame: Option<Arc<RenderImage>>,
+    gif_play: Option<crate::ui::gif_clip::GifPlay>,
     sticker_frame: Option<super::super::sticker_playback::AnimatedVisual>,
     // A slot machine's five layers, bottom to top (empty for other rows).
     dice_layers: Vec<Option<super::super::sticker_playback::AnimatedVisual>>,
@@ -424,7 +424,7 @@ pub(in crate::ui) fn session_history_row(
             downloading,
             media_roots,
             animation_playing,
-            animation_frame,
+            gif_play,
             inline,
             None,
             Some((message.chat_id, message.id)),

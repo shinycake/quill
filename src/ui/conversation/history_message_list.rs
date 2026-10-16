@@ -272,19 +272,11 @@ impl QuillApp {
                             _ => None,
                         };
                         let animation_playing = self.playback.playing_animation == Some(message.id);
-                        let animation_frame = if animation_playing {
-                            if self
-                                .playback
-                                .gif
-                                .as_ref()
-                                .is_some_and(|clip| !clip.is_still())
-                            {
-                                self.request_animation_tick(30, cx);
-                            }
-                            self.playback.gif_frame()
-                        } else {
-                            None
-                        };
+                        // Drawn at its own cadence by the row (and its
+                        // animation layer) while the row renders.
+                        let animation = animation_playing
+                            .then(|| self.playback.gif_play())
+                            .flatten();
                         let row_day_label = day_label(message.date);
                         let row_unread_divider = first_unread(&message);
                         rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
@@ -310,7 +302,7 @@ impl QuillApp {
                             via_bot: session.and_then(|s| s.via_bot_label(&message)),
                             seek_bar,
                             animation_playing,
-                            animation_frame,
+                            animation,
                             is_secret,
                             vanishing: self.vanish_progress(message.id),
                             message,
@@ -337,7 +329,7 @@ impl QuillApp {
                     via_bot: None,
                     seek_bar: None,
                     animation_playing: false,
-                    animation_frame: None,
+                    animation: None,
                     is_secret: false,
                     vanishing: None,
                     message,

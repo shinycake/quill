@@ -184,7 +184,8 @@ pub(in crate::ui) fn animation_attachment(
     downloading: &std::collections::HashSet<i32>,
     media_roots: &[PathBuf],
     playing: bool,
-    frame: Option<Arc<RenderImage>>,
+    // The `image/gif` file looping in the row (`gif_clip`).
+    gif: Option<crate::ui::gif_clip::GifPlay>,
     inline: Option<crate::ui::inline_video::InlineFrame>,
     sponsored: Option<(ChatId, i64)>,
     // `(chat_id, message_id)` when a click should open the fullscreen
@@ -204,34 +205,30 @@ pub(in crate::ui) fn animation_attachment(
     } else {
         tr(keys::Q_MISC_PLAY)
     };
-    let visual = if playing {
-        frame.map(ImageSource::Render)
-    } else {
-        None
-    };
-    let visual = visual.or_else(|| {
-        [thumb_id, play_id].into_iter().find_map(|id| {
-            if id.0 == 0 {
-                return None;
-            }
-            files
-                .get(&id.0)
-                .and_then(|file| file.usable_path())
-                .and_then(|path| sandboxed_display_path(path, media_roots))
-                .map(|path| {
-                    crate::ui::image_budget::sized_media(
-                        &path,
-                        media_frame_for(
-                            MediaFrameKind::Gif,
-                            animation.width,
-                            animation.height,
-                            caption_width,
-                        ),
-                        Some((animation.width, animation.height)),
-                        crate::ui::image_budget::Fit::Cover,
-                    )
-                })
-        })
+    let gif = gif.filter(|_| playing);
+    // The GIF and the controls over it are drawn by the animation layer.
+    let gif_live = gif.is_some() && !(animation.is_secret || animation.has_spoiler);
+    let visual = [thumb_id, play_id].into_iter().find_map(|id| {
+        if id.0 == 0 {
+            return None;
+        }
+        files
+            .get(&id.0)
+            .and_then(|file| file.usable_path())
+            .and_then(|path| sandboxed_display_path(path, media_roots))
+            .map(|path| {
+                crate::ui::image_budget::sized_media(
+                    &path,
+                    media_frame_for(
+                        MediaFrameKind::Gif,
+                        animation.width,
+                        animation.height,
+                        caption_width,
+                    ),
+                    Some((animation.width, animation.height)),
+                    crate::ui::image_budget::Fit::Cover,
+                )
+            })
     });
     let downloading_now = file_is_downloading(play_id, files, downloading)
         || file_is_downloading(thumb_id, files, downloading);
@@ -274,6 +271,47 @@ pub(in crate::ui) fn animation_attachment(
                 .child(gif_badge())
                 .into_any_element()
         })
+    } else if !blocked && let Some(gif) = gif {
+        // The looping GIF: drawn by the conversation's animation layer at
+        // its own frame cadence while the row renders, the slice keeping
+        // the picture it rendered with underneath. The badge and the Pause
+        // disc (shown on hover; the row's own disc under it takes the
+        // click) ride with it, since the layer paints over the row.
+        let draw = move |frame: Arc<RenderImage>| {
+            div()
+                .relative()
+                .w(frame_w)
+                .h(frame_h)
+                .child(
+                    img(ImageSource::Render(frame))
+                        .w(frame_w)
+                        .h(frame_h)
+                        .map(|this| corners.round(this))
+                        .object_fit(ObjectFit::Cover),
+                )
+                .child(gif_badge())
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            media_disc(("gif-disc-shown", row_id), MediaDisc::Pause)
+                                .invisible()
+                                .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible()),
+                        ),
+                )
+                .into_any_element()
+        };
+        let under = match gif.frame_now() {
+            Some(frame) => draw(frame),
+            None => visual.map_or_else(|| div().into_any_element(), still),
+        };
+        let fps = gif.fps();
+        crate::ui::anim_layer::tile(under, fps, move || gif.frame_now().map(draw))
+            .into_any_element()
     } else if !blocked && let Some(path) = visual {
         still(path)
     } else {
@@ -316,7 +354,7 @@ pub(in crate::ui) fn animation_attachment(
                 )
                 .group(MEDIA_VISUAL_GROUP)
                 .child(picture)
-                .when(!live, |this| this.child(gif_badge()))
+                .when(!live && !gif_live, |this| this.child(gif_badge()))
                 // Autoplaying GIFs show no play control (Telegram Desktop).
                 .when(!blocked && !live, |this| {
                     this.child(
@@ -331,9 +369,14 @@ pub(in crate::ui) fn animation_attachment(
                                     .role(gpui_kit::Role::Button)
                                     .aria_label(play_label)
                                     .cursor_pointer()
-                                    .when(playing, |disc| {
-                                        disc.invisible()
-                                            .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible())
+                                    .map(|disc| match (playing, gif_live) {
+                                        // Drawn with the GIF; this one
+                                        // only takes the click.
+                                        (true, true) => disc.opacity(0.),
+                                        (true, false) => disc
+                                            .invisible()
+                                            .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible()),
+                                        (false, _) => disc,
                                     })
                                     // Press on the disc must not start the frame's click (open viewer).
                                     .swallow_press()
