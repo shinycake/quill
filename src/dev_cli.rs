@@ -11,6 +11,12 @@ pub fn exit_code(args: &[String]) -> Option<i32> {
             args.get(2).is_some_and(|a| a == "login"),
         ));
     }
+    if args.get(1).is_some_and(|a| a == "--embedded-credentials") {
+        // Release pipeline check; prints only whether a pair is embedded.
+        let embedded = crate::credentials::has_embedded();
+        println!("{}", if embedded { "embedded" } else { "none" });
+        return Some(0);
+    }
     if args.iter().skip(1).any(|a| a == "--connect-smoke") {
         return Some(crate::connect_smoke::cli_exit_code());
     }

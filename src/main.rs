@@ -76,12 +76,6 @@ fn main() {
         println!("{}", if cfg!(feature = "ui") { "ui" } else { "core" });
         return;
     }
-    if args.get(1).is_some_and(|a| a == "--embedded-credentials") {
-        // Release pipeline check; prints only whether a pair is embedded.
-        let embedded = quill::credentials::has_embedded();
-        println!("{}", if embedded { "embedded" } else { "none" });
-        return;
-    }
     if args.get(1).is_some_and(|a| a == "--apply-update") {
         let result = args
             .get(2)
@@ -169,6 +163,9 @@ fn ui_main(args: &[String]) {
     if forwarded_to_running_instance(args) || quill::start_files::quit_requested(args) {
         return;
     }
+
+    // Crash handlers go in before GPUI, AppKit and TDLib start (crash_log).
+    quill::crash_log::begin_app_run();
 
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
