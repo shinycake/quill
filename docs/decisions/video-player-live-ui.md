@@ -107,7 +107,8 @@ Decisions:
 - No stream volume slider: mute stays, through
   `set_group_call_playback_muted`. `LiveFacts.volume` is in place, so
   the slider appears as soon as an engine can set the level.
-  `parity:calls-rtmp-volume` stays open.
+  Superseded: `stream-volume.md` plays the stream through Quill's own
+  output with a gain, and the slider is in.
 - Video chats: the stage slider sends
   `setGroupCallParticipantVolumeLevel` on release, which is the same
   request as the participant menu's volume steps. TDLib applies it for
@@ -174,7 +175,8 @@ shows the controls again; the cursor must not flash off in between.
   palette's red-600 in both themes (white text at about 4.8:1).
 - M and F keys: tdesktop's RTMP panel has no M or F keys. The design
   asks for them. Esc and the full-screen button behave as before.
-- No stream volume slider: see "The volume finding".
+- No stream volume slider: see "The volume finding", superseded by
+  `stream-volume.md`.
 - Ended overlay: the stream window and the live story still close
   when the call ends, as tdesktop does, so the Ended plate shows only
   between the feed ending and the call ending.
@@ -251,4 +253,5 @@ shows the controls again; the cursor must not flash off in between.
 `parity:calls-rtmp-window-polish`: the cursor now hides with the
 controls in full screen, and the letter avatar for a chat with no photo
 was already in place (`stream_view.rs` `placeholder`).
-`parity:calls-rtmp-volume` stays open.
+`parity:calls-rtmp-volume` stayed open here and closes in
+`stream-volume.md`.
