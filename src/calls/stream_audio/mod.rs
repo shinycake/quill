@@ -120,9 +120,10 @@ pub fn mix<'a>(frames: impl IntoIterator<Item = &'a [u8]>) -> Vec<i16> {
             sum.resize(samples, 0);
         }
         let decoded = frame
-            .chunks_exact(2)
-            .filter_map(|pair| <[u8; 2]>::try_from(pair).ok())
-            .map(i16::from_ne_bytes);
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| i16::from_ne_bytes(*pair));
         for (acc, sample) in sum.iter_mut().zip(decoded) {
             *acc = acc.saturating_add(i32::from(sample));
         }

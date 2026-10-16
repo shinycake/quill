@@ -71,7 +71,7 @@ mod tests {
         let start = Instant::now();
         let mut watch = PlaybackWatch::default();
         assert_eq!(watch.observe(start, Live, SILENT), None);
-        let almost = start + NO_SOUND_LIMIT - Duration::from_millis(1);
+        let almost = start + Duration::from_millis(4_999);
         assert_eq!(watch.observe(almost, Live, SILENT), None);
         assert_eq!(
             watch.observe(start + NO_SOUND_LIMIT, Live, SILENT),

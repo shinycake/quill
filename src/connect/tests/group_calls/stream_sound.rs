@@ -66,7 +66,7 @@ fn a_live_stream_without_sound_falls_back_after_five_seconds_once() {
     set_stream_state(&mut driver, StreamState::Live);
     let live = start + Duration::from_secs(31);
     driver.request_tick(live);
-    driver.request_tick(live + NO_SOUND_LIMIT - Duration::from_millis(1));
+    driver.request_tick(live + Duration::from_millis(4_999));
     assert!(handle.device_playbacks().is_empty());
     driver.request_tick(live + NO_SOUND_LIMIT);
     assert_eq!(handle.device_playbacks(), vec![555]);
