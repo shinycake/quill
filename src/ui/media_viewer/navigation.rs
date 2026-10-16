@@ -229,6 +229,17 @@ impl QuillApp {
         }
     }
 
+    /// A click on the black around the media. In video full screen it is
+    /// part of the picture (tdesktop forces `Over::Video` there), so it
+    /// toggles play instead of closing.
+    pub(in crate::ui) fn viewer_backdrop_click(&mut self, cx: &mut Context<Self>) {
+        if self.viewer.extra.video_fullscreen.is_on() {
+            self.toggle_viewer_video(cx);
+        } else {
+            self.close_media_viewer(cx);
+        }
+    }
+
     pub(in crate::ui) fn close_media_viewer(&mut self, cx: &mut Context<Self>) {
         self.viewer_leave_video_fullscreen();
         self.stop_viewer_video();

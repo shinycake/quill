@@ -914,7 +914,11 @@ enum InlineAction {
 }
 
 mod link_preview_tile;
+mod measure;
+pub(in crate::ui) use measure::{RichTextSource, measure_rich_text};
 mod of;
+mod paragraph;
+use paragraph::{ParagraphText, paragraph_text};
 mod rich_text_reserving;
 #[allow(unused_imports)]
 pub use rich_text_reserving::*;

@@ -391,6 +391,8 @@ impl QuillApp {
                     .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
                         if event.click_count() >= 2 {
                             this.viewer_reset_zoom(cx);
+                        } else if this.viewer.extra.video_fullscreen.is_on() {
+                            this.toggle_viewer_video(cx);
                         }
                     }))
                     // The media itself never closes the viewer.
@@ -506,7 +508,7 @@ impl QuillApp {
                 can_report,
                 profile_view,
             };
-            self.viewer_chrome(&item, facts, geometry, (&files, &roots), window, cx)
+            self.viewer_chrome(&item, facts, geometry, window, cx)
         });
         let open_gen = self.viewer.open_gen as usize;
         let viewport = window.viewport_size();
@@ -524,7 +526,7 @@ impl QuillApp {
                         this.viewer_note_activity(false, cx);
                     }))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_media_viewer(cx);
+                        this.viewer_backdrop_click(cx);
                     })),
             )
         } else {

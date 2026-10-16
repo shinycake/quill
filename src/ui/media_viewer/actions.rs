@@ -482,6 +482,25 @@ impl QuillApp {
         })
     }
 
+    /// The controls finished fading out: from then on they take no pointer
+    /// input (`viewer_chrome` leaves them out).
+    pub(super) fn viewer_controls_gone(&self) -> bool {
+        self.viewer.controls_hidden
+            && self.viewer.controls_hidden_at.elapsed()
+                >= Duration::from_millis(controls_fade_ms(true))
+    }
+
+    /// Draw again once the fade-out ends, so the faded controls drop out.
+    fn redraw_viewer_after_fade(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(controls_fade_ms(true)))
+                .await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+    }
+
     /// Mouse moved over the viewer: show the controls and restart the
     /// 1100 ms idle clock (tdesktop `mediaviewWaitHide`). `over_controls`
     /// keeps them up while the pointer rests on one.
@@ -511,7 +530,9 @@ impl QuillApp {
                         let held = this.viewer.over_controls || this.viewer.controls.dragging();
                         if !done && controls_should_hide(idle, held) {
                             this.viewer.controls_hidden = true;
+                            this.viewer.controls_hidden_at = std::time::Instant::now();
                             this.viewer.controls_gen += 1;
+                            this.redraw_viewer_after_fade(cx);
                             cx.notify();
                         } else if !done {
                             return Some(if held {

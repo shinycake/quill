@@ -1,9 +1,9 @@
 //! MED1: viewer seek, keyboard, full screen, speed and volume, media
 //! preferences, the media-session tick, and zoom/pan.
 
-use super::fullscreen::VideoFullscreen;
 use super::*;
 use quill::lang::{keys, tr, tr_with};
+use std::time::Instant;
 
 impl QuillApp {
     /// MED1: `SliderEvent` sink for the viewer video seek slider. Drag
@@ -114,7 +114,11 @@ impl QuillApp {
         if self.viewer.extra.video_fullscreen.is_on() {
             self.viewer_leave_video_fullscreen();
         } else {
-            let (mode, toggle) = VideoFullscreen::enter(window.is_fullscreen());
+            let (mode, toggle) = self
+                .viewer
+                .extra
+                .video_fullscreen
+                .enter(window.is_fullscreen());
             if toggle {
                 window.toggle_fullscreen();
             }
@@ -126,7 +130,8 @@ impl QuillApp {
     /// Leave video full screen; the window returns to windowed on the next
     /// frame unless it was full screen before.
     pub(in crate::ui) fn viewer_leave_video_fullscreen(&mut self) {
-        self.viewer.extra.video_fullscreen = self.viewer.extra.video_fullscreen.leave();
+        self.viewer.extra.video_fullscreen =
+            self.viewer.extra.video_fullscreen.leave(Instant::now());
     }
 
     /// Keep video full screen and the window in step, once a frame: give
@@ -137,7 +142,7 @@ impl QuillApp {
             .viewer
             .extra
             .video_fullscreen
-            .follow_window(window.is_fullscreen());
+            .follow_window(window.is_fullscreen(), Instant::now());
         self.viewer.extra.video_fullscreen = mode;
         if toggle {
             window.toggle_fullscreen();

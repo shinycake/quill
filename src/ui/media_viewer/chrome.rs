@@ -11,6 +11,9 @@ use crate::ui::video_player::controls::hide_cursor;
 use quill::lang::{keys, tr};
 use quill::media_viewer::ViewerTtl;
 
+/// The full screen scrim's height: the controller and a band above it.
+const FULLSCREEN_SCRIM: f32 = 160.0;
+
 /// What the media box already worked out that the chrome needs too.
 pub(super) struct ChromeFacts {
     pub(super) row_id: u64,
@@ -30,7 +33,6 @@ impl QuillApp {
         item: &MediaViewerItem,
         facts: ChromeFacts,
         geometry: ViewerGeometry,
-        (files, roots): (&HashMap<i32, ParsedFile>, &[PathBuf]),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -102,17 +104,7 @@ impl QuillApp {
         };
         // Custom emoji in the caption render like they do in message text:
         // the resolved sticker images, the span text until they are.
-        let caption_emoji = self
-            .session()
-            .map(|session| {
-                custom_emoji_paths(
-                    &item.caption_entities,
-                    &session.stickers.emoji.custom_emoji_stickers,
-                    files,
-                    roots,
-                )
-            })
-            .unwrap_or_default();
+        let caption_emoji = self.viewer_caption_emoji(item);
         let caption: Option<AnyElement> = geometry.caption.is_some().then(|| {
             rich_text_line(
                 &item.caption,
@@ -372,6 +364,14 @@ impl QuillApp {
         let fit = geometry.fit;
         let arrow_top = px(fit.origin.1 + fit.size.1 / 2.0 - 24.0);
         let mut parts: Vec<AnyElement> = Vec::new();
+        // Faded out, the controls stop taking the pointer: clicks, wheel
+        // and double-clicks reach the media under them.
+        if self.viewer_controls_gone() {
+            parts.extend(ttl_badge);
+            parts.extend(saved_toast);
+            parts.push(key_focus);
+            return parts;
+        }
         if !fullscreen {
             parts.push(
                 fade_controls(top_bar, "viewer-top-fade", fade_gen, hidden).into_any_element(),
@@ -413,10 +413,49 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
+        let error = self
+            .playback
+            .error
+            .clone()
+            .filter(|_| !is_video)
+            .map(|err| {
+                let can_open = item.kind.is_playable() && has_local_clip;
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().text_sm().text_color(danger_bright()).child(err))
+                    .when(can_open, |row| {
+                        row.child(
+                            Button::new(("media-viewer-open-externally", row_id))
+                                .label(tr(keys::Q_AV_OPEN_EXTERNALLY))
+                                .ghost()
+                                .text_color(gpui_kit::white())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.open_viewer_clip_externally(cx);
+                                })),
+                        )
+                    })
+                    .into_any_element()
+            });
+        // Only the rows themselves take the pointer, not the band around
+        // them, so the picture under the bar stays clickable.
+        let rows = [
+            ("media-viewer-caption-row", caption),
+            ("media-viewer-error-row", error),
+            ("media-viewer-controls-row", transport),
+        ]
+        .into_iter()
+        .filter_map(|(id, row)| {
+            row.map(|row| {
+                div()
+                    .id(id)
+                    .on_mouse_move(over_controls(cx))
+                    .occlude()
+                    .child(row)
+            })
+        });
         let bottom_bar = div()
-            .id("media-viewer-bottom-bar")
-            .on_mouse_move(over_controls(cx))
-            .occlude()
             .absolute()
             .left_0()
             .right_0()
@@ -427,41 +466,24 @@ impl QuillApp {
             .flex_col()
             .items_center()
             .gap(px(CAPTION_GAP))
-            .when(fullscreen, |bar| {
-                bar.pt_16().bg(linear_gradient(
+            .children(rows);
+        if fullscreen {
+            // Over the picture, a scrim keeps the controller readable.
+            let scrim = div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(px(FULLSCREEN_SCRIM))
+                .bg(linear_gradient(
                     180.,
                     linear_color_stop(gpui_kit::black().opacity(0.), 0.),
                     linear_color_stop(gpui_kit::black().opacity(0.6), 1.),
-                ))
-            })
-            .children(caption)
-            // MED1: honest playback error (unsupported format /
-            // player failure) instead of a silent stall.
-            .when_some(
-                self.playback.error.clone().filter(|_| !is_video),
-                |this, err| {
-                    let can_open = item.kind.is_playable() && has_local_clip;
-                    this.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(div().text_sm().text_color(danger_bright()).child(err))
-                            .when(can_open, |row| {
-                                row.child(
-                                    Button::new(("media-viewer-open-externally", row_id))
-                                        .label(tr(keys::Q_AV_OPEN_EXTERNALLY))
-                                        .ghost()
-                                        .text_color(gpui_kit::white())
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.open_viewer_clip_externally(cx);
-                                        })),
-                                )
-                            }),
-                    )
-                },
-            )
-            .children(transport);
+                ));
+            parts.push(
+                fade_controls(scrim, "viewer-scrim-fade", fade_gen, hidden).into_any_element(),
+            );
+        }
         parts.push(
             fade_controls(bottom_bar, "viewer-bottom-fade", fade_gen, hidden).into_any_element(),
         );

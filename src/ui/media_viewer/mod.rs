@@ -8,7 +8,7 @@ const VIEWER_TOP_BAR: f32 = 56.0;
 /// Width kept free on each side of the media for the prev/next arrows.
 const VIEWER_SIDE_LANE: f32 = 80.0;
 use super::message_media::{file_is_downloading, format_bytes, viewer_display_path};
-use super::message_text::{custom_emoji_paths, rich_text_line};
+use super::message_text::rich_text_line;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -43,6 +43,9 @@ mod controller;
 mod files;
 mod files_demo;
 mod fullscreen;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(in crate::ui) use fullscreen::VideoFullscreen;
 mod geometry;
 mod layer;
 mod navigation;

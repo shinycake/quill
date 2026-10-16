@@ -14,6 +14,9 @@
   controller and arrows sit over the picture and fade on idle. While they
   are hidden the cursor hides too (`updateCursor`). `displayPhoto` and
   `displayDocument` leave full screen when another item shows.
+- In full screen `updateOver` treats the whole window as `Over::Video`, so
+  a click anywhere outside the controls plays or pauses. Nothing closes
+  the viewer on a click.
 
 ## What was wrong
 
@@ -40,8 +43,11 @@
 - `geometry.rs` `fit_area` is a pure function of the window size, video or
   photo, the caption plate's height and full screen. In full screen the
   fit area is the whole window.
-- `caption.rs` shapes the caption with `shape_text` at the lane width
-  before anything draws (`CaptionLayout`). The picture makes room for the
+- `caption.rs` shapes the caption at the lane width before anything draws
+  (`CaptionLayout`). `message_text/measure.rs` lays it out with the runs
+  `rich_text_line` draws, which `paragraph.rs` builds for both: bold,
+  italic, code in the monospace font, and custom emoji. Quotes and `pre`
+  blocks add the insets their blocks draw. The picture makes room for the
   plate's real height. What shows under the picture is capped at a
   quarter of the window in whole lines. Text past that scrolls inside the
   plate. Long captions still collapse to two lines with "Show more".
@@ -50,12 +56,24 @@
   becomes `Active` once the window is full screen, and leaving OS full
   screen some other way (the title-bar button, a system shortcut) ends the
   mode. A window that was already full screen stays so when the mode ends.
+  Leaving while the window is still entering moves to `Cancelling`: once
+  the window reports full screen it is toggled back, and if it never does
+  within a second the mode just ends. Entering again while leaving keeps
+  the window Quill made full screen. Each window follows its own state,
+  so a viewer in a chat window tracks that window.
   Showing another item leaves the mode. Changing the video quality keeps
   it.
 - In full screen the top bar and caption are hidden. The arrows and the
   controller sit over the picture, the controller on a black gradient
   scrim so it reads on bright and dark frames. Both fade with the idle
   timer, and the cursor hides with them.
+- In full screen a click on the picture or the black bars plays or
+  pauses, as in tdesktop. Outside full screen a click on the backdrop
+  still closes the viewer.
+- Only the controller, caption and error rows take the pointer. The scrim
+  and the band around the rows take none, and once the fade ends the
+  controls are not drawn, so a click lands on the picture under them.
+  The seek bar's time bubble shows only while the controls are shown.
 
 ## Deviations
 
@@ -71,10 +89,17 @@
 
 - Unit tests: `geometry.rs` (a wrapped caption keeps its height under the
   picture, no caption keeps no room, full screen fills the window),
-  `caption.rs` (shown lines, the collapsed toggle, the quarter-window cap)
-  and `fullscreen.rs` (enter and leave from a windowed or full screen
-  window, leaving OS full screen another way). The GPUI test in
-  `caption_ui_tests.rs` checks the shaped layout of a long caption.
+  `caption.rs` (shown lines, the collapsed toggle, the quarter-window cap),
+  `fullscreen.rs` (enter and leave from a windowed or full screen window,
+  leaving OS full screen another way, leaving while entering, entering
+  while leaving) and `measure.rs` (bold and code runs are measured as
+  drawn). The GPUI test in `caption_ui_tests.rs` checks the shaped layout
+  of a long caption.
+- GPUI tests in `video_player/tests/fullscreen.rs`: full screen fits the
+  picture to the window with no top bar or caption, and Escape leaves
+  full screen before it closes the viewer. A click on the bars in full
+  screen plays or pauses and keeps the viewer open, and a click on the
+  backdrop outside full screen closes it.
 - Demo captures at 1600x1000 before and after: a two-line caption under a
   video, in light and dark; full screen with controls shown and faded on a
   bright and a dark 16:9 clip; a vertical clip pillarboxed in full screen;
@@ -86,8 +111,10 @@
 - Real OS full screen. The captures never enter it, so they show the
   `Entering` state. The transition, and leaving it from the title bar,
   were not run.
-- The caption is shaped as plain text in one font. Quotes, code blocks
-  and custom emoji can lay out taller; the plate then scrolls instead of
-  hiding text.
-- Leaving full screen while the OS is still animating into it.
+- The test text system shapes every run alike, so the GPUI tests cannot
+  see bold or code change a caption's width; `measure.rs` tests the runs
+  instead. Quote and `pre` insets are read off their blocks' styles, not
+  measured. If they are off, the plate scrolls instead of hiding text.
+- `Cancelling` against a real OS animation. The test window enters full
+  screen at once.
 - Cursor hiding, live playback and Linux and Windows.

@@ -135,6 +135,24 @@ impl Render for ViewerVideoLayer {
 }
 
 impl QuillApp {
+    /// Tests: the media's box in the window, and whether the caption takes
+    /// room under it, as the next frame lays them out.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(in crate::ui) fn viewer_media_bounds(
+        &mut self,
+        window: &mut Window,
+        cx: &App,
+    ) -> Option<(Bounds<Pixels>, bool)> {
+        let item = self.viewer.state.current().cloned()?;
+        let geometry = self.viewer_geometry(&item, window, cx);
+        let bounds = Bounds::new(
+            point(px(geometry.origin.0), px(geometry.origin.1)),
+            size(px(geometry.media.0), px(geometry.media.1)),
+        );
+        Some((bounds, geometry.caption.is_some()))
+    }
+
     /// Lay out the media in the window: fit it between the bars and the
     /// shaped caption, and refit the zoom when the box changed (a resized
     /// window, another item). The media box, the chrome and the video
@@ -245,7 +263,7 @@ impl QuillApp {
                         this.viewer_note_activity(false, cx);
                     }))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_media_viewer(cx);
+                        this.viewer_backdrop_click(cx);
                     }))
                     // Fade in over 200 ms when it opens (tdesktop
                     // `mediaviewShowDuration`); closing is instant.

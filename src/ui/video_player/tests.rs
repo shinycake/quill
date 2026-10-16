@@ -411,6 +411,11 @@ mod pip_lifetime;
 #[cfg(feature = "demo-capture")]
 mod live_pip;
 
+/// Video full screen in the viewer: the picture takes the window, a click
+/// on it plays or pauses, Escape leaves before it closes.
+#[cfg(feature = "demo-capture")]
+mod fullscreen;
+
 /// The viewer on a clip that is still opening: the transport shows it,
 /// and closing then drops the player without a crash.
 #[cfg(feature = "demo-capture")]
@@ -451,7 +456,15 @@ mod viewer {
         (app, vcx)
     }
 
-    fn settle(vcx: &mut VisualTestContext) {
+    /// The controls as just after a pointer move. The idle timer runs on
+    /// the wall clock, so on a busy machine they can fade out before a
+    /// frame is drawn, and faded controls are not drawn at all.
+    pub(super) fn wake_controls(app: &mut QuillApp) {
+        app.viewer.last_activity = std::time::Instant::now();
+        app.viewer.controls_hidden = false;
+    }
+
+    pub(super) fn settle(vcx: &mut VisualTestContext) {
         for _ in 0..3 {
             vcx.update(|window, _| window.refresh());
             vcx.run_until_parked();
@@ -578,6 +591,7 @@ mod viewer {
         let (app, mut vcx) = open_scripted(cx, &script);
         let vcx = &mut vcx;
         assert!(app.read_with(vcx, |app, _| app.viewer.video_layer.is_some()));
+        app.update(vcx, |app, _| wake_controls(app));
         let (panel, viewport) = vcx.update(|window, cx| {
             window.render_frame(cx);
             (
@@ -666,7 +680,7 @@ mod viewer {
 
     /// The app in an active, focused window with the viewer open on the
     /// demo clip, played by `script`.
-    fn open_scripted(
+    pub(super) fn open_scripted(
         cx: &mut TestAppContext,
         script: &Rc<RefCell<Script>>,
     ) -> (Entity<QuillApp>, VisualTestContext) {

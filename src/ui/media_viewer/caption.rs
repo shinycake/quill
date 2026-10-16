@@ -22,6 +22,7 @@
 //! at a quarter of the window in whole lines, and scrolls past that.
 
 use super::*;
+use crate::ui::message_text::{RichTextSource, custom_emoji_paths, measure_rich_text};
 use crate::ui::motion::Glide;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use quill::lang::{keys, tr};
@@ -83,12 +84,13 @@ pub(super) struct CaptionLayout {
     pub(super) plate_h: f32,
 }
 
-/// Lay out `lines` lines of `line_h` whose widest is `text_w`, in a window
+/// Lay out text `content_h` tall in lines of `line_h`, whose widest line
+/// is `text_w`, in a window
 /// `viewport_h` tall (`rem`: the root font size the plate's padding and
 /// toggle are sized in). tdesktop `refreshCaptionGeometry`: at most a
 /// quarter of the window, in whole lines.
 pub(super) fn caption_layout(
-    lines: usize,
+    content_h: f32,
     line_h: f32,
     text_w: f32,
     viewport_h: f32,
@@ -99,7 +101,11 @@ pub(super) fn caption_layout(
     } else {
         0.
     };
-    let content_h = lines as f32 * line_h;
+    let content_h = if content_h.is_finite() {
+        content_h.max(0.)
+    } else {
+        0.
+    };
     let cut = overflows(content_h, line_h);
     let wanted = if cut {
         collapsed_height(line_h)
@@ -182,9 +188,10 @@ impl QuillApp {
         true
     }
 
-    /// The caption of `item` shaped as the plate draws it: the theme font
-    /// at the message font size, wrapped at `max_w` less the plate's
-    /// padding. `None` without a caption.
+    /// The caption of `item` laid out as the plate draws it
+    /// (`rich_text_line` in the theme font at the message font size),
+    /// wrapped at `max_w` less the plate's padding. `None` without a
+    /// caption.
     pub(super) fn viewer_caption_layout(
         &self,
         item: &MediaViewerItem,
@@ -197,44 +204,49 @@ impl QuillApp {
         }
         let size = self.msg_font();
         let rem = f32::from(window.rem_size());
-        let style = window.text_style();
+        let mut style = window.text_style();
+        style.font_family = cx.theme().font_family.clone();
+        style.font_size = size.into();
         let line_h = f32::from(
             style
                 .line_height
                 .to_pixels(size.into(), window.rem_size())
                 .round(),
         );
-        let mut font = style.font();
-        font.family = cx.theme().font_family.clone();
-        let run = TextRun {
-            len: item.caption.len(),
-            font,
-            color: style.color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
+        let emoji_paths = self.viewer_caption_emoji(item);
+        let source = RichTextSource {
+            text: &item.caption,
+            entities: &item.caption_entities,
+            msg_key: (item.chat_id.0, item.message_id.0 as u64),
+            is_caption: true,
+            revealed: &self.message_ui.spoiler_revealed,
+            emoji_paths: &emoji_paths,
         };
         let wrap = (max_w - 2. * PLATE_PAD_X_REM * rem).max(1.);
-        let shaped = window
-            .text_system()
-            .shape_text(
-                item.caption.clone().into(),
-                size,
-                &[run],
-                Some(px(wrap)),
-                None,
-            )
-            .ok()?;
-        let lines = shaped
-            .iter()
-            .map(|line| line.wrap_boundaries().len() + 1)
-            .sum();
-        let text_w = shaped
-            .iter()
-            .map(|line| f32::from(line.width()))
-            .fold(0., f32::max);
+        let text = measure_rich_text(&source, &style, line_h, wrap, window);
         let viewport_h = f32::from(window.viewport_size().height);
-        Some(caption_layout(lines, line_h, text_w, viewport_h, rem))
+        Some(caption_layout(
+            text.height,
+            line_h,
+            text.width,
+            viewport_h,
+            rem,
+        ))
+    }
+
+    /// The caption's custom emoji pictures, resolved like message text's.
+    pub(super) fn viewer_caption_emoji(&self, item: &MediaViewerItem) -> HashMap<i64, ImageSource> {
+        let roots = self.media_display_roots();
+        self.session()
+            .map(|session| {
+                custom_emoji_paths(
+                    &item.caption_entities,
+                    &session.stickers.emoji.custom_emoji_stickers,
+                    &session.media.files,
+                    &roots,
+                )
+            })
+            .unwrap_or_default()
     }
 
     /// The caption plate for `item`: `text` at its shown height, or
@@ -315,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_two_line_caption_shows_both_lines_in_its_plate() {
-        let layout = caption_layout(2, 22., 300.4, 1000., 16.);
+        let layout = caption_layout(2. * 22., 22., 300.4, 1000., 16.);
         assert_eq!(
             layout,
             CaptionLayout {
@@ -331,7 +343,7 @@ mod tests {
 
     #[test]
     fn a_long_caption_shows_two_lines_and_its_toggle() {
-        let layout = caption_layout(9, 22., 600., 1000., 16.);
+        let layout = caption_layout(9. * 22., 22., 600., 1000., 16.);
         assert!(layout.cut);
         assert_eq!(layout.content_h, 9. * 22.);
         assert_eq!(layout.shown_h, 44.);
@@ -340,10 +352,10 @@ mod tests {
 
     #[test]
     fn the_shown_caption_is_capped_at_a_quarter_of_the_window_in_whole_lines() {
-        let layout = caption_layout(4, 22., 600., 300., 16.);
+        let layout = caption_layout(4. * 22., 22., 600., 300., 16.);
         assert!(!layout.cut);
         assert_eq!(layout.shown_h, 66.);
-        assert_eq!(caption_layout(2, 22., 600., 40., 16.).shown_h, 22.);
+        assert_eq!(caption_layout(2. * 22., 22., 600., 40., 16.).shown_h, 22.);
     }
 
     #[test]
