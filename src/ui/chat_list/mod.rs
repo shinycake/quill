@@ -799,4 +799,5 @@ impl QuillApp {
 }
 
 mod listed;
+mod select_bar;
 mod toggle_chat_pin;
