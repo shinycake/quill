@@ -275,7 +275,11 @@ impl QuillApp {
         }
         match click_action(super::emoji_effect::premium_playing(key), has_set) {
             Click::Replay => {
-                super::emoji_effect::push_premium(effect_for(key, animation), outgoing);
+                super::emoji_effect::push_premium(
+                    effect_for(key, animation),
+                    outgoing,
+                    cx.background_executor().now(),
+                );
                 cx.notify();
             }
             Click::Hint => self.set_status_note(HINT, cx),
@@ -318,7 +322,11 @@ impl QuillApp {
                 && !paused
             {
                 PLAYED.with(|played| played.borrow_mut().mark(key));
-                super::emoji_effect::push_premium(effect_for(key, seen.animation), seen.outgoing);
+                super::emoji_effect::push_premium(
+                    effect_for(key, seen.animation),
+                    seen.outgoing,
+                    cx.background_executor().now(),
+                );
             }
         }
     }

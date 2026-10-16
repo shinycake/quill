@@ -64,6 +64,8 @@ thread_local! {
 struct Active {
     effect: EmojiEffect,
     outgoing: bool,
+    /// On the executor clock (`cx.background_executor().now()`), like
+    /// `missing`; a clip's `started` is on the real clock.
     queued: Instant,
     /// The decoded sticker and when it began.
     clip: Option<LayeredClip>,
@@ -85,7 +87,7 @@ struct MessageEffectPlay {
     /// Where the badge was last seen, to find the message again when it
     /// gets its final id while the effect plays.
     last: Option<Point<Pixels>>,
-    /// Since when the badge has not been on screen.
+    /// Since when the badge has not been on screen (executor clock).
     missing: Option<Instant>,
 }
 
@@ -96,6 +98,16 @@ const BADGE_GRACE: Duration = Duration::from_millis(400);
 const REBIND_RADIUS: f32 = 160.0;
 /// `Sticker::MessageEffectSize`: twice the big emoji's 112 px.
 const MESSAGE_EFFECT_SIDE: f32 = 224.0;
+
+/// Whether a badge missing since `at` is still within its grace at `now`.
+fn badge_within_grace(now: Instant, at: Instant) -> bool {
+    now.saturating_duration_since(at) < BADGE_GRACE
+}
+
+/// Whether an effect queued at `queued` has waited `wait` for its sticker by `now`.
+fn sticker_wait_over(now: Instant, queued: Instant, wait: Duration) -> bool {
+    now.saturating_duration_since(queued) >= wait
+}
 
 /// Whether the Premium sticker effect of message `key` is playing or waiting.
 pub(super) fn premium_playing(key: Key) -> bool {
@@ -121,7 +133,7 @@ pub(super) fn message_effect_playing(key: Key) -> bool {
 }
 
 /// Queue the effect of a Premium sticker. Dropped when too many wait.
-pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool) {
+pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool, now: Instant) {
     ACTIVE.with(|active| {
         let mut active = active.borrow_mut();
         if active.len() >= MAX_QUEUED {
@@ -131,7 +143,7 @@ pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool) {
             seed: 0,
             outgoing,
             effect,
-            queued: Instant::now(),
+            queued: now,
             clip: None,
             premium: true,
             message: None,
@@ -142,7 +154,13 @@ pub(super) fn push_premium(effect: EmojiEffect, outgoing: bool) {
 
 /// Queue the effect of a message sent with an effect, centred on its badge.
 /// `wait` is how long its animation may take to arrive.
-pub(super) fn push_message(effect: EmojiEffect, outgoing: bool, effect_id: i64, wait: Duration) {
+pub(super) fn push_message(
+    effect: EmojiEffect,
+    outgoing: bool,
+    effect_id: i64,
+    wait: Duration,
+    now: Instant,
+) {
     ACTIVE.with(|active| {
         let mut active = active.borrow_mut();
         if active.len() >= MAX_QUEUED {
@@ -152,7 +170,7 @@ pub(super) fn push_message(effect: EmojiEffect, outgoing: bool, effect_id: i64, 
             seed: 0,
             outgoing,
             effect,
-            queued: Instant::now(),
+            queued: now,
             clip: None,
             premium: false,
             message: Some(MessageEffectPlay {
@@ -168,7 +186,7 @@ pub(super) fn push_message(effect: EmojiEffect, outgoing: bool, effect_id: i64, 
 /// Follow each message effect to its badge. A message gets its final id
 /// while its effect plays (`updateMessageSendSucceeded`): the badge is then
 /// found again by where it was. An effect whose badge is gone for good ends.
-fn follow_badges() {
+fn follow_badges(now: Instant) {
     ACTIVE.with(|active| {
         for a in active.borrow_mut().iter_mut() {
             let Some(play) = a.message.as_mut() else {
@@ -196,7 +214,7 @@ fn follow_badges() {
                     play.missing = None;
                 }
                 None => {
-                    play.missing.get_or_insert_with(Instant::now);
+                    play.missing.get_or_insert(now);
                 }
             }
         }
@@ -426,6 +444,7 @@ impl QuillApp {
     /// the conversation. `None` when nothing plays.
     pub(super) fn emoji_effect_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.viewed_chat();
+        let now = cx.background_executor().now();
         self.premium_autoplay(cx);
         self.message_effects_pass(cx);
         let queued = self
@@ -437,7 +456,8 @@ impl QuillApp {
             return None;
         }
         if !queued.is_empty() {
-            let started = Instant::now();
+            let started = now;
+            let seed_clock = Instant::now();
             let outgoing: Vec<Option<bool>> = {
                 let session = self.session();
                 queued
@@ -455,7 +475,8 @@ impl QuillApp {
                         continue;
                     }
                     active.push(Active {
-                        seed: (effect.message_id.0 as u64) ^ (started.elapsed().as_nanos() as u64),
+                        seed: (effect.message_id.0 as u64)
+                            ^ (seed_clock.elapsed().as_nanos() as u64),
                         outgoing: outgoing.unwrap_or(false),
                         effect,
                         queued: started,
@@ -467,8 +488,8 @@ impl QuillApp {
                 }
             });
         }
-        follow_badges();
-        self.advance_effects(open, cx);
+        follow_badges(now);
+        self.advance_effects(open, now, cx);
         let drawn: Vec<(Key, bool, u64, bool, bool, LayeredClip)> = ACTIVE.with(|active| {
             active
                 .borrow()
@@ -564,7 +585,7 @@ impl QuillApp {
     /// Give each waiting effect its decoded sticker, tell the partner an
     /// incoming one is being watched, and drop what ended, timed out or
     /// belongs to another chat.
-    fn advance_effects(&mut self, open: Option<ChatId>, cx: &mut Context<Self>) {
+    fn advance_effects(&mut self, open: Option<ChatId>, now: Instant, cx: &mut Context<Self>) {
         let mut watched: Vec<(ChatId, String)> = Vec::new();
         let waiting: Vec<(usize, i32)> = ACTIVE.with(|active| {
             active
@@ -619,11 +640,12 @@ impl QuillApp {
             }
             active.retain(|a| {
                 a.effect.chat_id == open.unwrap_or(ChatId(0))
-                    && a.message
-                        .is_none_or(|play| play.missing.is_none_or(|at| at.elapsed() < BADGE_GRACE))
+                    && a.message.is_none_or(|play| {
+                        play.missing.is_none_or(|at| badge_within_grace(now, at))
+                    })
                     && match &a.clip {
                         Some(clip) => clip.started.elapsed() < clip.duration,
-                        None => a.queued.elapsed() < a.wait,
+                        None => !sticker_wait_over(now, a.queued, a.wait),
                     }
             });
         });
@@ -669,10 +691,30 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SIDE, MIN_SIDE, SHIFT_SHARE, effect_origin, effect_side, flip_rows, may_start,
-        shift_for,
+        BADGE_GRACE, MAX_SIDE, MIN_SIDE, SHIFT_SHARE, START_WAIT, badge_within_grace,
+        effect_origin, effect_side, flip_rows, may_start, shift_for, sticker_wait_over,
     };
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_missing_badge_ends_the_effect_at_the_grace() {
+        let at = Instant::now();
+        let ms = Duration::from_millis;
+        assert!(badge_within_grace(at, at));
+        assert!(badge_within_grace(at + ms(399), at));
+        assert!(!badge_within_grace(at + BADGE_GRACE, at));
+        // A clock that reads earlier than the mark never ends it.
+        assert!(badge_within_grace(at, at + ms(5)));
+    }
+
+    #[test]
+    fn a_sticker_is_waited_for_until_the_wait_is_over() {
+        let queued = Instant::now();
+        let ms = Duration::from_millis;
+        assert!(!sticker_wait_over(queued + ms(1999), queued, START_WAIT));
+        assert!(sticker_wait_over(queued + START_WAIT, queued, START_WAIT));
+        assert!(!sticker_wait_over(queued, queued + ms(5), START_WAIT));
+    }
 
     #[test]
     fn effect_hugs_the_bubble_side_and_centres_on_the_emoji() {

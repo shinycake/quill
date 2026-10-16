@@ -62,6 +62,21 @@ fn a_click_on_the_badge_plays_the_effect_again(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_badge_effect_waits_on_the_executor_clock_not_the_wall_clock(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let key = (CHAT, 99);
+    vcx.update(|window, cx| window.click(("message-effect", 99u64), cx));
+    frames(vcx);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+    // The badge stays on screen: simulated time passing, well past the
+    // 400 ms grace a missing badge gets, does not end the effect.
+    vcx.executor().advance_clock(Duration::from_millis(1500));
+    frames(vcx);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+}
+
+#[gpui_kit::test]
 fn the_send_menu_offers_effects_and_sends_with_the_chosen_one(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
