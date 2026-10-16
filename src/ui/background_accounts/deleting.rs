@@ -56,8 +56,10 @@ fn delete_account_data(
 /// clients had closed), deleted on a worker before the first client opens.
 pub(in crate::ui) struct Sweep {
     root: PathBuf,
-    /// Accounts this run still has a client or a deletion for.
-    skip: HashSet<AccountKey>,
+    /// The recorded folders to delete, read once when the sweep began and
+    /// already without the accounts this run still has a client or a
+    /// deletion for. A removal after that is not the sweep's business.
+    keys: Vec<AccountKey>,
     secrets: SecretsFactory,
 }
 
@@ -66,10 +68,7 @@ impl Sweep {
     pub(in crate::ui) fn run(self) -> (PathBuf, Vec<AccountKey>) {
         let store = (self.secrets)();
         let mut deleted = Vec::new();
-        for key in pending_deletes(&self.root) {
-            if self.skip.contains(&key) {
-                continue;
-            }
+        for key in self.keys {
             if delete_account_data(&self.root, &key, store.as_ref()).is_ok() {
                 deleted.push(key);
             }
@@ -123,9 +122,13 @@ impl QuillApp {
                 .iter()
                 .map(|live| live.driver.session.account.clone()),
         );
+        let keys = pending_deletes(&root)
+            .into_iter()
+            .filter(|key| !skip.contains(key))
+            .collect();
         Some(Sweep {
             root,
-            skip,
+            keys,
             secrets: self.secrets(),
         })
     }
@@ -201,7 +204,14 @@ impl QuillApp {
             return;
         }
         let accounts: Vec<AccountKey> = list_accounts(&root).into_iter().map(|r| r.key).collect();
-        let _ = mark_for_deletion(&root, &accounts);
+        if let Err(e) = mark_for_deletion(&root, &accounts) {
+            // Without the record, a quit before the clients close would
+            // keep the data but lose the passcode: keep both.
+            self.connection.status_note =
+                tr_with(keys::Q_REST_COULD_NOT_LOG_OUT_E, &[("e", &e.to_string())]);
+            cx.notify();
+            return;
+        }
         quill::passcode::forget_passcode(&root, &quill::passcode::global_unlock());
         self.background.wiping = true;
         // A connection being prepared must not open now.
@@ -220,7 +230,7 @@ impl QuillApp {
                 // folders before connecting.
                 Deletion::Deferred => {
                     this.connection.status_note =
-                        tr(keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into();
+                        tr(keys::Q_REST_RESTART_QUILL_TO_FINISH_LOGGING_OUT).into();
                 }
             },
             cx,

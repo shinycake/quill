@@ -317,3 +317,81 @@ fn the_startup_sweep_skips_accounts_this_run_still_has_open(cx: &mut TestAppCont
     assert_eq!(pending_deletes(&root), vec![account(1)]);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[gpui_kit::test]
+fn the_startup_sweep_deletes_only_what_was_recorded_when_it_began(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[]);
+    let fake = Fake::default();
+    app.update_in(&mut vcx, |app, _, cx| {
+        let Some(sweep) = app.startup_sweep() else {
+            panic!("the first connection sweeps");
+        };
+        // Removed after the sweep began, while its client still closes:
+        // the worker must not take the new record.
+        app.background.closing.push(account(1), fake.boxed(), false);
+        app.remove_account_in(root.clone(), &account(1), cx);
+        assert_eq!(pending_deletes(&root), vec![account(1)]);
+        let (_, deleted) = sweep.run();
+        assert!(deleted.is_empty());
+    });
+    assert!(folder(&root, &account(1)), "TDLib may still have it open");
+    assert_eq!(pending_deletes(&root), vec![account(1)]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[gpui_kit::test]
+fn a_log_out_that_cannot_be_recorded_keeps_the_passcode_and_says_why(cx: &mut TestAppContext) {
+    use std::os::unix::fs::PermissionsExt;
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[]);
+    let config = quill::passcode::config_path(&root);
+    std::fs::write(&config, b"{}").unwrap();
+    // A read-only root: the record can't be written.
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o555)).unwrap();
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.begin_local_wipe(root.clone(), cx);
+    });
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(config.exists(), "the passcode stays");
+    assert!(folder(&root, &AccountKey::primary()));
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.background.wiping, "nothing started");
+        assert!(
+            app.connection
+                .status_note
+                .to_string()
+                .starts_with("Could not log out"),
+            "{}",
+            app.connection.status_note
+        );
+    });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[gpui_kit::test]
+fn an_unconfirmed_log_out_tells_the_user_to_restart_quill(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[]);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let started = Instant::now();
+        app.background
+            .closing
+            .push(AccountKey::primary(), Fake::default().boxed(), false);
+        app.begin_local_wipe(root.clone(), cx);
+        app.close_all_for_quit(started + Duration::from_millis(100));
+    });
+    run_for(&mut vcx, 100);
+    app.read_with(&vcx, |app, _| {
+        assert!(app.background.wiping);
+        assert_eq!(
+            app.connection.status_note.to_string(),
+            "Restart Quill to finish logging out. Nothing connects until then."
+        );
+    });
+    let _ = std::fs::remove_dir_all(&root);
+}
