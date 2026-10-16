@@ -50,6 +50,7 @@ mod tests {
         assert_eq!(defaults.grace_period(), Duration::ZERO);
     }
 
+    #[cfg(feature = "demo-capture")]
     #[gpui_kit::test]
     fn show_delay_reads_the_installed_global(cx: &mut gpui_kit::TestAppContext) {
         cx.update(|cx| {

@@ -232,21 +232,34 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
     assert_eq!(round_state(&app, vcx), Some((true, false)));
     let calls = calls(&script);
     assert!(calls.is_empty(), "{calls:?}");
-    // Off screen for RELEASE_AFTER: released, its backend freed.
+    // Off screen for RELEASE_AFTER: the slot sleeps, its backend freed.
     drop(held);
     vcx.executor().advance_clock(RELEASE_AFTER);
     vcx.run_until_parked();
     assert!(script.borrow().dropped, "the backend is released");
-    // A later pass that still renders the row opens a new player held,
-    // not playing, until its picture is painted in view.
-    history_passes(&app, vcx, 2);
-    assert!(
-        matches!(round_state(&app, vcx), None | Some((true, false))),
-        "{:?}",
-        round_state(&app, vcx)
+    assert!(app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(ROUND)));
+    // Later passes that still render the row (in the overdraw) open no
+    // new backend: the sleeping slot waits to be painted in view.
+    let used = |scripts: &[Rc<RefCell<Script>>]| {
+        scripts
+            .iter()
+            .filter(|script| !script.borrow().calls.is_empty() || script.borrow().dropped)
+            .count()
+    };
+    let before = used(&scripts);
+    history_passes(&app, vcx, 4);
+    vcx.executor().advance_clock(RELEASE_AFTER);
+    vcx.run_until_parked();
+    assert_eq!(round_state(&app, vcx), Some((true, false)));
+    assert_eq!(
+        used(&scripts),
+        before,
+        "a sleeping slot reopened its decoder"
     );
-    // Back in view: a new player opens and plays.
+    // Back in view: the sweep gives it a new player, which plays.
     scroll_until_playing(&app, vcx, 40.);
+    assert!(!app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(ROUND)));
+    assert_eq!(used(&scripts), before + 1);
 }
 
 #[gpui_kit::test]

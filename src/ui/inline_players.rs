@@ -7,11 +7,16 @@
 //!   pass (scrolled away, chat changed, viewer open).
 //! - Off-screen policy: after each history pass the players whose picture
 //!   was not painted inside the visible area in that pass are paused at
-//!   once (no more decoding, no more frame requests), resumed when their
-//!   row renders again, and released after [`RELEASE_AFTER`] off screen
-//!   ([`off_screen_step`]). tdesktop pauses a clip that is not drawn the
-//!   same way (its streamed player only decodes ahead of frames shown) and
-//!   unloads it once far from the visible area (`unloadHeavyViewParts`).
+//!   once (no more decoding, no more frame requests), resumed when a sweep
+//!   sees them painted in view again, and put to sleep after
+//!   [`RELEASE_AFTER`] off screen ([`off_screen_step`]): the decoder goes,
+//!   the slot stays with a backend-less player that paints nothing over
+//!   the still and only counts being painted, so a row that keeps
+//!   rendering in the list's overdraw does not reopen its decoder every
+//!   pass. A sweep that sees a sleeping slot painted in view opens a new
+//!   player for it (`revive`). tdesktop pauses a clip that is not drawn
+//!   the same way (its streamed player only decodes ahead of frames shown)
+//!   and unloads it once far from the visible area (`unloadHeavyViewParts`).
 //! - A round video message plays once with sound when clicked, then loops
 //!   muted again.
 //!
@@ -41,8 +46,8 @@ pub(super) const PANEL_CHAT: i64 = i64::MIN;
 /// or more large clips on screen at once to get there.
 pub(super) const INLINE_DECODE_BUDGET: usize = 64 * 1024 * 1024;
 
-/// An off-screen player is released (its decoder and budget freed) after
-/// this long, even when no history pass dropped it.
+/// An off-screen player is put to sleep (its decoder and budget freed)
+/// after this long, even when no history pass dropped it.
 pub(super) const RELEASE_AFTER: Duration = Duration::from_secs(2);
 
 /// tdesktop `VideoMessageSeek`: the ring shows in 220 ms (ease-out-back),
@@ -66,7 +71,7 @@ pub(super) enum OffScreenStep {
     Hide,
     /// Still off screen, not long enough to release.
     Stay,
-    /// Off screen for [`RELEASE_AFTER`]: drop the player.
+    /// Off screen for [`RELEASE_AFTER`]: drop the decoder (sleep).
     Release,
 }
 
@@ -178,11 +183,26 @@ fn run(commands: Vec<(VideoPlayer, Command)>) {
     }
 }
 
+/// What a new player for the slot is opened from.
+#[derive(Clone)]
+struct Source {
+    path: PathBuf,
+    max_edge: u32,
+    /// Decoded picture memory a player of it holds (`Slot::bytes`).
+    bytes: usize,
+    /// The message's duration, shown until the file's own is known.
+    duration: Option<f64>,
+}
+
 struct Slot {
     player: VideoPlayer,
+    source: Source,
     /// Decoded picture memory it may hold (0 for AVPlayer, whose buffers
-    /// aren't ours).
+    /// aren't ours, and for a sleeping slot).
     bytes: usize,
+    /// Off screen for [`RELEASE_AFTER`]: the player has no backend
+    /// (`VideoPlayer::hibernate`) until a sweep sees it painted in view.
+    asleep: bool,
     /// The pass its row last rendered in: the history's, or the GIF
     /// panel's for [`PANEL_CHAT`] keys.
     seen: u64,
@@ -284,6 +304,9 @@ fn survives(key: Key, seen: u64, pass: Pass) -> bool {
 struct State {
     players: HashMap<Key, Slot>,
     render: u64,
+    /// The view the history renders in (`begin_render`): redrawn once a
+    /// sleeping slot gets a new player, so its tile picks it up.
+    history_view: Option<EntityId>,
     /// The GIF panel's pass count ([`InlineVideos::begin_panel_render`]).
     panel_render: u64,
     /// The history rendered (and swept the players) this frame.
@@ -368,9 +391,10 @@ impl InlineVideos {
     /// the last pass stop, and each player's paint count is noted. Once the
     /// pass has painted (deferred to the end of this frame), the players
     /// not painted in view are paused ([`Self::sweep`]).
-    pub(super) fn begin_render(self: &Rc<Self>, cx: &mut App) {
+    pub(super) fn begin_render(self: &Rc<Self>, view: Option<EntityId>, cx: &mut App) {
         let dropped = self.with(|state| {
             state.swept = true;
+            state.history_view = view;
             state.render += 1;
             let pass = Pass::History(state.render);
             let (keep, drop): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
@@ -408,7 +432,9 @@ impl InlineVideos {
 
     /// The off-screen policy after a history pass painted (or when the
     /// release timer fires): pause what was not painted in view, resume
-    /// what was, release what has been off screen for [`RELEASE_AFTER`].
+    /// what was, put to sleep what has been off screen for
+    /// [`RELEASE_AFTER`], and give a sleeping slot painted in view a new
+    /// player.
     pub(super) fn sweep(self: &Rc<Self>, cx: &mut App) {
         let now = cx.background_executor().now();
         let players: Vec<(Key, VideoPlayer, u64)> = self
@@ -432,14 +458,21 @@ impl InlineVideos {
                 )
             })
             .collect();
-        let Some((commands, released, hidden)) = self.with(|state| {
+        let Some((commands, sleepers, revive, hidden)) = self.with(|state| {
             let inactive = state.inactive;
             let mut commands = Vec::new();
-            let mut released = Vec::new();
+            let mut sleepers = Vec::new();
+            let mut revive = Vec::new();
             for (key, visible, play_state, running) in visible {
                 let Some(slot) = state.players.get_mut(&key) else {
                     continue;
                 };
+                if slot.asleep {
+                    if visible {
+                        revive.push((key, slot.source.clone()));
+                    }
+                    continue;
+                }
                 match off_screen_step(visible, slot.hidden_since, now) {
                     OffScreenStep::Show => slot.hidden_since = None,
                     OffScreenStep::Hide => slot.hidden_since = Some(now),
@@ -447,9 +480,10 @@ impl InlineVideos {
                     // Never cut a clip short while it is heard.
                     OffScreenStep::Release if slot.sound => {}
                     OffScreenStep::Release => {
-                        if let Some(slot) = state.players.remove(&key) {
-                            released.push(slot);
-                        }
+                        slot.asleep = true;
+                        slot.bytes = 0;
+                        slot.hidden_since = None;
+                        sleepers.push(slot.player.clone());
                         continue;
                     }
                 }
@@ -461,14 +495,66 @@ impl InlineVideos {
                 .players
                 .values()
                 .any(|slot| slot.hidden_since.is_some());
-            (commands, released, hidden)
+            (commands, sleepers, revive, hidden)
         }) else {
             return;
         };
         run(commands);
-        drop(released);
+        for player in sleepers {
+            player.hibernate();
+        }
+        for (key, source) in revive {
+            self.revive(key, source, cx);
+        }
         if hidden {
             self.arm_release(cx);
+        }
+    }
+
+    /// A sleeping slot was painted in view: open a new player for it (if
+    /// the budget admits one) and redraw the history, whose tile still
+    /// holds the sleeping one.
+    fn revive(&self, key: Key, source: Source, cx: &mut App) {
+        let Some((held, inactive, view)) = self.with(|state| {
+            (
+                state.players.values().map(|slot| slot.bytes).sum::<usize>(),
+                state.inactive,
+                state.history_view,
+            )
+        }) else {
+            return;
+        };
+        if !admits(held, source.bytes) {
+            return;
+        }
+        let Ok(player) = VideoPlayer::open(
+            &source.path,
+            Purpose::Inline {
+                max_edge: source.max_edge,
+            },
+            source.duration,
+            cx,
+        ) else {
+            return;
+        };
+        player.set_volume(0.0);
+        player.set_looping(true);
+        // It is in view: play, unless the window is behind another app.
+        if !inactive {
+            player.play();
+        }
+        let mark = player.shown_count();
+        let replaced = self.with(|state| {
+            let slot = state.players.get_mut(&key)?;
+            slot.asleep = false;
+            slot.bytes = source.bytes;
+            slot.shown_mark = mark;
+            slot.hidden_since = None;
+            Some(std::mem::replace(&mut slot.player, player))
+        });
+        drop(replaced);
+        if let Some(view) = view {
+            cx.notify(view);
         }
     }
 
@@ -708,8 +794,11 @@ impl InlineVideos {
         let (command, frame) = self.with(|videos| {
             let inactive = videos.inactive;
             let slot = videos.players.get_mut(&key)?;
-            let command = slot
-                .settle(state, running, inactive)
+            // A sleeping slot's tile paints nothing over the still and
+            // only counts being painted; the sweep gives it a player.
+            let command = (!slot.asleep)
+                .then(|| slot.settle(state, running, inactive))
+                .flatten()
                 .map(|command| (slot.player.clone(), command));
             let held = slot.paused || slot.seeking.is_some();
             Some((command, slot.frame(held)))
@@ -745,8 +834,8 @@ impl InlineVideos {
         if !admits(held, bytes) {
             return None;
         }
-        let player =
-            VideoPlayer::open(&path()?, Purpose::Inline { max_edge }, duration, cx).ok()?;
+        let path = path()?;
+        let player = VideoPlayer::open(&path, Purpose::Inline { max_edge }, duration, cx).ok()?;
         player.set_volume(0.0);
         player.set_looping(true);
         // A history clip starts held, as if off screen: the sweep after
@@ -765,7 +854,14 @@ impl InlineVideos {
                 key,
                 Slot {
                     player,
+                    source: Source {
+                        path,
+                        max_edge,
+                        bytes,
+                        duration,
+                    },
                     bytes,
+                    asleep: false,
                     seen: render,
                     shown_mark: mark,
                     hidden_since,
@@ -801,7 +897,7 @@ impl InlineVideos {
             .flatten()
     }
 
-    /// Whether the slot is paused off screen, for tests.
+    /// Whether the slot is paused or asleep off screen, for tests.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn is_hidden(&self, key: Key) -> bool {
@@ -809,9 +905,17 @@ impl InlineVideos {
             state
                 .players
                 .get(&key)
-                .is_some_and(|slot| slot.hidden_since.is_some())
+                .is_some_and(|slot| slot.hidden_since.is_some() || slot.asleep)
         })
         .unwrap_or(false)
+    }
+
+    /// Whether the slot sleeps without a decoder, for tests.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn is_asleep(&self, key: Key) -> bool {
+        self.with(|state| state.players.get(&key).is_some_and(|slot| slot.asleep))
+            .unwrap_or(false)
     }
 }
 

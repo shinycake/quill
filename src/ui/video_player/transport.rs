@@ -214,6 +214,19 @@ impl TransportMachine {
         }
     }
 
+    /// The backend is gone for now (an inline tile released off screen):
+    /// paused where it was, no play wanted, until a new backend opens
+    /// through a new machine. A failed clip stays failed.
+    pub(crate) fn sleep(&mut self, now: Instant) {
+        self.wants_play = false;
+        self.loop_sent = false;
+        if self.state != PlayState::Failed {
+            self.position = self.position_at(now);
+            self.pulled_at = now;
+            self.state = PlayState::Paused;
+        }
+    }
+
     /// Seek to `secs` (clamped to the clip). Playing stays playing; an
     /// ended clip becomes paused there.
     pub(crate) fn seek(&mut self, secs: f64, now: Instant) -> f64 {
@@ -371,6 +384,31 @@ mod tests {
             duration: Some(10.0),
             ..BackendStatus::default()
         }
+    }
+
+    #[test]
+    fn sleep_holds_the_position_and_wants_no_play_from_any_state() {
+        let t0 = Instant::now();
+        // Opening, play wanted: asleep it is paused and wants nothing.
+        let mut machine = TransportMachine::new(None, t0);
+        machine.play(t0);
+        machine.sleep(t0);
+        assert_eq!(machine.state(), PlayState::Paused);
+        assert!(!machine.snapshot(t0).is_playing());
+        // Playing: the position freezes where it was.
+        let mut machine = TransportMachine::new(Some(10.0), t0);
+        machine.play(t0);
+        machine.observe(&ready(0.0), t0);
+        let later = t0 + Duration::from_secs(2);
+        machine.sleep(later);
+        assert_eq!(machine.state(), PlayState::Paused);
+        let at = machine.snapshot(later + Duration::from_secs(5)).position;
+        assert!((at - 2.0).abs() < 0.01, "{at}");
+        // Failed stays failed.
+        let mut machine = TransportMachine::new(None, t0);
+        machine.fail(t0);
+        machine.sleep(t0);
+        assert_eq!(machine.state(), PlayState::Failed);
     }
 
     #[test]
