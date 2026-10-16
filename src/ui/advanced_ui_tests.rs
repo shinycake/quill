@@ -299,7 +299,7 @@ fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestA
         "the sign-in screen says Test Mode"
     );
     app.read_with(vcx, |app, _| {
-        assert!(app.settings.advanced.test_environment);
+        assert!(app.settings.advanced.test_environment());
         assert_eq!(app.connection.status_note, SWITCHED_TO_TEST);
         assert!(app.live.is_none(), "nothing connected");
     });

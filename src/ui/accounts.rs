@@ -179,7 +179,7 @@ impl QuillApp {
             );
             return;
         }
-        self.refresh_test_environment();
+        quill::icon_badge::invalidate_icon_badge();
         match self.take_background_live(key, cx) {
             Some(live) => self.adopt_live(live, cx),
             None => self.start_connection(cx),

@@ -13,9 +13,10 @@ pub(crate) struct AdvancedUi {
     /// The `debugmode` confirm is on screen; holds whether the logs are on
     /// right now, which picks the question.
     pub(super) debug_confirm: Option<bool>,
-    /// The active account connects to the test environment: the sign-in
-    /// screen then says "Test Mode".
-    pub(super) test_environment: bool,
+    /// Screenshot demos have no account store; their `testmode` switch lives
+    /// here. A real app reads the environment from the store instead.
+    demo_test_environment: bool,
+    disk_backed: bool,
 }
 
 impl AdvancedUi {
@@ -26,14 +27,6 @@ impl AdvancedUi {
             this.feed_secret_code(&event.keystroke, window, cx)
         })
         .detach();
-        let test_environment = load_disk_state
-            && quill::settings::safe_app_root().is_some_and(|root| {
-                quill::advanced::test_environment::account_is_test(
-                    &root,
-                    &quill::settings::active_account(&root),
-                )
-            });
-        quill::advanced::test_environment::set_active_test(test_environment);
         // The update switch reads this at render time; read the file now.
         if load_disk_state {
             let _ = quill::advanced::update_channel::install_beta();
@@ -41,7 +34,23 @@ impl AdvancedUi {
         Self {
             codes: CodeFeeder::default(),
             debug_confirm: None,
-            test_environment,
+            demo_test_environment: false,
+            disk_backed: load_disk_state,
         }
+    }
+
+    /// The active account connects to the test environment: the sign-in
+    /// screen then says "Test Mode". Derived from the account store on every
+    /// read.
+    pub(super) fn test_environment(&self) -> bool {
+        if self.disk_backed {
+            quill::advanced::test_environment::active_is_test()
+        } else {
+            self.demo_test_environment
+        }
+    }
+
+    pub(super) fn set_demo_test_environment(&mut self, on: bool) {
+        self.demo_test_environment = on;
     }
 }

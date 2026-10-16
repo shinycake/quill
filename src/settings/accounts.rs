@@ -116,7 +116,10 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
 }
 
 fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result<()> {
-    write_json_atomic(&registry_path(app_root), registry)
+    let written = write_json_atomic(&registry_path(app_root), registry);
+    // The active account may have changed; the in-memory test flag follows.
+    crate::advanced::test_environment::invalidate_active_test();
+    written
 }
 
 /// Move an unreadable `accounts.json` aside as `accounts.json.corrupt-<ts>`

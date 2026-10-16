@@ -195,12 +195,21 @@ impl QuillApp {
         Self::new_with_demo(window, cx, credentials, None)
     }
 
+    /// The live receive bridge died on its own. Read from the bridge every
+    /// time: a replaced connection has a fresh bridge, so there is no flag
+    /// to clear and none to go stale.
+    pub(super) fn connection_lost(&self) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.bridge.stopped_unexpectedly())
+    }
+
     pub(super) fn current_auth(&self) -> AuthorizationState {
-        if self.connection.lost {
-            // The receive bridge died: treat it like an unexpected Closed.
-            AuthorizationState::Closed
-        } else if let Some(live) = self.live.as_ref() {
-            live.driver.session.auth.clone()
+        if let Some(live) = self.live.as_ref() {
+            super::connection_state::auth_for_bridge(
+                live.bridge.stopped_unexpectedly(),
+                live.driver.session.auth.clone(),
+            )
         } else if let Some(session) = self.demo_session.as_ref() {
             session.auth.clone()
         } else {

@@ -139,7 +139,6 @@ impl QuillApp {
                     .map(|record| record.display_name)
                     .unwrap_or_default();
                 self.switch_account(&key, &name, window, cx);
-                self.refresh_test_environment();
                 self.connection.status_note = toast.into();
             }
             Err(error) => {
@@ -160,12 +159,12 @@ impl QuillApp {
         let Some(action) = test_environment::plan_test_mode(
             1,
             signed_out,
-            self.settings.advanced.test_environment,
+            self.settings.advanced.test_environment(),
         ) else {
             return;
         };
         let to_test = action == test_environment::TestModeAction::AddTest;
-        self.settings.advanced.test_environment = to_test;
+        self.settings.advanced.set_demo_test_environment(to_test);
         self.connection.status_note = if to_test {
             test_environment::SWITCHED_TO_TEST
         } else {
@@ -173,15 +172,6 @@ impl QuillApp {
         }
         .into();
         cx.notify();
-    }
-
-    /// Read whether the active account is a test account. Called when the
-    /// active account changes.
-    pub(super) fn refresh_test_environment(&mut self) {
-        let test = safe_app_root()
-            .is_some_and(|root| test_environment::account_is_test(&root, &active_account(&root)));
-        self.settings.advanced.test_environment = test;
-        test_environment::set_active_test(test);
     }
 
     /// The confirmed `debugmode` question (tdesktop

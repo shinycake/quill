@@ -109,7 +109,7 @@ pub static BATTERY: Signal = Signal::new();
 pub fn poke_on_activation() {
     UPDATES.poke();
     PASSCODE.poke();
-    CHROME.poke();
+    crate::icon_badge::invalidate_icon_badge();
 }
 
 #[cfg(test)]

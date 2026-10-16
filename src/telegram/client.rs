@@ -407,4 +407,21 @@ mod tests {
         clean.shutdown();
         assert!(!clean.stopped_unexpectedly());
     }
+
+    #[test]
+    fn a_closed_authorization_update_does_not_stop_the_bridge() {
+        // A clean logout ends with TDLib's Closed state; that is data the
+        // loop delivers, not the end of the loop, so it never reads as a
+        // lost connection.
+        let sink = Arc::new(MemorySink::new());
+        let mut bridge = ReceiveBridge::spawn_injected(sink).unwrap();
+        bridge.inject(
+            r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosed"}}"#,
+        );
+        let got = bridge.next_timeout(Duration::from_secs(1));
+        assert!(got.is_some(), "the Closed update is delivered");
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!bridge.stopped_unexpectedly());
+        bridge.shutdown();
+    }
 }

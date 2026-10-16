@@ -279,7 +279,7 @@ impl QuillApp {
             self.connection.status_note.clone(),
             self.auth_ui.login_prevented.is_some(),
             self.folders.tab,
-            self.connection.lost,
+            self.connection_lost(),
         )
     }
 
@@ -356,12 +356,10 @@ impl QuillApp {
         // The receive thread ended on its own (panic or closed channel):
         // nothing more will arrive, so surface it like an unexpected
         // Closed with a Retry instead of a UI that silently goes stale.
-        if bridge_lost(
-            live.bridge.stopped_unexpectedly(),
-            budget_hit,
-            self.connection.lost,
-        ) {
-            self.connection.lost = true;
+        if self
+            .connection
+            .claim_closed_note(live.bridge.stopped_unexpectedly(), budget_hit)
+        {
             self.connection.status_note =
                 tr(keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED).into();
             progressed = true;
@@ -770,7 +768,6 @@ impl QuillApp {
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
-        self.connection.lost = false;
         self.payments.marketplace_open = false;
         self.payments.marketplace_error = None;
         self.payments.marketplace_private = true;
@@ -962,12 +959,6 @@ fn logout_restart_trigger(saw_logging_out: bool, new_auth: &AuthorizationState) 
     saw_logging_out && matches!(new_auth, AuthorizationState::Closed)
 }
 
-/// Whether the poll should declare the receive bridge lost: it stopped on
-/// its own, its queue is fully drained, and it was not flagged already.
-fn bridge_lost(stopped: bool, budget_hit: bool, already_lost: bool) -> bool {
-    stopped && !budget_hit && !already_lost
-}
-
 mod account_notifications;
 mod avatar_icon;
 mod debug_notification;
@@ -983,7 +974,7 @@ mod spawn_call_notification;
 mod tests {
     use super::{
         POLL_BUSY, POLL_HELD_BACK_MAX, POLL_IDLE_MAX, POLL_START, PolledAction, PolledRedraw,
-        bridge_lost, cap_at_deadline, logout_restart_trigger, next_poll_delay,
+        cap_at_deadline, logout_restart_trigger, next_poll_delay,
     };
     use quill::state::RedrawNeed;
     use quill::telegram::envelope::AuthorizationState;
@@ -1317,14 +1308,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn bridge_loss_waits_for_the_queue_and_fires_once() {
-        assert!(bridge_lost(true, false, false));
-        assert!(!bridge_lost(false, false, false));
-        // Updates are still queued behind the ingest budget.
-        assert!(!bridge_lost(true, true, false));
-        assert!(!bridge_lost(true, false, true));
     }
 }

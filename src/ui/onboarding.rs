@@ -34,8 +34,7 @@ impl QuillApp {
         let can_qr = quill::auth::can_request_qr_login(&self.current_auth())
             && (self.live.is_some() || self.auth_ui.demo_inputs);
         let live_or_demo = self.live.is_some() || self.auth_ui.demo_inputs;
-        let retry_available =
-            self.live.is_some() || self.connection.lost || self.auth_ui.demo_inputs;
+        let retry_available = self.live.is_some() || self.auth_ui.demo_inputs;
         let mut card = div()
             .id("onboarding-card")
             .w(px(CARD_WIDTH))
@@ -254,7 +253,7 @@ impl QuillApp {
             .child(card)
             // The intro says "Test Mode" in its corner while the account on
             // screen belongs to the test environment.
-            .when(self.settings.advanced.test_environment, |this| {
+            .when(self.settings.advanced.test_environment(), |this| {
                 this.child(
                     div()
                         .id("auth-test-mode-label")
