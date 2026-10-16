@@ -161,7 +161,8 @@ fn extract_zip(
             continue;
         };
         let target = dest.join(&relative);
-        if entry.is_dir() {
+        // Decided on the normalized name, not on the zip crate's own rules.
+        if name.ends_with('/') || entry.is_dir() {
             fs::create_dir_all(&target)?;
         } else {
             let mode = entry.unix_mode().unwrap_or(0o644);
@@ -286,6 +287,33 @@ mod tests {
         let evil = root.join("b.zip");
         write_zip(&evil, &["pkg/quill.exe", "pkg/../../evil"]);
         assert!(extract(&evil, ArchiveKind::Zip, &root.join("o3")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn zip_directory_entries_with_backslashes_become_directories() {
+        let root = scratch("zip-dirs");
+        let archive = root.join("w.zip");
+        let mut writer = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        // Windows archivers may write directory entries as `pkg\licenses\`,
+        // ahead of the files inside them.
+        for (name, data) in [
+            ("pkg\\", &b""[..]),
+            ("pkg\\licenses\\", b""),
+            ("pkg\\licenses\\a.txt", b"a"),
+            ("pkg\\quill.exe", b"exe"),
+        ] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap();
+        let out = root.join("out");
+        extract(&archive, ArchiveKind::Zip, &out).unwrap();
+        assert!(out.join("licenses").is_dir());
+        assert_eq!(fs::read(out.join("licenses/a.txt")).unwrap(), b"a");
+        assert_eq!(fs::read(out.join("quill.exe")).unwrap(), b"exe");
         fs::remove_dir_all(root).unwrap();
     }
 }
