@@ -284,6 +284,7 @@ impl QuillApp {
             return;
         };
         let seconds = f64::from(capture.elapsed_secs());
+        let mut resumed_preview = false;
         if let Some(clock) = self.recording.preview.as_mut() {
             if clock.is_playing() {
                 clock.pause();
@@ -298,12 +299,17 @@ impl QuillApp {
                 let at = clock.elapsed_secs();
                 if self.playback.audio.resume(at).is_ok() {
                     clock.resume();
-                    cx.notify();
-                    return;
+                    resumed_preview = true;
                 }
             }
         }
+        if resumed_preview {
+            self.sound_starts(cx);
+            cx.notify();
+            return;
+        }
         // Whatever else was playing gives way to the preview.
+        self.sound_starts(cx);
         self.stop_voice_playback();
         self.stop_audio_playback();
         if self.start_player(&path, 0.0) {

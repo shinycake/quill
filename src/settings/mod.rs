@@ -12,12 +12,14 @@ mod badge;
 mod chat_prefs;
 mod chat_windows;
 mod media;
+mod video_pip;
 pub use accounts::*;
 pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;
 pub use chat_windows::*;
 pub use media::*;
+pub use video_pip::*;
 
 pub const APP_DIR_NAME: &str = "Quill";
 pub const PREFS_VERSION: u32 = 1;

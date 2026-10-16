@@ -142,6 +142,7 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
+        self.sound_starts(cx);
         // The sound was replaced, so a recording preview is over.
         self.recording.preview = None;
         self.playback.error = None;
@@ -214,10 +215,11 @@ impl QuillApp {
     }
 
     /// Resume the active track from the frozen clock position.
-    pub(super) fn resume_active_playback(&mut self) {
+    pub(super) fn resume_active_playback(&mut self, cx: &mut Context<Self>) {
         let offset = self.playback.clock.as_ref().map(|c| c.elapsed_secs());
         match offset {
             Some(offset) => {
+                self.sound_starts(cx);
                 if let Err(err) = self.playback.audio.resume(offset) {
                     self.playback.error = Some(err.to_string());
                 }
@@ -460,7 +462,7 @@ impl QuillApp {
                 self.pause_active_playback();
                 self.connection.status_note = "voice note paused".into();
             } else {
-                self.resume_active_playback();
+                self.resume_active_playback(cx);
                 self.connection.status_note = "playing voice note".into();
             }
             cx.notify();
@@ -537,7 +539,7 @@ impl QuillApp {
                 self.pause_active_playback();
                 self.connection.status_note = "audio paused".into();
             } else {
-                self.resume_active_playback();
+                self.resume_active_playback(cx);
                 self.connection.status_note = "playing audio".into();
             }
             cx.notify();

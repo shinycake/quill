@@ -28,7 +28,9 @@ pub(crate) struct ViewerUi {
     /// Parity slice 5: message whose video clip is playing in the viewer
     /// (sound playing) or paused (clock frozen, sound paused).
     pub(super) video: Option<MessageId>,
-    pub(super) pip_window: Option<WindowHandle<gpui_kit::component::Root>>,
+    /// The Picture-in-Picture window playing the viewer's clip, while
+    /// one is open (the viewer itself is closed then).
+    pub(super) pip: Option<super::media_viewer::PipLink>,
     /// Sandbox-checked local path of the viewer's clip.
     pub(super) video_path: Option<PathBuf>,
     /// The viewer clip's player (`video_player`): picture, sound and
@@ -85,7 +87,7 @@ impl ViewerUi {
             frame: (720.0, 480.0),
             drag: None,
             video: None,
-            pip_window: None,
+            pip: None,
             video_path: None,
             player: None,
             gif: None,

@@ -314,6 +314,7 @@ impl QuillApp {
                     .inline_videos
                     .toggle_sound(chat.0, message.id.0);
                 if sounding {
+                    self.round_sound_started((chat.0, message.id.0), cx);
                     if !note.is_viewed {
                         self.mark_voice_opened(chat, message.id);
                     }

@@ -82,3 +82,12 @@ display's real present time (`docs/decisions/video-player-core.md`):
   rate, so draw spacing alone would mistake that rate for the display's.
   The time is per display (the link is shared by the windows on it), not
   per window.
+
+Picture-in-Picture (`docs/decisions/video-pip.md`):
+
+- `src/window.rs`: a `WindowKind::Floating` window gets the same
+  always-active `NSTrackingArea` (`add_mouse_tracking_area`) and
+  `acceptsMouseMovedEvents = NO` as a normal window. Upstream gave floating
+  windows only `acceptsMouseMovedEvents = YES`, which delivers mouse moves
+  to the key window alone, so a panel opened without focus never saw
+  hover, cursor or mouse-exit events.

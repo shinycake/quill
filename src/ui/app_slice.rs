@@ -407,7 +407,7 @@ impl QuillApp {
     ) -> AnyElement {
         match kind {
             SliceKind::Viewer => {
-                if self.viewer.state.is_open() && self.viewer.pip_window.is_none() {
+                if self.viewer.state.is_open() {
                     self.media_viewer_panel(true, window, cx)
                 } else {
                     Empty.into_any_element()

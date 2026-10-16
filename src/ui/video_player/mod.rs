@@ -97,6 +97,34 @@ impl Picture {
     pub(crate) fn is_surface(&self) -> bool {
         false
     }
+
+    /// The picture's size in pixels (as shown, after any turn).
+    #[cfg(target_os = "macos")]
+    pub(crate) fn size(&self) -> (u32, u32) {
+        match self {
+            Picture::Image(image) => image_size(image),
+            Picture::Surface(buffer) => {
+                let side = |pixels: usize| u32::try_from(pixels).unwrap_or(u32::MAX);
+                (
+                    side(objc2_core_video::CVPixelBufferGetWidth(buffer)),
+                    side(objc2_core_video::CVPixelBufferGetHeight(buffer)),
+                )
+            }
+        }
+    }
+
+    /// The picture's size in pixels (as shown, after any turn).
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn size(&self) -> (u32, u32) {
+        let Picture::Image(image) = self;
+        image_size(image)
+    }
+}
+
+fn image_size(image: &RenderImage) -> (u32, u32) {
+    let size = image.size(0);
+    let side = |pixels: i32| u32::try_from(pixels).unwrap_or(0);
+    (side(size.width.0), side(size.height.0))
 }
 
 /// Why a clip can't play.
@@ -448,6 +476,25 @@ impl VideoPlayer {
                 inner.watchers.push(view);
             }
         });
+    }
+
+    /// Forget every watcher: the player moves to another surface
+    /// (Picture-in-Picture and back), whose views watch it from then on.
+    pub(crate) fn clear_watchers(&self) {
+        self.with_inner(|inner| {
+            inner.watchers.clear();
+            inner.watched = None;
+        });
+    }
+
+    /// Whether `other` is a handle to this same player.
+    pub(crate) fn same_as(&self, other: &VideoPlayer) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// The size of the picture on screen, once there is one.
+    pub(crate) fn picture_size(&self) -> Option<(u32, u32)> {
+        self.current_picture().map(|picture| picture.size())
     }
 
     fn watchers(&self) -> Vec<EntityId> {

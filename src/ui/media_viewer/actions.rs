@@ -259,8 +259,10 @@ impl QuillApp {
         }
     }
 
-    /// Drop viewer items whose message no longer exists, moving to the
-    /// next item (or closing when none remain).
+    /// Drop viewer items whose message was deleted, moving to the next
+    /// item (or closing when none remain). A message that only left the
+    /// loaded part of the history (paging, a jump) is not deleted: only a
+    /// tombstone counts.
     pub(super) fn prune_deleted_viewer_items(&mut self, cx: &mut Context<Self>) {
         // Shared Media items reach past the loaded history; absence there
         // does not mean deleted.
@@ -276,7 +278,7 @@ impl QuillApp {
                 session
                     .histories
                     .get(&item.chat_id.0)
-                    .is_none_or(|history| history.messages.contains_key(&item.message_id.0))
+                    .is_none_or(|history| !history.is_tombstone(item.message_id))
             }),
             None => false,
         };

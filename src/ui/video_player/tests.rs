@@ -324,6 +324,15 @@ fn the_trace_line_has_the_documented_columns() {
 #[cfg(feature = "demo-capture")]
 mod inline;
 
+/// Picture-in-Picture: handed over, paused, snapped, closed, handed back.
+#[cfg(feature = "demo-capture")]
+mod pip;
+
+/// Picture-in-Picture's lifetime: history paging, deletion, lock,
+/// accounts, albums, reopening from the chat.
+#[cfg(feature = "demo-capture")]
+mod pip_lifetime;
+
 /// The viewer on a clip that is still opening: the transport shows it,
 /// and closing then drops the player without a crash.
 #[cfg(feature = "demo-capture")]

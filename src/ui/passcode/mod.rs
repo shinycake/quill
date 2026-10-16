@@ -501,6 +501,10 @@ impl QuillApp {
         // Notification windows on screen show senders and text (tdesktop
         // redraws them hidden on lock).
         self.close_all_notify_windows(cx);
+        // tdesktop drops Picture-in-Picture on lock (`passcodeLockChanges`
+        // in `switchToPip`); this runs with the main window minimized or
+        // hidden too.
+        self.close_video_pip(cx);
         cx.notify();
     }
 

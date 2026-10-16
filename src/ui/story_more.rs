@@ -122,6 +122,9 @@ impl QuillApp {
                 Ok(player) => {
                     player.set_volume(self.story_volume());
                     if !self.story_playback_paused() {
+                        if self.story_volume() > 0.0 {
+                            self.sound_starts(cx);
+                        }
                         player.play();
                         self.stories.native_play_at = Instant::now();
                     } else {
@@ -250,6 +253,9 @@ impl QuillApp {
     /// Mute / unmute the video story's sound.
     pub(super) fn toggle_story_mute(&mut self, cx: &mut Context<Self>) {
         self.stories.muted = !self.stories.muted;
+        if self.stories.player.is_some() && self.story_volume() > 0.0 {
+            self.sound_starts(cx);
+        }
         if let Some(player) = self.stories.player.as_ref() {
             player.set_volume(self.story_volume());
         }

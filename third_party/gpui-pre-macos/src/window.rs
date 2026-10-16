@@ -1246,12 +1246,17 @@ impl MacWindow {
                     if kind == WindowKind::Floating {
                         // Let the window float keep above normal windows.
                         native_window.setLevel_(NSFloatingWindowLevel);
-                        native_window.setAcceptsMouseMovedEvents_(YES);
                     } else {
                         native_window.setLevel_(NSNormalWindowLevel);
-                        native_window.setAcceptsMouseMovedEvents_(NO);
-                        add_mouse_tracking_area(tracking_view);
                     }
+                    // Quill: a floating window gets the always-active
+                    // tracking area too (upstream only set
+                    // `acceptsMouseMovedEvents`, which reports moves to
+                    // the key window only), so a panel that never takes
+                    // focus (Picture-in-Picture) sees hover, cursor and
+                    // exit events.
+                    native_window.setAcceptsMouseMovedEvents_(NO);
+                    add_mouse_tracking_area(tracking_view);
 
                     if let Some(tabbing_identifier) = tabbing_identifier {
                         let tabbing_id = ns_string(tabbing_identifier.as_str());

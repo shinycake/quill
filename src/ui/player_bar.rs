@@ -278,7 +278,7 @@ impl QuillApp {
         if clock.is_playing() {
             self.pause_active_playback();
         } else {
-            self.resume_active_playback();
+            self.resume_active_playback(cx);
         }
         cx.notify();
     }
