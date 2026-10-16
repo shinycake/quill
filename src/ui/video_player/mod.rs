@@ -46,8 +46,10 @@ pub(crate) use element::{WidthReport, video_frame};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(crate) use live_picture::{bgra_only, take_made_images};
+pub(crate) use picture::Picture;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use picture::SurfaceHandle;
 use picture::turn;
-pub(crate) use picture::{Picture, SurfaceHandle};
 pub(crate) use transport::{PlayState, Transport};
 
 use gpui_kit::*;

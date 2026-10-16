@@ -3,7 +3,9 @@
 //! orientation.
 #![deny(clippy::indexing_slicing)]
 
-use super::{rotate, surface};
+use super::rotate;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use super::surface;
 use gpui_kit::*;
 use std::sync::Arc;
 
