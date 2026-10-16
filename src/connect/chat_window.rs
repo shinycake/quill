@@ -39,14 +39,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_history_for(chat_id)
     }
 
-    /// Run `f` with `chat_id` as the session's open chat (the driver's
-    /// open-chat methods then address the window's chat), restoring the
-    /// main window's view afterwards.
+    /// Run `f` with `chat_id`'s window view in the session's place (the
+    /// driver's open-chat methods then address the window's chat, and the
+    /// requests they register answer into that view), then put back the
+    /// view that was. A chat with no window gets the main window's view.
     pub fn with_window_chat<R>(&mut self, chat_id: ChatId, f: impl FnOnce(&mut Self) -> R) -> R {
-        let mut view = crate::state::SessionView::of_chat(chat_id);
-        self.session.swap_view(&mut view);
+        let outer = self.session.view_in_place();
+        self.session.enter_view(Some(chat_id));
         let result = f(self);
-        self.session.swap_view(&mut view);
+        self.session.enter_view(outer);
         result
     }
 

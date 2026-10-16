@@ -67,8 +67,8 @@ pub struct Session {
     /// Declared in `src/state/domains/groups/state.rs`.
     pub groups: GroupsState,
     pub open_chat: Option<ChatId>,
-    /// Chats shown in a window of their own (`parity:platform-new-window`); they stay open in TDLib and page their history while `open_chat` changes.
-    pub window_chats: std::collections::BTreeSet<ChatId>,
+    /// Chats shown in a window of their own (`parity:platform-new-window`), with each window's view; they stay open in TDLib and page their history while `open_chat` changes.
+    pub window_chats: WindowViews,
     /// The window chats whose window is the active one: their messages are read on arrival, so they do not notify.
     pub active_window_chats: std::collections::BTreeSet<ChatId>,
     /// Phase 8.1: whether the OS considers our window focused. The UI sets

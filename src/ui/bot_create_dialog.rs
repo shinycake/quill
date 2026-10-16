@@ -263,7 +263,7 @@ impl QuillApp {
             return;
         }
         dialog.submitted = true;
-        cx.spawn_in(window, async move |this, cx| {
+        Self::spawn_main_in(window, cx, async move |this, cx| {
             for _ in 0..200 {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))

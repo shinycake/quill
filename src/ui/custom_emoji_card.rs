@@ -56,7 +56,7 @@ impl QuillApp {
         if self.message_ui.custom_emoji_card_seen.as_ref() != Some(&preview) {
             self.message_ui.custom_emoji_card_seen = Some(preview.clone());
             let shown = preview.clone();
-            cx.spawn(async move |this, cx| {
+            self.spawn_scoped(cx, async move |this, cx| {
                 cx.background_executor().timer(CARD_LIFETIME).await;
                 let _ = this.update(cx, |this, cx| {
                     if this.message_ui.custom_emoji_card_seen.as_ref() == Some(&shown) {

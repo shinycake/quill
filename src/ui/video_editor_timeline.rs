@@ -207,7 +207,7 @@ impl QuillApp {
         // Twice the strip's height, for HiDPI screens.
         let height = (STRIP_HEIGHT * 2.0) as u32;
         // One frame at a time, each shown as it arrives.
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             for (index, at) in times.into_iter().enumerate() {
                 if cancel.load(Ordering::Relaxed) {
                     return;
@@ -410,6 +410,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let app = cx.entity().downgrade();
+        // A reload asked for by the paint below is for this window's editor.
+        let scope = self.windows.scope;
         let bounds_cell = editor.motion.timeline_bounds.clone();
         let timeline = editor.timeline;
         let frames = editor.motion.frames.clone();
@@ -434,7 +436,11 @@ impl QuillApp {
                 {
                     let app = app.clone();
                     cx.defer(move |cx| {
-                        let _ = app.update(cx, |this, cx| this.video_editor_reload_frames(cx));
+                        let _ = app.update(cx, |this, cx| {
+                            this.in_window_scope(scope, cx, |this, cx| {
+                                this.video_editor_reload_frames(cx)
+                            })
+                        });
                     });
                 }
                 paint_timeline(

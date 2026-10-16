@@ -607,7 +607,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        cx.spawn_in(window, async move |this, cx| {
+        Self::spawn_main_in(window, cx, async move |this, cx| {
             let ok = loop {
                 match receiver.try_recv() {
                     Ok(ok) => break ok,
@@ -670,7 +670,7 @@ impl QuillApp {
     }
 
     pub(crate) fn spawn_passcode_tick(&mut self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+        Self::spawn_main(cx, async move |this, cx| {
             // Parked: nothing to time, so the next tick follows a long gap.
             let mut parked = true;
             loop {

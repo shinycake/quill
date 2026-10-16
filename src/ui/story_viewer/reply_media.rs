@@ -426,7 +426,7 @@ impl QuillApp {
         self.stories.reply_recording = false;
         cx.notify();
         let finished = cx.background_spawn(async move { capture.finish() });
-        cx.spawn_in(window, async move |this, cx| {
+        Self::spawn_main_in(window, cx, async move |this, cx| {
             let result = finished.await;
             let _ = this.update_in(cx, |this, _window, cx| {
                 let sent = match result {

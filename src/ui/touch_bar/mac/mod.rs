@@ -125,7 +125,7 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
         emoji: RefCell::new((None, Rc::default())),
     });
     // Touches run on the app in its window.
-    cx.spawn_in(window, async move |this, cx| {
+    QuillApp::spawn_main_in(window, cx, async move |this, cx| {
         loop {
             let command = next_command().await;
             let alive = this
@@ -166,7 +166,9 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
     // The app is mid-update here, so its composer is read once it is not.
     let on_composer = schedule.clone();
     cx.defer_in(window, move |app, _, cx| {
-        let composer = app.composer.clone();
+        let Some(composer) = app.in_window_scope(None, cx, |app, _| app.composer.clone()) else {
+            return;
+        };
         cx.observe(&composer, move |_, _, cx| on_composer(cx))
             .detach();
     });

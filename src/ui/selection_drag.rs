@@ -305,7 +305,7 @@ impl QuillApp {
         }
         self.message_ui.selection_drag_loop = true;
         let handle = window.window_handle();
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(AUTOSCROLL_TICK_MS))
@@ -329,7 +329,7 @@ impl QuillApp {
                     // The wheel event lands inside the list, where the
                     // scroller listens.
                     let anchor = this
-                        .read_with(cx, |this, _| {
+                        .update(cx, |this, _| {
                             this.history.viewport.get().map(|view| {
                                 point(
                                     pointer.x.max(view.left()).min(view.right() - px(1.)),

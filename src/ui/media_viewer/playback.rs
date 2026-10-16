@@ -507,7 +507,7 @@ impl QuillApp {
             return;
         }
         self.viewer.session_tick = true;
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(250))

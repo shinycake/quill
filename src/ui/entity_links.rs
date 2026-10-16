@@ -364,7 +364,7 @@ impl QuillApp {
                 });
                 // Same delay as every kit tooltip (`ui::tooltip_timing`).
                 let delay = super::tooltip_timing::show_delay(cx);
-                cx.spawn(async move |this, cx| {
+                self.spawn_scoped(cx, async move |this, cx| {
                     cx.background_executor().timer(delay).await;
                     let _ = this.update(cx, |this, cx| {
                         if let Some(tooltip) = this.message_ui.link_tooltip.as_mut()

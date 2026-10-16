@@ -238,6 +238,8 @@ macro_rules! window_command {
                 .update(cx, |app, cx| {
                     app.in_window_scope(Some(chat_id), cx, |app, cx| app.$method(window, cx))
                 })
+                .ok()
+                .flatten()
                 .unwrap_or(false);
             if !handled {
                 cx.propagate();

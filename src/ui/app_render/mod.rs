@@ -102,7 +102,9 @@ impl Render for QuillApp {
             self.request_animation_tick(30, cx);
         }
         if std::mem::take(&mut self.recording.auto_send) {
-            cx.defer_in(window, |this, window, cx| this.send_recording(window, cx));
+            self.defer_scoped(window, cx, |this, window, cx| {
+                this.send_recording(window, cx)
+            });
         }
         let status_toast = self.status_toast_visible(cx);
         let viewer_open = self.viewer.state.is_open();

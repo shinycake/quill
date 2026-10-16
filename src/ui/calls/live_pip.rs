@@ -145,6 +145,7 @@ impl QuillApp {
             live: Some(live_pip_controls(weak.clone(), source)),
         };
         // Window creation draws at once: let this update finish first.
+        // window-scope: the live PiP is the app's (`group_call`), no chat window's.
         cx.defer(move |cx| {
             let opened = open_pip_window(open, cx);
             let _ = weak.update(cx, |app, cx| {

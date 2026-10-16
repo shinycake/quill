@@ -274,7 +274,7 @@ impl QuillApp {
             });
             let credentials = credentials.clone();
             let root = root.clone();
-            cx.spawn(async move |this, cx| {
+            Self::spawn_main(cx, async move |this, cx| {
                 let prepared = prepared.await;
                 let _ = this.update(cx, |this, cx| {
                     this.background.prepared(&key);
@@ -370,7 +370,7 @@ impl QuillApp {
         }
         self.background.polling = true;
         let generation = self.background.generation;
-        cx.spawn(async move |this, cx| {
+        Self::spawn_main(cx, async move |this, cx| {
             const BUSY: Duration = Duration::from_millis(40);
             // Idle sleeps are cut short by the receive thread's poke.
             const IDLE_MAX: Duration = Duration::from_secs(2);

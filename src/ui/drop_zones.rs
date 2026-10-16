@@ -108,7 +108,7 @@ impl QuillApp {
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
                 quill::local_path::ensure_private_dir(&dir);
-                cx.spawn(async move |this, cx| {
+                self.spawn_scoped(cx, async move |this, cx| {
                     let built = cx
                         .background_spawn(async move {
                             build_archive(&source, &dir, ARCHIVE_SIZE_LIMIT)

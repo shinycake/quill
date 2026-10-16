@@ -30,7 +30,12 @@ impl Session {
             });
             return;
         }
-        self.apply_payload(owned.envelope.payload, pending.as_ref(), extra, owned.seq);
+        self.apply_payload_in_asking_view(
+            owned.envelope.payload,
+            pending.as_ref(),
+            extra,
+            owned.seq,
+        );
     }
 
     pub(crate) fn apply_payload(

@@ -30,6 +30,9 @@ jobs:
       # docs/decisions/language-packs.md: no new hard-coded English.
       - name: interface strings
         run: python3 scripts/check-lang.py
+      # docs/decisions/sweep-window-slot-scope.md: async work names its window.
+      - name: window scope
+        run: python3 scripts/check-window-scope.py
       - name: hotspots
         if: github.event_name == 'pull_request'
         run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}

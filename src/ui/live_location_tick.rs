@@ -36,7 +36,7 @@ impl QuillApp {
             return;
         }
         self.history.live_location_tick_chat = Some(chat_id);
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 let wait = this
                     .update(cx, |this, _| this.live_location_wait(chat_id))

@@ -498,7 +498,7 @@ impl QuillApp {
         cx.notify();
         // ffmpeg finishes the file after the stop signal: off the main thread.
         let finished = cx.background_spawn(async move { capture.finish() });
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             let result = finished.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.send_finished_video_note(result, window, cx);

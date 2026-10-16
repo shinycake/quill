@@ -174,7 +174,7 @@ impl QuillApp {
         let cancel = Arc::new(AtomicBool::new(false));
         self.playback.gif_decodes.insert(message_id, cancel.clone());
         let max_edge = self.gif_decode_edge(message_id, cx);
-        cx.spawn(async move |this, cx| {
+        Self::spawn_main(cx, async move |this, cx| {
             let decoded = cx
                 .background_executor()
                 .spawn(async move { GifClip::decode(&path, max_edge, &cancel) })

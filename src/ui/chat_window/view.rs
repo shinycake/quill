@@ -37,7 +37,7 @@ impl ChatWindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let slot = owner.update(cx, |app, cx| WindowSlot::new(app, chat_id, window, cx));
+        let slot = owner.update(cx, |app, cx| WindowSlot::new(app, window, cx));
         let shell = cx.new(|_| QuillShell::new(owner.clone()));
         let observe = cx.observe(&owner, |_, _, cx| cx.notify());
         Self {

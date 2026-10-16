@@ -198,7 +198,7 @@ impl QuillApp {
         let token = hdr.token;
         let path = path.to_path_buf();
         let job = cx.background_spawn(async move { run(&path, long_edge, can_show) });
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             let outcome = job.await;
             let _ = this.update(cx, |app, cx| {
                 let hdr = &mut app.viewer.hdr;
@@ -226,7 +226,7 @@ impl QuillApp {
             return;
         }
         self.viewer.hdr.polling = true;
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             let mut ticks = 0_u32;
             loop {
                 ticks = ticks.saturating_add(1);

@@ -5,14 +5,17 @@
 //! and overlay code reads (`history`, `composer`, `composer_ui`,
 //! `message_ui`, `pickers`, `viewer`) and the `Session` keeps one view
 //! (`open_chat`, `open_topic`, the thread, Saved Messages and search
-//! views, the gallery). A chat window owns its own copy of each in a
-//! [`WindowSlot`]; [`QuillApp::set_window_scope`] exchanges the window's
-//! copy with the app's, so the same code then reads and writes the
-//! window's state. The scope is entered when the window is built, laid
-//! out and painted (`view::WindowScope`) and on every input event in it
-//! ([`scope_probe`] for the pointer, the keystroke interceptor in
-//! `ChatWindows::new` for keys), and left at the main window's render,
-//! its input, and the poll loop.
+//! views, the gallery). A chat window owns its own copy of the app's part
+//! in a [`WindowSlot`] and the session keeps its view by chat
+//! (`Session::window_chats`); [`QuillApp::set_window_scope`] exchanges the
+//! window's copies with the ones in place, so the same code then reads and
+//! writes the window's state. The scope is entered when the window is
+//! built, laid out and painted (`view::WindowScope`) and on every input
+//! event in it ([`scope_probe`] for the pointer, the keystroke interceptor
+//! in `ChatWindows::new` for keys), and left at the main window's render,
+//! its input, and the poll loop. Work that finishes later carries the
+//! window it started in (`scoped`); TDLib answers carry it on their
+//! request (`Session::enter_view`).
 
 use super::super::app::QuillApp;
 use super::super::composer_state::ComposerUi;
@@ -25,7 +28,6 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::state::SessionView;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -41,7 +43,6 @@ pub(super) struct WindowSlot {
     pub(super) chat_search_input: Entity<TextareaState>,
     /// The window's own share box, forward selection and picker field.
     pub(super) share: ShareUi,
-    pub(super) session: SessionView,
     /// The window was the active one at its last render.
     pub(super) active: bool,
 }
@@ -49,14 +50,9 @@ pub(super) struct WindowSlot {
 pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
 
 impl WindowSlot {
-    /// A fresh slot for `chat_id`, with a compose field wired like the
-    /// main window's and its own picker search fields.
-    pub(super) fn new(
-        app: &QuillApp,
-        chat_id: ChatId,
-        window: &mut Window,
-        cx: &mut Context<QuillApp>,
-    ) -> Self {
+    /// A fresh slot, with a compose field wired like the main window's and
+    /// its own picker search fields.
+    pub(super) fn new(app: &QuillApp, window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let composer = QuillApp::new_composer_field(app.chat_prefs.send_key_mode, window, cx);
         let emoji_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -86,7 +82,6 @@ impl WindowSlot {
             viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
-            session: SessionView::of_chat(chat_id),
             active: false,
         }
     }
@@ -94,7 +89,8 @@ impl WindowSlot {
 
 impl QuillApp {
     /// Put `target`'s window state in place (`None`: the main window's).
-    /// A no-op when it already is.
+    /// A no-op when it already is; a chat with no window puts the main
+    /// window's state in place.
     pub(in crate::ui) fn set_window_scope(&mut self, target: Option<ChatId>) {
         if self.windows.scope == target {
             return;
@@ -110,6 +106,12 @@ impl QuillApp {
             self.swap_slot(&slot);
             self.windows.scope = Some(chat_id);
         }
+        let scope = self.windows.scope;
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.enter_view(scope);
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.enter_view(scope);
+        }
     }
 
     /// Exchange the app's view state with the slot's (symmetric).
@@ -123,27 +125,27 @@ impl QuillApp {
         std::mem::swap(&mut self.viewer, &mut slot.viewer);
         std::mem::swap(&mut self.search_ui.chat_input, &mut slot.chat_search_input);
         std::mem::swap(&mut self.share, &mut slot.share);
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.swap_view(&mut slot.session);
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.swap_view(&mut slot.session);
-        }
     }
 
     /// Run `f` as `window_chat`'s window (`None`: the main window), for
-    /// work deferred from a window's render, then restore the scope that
-    /// was in place.
+    /// work deferred from a window's render or finishing later, then
+    /// restore the scope that was in place. `None`, without running `f`,
+    /// when that window has closed: its work must not land in the state
+    /// of whichever window is in place instead.
     pub(in crate::ui) fn in_window_scope<R>(
         &mut self,
         window_chat: Option<ChatId>,
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut Self, &mut Context<Self>) -> R,
-    ) -> R {
+    ) -> Option<R> {
+        if window_chat.is_some_and(|chat_id| self.windows.window_for(chat_id).is_none()) {
+            return None;
+        }
         let outer = self.windows.scope;
         self.set_window_scope(window_chat);
         let result = f(self, cx);
         self.set_window_scope(outer);
-        result
+        Some(result)
     }
 
     /// An input event started in `chat`'s window (`None`: the main

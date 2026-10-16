@@ -10,7 +10,8 @@
 //! under one shared deadline (`QUIT_CLOSE_DEADLINE`).
 
 use super::*;
-use gpui_kit::{AsyncApp, WeakEntity};
+use crate::ui::chat_window::ScopedApp;
+use gpui_kit::AsyncApp;
 use quill::connect::{QUIT_CLOSE_DEADLINE, deadline_after};
 
 /// How often a waiter checks the closing set again.
@@ -107,7 +108,7 @@ impl QuillApp {
         then: impl FnOnce(&mut QuillApp, bool, &mut Context<QuillApp>) + 'static,
     ) {
         let mut then = Some(then);
-        cx.spawn(async move |this, cx| {
+        Self::spawn_main(cx, async move |this, cx| {
             loop {
                 let finished = this.update(cx, |this, cx| {
                     this.reap_closing(cx);
@@ -174,11 +175,7 @@ impl QuillApp {
 /// Wait (without blocking the window) until `key`'s old client finished
 /// closing, so a new client never opens a database that is still closing.
 /// False: that can't be confirmed in this run, so never open it.
-pub(in crate::ui) async fn closed(
-    this: &WeakEntity<QuillApp>,
-    key: &AccountKey,
-    cx: &mut AsyncApp,
-) -> bool {
+pub(in crate::ui) async fn closed(this: &ScopedApp, key: &AccountKey, cx: &mut AsyncApp) -> bool {
     loop {
         let wait = this
             .update(cx, |this, cx| {

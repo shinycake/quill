@@ -21,7 +21,8 @@
 //! message menu and selection, the pickers, the media viewer, and the
 //! session's view of the chat. `QuillApp::set_window_scope` swaps a slot
 //! in while its window is drawn or handles input, so the app's own
-//! conversation, composer and overlay code serves every window; kit
+//! conversation, composer and overlay code serves every window; work that
+//! finishes later runs in the window it started in (`scoped`); kit
 //! dialogs open in the window whose input asked for them
 //! (`QuillShell::sync_kit_dialogs_in`). On the session side the chat is
 //! one of `Session::window_chats`.
@@ -29,6 +30,7 @@
 
 mod body;
 mod saved;
+mod scoped;
 mod slot;
 #[cfg(test)]
 mod tests;
@@ -39,6 +41,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::state::ChatSummary;
+pub(in crate::ui) use scoped::ScopedApp;
 pub(in crate::ui) use slot::scope_probe;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -229,6 +232,13 @@ impl QuillApp {
     /// window's open chat.
     pub(super) fn viewed_chat(&self) -> Option<ChatId> {
         self.windows.scope.or_else(|| self.open_chat_id())
+    }
+
+    /// The chat whose window `window` is (`None`: the main window), for
+    /// work a window's own callback defers.
+    pub(in crate::ui) fn window_scope_of(&self, window: &Window) -> Option<ChatId> {
+        self.windows
+            .chat_for_window(window.window_handle().window_id())
     }
 
     /// The open forum topic of the content being built now.

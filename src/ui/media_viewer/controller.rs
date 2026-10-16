@@ -265,7 +265,7 @@ impl QuillApp {
         {
             window.focus(&focus, cx);
         }
-        let timer = cx.spawn(async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(SPEED_BOOST_HOLD_MS))
                 .await;

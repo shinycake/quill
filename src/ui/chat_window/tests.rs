@@ -352,11 +352,10 @@ fn a_chat_picked_inside_a_chat_window_opens_in_the_main_window(cx: &mut TestAppC
     cx.run_until_parked();
     assert_eq!(h.open_chat(cx), Some(CHANNEL), "the main window switched");
     assert_eq!(h.window_chats(cx), vec![OTHER], "the window kept its chat");
-    h.settle(cx);
-    let window_view = h.app.read_with(cx, |app, _| {
-        app.windows
-            .slot_for(OTHER)
-            .map(|slot| slot.borrow().session.open_chat)
+    let window_view = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.session().and_then(|session| session.open_chat)
+        })
     });
     assert_eq!(window_view, Some(Some(OTHER)));
 }
@@ -453,14 +452,17 @@ fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppCo
         )
     });
     // With the window's state in place the fields are the window's own.
-    let (window_search, window_forward) = h.app.update(cx, |app, cx| {
-        app.in_window_scope(Some(OTHER), cx, |app, _| {
-            (
-                app.search_ui.chat_input.entity_id(),
-                app.share.search_input.entity_id(),
-            )
+    let (window_search, window_forward) = h
+        .app
+        .update(cx, |app, cx| {
+            app.in_window_scope(Some(OTHER), cx, |app, _| {
+                (
+                    app.search_ui.chat_input.entity_id(),
+                    app.share.search_input.entity_id(),
+                )
+            })
         })
-    });
+        .expect("the window is open");
     assert_ne!(main_search, window_search);
     assert_ne!(main_forward, window_forward);
 
@@ -474,18 +476,22 @@ fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppCo
     .unwrap();
     cx.run_until_parked();
     h.settle(cx);
-    let (window_text, window_open, main_text, main_open) = h.app.read_with(cx, |app, cx| {
+    let (window_text, main_text, main_open) = h.app.read_with(cx, |app, cx| {
         let slot = app.windows.slot_for(OTHER).expect("slot");
         let slot = slot.borrow();
         (
             slot.chat_search_input.read(cx).value().to_string(),
-            slot.session.chat_search.open,
             app.search_ui.chat_input.read(cx).value().to_string(),
             app.session().is_some_and(|s| s.search.chat_search.open),
         )
     });
+    let window_open = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.session().is_some_and(|s| s.search.chat_search.open)
+        })
+    });
     assert_eq!(window_text, "later");
-    assert!(window_open, "the window's chat search opened");
+    assert_eq!(window_open, Some(true), "the window's chat search opened");
     assert_eq!(main_text, "");
     assert!(!main_open, "the main window's search stayed closed");
 }
@@ -569,4 +575,85 @@ fn reopen_closed_window_brings_back_the_window_closed_last(cx: &mut TestAppConte
         })
         .unwrap();
     assert!(!again, "the list of closed windows is used up");
+}
+
+/// The media viewer's "saved" toast of `chat`'s window (`None`: the main
+/// window's) is showing.
+fn toast_shown(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) -> bool {
+    h.settle(cx);
+    h.app.read_with(cx, |app, _| match chat {
+        Some(chat) => app
+            .windows
+            .slot_for(chat)
+            .is_some_and(|slot| slot.borrow().viewer.extra.saved_toast.is_some()),
+        None => app.viewer.extra.saved_toast.is_some(),
+    })
+}
+
+/// Show the "saved" toast in `chat`'s window (`None`: the main window),
+/// as a Save there would; its timer hides it later.
+fn show_saved_toast(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) {
+    let shown = h.app.update(cx, |app, cx| {
+        app.in_window_scope(chat, cx, |app, cx| {
+            app.show_saved_toast(std::path::PathBuf::from("/tmp/clip.mp4"), true, cx);
+        })
+    });
+    assert_eq!(shown, Some(()), "the window is open");
+    // The input that asked is over: the main window's state goes back in
+    // place, as its next draw or the poll loop puts it.
+    h.settle(cx);
+}
+
+const TOAST: std::time::Duration =
+    std::time::Duration::from_millis(quill::viewer_extras::SAVED_TOAST_MS);
+const A_MOMENT: std::time::Duration = std::time::Duration::from_millis(50);
+
+#[gpui_kit::test]
+fn a_timer_started_in_a_chat_window_finishes_in_that_window(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    // The window's toast first, the main window's half a lifetime later:
+    // each is its viewer's first, so their counters match.
+    show_saved_toast(&h, Some(OTHER), cx);
+    cx.executor().advance_clock(TOAST / 2);
+    show_saved_toast(&h, None, cx);
+    assert!(toast_shown(&h, Some(OTHER), cx));
+    assert!(toast_shown(&h, None, cx));
+
+    // The window's timer ends with the main window's state in place: it
+    // hides the window's toast, not the main window's younger one.
+    cx.executor().advance_clock(TOAST / 2 + A_MOMENT);
+    cx.run_until_parked();
+    assert!(!toast_shown(&h, Some(OTHER), cx), "the window's toast went");
+    assert!(toast_shown(&h, None, cx), "the main window's toast stays");
+
+    cx.executor().advance_clock(TOAST / 2);
+    cx.run_until_parked();
+    assert!(!toast_shown(&h, None, cx), "then the main window's goes");
+}
+
+#[gpui_kit::test]
+fn work_from_a_closed_chat_window_lands_nowhere(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    show_saved_toast(&h, Some(OTHER), cx);
+    cx.executor().advance_clock(TOAST / 2);
+    show_saved_toast(&h, None, cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+
+    let ran = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |_, _| ())
+    });
+    assert_eq!(ran, None, "a closed window's scope runs nothing");
+    // The closed window's timer ends: the main window's toast, with the
+    // same counter, is not the one it hides.
+    cx.executor().advance_clock(TOAST / 2 + A_MOMENT);
+    cx.run_until_parked();
+    assert!(toast_shown(&h, None, cx), "the main window's toast stays");
 }

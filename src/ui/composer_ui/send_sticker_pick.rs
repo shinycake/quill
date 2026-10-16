@@ -163,7 +163,7 @@ impl QuillApp {
         }
         self.composer_ui.preview_token = self.composer_ui.preview_token.wrapping_add(1);
         let token = self.composer_ui.preview_token;
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(500))
                 .await;

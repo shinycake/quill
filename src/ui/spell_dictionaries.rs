@@ -150,7 +150,7 @@ impl QuillApp {
             worker_progress.finish();
             result
         });
-        self.spell.dict_manager.task = Some(cx.spawn(async move |this, cx| {
+        self.spell.dict_manager.task = Some(Self::spawn_main(cx, async move |this, cx| {
             while !progress.is_finished() {
                 cx.background_executor()
                     .timer(Duration::from_millis(120))
