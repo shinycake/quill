@@ -503,15 +503,12 @@ impl QuillApp {
                 ("15m", 900),
                 ("1h", 3600),
             ] {
-                let label = if value == current_delay {
-                    format!("✓ {label}")
-                } else {
-                    label.to_string()
-                };
                 value_row = value_row.child(
                     Button::new(format!("slow-mode-set-{value}"))
                         .label(label)
-                        .ghost()
+                        .small()
+                        .outline()
+                        .selected(value == current_delay)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.set_slow_mode_delay(chat_id, value, cx);
                         })),

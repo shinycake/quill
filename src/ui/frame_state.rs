@@ -48,6 +48,8 @@ pub(crate) struct FrameUi {
     pub(super) context_menu_focus: FocusHandle,
     pub(super) context_menu_was_open: bool,
     pub(super) context_menu_previous_focus: Option<FocusHandle>,
+    /// Focus return for hand-drawn layers (see `esc_stack::track_layer_focus`).
+    pub(super) layer_focus: super::esc_stack::LayerFocus,
 }
 
 impl FrameUi {
@@ -75,6 +77,7 @@ impl FrameUi {
             context_menu_focus: cx.focus_handle(),
             context_menu_was_open: false,
             context_menu_previous_focus: None,
+            layer_focus: Default::default(),
         }
     }
 }

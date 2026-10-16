@@ -402,6 +402,63 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
 ];
 
+/// Layers that give focus back to whatever had it before they opened.
+const FOCUS_RETURN_LAYERS: &[&str] = &[
+    "profile-modal",
+    "earn-layer",
+    "composer-code-language",
+    "composer-date-dialog",
+    "composer-link-dialog",
+    "gif-panel",
+    "sticker-panel",
+    "reply-panels",
+    "forward-picker",
+];
+
+/// Bookkeeping for [`QuillApp::track_layer_focus`]. Weak handles only: a
+/// strong one would keep a closed dialog's focus handle alive.
+#[derive(Default)]
+pub(super) struct LayerFocus {
+    /// Focus as of the last frame with no tracked layer open.
+    base: Option<WeakFocusHandle>,
+    /// Focus as of the last frame with a tracked layer open.
+    open_focus: Option<WeakFocusHandle>,
+    was_open: bool,
+}
+
+impl QuillApp {
+    fn focus_return_layer_open(&self) -> bool {
+        self.pickers.media_panel.open
+            || ESC_LAYERS
+                .iter()
+                .any(|layer| FOCUS_RETURN_LAYERS.contains(&layer.name) && (layer.is_open)(self))
+    }
+
+    /// One shared focus return for the hand-drawn layers. Runs every frame:
+    /// while no tracked layer is open it remembers the focused element; when
+    /// the last one closes, focus goes back there unless the close path
+    /// already moved it somewhere on purpose (context menus do the same).
+    pub(super) fn track_layer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let open = self.focus_return_layer_open();
+        let focused = window.focused(cx);
+        let state = &mut self.frame.layer_focus;
+        if open {
+            state.open_focus = focused.map(|handle| handle.downgrade());
+        } else if state.was_open {
+            let open_focus = state.open_focus.take().and_then(|weak| weak.upgrade());
+            let untouched = focused.is_none() || focused == open_focus;
+            let base = state.base.take().and_then(|weak| weak.upgrade());
+            if untouched && let Some(base) = base {
+                window.focus(&base, cx);
+            }
+            state.base = window.focused(cx).map(|handle| handle.downgrade());
+        } else {
+            state.base = focused.map(|handle| handle.downgrade());
+        }
+        self.frame.layer_focus.was_open = open;
+    }
+}
+
 impl QuillApp {
     /// The topmost open layer, if any.
     pub(super) fn topmost_esc_layer(&self) -> Option<&'static EscLayer> {

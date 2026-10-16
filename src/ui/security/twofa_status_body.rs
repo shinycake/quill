@@ -633,9 +633,12 @@ impl QuillApp {
                         })),
                 );
         }
-        // TGX never offers to terminate the current session.
+        // Terminate and Details share one right-aligned row, so Details sits
+        // in the same column on every card (TGX never offers to terminate
+        // the current session: that card just has no Terminate).
+        let mut buttons = div().flex().items_center().justify_end().gap_1();
         if !s.is_current {
-            actions = actions.child(
+            buttons = buttons.child(
                 Button::new(format!("terminate-session-{session_id}"))
                     .label(tr(keys::SETTINGS_RESET_BUTTON))
                     .small()
@@ -646,7 +649,7 @@ impl QuillApp {
                     })),
             );
         }
-        actions = actions.child(
+        buttons = buttons.child(
             Button::new(format!("session-details-{session_id}"))
                 .label(tr(keys::Q_PREFS_DETAILS))
                 .small()
@@ -656,6 +659,7 @@ impl QuillApp {
                     cx.notify();
                 })),
         );
+        actions = actions.child(buttons);
         row = row.child(actions);
         row.into_any_element()
     }
