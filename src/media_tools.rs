@@ -38,7 +38,13 @@ pub fn command(name: &str) -> Command {
 
 /// Resolve the tools and list the encoders on a background thread, so the
 /// probes (up to 5 s each) are done before the UI thread asks.
+/// Runs once per process; later calls (a second window) do nothing.
 pub fn warm_up() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(spawn_warm_up);
+}
+
+fn spawn_warm_up() {
     let _ = std::thread::Builder::new()
         .name("quill-media-tools".into())
         .spawn(|| {
