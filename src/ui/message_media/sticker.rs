@@ -7,7 +7,7 @@ pub(in crate::ui) fn sticker_attachment(
     row_id: u64,
     sticker: &quill::telegram::envelope::StickerContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     animated: Option<crate::ui::sticker_playback::AnimatedVisual>,
     cx: &mut Context<QuillApp>,

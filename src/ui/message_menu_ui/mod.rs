@@ -207,9 +207,11 @@ impl QuillApp {
     ) -> MediaFacts {
         let protected = session.chat_has_protected_content(chat_id);
         let file = session.file(target.file_id);
-        let downloading = session.media.downloading.contains(&target.file_id.0)
-            || session.requests.has_download(target.file_id)
-            || file.is_some_and(|f| f.local.is_downloading_active);
+        let downloading = session
+            .media
+            .downloads
+            .is_downloading(target.file_id.0, &session.media.files)
+            || session.requests.has_download(target.file_id);
         let content = quill::telegram::envelope::effective_content(
             &message.content,
             message.ephemeral.as_ref(),

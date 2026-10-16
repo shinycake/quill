@@ -39,8 +39,7 @@ impl Session {
             self.requests.invalidate_account();
             self.account_generation.bump();
             self.media.files.clear();
-            self.media.downloading.clear();
-            self.media.stalled_auto_downloads.clear();
+            self.media.downloads.clear();
             self.media.download_extras.clear();
             self.search.search.close();
             self.search.chat_search.close();

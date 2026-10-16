@@ -77,7 +77,7 @@ impl QuillApp {
         &self,
         item: &MediaViewerItem,
         files: &HashMap<i32, ParsedFile>,
-        downloading: &HashSet<i32>,
+        downloading: &quill::state::DownloadIntents,
     ) -> Option<FileCard> {
         let file = files.get(&item.download_file_id.0);
         let size = file.map(ParsedFile::display_size).unwrap_or(0);
@@ -139,7 +139,7 @@ impl FileCard {
     pub(super) fn new(
         item: &MediaViewerItem,
         files: &HashMap<i32, ParsedFile>,
-        downloading: &HashSet<i32>,
+        downloading: &quill::state::DownloadIntents,
     ) -> Self {
         let file_id = item.download_file_id;
         let file = files.get(&file_id.0);

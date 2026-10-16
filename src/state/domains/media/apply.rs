@@ -47,20 +47,14 @@ impl Session {
                 // path (recent list + unstick).
                 // The idle file update can precede the list's pause event.
                 // A later authoritative list update restores that transfer.
-                if (is_paused || complete_date != 0) && self.media.failed_downloads.remove(&file_id)
-                {
-                    self.media.user_downloads.insert(file_id);
-                    self.media.downloading.insert(file_id);
+                if (is_paused || complete_date != 0) && self.media.downloads.is_failed(file_id) {
+                    self.media.downloads.adopt(file_id, false);
                 }
                 if complete_date != 0 {
                     self.record_completed_user_download(file_id);
                     self.unstick_download(file_id);
-                } else if self.media.user_downloads.contains(&file_id) {
-                    if is_paused {
-                        self.media.paused_downloads.insert(file_id);
-                    } else {
-                        self.media.paused_downloads.remove(&file_id);
-                    }
+                } else if self.media.downloads.is_user(file_id) {
+                    self.media.downloads.set_paused(file_id, is_paused);
                 }
             }
             MediaPayload::ProfileAudios(page) => self.apply_profile_audios(page, pending),

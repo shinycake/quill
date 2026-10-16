@@ -355,7 +355,7 @@ impl QuillApp {
                             .values()
                             .filter(|file| file.usable_path().is_some())
                             .count(),
-                        s.media.downloading.len(),
+                        s.media.downloads.requested_count(),
                     )
                 })
                 .unwrap_or_default();

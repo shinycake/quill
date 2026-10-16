@@ -150,7 +150,7 @@ impl QuillApp {
                     .current()
                     .and_then(|item| item.video_file_id)
                     .is_some_and(|id| {
-                        file_is_downloading(id, &session.media.files, &session.media.downloading)
+                        file_is_downloading(id, &session.media.files, &session.media.downloads)
                     })
             });
             let waited = self

@@ -8,29 +8,12 @@ pub struct MediaState {
     pub media_library: MediaLibrary,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: HashMap<i32, ParsedFile>,
-    /// `downloadFile` in flight (until completed, undownloadable, idle, or error).
-    pub downloading: HashSet<i32>,
-    /// Subset of `downloading` the user explicitly started (history rows,
-    /// viewer) — these surface in the downloads manager. Automatic
-    /// thumbs/avatars/sounds are not tracked here.
-    pub user_downloads: HashSet<i32>,
-    /// Subset of `user_downloads` currently paused via
-    /// `toggleDownloadIsPaused`. Pause is list state (`updateFileDownload`)
-    /// tracked separately from the in-flight download above.
-    pub paused_downloads: HashSet<i32>,
-    /// `downloadFile` requests TDLib answered with an error (file id → still
-    /// in `downloading` until unstuck; the UI shows "failed — retry").
-    /// Cleared when a new download starts or the file completes.
-    pub failed_downloads: HashSet<i32>,
-    /// Automatic (non-user) downloads TDLib refused or stopped without
-    /// completing. The automatic path skips them so each ingest does not
-    /// re-send `downloadFile`; an explicit user download or completion
-    /// clears the mark (Telegram X `TdlibFilesManager.onFileUpdate` treats
-    /// a stopped download as paused until asked again).
-    pub stalled_auto_downloads: HashSet<i32>,
+    /// What was asked to download and how each request ended; the status
+    /// rows show is `downloads.status(id, &files)`.
+    pub downloads: DownloadIntents,
     /// Automatic downloads of full media in the open chat (MED3), whose
     /// progress the history draws: their `updateFile`s redraw at once
-    /// (`redraw_need`). Pruned to `downloading` on each pass.
+    /// (`redraw_need`). Pruned to the requested downloads on each pass.
     pub open_chat_media_downloads: HashSet<i32>,
     /// Avatar file id → number of chats / users showing it (chat-list
     /// photos and contact `photo_small`), kept where those ids are set.
@@ -41,11 +24,6 @@ pub struct MediaState {
     /// Re-check every avatar once (new session, any auth change: requests
     /// were invalidated and files may have been cleared).
     pub(crate) avatar_rescan: bool,
-    /// Recently completed downloads (file ids, most recent last, capped) for
-    /// the downloads manager's "recent" list. Recorded only when a file was
-    /// in `downloading` and its `updateFile` shows completion — pre-existing
-    /// local files don't count.
-    pub completed_downloads: VecDeque<i32>,
     /// Downloads manager panel open (right side, next to the info panel).
     pub downloads_panel_open: bool,
     /// `@extra` → `file.id` until the download unsticks (survives `file@extra` consuming pending).
@@ -73,16 +51,11 @@ impl MediaState {
         Self {
             media_library: MediaLibrary::default(),
             files: HashMap::new(),
-            downloading: HashSet::new(),
-            user_downloads: HashSet::new(),
-            paused_downloads: HashSet::new(),
-            failed_downloads: HashSet::new(),
-            stalled_auto_downloads: HashSet::new(),
+            downloads: DownloadIntents::default(),
             open_chat_media_downloads: HashSet::new(),
             avatar_file_refs: HashMap::new(),
             avatar_downloads_due: BTreeSet::new(),
             avatar_rescan: true,
-            completed_downloads: VecDeque::new(),
             downloads_panel_open: false,
             download_extras: HashMap::new(),
             shared_media: SharedMediaState::default(),

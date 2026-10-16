@@ -237,15 +237,9 @@ impl Session {
             .and_then(|p| p.file_id)
             .or_else(|| extra.and_then(|id| self.media.download_extras.get(&id.0).copied()));
         if let Some(file_id) = download_id {
-            // MED3 review: only user-initiated downloads enter the
-            // Failed section; automatic downloads never started by
-            // the user must not show rows here.
-            if self.media.user_downloads.contains(&file_id) {
-                self.media.failed_downloads.insert(file_id);
-            } else {
-                // A refused automatic download is not retried per ingest.
-                self.media.stalled_auto_downloads.insert(file_id);
-            }
+            // A user download lands in the Failed section; an automatic
+            // one is not retried per ingest.
+            self.media.downloads.end(file_id);
             self.unstick_download(file_id);
         }
         if let Some(pending) = pending

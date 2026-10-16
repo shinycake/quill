@@ -36,7 +36,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn card_shown(app: &QuillApp) -> bool {
     let session = app.session().expect("demo session");
     let item = app.viewer.state.current().expect("an item").clone();
-    app.viewer_file_card(&item, &session.media.files, &session.media.downloading)
+    app.viewer_file_card(&item, &session.media.files, &session.media.downloads)
         .is_some()
 }
 

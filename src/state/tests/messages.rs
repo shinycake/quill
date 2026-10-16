@@ -635,7 +635,7 @@ fn nested_idle_message_file_does_not_unstick_in_flight_download() {
             r#"{{"@type":"updateNewMessage","message":{{"id":13,"chat_id":1,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":100,"height":80,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
         ),
     );
-    assert!(session.media.downloading.contains(&6));
+    assert!(session.media.downloads.is_requested(6));
     assert!(!session.should_download(FileId(6)));
 }
 

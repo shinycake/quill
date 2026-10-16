@@ -26,7 +26,7 @@ pub(super) fn game_card(
     game: &GameContent,
     session: Option<&Session>,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     revealed: &HashSet<(i64, u64, u64, bool)>,
     font: Pixels,

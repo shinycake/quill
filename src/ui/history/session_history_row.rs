@@ -6,8 +6,7 @@ use quill::lang::{keys, tr, tr_with};
 pub(in crate::ui) fn session_history_row(
     message: &HistoryMessage,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
-    failed: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // kit Phase 4: per-row chrome (sender header / outbox receipt /
     // avatar) computed at row-build time so the virtualized row doesn't
@@ -356,12 +355,11 @@ pub(in crate::ui) fn session_history_row(
             message.is_outgoing,
             files,
             downloading,
-            failed,
             media_roots,
             // The pause toggle is for user-initiated (listed) downloads.
             session
-                .filter(|s| s.media.user_downloads.contains(&doc.file_id.0))
-                .map(|s| s.media.paused_downloads.contains(&doc.file_id.0)),
+                .filter(|s| s.media.downloads.is_user(doc.file_id.0))
+                .map(|s| s.media.downloads.is_paused(doc.file_id.0)),
             DocOrigin::Message(message.chat_id, message.id),
             look.plain,
             cx,

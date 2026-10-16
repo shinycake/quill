@@ -70,11 +70,10 @@ impl QuillApp {
         .flatten()
         .filter(|id| {
             self.session().is_some_and(|s| {
-                s.media.failed_downloads.contains(&id.0)
+                s.media.downloads.is_failed(id.0)
                     || (s.file(*id).and_then(|f| f.usable_path()).is_none()
-                        && !s.media.downloading.contains(&id.0)
-                        && !s.requests.has_download(*id)
-                        && !s.file(*id).is_some_and(|f| f.local.is_downloading_active))
+                        && !s.media.downloads.is_downloading(id.0, &s.media.files)
+                        && !s.requests.has_download(*id))
             })
         })
         .collect();
@@ -186,8 +185,8 @@ impl QuillApp {
             return None;
         }
         let (active, recent) = (
-            session.media.user_downloads.len(),
-            session.media.completed_downloads.len(),
+            session.media.downloads.user_count(),
+            session.media.downloads.recent(&session.media.files).count(),
         );
         let mut panel = div()
             .id("downloads-panel")
@@ -255,9 +254,13 @@ impl QuillApp {
     /// strip lists its Downloads tab only then.
     pub(super) fn has_downloads(&self) -> bool {
         self.session().is_some_and(|s| {
-            !(s.media.user_downloads.is_empty()
-                && s.media.completed_downloads.is_empty()
-                && s.media.failed_downloads.is_empty())
+            s.media.downloads.user_count() > 0
+                || s.media.downloads.recent(&s.media.files).next().is_some()
+                || s.media
+                    .downloads
+                    .failed_ids(&s.media.files)
+                    .next()
+                    .is_some()
         })
     }
 
@@ -275,13 +278,21 @@ impl QuillApp {
                     .to_lowercase()
                     .contains(&needle)
         };
-        let mut active: Vec<i32> = session.media.user_downloads.iter().copied().collect();
+        let mut active: Vec<i32> = session.media.downloads.user_ids().collect();
         active.sort_unstable();
         active.retain(keep);
-        let mut failed: Vec<i32> = session.media.failed_downloads.iter().copied().collect();
+        let mut failed: Vec<i32> = session
+            .media
+            .downloads
+            .failed_ids(&session.media.files)
+            .collect();
         failed.sort_unstable();
         failed.retain(keep);
-        let mut recent: Vec<i32> = session.media.completed_downloads.iter().copied().collect();
+        let mut recent: Vec<i32> = session
+            .media
+            .downloads
+            .recent(&session.media.files)
+            .collect();
         recent.retain(keep);
         let muted = cx.theme().muted_foreground;
         let heading = |text: &'static str| {
@@ -342,7 +353,7 @@ impl QuillApp {
         let paused = active
             && session
                 .as_ref()
-                .is_some_and(|s| s.media.paused_downloads.contains(&file_id));
+                .is_some_and(|s| s.media.downloads.is_paused(file_id));
         let done = file.map_or(0, |f| f.local.downloaded_size);
         let meta = if active {
             let amount = if done > 0 && !size_label.is_empty() {

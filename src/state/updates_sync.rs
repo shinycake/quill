@@ -265,28 +265,18 @@ impl Session {
         if let Some(name) = download.name {
             self.sync.download_names.insert(id, name);
         }
-        self.media.failed_downloads.remove(&id);
         if download.complete_date != 0 {
-            self.media.user_downloads.insert(id);
-            self.record_completed_user_download(id);
-            self.media.user_downloads.remove(&id);
-            self.media.paused_downloads.remove(&id);
+            self.media.downloads.record_finished(id);
+            self.media.downloads.forget(id);
         } else {
-            self.media.user_downloads.insert(id);
-            if download.is_paused {
-                self.media.paused_downloads.insert(id);
-            } else {
-                self.media.paused_downloads.remove(&id);
-            }
+            self.media.downloads.adopt(id, download.is_paused);
         }
     }
 
     /// The download left the list (removed here or on another device).
     pub(crate) fn apply_download_removed(&mut self, file_id: i32) {
-        self.media.user_downloads.remove(&file_id);
-        self.media.paused_downloads.remove(&file_id);
-        self.media.failed_downloads.remove(&file_id);
-        self.media.completed_downloads.retain(|id| *id != file_id);
+        self.media.downloads.forget(file_id);
+        self.media.downloads.drop_finished(file_id);
         self.sync.download_names.remove(&file_id);
     }
 

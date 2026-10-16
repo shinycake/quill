@@ -569,7 +569,7 @@ fn driver_fetch_story_custom_emoji_stickers_dedupes_and_caches() {
     assert_eq!(download["file_id"], 77);
     assert_eq!(download["priority"], 1);
     assert!(driver.download_file(display_file, 1).unwrap().is_none());
-    assert!(driver.session.media.user_downloads.is_empty());
+    assert!(driver.session.media.downloads.user_count() == 0);
     assert_eq!(recorder.snapshot().len(), sent + 1);
 
     driver
