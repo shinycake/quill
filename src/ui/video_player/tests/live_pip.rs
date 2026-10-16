@@ -269,6 +269,30 @@ fn locking_quill_closes_the_live_pip(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn enlarge_on_another_account_closes_the_live_pip(cx: &mut TestAppContext) {
+    let (app, mut main) = new_app(cx);
+    let main = &mut main;
+    let mut stream = open_stream(&app, main, cx);
+    let mut pip = open_stream_pip(&app, &mut stream, main, cx);
+    app.update_in(main, |app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.account = quill::ids::AccountKey("another".into());
+        }
+    });
+    pip.update(|window, cx| {
+        window.hover("pip-enlarge", cx);
+        window.click("pip-enlarge", cx);
+    });
+    pip.run_until_parked();
+    settle(main);
+    assert!(
+        !live_pip_open(&app, main),
+        "nothing can take it back: closed"
+    );
+    assert!(app.read_with(main, |app, _| app.group_call.window.is_none()));
+}
+
+#[gpui_kit::test]
 fn one_sound_at_a_time_with_a_file_pip(cx: &mut TestAppContext) {
     let script = Rc::new(RefCell::new(Script {
         ready: true,
@@ -387,5 +411,31 @@ fn a_live_story_pip_keeps_the_story_until_it_closes(cx: &mut TestAppContext) {
     app.read_with(main, |app, _| {
         assert!(app.group_call.live_pip.is_none());
         assert_eq!(app.stories.live.watching, None, "closing left the story");
+    });
+}
+
+#[gpui_kit::test]
+fn enlarging_a_story_that_is_gone_closes_the_live_pip(cx: &mut TestAppContext) {
+    let (app, mut main) = open_live_story(cx);
+    let main = &mut main;
+    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    app.update_in(main, |app, window, cx| app.open_story_pip(window, cx));
+    settle(main);
+    let mut pip = live_pip_window(&app, main, cx);
+    app.update_in(main, |app, _, _| {
+        if let (Some(session), Some((chat_id, story_id))) = (app.demo_session.as_mut(), watching) {
+            session.stories.stories.remove(&(chat_id.0, story_id));
+        }
+    });
+    pip.update(|window, cx| {
+        window.hover("pip-enlarge", cx);
+        window.click("pip-enlarge", cx);
+    });
+    pip.run_until_parked();
+    settle(main);
+    app.read_with(main, |app, _| {
+        assert!(app.group_call.live_pip.is_none(), "closed");
+        assert!(!app.stories.viewer.is_open());
+        assert_eq!(app.stories.live.watching, None, "the story was left");
     });
 }

@@ -196,8 +196,12 @@ impl QuillApp {
         let Some(link) = self.group_call.live_pip.as_ref() else {
             return;
         };
+        // Another account is active: its windows cannot take the player,
+        // so the PiP closes (a stream's call stays on its account).
         let account = self.session().map(|session| session.account.clone());
         if account != link.account {
+            self.close_live_pip(cx);
+            cx.notify();
             return;
         }
         let (source, return_to) = (link.source, link.return_to);
@@ -213,7 +217,10 @@ impl QuillApp {
                         )
                     })
                     .unwrap_or_default();
+                // The story is gone: nothing can take the picture back.
                 if items.is_empty() {
+                    self.close_live_pip(cx);
+                    cx.notify();
                     return;
                 }
                 self.begin_story_viewer(items, 0, cx);
