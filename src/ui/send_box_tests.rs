@@ -55,10 +55,12 @@ fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
 }
 
 fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
-    app.composer_ui.pending_attachments = files
+    let files: Vec<_> = files
         .iter()
         .map(|(name, kind)| ComposerAttachment::pick(&fixture(name), *kind).unwrap())
         .collect();
+    app.update_pending_attachments(|tray| *tray = files)
+        .expect("an open chat");
 }
 
 #[gpui_kit::test]
@@ -125,18 +127,18 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, _| {
         tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
         assert!(!app.tray_has_large_photo());
-        app.composer_ui
-            .pending_attachments
-            .push(ComposerAttachment::pick(&big, AttachmentKind::Photo).unwrap());
+        let photo = ComposerAttachment::pick(&big, AttachmentKind::Photo).unwrap();
+        app.update_pending_attachments(|tray| tray.push(photo))
+            .expect("an open chat");
         assert!(app.tray_has_large_photo());
         assert!(!app.composer_media_options().hd_photos);
-        app.composer_ui.send_box.hd_photos = true;
+        app.update_pending_send(|send| send.hd_photos = true);
         assert!(app.composer_media_options().hd_photos);
         // Sent as files, the quality choice means nothing.
-        quill::composer::ComposerAttachment::set_send_as_files(
-            &mut app.composer_ui.pending_attachments,
-            true,
-        );
+        app.update_pending_attachments(|tray| {
+            quill::composer::ComposerAttachment::set_send_as_files(tray, true)
+        })
+        .expect("an open chat");
         assert!(!app.composer_media_options().hd_photos);
     });
     let _ = std::fs::remove_dir_all(&dir);
@@ -172,12 +174,12 @@ fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppCont
         app.attach_dropped_files(std::slice::from_ref(&clip), cx);
         // The probe runs in the background: the tray waits for it.
         assert!(app.tray_videos_checking());
-        assert!(!app.composer_ui.pending_attachments[0].extras.gif);
+        assert!(!app.pending_attachments()[0].extras.gif);
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(!app.tray_videos_checking());
-        assert!(app.composer_ui.pending_attachments[0].extras.gif);
+        assert!(app.pending_attachments()[0].extras.gif);
     });
     let _ = std::fs::remove_dir_all(&dir);
 }

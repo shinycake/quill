@@ -395,3 +395,31 @@ fn an_unconfirmed_log_out_tells_the_user_to_restart_quill(cx: &mut TestAppContex
     });
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[gpui_kit::test]
+fn a_removed_account_takes_its_composer_choices_with_it(cx: &mut TestAppContext) {
+    use crate::ui::composer_sends::SendSlot;
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    let _store = isolate(&app, &mut vcx, &root, &[account(1)]);
+    let slot = |key: AccountKey| SendSlot {
+        account: key,
+        draft: quill::composer::DraftTopic::Chat.key(11),
+    };
+    app.update_in(&mut vcx, |app, _, cx| {
+        for key in [AccountKey::primary(), account(1)] {
+            app.composer_sends
+                .update(&slot(key), |send| send.preview.disabled = true);
+        }
+        app.remove_account_in(root.clone(), &account(1), cx);
+        assert!(!app.composer_sends.get(&slot(account(1))).preview.disabled);
+        assert!(
+            app.composer_sends
+                .get(&slot(AccountKey::primary()))
+                .preview
+                .disabled,
+            "other accounts keep theirs"
+        );
+    });
+    let _ = std::fs::remove_dir_all(&root);
+}

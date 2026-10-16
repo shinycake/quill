@@ -51,7 +51,7 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
         assert!(app.paid_send_waits(ChatId(11), "hello", cx));
     });
     app.read_with(vcx, |app, _| {
-        let confirm = app.paid_messages.confirm.as_ref().expect("asks first");
+        let confirm = &app.paid_messages.confirm.as_ref().expect("asks first").ask;
         assert_eq!(confirm.per_message, 25);
         assert_eq!(confirm.total(), 25);
         assert_eq!(confirm.text, "hello");

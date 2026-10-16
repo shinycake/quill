@@ -210,12 +210,7 @@ impl QuillApp {
     pub(in crate::ui) fn preview_choice(&self) -> LinkPreviewChoice {
         match self.composer_ui.pending_edit.as_ref() {
             Some(edit) => edit.link_preview,
-            None => LinkPreviewChoice {
-                disabled: self.composer_ui.preview_disabled,
-                above_text: self.composer_ui.preview_above,
-                media: self.composer_ui.preview_media,
-                link_index: self.composer_ui.preview_link,
-            },
+            None => self.pending_send().preview,
         }
     }
 
@@ -223,10 +218,7 @@ impl QuillApp {
         match self.composer_ui.pending_edit.as_mut() {
             Some(edit) => edit.link_preview = choice,
             None => {
-                self.composer_ui.preview_disabled = choice.disabled;
-                self.composer_ui.preview_above = choice.above_text;
-                self.composer_ui.preview_media = choice.media;
-                self.composer_ui.preview_link = choice.link_index;
+                self.update_pending_send(|send| send.preview = choice);
             }
         }
     }
@@ -364,7 +356,7 @@ impl QuillApp {
             .pending_edit
             .as_ref()
             .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Text));
-        if !self.composer_ui.pending_attachments.is_empty()
+        if !self.pending_attachments().is_empty()
             || (self.composer_ui.pending_edit.is_some() && !editing_text)
         {
             return None;
@@ -576,7 +568,7 @@ impl QuillApp {
             self.composer_ui.pending_edit.as_ref().is_some_and(|edit| {
                 matches!(edit.kind, quill::composer::ComposerEditKind::Caption)
             });
-        if self.composer_ui.pending_attachments.is_empty() && !editing_caption {
+        if self.pending_attachments().is_empty() && !editing_caption {
             return None;
         }
         // Documents and music have no caption position; photos, videos and
@@ -586,7 +578,7 @@ impl QuillApp {
             .pending_edit
             .as_ref()
             .is_some_and(|edit| editing_caption && edit.caption_position_applies())
-            || self.composer_ui.pending_attachments.iter().any(|att| {
+            || self.pending_attachments().iter().any(|att| {
                 matches!(
                     att.kind,
                     quill::composer::AttachmentKind::Photo | quill::composer::AttachmentKind::Video
@@ -598,7 +590,7 @@ impl QuillApp {
                 .as_ref()
                 .is_some_and(|edit| edit.caption_above)
         } else {
-            self.composer_ui.caption_above
+            self.pending_send().caption_above
         };
         let text_len = self.composer.read(cx).value().chars().count();
         let limit = self
@@ -636,8 +628,9 @@ impl QuillApp {
                                         if let Some(edit) = this.composer_ui.pending_edit.as_mut() {
                                             edit.caption_above = !edit.caption_above;
                                         } else {
-                                            this.composer_ui.caption_above =
-                                                !this.composer_ui.caption_above;
+                                            this.update_pending_send(|send| {
+                                                send.caption_above = !send.caption_above
+                                            });
                                         }
                                         cx.notify();
                                     })),
@@ -659,7 +652,7 @@ impl QuillApp {
     /// editing. A new message over the limit is not an error (it is sent as
     /// several messages), so the label says how many.
     pub(in crate::ui) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.composer_ui.pending_attachments.is_empty() {
+        if !self.pending_attachments().is_empty() {
             return None;
         }
         let editing = self.composer_ui.pending_edit.as_ref();

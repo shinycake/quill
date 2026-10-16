@@ -38,6 +38,7 @@ mod chat_window;
 mod clipboard_files;
 mod composer_events;
 mod composer_rtl;
+mod composer_sends;
 mod composer_state;
 mod composer_thumb;
 mod connection_state;
@@ -205,6 +206,9 @@ mod composer_field;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod composer_field_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod composer_sends_tests;
 mod composer_shortcuts;
 mod composer_suggest;
 mod composer_ui;

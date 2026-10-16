@@ -114,7 +114,7 @@ impl QuillApp {
     ) {
         let text = self.composer.read(cx).value().to_string();
         if text.trim().is_empty()
-            && self.composer_ui.pending_attachments.is_empty()
+            && self.pending_attachments().is_empty()
             && !self.forward_bar_here()
         {
             return;

@@ -1,20 +1,17 @@
-//! State of the send box (the attachment tray above the composer): the
-//! "High quality" and paid media choices, the price box and the video
-//! editor. Behaviour is in `send_box_options.rs` and `video_editor.rs`.
+//! State of the send box (the attachment tray above the composer): what
+//! was read about its files, the price box and the video editor (the
+//! "High quality" and price choices are per chat, `composer_sends.rs`). Behaviour is in
+//! `send_box_options.rs` and `video_editor.rs`.
 #![deny(clippy::indexing_slicing)]
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::send_box_options::PriceDialog;
 use super::video_editor::VideoEditorDialog;
 
 pub(crate) struct SendBoxUi {
-    /// "High quality": photos keep up to 2560 px instead of 1280 px.
-    pub(super) hd_photos: bool,
-    /// Stars to unlock the media; 0 sends a normal message.
-    pub(super) paid_stars: i64,
     /// Sizes read from the header of tray photos, once per file.
     pub(super) photo_sizes: RefCell<HashMap<PathBuf, Option<(u32, u32)>>>,
     /// Tray videos whose sound track is being read in the background, and
@@ -37,8 +34,6 @@ pub(crate) struct SendBoxUi {
 impl SendBoxUi {
     pub(super) fn new() -> Self {
         Self {
-            hd_photos: false,
-            paid_stars: 0,
             photo_sizes: RefCell::new(HashMap::new()),
             sound_checking: HashSet::new(),
             sound_checked: HashSet::new(),
@@ -50,15 +45,18 @@ impl SendBoxUi {
         }
     }
 
-    /// The choices made for one batch end with it.
-    pub(super) fn reset(&mut self) {
-        self.hd_photos = false;
-        self.paid_stars = 0;
-        self.photo_sizes.borrow_mut().clear();
-        self.sound_checking.clear();
-        self.sound_checked.clear();
-        self.thumbnailing.clear();
-        self.thumbnailed.clear();
+    /// Files left their tray: forget what was read about them, so the same
+    /// file attached again is read again. Callers pass only files no tray
+    /// holds any more (`QuillApp::forget_tray_checks`).
+    pub(super) fn forget<'a>(&mut self, paths: impl Iterator<Item = &'a Path>) {
+        let mut sizes = self.photo_sizes.borrow_mut();
+        for path in paths {
+            sizes.remove(path);
+            self.sound_checking.remove(path);
+            self.sound_checked.remove(path);
+            self.thumbnailing.remove(path);
+            self.thumbnailed.remove(path);
+        }
     }
 }
 

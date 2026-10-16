@@ -84,15 +84,15 @@ fn the_repeat_choice_rides_the_schedule_for_premium(cx: &mut TestAppContext) {
         set_premium(app, true);
         schedule_with_repeat(app, 7 * DAY, window, cx);
         assert!(matches!(
-            app.composer_ui.scheduling,
+            app.pending_send().scheduling,
             ComposerScheduling::SendAtDate(_)
         ));
-        assert_eq!(app.composer_ui.schedule_repeat, 7 * DAY);
+        assert_eq!(app.pending_send().schedule_repeat, 7 * DAY);
         let options = app.composer_send_options();
         assert_eq!(options.schedule_repeat_period, 7 * DAY);
         // The choice is as one-shot as the schedule: clearing the schedule
         // drops it from the options.
-        app.composer_ui.scheduling = ComposerScheduling::None;
+        app.update_pending_send(|send| send.scheduling = ComposerScheduling::None);
         assert_eq!(app.composer_send_options().schedule_repeat_period, 0);
     });
 }
@@ -109,7 +109,7 @@ fn without_premium_the_repeat_choice_is_dropped_and_the_button_is_locked(cx: &mu
         assert!(!app.repeat_allowed(ScheduleTarget::Composer));
         app.close_schedule_picker(cx);
         schedule_with_repeat(app, DAY, window, cx);
-        assert_eq!(app.composer_ui.schedule_repeat, 0);
+        assert_eq!(app.pending_send().schedule_repeat, 0);
     });
 }
 
@@ -194,12 +194,12 @@ fn the_scheduled_list_and_the_link_preview_toggle_follow_the_chat(cx: &mut TestA
             input.set_value("see https://example.com", window, cx)
         });
         assert!(app.toggle_link_preview_by_key(window, cx));
-        assert!(app.composer_ui.preview_disabled);
+        assert!(app.pending_send().preview.disabled);
         // Turning it back on, even though the text has changed.
         app.composer
             .update(cx, |input, cx| input.set_value("plain", window, cx));
         assert!(app.toggle_link_preview_by_key(window, cx));
-        assert!(!app.composer_ui.preview_disabled);
+        assert!(!app.pending_send().preview.disabled);
     });
 }
 

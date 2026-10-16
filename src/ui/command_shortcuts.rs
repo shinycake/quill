@@ -31,7 +31,7 @@ impl QuillApp {
         self.composer_ui.pending_edit.is_none()
             && !self.recording_active()
             && (!self.composer.read(cx).value().trim().is_empty()
-                || !self.composer_ui.pending_attachments.is_empty()
+                || !self.pending_attachments().is_empty()
                 || self.forward_bar_here())
     }
 
@@ -151,7 +151,7 @@ impl QuillApp {
             || self.composer_ui.pending_edit.is_some()
             || self.recording_active()
             || !self.composer.read(cx).value().trim().is_empty()
-            || !self.composer_ui.pending_attachments.is_empty()
+            || !self.pending_attachments().is_empty()
         {
             return false;
         }

@@ -86,7 +86,7 @@ fn a_chat_that_takes_no_files_keeps_the_chooser_open(cx: &mut TestAppContext) {
             app.connection.status_note,
             "Sorry, no way to send media here :("
         );
-        assert!(app.composer_ui.pending_attachments.is_empty());
+        assert!(app.pending_attachments().is_empty());
     });
 }
 
@@ -100,6 +100,6 @@ fn a_chat_that_takes_files_opens_with_them_attached(cx: &mut TestAppContext) {
         app.choose_start_files_chat(chat, window, cx);
         assert!(app.start_files.choosing.is_empty());
         assert_eq!(app.open_chat_id(), Some(chat));
-        assert_eq!(app.composer_ui.pending_attachments.len(), 1);
+        assert_eq!(app.pending_attachments().len(), 1);
     });
 }

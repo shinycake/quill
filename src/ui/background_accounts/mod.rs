@@ -432,6 +432,7 @@ impl QuillApp {
         // Clients on their way out: one non-blocking drain each.
         busy |= self.reap_closing(cx);
         let mut stopped: Vec<(AccountKey, LiveConnect)> = Vec::new();
+        let mut signed_out: Vec<AccountKey> = Vec::new();
         for client in &mut self.background.clients {
             let Some(live) = client.live.as_mut() else {
                 continue;
@@ -478,6 +479,12 @@ impl QuillApp {
                 client.status = status.clone();
                 changed = true;
             }
+            if matches!(
+                status,
+                BackgroundStatus::SignedOut | BackgroundStatus::NeedsSignIn
+            ) {
+                signed_out.push(client.key.clone());
+            }
             if status.stops_client()
                 && let Some(live) = client.live.take()
             {
@@ -488,6 +495,10 @@ impl QuillApp {
         }
         for (key, live) in stopped {
             self.background.push_closing(key, live, false);
+        }
+        // Logged out in the background: its next sends go with it.
+        for key in signed_out {
+            self.forget_account_sends(&key);
         }
         if changed {
             self.publish_background_unread();

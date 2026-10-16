@@ -10,7 +10,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
-use super::paid_messages_state::RemoveFeeBox;
+use super::paid_messages_state::{ComposerPaidConfirm, RemoveFeeBox};
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -55,13 +55,19 @@ impl QuillApp {
             || tr(keys::Q_MONEY_THIS_USER).to_string(),
             |chat| chat.title.clone(),
         );
-        let messages = self.composer_ui.pending_attachments.len().max(1) as i64;
-        self.paid_messages.confirm = Some(PaidConfirm {
-            chat_id: chat_id.0,
-            name,
-            per_message: stars,
-            messages,
-            text: text.to_string(),
+        let Some(slot) = self.send_slot() else {
+            return false;
+        };
+        let messages = self.pending_attachments().len().max(1) as i64;
+        self.paid_messages.confirm = Some(ComposerPaidConfirm {
+            ask: PaidConfirm {
+                chat_id: chat_id.0,
+                name,
+                per_message: stars,
+                messages,
+                text: text.to_string(),
+            },
+            slot,
         });
         self.paid_messages.confirm_trust = false;
         if let Some(live) = self.live.as_mut() {
@@ -76,8 +82,8 @@ impl QuillApp {
     /// a send the guard holds (a sticker, GIF, voice note, forward...).
     /// The flag is true for a held send.
     pub(super) fn paid_confirm_view(&self) -> Option<(PaidConfirm, bool)> {
-        if let Some(confirm) = self.paid_messages.confirm.clone() {
-            return Some((confirm, false));
+        if let Some(pending) = self.paid_messages.confirm.as_ref() {
+            return Some((pending.ask.clone(), false));
         }
         let held = self.live.as_ref()?.driver.held_paid_send()?;
         let name = self.session()?.chats.get(&held.chat_id).map_or_else(
@@ -111,13 +117,10 @@ impl QuillApp {
     /// released as it is.
     pub(super) fn confirm_paid_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let remember = self.paid_messages.confirm_trust;
-        let Some((confirm, held)) = self.paid_confirm_view() else {
-            return;
-        };
-        let chat = ChatId(confirm.chat_id);
-        self.paid_messages.confirm = None;
-        if held {
+        let Some(ComposerPaidConfirm { ask: confirm, slot }) = self.paid_messages.confirm.take()
+        else {
             if let Some(live) = self.live.as_mut()
+                && live.driver.held_paid_send().is_some()
                 && live.driver.release_paid_send(remember).is_err()
             {
                 self.connection.status_note =
@@ -125,7 +128,15 @@ impl QuillApp {
             }
             cx.notify();
             return;
+        };
+        // Another chat or account is on screen now: the composer would send
+        // there, at a price nobody agreed to. Nothing goes, as on Cancel;
+        // the text waits in its own chat's composer.
+        if self.send_slot().as_ref() != Some(&slot) {
+            cx.notify();
+            return;
         }
+        let chat = ChatId(confirm.chat_id);
         if remember {
             if let Some(live) = self.live.as_mut() {
                 live.driver.remember_paid_trust(chat, confirm.per_message);

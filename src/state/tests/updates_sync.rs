@@ -197,15 +197,6 @@ fn live_shares_replace_keep_viewed_and_expire() {
 }
 
 #[test]
-fn effective_silent_honors_chat_default_and_override() {
-    assert!(!effective_silent(false, false, false));
-    assert!(effective_silent(true, false, false));
-    assert!(effective_silent(false, true, false));
-    assert!(!effective_silent(false, true, true));
-    assert!(effective_silent(true, true, true));
-}
-
-#[test]
 fn age_gate_only_blocks_turning_on_before_verification() {
     assert!(age_gate_blocks(true, true, false));
     assert!(!age_gate_blocks(false, true, false));

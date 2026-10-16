@@ -40,13 +40,15 @@ fn fixture(name: &str) -> PathBuf {
 
 fn attach(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, path: PathBuf) {
     app.update_in(vcx, |app, _, _| {
-        app.composer_ui.pending_attachments = vec![ComposerAttachment {
+        let picked = vec![ComposerAttachment {
             file_name: "pic".into(),
             path,
             kind: AttachmentKind::Photo,
             spoiler: false,
             extras: AttachmentExtras::default(),
         }];
+        app.update_pending_attachments(|tray| *tray = picked)
+            .expect("an open chat");
     });
 }
 

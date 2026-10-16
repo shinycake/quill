@@ -1,15 +1,12 @@
-//! Composer state: menus, attachments, send options, reply and edit drafts.
+//! Composer state: menus, dialogs, reply and edit drafts. The next send's
+//! attachments and options are per chat, in `composer_sends.rs`.
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use quill::composer::ComposerAttachment;
 use quill::composer::ComposerEdit;
 use quill::composer::ComposerReplyTo;
-use quill::composer::ComposerScheduling;
-use quill::composer::PreviewMediaSize;
 use quill::ids::ChatId;
 use quill::ids::MessageId;
-use quill::telegram::requests::SelfDestructSend;
 
 pub(crate) struct ComposerUi {
     /// Phase 3.3: `/` command menu state. Open while the composer text
@@ -38,42 +35,6 @@ pub(crate) struct ComposerUi {
     /// The chat an inline results button left, to come back to
     /// (`inline_return.rs`).
     pub(super) inline_return: Option<super::inline_return::InlineReturn>,
-    /// Local files the user explicitly attached (canonical paths via `pick`).
-    /// One item sends with `sendMessage`. Two or more photos/videos send with
-    /// `sendMessageAlbum`.
-    pub(super) pending_attachments: Vec<ComposerAttachment>,
-    /// Phase B3: the composer's self-destruct choice for photo/video
-    /// sends (`inputMessagePhoto`/`inputMessageVideo`
-    /// `self_destruct_type`, schema 1.8.67 lines 6117/6128 — private
-    /// chats only). Cycles Off → 5s → 30s → 1m → View once via the
-    /// picker button; captured into `ComposerSnapshot` at submit time.
-    pub(super) self_destruct: Option<SelfDestructSend>,
-    /// MED4: caption-above-media toggle for photo/video sends
-    /// (`show_caption_above_media`, schema 1.8.67 lines 6117/6128).
-    /// Captured into `ComposerSnapshot` at submit time; reset after send.
-    pub(super) caption_above: bool,
-    /// M1: silent-send toggle (`messageSendOptions.disable_notification`,
-    /// schema 1.8.67 line 5934). Persists across sends until toggled.
-    pub(super) silent: bool,
-    /// The chat whose `default_disable_notification` the user turned off
-    /// for the composer ("Send with sound" in a chat that sends silently).
-    pub(super) loud_chat: Option<i64>,
-    /// M1: link-preview toggle (`linkPreviewOptions.is_disabled`, schema
-    /// 1.8.67 line 2237). Persists across sends; secret chats force it on.
-    pub(super) preview_disabled: bool,
-    /// MED4b: `linkPreviewOptions.show_above_text` (schema:2236, TGX
-    /// `onRequestToggleShowAbove`). Persists across sends like the
-    /// disable toggle; hidden while the preview is off.
-    pub(super) preview_above: bool,
-    /// MED4b: `linkPreviewOptions.force_small_media` /
-    /// `force_large_media` (schema:2234-2235, TGX
-    /// `onRequestToggleLargeMedia`). Persists across sends; the size
-    /// button only renders when the prefetched preview actually offers
-    /// large media.
-    pub(super) preview_media: PreviewMediaSize,
-    /// B5: which detected link drives the preview (tdesktop "choose
-    /// link"); an index into the composer text's URLs, clamped.
-    pub(super) preview_link: usize,
     /// B5: "Send as a document" for the replacement file while editing
     /// media (tdesktop `EditCaptionBox::_asFile`).
     pub(super) edit_replace_as_file: bool,
@@ -86,12 +47,6 @@ pub(crate) struct ComposerUi {
     pub(super) prev_text: String,
     /// A typed markdown replacement Backspace can still take back.
     pub(super) markdown_revert: Option<super::composer_field::MarkdownRevert>,
-    /// M1: scheduling choice (`messageSchedulingState*`, schema 1.8.67
-    /// lines 5902/5905). Reset to `None` after each successful send.
-    pub(super) scheduling: ComposerScheduling,
-    /// The repeat period (seconds) chosen with the schedule, zero for
-    /// never. One-shot like `scheduling`.
-    pub(super) schedule_repeat: i32,
     /// "Silent send" shortcut: the next send alone goes without sound.
     pub(super) send_silent_once: bool,
     /// "Send with Effect": the next send alone carries this effect
@@ -163,12 +118,12 @@ pub(crate) struct ComposerUi {
     pub(super) poll_dialog: Option<PollDialog>,
     /// B15: the checklist composer / "Add Tasks" box.
     pub(super) checklist_dialog: Option<ChecklistDialog>,
-    /// The attachment tray's High quality, paid media and video editor.
+    /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
 }
 
 impl ComposerUi {
-    pub(super) fn new(pending_attachments: Vec<ComposerAttachment>) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             command_menu_open: false,
             command_menu_selected: 0,
@@ -180,21 +135,10 @@ impl ComposerUi {
             inline_query_armed: None,
             inline_scroll: gpui_kit::ScrollHandle::new(),
             inline_return: None,
-            pending_attachments,
-            self_destruct: None,
-            caption_above: false,
-            silent: false,
-            loud_chat: None,
-            preview_disabled: false,
-            preview_above: false,
-            preview_media: PreviewMediaSize::Auto,
-            preview_link: 0,
             edit_replace_as_file: false,
             preview_token: 0,
             prev_text: String::new(),
             markdown_revert: None,
-            scheduling: ComposerScheduling::None,
-            schedule_repeat: 0,
             send_silent_once: false,
             send_effect_once: 0,
             send_menu: Default::default(),

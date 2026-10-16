@@ -419,6 +419,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_story_viewer(cx);
+        self.flush_leaving_draft(cx);
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live
                 .driver
@@ -433,6 +434,9 @@ impl QuillApp {
             let _ = session.begin_chat_search_jump(message_id);
             self.connection.status_note = chat_search_jump_note(session);
         }
+        self.dismiss_cross_chat_state(chat_id, cx);
+        // The composer shows the new chat's draft (next frame: no window here).
+        self.request_draft_restore();
         cx.notify();
     }
 

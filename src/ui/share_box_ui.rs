@@ -305,13 +305,13 @@ impl QuillApp {
             return;
         }
         let options = self.composer_send_options();
-        if !text.trim().is_empty() || !self.composer_ui.pending_attachments.is_empty() {
+        if !text.trim().is_empty() || !self.pending_attachments().is_empty() {
             self.share.forward_bar_dest = None;
             self.submit_composer(text, window, cx);
             self.share.forward_bar_dest = Some(dest);
             // The comment did not go out (the composer keeps it): stop.
             if !self.composer.read(cx).value().trim().is_empty()
-                || !self.composer_ui.pending_attachments.is_empty()
+                || !self.pending_attachments().is_empty()
             {
                 return;
             }
@@ -325,7 +325,9 @@ impl QuillApp {
                     self.connection.status_note = tr(keys::Q_OPS_FORWARDING).into();
                     self.share.pending_forward = None;
                     self.share.forward_bar_dest = None;
-                    self.composer_ui.scheduling = quill::composer::ComposerScheduling::None;
+                    self.update_pending_send(|send| {
+                        send.scheduling = quill::composer::ComposerScheduling::None
+                    });
                 }
                 Err(_) => {
                     self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_FORWARD_MESSAGES).into()

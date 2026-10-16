@@ -13,37 +13,21 @@ pub(in crate::ui) struct SendOptionsState {
 }
 
 impl QuillApp {
-    /// Flip silent send for the next message, keeping a chat default
-    /// from switching it back on.
-    pub(in crate::ui) fn toggle_composer_silent(&mut self) {
-        let chat = self.session().and_then(|s| s.open_chat).map(|c| c.0);
-        let chat_default =
-            chat.is_some_and(|id| self.session().is_some_and(|s| s.sync.is_default_silent(id)));
-        if self.composer_effective_silent() {
-            self.composer_ui.silent = false;
-            if chat_default {
-                self.composer_ui.loud_chat = chat;
-            }
-        } else {
-            self.composer_ui.silent = true;
-            self.composer_ui.loud_chat = None;
-        }
-    }
-
     /// M1: the composer's `messageSendOptions` for the next send.
     pub(in crate::ui) fn composer_send_options(&self) -> SendOptions {
+        let send = self.pending_send();
         SendOptions {
             disable_notification: self.composer_effective_silent()
                 || self.composer_ui.send_silent_once,
-            scheduling: self.composer_ui.scheduling,
-            schedule_repeat_period: match self.composer_ui.scheduling {
-                ComposerScheduling::SendAtDate(_) => self.composer_ui.schedule_repeat,
+            scheduling: send.scheduling,
+            schedule_repeat_period: match send.scheduling {
+                ComposerScheduling::SendAtDate(_) => send.schedule_repeat,
                 _ => 0,
             },
-            link_preview_disabled: self.composer_ui.preview_disabled,
-            link_preview_above_text: self.composer_ui.preview_above,
-            link_preview_media: self.composer_ui.preview_media,
-            link_preview_link: self.composer_ui.preview_link,
+            link_preview_disabled: send.preview.disabled,
+            link_preview_above_text: send.preview.above_text,
+            link_preview_media: send.preview.media,
+            link_preview_link: send.preview.link_index,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
             effect_id: self.composer_ui.send_effect_once,
@@ -263,8 +247,8 @@ impl QuillApp {
     pub(in crate::ui) fn send_options_state(&self) -> SendOptionsState {
         SendOptionsState {
             silent: self.composer_effective_silent(),
-            preview_off: self.composer_ui.preview_disabled,
-            scheduled: !matches!(self.composer_ui.scheduling, ComposerScheduling::None),
+            preview_off: self.pending_send().preview.disabled,
+            scheduled: !matches!(self.pending_send().scheduling, ComposerScheduling::None),
             kind: self.schedule_kind(),
         }
     }
@@ -307,7 +291,9 @@ impl QuillApp {
                 .checked(!preview_off)
                 .on_click(move |_, _, cx| {
                     let _ = toggle_preview.update(cx, |this, cx| {
-                        this.composer_ui.preview_disabled = !this.composer_ui.preview_disabled;
+                        this.update_pending_send(|send| {
+                            send.preview.disabled = !send.preview.disabled
+                        });
                         cx.notify();
                     });
                 }),
@@ -361,7 +347,7 @@ impl QuillApp {
                 ),
             );
         }
-        let schedule_label = match self.composer_ui.scheduling {
+        let schedule_label = match self.pending_send().scheduling {
             ComposerScheduling::None => None,
             ComposerScheduling::SendAtDate(date) => Some(format!(
                 "{} · {}",
@@ -394,13 +380,15 @@ impl QuillApp {
                             .accessibility_label(tr(keys::CONTEXT_SEND_NOW_MSG))
                             .swallow_press()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.composer_ui.scheduling = ComposerScheduling::None;
+                                this.update_pending_send(|send| {
+                                    send.scheduling = ComposerScheduling::None
+                                });
                                 cx.notify();
                             })),
                     ),
             );
         }
-        if self.composer_ui.preview_disabled {
+        if self.pending_send().preview.disabled {
             any = true;
             row = row.child(
                 chip("chip-preview", tr(keys::Q_CHAT_NO_LINK_PREVIEW).into(), cx).child(
@@ -410,7 +398,7 @@ impl QuillApp {
                         .ghost()
                         .accessibility_label(tr(keys::Q_CHAT_SHOW_LINK_PREVIEW))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.composer_ui.preview_disabled = false;
+                            this.update_pending_send(|send| send.preview.disabled = false);
                             cx.notify();
                         })),
                 ),
@@ -767,7 +755,7 @@ impl QuillApp {
 
     /// Phase B3: label for the picker button (`⏱` cycle affordance).
     pub(in crate::ui) fn self_destruct_button_label(&self) -> String {
-        match self.composer_ui.self_destruct {
+        match self.pending_send().self_destruct {
             None => tr(keys::Q_CHAT_OFF).to_string(),
             Some(SelfDestructSend::Timer(secs)) => format!("{secs}s"),
             Some(SelfDestructSend::Immediately) => tr(keys::Q_CHAT_VIEW_ONCE).to_string(),

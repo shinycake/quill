@@ -88,7 +88,12 @@ impl QuillApp {
         )
     }
 
+    /// Close what was open for another chat before `chat_id` shows: menus,
+    /// confirmations and a recording. The next send's attachments and
+    /// options need nothing here, they are per chat (`composer_sends.rs`).
     pub(super) fn dismiss_cross_chat_state(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        // Phase B4: the TTL picker belongs to the previous chat.
+        self.notify.ttl_picker_open = false;
         if self
             .composer_ui
             .pending_reply

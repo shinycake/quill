@@ -30,8 +30,7 @@ impl QuillApp {
     /// sound checks.
     pub(super) fn prepare_tray_file_thumbnails(&mut self, cx: &mut Context<Self>) {
         let paths: Vec<PathBuf> = self
-            .composer_ui
-            .pending_attachments
+            .pending_attachments()
             .iter()
             .filter(|attachment| attachment.kind == AttachmentKind::Document)
             .filter(|attachment| attachment.extras.file_thumbnail.is_none())
@@ -71,12 +70,7 @@ impl QuillApp {
                         return;
                     }
                     if let Some(thumbnail) = thumbnail {
-                        for attachment in this
-                            .composer_ui
-                            .pending_attachments
-                            .iter_mut()
-                            .filter(|attachment| attachment.path == path)
-                        {
+                        for attachment in this.composer_sends.attachments_at_mut(&path) {
                             attachment.extras.file_thumbnail = Some(thumbnail.clone());
                         }
                     }

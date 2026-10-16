@@ -465,6 +465,7 @@ impl QuillApp {
                 .map(|live| live.driver.session.account.clone())
         {
             self.video_pip_account_ended(&account, cx);
+            self.forget_account_sends(&account);
         }
         if ingested {
             self.check_video_pip(cx);

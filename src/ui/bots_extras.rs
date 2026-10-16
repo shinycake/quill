@@ -35,7 +35,7 @@ impl QuillApp {
         if !composer.focus_handle(cx).is_focused(window)
             || !composer.value().is_empty()
             || self.composer_ui.pending_edit.is_some()
-            || !self.composer_ui.pending_attachments.is_empty()
+            || !self.pending_attachments().is_empty()
         {
             return false;
         }
