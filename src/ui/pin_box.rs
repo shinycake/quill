@@ -155,7 +155,13 @@ impl QuillApp {
                     let ids = ids.clone();
                     let _ = app.update(cx, |this, cx| {
                         for id in ids {
-                            this.unpin_from_banner(chat_id, id, cx);
+                            // Skip what was deleted while the box was open.
+                            let there = this
+                                .session()
+                                .is_none_or(|session| session.message_still_there(chat_id, id));
+                            if there {
+                                this.unpin_from_banner(chat_id, id, cx);
+                            }
                         }
                         this.share.pending_forward = None;
                         this.share.forward_picker_open = false;
@@ -169,7 +175,7 @@ impl QuillApp {
     /// Whether every selected message is pinned and the user may unpin
     /// (`MessagesToUnpin`).
     pub(super) fn selection_unpinnable(&self, chat_id: ChatId) -> bool {
-        let Some(draft) = self.share.pending_forward.as_ref() else {
+        let Some(draft) = self.forward_draft() else {
             return false;
         };
         let Some(session) = self.session() else {

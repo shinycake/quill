@@ -163,30 +163,6 @@ impl Session {
             (None, None) => DraftTopic::Chat,
         }
     }
-
-    /// The message a draft replies to, looked up where the composer is:
-    /// the chat history, the open thread, or the open topic's history.
-    pub fn draft_reply_preview(&self, chat_id: ChatId, message_id: MessageId) -> Option<String> {
-        let row = self
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
-            .or_else(|| {
-                self.threads
-                    .thread
-                    .as_ref()
-                    .filter(|thread| thread.chat_id == chat_id)
-                    .and_then(|thread| thread.history.messages.get(&message_id.0))
-            })
-            .or_else(|| {
-                let topic = self.open_topic?;
-                self.threads
-                    .topic_histories
-                    .get(&(chat_id.0, topic))
-                    .and_then(|history| history.messages.get(&message_id.0))
-            })?;
-        Some(effective_preview(row))
-    }
 }
 
 impl ForumTopic {

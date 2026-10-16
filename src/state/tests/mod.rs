@@ -11,6 +11,7 @@ mod chat_list;
 mod chat_list_more;
 mod chat_row;
 mod common;
+mod composer_targets;
 mod connection_indicator;
 mod downloads;
 mod drafts_everywhere;

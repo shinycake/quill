@@ -157,7 +157,6 @@ mod tests {
         ComposerEdit {
             chat_id: ChatId(1),
             message_id: MessageId(2),
-            original_text: String::new(),
             kind: ComposerEditKind::Caption,
             scheduled: false,
             caption_above: false,

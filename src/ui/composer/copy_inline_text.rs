@@ -168,7 +168,12 @@ impl QuillApp {
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
         let reply = self.composer_ui.pending_reply.take();
-        let (edit, field, saved, stashed) = begin_edit_keeping_reply(current, edit, reply);
+        let original = self
+            .session()
+            .and_then(|session| session.edit_target_text(&edit))
+            .unwrap_or_default();
+        let (edit, field, saved, stashed) =
+            begin_edit_keeping_reply(current, edit, original, reply);
         self.composer_ui.pending_edit = Some(edit);
         self.composer_ui.saved_edit_draft = saved;
         self.composer_ui.saved_edit_reply = stashed;

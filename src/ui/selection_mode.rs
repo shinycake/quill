@@ -29,10 +29,8 @@ pub(super) struct SelectionRow {
 impl QuillApp {
     /// Whether selection mode is on in `chat_id`.
     pub(super) fn selecting_in(&self, chat_id: ChatId) -> bool {
-        self.share
-            .pending_forward
-            .as_ref()
-            .is_some_and(|draft| draft.from_chat_id == chat_id && !draft.message_ids.is_empty())
+        self.forward_draft()
+            .is_some_and(|draft| draft.from_chat_id == chat_id)
     }
 
     /// Follow selection mode for the motion state; returns the check fade
@@ -264,7 +262,7 @@ impl QuillApp {
                         .ghost()
                         .tooltip(tr(keys::Q_CHAT_UNPIN_SELECTED))
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if let Some(draft) = this.share.pending_forward.clone() {
+                            if let Some(draft) = this.forward_draft() {
                                 this.confirm_unpin(
                                     draft.from_chat_id,
                                     draft.message_ids,
@@ -308,6 +306,7 @@ impl QuillApp {
     /// Select `ids` that are not selected yet, up to the selection limit
     /// (`Data::MaxSelectedItems`).
     pub(super) fn add_to_selection(&mut self, chat_id: ChatId, ids: Vec<MessageId>) {
+        self.drop_deleted_selection();
         let Some(draft) = self.share.pending_forward.as_mut() else {
             return;
         };
@@ -330,7 +329,7 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        let Some(draft) = self.share.pending_forward.as_ref() else {
+        let Some(draft) = self.forward_draft() else {
             return;
         };
         let ids = self.loaded_selectable_ids(chat_id);
@@ -350,7 +349,7 @@ impl QuillApp {
     /// selection is on in the chat and the message is not part of it, with
     /// a selected message among the loaded ones.
     pub(super) fn can_select_up_to(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        let Some(draft) = self.share.pending_forward.as_ref() else {
+        let Some(draft) = self.forward_draft() else {
             return false;
         };
         draft.from_chat_id == chat_id
@@ -395,7 +394,7 @@ impl QuillApp {
 
     /// The media messages of the selection, oldest first.
     fn selected_media(&self) -> Vec<(MessageId, quill::message_menu::MediaTarget)> {
-        let Some(draft) = self.share.pending_forward.as_ref() else {
+        let Some(draft) = self.forward_draft() else {
             return Vec::new();
         };
         let Some(history) = self
@@ -438,7 +437,7 @@ impl QuillApp {
     /// "Download Selected": start the downloads of every selected media
     /// message that is not on disk yet (Save then copies them out).
     fn download_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.share.pending_forward.as_ref().map(|d| d.from_chat_id) else {
+        let Some(chat_id) = self.forward_draft().map(|d| d.from_chat_id) else {
             return;
         };
         if self.refuse_protected_copy(chat_id, cx) {
@@ -461,7 +460,7 @@ impl QuillApp {
     /// "Save Selected": pick a folder and copy the downloaded media of the
     /// selection into it; media still downloading is requested first.
     fn save_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.share.pending_forward.as_ref().map(|d| d.from_chat_id) else {
+        let Some(chat_id) = self.forward_draft().map(|d| d.from_chat_id) else {
             return;
         };
         if self.refuse_protected_copy(chat_id, cx) {
@@ -540,7 +539,7 @@ impl QuillApp {
     /// messages in a chat that is not Saved Messages (Telegram Desktop's
     /// `suggestReport`).
     pub(super) fn selection_reportable(&self, chat_id: ChatId) -> bool {
-        let Some(draft) = self.share.pending_forward.as_ref() else {
+        let Some(draft) = self.forward_draft() else {
             return false;
         };
         let Some(session) = self.session() else {
@@ -563,7 +562,7 @@ impl QuillApp {
 
     /// "Report N": the Report flow for every selected message.
     pub(super) fn report_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(draft) = self.share.pending_forward.clone() else {
+        let Some(draft) = self.forward_draft() else {
             return;
         };
         let mut ids = draft.message_ids.clone();
@@ -576,7 +575,7 @@ impl QuillApp {
     /// single message as its text; several as "[date time] Name: text"
     /// lines, oldest first.
     pub(super) fn selected_messages_text(&self) -> Option<(ChatId, String)> {
-        let draft = self.share.pending_forward.as_ref()?;
+        let draft = self.forward_draft()?;
         let session = self.session()?;
         let history = session.histories.get(&draft.from_chat_id.0)?;
         let mut ids = draft.message_ids.clone();
@@ -622,7 +621,7 @@ impl QuillApp {
     /// "delete for everyone" (checked by default) when every selected
     /// message is yours and the chat isn't Saved Messages.
     pub(super) fn confirm_delete_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(draft) = self.share.pending_forward.as_ref() else {
+        let Some(draft) = self.forward_draft() else {
             return;
         };
         let (chat_id, ids) = (draft.from_chat_id, draft.message_ids.clone());
@@ -699,14 +698,26 @@ impl QuillApp {
         revoke: bool,
         cx: &mut Context<Self>,
     ) {
-        self.begin_vanish(chat_id, ids);
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
-                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES).into();
-            }
-        } else if self.demo_session.is_some() {
-            for id in ids {
-                self.apply_demo_delete(chat_id, *id);
+        // The box may have sat open while some of them went away.
+        let ids: Vec<MessageId> = ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.session()
+                    .is_none_or(|session| session.message_still_there(chat_id, *id))
+            })
+            .collect();
+        let ids = ids.as_slice();
+        if !ids.is_empty() {
+            self.begin_vanish(chat_id, ids);
+            if let Some(live) = self.live.as_mut() {
+                if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
+                    self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES).into();
+                }
+            } else if self.demo_session.is_some() {
+                for id in ids {
+                    self.apply_demo_delete(chat_id, *id);
+                }
             }
         }
         self.share.pending_forward = None;

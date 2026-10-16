@@ -269,16 +269,7 @@ impl QuillApp {
                 return Some((None, None));
             }
             let draft = session.draft_for(chat_id, topic).cloned();
-            let preview = draft
-                .as_ref()
-                .and_then(|draft| draft.reply_to_message_id)
-                .map(|id| {
-                    let text = session
-                        .draft_reply_preview(chat_id, id)
-                        .filter(|text| !text.is_empty())
-                        .unwrap_or_else(|| "message".into());
-                    (id, text)
-                });
+            let preview = draft.as_ref().and_then(|draft| draft.reply_to_message_id);
             Some((draft, preview))
         });
         let Some((draft, preview)) = restored else {
@@ -288,17 +279,14 @@ impl QuillApp {
             .as_ref()
             .map(|draft| draft.text.clone())
             .unwrap_or_default();
-        self.composer_ui.pending_reply = preview.map(|(id, preview)| {
+        self.composer_ui.pending_reply = preview.map(|id| {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
             match draft.as_ref().and_then(|draft| draft.quote.clone()) {
-                Some((text, position)) => ComposerReplyTo::with_quote(
-                    chat_id,
-                    id,
-                    preview,
-                    QuoteSelection { text, position },
-                ),
-                None => ComposerReplyTo::new(chat_id, id, preview),
+                Some((text, position)) => {
+                    ComposerReplyTo::with_quote(chat_id, id, QuoteSelection { text, position })
+                }
+                None => ComposerReplyTo::new(chat_id, id),
             }
         });
         self.set_composer_markup(&text, window, cx);

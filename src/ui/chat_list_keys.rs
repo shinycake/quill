@@ -383,7 +383,7 @@ impl QuillApp {
         // Escape from the chat comes back to it.
         match row {
             ListRow::Archive => self.open_archive_folder(cx),
-            ListRow::Chat(id) if !self.chat_list.selected.is_empty() => {
+            ListRow::Chat(id) if self.selecting_chats() => {
                 self.toggle_chat_selected(id, cx);
             }
             ListRow::Chat(id) => {

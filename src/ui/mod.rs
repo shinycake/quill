@@ -40,6 +40,7 @@ mod composer_events;
 mod composer_rtl;
 mod composer_sends;
 mod composer_state;
+mod composer_targets;
 mod composer_thumb;
 mod connection_state;
 pub(crate) mod crash_notice;
@@ -100,6 +101,7 @@ mod search_state;
 mod secret_codes_ui;
 mod selectable_text;
 mod selection_drag;
+mod selection_live;
 mod selection_mode;
 mod sessions_extra;
 mod settings_state;
@@ -223,6 +225,9 @@ mod deep_links;
 mod demo;
 mod demo_stream;
 mod demos;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod derived_state_tests;
 mod downloads;
 mod drafts;
 mod drop_zones;

@@ -24,11 +24,7 @@ impl QuillApp {
     pub(super) fn repeat_offered(&self, target: ScheduleTarget) -> bool {
         match target {
             ScheduleTarget::Composer => true,
-            ScheduleTarget::Share => self
-                .share
-                .pending_forward
-                .as_ref()
-                .is_some_and(|draft| draft.count() == 1),
+            ScheduleTarget::Share => self.forward_draft().is_some_and(|draft| draft.count() == 1),
             ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected => false,
         }
     }

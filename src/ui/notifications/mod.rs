@@ -786,6 +786,7 @@ impl QuillApp {
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
+        self.cancel_gone_composer_targets(window, cx);
         // Where Quill's own notification windows would go. The main
         // window's display is noted when it changes (`display_events`):
         // looking it up enumerates every display.

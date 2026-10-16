@@ -281,24 +281,20 @@ mod tests {
 
     #[test]
     fn snapshot_reply_is_same_chat_unless_aimed_there() {
-        let same = ComposerSnapshot::capture(ChatId(11), ViewGeneration(1), "hi").with_reply(Some(
-            ComposerReplyTo::new(ChatId(11), MessageId(101), "orig"),
-        ));
+        let same = ComposerSnapshot::capture(ChatId(11), ViewGeneration(1), "hi")
+            .with_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
         assert_eq!(same.send_reply_to(), Some(MessageId(101)));
         assert_eq!(same.send_reply().unwrap().source_chat, None);
         // A reply from chat 12 that was never aimed at chat 11 is dropped.
-        let other = same.clone().with_reply(Some(ComposerReplyTo::new(
-            ChatId(12),
-            MessageId(40),
-            "other chat",
-        )));
+        let other = same
+            .clone()
+            .with_reply(Some(ComposerReplyTo::new(ChatId(12), MessageId(40))));
         assert_eq!(other.send_reply_to(), None);
         // Aimed at chat 11, it goes out as a reply to chat 12's message.
         let aimed = same.with_reply(Some(
             ComposerReplyTo::with_quote(
                 ChatId(12),
                 MessageId(40),
-                "other chat",
                 QuoteSelection {
                     text: "part".into(),
                     position: 3,

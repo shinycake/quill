@@ -94,7 +94,6 @@ fn up_on_a_pending_media_message_edits_its_caption_and_sends_it_with_the_real_id
         .last_editable_message(ChatId(7))
         .expect("the pending photo opens for editing");
     assert_eq!(edit.message_id, MessageId(PENDING));
-    assert_eq!(edit.original_text, "first");
     assert!(!edit.allows_replace(), "the file cannot be swapped yet");
 
     let sent_before = s.sent().len();

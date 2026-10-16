@@ -287,6 +287,8 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        // The chats still in the list, read before the live borrow.
+        let selected_chats = self.selected_chat_ids();
         let note = match self.live.as_mut() {
             Some(live) => {
                 let result = match dialog.action {
@@ -391,12 +393,7 @@ impl QuillApp {
                     // (the dialog blocks selection changes while
                     // open), so the enum stays `Copy`.
                     GroupConfirmAction::RemoveSelectedChats => {
-                        let chat_ids: Vec<ChatId> = self
-                            .chat_list
-                            .selected
-                            .iter()
-                            .map(|id| ChatId(*id))
-                            .collect();
+                        let chat_ids: Vec<ChatId> = selected_chats;
                         let mut sent = 0;
                         for id in &chat_ids {
                             if live

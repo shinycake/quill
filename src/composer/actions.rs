@@ -113,6 +113,14 @@ impl ForwardDraft {
     pub fn count(&self) -> usize {
         self.message_ids.len()
     }
+
+    /// The selection as it stands now: only ids `alive` still knows. The
+    /// stored ids are what was picked; this is what counts and acts.
+    #[must_use]
+    pub fn retaining(mut self, alive: impl Fn(MessageId) -> bool) -> Self {
+        self.message_ids.retain(|id| alive(*id));
+        self
+    }
 }
 
 /// tdesktop ShareBox / `ShowForwardMessagesBox` Escape: leave the picker

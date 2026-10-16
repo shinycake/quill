@@ -17,7 +17,6 @@ pub enum ComposerEditKind {
 pub struct ComposerEdit {
     pub chat_id: ChatId,
     pub message_id: MessageId,
-    pub original_text: String,
     pub kind: ComposerEditKind,
     /// M1: the target is a scheduled send (`session.messages.scheduled_messages`),
     /// not a history message. `edit_snapshot` validates against the
@@ -255,20 +254,12 @@ impl ComposerEdit {
 }
 
 impl ComposerEdit {
-    /// Own outgoing, already-sent messages only. Incoming / pending / unsupported
-    /// stay out of this slice (schema `messageProperties.can_be_edited` is the
-    /// live gate; official clients call `getMessageProperties`).
-    pub fn from_own_content(
-        chat_id: ChatId,
-        message_id: MessageId,
-        is_outgoing: bool,
-        pending: bool,
-        content: &MessageContent,
-    ) -> Option<Self> {
-        if !is_outgoing || pending {
-            return None;
-        }
-        let (kind, original_text) = match content {
+    /// What editing `content` puts in the field: the edit kind and the
+    /// message's current text or caption. `None` when the content is not
+    /// editable here. The composer reads this from the live message each
+    /// time it needs it; the edit itself keeps only ids.
+    pub fn editable_text(content: &MessageContent) -> Option<(ComposerEditKind, String)> {
+        Some(match content {
             MessageContent::Text(text) => (ComposerEditKind::Text, text.text.clone()),
             MessageContent::Photo(photo) => (ComposerEditKind::Caption, photo.caption.clone()),
             MessageContent::Document(doc) => (ComposerEditKind::Caption, doc.caption.clone()),
@@ -309,11 +300,26 @@ impl ComposerEdit {
             | MessageContent::PaymentReceived(_)
             | MessageContent::Action(_)
             | MessageContent::Unsupported { .. } => return None,
-        };
+        })
+    }
+
+    /// Own outgoing, already-sent messages only. Incoming / pending / unsupported
+    /// stay out of this slice (schema `messageProperties.can_be_edited` is the
+    /// live gate; official clients call `getMessageProperties`).
+    pub fn from_own_content(
+        chat_id: ChatId,
+        message_id: MessageId,
+        is_outgoing: bool,
+        pending: bool,
+        content: &MessageContent,
+    ) -> Option<Self> {
+        if !is_outgoing || pending {
+            return None;
+        }
+        let (kind, _) = Self::editable_text(content)?;
         Some(Self {
             chat_id,
             message_id,
-            original_text,
             kind,
             scheduled: false,
             media_edit: MediaEdit {
@@ -370,9 +376,9 @@ impl ComposerEdit {
 pub fn begin_edit_draft(
     current_text: String,
     edit: ComposerEdit,
+    original_text: String,
 ) -> (ComposerEdit, String, String) {
-    let field = edit.original_text.clone();
-    (edit, field, current_text)
+    (edit, original_text, current_text)
 }
 
 /// tdesktop `ComposeControls::cancelEditMessage`: clear the edit header,
@@ -390,9 +396,10 @@ pub fn cancel_edit_draft(
 pub fn begin_edit_keeping_reply(
     current_text: String,
     edit: ComposerEdit,
+    original_text: String,
     reply: Option<ComposerReplyTo>,
 ) -> (ComposerEdit, String, String, Option<ComposerReplyTo>) {
-    let (edit, field, saved) = begin_edit_draft(current_text, edit);
+    let (edit, field, saved) = begin_edit_draft(current_text, edit, original_text);
     (edit, field, saved, reply)
 }
 
@@ -412,7 +419,6 @@ mod tests {
         ComposerEdit {
             chat_id: ChatId(1),
             message_id: MessageId(2),
-            original_text: String::new(),
             kind: ComposerEditKind::Caption,
             scheduled: false,
             caption_above: false,
@@ -565,7 +571,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outgoing.kind, ComposerEditKind::Text);
-        assert_eq!(outgoing.original_text, "Reply from the session reducer.");
+        assert_eq!(
+            ComposerEdit::editable_text(&MessageContent::Text(
+                "Reply from the session reducer.".into()
+            )),
+            Some((
+                ComposerEditKind::Text,
+                "Reply from the session reducer.".to_string()
+            ))
+        );
         assert!(
             ComposerEdit::from_own_content(
                 ChatId(11),
@@ -598,7 +612,8 @@ mod tests {
             &MessageContent::Text("original outgoing".into()),
         )
         .unwrap();
-        let (edit, field, saved) = begin_edit_draft("keep this draft".into(), edit);
+        let (edit, field, saved) =
+            begin_edit_draft("keep this draft".into(), edit, "original outgoing".into());
         assert_eq!(field, "original outgoing");
         assert_eq!(saved, "keep this draft");
         let (cleared, restored) = cancel_edit_draft(Some(edit), saved);
@@ -616,9 +631,13 @@ mod tests {
             &MessageContent::Text("original outgoing".into()),
         )
         .unwrap();
-        let reply = ComposerReplyTo::new(ChatId(11), MessageId(101), "quoted");
-        let (edit, field, saved, stashed) =
-            begin_edit_keeping_reply("keep this draft".into(), edit, Some(reply.clone()));
+        let reply = ComposerReplyTo::new(ChatId(11), MessageId(101));
+        let (edit, field, saved, stashed) = begin_edit_keeping_reply(
+            "keep this draft".into(),
+            edit,
+            "original outgoing".into(),
+            Some(reply.clone()),
+        );
         assert_eq!(field, "original outgoing");
         assert_eq!(saved, "keep this draft");
         assert_eq!(stashed, Some(reply.clone()));

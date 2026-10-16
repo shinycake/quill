@@ -201,7 +201,7 @@ impl QuillApp {
                             this.child(self.forward_success_banner(&result, cx))
                         })
                         .when(
-                            self.share.pending_forward.is_some()
+                            self.forward_draft().is_some()
                                 && !self.share.forward_picker_open
                                 && !self.forward_bar_here()
                                 // Selecting here: the header carries the buttons.
@@ -210,7 +210,7 @@ impl QuillApp {
                                     .and_then(|s| s.open_chat)
                                     .is_some_and(|chat| self.selecting_in(chat)),
                             |this| {
-                                this.when_some(self.share.pending_forward.clone(), |this, draft| {
+                                this.when_some(self.forward_draft(), |this, draft| {
                                     this.child(self.forward_selection_banner(&draft, cx))
                                 })
                             },
@@ -850,10 +850,8 @@ impl QuillApp {
             return None;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.share
-            .pending_forward
-            .as_ref()
-            .map(|draft| (draft.from_chat_id.0, &draft.message_ids))
+        self.forward_draft()
+            .map(|draft| (draft.from_chat_id.0, draft.message_ids))
             .hash(&mut hasher);
         let mut positions: Vec<(i64, u64)> = self
             .playback

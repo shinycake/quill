@@ -89,7 +89,6 @@ fn the_toggle_takes_the_reply_s_place(cx: &mut TestAppContext) {
         app.composer_ui.pending_reply = Some(quill::composer::ComposerReplyTo::new(
             ChatId(CHAT),
             MessageId(COUNTER),
-            "Our spring release",
         ));
         assert!(app.suggest_post_toggle(cx).is_some());
         app.toggle_suggest_post(ChatId(CHAT), cx);

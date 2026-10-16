@@ -72,6 +72,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
+        self.drop_deleted_selection();
         if let Some(existing) = self.share.pending_forward.as_mut()
             && existing.from_chat_id == chat_id
             && self.share.forward_picker_open
@@ -94,6 +95,7 @@ impl QuillApp {
         pending: bool,
         cx: &mut Context<Self>,
     ) {
+        self.drop_deleted_selection();
         match self.share.pending_forward.as_mut() {
             Some(draft) => {
                 draft.toggle(chat_id, message_id, pending);
@@ -108,7 +110,7 @@ impl QuillApp {
                     ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.connection.status_note = match self.share.pending_forward.as_ref().map(|d| d.count()) {
+        self.connection.status_note = match self.forward_draft().map(|d| d.count()) {
             Some(1) => tr(keys::Q_MISC_1_MESSAGE_SELECTED).into(),
             Some(n) => trn(keys::Q_MISC_MESSAGES_SELECTED, n),
             None => tr(keys::Q_MISC_SELECTION_CLEARED).into(),
@@ -117,12 +119,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_forward_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self
-            .share
-            .pending_forward
-            .as_ref()
-            .is_none_or(|d| d.is_empty())
-        {
+        if self.forward_draft().is_none() {
             return;
         }
         self.share.forward_picker_open = true;

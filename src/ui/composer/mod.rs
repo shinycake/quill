@@ -27,7 +27,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::schedule::ScheduleKind;
 use quill::send_rights::SendKind;
-use quill::state::{Session, effective_preview};
+use quill::state::Session;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::ChatKind;
 use quill::telegram::requests::SelfDestructSend;
