@@ -115,6 +115,12 @@ pub fn load_current(app_root: &Path) -> EmojiSetId {
         .unwrap_or_default()
 }
 
+/// Whether a set has been saved (by the user or a completed switch).
+pub fn has_saved_choice(app_root: &Path) -> bool {
+    std::fs::read_to_string(sets_dir(app_root).join(CURRENT_FILE))
+        .is_ok_and(|key| EmojiSetId::from_key(&key).is_some())
+}
+
 pub fn save_current(app_root: &Path, id: EmojiSetId) -> std::io::Result<()> {
     let dir = sets_dir(app_root);
     std::fs::create_dir_all(&dir)?;
