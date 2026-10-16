@@ -8,6 +8,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+mod webm;
+mod webm_ffi;
+pub use webm::WebmFrames;
+
 pub const STICKER_EDGE: usize = 128;
 pub const MAX_STICKER_FRAMES: usize = 120;
 /// Playback rate cap for stickers and custom emoji drawn in the chat
@@ -248,12 +252,13 @@ pub fn decode_tgs_sized(
     })
 }
 
+/// Video sticker frames at [`STICKER_EDGE`] (see [`decode_webm_sized`]).
 pub fn decode_webm(
     path: &Path,
     cache: &Path,
     child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
     cancelled: &AtomicBool,
-) -> Result<crate::video::ViewerFrames, String> {
+) -> Result<WebmFrames, String> {
     decode_webm_sized(
         path,
         cache,
@@ -264,7 +269,11 @@ pub fn decode_webm(
     )
 }
 
-/// [`decode_webm`] at `edge` px wide with at most `max_frames` frames.
+/// A WebM video sticker fit into `edge` × `edge` px, with at most
+/// `max_frames` frames. Decoded in process by the bundled decoder when it
+/// is installed; otherwise by the `ffmpeg` binary, with PNG frames under
+/// `cache` (removed again) and the running process in `child` so the UI
+/// can stop it.
 pub fn decode_webm_sized(
     path: &Path,
     cache: &Path,
@@ -272,28 +281,11 @@ pub fn decode_webm_sized(
     max_frames: usize,
     child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
     cancelled: &AtomicBool,
-) -> Result<crate::video::ViewerFrames, String> {
-    let probe =
-        crate::video::probe_with_ffprobe(path, false).ok_or("Could not read video sticker")?;
-    if probe.duration > 30 {
-        return Err("Video sticker is too long".into());
+) -> Result<WebmFrames, String> {
+    if let Some(frames) = webm::decode_in_process(path, edge, max_frames, cancelled)? {
+        return Ok(frames);
     }
-    let max_frames = max_frames.max(1);
-    let fps = (max_frames as f64 / f64::from(probe.duration.max(1) + 1)).min(24.0);
-    // VP9's native ffmpeg decoder drops alpha; libvpx preserves the sticker surface.
-    let frames = crate::video::extract_frames(
-        path,
-        cache,
-        fps,
-        edge as i32,
-        max_frames as i32,
-        Some((child, cancelled)),
-        Some("libvpx-vp9"),
-    )?;
-    if frames.is_empty() {
-        return Err("Video sticker has no frames".into());
-    }
-    Ok(crate::video::ViewerFrames { frames, fps })
+    webm::decode_with_ffmpeg(path, cache, edge, max_frames, child, cancelled)
 }
 
 #[cfg(test)]
@@ -320,12 +312,10 @@ mod tests {
         let webm =
             decode_webm(&root.join("demo-sticker.webm"), &cache, &child, &cancelled).unwrap();
         assert!(webm.frames.len() > 1 && webm.frames.len() <= MAX_STICKER_FRAMES);
-        assert_ne!(
-            std::fs::read(&webm.frames[0]).unwrap(),
-            std::fs::read(&webm.frames[10]).unwrap()
-        );
+        assert_ne!(webm.frames[0], webm.frames[10]);
+        assert_eq!(webm.frames[0][3], 0);
         assert!(child.lock().unwrap().is_none());
-        std::fs::remove_dir_all(cache).unwrap();
+        assert!(!cache.exists());
         let mut legacy = serde_json::to_value(crate::settings::MediaPrefs::default()).unwrap();
         legacy
             .as_object_mut()
