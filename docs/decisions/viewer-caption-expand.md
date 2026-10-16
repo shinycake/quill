@@ -36,9 +36,9 @@ tall):
   an interrupted toggle reverses from where it is. Frames come from the
   frame clock (`request_animation_tick`), not `with_animation`. Reduced
   motion and "interface animations off" snap.
-- The full height comes from the caption's own layout through a tracked
-  `ScrollHandle` (bounds + max offset), so quotes, code blocks and custom
-  emoji count. It is measured one frame late and redrawn until stable.
+- The heights come from shaping the caption text before the frame draws.
+  See `viewer-chrome-fullscreen.md`, which replaced the one-frame-late
+  measurement through the text box's `ScrollHandle`.
 
 ## Deviations
 

@@ -195,6 +195,7 @@ impl QuillApp {
     pub(in crate::ui) fn reset_viewer_item_state(&mut self, cx: &mut Context<Self>) {
         self.viewer.zoom.reset();
         self.viewer.drag = None;
+        self.viewer_leave_video_fullscreen();
         // MED1: orientation and playback error are per-item state.
         self.viewer.orientation = Default::default();
         self.viewer.rotated = None;
@@ -225,6 +226,17 @@ impl QuillApp {
             let _ = live
                 .driver
                 .fetch_message_menu_actions(item.chat_id, item.message_id);
+        }
+    }
+
+    /// A click on the black around the media. In video full screen it is
+    /// part of the picture (tdesktop forces `Over::Video` there), so it
+    /// toggles play instead of closing.
+    pub(in crate::ui) fn viewer_backdrop_click(&mut self, cx: &mut Context<Self>) {
+        if self.viewer.extra.video_fullscreen.is_on() {
+            self.toggle_viewer_video(cx);
+        } else {
+            self.close_media_viewer(cx);
         }
     }
 

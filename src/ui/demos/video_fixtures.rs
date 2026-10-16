@@ -90,19 +90,35 @@ pub(in crate::ui) fn apply_ready_video_viewer(
     seq: &AtomicU64,
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    let clip_path = demo_media_allowlist()
-        .join("demo-clip-12s.mp4")
-        .to_string_lossy()
-        .into_owned();
+    let custom = demo_viewer_clip();
+    let ((width, height), clip_path) = custom.clone().unwrap_or_else(|| {
+        let path = demo_media_allowlist().join("demo-clip-12s.mp4");
+        ((320, 180), path.to_string_lossy().into_owned())
+    });
+    // A clip from elsewhere plays only as one you sent (`playable_clip_path`).
+    let outgoing = custom.is_some();
     let thumb_path = demo_thumb_png_path();
     let clip = demo_file_json(96, &clip_path, true);
     let thumb = demo_file_json(97, &thumb_path, true);
     let json = format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":204,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":320,"height":180,"file_name":"demo-clip-12s.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Demo clip","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
+        r#"{{"@type":"updateNewMessage","message":{{"id":204,"chat_id":11,"is_outgoing":{outgoing},"content":{{"@type":"messageVideo","video":{{"@type":"video","duration":12,"width":{width},"height":{height},"file_name":"demo-clip-12s.mp4","mime_type":"video/mp4","has_stickers":false,"supports_streaming":true,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":240,"height":140,"file":{thumb}}},"video":{clip}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":"Demo clip with a longer caption that wraps across several lines in the viewer, the way a real message caption often does when someone writes a paragraph under a video, so the bottom bar has to make room for it","entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}}}"#
     );
     if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
         session.apply(owned);
     }
+}
+
+/// `QUILL_DEMO_VIEWER_CLIP=<w>x<h>:<path>`: the viewer demos play that
+/// clip (a bright, dark or vertical picture for a capture) instead of the
+/// 12 s test pattern.
+fn demo_viewer_clip() -> Option<((u32, u32), String)> {
+    let value = std::env::var("QUILL_DEMO_VIEWER_CLIP").ok()?;
+    let (size, path) = value.split_once(':')?;
+    let (width, height) = size.split_once('x')?;
+    Some((
+        (width.parse().ok()?, height.parse().ok()?),
+        path.to_string(),
+    ))
 }
 
 pub(in crate::ui) fn apply_ready_video_note(

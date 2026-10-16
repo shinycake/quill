@@ -66,6 +66,8 @@ pub(crate) struct ViewerUi {
     pub(super) last_activity: std::time::Instant,
     /// Toolbar, arrows and caption are faded out (after the idle wait).
     pub(super) controls_hidden: bool,
+    /// When they last faded out.
+    pub(super) controls_hidden_at: std::time::Instant,
     /// Bumped on every show/hide flip; keys the 150 ms controls fade.
     pub(super) controls_gen: u64,
     /// The pointer rests on a control, so they must not auto-hide.
@@ -101,6 +103,7 @@ impl ViewerUi {
             pending_seek: None,
             last_activity: std::time::Instant::now(),
             controls_hidden: false,
+            controls_hidden_at: std::time::Instant::now(),
             controls_gen: 0,
             over_controls: false,
             hide_timer: false,

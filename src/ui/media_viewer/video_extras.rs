@@ -151,8 +151,10 @@ impl QuillApp {
             self.viewer.pending_seek = Some((item.message_id, elapsed));
         }
         let orientation = self.viewer.orientation;
+        let fullscreen = self.viewer.extra.video_fullscreen;
         self.reset_viewer_item_state(cx);
         self.viewer.orientation = orientation;
+        self.viewer.extra.video_fullscreen = fullscreen;
         cx.notify();
     }
 

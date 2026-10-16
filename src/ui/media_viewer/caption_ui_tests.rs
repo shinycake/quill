@@ -78,11 +78,17 @@ fn a_long_caption_collapses_and_expands(cx: &mut TestAppContext) {
         app.open_media_viewer(ChatId(11), MessageId(8901), cx);
     });
     settle(vcx);
-    // Measured taller than its collapsed height: cut, not expanded.
+    let layout = app.update_in(vcx, |app, window, cx| {
+        let item = app.viewer.state.current().cloned().expect("an item");
+        app.viewer_caption_layout(&item, 800., window, cx)
+            .expect("a caption")
+    });
+    assert!(layout.content_h > 400.);
+    assert!(layout.cut);
+    assert_eq!(layout.shown_h, 2. * layout.line_h);
     app.read_with(vcx, |app, _| {
         let caption = &app.viewer.extra.caption;
         assert_eq!(caption.key, Some((11, 8901)));
-        assert!(caption.content_height() > 400.);
         assert!(!caption.expanded());
     });
     app.update_in(vcx, |app, _, cx| app.toggle_viewer_caption(cx));

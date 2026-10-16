@@ -3,6 +3,7 @@
 
 use super::*;
 use quill::lang::{keys, tr, tr_with};
+use std::time::Instant;
 
 impl QuillApp {
     /// MED1: `SliderEvent` sink for the viewer video seek slider. Drag
@@ -81,7 +82,7 @@ impl QuillApp {
             &keystroke.key,
             mods,
             kind,
-            self.viewer.extra.video_fullscreen,
+            self.viewer.extra.video_fullscreen.is_on(),
             paused,
         ) else {
             return false;
@@ -110,14 +111,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.extra.video_fullscreen {
+        if self.viewer.extra.video_fullscreen.is_on() {
             self.viewer_leave_video_fullscreen();
         } else {
-            self.viewer.extra.window_was_fullscreen = window.is_fullscreen();
-            if !self.viewer.extra.window_was_fullscreen {
+            let (mode, toggle) = self
+                .viewer
+                .extra
+                .video_fullscreen
+                .enter(window.is_fullscreen());
+            if toggle {
                 window.toggle_fullscreen();
             }
-            self.viewer.extra.video_fullscreen = true;
+            self.viewer.extra.video_fullscreen = mode;
         }
         cx.notify();
     }
@@ -125,11 +130,23 @@ impl QuillApp {
     /// Leave video full screen; the window returns to windowed on the next
     /// frame unless it was full screen before.
     pub(in crate::ui) fn viewer_leave_video_fullscreen(&mut self) {
-        if !self.viewer.extra.video_fullscreen {
-            return;
+        self.viewer.extra.video_fullscreen =
+            self.viewer.extra.video_fullscreen.leave(Instant::now());
+    }
+
+    /// Keep video full screen and the window in step, once a frame: give
+    /// the window back after the mode ended, and end the mode when the
+    /// window left full screen some other way.
+    pub(in crate::ui) fn viewer_follow_window_fullscreen(&mut self, window: &mut Window) {
+        let (mode, toggle) = self
+            .viewer
+            .extra
+            .video_fullscreen
+            .follow_window(window.is_fullscreen(), Instant::now());
+        self.viewer.extra.video_fullscreen = mode;
+        if toggle {
+            window.toggle_fullscreen();
         }
-        self.viewer.extra.video_fullscreen = false;
-        self.viewer.extra.restore_fullscreen = !self.viewer.extra.window_was_fullscreen;
     }
 
     /// Looping clips play only while the window is active (tdesktop pauses

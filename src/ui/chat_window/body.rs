@@ -102,7 +102,11 @@ impl QuillApp {
             .when(!topics_only, |this| this.child(conversation))
             // MED1: fullscreen media viewer over the window's content.
             .when(viewer_open, |this| {
-                this.child(self.media_viewer_panel(false, window, cx))
+                this.child(self.media_viewer_panel(
+                    crate::ui::media_viewer::ViewerPart::Inline,
+                    window,
+                    cx,
+                ))
             })
             .children(self.photo_editor_overlay(cx))
             // M1: right-click message context menu.

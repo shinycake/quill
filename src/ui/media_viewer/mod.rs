@@ -8,7 +8,7 @@ const VIEWER_TOP_BAR: f32 = 56.0;
 /// Width kept free on each side of the media for the prev/next arrows.
 const VIEWER_SIDE_LANE: f32 = 80.0;
 use super::message_media::{file_is_downloading, format_bytes, viewer_display_path};
-use super::message_text::{custom_emoji_paths, rich_text_line};
+use super::message_text::rich_text_line;
 use super::*;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -38,9 +38,15 @@ use std::time::Duration;
 
 mod actions;
 mod caption;
+mod chrome;
 mod controller;
 mod files;
 mod files_demo;
+mod fullscreen;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(in crate::ui) use fullscreen::VideoFullscreen;
+mod geometry;
 mod layer;
 mod navigation;
 mod overlay;
@@ -62,13 +68,8 @@ pub(super) struct ViewerExtra {
     pub shared_tab: SharedMediaTab,
     /// Items of that tab the viewer has already merged in.
     pub shared_seen: usize,
-    /// Video full screen (tdesktop `_fullScreenVideo`): arrows seek, digits
-    /// jump, Escape leaves it.
-    pub video_fullscreen: bool,
-    /// The window was already full screen when the mode was entered.
-    pub window_was_fullscreen: bool,
-    /// Give the window back to windowed mode on the next frame.
-    pub restore_fullscreen: bool,
+    /// Video full screen, kept in step with the window (`fullscreen`).
+    pub(in crate::ui) video_fullscreen: fullscreen::VideoFullscreen,
     /// A looping clip paused because the window lost focus.
     pub inactive_paused: bool,
     /// B10: whose profile photos the viewer shows (`ViewerSource::Profile`).
@@ -87,10 +88,38 @@ pub(super) struct ViewerExtra {
     pub(in crate::ui) caption: caption::ViewerCaption,
 }
 
+/// Which part of the viewer a render draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::ui) enum ViewerPart {
+    /// Chat windows: the whole viewer inline, its backdrop included.
+    Inline,
+    /// The main window's slice under the playing picture: the media box.
+    Media,
+    /// The main window's slice over the playing picture: bars, arrows,
+    /// caption and controls.
+    Chrome,
+}
+
+impl ViewerPart {
+    fn draws_media(self) -> bool {
+        self != Self::Chrome
+    }
+
+    fn draws_chrome(self) -> bool {
+        self != Self::Media
+    }
+}
+
 /// Screenshot-capture runs render a single frame: skip fades there so the
 /// shot shows the settled viewer, not frame zero of an animation.
 fn still_frame() -> bool {
     std::env::var_os("QUILL_DEMO_CAPTURE").is_some()
+}
+
+/// Captures keep the controls up, since they render once after the idle
+/// wait; `QUILL_DEMO_IDLE_HIDE=1` lets them fade for a capture of that.
+fn controls_stay_up() -> bool {
+    still_frame() && std::env::var_os("QUILL_DEMO_IDLE_HIDE").is_none()
 }
 
 /// Fade a group of viewer controls in over 200 ms or out over 600 ms

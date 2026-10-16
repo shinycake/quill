@@ -229,6 +229,7 @@ pub(crate) struct VideoController {
     volume: Option<Entity<SliderState>>,
     level: f32,
     fullscreen: bool,
+    shown: bool,
     speed_dial: Option<AnyElement>,
     quality: Option<AnyElement>,
     actions: ControllerActions,
@@ -251,6 +252,7 @@ impl VideoController {
             volume: state.volume.clone(),
             level: transport.volume,
             fullscreen: false,
+            shown: true,
             speed_dial: None,
             quality: None,
             actions,
@@ -266,6 +268,13 @@ impl VideoController {
     /// The viewer is in video full screen.
     pub(crate) fn fullscreen(mut self, fullscreen: bool) -> Self {
         self.fullscreen = fullscreen;
+        self
+    }
+
+    /// The controls are faded out: the scrubber's time bubble, drawn
+    /// above everything, goes with them.
+    pub(crate) fn shown(mut self, shown: bool) -> Self {
+        self.shown = shown;
         self
     }
 
@@ -321,7 +330,7 @@ impl RenderOnce for VideoController {
                 actions.hover.clone(),
             )
             .buffered(&transport.buffered)
-            .hover(self.hover)
+            .hover(self.hover.filter(|_| self.shown))
             .preview(self.seek_preview)
         });
         let scrubber_row = div()

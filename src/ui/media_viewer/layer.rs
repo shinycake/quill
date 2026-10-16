@@ -1,17 +1,20 @@
-//! The viewer's layers in the main window: the backdrop, the viewer panel
-//! as a cached slice (`SliceKind::Viewer`: top bar, the media box with its
-//! thumbnail and handlers, arrows, controls, caption), and above it the
-//! video layer, a small view that draws only the playing picture.
+//! The viewer's layers in the main window, bottom to top: the opaque
+//! backdrop, the media box as a cached slice (`SliceKind::Viewer`: the
+//! thumbnail or photo with its zoom, pan and menu handlers), the video
+//! layer (a small view that draws only the playing picture), and the
+//! chrome as a cached slice (`SliceKind::ViewerChrome`: top bar, arrows,
+//! caption, controls), so nothing the chrome draws is ever under the
+//! picture.
 //!
 //! The video element asks for its next frame on the view it is drawn in
 //! (`video_player::video_frame`), so a new picture redraws the layer and
-//! `QuillApp` around it while the panel and the chat replay their last
-//! frame. The panel itself redraws when the player's transport changes,
-//! at most every 100 ms while it plays (the time labels and seek bar).
-//! Chat windows draw the viewer inline instead (`media_viewer_panel` with
-//! `layered: false`).
+//! `QuillApp` around it while both slices and the chat replay their last
+//! frame. The chrome redraws when the player's transport changes, at most
+//! every 100 ms while it plays (the time labels and seek bar). Chat
+//! windows draw the viewer inline instead (`ViewerPart::Inline`).
 #![deny(clippy::indexing_slicing)]
 
+use super::caption::CaptionLayout;
 use super::*;
 use crate::ui::video_player::controls::{PictureOverlay, PictureState, WaitingCheck, WaitingGate};
 use crate::ui::video_player::{PlayState, WeakVideoPlayer, video_frame};
@@ -19,9 +22,12 @@ use crate::ui::video_player::{PlayState, WeakVideoPlayer, video_frame};
 /// Where the media sits in the window, and its zoomed box inside that.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct ViewerGeometry {
-    /// The area the media fits into (between the bars, outside the arrow
-    /// lanes).
-    pub(super) fit: (f32, f32),
+    /// The area the media fits into: between the bars and outside the
+    /// arrow lanes, or the whole window in video full screen.
+    pub(super) fit: geometry::FitArea,
+    /// The caption as shaped for its plate (`None`: no caption, or video
+    /// full screen, which hides it).
+    pub(super) caption: Option<CaptionLayout>,
     /// The media's own box (fitted from its natural size).
     pub(super) media: (f32, f32),
     /// Its top-left in the window (centered in the fit area).
@@ -129,30 +135,50 @@ impl Render for ViewerVideoLayer {
 }
 
 impl QuillApp {
-    /// Lay out the media for `viewport`: fit it between the bars, and
-    /// refit the zoom when the box changed (a resized window, another
-    /// item). The panel and the video layer both place the media here.
+    /// Tests: the media's box in the window, and whether the caption takes
+    /// room under it, as the next frame lays them out.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(in crate::ui) fn viewer_media_bounds(
+        &mut self,
+        window: &mut Window,
+        cx: &App,
+    ) -> Option<(Bounds<Pixels>, bool)> {
+        let item = self.viewer.state.current().cloned()?;
+        let geometry = self.viewer_geometry(&item, window, cx);
+        let bounds = Bounds::new(
+            point(px(geometry.origin.0), px(geometry.origin.1)),
+            size(px(geometry.media.0), px(geometry.media.1)),
+        );
+        Some((bounds, geometry.caption.is_some()))
+    }
+
+    /// Lay out the media in the window: fit it between the bars and the
+    /// shaped caption, and refit the zoom when the box changed (a resized
+    /// window, another item). The media box, the chrome and the video
+    /// layer all place the media here.
     pub(super) fn viewer_geometry(
         &mut self,
         item: &MediaViewerItem,
-        viewport: gpui_kit::Size<Pixels>,
+        window: &mut Window,
+        cx: &App,
     ) -> ViewerGeometry {
-        // A video keeps room for its 72 px controller (and the bar's
-        // 16 px padding) under the picture.
-        let controls = if item.kind == MediaViewerKind::Video {
-            96.0
+        let viewport = window.viewport_size();
+        let viewport = (f32::from(viewport.width), f32::from(viewport.height));
+        let fullscreen = self.viewer.extra.video_fullscreen.is_on();
+        let caption = if fullscreen {
+            None
         } else {
-            72.0
+            let width = geometry::lane_width(viewport.0);
+            self.viewer_caption_layout(item, width, window, cx)
         };
-        let bottom_space = if item.caption.is_empty() {
-            controls
-        } else {
-            controls + 32.0
-        };
-        let fit = (
-            (f32::from(viewport.width) - 2.0 * VIEWER_SIDE_LANE).max(240.0),
-            (f32::from(viewport.height) - VIEWER_TOP_BAR - bottom_space).max(200.0),
-        );
+        let area = geometry::fit_area(geometry::ViewerFrame {
+            viewport,
+            video: item.kind == MediaViewerKind::Video,
+            caption: caption.map_or(0.0, |caption| caption.plate_h),
+            fullscreen,
+        });
+        let fit = area.size;
         // The media's own box inside the frame: sized from its natural
         // dimensions (axes swapped for a quarter turn) rather than trusting
         // object-fit, so it can never spill out of the frame.
@@ -172,11 +198,12 @@ impl QuillApp {
         }
         let zoom = self.viewer.zoom;
         ViewerGeometry {
-            fit,
+            fit: area,
+            caption,
             media,
             origin: (
-                (f32::from(viewport.width) - media.0) / 2.0,
-                VIEWER_TOP_BAR + (fit.1 - media.1) / 2.0,
+                area.origin.0 + (fit.0 - media.0) / 2.0,
+                area.origin.1 + (fit.1 - media.1) / 2.0,
             ),
             zoomed: (media.0 * zoom.zoom, media.1 * zoom.zoom),
             pan: zoom.pan,
@@ -198,22 +225,22 @@ impl QuillApp {
     }
 
     /// Phase 4.5 / MED1: the fullscreen media viewer. In the main window
-    /// it is three layers (see the module docs); clicking the backdrop
-    /// closes it. The panel draws above the backdrop and the video layer
-    /// above the panel; neither layer takes clicks, so the media box's
-    /// handlers in the panel get them.
+    /// it is four layers (see the module docs); clicking the backdrop
+    /// closes it. The video layer takes no clicks, so the media box's
+    /// handlers under it get them, and the chrome above takes clicks only
+    /// on its controls.
     pub(in crate::ui) fn media_viewer_overlay(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(panel) = self.viewer_slot() else {
-            return self.media_viewer_panel(false, window, cx);
+        let Some((media, chrome)) = self.viewer_slots() else {
+            return self.media_viewer_panel(ViewerPart::Inline, window, cx);
         };
         let Some(item) = self.viewer.state.current().cloned() else {
             return Empty.into_any_element();
         };
-        let geometry = self.viewer_geometry(&item, window.viewport_size());
+        let geometry = self.viewer_geometry(&item, window, cx);
         let layer = self.update_viewer_layer(&item, geometry, cx);
         let open_gen = self.viewer.open_gen as usize;
         div()
@@ -231,12 +258,12 @@ impl QuillApp {
                     .occlude()
                     .absolute()
                     .inset_0()
-                    .bg(gpui_kit::black().opacity(0.92))
+                    .bg(gpui_kit::black())
                     .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
                         this.viewer_note_activity(false, cx);
                     }))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_media_viewer(cx);
+                        this.viewer_backdrop_click(cx);
                     }))
                     // Fade in over 200 ms when it opens (tdesktop
                     // `mediaviewShowDuration`); closing is instant.
@@ -246,8 +273,9 @@ impl QuillApp {
                         |backdrop, t| backdrop.opacity(if still_frame() { 1.0 } else { t }),
                     ),
             )
-            .child(panel)
+            .child(media)
             .children(layer)
+            .child(chrome)
             .into_any_element()
     }
 

@@ -15,11 +15,14 @@
 //!
 //! The viewer follows the stories caption: more than four lines collapse
 //! to two (`kMaxShownCaptionLines`, `kCollapsedCaptionLines`), and the
-//! expanded caption scrolls with a scrollbar when it outgrows the window. Heights come from the caption's own layout
-//! (its scroll handle), measured one frame late and re-rendered until
-//! stable, so wrapping, quotes and custom emoji are all accounted for.
+//! expanded caption grows over the picture and scrolls with a scrollbar
+//! when it outgrows the window. The caption is shaped at the plate's
+//! width before anything draws ([`CaptionLayout`]), so the picture makes
+//! room for the lines it shows; what it shows under the picture is capped
+//! at a quarter of the window in whole lines, and scrolls past that.
 
 use super::*;
+use crate::ui::message_text::{RichTextSource, custom_emoji_paths, measure_rich_text};
 use crate::ui::motion::Glide;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use quill::lang::{keys, tr};
@@ -35,6 +38,11 @@ const MAX_SHOWN_LINES: f32 = 4.;
 /// Room kept under an expanded caption for the player panel or zoom
 /// controls, plus the "Show less" row.
 const EXPANDED_BOTTOM_ROOM: f32 = 120.0;
+/// The plate's padding and the toggle row, in rem: the layout and the
+/// drawn plate both use these.
+const PLATE_PAD_X_REM: f32 = 0.75;
+const PLATE_PAD_Y_REM: f32 = 0.5;
+const TOGGLE_REM: f32 = 1.25;
 
 /// `anim::sineInOut`.
 fn sine_in_out(t: f32) -> f32 {
@@ -62,6 +70,65 @@ pub(super) fn overflows(content_h: f32, line_h: f32) -> bool {
     line_h > 0. && content_h > MAX_SHOWN_LINES * line_h + 0.5
 }
 
+/// The caption shaped for the viewer: what the picture makes room for and
+/// what the plate draws.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct CaptionLayout {
+    pub(super) line_h: f32,
+    pub(super) content_h: f32,
+    /// Collapsed behind "Show more".
+    pub(super) cut: bool,
+    pub(super) shown_h: f32,
+    /// The plate around it: padding, and the "Show more" row when cut.
+    pub(super) plate_w: f32,
+    pub(super) plate_h: f32,
+}
+
+/// Lay out text `content_h` tall in lines of `line_h`, whose widest line
+/// is `text_w`, in a window
+/// `viewport_h` tall (`rem`: the root font size the plate's padding and
+/// toggle are sized in). tdesktop `refreshCaptionGeometry`: at most a
+/// quarter of the window, in whole lines.
+pub(super) fn caption_layout(
+    content_h: f32,
+    line_h: f32,
+    text_w: f32,
+    viewport_h: f32,
+    rem: f32,
+) -> CaptionLayout {
+    let line_h = if line_h.is_finite() {
+        line_h.max(0.)
+    } else {
+        0.
+    };
+    let content_h = if content_h.is_finite() {
+        content_h.max(0.)
+    } else {
+        0.
+    };
+    let cut = overflows(content_h, line_h);
+    let wanted = if cut {
+        collapsed_height(line_h)
+    } else {
+        content_h
+    };
+    let quarter_lines = if line_h > 0. {
+        (viewport_h / 4. / line_h).floor().max(1.)
+    } else {
+        0.
+    };
+    let shown_h = wanted.min(quarter_lines * line_h);
+    let toggle_h = if cut { TOGGLE_REM * rem } else { 0. };
+    CaptionLayout {
+        line_h,
+        content_h,
+        cut,
+        shown_h,
+        plate_w: text_w.max(0.).ceil() + 2. * PLATE_PAD_X_REM * rem,
+        plate_h: shown_h + 2. * PLATE_PAD_Y_REM * rem + toggle_h,
+    }
+}
+
 /// The caption's expand state, reset whenever the viewer shows another
 /// item.
 pub(in crate::ui) struct ViewerCaption {
@@ -69,14 +136,7 @@ pub(in crate::ui) struct ViewerCaption {
     key: Option<(i64, i64)>,
     /// 0 collapsed, 1 expanded.
     glide: Glide,
-    /// Tracks the caption text box: its laid-out bounds and how far its
-    /// content runs past them give the full caption height.
     scroll: ScrollHandle,
-    /// The content height the last render used.
-    measured: f32,
-    /// Not laid out yet for this item: the handle still holds the
-    /// previous item's layout.
-    fresh: bool,
 }
 
 impl Default for ViewerCaption {
@@ -85,8 +145,6 @@ impl Default for ViewerCaption {
             key: None,
             glide: Glide::settled(0., Instant::now(), sine_in_out),
             scroll: ScrollHandle::new(),
-            measured: 0.,
-            fresh: true,
         }
     }
 }
@@ -100,14 +158,6 @@ impl ViewerCaption {
         self.key = Some(key);
         self.glide = Glide::settled(0., Instant::now(), sine_in_out);
         self.scroll.set_offset(point(px(0.), px(0.)));
-        self.measured = 0.;
-        self.fresh = true;
-    }
-
-    /// Full height of the caption text from the last layout.
-    fn content_height(&self) -> f32 {
-        let bounds = self.scroll.bounds();
-        f32::from(bounds.size.height + self.scroll.max_offset().y)
     }
 }
 
@@ -138,71 +188,108 @@ impl QuillApp {
         true
     }
 
-    /// The caption plate for `item`: `text` clipped to its collapsed or
-    /// animating height, with "Show more" / "Show less" when it is cut.
+    /// The caption of `item` laid out as the plate draws it
+    /// (`rich_text_line` in the theme font at the message font size),
+    /// wrapped at `max_w` less the plate's padding. `None` without a
+    /// caption.
+    pub(super) fn viewer_caption_layout(
+        &self,
+        item: &MediaViewerItem,
+        max_w: f32,
+        window: &mut Window,
+        cx: &App,
+    ) -> Option<CaptionLayout> {
+        if item.caption.is_empty() {
+            return None;
+        }
+        let size = self.msg_font();
+        let rem = f32::from(window.rem_size());
+        let mut style = window.text_style();
+        style.font_family = cx.theme().font_family.clone();
+        style.font_size = size.into();
+        let line_h = f32::from(
+            style
+                .line_height
+                .to_pixels(size.into(), window.rem_size())
+                .round(),
+        );
+        let emoji_paths = self.viewer_caption_emoji(item);
+        let source = RichTextSource {
+            text: &item.caption,
+            entities: &item.caption_entities,
+            msg_key: (item.chat_id.0, item.message_id.0 as u64),
+            is_caption: true,
+            revealed: &self.message_ui.spoiler_revealed,
+            emoji_paths: &emoji_paths,
+        };
+        let wrap = (max_w - 2. * PLATE_PAD_X_REM * rem).max(1.);
+        let text = measure_rich_text(&source, &style, line_h, wrap, window);
+        let viewport_h = f32::from(window.viewport_size().height);
+        Some(caption_layout(
+            text.height,
+            line_h,
+            text.width,
+            viewport_h,
+            rem,
+        ))
+    }
+
+    /// The caption's custom emoji pictures, resolved like message text's.
+    pub(super) fn viewer_caption_emoji(&self, item: &MediaViewerItem) -> HashMap<i64, ImageSource> {
+        let roots = self.media_display_roots();
+        self.session()
+            .map(|session| {
+                custom_emoji_paths(
+                    &item.caption_entities,
+                    &session.stickers.emoji.custom_emoji_stickers,
+                    &session.media.files,
+                    &roots,
+                )
+            })
+            .unwrap_or_default()
+    }
+
+    /// The caption plate for `item`: `text` at its shown height, or
+    /// growing over the picture to its full height when expanded, with
+    /// "Show more" / "Show less" when it is cut.
     pub(super) fn viewer_caption_plate(
         &mut self,
         item: &MediaViewerItem,
         text: AnyElement,
-        plate_w: f32,
-        window: &mut Window,
+        layout: CaptionLayout,
+        viewport_h: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let key = (item.chat_id.0, item.message_id.0);
         if self.viewer.extra.caption.key != Some(key) {
             self.viewer.extra.caption.reset(key);
         }
-        let font = self.msg_font();
-        let line_h = f32::from(
-            window
-                .text_style()
-                .line_height
-                .to_pixels(font.into(), window.rem_size())
-                .round(),
-        );
-        let viewport_h = f32::from(window.viewport_size().height);
-        let collapsed_h = collapsed_height(line_h);
-        let room = (viewport_h - VIEWER_TOP_BAR - EXPANDED_BOTTOM_ROOM).max(collapsed_h);
-
+        let room = (viewport_h - VIEWER_TOP_BAR - EXPANDED_BOTTOM_ROOM).max(layout.shown_h);
         let now = Instant::now();
-        let caption = &mut self.viewer.extra.caption;
-        // Right after a reset the handle still describes the previous
-        // item: show this one collapsed, untoggled, until it is laid out.
-        let fresh = std::mem::take(&mut caption.fresh);
-        let content_h = if fresh { 0. } else { caption.content_height() };
-        // The text box was laid out at another width or for another item:
-        // draw again so the toggle and heights follow the new layout.
-        let remeasure = fresh || (content_h - caption.measured).abs() > 0.5;
-        caption.measured = content_h;
-        let cut = overflows(content_h, line_h);
+        let caption = &self.viewer.extra.caption;
         let shown = caption.glide.value(now).clamp(0., 1.);
         let animating = caption.glide.animating(now);
         let expanded = caption.expanded();
-        let full_h = expanded_height(content_h, collapsed_h, room);
-        let max_h = if cut {
-            collapsed_h + (full_h - collapsed_h) * shown
-        } else {
-            // Up to four lines show in full.
-            MAX_SHOWN_LINES * line_h
-        };
+        let full_h = expanded_height(layout.content_h, layout.shown_h, room);
+        let max_h = layout.shown_h + (full_h - layout.shown_h) * shown;
         let scroll = caption.scroll.clone();
-        if remeasure || animating {
+        if animating {
             self.request_animation_tick(60, cx);
         }
-
+        let clipped = animating || (layout.cut && !expanded);
         let row_id = item.message_id.0 as u64;
         let text_box = div()
             .id(("media-viewer-caption-text", row_id))
             .track_scroll(&scroll)
             .max_h(px(max_h))
-            .line_height(px(line_h))
-            .when(expanded && !animating, |this| {
+            .line_height(px(layout.line_h))
+            .when(!clipped, |this| {
                 this.overflow_y_scroll().vertical_scrollbar(&scroll)
             })
-            .when(!expanded || animating, |this| this.overflow_hidden())
+            .when(clipped, |this| this.overflow_hidden())
             .child(text);
-        let toggle = cut.then(|| {
-            div().flex().justify_end().child(
+        let toggle = layout.cut.then(|| {
+            div().h(rems(TOGGLE_REM)).flex().justify_end().child(
                 Button::new(("media-viewer-caption-toggle", row_id))
                     .label(if expanded {
                         tr(keys::Q_AV_SHOW_LESS)
@@ -220,10 +307,10 @@ impl QuillApp {
         });
         div()
             .id(("media-viewer-caption", row_id))
-            .w(px(plate_w))
+            .w(px(layout.plate_w))
             .max_w_full()
-            .px_3()
-            .py_2()
+            .px(rems(PLATE_PAD_X_REM))
+            .py(rems(PLATE_PAD_Y_REM))
             .bg(gpui_kit::black().opacity(0.55))
             .text_color(gpui_kit::white())
             .child(text_box)
@@ -234,7 +321,42 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{collapsed_height, expanded_height, overflows, sine_in_out};
+    use super::{
+        CaptionLayout, caption_layout, collapsed_height, expanded_height, overflows, sine_in_out,
+    };
+
+    #[test]
+    fn a_two_line_caption_shows_both_lines_in_its_plate() {
+        let layout = caption_layout(2. * 22., 22., 300.4, 1000., 16.);
+        assert_eq!(
+            layout,
+            CaptionLayout {
+                line_h: 22.,
+                content_h: 44.,
+                cut: false,
+                shown_h: 44.,
+                plate_w: 301. + 24.,
+                plate_h: 44. + 16.,
+            }
+        );
+    }
+
+    #[test]
+    fn a_long_caption_shows_two_lines_and_its_toggle() {
+        let layout = caption_layout(9. * 22., 22., 600., 1000., 16.);
+        assert!(layout.cut);
+        assert_eq!(layout.content_h, 9. * 22.);
+        assert_eq!(layout.shown_h, 44.);
+        assert_eq!(layout.plate_h, 44. + 16. + 20.);
+    }
+
+    #[test]
+    fn the_shown_caption_is_capped_at_a_quarter_of_the_window_in_whole_lines() {
+        let layout = caption_layout(4. * 22., 22., 600., 300., 16.);
+        assert!(!layout.cut);
+        assert_eq!(layout.shown_h, 66.);
+        assert_eq!(caption_layout(2. * 22., 22., 600., 40., 16.).shown_h, 22.);
+    }
 
     #[test]
     fn collapsed_caption_is_two_lines() {

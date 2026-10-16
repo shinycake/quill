@@ -79,7 +79,8 @@ impl QuillApp {
         Some(
             VideoController::new(row_id, &transport, &self.viewer.controls, actions)
                 .level(self.playback.volume)
-                .fullscreen(self.viewer.extra.video_fullscreen)
+                .fullscreen(self.viewer.extra.video_fullscreen.is_on())
+                .shown(!self.viewer.controls_hidden)
                 .speed_dial(speed_dial)
                 .quality(quality)
                 .into_any_element(),

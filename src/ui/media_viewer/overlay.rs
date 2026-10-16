@@ -1,6 +1,8 @@
-//! The fullscreen viewer's panel (render); `layer` stacks it with the
-//! backdrop and the playing picture.
+//! The fullscreen viewer's panel (render): the media box here, the chrome
+//! in `chrome`; `layer` stacks them with the backdrop and the playing
+//! picture.
 
+use super::chrome::ChromeFacts;
 use super::*;
 use quill::lang::{keys, tr, tr_with};
 
@@ -12,30 +14,32 @@ impl QuillApp {
     /// the third path. Secret/spoiler media never reach the viewer
     /// (filtered in `collect_media_items`).
     ///
-    /// `layered`: the main window's cached viewer slice (`layer`), where
-    /// the backdrop and the playing picture are drawn by `QuillApp` around
-    /// it; otherwise (chat windows) the whole viewer inline. Takes
-    /// `&mut self` + `window` so the seek/volume sliders sync during
+    /// `part`: in the main window the media box and the chrome are two
+    /// cached slices with the backdrop and the playing picture drawn by
+    /// `QuillApp` around them (`layer`); chat windows draw it all inline.
+    /// Takes `&mut self` + `window` so the seek/volume sliders sync during
     /// render.
     pub(in crate::ui) fn media_viewer_panel(
         &mut self,
-        layered: bool,
+        part: ViewerPart,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // A deleted item leaves the viewer (next item, or closed).
-        self.prune_deleted_viewer_items(cx);
-        self.sync_shared_media_viewer(cx);
-        self.sync_viewer_window_activity(window.is_window_active(), cx);
-        // A hover over the scrubber redraws only this view.
-        self.viewer.controls.panel_view = Some(window.current_view());
-        // MED1: keep the viewer seek/volume thumbs on the transport.
-        self.sync_viewer_seek_slider(window, cx);
-        self.sync_viewer_volume_slider(window, cx);
-        // The controls redraw when the transport changes (the player
-        // notifies the views drawing them, at most every 100 ms).
-        if let Some(player) = &self.viewer.player {
-            player.watch(window.current_view());
+        if part.draws_chrome() {
+            // A deleted item leaves the viewer (next item, or closed).
+            self.prune_deleted_viewer_items(cx);
+            self.sync_shared_media_viewer(cx);
+            self.sync_viewer_window_activity(window.is_window_active(), cx);
+            // A hover over the scrubber redraws only this view.
+            self.viewer.controls.panel_view = Some(window.current_view());
+            // MED1: keep the viewer seek/volume thumbs on the transport.
+            self.sync_viewer_seek_slider(window, cx);
+            self.sync_viewer_volume_slider(window, cx);
+            // The controls redraw when the transport changes (the player
+            // notifies the views drawing them, at most every 100 ms).
+            if let Some(player) = &self.viewer.player {
+                player.watch(window.current_view());
+            }
         }
         let item = self
             .viewer
@@ -59,7 +63,6 @@ impl QuillApp {
                 natural_size: None,
                 quality_options: Vec::new(),
             });
-        let (position, total) = self.viewer.state.position().unwrap_or((0, 0));
         let files: HashMap<i32, ParsedFile> = self
             .session()
             .map(|s| s.media.files.clone())
@@ -74,17 +77,12 @@ impl QuillApp {
         // Save and Share for `ttlSeconds`); its countdown shows in the
         // header and as a ring.
         let ttl = self.viewer_ttl();
-        self.tick_viewer_ttl(ttl, cx);
-        let ttl_badge = ttl.and_then(|ttl| self.viewer_ttl_badge(ttl));
         let protected =
             ttl.is_some()
                 || self.viewer.state.current().zip(self.session()).is_some_and(
                     |(item, session)| session.chat_has_protected_content(item.chat_id),
                 );
         let can_delete = self.viewer_delete_confirm().is_some();
-        let has_local_clip = self.viewer_clip_path(&item).is_some();
-        let hidden = self.viewer.controls_hidden;
-        let fade_gen = self.viewer.controls_gen;
         let row_id = item.message_id.0 as u64;
         let downloading_now = item
             .display_file_ids
@@ -103,16 +101,9 @@ impl QuillApp {
         } else {
             item.kind.label()
         };
-        let sender_line = (!profile_view)
-            .then(|| self.viewer_sender_line(&item))
-            .flatten();
-        let header_label = if total > 1 {
-            format!("{kind_label} {position} of {total}")
-        } else {
-            kind_label.to_string()
-        };
         // B10: "Set as main photo" for one of your own earlier photos (the
         // first one already is the main photo).
+        let (position, _) = self.viewer.state.position().unwrap_or((0, 0));
         let can_set_main = profile_view
             && position > 1
             && self
@@ -129,682 +120,416 @@ impl QuillApp {
                 .profile_user
                 .zip(self.session().and_then(|s| s.my_user_id))
                 .is_some_and(|(shown, me)| shown != me);
-        // MED1: album pin action for the header — only when the item is in
-        // an album and the user may pin in this chat (rights-gated, TGX
-        // `MessagePinAlbum` semantics: unpins when any member is pinned).
-        let album_pin_label: Option<String> =
-            self.viewer_album_id(item.message_id).and_then(|album_id| {
-                let can_pin = self
-                    .session()
-                    .and_then(|s| s.chats.get(&item.chat_id.0))
-                    .is_some_and(|chat| chat.can_pin_messages());
-                if !can_pin {
-                    return None;
-                }
-                let history: Vec<HistoryMessage> = self
-                    .session()
-                    .and_then(|s| s.histories.get(&item.chat_id.0))
-                    .map(|h| h.ordered().into_iter().cloned().collect())
-                    .unwrap_or_default();
-                let ids = quill::album::album_message_ids(&history, album_id);
-                if ids.is_empty() {
-                    return None;
-                }
-                let any_pinned = ids
-                    .iter()
-                    .any(|id| history.iter().any(|m| m.id == *id && m.is_pinned));
-                Some(if any_pinned {
-                    tr(keys::Q_AV_UNPIN_ALBUM).to_string()
-                } else {
-                    tr(keys::Q_AV_PIN_ALBUM).to_string()
-                })
-            });
-        // The visual fills the window between the top bar and the bottom
-        // controls, leaving lanes for the prev/next arrows; the media fits
-        // inside it (object-fit contain). Scroll zooms (1×–8×, frame-center
+        // The visual fills the fit area (`geometry`); the media fits inside
+        // it (object-fit contain). Scroll zooms (1×–8×, frame-center
         // kept) and drag pans when zoomed.
-        let viewport = window.viewport_size();
-        let geometry = self.viewer_geometry(&item, viewport);
-        let fit = geometry.fit;
-        let frame_h = fit.1;
+        let geometry = self.viewer_geometry(&item, window, cx);
         let (media_w, media_h) = geometry.media;
-        let zoom = self.viewer.zoom;
         let (zoom_w, zoom_h) = geometry.zoomed;
         let (pan_x, pan_y) = geometry.pan;
-        // Chat windows draw the playing picture over the thumbnail here;
-        // the main window's video layer draws it above the panel.
-        let inline_video =
-            (!layered && item.kind.is_playable() && self.viewer.video == Some(item.message_id))
-                .then(|| {
-                    if let Some(player) = &self.viewer.player {
-                        player.set_orientation(self.viewer.orientation.turns, false);
-                    }
-                    self.viewer_inline_video()
-                })
-                .flatten();
-        // A file that is not a picture (or too large to show as one) is a
-        // card; a picture file decodes through `image_decode` (HEIC, AVIF,
-        // JPEG XL, colour profiles), falling back to the card.
-        let file_card = self.viewer_file_card(&item, &files, &downloading);
-        let fallback_card = (item.kind == MediaViewerKind::ImageFile)
-            .then(|| files::FileCard::new(&item, &files, &downloading));
-        // An upright HDR picture file draws its HDR rendition (macOS).
-        let hdr_frame = (file_card.is_none()
-            && item.kind == MediaViewerKind::ImageFile
-            && self.viewer.orientation.is_identity())
-        .then_some(thumb_path.as_deref())
-        .flatten()
-        .and_then(|path| self.viewer_hdr_element(path, (zoom_w, zoom_h), window, cx));
-        let card_view = cx.entity().downgrade();
-        let content: AnyElement = if let Some(card) = file_card {
-            div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(card.render(card_view))
-                .into_any_element()
-        } else if let Some(hdr_frame) = hdr_frame {
-            hdr_frame
-        } else {
-            // The thumbnail (under the playing picture) renders through
-            // `img` from its path (async-loaded once, then cached). MED1:
-            // a rotated photo renders from the eagerly-decoded
-            // `viewer_rotated` cache (90°/180°/270° clockwise).
-            let rotated: Option<ImageSource> = item
-                .kind
-                .is_picture()
-                .then_some(self.viewer.rotated.as_ref())
-                .flatten()
-                .filter(|(path, turns, _)| {
-                    *turns == self.viewer.orientation.code()
-                        && Some(path.as_path()) == thumb_path.as_deref()
-                })
-                .map(|(_, _, image)| ImageSource::from(image.clone()));
-            let source: Option<ImageSource> = rotated.or_else(|| {
-                thumb_path.as_deref().map(|path| {
-                    if item.kind == MediaViewerKind::ImageFile {
-                        crate::ui::image_budget::full_picture(path)
-                    } else {
-                        ImageSource::from(path.to_path_buf())
-                    }
-                })
-            });
-            if let Some(source) = source {
-                img(source)
-                    .id(("media-viewer-img", row_id))
-                    .w(px(zoom_w))
-                    .h(px(zoom_h))
-                    .aspect_ratio(px(zoom_w) / px(zoom_h))
-                    .object_fit(ObjectFit::Contain)
-                    .with_fallback(move || {
-                        if let Some(card) = fallback_card.clone() {
-                            return div()
-                                .w(px(zoom_w))
-                                .h(px(zoom_h))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(card.render(card_view.clone()))
-                                .into_any_element();
-                        }
-                        div()
-                            .w(px(zoom_w))
-                            .h(px(zoom_h))
-                            .bg(bg_deep())
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(gpui_kit::white())
-                            .child(tr_with(
-                                keys::Q_AV_COULD_NOT_RENDER,
-                                &[("kind_label", kind_label)],
-                            ))
-                            .into_any_element()
-                    })
-                    .into_any_element()
-            } else {
-                // MED3: show the real download percent when known
-                // (`updateFile` → `downloaded_size`).
-                let progress_pct: Option<i32> = item
-                    .display_file_ids
-                    .iter()
-                    .chain(std::iter::once(&item.download_file_id))
-                    .filter_map(|id| files.get(&id.0))
-                    .filter_map(|f| f.download_progress())
-                    .map(|p| (p * 100.0).round() as i32)
-                    .next();
-                let downloading_label = match progress_pct {
-                    Some(pct) => tr_with(keys::Q_AV_DOWNLOADING, &[("pct", &pct.to_string())]),
-                    None => tr(keys::Q_AV_DOWNLOADING_2).to_string(),
-                };
-                let status = match (&item.duration_label, downloading_now) {
-                    (Some(duration), true) => {
-                        format!("{kind_label} · {duration} — {downloading_label}")
-                    }
-                    (Some(duration), false) => tr_with(
-                        keys::Q_AV_NOT_DOWNLOADED,
-                        &[
-                            ("kind_label", kind_label),
-                            ("duration", &duration.to_string()),
-                        ],
-                    ),
-                    (None, true) => format!("{kind_label} — {downloading_label}"),
-                    (None, false) => {
-                        tr_with(keys::Q_AV_NOT_DOWNLOADED_2, &[("kind_label", kind_label)])
-                    }
-                };
+        let visual = if part.draws_media() {
+            // Chat windows draw the playing picture over the thumbnail here;
+            // the main window's video layer draws it above the panel.
+            let inline_video = (part == ViewerPart::Inline
+                && item.kind.is_playable()
+                && self.viewer.video == Some(item.message_id))
+            .then(|| {
+                if let Some(player) = &self.viewer.player {
+                    player.set_orientation(self.viewer.orientation.turns, false);
+                }
+                self.viewer_inline_video()
+            })
+            .flatten();
+            // A file that is not a picture (or too large to show as one) is a
+            // card; a picture file decodes through `image_decode` (HEIC, AVIF,
+            // JPEG XL, colour profiles), falling back to the card.
+            let file_card = self.viewer_file_card(&item, &files, &downloading);
+            let fallback_card = (item.kind == MediaViewerKind::ImageFile)
+                .then(|| files::FileCard::new(&item, &files, &downloading));
+            // An upright HDR picture file draws its HDR rendition (macOS).
+            let hdr_frame = (file_card.is_none()
+                && item.kind == MediaViewerKind::ImageFile
+                && self.viewer.orientation.is_identity())
+            .then_some(thumb_path.as_deref())
+            .flatten()
+            .and_then(|path| self.viewer_hdr_element(path, (zoom_w, zoom_h), window, cx));
+            let card_view = cx.entity().downgrade();
+            let content: AnyElement = if let Some(card) = file_card {
                 div()
-                    .id(("media-viewer-loading", row_id))
-                    .w(px(zoom_w))
-                    .h(px(zoom_h))
-                    .bg(bg_deep())
+                    .size_full()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(div().text_sm().text_color(gpui_kit::white()).child(status))
+                    .child(card.render(card_view))
                     .into_any_element()
-            }
-        };
-        let content = match inline_video {
-            Some(video) => div()
-                .relative()
-                .w(px(zoom_w))
-                .h(px(zoom_h))
-                .child(content)
-                .child(div().absolute().inset_0().child(video))
-                .into_any_element(),
-            None => content,
-        };
-        // The download ring, the "can't be played" plate, or (chat
-        // windows) the waiting spinner, over the picture.
-        let picture_overlay =
-            self.viewer_picture_overlay(&item, row_id, &files, &downloading, layered, cx);
-        let visual = {
-            let view = cx.entity().downgrade();
-            let scroll_view = view.clone();
-            let down_view = view.clone();
-            let move_view = view.clone();
-            let up_view = view.clone();
-            // Window position of the visual's top-left (it is centered in
-            // the frame): wheel zoom keeps the point under the pointer.
-            let origin = geometry.origin;
-            let menu_view = view;
-            let is_photo = item.kind.is_picture();
-            let menu_protected = protected;
-            let menu_can_delete = can_delete;
-            let menu_profile = profile_view;
-            let menu_set_main = can_set_main;
-            let menu_can_report = can_report;
-            let menu_playable = item.kind.is_playable();
-            let menu_chat_source = self.viewer.state.source() == ViewerSource::Chat;
-            let menu_rotate_video = self.viewer_video_rotatable();
-            let menu_share_at: Option<String> = (self.viewer_can_share_at_time() && !protected)
-                .then(|| {
-                    tr_with(
-                        keys::MEDIAVIEW_SHARE_AT_TIME,
-                        &[(
-                            "time",
-                            &quill::message_menu::timecode_text(f64::from(
-                                self.viewer_share_position(),
-                            )),
-                        )],
-                    )
+            } else if let Some(hdr_frame) = hdr_frame {
+                hdr_frame
+            } else {
+                // The thumbnail (under the playing picture) renders through
+                // `img` from its path (async-loaded once, then cached). MED1:
+                // a rotated photo renders from the eagerly-decoded
+                // `viewer_rotated` cache (90°/180°/270° clockwise).
+                let rotated: Option<ImageSource> = item
+                    .kind
+                    .is_picture()
+                    .then_some(self.viewer.rotated.as_ref())
+                    .flatten()
+                    .filter(|(path, turns, _)| {
+                        *turns == self.viewer.orientation.code()
+                            && Some(path.as_path()) == thumb_path.as_deref()
+                    })
+                    .map(|(_, _, image)| ImageSource::from(image.clone()));
+                let source: Option<ImageSource> = rotated.or_else(|| {
+                    thumb_path.as_deref().map(|path| {
+                        if item.kind == MediaViewerKind::ImageFile {
+                            crate::ui::image_budget::full_picture(path)
+                        } else {
+                            ImageSource::from(path.to_path_buf())
+                        }
+                    })
                 });
-            // `photo.has_stickers` / `video.has_stickers`: stickers were
-            // added to the media (tdesktop "Attached Stickers").
-            let menu_attached = self
-                .session()
-                .and_then(|s| s.histories.get(&item.chat_id.0))
-                .and_then(|h| h.messages.get(&item.message_id.0))
-                .is_some_and(|m| match &m.content {
-                    quill::telegram::envelope::MessageContent::Photo(p) => p.has_stickers,
-                    quill::telegram::envelope::MessageContent::Video(v) => v.has_stickers,
-                    _ => false,
-                });
-            div()
-                .id(("media-viewer-visual", row_id))
-                .relative()
-                .w(px(media_w))
-                .h(px(media_h))
-                .overflow_hidden()
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(pan_x))
-                        .top(px(pan_y))
+                if let Some(source) = source {
+                    img(source)
+                        .id(("media-viewer-img", row_id))
                         .w(px(zoom_w))
                         .h(px(zoom_h))
-                        .child(content),
-                )
-                .children(picture_overlay)
-                .on_scroll_wheel(move |event, _window, cx| {
-                    let dy = match event.delta {
-                        ScrollDelta::Pixels(p) => f32::from(p.y),
-                        ScrollDelta::Lines(l) => l.y * VIEWER_WHEEL_NOTCH_PX,
-                    };
-                    let anchor = (
-                        f32::from(event.position.x) - origin.0,
-                        f32::from(event.position.y) - origin.1,
-                    );
-                    if let Some(view) = scroll_view.upgrade() {
-                        view.update(cx, |this, cx| {
-                            this.viewer_note_activity(false, cx);
-                            this.viewer_zoom_scroll(dy, anchor, cx)
-                        });
-                    }
-                })
-                .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
-                    let pos = (f32::from(event.position.x), f32::from(event.position.y));
-                    if let Some(view) = down_view.upgrade() {
-                        view.update(cx, |this, cx| {
-                            this.viewer.drag = Some(pos);
-                            cx.notify();
-                        });
-                    }
-                })
-                .on_mouse_move(move |event, _window, cx| {
-                    let pos = (f32::from(event.position.x), f32::from(event.position.y));
-                    if let Some(view) = move_view.upgrade() {
-                        view.update(cx, |this, cx| {
-                            this.viewer_note_activity(false, cx);
-                            if let Some((lx, ly)) = this.viewer.drag {
-                                this.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
-                                this.viewer.drag = Some(pos);
+                        .aspect_ratio(px(zoom_w) / px(zoom_h))
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(move || {
+                            if let Some(card) = fallback_card.clone() {
+                                return div()
+                                    .w(px(zoom_w))
+                                    .h(px(zoom_h))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(card.render(card_view.clone()))
+                                    .into_any_element();
                             }
-                        });
-                    }
-                })
-                .on_mouse_up(MouseButton::Left, move |_event, _window, cx| {
-                    if let Some(view) = up_view.upgrade() {
-                        view.update(cx, |this, cx| {
-                            this.viewer.drag = None;
-                            cx.notify();
-                        });
-                    }
-                })
-                // Double-click resets zoom/pan to fit.
-                .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
-                    if event.click_count() >= 2 {
-                        this.viewer_reset_zoom(cx);
-                    }
-                }))
-                // The media itself never closes the viewer.
-                .occlude()
-                // Right-click menu (tdesktop's viewer context menu).
-                .context_menu(move |menu, _, _| {
-                    let item = |label: &'static str,
-                                run: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>)| {
-                        let view = menu_view.clone();
-                        PopupMenuItem::new(label).on_click(move |_, window, cx| {
-                            let _ = view.update(cx, |this, cx| run(this, window, cx));
+                            div()
+                                .w(px(zoom_w))
+                                .h(px(zoom_h))
+                                .bg(bg_deep())
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_color(gpui_kit::white())
+                                .child(tr_with(
+                                    keys::Q_AV_COULD_NOT_RENDER,
+                                    &[("kind_label", kind_label)],
+                                ))
+                                .into_any_element()
                         })
+                        .into_any_element()
+                } else {
+                    // MED3: show the real download percent when known
+                    // (`updateFile` → `downloaded_size`).
+                    let progress_pct: Option<i32> = item
+                        .display_file_ids
+                        .iter()
+                        .chain(std::iter::once(&item.download_file_id))
+                        .filter_map(|id| files.get(&id.0))
+                        .filter_map(|f| f.download_progress())
+                        .map(|p| (p * 100.0).round() as i32)
+                        .next();
+                    let downloading_label = match progress_pct {
+                        Some(pct) => tr_with(keys::Q_AV_DOWNLOADING, &[("pct", &pct.to_string())]),
+                        None => tr(keys::Q_AV_DOWNLOADING_2).to_string(),
                     };
-                    let mut menu = menu;
-                    if menu_set_main {
-                        menu = menu.item(item(tr(keys::Q_AV_SET_AS_MAIN_PHOTO), |this, _, cx| {
-                            this.set_viewer_photo_as_main(cx)
-                        }));
-                    }
-                    if menu_can_report {
-                        menu = menu.item(item(tr(keys::Q_AV_REPORT), |this, _, cx| {
-                            this.report_viewer_profile_photo(cx)
-                        }));
-                    }
-                    if !menu_protected && !menu_profile {
-                        menu = menu.item(item(tr(keys::Q_AV_FORWARD), |this, window, cx| {
-                            this.share_viewer_media(window, cx)
-                        }));
-                    }
-                    if menu_can_delete {
-                        menu = menu.item(item(tr(keys::BOX_DELETE), |this, window, cx| {
-                            this.delete_viewer_media(window, cx)
-                        }));
-                    }
-                    if !menu_protected {
-                        menu = menu
-                            .item(PopupMenuItem::separator())
-                            .item(item(tr(keys::Q_AV_SAVE_AS_2), |this, _, cx| {
-                                this.save_viewer_media(cx)
-                            }));
-                        if is_photo {
-                            menu = menu.item(item(tr(keys::Q_AV_COPY), |this, _, cx| {
-                                this.copy_viewer_photo(cx)
-                            }));
-                        } else if menu_playable {
-                            menu = menu.item(item(tr(keys::Q_AV_COPY_FRAME), |this, _, cx| {
-                                this.copy_viewer_frame(cx)
-                            }));
+                    let status = match (&item.duration_label, downloading_now) {
+                        (Some(duration), true) => {
+                            format!("{kind_label} · {duration} — {downloading_label}")
                         }
-                    }
-                    if let Some(label) = menu_share_at.clone() {
-                        let view = menu_view.clone();
-                        menu =
-                            menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
-                                let _ = view.update(cx, |this, cx| {
-                                    this.share_viewer_video_at_time(window, cx)
-                                });
-                            }));
-                    }
-                    if menu_attached {
-                        menu = menu.item(item(tr(keys::Q_AV_ATTACHED_STICKERS), |this, _, cx| {
-                            this.show_viewer_attached_stickers(cx)
-                        }));
-                    }
-                    if !menu_profile {
-                        menu = menu.item(item(tr(keys::Q_AV_SHOW_IN_CHAT), |this, _, cx| {
-                            this.show_viewer_in_chat(cx)
-                        }));
-                    }
-                    if menu_chat_source {
-                        menu = menu.item(item(
-                            quill::viewer_extras::view_all_label(is_photo),
-                            |this, _, cx| this.view_all_viewer_media(cx),
-                        ));
-                    }
-                    if is_photo {
-                        menu = menu
-                            .item(PopupMenuItem::separator())
-                            .item(item(tr(keys::Q_AV_ROTATE), |this, _, cx| {
-                                this.rotate_viewer_photo(cx)
-                            }))
-                            .item(item(tr(keys::Q_AV_FLIP_HORIZONTALLY), |this, _, cx| {
-                                this.flip_viewer_horizontal(cx)
-                            }))
-                            .item(item(tr(keys::Q_AV_FLIP_VERTICALLY), |this, _, cx| {
-                                this.flip_viewer_vertical(cx)
-                            }));
-                    }
-                    if menu_rotate_video {
-                        menu = menu
-                            .item(PopupMenuItem::separator())
-                            .item(item(tr(keys::Q_AV_ROTATE), |this, _, cx| {
-                                this.rotate_viewer_video(cx)
-                            }));
-                    }
-                    menu
-                })
-        };
-        // Parity slice 5: the video player panel (or a download CTA).
-        let is_video = item.kind == MediaViewerKind::Video;
-        let video_controls: Option<AnyElement> = is_video
-            .then(|| self.viewer_video_controls(&item, row_id, cx))
-            .flatten();
-        let key_focus = self.viewer_key_focus_probe(cx);
-        // Videos get the player panel; zoom controls are for photos.
-        let transport: Option<AnyElement> = if is_video {
-            video_controls
-        } else {
-            Some(Self::viewer_zoom_controls(zoom, row_id, cx).into_any_element())
-        };
-        // Custom emoji in the caption render like they do in message text:
-        // the resolved sticker images, the span text until they are.
-        let caption_emoji = self
-            .session()
-            .map(|session| {
-                custom_emoji_paths(
-                    &item.caption_entities,
-                    &session.stickers.emoji.custom_emoji_stickers,
-                    &files,
-                    &roots,
-                )
-            })
-            .unwrap_or_default();
-        let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
-            rich_text_line(
-                &item.caption,
-                &item.caption_entities,
-                (item.chat_id.0, row_id),
-                true,
-                &self.message_ui.spoiler_revealed,
-                // Settings → Appearance: captions follow the message font size.
-                self.msg_font(),
-                &caption_emoji,
-                cx,
-            )
-        });
-        let caption = caption.map(|caption| {
-            let plate = media_w.max(240.).min(fit.0);
-            self.viewer_caption_plate(&item, caption, plate, window, cx)
-        });
-        let sender_profile = self.viewer_sender_profile(&item);
-        let saved_toast: Option<AnyElement> = self.viewer_saved_toast(cx);
-        let icon_action =
-            |id: (&'static str, u64), icon: gpui_kit::assets::IconName, label: &'static str| {
-                Button::new(id)
-                    .icon(icon)
-                    .ghost()
-                    .text_color(gpui_kit::white())
-                    .tooltip(label)
-                    .accessibility_label(label)
+                        (Some(duration), false) => tr_with(
+                            keys::Q_AV_NOT_DOWNLOADED,
+                            &[
+                                ("kind_label", kind_label),
+                                ("duration", &duration.to_string()),
+                            ],
+                        ),
+                        (None, true) => format!("{kind_label} — {downloading_label}"),
+                        (None, false) => {
+                            tr_with(keys::Q_AV_NOT_DOWNLOADED_2, &[("kind_label", kind_label)])
+                        }
+                    };
+                    div()
+                        .id(("media-viewer-loading", row_id))
+                        .w(px(zoom_w))
+                        .h(px(zoom_h))
+                        .bg(bg_deep())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().text_sm().text_color(gpui_kit::white()).child(status))
+                        .into_any_element()
+                }
             };
-        // Every control surface occludes: GPUI delivers a click to all
-        // hitboxes under the cursor down to the first occluding one, so
-        // without it the backdrop below also gets the click and closes.
-        let over_controls = Self::over_controls_listener;
-        let hdr_badge = self.viewer_hdr_badge();
-        let top_bar = div()
-            .id("media-viewer-top-bar")
-            .on_mouse_move(over_controls(cx))
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .h(px(VIEWER_TOP_BAR))
-            .px_4()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(match sender_line {
-                Some((name, when)) => div()
-                    .id("media-viewer-sender")
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .text_color(gpui_kit::white())
-                    .when_some(sender_profile, |this, profile| {
-                        this.role(Role::Button)
-                            .aria_label(tr(keys::Q_AV_OPEN_PROFILE))
-                            .cursor_pointer()
-                            .hover(|style| style.opacity(0.8))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.open_viewer_sender_profile(profile, window, cx);
-                            }))
-                    })
+            let content = match inline_video {
+                Some(video) => div()
+                    .relative()
+                    .w(px(zoom_w))
+                    .h(px(zoom_h))
+                    .child(content)
+                    .child(div().absolute().inset_0().child(video))
+                    .into_any_element(),
+                None => content,
+            };
+            // The download ring, the "can't be played" plate, or (chat
+            // windows) the waiting spinner, over the picture.
+            let picture_overlay = self.viewer_picture_overlay(
+                &item,
+                row_id,
+                &files,
+                &downloading,
+                part != ViewerPart::Inline,
+                cx,
+            );
+            Some({
+                let view = cx.entity().downgrade();
+                let scroll_view = view.clone();
+                let down_view = view.clone();
+                let move_view = view.clone();
+                let up_view = view.clone();
+                // Window position of the visual's top-left (it is centered in
+                // the frame): wheel zoom keeps the point under the pointer.
+                let origin = geometry.origin;
+                let menu_view = view;
+                let is_photo = item.kind.is_picture();
+                let menu_protected = protected;
+                let menu_can_delete = can_delete;
+                let menu_profile = profile_view;
+                let menu_set_main = can_set_main;
+                let menu_can_report = can_report;
+                let menu_playable = item.kind.is_playable();
+                let menu_chat_source = self.viewer.state.source() == ViewerSource::Chat;
+                let menu_rotate_video = self.viewer_video_rotatable();
+                let menu_share_at: Option<String> = (self.viewer_can_share_at_time() && !protected)
+                    .then(|| {
+                        tr_with(
+                            keys::MEDIAVIEW_SHARE_AT_TIME,
+                            &[(
+                                "time",
+                                &quill::message_menu::timecode_text(f64::from(
+                                    self.viewer_share_position(),
+                                )),
+                            )],
+                        )
+                    });
+                // `photo.has_stickers` / `video.has_stickers`: stickers were
+                // added to the media (tdesktop "Attached Stickers").
+                let menu_attached = self
+                    .session()
+                    .and_then(|s| s.histories.get(&item.chat_id.0))
+                    .and_then(|h| h.messages.get(&item.message_id.0))
+                    .is_some_and(|m| match &m.content {
+                        quill::telegram::envelope::MessageContent::Photo(p) => p.has_stickers,
+                        quill::telegram::envelope::MessageContent::Video(v) => v.has_stickers,
+                        _ => false,
+                    });
+                div()
+                    .id(("media-viewer-visual", row_id))
+                    .relative()
+                    .w(px(media_w))
+                    .h(px(media_h))
+                    .overflow_hidden()
                     .child(
                         div()
-                            .font_semibold()
-                            .truncate()
-                            .child(crate::ui::bidi_line::one_line_plain(name)),
+                            .absolute()
+                            .left(px(pan_x))
+                            .top(px(pan_y))
+                            .w(px(zoom_w))
+                            .h(px(zoom_h))
+                            .child(content),
                     )
-                    .child(div().text_xs().opacity(0.7).truncate().child({
-                        // `lng_mediaview_ttl_in` follows the date
-                        // once the timer runs.
-                        let when = match ttl.and_then(|ttl| ttl.date_suffix()) {
-                            Some(left) if when.is_empty() => left,
-                            Some(left) => format!("{when} \u{b7} {left}"),
-                            None => when,
+                    .children(picture_overlay)
+                    .on_scroll_wheel(move |event, _window, cx| {
+                        let dy = match event.delta {
+                            ScrollDelta::Pixels(p) => f32::from(p.y),
+                            ScrollDelta::Lines(l) => l.y * VIEWER_WHEEL_NOTCH_PX,
                         };
-                        if when.is_empty() {
-                            header_label
-                        } else {
-                            format!("{when} \u{b7} {header_label}")
+                        let anchor = (
+                            f32::from(event.position.x) - origin.0,
+                            f32::from(event.position.y) - origin.1,
+                        );
+                        if let Some(view) = scroll_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.viewer_note_activity(false, cx);
+                                this.viewer_zoom_scroll(dy, anchor, cx)
+                            });
+                        }
+                    })
+                    .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
+                        let pos = (f32::from(event.position.x), f32::from(event.position.y));
+                        if let Some(view) = down_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.viewer.drag = Some(pos);
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .on_mouse_move(move |event, _window, cx| {
+                        let pos = (f32::from(event.position.x), f32::from(event.position.y));
+                        if let Some(view) = move_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.viewer_note_activity(false, cx);
+                                if let Some((lx, ly)) = this.viewer.drag {
+                                    this.viewer_pan_drag(pos.0 - lx, pos.1 - ly, cx);
+                                    this.viewer.drag = Some(pos);
+                                }
+                            });
+                        }
+                    })
+                    .on_mouse_up(MouseButton::Left, move |_event, _window, cx| {
+                        if let Some(view) = up_view.upgrade() {
+                            view.update(cx, |this, cx| {
+                                this.viewer.drag = None;
+                                cx.notify();
+                            });
+                        }
+                    })
+                    // Double-click resets zoom/pan to fit.
+                    .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                        if event.click_count() >= 2 {
+                            this.viewer_reset_zoom(cx);
+                        } else if this.viewer.extra.video_fullscreen.is_on() {
+                            this.toggle_viewer_video(cx);
                         }
                     }))
-                    .into_any_element(),
-                None => div()
-                    .font_semibold()
-                    .text_color(gpui_kit::white())
-                    .child(header_label)
-                    .into_any_element(),
+                    // The media itself never closes the viewer.
+                    .occlude()
+                    // Right-click menu (tdesktop's viewer context menu).
+                    .context_menu(move |menu, _, _| {
+                        let item = |label: &'static str,
+                                    run: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>)| {
+                            let view = menu_view.clone();
+                            PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                                let _ = view.update(cx, |this, cx| run(this, window, cx));
+                            })
+                        };
+                        let mut menu = menu;
+                        if menu_set_main {
+                            menu = menu
+                                .item(item(tr(keys::Q_AV_SET_AS_MAIN_PHOTO), |this, _, cx| {
+                                    this.set_viewer_photo_as_main(cx)
+                                }));
+                        }
+                        if menu_can_report {
+                            menu = menu.item(item(tr(keys::Q_AV_REPORT), |this, _, cx| {
+                                this.report_viewer_profile_photo(cx)
+                            }));
+                        }
+                        if !menu_protected && !menu_profile {
+                            menu = menu.item(item(tr(keys::Q_AV_FORWARD), |this, window, cx| {
+                                this.share_viewer_media(window, cx)
+                            }));
+                        }
+                        if menu_can_delete {
+                            menu = menu.item(item(tr(keys::BOX_DELETE), |this, window, cx| {
+                                this.delete_viewer_media(window, cx)
+                            }));
+                        }
+                        if !menu_protected {
+                            menu = menu
+                                .item(PopupMenuItem::separator())
+                                .item(item(tr(keys::Q_AV_SAVE_AS_2), |this, _, cx| {
+                                    this.save_viewer_media(cx)
+                                }));
+                            if is_photo {
+                                menu = menu.item(item(tr(keys::Q_AV_COPY), |this, _, cx| {
+                                    this.copy_viewer_photo(cx)
+                                }));
+                            } else if menu_playable {
+                                menu = menu.item(item(tr(keys::Q_AV_COPY_FRAME), |this, _, cx| {
+                                    this.copy_viewer_frame(cx)
+                                }));
+                            }
+                        }
+                        if let Some(label) = menu_share_at.clone() {
+                            let view = menu_view.clone();
+                            menu = menu.item(PopupMenuItem::new(label).on_click(
+                                move |_, window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.share_viewer_video_at_time(window, cx)
+                                    });
+                                },
+                            ));
+                        }
+                        if menu_attached {
+                            menu = menu
+                                .item(item(tr(keys::Q_AV_ATTACHED_STICKERS), |this, _, cx| {
+                                    this.show_viewer_attached_stickers(cx)
+                                }));
+                        }
+                        if !menu_profile {
+                            menu = menu.item(item(tr(keys::Q_AV_SHOW_IN_CHAT), |this, _, cx| {
+                                this.show_viewer_in_chat(cx)
+                            }));
+                        }
+                        if menu_chat_source {
+                            menu = menu.item(item(
+                                quill::viewer_extras::view_all_label(is_photo),
+                                |this, _, cx| this.view_all_viewer_media(cx),
+                            ));
+                        }
+                        if is_photo {
+                            menu = menu
+                                .item(PopupMenuItem::separator())
+                                .item(item(tr(keys::Q_AV_ROTATE), |this, _, cx| {
+                                    this.rotate_viewer_photo(cx)
+                                }))
+                                .item(item(tr(keys::Q_AV_FLIP_HORIZONTALLY), |this, _, cx| {
+                                    this.flip_viewer_horizontal(cx)
+                                }))
+                                .item(item(tr(keys::Q_AV_FLIP_VERTICALLY), |this, _, cx| {
+                                    this.flip_viewer_vertical(cx)
+                                }));
+                        }
+                        if menu_rotate_video {
+                            menu = menu
+                                .item(PopupMenuItem::separator())
+                                .item(item(tr(keys::Q_AV_ROTATE), |this, _, cx| {
+                                    this.rotate_viewer_video(cx)
+                                }));
+                        }
+                        menu
+                    })
             })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .when_some(hdr_badge, |this, badge| {
-                        this.child(crate::ui::hdr_image::badge_element(badge))
-                    })
-                    .when(item.kind.is_picture(), |this| {
-                        this.child(
-                            icon_action(
-                                ("media-viewer-rotate", row_id),
-                                gpui_kit::assets::IconName::RotateCw,
-                                tr(keys::Q_AV_ROTATE),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.rotate_viewer_photo(cx);
-                            })),
-                        )
-                    })
-                    // Protected content can't be shared or saved
-                    // (Telegram Desktop hides both).
-                    .when(can_set_main, |this| {
-                        this.child(
-                            icon_action(
-                                ("media-viewer-set-main", row_id),
-                                gpui_kit::assets::IconName::Images,
-                                tr(keys::Q_AV_SET_AS_MAIN_PHOTO_2),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_viewer_photo_as_main(cx);
-                            })),
-                        )
-                    })
-                    .when(can_report, |this| {
-                        this.child(
-                            icon_action(
-                                ("media-viewer-report", row_id),
-                                gpui_kit::assets::IconName::Flag,
-                                tr(keys::Q_AV_REPORT),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.report_viewer_profile_photo(cx);
-                            })),
-                        )
-                    })
-                    .when(!protected && !profile_view, |this| {
-                        this.child(
-                            icon_action(
-                                ("media-viewer-share", row_id),
-                                gpui_kit::assets::IconName::Forward,
-                                tr(keys::Q_AV_SHARE),
-                            )
-                            .on_click(cx.listener(
-                                |this, _, window, cx| {
-                                    this.share_viewer_media(window, cx);
-                                },
-                            )),
-                        )
-                    })
-                    .when(!protected, |this| {
-                        this.child(
-                            icon_action(
-                                ("media-viewer-save", row_id),
-                                gpui_kit::assets::IconName::Download,
-                                tr(keys::SETTINGS_SAVE),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.save_viewer_media(cx);
-                            })),
-                        )
-                    })
-                    .when(!profile_view, |this| {
-                        this.child(
-                            icon_action(
-                                ("media-viewer-show-in-chat", row_id),
-                                gpui_kit::assets::IconName::MessageSquare,
-                                tr(keys::Q_AV_SHOW_IN_CHAT_2),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.show_viewer_in_chat(cx);
-                            })),
-                        )
-                    })
-                    .when_some(album_pin_label, |this, label| {
-                        this.child(
-                            Button::new(("media-viewer-pin-album", row_id))
-                                .icon(gpui_kit::assets::IconName::Pin)
-                                .ghost()
-                                .text_color(gpui_kit::white())
-                                .tooltip(label.clone())
-                                .accessibility_label(label)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_viewer_album_pin(cx);
-                                })),
-                        )
-                    })
-                    .when(can_delete, |this| {
-                        this.child(
-                            icon_action(
-                                ("media-viewer-delete", row_id),
-                                gpui_kit::assets::IconName::Trash,
-                                tr(keys::BOX_DELETE),
-                            )
-                            .on_click(cx.listener(
-                                |this, _, window, cx| {
-                                    this.delete_viewer_media(window, cx);
-                                },
-                            )),
-                        )
-                    })
-                    .child(
-                        icon_action(
-                            ("media-viewer-close", row_id),
-                            gpui_kit::assets::IconName::X,
-                            tr(keys::Q_AV_CLOSE_MEDIA_VIEWER),
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_media_viewer(cx);
-                        })),
-                    ),
-            );
-        let nav_arrow = |id: &'static str,
-                         icon: gpui_kit::assets::IconName,
-                         label: &'static str,
-                         step: i32,
-                         cx: &mut Context<Self>| {
-            Button::new(id)
-                .icon(icon)
-                .large()
-                .rounded_full()
-                .custom(
-                    ButtonCustomVariant::new(cx)
-                        .color(gpui_kit::black().opacity(0.4))
-                        .foreground(gpui_kit::white())
-                        .hover(gpui_kit::black().opacity(0.6)),
-                )
-                .tooltip(label)
-                .accessibility_label(label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.step_media_viewer(step, cx);
-                }))
+        } else {
+            None
         };
-        let prev = self.viewer.state.has_prev().then(|| {
-            nav_arrow(
-                "media-viewer-prev",
-                gpui_kit::assets::IconName::ChevronLeft,
-                tr(keys::Q_AV_PREVIOUS),
-                -1,
-                cx,
-            )
-        });
-        let next = self.viewer.state.has_next().then(|| {
-            nav_arrow(
-                "media-viewer-next",
-                gpui_kit::assets::IconName::ChevronRight,
-                tr(keys::Q_AV_NEXT),
-                1,
-                cx,
-            )
+        let chrome = part.draws_chrome().then(|| {
+            let facts = ChromeFacts {
+                row_id,
+                kind_label,
+                ttl,
+                protected,
+                can_delete,
+                can_set_main,
+                can_report,
+                profile_view,
+            };
+            self.viewer_chrome(&item, facts, geometry, window, cx)
         });
         let open_gen = self.viewer.open_gen as usize;
-        let arrow_top = px(VIEWER_TOP_BAR + frame_h / 2.0 - 24.0);
+        let viewport = window.viewport_size();
         // Layered, the panel takes no clicks itself: the backdrop under it
         // closes the viewer.
-        let root = if layered {
+        let root = if part == ViewerPart::Inline {
+            div().absolute().inset_0().child(
+                div()
+                    .id("media-viewer-backdrop")
+                    .occlude()
+                    .absolute()
+                    .inset_0()
+                    .bg(gpui_kit::black())
+                    .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
+                        this.viewer_note_activity(false, cx);
+                    }))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.viewer_backdrop_click(cx);
+                    })),
+            )
+        } else {
             // The slice's box has no height of its own (a cached view over
             // absolute content): size the panel to the window, or `bottom_0`
             // puts the controller above the top edge.
@@ -814,116 +539,13 @@ impl QuillApp {
                 .left_0()
                 .w(viewport.width)
                 .h(viewport.height)
-        } else {
-            div().absolute().inset_0().child(
-                div()
-                    .id("media-viewer-backdrop")
-                    .occlude()
-                    .absolute()
-                    .inset_0()
-                    .bg(gpui_kit::black().opacity(0.92))
-                    .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
-                        this.viewer_note_activity(false, cx);
-                    }))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_media_viewer(cx);
-                    })),
-            )
         };
+        let (left, top) = geometry.origin;
         let panel = root
-            .child(fade_controls(top_bar, "viewer-top-fade", fade_gen, hidden))
-            .child(
-                div()
-                    .absolute()
-                    .top(px(VIEWER_TOP_BAR))
-                    .left_0()
-                    .right_0()
-                    .h(px(frame_h))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(visual),
+            .children(
+                visual.map(|visual| div().absolute().left(px(left)).top(px(top)).child(visual)),
             )
-            .when_some(prev, |this, prev| {
-                this.child(fade_controls(
-                    div()
-                        .id("media-viewer-prev-lane")
-                        .on_mouse_move(over_controls(cx))
-                        .occlude()
-                        .absolute()
-                        .left(px(16.))
-                        .top(arrow_top)
-                        .child(prev),
-                    "viewer-prev-fade",
-                    fade_gen,
-                    hidden,
-                ))
-            })
-            .when_some(next, |this, next| {
-                this.child(fade_controls(
-                    div()
-                        .id("media-viewer-next-lane")
-                        .on_mouse_move(over_controls(cx))
-                        .occlude()
-                        .absolute()
-                        .right(px(16.))
-                        .top(arrow_top)
-                        .child(next),
-                    "viewer-next-fade",
-                    fade_gen,
-                    hidden,
-                ))
-            })
-            .child(fade_controls(
-                div()
-                    .id("media-viewer-bottom-bar")
-                    .on_mouse_move(over_controls(cx))
-                    .occlude()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .px_6()
-                    .pb_4()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_2()
-                    .children(caption)
-                    // MED1: honest playback error (unsupported format /
-                    // player failure) instead of a silent stall.
-                    .when_some(
-                        self.playback.error.clone().filter(|_| !is_video),
-                        |this, err| {
-                            let can_open = item.kind.is_playable() && has_local_clip;
-                            this.child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(div().text_sm().text_color(danger_bright()).child(err))
-                                    .when(can_open, |row| {
-                                        row.child(
-                                            Button::new(("media-viewer-open-externally", row_id))
-                                                .label(tr(keys::Q_AV_OPEN_EXTERNALLY))
-                                                .ghost()
-                                                .text_color(gpui_kit::white())
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.open_viewer_clip_externally(cx);
-                                                })),
-                                        )
-                                    }),
-                            )
-                        },
-                    )
-                    .children(transport),
-                "viewer-bottom-fade",
-                fade_gen,
-                hidden,
-            ))
-            .children(ttl_badge)
-            .children(saved_toast)
-            .child(key_focus)
+            .children(chrome.into_iter().flatten())
             // Fade in over 200 ms when it opens (tdesktop
             // `mediaviewShowDuration`). Closing is instant: a fade-out
             // would have to keep the closed viewer's state alive.
@@ -932,9 +554,7 @@ impl QuillApp {
                 Animation::new(Duration::from_millis(VIEWER_SHOW_MS)),
                 |panel, t| panel.opacity(if still_frame() { 1.0 } else { t }),
             );
-        if layered {
-            panel.into_any_element()
-        } else {
+        if part == ViewerPart::Inline {
             div()
                 .id("media-viewer-overlay")
                 .occlude()
@@ -945,6 +565,8 @@ impl QuillApp {
                 .bottom_0()
                 .child(panel)
                 .into_any_element()
+        } else {
+            panel.into_any_element()
         }
     }
 }
