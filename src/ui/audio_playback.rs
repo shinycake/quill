@@ -248,6 +248,9 @@ impl QuillApp {
             SliderEvent::Release(value) => {
                 self.playback.seek_scrubbing = false;
                 self.playback.seek_preview_secs = None;
+                // A drag released off the scrubber gets no leave event;
+                // the next move over it sets the hover again.
+                self.playback.seek_hover = None;
                 self.seek_active_to(f64::from(value.end()), cx);
             }
         }

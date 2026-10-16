@@ -34,8 +34,9 @@ const LINE_UNPLAYED: f32 = 0.25;
 /// How much of the full color the hovered stretch gains over the unplayed
 /// tone (tdesktop paints it with the active color at 30%).
 const HOVER_TINT: f32 = 0.3;
-/// The line face's row: tall enough to hold the dragged knob.
-const LINE_ROW: f32 = 12.;
+/// The line face's row: room for the dragged knob and a comfortable
+/// pointer target around the thin track.
+const LINE_ROW: f32 = 20.;
 const LINE_TRACK: f32 = 3.;
 const KNOB: f32 = 10.;
 const KNOB_DRAG: f32 = 12.;
@@ -303,7 +304,6 @@ impl AudioScrubber {
 
 impl RenderOnce for AudioScrubber {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let bounds = self.state.read(cx).bounds();
         // While dragging, the progress is the drag; a hover tint would
         // only repeat it.
         let hover = self.hover.filter(|_| !self.dragging);
@@ -342,12 +342,15 @@ impl RenderOnce for AudioScrubber {
         };
         let on_move = self.on_hover.clone();
         let on_leave = self.on_hover;
+        let state = self.state.clone();
         div()
             .id(self.id)
             .relative()
             .w_full()
             .h(px(height))
             .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+                // This frame's track, not the one at render time.
+                let bounds = state.read(cx).bounds();
                 if let Some(at) =
                     pointer_fraction(event.position.x, bounds.left(), bounds.size.width)
                 {
