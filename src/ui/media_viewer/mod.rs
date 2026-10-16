@@ -31,7 +31,7 @@ use quill::state::HistoryMessage;
 use quill::state::SharedMediaTab;
 use quill::telegram::envelope::ParsedFile;
 use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

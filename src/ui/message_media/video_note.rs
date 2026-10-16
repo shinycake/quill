@@ -14,7 +14,7 @@ pub(in crate::ui) fn video_note_attachment(
     outgoing: bool,
     note: &quill::telegram::envelope::VideoNoteContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     inline: Option<crate::ui::inline_video::InlineFrame>,
     cx: &mut Context<QuillApp>,

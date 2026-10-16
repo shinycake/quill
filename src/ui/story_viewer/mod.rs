@@ -23,7 +23,7 @@ use quill::telegram::envelope::{
     MessageSender, ParsedFile, ParsedStory, StoryAreaKind, StoryAvailableReactionKind,
     StoryChosenExtraReaction, StoryOriginView,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 impl QuillApp {

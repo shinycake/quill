@@ -14,6 +14,7 @@ mod common;
 mod composer_targets;
 mod connection_indicator;
 mod downloads;
+mod downloads_derived;
 mod drafts_everywhere;
 mod emoji_interaction;
 mod folder_followups;

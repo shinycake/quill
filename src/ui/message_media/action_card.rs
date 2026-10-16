@@ -59,7 +59,7 @@ pub(in crate::ui) fn action_card(
     message: &HistoryMessage,
     session: Option<&Session>,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {

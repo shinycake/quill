@@ -124,7 +124,7 @@ pub(in crate::ui) fn voice_note_row(
     outgoing: bool,
     note: &quill::telegram::envelope::VoiceNoteContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     seek: &SeekBarView,
     // The bubble look (plain bubbles have no padding to take off the
     // row's width) and the time footer's width, 0 when hidden.
@@ -271,7 +271,7 @@ pub(in crate::ui) fn audio_row(
     outgoing: bool,
     audio: &quill::telegram::envelope::AudioContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     seek: &SeekBarView,
     // The plain look: no bubble padding to leave out of the row's bounds.

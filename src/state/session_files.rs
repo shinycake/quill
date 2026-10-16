@@ -21,39 +21,28 @@ impl Session {
         {
             return;
         }
+        let id = file.id.0;
         let idle_incomplete = file.local.is_idle_incomplete();
-        let paused = self.media.paused_downloads.contains(&file.id.0);
         if file.local.is_downloading_completed {
-            self.media.failed_downloads.remove(&file.id.0);
-            self.media.stalled_auto_downloads.remove(&file.id.0);
-            self.record_completed_user_download(file.id.0);
+            self.record_completed_user_download(id);
+            self.media.downloads.forget(id);
         }
-        if from_file_update
-            && idle_incomplete
-            && self.media.downloading.contains(&file.id.0)
-            && !self.media.user_downloads.contains(&file.id.0)
-        {
-            // An automatic download we started went idle without
-            // completing (explicit cancels already left `downloading`).
-            self.media.stalled_auto_downloads.insert(file.id.0);
+        if from_file_update && !file.local.is_downloading_active {
+            self.media.downloads.confirm_cancel(id);
         }
-        if from_file_update
-            && idle_incomplete
-            && !paused
-            && self.media.user_downloads.contains(&file.id.0)
-        {
-            // MED3: a user-initiated download that went active → idle without
-            // completing stalled (or errored without failing the request) —
-            // surface it as failed so the row offers Retry. Explicit cancels
-            // are excluded: `abort_download` already dropped them from
-            // `user_downloads`.
-            self.media.failed_downloads.insert(file.id.0);
+        let paused = self.media.downloads.is_paused(id);
+        if from_file_update && idle_incomplete && !paused && self.media.downloads.is_requested(id) {
+            // A request went idle without completing (an error that did
+            // not fail the request, or a stall): a user download offers
+            // Retry, an automatic one is not re-sent per ingest. Explicit
+            // cancels are no longer requested.
+            self.media.downloads.end(id);
         }
         if file.local.is_downloading_completed
             || !file.local.can_be_downloaded
             || (from_file_update && idle_incomplete && !paused)
         {
-            self.unstick_download(file.id.0);
+            self.unstick_download(id);
         }
         let sound_id = self.settings.sound_file_ids.get(&file.id.0).copied();
         if let Some(sound_id) = sound_id {
@@ -76,24 +65,20 @@ impl Session {
         self.media.files.insert(file.id.0, file);
     }
 
+    /// Stop tracking the in-flight request for `file_id`; an end already
+    /// recorded (Retry, stalled) stays.
     pub(crate) fn unstick_download(&mut self, file_id: i32) {
         self.note_avatar_file_changed(file_id);
-        self.media.downloading.remove(&file_id);
-        self.media.user_downloads.remove(&file_id);
-        self.media.paused_downloads.remove(&file_id);
+        self.media.downloads.settle(file_id);
         self.media.download_extras.retain(|_, id| *id != file_id);
     }
 
     /// Record a finished user-initiated download in the downloads manager's
-    /// recent list (deduped, capped at 50). Shared by the `updateFile`
-    /// completion path and the list-API `updateFileDownload` path.
+    /// recent list. Shared by the `updateFile` completion path and the
+    /// list-API `updateFileDownload` path.
     pub(crate) fn record_completed_user_download(&mut self, file_id: i32) {
-        if self.media.user_downloads.contains(&file_id) {
-            self.media.completed_downloads.retain(|id| *id != file_id);
-            self.media.completed_downloads.push_back(file_id);
-            while self.media.completed_downloads.len() > 50 {
-                self.media.completed_downloads.pop_front();
-            }
+        if self.media.downloads.is_user(file_id) {
+            self.media.downloads.record_finished(file_id);
         }
     }
 
@@ -128,7 +113,7 @@ impl Session {
         if file_id.0 == 0 {
             return false;
         }
-        if self.media.downloading.contains(&file_id.0) || self.requests.has_download(file_id) {
+        if self.media.downloads.is_requested(file_id.0) || self.requests.has_download(file_id) {
             return false;
         }
         match self.media.files.get(&file_id.0) {
@@ -137,16 +122,22 @@ impl Session {
         }
     }
 
+    /// An automatic download request goes out.
     pub fn begin_download(&mut self, file_id: FileId) {
-        if file_id.0 != 0 {
-            self.media.failed_downloads.remove(&file_id.0);
-            self.media.stalled_auto_downloads.remove(&file_id.0);
-            self.media.downloading.insert(file_id.0);
-        }
+        self.media.downloads.begin(file_id.0, DownloadOrigin::Auto);
     }
 
+    /// A user-initiated (listed) download request goes out.
+    pub fn begin_user_download(&mut self, file_id: FileId) {
+        self.media.downloads.begin(file_id.0, DownloadOrigin::User);
+    }
+
+    /// The user cancelled the download: the row stops showing progress at
+    /// once, TDLib's idle update confirms it.
     pub fn abort_download(&mut self, file_id: FileId) {
-        self.unstick_download(file_id.0);
+        self.note_avatar_file_changed(file_id.0);
+        self.media.downloads.cancel(file_id.0);
+        self.media.download_extras.retain(|_, id| *id != file_id.0);
     }
 
     /// Files the inline results panel shows, most urgent first: each

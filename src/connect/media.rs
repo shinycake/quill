@@ -81,7 +81,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         session
             .media
             .open_chat_media_downloads
-            .retain(|id| session.media.downloading.contains(id));
+            .retain(|id| session.media.downloads.is_requested(*id));
         let mut extras = Vec::new();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, AUTO_MEDIA_DOWNLOAD_PRIORITY)? {
@@ -142,11 +142,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.session.should_download(file_id)
-            || self
-                .session
-                .media
-                .stalled_auto_downloads
-                .contains(&file_id.0)
+            || self.session.media.downloads.is_stalled_auto(file_id.0)
         {
             return Ok(None);
         }
@@ -159,7 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.abort_download(file_id);
+                self.session.unstick_download(file_id.0);
                 Err(err)
             }
         }
@@ -219,9 +215,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .map(|message| (message.chat_id, message.id.0))
             });
         let extra = self.session.request_download(file_id);
-        self.session.begin_download(file_id);
         let request = if let Some((chat_id, message_id)) = origin {
-            self.session.media.user_downloads.insert(file_id.0);
+            self.session.begin_user_download(file_id);
             add_file_to_downloads_request(
                 extra,
                 file_id,
@@ -232,6 +227,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             // Picker stickers and thumbnails have no source message. TDLib's
             // persistent download list requires one; use the direct file API.
+            self.session.begin_download(file_id);
             download_file_request(extra, file_id, USER_DOWNLOAD_PRIORITY)
         };
         match self.sender.send_json(&request) {
@@ -240,8 +236,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 // The request never reached TDLib: record the failure
                 // like an error response so the row offers Retry.
-                self.session.media.failed_downloads.insert(file_id.0);
-                self.session.abort_download(file_id);
+                self.session
+                    .media
+                    .downloads
+                    .end_as(file_id.0, crate::state::DownloadOrigin::User);
+                self.session.unstick_download(file_id.0);
                 Err(err)
             }
         }
@@ -268,7 +267,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if file_id.0 == 0 || !self.session.media.user_downloads.contains(&file_id.0) {
+        if file_id.0 == 0 || !self.session.media.downloads.is_user(file_id.0) {
             return Ok(false);
         }
         let extra = self
@@ -296,13 +295,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if file_id.0 == 0 || !self.session.media.downloading.contains(&file_id.0) {
+        if file_id.0 == 0 || !self.session.media.downloads.is_requested(file_id.0) {
             return Ok(false);
         }
         let extra = self
             .session
             .request(RequestPurpose::CancelDownloadFile, None);
-        let payload = if self.session.media.user_downloads.contains(&file_id.0) {
+        let payload = if self.session.media.downloads.is_user(file_id.0) {
             remove_file_from_downloads_request(extra, file_id, false)
         } else {
             cancel_download_file_request(extra, file_id, false)

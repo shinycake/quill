@@ -198,7 +198,7 @@ pub(in crate::ui) fn paid_album_card(
     unlocked: &[MessageContent],
     caption: &str,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {

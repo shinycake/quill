@@ -13,11 +13,10 @@ impl QuillApp {
         // File state is read from the session at row-render time rather
         // than copied into a per-render snapshot.
         let no_files = HashMap::new();
-        let no_ids = std::collections::HashSet::new();
+        let no_ids = quill::state::DownloadIntents::default();
         let session = self.session();
         let files = session.map_or(&no_files, |s| &s.media.files);
-        let downloading = session.map_or(&no_ids, |s| &s.media.downloading);
-        let failed = session.map_or(&no_ids, |s| &s.media.failed_downloads);
+        let downloading = session.map_or(&no_ids, |s| &s.media.downloads);
         // Settings → Appearance: font size + bubble/plain style.
         let look = self.bubble_look(cx);
         match row {
@@ -88,7 +87,6 @@ impl QuillApp {
                     message,
                     files,
                     downloading,
-                    failed,
                     &shared.media_roots,
                     inputs.sender.clone(),
                     sender_status,

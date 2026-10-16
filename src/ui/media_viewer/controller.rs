@@ -96,7 +96,7 @@ impl QuillApp {
         item: &MediaViewerItem,
         row_id: u64,
         files: &HashMap<i32, ParsedFile>,
-        downloading: &HashSet<i32>,
+        downloading: &quill::state::DownloadIntents,
         layered: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {

@@ -67,8 +67,7 @@ pub(super) fn sponsored_message_row(
     chat_id: ChatId,
     message: &SponsoredMessage,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
-    failed: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
     // Settings → Appearance: font size + bubble/plain style.
@@ -224,7 +223,6 @@ pub(super) fn sponsored_message_row(
             false,
             files,
             downloading,
-            failed,
             media_roots,
             // Sponsored rows don't expose the list-API pause toggle (the
             // manager panel does); `None` hides it.
@@ -336,8 +334,7 @@ impl QuillApp {
         }
         let look = self.bubble_look(cx);
         let files: HashMap<i32, ParsedFile> = session.media.files.clone();
-        let downloading = session.media.downloading.clone();
-        let failed = session.media.failed_downloads.clone();
+        let downloading = session.media.downloads.clone();
         let media_roots = self.media_display_roots();
         let mut list = div()
             .id("sponsored-footer")
@@ -386,7 +383,6 @@ impl QuillApp {
                 &ad,
                 &files,
                 &downloading,
-                &failed,
                 &media_roots,
                 &self.message_ui.spoiler_revealed,
                 look,

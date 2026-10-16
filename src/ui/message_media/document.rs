@@ -124,8 +124,7 @@ pub(in crate::ui) fn document_chip(
     // to a translucent white one.
     outgoing: bool,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
-    failed: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Slice media-downloads-pause: `None` when the file isn't a pausable
     // (user-initiated, listed) download; `Some(paused)` otherwise.
@@ -143,7 +142,6 @@ pub(in crate::ui) fn document_chip(
             outgoing,
             files,
             downloading,
-            failed,
             media_roots,
             origin,
             plain,
@@ -156,7 +154,7 @@ pub(in crate::ui) fn document_chip(
     let ready = file.and_then(|f| f.usable_path()).is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
     let paused_now = downloading_now && paused == Some(true);
-    let failed_now = !ready && !downloading_now && failed.contains(&file_id.0);
+    let failed_now = !ready && !downloading_now && downloading.is_failed(file_id.0);
     let progress = file.and_then(|f| f.download_progress());
     let size = file.map(|f| f.display_size()).unwrap_or(0);
     let size_label = format_bytes(size);

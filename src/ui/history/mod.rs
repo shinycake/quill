@@ -177,7 +177,7 @@ pub(super) fn album_history_row(
     album_id: i64,
     messages: &[&HistoryMessage],
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // kit Phase 4: per-row chrome (sender header / outbox receipt /
     // avatar) computed at row-build time so the virtualized row doesn't
@@ -432,7 +432,7 @@ pub(super) fn album_tile(
     mosaic: (i32, i32),
     mosaic_corners: MediaCorners,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Which item of the message the tile is (a bought paid-media album
     // holds several under one message id); 0 for ordinary albums.

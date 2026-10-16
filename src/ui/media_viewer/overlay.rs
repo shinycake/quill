@@ -67,9 +67,9 @@ impl QuillApp {
             .session()
             .map(|s| s.media.files.clone())
             .unwrap_or_default();
-        let downloading: HashSet<i32> = self
+        let downloading: quill::state::DownloadIntents = self
             .session()
-            .map(|s| s.media.downloading.clone())
+            .map(|s| s.media.downloads.clone())
             .unwrap_or_default();
         let roots = self.media_display_roots();
         let thumb_path = viewer_display_path(&item, &files, &roots);

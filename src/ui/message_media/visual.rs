@@ -7,7 +7,7 @@ pub(in crate::ui) fn photo_attachment(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     sponsored: Option<(ChatId, i64)>,
     // Phase 4.5: `(chat_id, message_id)` when a click should open the
@@ -178,7 +178,7 @@ pub(in crate::ui) fn animation_attachment(
     message_id: MessageId,
     animation: &quill::telegram::envelope::AnimationContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     playing: bool,
     // The `image/gif` file looping in the row (`gif_clip`).
@@ -404,7 +404,7 @@ pub(in crate::ui) fn video_attachment(
     message_id: MessageId,
     video: &quill::telegram::envelope::VideoContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     inline: Option<crate::ui::inline_video::InlineFrame>,
     sponsored: Option<(ChatId, i64)>,

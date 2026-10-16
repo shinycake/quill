@@ -18,7 +18,7 @@ pub(in crate::ui) fn picture_file_attachment(
     row_id: u64,
     doc: &DocumentContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     (chat_id, message_id): (ChatId, MessageId),
     (frame_w, frame_h): (Pixels, Pixels),

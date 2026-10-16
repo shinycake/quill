@@ -225,7 +225,7 @@ impl QuillApp {
                 .emoji
                 .pack_files
                 .insert(2, vec![quill::ids::FileId(62)]);
-            session.media.downloading.insert(62);
+            session.begin_download(quill::ids::FileId(62));
             session.stickers.emoji.outdated_packs.insert(3);
             session.stickers.emoji.mutating_set = Some((4, true));
             session.settings.media_prefs.recent_emoji_packs = vec![2, 1];

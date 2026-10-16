@@ -23,8 +23,7 @@ pub(in crate::ui) fn thumbed_document_chip(
     doc: &quill::telegram::envelope::DocumentContent,
     outgoing: bool,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
-    failed: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     origin: DocOrigin,
     plain: bool,
@@ -35,7 +34,7 @@ pub(in crate::ui) fn thumbed_document_chip(
     let file = files.get(&file_id.0);
     let ready = file.and_then(|f| f.usable_path()).is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
-    let failed_now = !ready && !downloading_now && failed.contains(&file_id.0);
+    let failed_now = !ready && !downloading_now && downloading.is_failed(file_id.0);
     let progress = file.and_then(|f| f.download_progress());
     let size = file.map(|f| f.display_size()).unwrap_or(0);
     let status = if downloading_now {

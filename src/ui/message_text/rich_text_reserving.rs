@@ -227,7 +227,7 @@ pub(in crate::ui) fn message_text_block(
     msg_key: (i64, u64),
     text: &quill::telegram::envelope::TextContent,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Resolved custom emoji stickers for inline rendering (EmojiPanel cache).
     custom_emoji: &[StickerItem],
@@ -320,7 +320,7 @@ pub(in crate::ui) fn link_preview_card(
     row_id: u64,
     preview: &quill::telegram::envelope::LinkPreview,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Settings → Appearance: message font size.
     font: Pixels,

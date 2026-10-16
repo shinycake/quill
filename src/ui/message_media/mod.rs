@@ -129,10 +129,7 @@ pub(super) fn story_viewer_display_path(
 pub(super) fn file_is_downloading(
     file_id: FileId,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloads: &quill::state::DownloadIntents,
 ) -> bool {
-    downloading.contains(&file_id.0)
-        || files
-            .get(&file_id.0)
-            .is_some_and(|f| f.local.is_downloading_active)
+    downloads.is_downloading(file_id.0, files)
 }

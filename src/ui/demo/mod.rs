@@ -269,14 +269,14 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
     // Completed document 25 → lands in the recent list.
     apply(&mut session, &document(204, 25, "report.pdf", 460_800));
     session.begin_download(FileId(25));
-    session.media.user_downloads.insert(25);
+    session.begin_user_download(quill::ids::FileId(25));
     apply(
         &mut session,
         &file_update(25, 460_800, 460_800, false, "/tmp/report.pdf"),
     );
     // Active document 24 (the Media seed's notes.txt): 42% progress.
     session.begin_download(FileId(24));
-    session.media.user_downloads.insert(24);
+    session.begin_user_download(quill::ids::FileId(24));
     apply(&mut session, &file_update(24, 24, 10, true, ""));
     // Paused document 27 → "paused" state + Resume toggle on the chip and
     // the manager row (slice media-downloads-pause).
@@ -285,7 +285,7 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
         &document(206, 27, "big-video.mp4", 100_000_000),
     );
     session.begin_download(FileId(27));
-    session.media.user_downloads.insert(27);
+    session.begin_user_download(quill::ids::FileId(27));
     apply(
         &mut session,
         &file_update(27, 100_000_000, 30_000_000, true, ""),
@@ -307,7 +307,10 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
     );
     // Failed document 26 → Retry chip on the row.
     apply(&mut session, &document(205, 26, "archive.zip", 1_048_576));
-    session.media.failed_downloads.insert(26);
+    session
+        .media
+        .downloads
+        .end_as(26, quill::state::DownloadOrigin::User);
     session.media.downloads_panel_open = true;
     session
 }

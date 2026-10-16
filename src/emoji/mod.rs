@@ -239,14 +239,10 @@ impl Session {
         {
             return "Downloaded";
         }
-        if ids.iter().any(|id| {
-            self.media.downloading.contains(&id.0)
-                || self
-                    .media
-                    .files
-                    .get(&id.0)
-                    .is_some_and(|file| file.local.is_downloading_active)
-        }) {
+        if ids
+            .iter()
+            .any(|id| self.media.downloads.is_downloading(id.0, &self.media.files))
+        {
             return "Downloading…";
         }
         "Not downloaded"

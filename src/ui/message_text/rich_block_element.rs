@@ -278,7 +278,7 @@ pub(in crate::ui) fn preview_thumb(
     photo: &quill::telegram::envelope::PhotoContent,
     frame: ThumbFrame,
     files: &HashMap<i32, ParsedFile>,
-    downloading: &std::collections::HashSet<i32>,
+    downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
 ) -> AnyElement {
     if let Some(path) = photo_display_path(photo, files, media_roots) {
