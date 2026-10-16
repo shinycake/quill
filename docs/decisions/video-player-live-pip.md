@@ -54,7 +54,10 @@ window and only changes its controls.
     it, and `sync_live_story` keeps it as its target.
   - **Enlarge.** For a stream, enlarge reopens the stream window. For a
     story, it reopens the viewer on that story. Either way the same
-    player goes back to its host and nothing restarts.
+    player goes back to its host and nothing restarts. When nothing can
+    take it back (another account is active, as with the file PiP's
+    check, or the story is gone), the PiP closes instead of ignoring
+    the click.
   - **Close.** Closing a stream's PiP keeps the call; the next window
     sync drops the player. Closing a story's PiP leaves the story.
   - **One sound at a time.** Opening a live PiP closes a file PiP and
@@ -97,14 +100,20 @@ window and only changes its controls.
   (`lng_call_leave_to_other_sure_channel` and the like) and offers
   Cancel and "Leave call and watch" (`qll_media_live_leave_and_watch`).
 - Confirm leaves the other call and joins once the slot is free (the
-  existing `retry_join`). Cancel clears the question, and the Join
+  existing `retry_join`). Cancel or Esc (a layer above the viewer's in
+  `esc_stack.rs`, as the modal had) clears the question, and the Join
   button asks again.
+- When the leave fails and a call still holds the slot after the
+  10 s retry limit, the viewer says it could not join and the card asks
+  again. A story that stops being live while the card asks (ended or
+  deleted, seen in the session's story since nothing is joined) closes
+  the viewer, as an ended stream does, and the card goes with it.
 - The card blocks presses from reaching the backdrop, which would close
   the viewer, and the media, which would pause it.
 - Its buttons use the viewer's always-dark chrome
-  (`chrome::ghost`, `chrome::attention`). The kit's danger button
-  follows the app theme, which gave light-theme colors on the dark
-  card.
+  (`chrome::ghost`, `chrome::attention`) where the old modal used the
+  kit's `danger()`: on this card `danger()` follows the app theme and
+  drew a light-theme button on the dark chrome.
 
 ## Deviations from the design, with reasons
 
@@ -117,9 +126,12 @@ window and only changes its controls.
 - **The story PiP does not run the story tick.** Comments, Stars and
   effects pause while it floats; the PiP shows the picture only.
   Enlarging brings them back.
-- **The PiP's player does not follow a feed change.** A rejoin gives a
-  new feed; the PiP closes when its feed ends rather than swapping
-  players under the window.
+- **The PiP's player does not follow a feed change.** A rejoin or a
+  presenter switch gives a new feed; the PiP keeps showing the old one
+  (or closes when that feed ends) until it is enlarged, where the host
+  picks up the new feed. Swapping players under the window is left for
+  later; it is a README gap the merge pipeline adds (feature PRs do not
+  edit the README).
 - **The badge is always visible**, while other controls fade, so a
   still frame is never mistaken for a paused file.
 - **The 1:1 preview** sits at right 12 and bottom 99, measures
@@ -168,9 +180,13 @@ stream on this machine, and the demo feeds are synthetic.
       `sound_starts`;
     - the live story PiP keeps the story, enlarges back to the viewer,
       and closing it leaves the story.
-  - `story_viewer/live_tests.rs`: the leave card replaces the picture,
-    Cancel keeps the viewer and leaves nothing, and "Leave call and
-    watch" leaves and retries the join.
+  - `story_viewer/live_tests.rs`: the leave card replaces the picture;
+    Cancel and Esc keep the viewer and leave nothing; "Leave call and
+    watch" leaves and retries the join; a failed leave brings the card
+    back after the retry limit; a story that ends while the card asks
+    closes the viewer.
+  - Enlarge on another account, and on a story that is gone, closes the
+    live PiP (`video_player/tests/live_pip.rs`).
   - `calls/call_video_tests.rs`: the local preview draws through a live
     player and is mirrored, turning the camera off drops it, and the
     players go with the call.
