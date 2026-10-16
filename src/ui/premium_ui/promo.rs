@@ -545,10 +545,11 @@ impl QuillApp {
             clip.as_ref()
                 .and_then(|c| self.preview_player(c.file_id, cx))
         };
+        // Rounded as the clip over it is (`corner_radii` below).
         let stage = div()
             .w(side)
             .h(height)
-            .rounded_lg()
+            .rounded(px(12.))
             .overflow_hidden()
             .flex()
             .items_center()
@@ -560,10 +561,12 @@ impl QuillApp {
             ));
         let stage = match picture {
             Some(player) => stage.child(
-                div()
-                    .w(side)
-                    .h(height)
-                    .child(video_frame(&player).object_fit(ObjectFit::Cover)),
+                div().w(side).h(height).child(
+                    video_frame(&player)
+                        .object_fit(ObjectFit::Cover)
+                        // The dialog shows behind the rounded corners.
+                        .corner_radii(Corners::all(px(12.)), cx.theme().background),
+                ),
             ),
             None if feature.title == STICKERS_FEATURE && preview_stickers(hub).next().is_some() => {
                 let roots = self.media_display_roots();
