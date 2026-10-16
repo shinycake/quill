@@ -41,13 +41,16 @@ impl QuillApp {
     }
 
     /// Joins the live story the viewer shows and leaves the one it moved
-    /// away from. Runs on open, on every step and close, and on the tick.
-    pub(super) fn sync_live_story(&mut self, cx: &mut Context<Self>) {
-        let target = if self.stories.viewer.is_open() {
+    /// away from; one playing in Picture-in-Picture stays while the viewer
+    /// shows no other. Runs on open, on every step and close, on the tick
+    /// and when a live PiP goes.
+    pub(in crate::ui) fn sync_live_story(&mut self, cx: &mut Context<Self>) {
+        let shown = if self.stories.viewer.is_open() {
             live_item(self.stories.viewer.current())
         } else {
             None
         };
+        let target = shown.or_else(|| self.live_pip_story());
         let watching = self.stories.live.watching;
         if watching.is_some() && watching != target {
             self.leave_live_story_view(cx);
@@ -62,8 +65,9 @@ impl QuillApp {
     }
 
     /// Joins the watched live story. When another call holds the slot the
-    /// viewer asks to leave it; until then the Join button stays.
-    fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
+    /// frame asks to leave it (`live_leave_other_card`); Cancel leaves the
+    /// Join button, which comes back here.
+    pub(super) fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
         let Some((chat_id, story_id)) = self.stories.live.watching else {
             return;
         };

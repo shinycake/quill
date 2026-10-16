@@ -64,6 +64,9 @@ pub(crate) struct GroupCallUi {
     pub(super) stream: super::group_call_stream_layout::StreamWindow,
     /// The "Stream with other apps" box (`dialogs/rtmp_stream.rs`).
     pub(super) rtmp_start: super::dialogs::rtmp_stream::RtmpStartUi,
+    /// The live Picture-in-Picture of a stream or a live story
+    /// (`calls::live_pip`).
+    pub(super) live_pip: Option<super::calls::live_pip::LivePipLink>,
 }
 
 impl GroupCallUi {
@@ -99,6 +102,7 @@ impl GroupCallUi {
             players: HashMap::new(),
             stream: Default::default(),
             rtmp_start: Default::default(),
+            live_pip: None,
         }
     }
 }

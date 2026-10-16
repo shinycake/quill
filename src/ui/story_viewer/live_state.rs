@@ -73,8 +73,9 @@ pub(in crate::ui) struct FlyingStars {
 pub(in crate::ui) struct LiveStoryUi {
     /// The comment field.
     pub(in crate::ui) input: Entity<TextareaState>,
-    /// The stream's live player, over the driver's feed.
-    pub(super) player: Option<VideoPlayer>,
+    /// The stream's live player, over the driver's feed (also the live
+    /// PiP's, `calls::live_pip`).
+    pub(in crate::ui) player: Option<VideoPlayer>,
     /// The live story the viewer joined: `(poster, story)`.
     pub(in crate::ui) watching: Option<(ChatId, i32)>,
     /// The call was seen tracked since the join (so its end is noticed).

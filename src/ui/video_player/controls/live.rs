@@ -1,6 +1,7 @@
 //! The controller's live mode (`VideoController::live`), for pictures
-//! with no timeline: a channel's live stream, a live story and, from the
-//! next PR, the live PiP (`docs/decisions/video-player-live-ui.md`).
+//! with no timeline: a channel's live stream and a live story
+//! (`docs/decisions/video-player-live-ui.md`); the live PiP draws its own
+//! form of it (`pip::live`, `docs/decisions/video-player-live-pip.md`).
 //!
 //! There is no scrubber, no time, no speed and no frame step: a live
 //! picture has nothing to seek or pause (tdesktop's RTMP panel has none
@@ -79,7 +80,7 @@ pub(crate) struct LiveActions {
     pub(crate) toggle_mute: Handler,
     /// `None` leaves the button out (a host with no full screen).
     pub(crate) fullscreen: Option<Handler>,
-    /// `None` leaves the button out (no live PiP yet).
+    /// `None` leaves the button out (a host with no live PiP).
     pub(crate) pip: Option<Handler>,
     /// The pointer entered or left the controls (the fade's hover).
     pub(crate) hover: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
@@ -346,6 +347,16 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
     let (icon, label) = mute_look(this.facts.muted);
     let variant = this.variant.unwrap_or_else(|| overlay_button(cx));
     let toggle_mute = this.actions.toggle_mute.clone();
+    let pip = this.actions.pip.map(|pip| {
+        Button::new(("live-pip", row_id))
+            .icon(IconName::PictureInPicture2)
+            .custom(variant.clone())
+            .small()
+            .tab_index(0)
+            .tooltip(tr(keys::Q_AV_PICTURE_IN_PICTURE))
+            .accessibility_label(tr(keys::Q_AV_PICTURE_IN_PICTURE))
+            .on_click(move |_, window, cx| pip(window, cx))
+    });
     div()
         .id(("live-controller", row_id))
         .flex()
@@ -363,6 +374,7 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
                 .accessibility_label(label)
                 .on_click(move |_, window, cx| toggle_mute(window, cx)),
         )
+        .children(pip)
         .when_some(this.facts.volume, |row, slider| {
             row.child(
                 div().w(super::metrics::VOLUME_WIDTH).child(

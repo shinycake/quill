@@ -411,15 +411,35 @@ fn another_call_is_left_only_after_the_confirm(cx: &mut TestAppContext) {
     use quill::calls::group_call_create::LeaveText;
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
-    app.update(vcx, |app, cx| {
-        app.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
-        cx.notify();
-    });
-    frames(vcx);
+    let ask = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, cx| {
+            app.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
+            cx.notify();
+        });
+        frames(vcx);
+    };
+    ask(&app, vcx);
+    // The frame asks in place of the picture.
+    assert!(find(vcx, "live-story-leave-other-card").is_some());
     assert!(find(vcx, "live-story-leave-other").is_some());
-    app.update(vcx, |app, cx| app.leave_other_call_for_live_story(cx));
+    assert!(find(vcx, "live-story-frame").is_none(), "no picture");
+    // Cancel: nothing was left and the viewer stays (the demo's picture
+    // is back; a refused join has none and shows its Join button).
+    click(vcx, "live-story-leave-other-cancel");
     frames(vcx);
-    assert!(find(vcx, "live-story-leave-other").is_none());
+    assert!(find(vcx, "live-story-leave-other-card").is_none());
+    app.read_with(vcx, |app, _| {
+        assert!(app.stories.live.leave_other.is_none());
+        assert!(app.stories.live.retry_join.is_none(), "nothing was left");
+        assert!(app.stories.viewer.is_open(), "the viewer stays");
+    });
+    assert!(find(vcx, "live-story-frame").is_some());
+    // Asked again, "Leave call and watch" leaves the other call and joins
+    // once the slot is free.
+    ask(&app, vcx);
+    click(vcx, "live-story-leave-other-confirm");
+    frames(vcx);
+    assert!(find(vcx, "live-story-leave-other-card").is_none());
     app.read_with(vcx, |app, _| {
         assert!(app.stories.live.leave_other.is_none());
         assert!(

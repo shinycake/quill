@@ -53,7 +53,7 @@ impl VideoPip {
         }
         window.focus(&self.focus, cx);
         let local = local_point(event.position);
-        let over = self.layout(window).state_at(local);
+        let over = self.over_at(window, local);
         self.set_over(over, cx);
         if event.click_count >= 2 {
             // `handleDoubleClick` takes the second press.
@@ -82,7 +82,7 @@ impl VideoPip {
         cx: &mut Context<Self>,
     ) {
         let local = local_point(event.position);
-        let over = self.layout(window).state_at(local);
+        let over = self.over_at(window, local);
         self.set_over(over, cx);
         let Some(mut press) = self.press else {
             let edge = resize_part(local, self.frame.size(), self.attached.with(self.snapped));
@@ -169,7 +169,7 @@ impl VideoPip {
     }
 
     fn finish_press(&mut self, local: PipPoint, window: &mut Window, cx: &mut Context<Self>) {
-        let over = self.layout(window).state_at(local);
+        let over = self.over_at(window, local);
         let press = self.press.take();
         let action = self.presses.release(over, self.dragged);
         if press.is_some_and(|press| press.dragging) {

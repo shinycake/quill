@@ -88,7 +88,8 @@ impl QuillApp {
             }
             keep
         });
-        if wanted.is_none_or(|(_, stream)| !stream) {
+        // A live PiP plays the stream on: its player stays.
+        if wanted.is_none_or(|(_, stream)| !stream) && !self.live_pip_keeps_stream() {
             self.group_call.stream.clear(cx);
         }
         match (wanted, self.group_call.window) {

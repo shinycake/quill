@@ -875,5 +875,6 @@ mod call_video_demo;
 #[cfg(feature = "demo-capture")]
 mod call_video_tests;
 pub(super) mod demo_feed;
+pub(super) mod live_pip;
 pub(super) mod stream_title;
 pub(super) mod stream_view;

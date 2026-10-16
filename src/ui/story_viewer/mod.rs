@@ -207,6 +207,12 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
+        // The watched story asks again when another call holds the slot.
+        if self.live.is_some() && self.stories.live.watching == Some((chat_id, story_id)) {
+            self.join_watched_live_story(cx);
+            cx.notify();
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.join_live_story(chat_id, story_id) {
                 Ok(_) => tr(keys::Q_MEDIA_JOINING_LIVE_STORY).into(),
@@ -765,7 +771,10 @@ impl QuillApp {
             let _ = live.driver.close_story(item.chat_id, item.story_id);
         }
         self.stories.viewer.close();
-        self.leave_live_story_view(cx);
+        // A live story playing on in Picture-in-Picture stays joined.
+        if self.stories.live.watching != self.live_pip_story() {
+            self.leave_live_story_view(cx);
+        }
         self.chat_list.pending_story_open = None;
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);

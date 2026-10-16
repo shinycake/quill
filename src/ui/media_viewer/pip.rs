@@ -62,6 +62,8 @@ impl QuillApp {
             .natural_size
             .and_then(|(w, h)| Some((u32::try_from(w).ok()?, u32::try_from(h).ok()?)));
         self.close_video_pip(cx);
+        // One sound at a time: a live PiP goes too.
+        self.close_live_pip(cx);
         self.close_media_viewer(cx);
         let last_volume = if self.playback.volume > 0.0 {
             self.playback.volume
@@ -87,6 +89,7 @@ impl QuillApp {
                     hooks,
                     last_volume,
                     display,
+                    live: None,
                 },
                 cx,
             );
@@ -134,6 +137,7 @@ impl QuillApp {
     /// `startStreamingPlayer` drops `_pip`).
     pub(in crate::ui) fn sound_starts(&mut self, cx: &mut App) {
         self.close_video_pip(cx);
+        self.close_live_pip(cx);
     }
 
     /// A round video was clicked: when it now plays with sound, that is
@@ -159,6 +163,7 @@ impl QuillApp {
         {
             self.close_video_pip(cx);
         }
+        self.live_pip_account_ended(account, cx);
     }
 
     /// After updates land and at each root render: the window closed
@@ -166,6 +171,8 @@ impl QuillApp {
     /// deletion counts (a tombstone), not the message leaving the loaded
     /// part of the history.
     pub(in crate::ui) fn check_video_pip(&mut self, cx: &mut Context<Self>) {
+        // The live PiP's checks (`calls::live_pip`) run with the file's.
+        self.check_live_pip(cx);
         let Some(link) = self.viewer.pip.as_ref() else {
             return;
         };

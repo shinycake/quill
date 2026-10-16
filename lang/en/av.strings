@@ -173,6 +173,8 @@
 "qll_av_joining_voice_chat" = "Joining voice chat…";
 "qll_av_left_the_voice_chat" = "Left the voice chat.";
 "qll_av_left_the_voice_chat_local" = "Left the voice chat (local).";
+"qll_av_live_pip_back_story" = "Back to the story";
+"qll_av_live_pip_back_stream" = "Back to the live stream";
 "qll_av_live_stream_ended" = "Live stream ended";
 "qll_av_live_stream_failed" = "This live stream can't be played";
 "qll_av_loading_gif_playback" = "Loading GIF playback…";
