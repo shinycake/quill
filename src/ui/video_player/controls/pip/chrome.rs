@@ -12,6 +12,7 @@
 
 use super::super::super::{PlayState, video_frame};
 use super::super::{elapsed_label, remaining_label, volume_icon};
+use super::live::EndCheck;
 use super::{VideoPip, place};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{Slider as BaseSlider, SliderIndicator, SliderTrack, Transition, transition};
@@ -182,13 +183,17 @@ impl Render for VideoPip {
         let Some(player) = self.player.clone() else {
             return div().size_full().bg(gpui_kit::black()).into_any_element();
         };
-        // A clip that fails closes the window (`handleStreamingError`).
-        // A live picture that ended (the stream, or the call) closes too.
-        let ended = self.live.is_some() && player.state() == PlayState::Ended;
-        if player.state() == PlayState::Failed || ended {
-            self.close(window, cx);
-            return div().size_full().bg(gpui_kit::black()).into_any_element();
-        }
+        // A clip that fails closes the window (`handleStreamingError`),
+        // and so does a live picture whose stream is over. A live feed
+        // that was only left (a rejoin) waits for the owner's new player.
+        let gap = match self.end_check(&player, cx) {
+            EndCheck::Close => {
+                self.close(window, cx);
+                return div().size_full().bg(gpui_kit::black()).into_any_element();
+            }
+            EndCheck::Gap => true,
+            EndCheck::Plays => false,
+        };
         self.sync_ratio(window, cx);
         if self.step_slide(window, cx) {
             window.request_animation_frame();
@@ -212,7 +217,7 @@ impl Render for VideoPip {
             cx,
         );
         let waiting = self.waiting_shown(
-            matches!(transport.state, PlayState::Opening | PlayState::Buffering),
+            gap || matches!(transport.state, PlayState::Opening | PlayState::Buffering),
             cx,
         );
         let close_active = self.active("close", OverState::Close, window, cx);
@@ -358,6 +363,7 @@ impl Render for VideoPip {
         };
         let spinner = waiting.then(|| {
             div()
+                .debug_selector(|| "pip-waiting".into())
                 .absolute()
                 .inset_0()
                 .flex()

@@ -78,6 +78,11 @@ pub(crate) struct LivePip {
     /// The enlarge button's label: back to the stream window, or to the
     /// story.
     pub(crate) back_label: &'static str,
+    /// The player's feed was left (a rejoin or a restart replaced it):
+    /// the owner swaps in a player on the new feed
+    /// ([`PipWindow::replace_player`]) or closes the window when the
+    /// picture's source is gone. Asked once per player, deferred.
+    pub(crate) feed_left: Rc<dyn Fn(&mut App)>,
 }
 
 /// What the live PiP shows besides the picture.
@@ -108,6 +113,20 @@ pub(crate) struct PipOpen {
 pub(crate) struct PipWindow {
     pub(crate) window: WindowHandle<Root>,
     pub(crate) view: WeakEntity<VideoPip>,
+}
+
+impl PipWindow {
+    /// Play `player` in this window instead (a live picture's new feed),
+    /// keeping the window, its place and size, the controls' state and
+    /// their fade. Returns the old player for the caller to release;
+    /// `None` when the window is gone or has let go of its player, and
+    /// then nothing changed (`player` is dropped).
+    pub(crate) fn replace_player(&self, player: VideoPlayer, cx: &mut App) -> Option<VideoPlayer> {
+        self.view
+            .update(cx, |pip, cx| pip.replace_player(player, cx))
+            .ok()
+            .flatten()
+    }
 }
 
 /// A press in progress: where it went down and, once it moved far enough,
@@ -166,6 +185,8 @@ pub(crate) struct VideoPip {
     last_volume: f32,
     waiting: WaitingGate,
     live: Option<LivePip>,
+    /// The owner was told the live feed was left (`LivePip::feed_left`).
+    feed_left_told: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -259,6 +280,7 @@ impl VideoPip {
             last_volume: if last_volume > 0.0 { last_volume } else { 1.0 },
             waiting: WaitingGate::default(),
             live,
+            feed_left_told: false,
             _subscriptions: subscriptions,
         }
     }
@@ -273,6 +295,26 @@ impl VideoPip {
     /// The player this window plays, until it closes or hands it back.
     pub(crate) fn player(&self) -> Option<&VideoPlayer> {
         self.player.as_ref()
+    }
+
+    /// See [`PipWindow::replace_player`]. Until the new player has a
+    /// picture the window keeps the old picture's aspect.
+    fn replace_player(
+        &mut self,
+        player: VideoPlayer,
+        cx: &mut Context<Self>,
+    ) -> Option<VideoPlayer> {
+        let old = self.player.take()?;
+        if let Some(size) = old.picture_size().filter(|(w, h)| *w > 0 && *h > 0) {
+            self.dimensions = Some(size);
+        }
+        old.clear_watchers();
+        player.clear_watchers();
+        player.watch(cx.entity_id());
+        self.player = Some(player);
+        self.feed_left_told = false;
+        cx.notify();
+        Some(old)
     }
 
     /// The window is closing: drop the player now (the sound stops at
