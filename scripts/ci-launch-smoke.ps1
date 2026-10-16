@@ -3,9 +3,9 @@
 # Microsoft Basic Render Driver, i.e. WARP), let the app render its own frame to
 # a PNG (QUILL_DEMO_CAPTURE), and fail on a non-zero exit, a missing PNG or a
 # blank picture. The first kind also prints its idle wakeups (context switches
-# over about 10 s of an idle window, all threads and the main one, from the
-# Thread performance counters) and the same with QUILL_IDLE_FRAMES=0 for
-# contrast (docs/decisions/sweep-idle-heartbeat.md); report only.
+# over 10 s of an idle window, all threads and the main one, from the raw
+# Thread performance data) and the same with QUILL_IDLE_FRAMES=0 for contrast
+# (docs/decisions/sweep-idle-heartbeat.md); report only.
 # Usage: ci-launch-smoke.ps1 <quill.exe> <out-dir> [kind...]
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
@@ -18,7 +18,6 @@ $Out = (Resolve-Path $Out).Path
 $Exe = (Resolve-Path $Exe).Path
 $failed = $false
 $idleKind = $Kinds[0]
-$processName = [System.IO.Path]::GetFileNameWithoutExtension($Exe)
 
 function Start-Demo([string]$kind, [string]$png, [string]$linger, [string]$logBase) {
     Remove-Item -ErrorAction SilentlyContinue $png, (Join-Path $Out ".quill-ready-$kind")
@@ -45,25 +44,39 @@ function Measure-Idle($proc, [string]$png, [string]$label, [string]$file) {
             return
         }
         Start-Sleep -Seconds 3
+        # Raw (cumulative) context switches of each thread; the main thread is
+        # the one whose instance name ends in /0.
+        $query = "IDProcess = $($proc.Id)"
+        $before = @{}
+        Get-CimInstance Win32_PerfRawData_PerfProc_Thread -Filter $query |
+            ForEach-Object { $before[[int]$_.IDThread] = [int64]$_.ContextSwitchesPersec }
         $cpu0 = (Get-Process -Id $proc.Id).TotalProcessorTime
         $clock = [System.Diagnostics.Stopwatch]::StartNew()
-        $samples = Get-Counter -Counter "\Thread($processName/*)\Context Switches/sec" `
-            -SampleInterval 5 -MaxSamples 2
+        Start-Sleep -Seconds 10
         $elapsed = $clock.Elapsed.TotalSeconds
         $cpu1 = (Get-Process -Id $proc.Id).TotalProcessorTime
-        $last = $samples[-1].CounterSamples
-        $total = ($last | Measure-Object -Property CookedValue -Sum).Sum
-        $main = ($last | Where-Object { $_.InstanceName -eq "$processName/0" } |
-            Select-Object -First 1).CookedValue
+        $after = @(Get-CimInstance Win32_PerfRawData_PerfProc_Thread -Filter $query)
+        $total = 0
+        $main = 0
+        $rows = @()
+        foreach ($thread in $after) {
+            $id = [int]$thread.IDThread
+            if (-not $before.ContainsKey($id)) { continue }
+            $switches = [int64]$thread.ContextSwitchesPersec - $before[$id]
+            $total += $switches
+            if ($thread.Name -like '*/0') { $main = $switches }
+            if ($switches -gt 0) {
+                $rows += [pscustomobject]@{ Name = $thread.Name; Id = $id; Switches = $switches }
+            }
+        }
         $cpu = 100.0 * ($cpu1 - $cpu0).TotalSeconds / $elapsed
-        $line = "idle wakeups ($label) over {0:N1} s: main thread {1:N1}/s, all threads {2:N1}/s, cpu {3:N2}%" -f `
-            $elapsed, $main, $total, $cpu
+        $line = "idle wakeups ($label) over {0:N1} s: main thread {1} ({2:N1}/s), all threads {3} ({4:N1}/s), cpu {5:N2}%" -f `
+            $elapsed, $main, ($main / $elapsed), $total, ($total / $elapsed), $cpu
         Write-Host $line
-        $rows = $last | Where-Object { $_.CookedValue -gt 0 } |
-            Sort-Object -Property CookedValue -Descending |
-            ForEach-Object { "  {0,-16} {1:N1}/s" -f $_.InstanceName, $_.CookedValue }
-        $rows | ForEach-Object { Write-Host $_ }
-        @($line) + $rows | Set-Content -Path $file
+        $text = $rows | Sort-Object -Property Switches -Descending |
+            ForEach-Object { "  {0,-16} tid {1,-8} switched {2}" -f $_.Name, $_.Id, $_.Switches }
+        $text | ForEach-Object { Write-Host $_ }
+        @($line) + $text | Set-Content -Path $file
     }
     catch {
         Write-Host "idle wakeups ($label): could not measure: $_"

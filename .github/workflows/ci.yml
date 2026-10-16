@@ -63,8 +63,13 @@ jobs:
       - name: build UI binary (launch smoke)
         if: github.event_name == 'push'
         run: cargo build --features demo-capture --locked --bin quill
+      # Also fails when the idle window's main thread wakes more than this
+      # often (docs/decisions/sweep-idle-heartbeat.md): parked frame sources
+      # wake it 0 times a second, the old heartbeat 1, unparked 60.
       - name: launch smoke (Xvfb + lavapipe)
         if: github.event_name == 'push'
+        env:
+          IDLE_MAX_MAIN_PER_S: "0.5"
         run: bash scripts/ci-launch-smoke.sh target/debug/quill "$RUNNER_TEMP/launch-smoke"
       - name: launch smoke pictures
         if: github.event_name == 'push' && always()
