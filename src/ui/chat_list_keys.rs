@@ -344,6 +344,20 @@ impl QuillApp {
         self.notify_sidebar(cx);
     }
 
+    /// Put the keyboard selection on `row` and scroll it into view when the
+    /// list shows it.
+    fn select_list_row(&mut self, row: ListRow) {
+        self.chat_list.keys.list = Some(row);
+        if let Some((item, _)) = list_rows(&self.chat_list.items)
+            .into_iter()
+            .find(|(_, candidate)| *candidate == row)
+        {
+            self.chat_list
+                .scroll
+                .scroll_to_item(item, ScrollStrategy::Nearest);
+        }
+    }
+
     fn open_list_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rows = list_rows(&self.chat_list.items);
         let keys = &self.chat_list.keys;
@@ -476,7 +490,11 @@ impl QuillApp {
         if !self.focus_sidebar.contains_focused(window, cx) {
             // `HistoryWidget::escape` → `handleHistoryBack`: close the chat
             // (`clearSectionStack`) and give the list the keyboard.
-            if open.is_some() {
+            if let Some(chat) = open {
+                // The closed chat's row becomes the selection (tdesktop
+                // keeps `_selected` on it), the one state the list paints
+                // and the next key steps from.
+                self.select_list_row(ListRow::Chat(chat));
                 self.leave_open_chat(window, cx);
                 window.focus(&self.focus_sidebar, cx);
             }
