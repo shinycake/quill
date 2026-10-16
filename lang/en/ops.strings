@@ -53,11 +53,15 @@
 "lng_call_screencast" = "Screencast";
 "lng_call_start_video" = "Start Video";
 "lng_call_status_busy" = "line busy";
+"lng_call_status_connecting" = "connecting…";
 "lng_call_status_ended" = "call ended";
 "lng_call_status_exchanging" = "exchanging encryption keys…";
 "lng_call_status_failed" = "failed to connect";
 "lng_call_status_hanging" = "hanging up…";
 "lng_call_status_incoming" = "is calling you…";
+"lng_call_status_requesting" = "requesting…";
+"lng_call_status_ringing" = "ringing…";
+"lng_call_status_waiting" = "waiting…";
 "lng_call_stop_video" = "Stop Video";
 "lng_call_unmute_audio" = "Unmute";
 "lng_cancel" = "Cancel";

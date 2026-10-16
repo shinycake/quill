@@ -69,8 +69,21 @@ pub(crate) fn ensure_danger_aa(colors: &mut ThemeColor, dark: bool) {
             a: 1.,
         })
     };
+    // The kit's own themes draw the danger button as a pale wash with the
+    // danger red as its label (`button.danger.foreground` falls back to
+    // `danger`); palette themes fill it and print the active-text colour.
+    let wash_style = colors.button_danger_foreground == colors.danger;
     let on_background = readable_hsla(colors.danger, colors.background);
     colors.danger = readable_hsla(on_background, wash(on_background));
+    if wash_style {
+        // Label follows the corrected red; the wash moves away from it
+        // until the pair reaches AA.
+        colors.button_danger_foreground = colors.danger;
+        colors.button_danger = readable_hsla(colors.button_danger, colors.danger);
+        colors.button_danger_hover = readable_hsla(colors.button_danger_hover, colors.danger);
+        colors.button_danger_active = readable_hsla(colors.button_danger_active, colors.danger);
+        return;
+    }
     colors.danger_hover = lighter(colors.danger, step);
     colors.danger_active = lighter(colors.danger, if dark { 0.06 } else { -0.06 });
     colors.button_danger = readable_hsla(colors.button_danger, colors.button_danger_foreground);
@@ -253,6 +266,37 @@ mod tests {
         assert!(quill::theme_colorize::contrast(button, label) >= 4.5);
         // Alpha survives: the scroll bar thumb is translucent.
         assert!(colors.scrollbar_thumb.a < 0.5);
+    }
+
+    /// The kit's default danger button (pale wash, red label) reaches AA
+    /// for its label on the idle, hovered and pressed fills.
+    #[test]
+    fn danger_wash_button_reaches_aa() {
+        for (dark, bg, wash, hover, active) in [
+            (false, 0xffffffu32, 0xfef2f2u32, 0xfee2e2u32, 0xfecacau32),
+            (true, 0x0d1117, 0x3b1212, 0x4c1818, 0x5f1f1f),
+        ] {
+            let red = hsla(if dark { 0xf87171ff } else { 0xef4444ff });
+            let mut colors = ThemeColor {
+                background: hsla((bg << 8) | 0xff),
+                danger: red,
+                button_danger_foreground: red,
+                button_danger: hsla((wash << 8) | 0xff),
+                button_danger_hover: hsla((hover << 8) | 0xff),
+                button_danger_active: hsla((active << 8) | 0xff),
+                ..ThemeColor::default()
+            };
+            super::ensure_danger_aa(&mut colors, dark);
+            let label = hsla_to_rgb(colors.button_danger_foreground);
+            for fill in [
+                colors.button_danger,
+                colors.button_danger_hover,
+                colors.button_danger_active,
+            ] {
+                let c = quill::theme_colorize::contrast(label, hsla_to_rgb(fill));
+                assert!(c >= 4.5, "dark={dark} contrast {c}");
+            }
+        }
     }
 
     /// The kit's own reds (Quill Light / Dark draw from them) reach AA once

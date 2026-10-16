@@ -284,3 +284,8 @@ impl QuillApp {
             )
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "forward_tests.rs"]
+mod tests;
