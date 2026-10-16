@@ -93,6 +93,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         )
     }
 
+    /// The listed name of device `id` of `kind` (what ffmpeg capture
+    /// matches on); `None` for the default or an unknown id.
+    pub(crate) fn call_device_name(
+        &self,
+        id: Option<&str>,
+        kind: MediaDeviceKind,
+    ) -> Option<String> {
+        let id = id?;
+        self.call_devices_cache
+            .iter()
+            .find(|device| device.kind == kind && device.id == id)
+            .map(|device| device.name.clone())
+    }
+
     /// Phase C2c: best-effort device re-enumeration. A missing or
     /// unavailable engine leaves the cache untouched.
     pub fn refresh_call_devices(&mut self) {
@@ -299,6 +313,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             engine.set_camera_enabled(call.id, camera_on, camera.as_deref())?;
         }
+        crate::capture_choice::set_camera(
+            self.call_device_name(camera.as_deref(), MediaDeviceKind::Camera),
+        );
         self.selected_camera = camera;
         Ok(())
     }

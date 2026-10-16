@@ -26,6 +26,7 @@ pub mod business_start_page;
 pub mod call_device_prefs;
 pub mod call_link;
 pub mod calls;
+pub mod capture_choice;
 pub mod chat_appearance;
 pub mod chat_bottom_bar;
 pub mod chat_header_menu;

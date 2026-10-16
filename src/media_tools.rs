@@ -93,30 +93,35 @@ pub struct CaptureInput {
     pub video: &'static str,
 }
 
-/// The platform's camera and microphone for ffmpeg: AVFoundation's defaults
-/// on macOS, the first V4L2 capture device + PulseAudio (or ALSA) on Linux,
-/// the first DirectShow camera and microphone on Windows.
+/// The platform's camera and microphone for ffmpeg: the ones picked in the
+/// call device menu (`capture_choice`) when still present, otherwise
+/// AVFoundation's defaults on macOS, the first V4L2 capture device +
+/// PulseAudio (or ALSA) on Linux, the first DirectShow pair on Windows.
+/// Linux picks only the camera: PulseAudio source names differ from the
+/// call engine's microphone names, so audio stays on `default`.
 pub fn capture_input() -> Result<CaptureInput, String> {
     let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect();
+    let choice = crate::capture_choice::current();
     if cfg!(target_os = "macos") {
+        let (video, audio) = avfoundation_inputs(&choice);
+        let mut list: Vec<String> = args(&[
+            "-f",
+            "avfoundation",
+            "-framerate",
+            "30",
+            "-pixel_format",
+            "nv12",
+            "-i",
+        ]);
+        list.push(format!("{video}:{audio}"));
         Ok(CaptureInput {
-            args: args(&[
-                "-f",
-                "avfoundation",
-                "-framerate",
-                "30",
-                "-pixel_format",
-                "nv12",
-                "-i",
-                "default:default",
-            ]),
+            args: list,
             audio: "0:a",
             video: "0:v",
         })
     } else if cfg!(target_os = "linux") {
-        let camera = v4l2_capture_devices()
-            .into_iter()
-            .next()
+        let nodes = v4l2_capture_devices();
+        let camera = crate::capture_choice::pick_v4l2(choice.camera.as_deref(), &nodes)
             .ok_or("No camera found.")?;
         let audio = linux_audio_backend();
         Ok(CaptureInput {
@@ -137,8 +142,10 @@ pub fn capture_input() -> Result<CaptureInput, String> {
         })
     } else if cfg!(windows) {
         let devices = list_dshow_devices()?;
-        let camera = devices.video.first().ok_or("No camera found.")?;
-        let mic = devices.audio.first().ok_or("No microphone found.")?;
+        let camera = crate::capture_choice::pick_device(choice.camera.as_deref(), &devices.video)
+            .ok_or("No camera found.")?;
+        let mic = crate::capture_choice::pick_device(choice.microphone.as_deref(), &devices.audio)
+            .ok_or("No microphone found.")?;
         Ok(CaptureInput {
             args: vec![
                 "-f".into(),
@@ -152,6 +159,34 @@ pub fn capture_input() -> Result<CaptureInput, String> {
     } else {
         Err("Recording isn't supported on this system yet.".into())
     }
+}
+
+/// AVFoundation `(video, audio)` input specifiers: the picked devices'
+/// indices, `default` for an unset or vanished pick. Lists the devices only
+/// when something was picked.
+fn avfoundation_inputs(choice: &crate::capture_choice::CaptureChoice) -> (String, String) {
+    if choice.camera.is_none() && choice.microphone.is_none() {
+        return ("default".into(), "default".into());
+    }
+    let listing = command("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-f",
+            "avfoundation",
+            "-list_devices",
+            "true",
+            "-i",
+            "",
+        ])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
+        .unwrap_or_default();
+    let devices = crate::capture_choice::parse_avfoundation_devices(&listing);
+    (
+        crate::capture_choice::avf_index(choice.camera.as_deref(), &devices.video),
+        crate::capture_choice::avf_index(choice.microphone.as_deref(), &devices.audio),
+    )
 }
 
 /// Audio capture backend ffmpeg uses on Linux: PulseAudio (which PipeWire
@@ -640,5 +675,39 @@ dummy: Immediate exit requested\n";
         std::fs::write(&log, "").unwrap();
         assert_eq!(capture_failure(&log, true), "Couldn't start the camera.");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// Real-ffmpeg check of the saved pick on macOS (skipped without ffmpeg).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_capture_input_honors_saved_pick_and_falls_back() {
+        if !is_installed("ffmpeg") {
+            return;
+        }
+        let listing = command("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-f",
+                "avfoundation",
+                "-list_devices",
+                "true",
+                "-i",
+                "",
+            ])
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
+            .unwrap_or_default();
+        let devices = crate::capture_choice::parse_avfoundation_devices(&listing);
+        let Some((index, name)) = devices.video.last().cloned() else {
+            return;
+        };
+        crate::capture_choice::set_camera(Some(name.clone()));
+        let picked = capture_input().map(|input| input.args.last().cloned());
+        println!("saved pick {name:?} -> {picked:?}");
+        assert_eq!(picked, Ok(Some(format!("{index}:default"))));
+        crate::capture_choice::set_camera(Some("Unplugged Camera".into()));
+        let missing = capture_input().map(|input| input.args.last().cloned());
+        println!("missing pick -> {missing:?}");
+        assert_eq!(missing, Ok(Some("default:default".to_string())));
+        crate::capture_choice::set_camera(None);
     }
 }

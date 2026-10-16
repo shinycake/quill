@@ -236,6 +236,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err) => return Err(err),
             }
         }
+        crate::capture_choice::set_microphone(
+            self.call_device_name(selection.0.as_deref(), MediaDeviceKind::Microphone),
+        );
         self.selected_devices = selection;
         Ok(())
     }
