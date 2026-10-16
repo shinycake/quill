@@ -199,3 +199,19 @@ worker.
   message is only the generic "connection was closed".
 - Not tried on Linux or Windows hardware. The code has nothing
   platform-specific.
+
+## Review follow-ups (re-review at 8028b955)
+
+- Sweep race: `startup_sweep` now reads `pending_deletes` once, on the UI
+  thread, drops the accounts this run still has open, and hands exactly
+  that list to the worker. A removal made after the sweep began is never
+  in it. Test: `the_startup_sweep_deletes_only_what_was_recorded_when_it_began`.
+- Log out: if recording the folders fails, the passcode is kept, nothing
+  starts, and the lock screen note says "Could not log out: ...". Test:
+  `a_log_out_that_cannot_be_recorded_keeps_the_passcode_and_says_why`
+  (Unix only, read-only root).
+- A wipe whose close can't be confirmed now shows "Restart Quill to finish
+  logging out. Nothing connects until then." instead of the generic
+  closed-connection note. Test:
+  `an_unconfirmed_log_out_tells_the_user_to_restart_quill`.
+  Both strings are in `lang/en/rest.strings`; `scripts/check-lang.py` passes.
