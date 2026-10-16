@@ -51,6 +51,9 @@ mod apple_build {
             "PathRasterizationVertex".into(),
             "ShadowInputIndex".into(),
             "Shadow".into(),
+            // QUILL: the backdrop-blur (liquid glass) pass.
+            "BackdropBlurInputIndex".into(),
+            "BackdropBlur".into(),
             "QuadInputIndex".into(),
             "Underline".into(),
             "UnderlineInputIndex".into(),

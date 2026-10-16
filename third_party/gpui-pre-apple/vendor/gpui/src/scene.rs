@@ -568,6 +568,48 @@ impl From<Underline> for Primitive {
     }
 }
 
+/// QUILL: a within-window backdrop blur region. The renderer snapshots
+/// everything painted below this order and paints it back through the glass
+/// transfer inside the rounded bounds. Only the Metal renderer draws it; see
+/// `Window::paint_backdrop_blur`.
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+#[expect(missing_docs)]
+pub struct BackdropBlur {
+    pub order: DrawOrder,
+    pub blur_radius: ScaledPixels,
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub corner_radii: Corners<ScaledPixels>,
+    /// How deep the lens profile reaches in from the rim; 0 paints a flat frost.
+    pub lens: ScaledPixels,
+    /// The furthest that profile may drag the backdrop.
+    pub reach: ScaledPixels,
+    /// Displacement amplitude. Signed: positive samples toward the centre, so
+    /// the interior magnifies and what it displaces compresses at the rim;
+    /// negative inverts that.
+    pub magnify: f32,
+    /// Per-channel spread of the displacement, the chromatic fringe.
+    pub dispersion: f32,
+    /// Slope of `out = gain * saturated(backdrop) + tint`.
+    pub gain: f32,
+    /// How far the backdrop's chroma is pushed from its own grey before the
+    /// gain drops the level. 1 passes it through.
+    pub saturation: f32,
+    /// The transfer's offset. Transparent leaves the blur bare.
+    pub tint: Hsla,
+    /// How much white the lit rim adds, 0..1.
+    pub edge: f32,
+    /// How far in that light falls off to nothing.
+    pub edge_width: ScaledPixels,
+    /// Width of the coverage ramp at the boundary. Zero is a hard edge.
+    pub edge_aa: ScaledPixels,
+    /// The element tree's opacity here. The pass replaces its region rather
+    /// than blending, so a fading material mixes itself back toward the
+    /// untouched backdrop through its coverage.
+    pub opacity: f32,
+}
+
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 #[expect(missing_docs)]
@@ -580,7 +622,10 @@ pub struct Shadow {
     pub color: Hsla,
     pub element_bounds: Bounds<ScaledPixels>,
     pub element_corner_radii: Corners<ScaledPixels>,
-    /// 0 = drop shadow (rendered outside the element), 1 = inset shadow (rendered inside).
+    /// 0 = drop shadow, 1 = inset shadow (rendered inside the element),
+    /// 2 = (QUILL) a drop shadow clipped to outside the element. A plain drop
+    /// shadow does not cut its own element out; nothing notices while an
+    /// opaque fill covers the middle, but a glass surface has no such cover.
     pub inset: u32,
     pub pad: u32, // align to 8 bytes
 }

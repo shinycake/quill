@@ -44,3 +44,41 @@ whose text system 0.3.9 moved here):
   attributes or a font, and a glyph whose string index is negative, instead
   of unwrapping; the font is read with `CFDictionary::find`, since `get`
   panics on a missing key. See `docs/decisions/gpui-fork-panics.md`.
+
+The Quill project changed it again in 2026 for liquid glass on macOS. The
+backdrop-blur pass is ported from the GPUI fork in crabtalk/zed (Apache-2.0,
+commit 693d6a82, `crates/gpui_apple`), which bezel
+(github.com/crabtalk/bezel, MIT) builds on:
+
+- `vendor/gpui/src/scene.rs`: `BackdropBlur` and the `Shadow::inset` doc,
+  mirrored from gpui-pre so cbindgen puts them in the shader header.
+  `build.rs` exports `BackdropBlur` and `BackdropBlurInputIndex`.
+- `src/shaders.metal`: `backdrop_blur_vertex` / `backdrop_blur_fragment`
+  (the fork's transfer `gain * saturated(backdrop) + tint`, the rim lens
+  with chromatic dispersion, the lit edge, coverage mixed against the sharp
+  snapshot). 0.3.9 has no `mask_alpha`, so the content mask clips through
+  `clip_distance` alone. `shadow_fragment` reads `inset == 1` as an inset
+  shadow (0.3.9 treated any non-zero value so) and `inset == 2` as a drop
+  shadow cut to outside its element.
+- `src/metal_renderer.rs`:
+  - `draw_primitives_to_texture` interleaves `Scene::backdrop_blurs` by
+    draw order: before the first batch at or above a blur's order it ends
+    the pass, blits the drawable into a scratch texture, runs a cached
+    `MPSImageGaussianBlur` (clamped edges; skipped at radius 0) into a
+    second texture, resumes the pass with a load action and draws the
+    region. A blur above every batch is drawn after the last one (the fork
+    drops it).
+  - The blur pipeline (blending off) is built per drawable format with the
+    other drawable pipelines (`match_drawable_format`); the scratch
+    textures take the drawable's size and pixel format, so the
+    `RGBA16Float` EDR path works. Both are allocated on the first frame
+    with a blur. A frame without blurs writes no blur instances, allocates
+    nothing and never breaks the pass.
+  - Never-crash changes against the fork: a pipeline that fails to build,
+    an MPS class or kernel that is missing (nil), or a framebuffer-only
+    drawable skip the blur (or its gaussian) instead of panicking; the
+    scratch textures and the pending-blur iterator use no `unwrap`.
+  - A frame with blurs asks the layer for readable (non framebuffer-only)
+    drawables, since the pass copies the drawable; a frame without hands
+    that back, except in debug test-support builds, which keep readback.
+  - Links MetalPerformanceShaders.
