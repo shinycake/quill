@@ -196,6 +196,19 @@ jobs:
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-windows-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      # The decoder tests against this shim (the NV12 paths among them):
+      # QUILL_REQUIRE_VIDEO_LIB turns a missing shim into a failure. The
+      # tests find vendor/ffmpeg/prefix/bin/quillvideo.dll from the test
+      # binary's ancestors (src/video_decode/ffi.rs).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - name: decoder tests against the built FFmpeg
+        shell: pwsh
+        env:
+          QUILL_REQUIRE_VIDEO_LIB: '1'
+        run: cargo test --no-default-features --locked --lib video_decode -- --nocapture
       - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-ffmpeg

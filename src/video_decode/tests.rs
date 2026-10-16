@@ -454,15 +454,32 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// Whether the real decoder can run. Without it these tests skip, unless
+/// `QUILL_REQUIRE_VIDEO_LIB=1` (the CI jobs that build the shim set it),
+/// which turns the skip into a failure.
 fn decoder() -> bool {
     if super::available() {
         return true;
     }
-    eprintln!(
-        "skipping: quillvideo not available ({})",
-        super::unavailable_reason().unwrap_or("unknown")
+    let reason = super::unavailable_reason().unwrap_or("unknown");
+    assert!(
+        !require_video_lib(std::env::var_os("QUILL_REQUIRE_VIDEO_LIB").as_deref()),
+        "QUILL_REQUIRE_VIDEO_LIB=1 but quillvideo is not available ({reason})"
     );
+    eprintln!("skipping: quillvideo not available ({reason})");
     false
+}
+
+fn require_video_lib(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| value == "1")
+}
+
+#[test]
+fn only_quill_require_video_lib_1_requires_the_shim() {
+    assert!(require_video_lib(Some("1".as_ref())));
+    assert!(!require_video_lib(Some("0".as_ref())));
+    assert!(!require_video_lib(Some("".as_ref())));
+    assert!(!require_video_lib(None));
 }
 
 fn decode_all(path: &Path, options: &OpenOptions) -> (MediaInfo, Vec<VideoFrame>, usize) {
