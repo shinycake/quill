@@ -8,6 +8,8 @@ use crate::calls::engine::{
     SegmentFetch, StreamFeeder, StreamFetchError, StreamPort, StreamQualityTracker, StreamReply,
     StreamState,
 };
+use crate::calls::stream_audio::gain::clamp_volume;
+use crate::calls::stream_audio::watch::PlaybackWatch;
 use crate::state::Session;
 use crate::telegram::envelope::{CallsPayload, Envelope, EnvelopePayload, ErrorClass, TdError};
 use crate::telegram::requests::{get_group_call_stream_segment, get_group_call_streams};
@@ -34,6 +36,11 @@ pub(crate) struct GroupCallStreams {
     events_rx: Mutex<Receiver<EngineEvent>>,
     feeders: HashMap<i64, StreamFeeder>,
     quality: HashMap<i64, StreamQualityTracker>,
+    /// The self-healing watch of each stream Quill plays, by group call.
+    sound_watch: HashMap<i32, PlaybackWatch>,
+    /// The streams' volume, 0.0 to 1.0: the media viewer's, as the UI
+    /// last set it.
+    volume: f32,
 }
 
 impl Default for GroupCallStreams {
@@ -44,6 +51,8 @@ impl Default for GroupCallStreams {
             events_rx: Mutex::new(events_rx),
             feeders: HashMap::new(),
             quality: HashMap::new(),
+            sound_watch: HashMap::new(),
+            volume: 1.0,
         }
     }
 }
@@ -134,6 +143,76 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             crate::wake::UPDATES.poke();
         }));
+        engine.set_stream_volume(self.group_call_streams.volume);
+    }
+
+    /// The volume of every stream Quill plays (the media viewer's volume,
+    /// as tdesktop's stream starts at `videoVolume`), now and for later
+    /// joins.
+    pub fn set_stream_volume(&mut self, volume: f32) {
+        let volume = clamp_volume(volume).min(1.0);
+        if volume == self.group_call_streams.volume {
+            return;
+        }
+        self.group_call_streams.volume = volume;
+        if let Some(engine) = self.call_engine.as_deref_mut() {
+            engine.set_stream_volume(volume);
+        }
+    }
+
+    pub fn stream_volume(&self) -> f32 {
+        self.group_call_streams.volume
+    }
+
+    /// Whether Quill plays group call `group_call_id`'s stream itself, so
+    /// its volume can change (device playback has mute only).
+    pub fn stream_has_volume(&self, group_call_id: i32) -> bool {
+        self.call_engine
+            .as_deref()
+            .is_some_and(|engine| engine.stream_sound_health(group_call_id).is_some())
+    }
+
+    /// The self-healing rule (`calls::stream_audio::watch`): a live
+    /// stream that sent Quill no sound for 5 s, or whose output stopped,
+    /// goes to ntgcalls' device playback, once, with a warning. It runs
+    /// on every poll and needs no deadline: a live stream's part requests
+    /// wake the poll loop several times a second.
+    fn watch_stream_sound(&mut self, now: Instant) {
+        let Some(engine) = self.call_engine.as_deref_mut() else {
+            return;
+        };
+        let calls: Vec<i32> = self
+            .group_call_streams
+            .feeders
+            .values()
+            .map(StreamFeeder::group_call_id)
+            .collect();
+        for group_call_id in calls {
+            let Some(health) = engine.stream_sound_health(group_call_id) else {
+                continue;
+            };
+            let live = self
+                .session
+                .calls
+                .group_call(group_call_id)
+                .is_some_and(|call| call.stream == StreamState::Live);
+            let watch = self
+                .group_call_streams
+                .sound_watch
+                .entry(group_call_id)
+                .or_default();
+            let Some(reason) = watch.observe(now, live, health) else {
+                continue;
+            };
+            let line = format!(
+                "stream sound: falling back to device playback for group call {group_call_id} ({reason:?})"
+            );
+            eprintln!("quill: warning: {line}");
+            crate::advanced::debug_mode::debug_log(&line);
+            if let Err(err) = engine.use_device_playback(group_call_id) {
+                eprintln!("quill: stream sound fallback for group call {group_call_id} failed: {err}");
+            }
+        }
     }
 
     /// An RTMP join answer carries the stream's server URL and key when you
@@ -234,6 +313,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             feeder.drain(&mut port);
             self.group_call_streams.quality.remove(&chat_id);
+            self.group_call_streams.sound_watch.remove(&group_call_id);
             self.close_stream_feed(chat_id);
         }
     }
@@ -252,6 +332,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if handled {
             self.sync_stream_state();
         }
+        self.watch_stream_sound(now);
         handled
     }
 
