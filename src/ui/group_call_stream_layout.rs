@@ -37,7 +37,7 @@
 use super::app::QuillApp;
 use super::calls::stream_title::{SEPARATOR_GAP, title_layout, title_rect};
 use super::calls::stream_view::blurred_photo;
-use super::calls::stream_volume::VolumeHost;
+use super::calls::stream_volume::{KEY_STEP, VolumeHost};
 use super::group_call_panel::LEAVE_BG;
 use super::group_call_stream_boxes::StreamOverlay;
 use super::video_player::VideoPlayer;
@@ -132,7 +132,6 @@ pub(crate) struct StreamWindow {
     pub(super) demo_feed: Option<super::calls::demo_feed::DemoFeed>,
     /// Screenshot fixtures and tests: "mute" without a call engine.
     pub(super) demo_muted: bool,
-    /// The bar's volume slider (`calls::stream_volume`).
     pub(super) volume: Option<Entity<SliderState>>,
 }
 
@@ -619,6 +618,7 @@ impl QuillApp {
             viewers: facts.viewers.max(1),
             muted: self.stream_muted(),
             volume,
+            volume_open: false,
             fullscreen: full,
         };
         div()
@@ -651,7 +651,7 @@ impl QuillApp {
     }
 
     /// The bar's mute button and the M key: the stream's sound off or on
-    /// for you only, through the call's playback; the volume stays.
+    /// for you only, through the call's playback.
     pub(super) fn toggle_stream_mute(&mut self, cx: &mut Context<Self>) {
         let muted = self.stream_muted();
         match self.live.as_mut() {
@@ -697,12 +697,17 @@ impl QuillApp {
         match action {
             LiveKeyAction::Nothing => {}
             LiveKeyAction::ToggleMute => self.toggle_stream_mute(cx),
-            LiveKeyAction::Volume(up) => {
+            LiveKeyAction::VolumeUp | LiveKeyAction::VolumeDown => {
+                let step = if action == LiveKeyAction::VolumeUp {
+                    KEY_STEP
+                } else {
+                    -KEY_STEP
+                };
                 let call_id = self
                     .session()
                     .and_then(|s| s.calls.active_group_call.as_ref())
                     .map(|c| c.id);
-                self.step_stream_volume(up, call_id, cx)
+                self.step_stream_volume(step, call_id, cx)
             }
             LiveKeyAction::ToggleFullscreen => toggle_stream_full(window),
             LiveKeyAction::LeaveFullscreen => leave_stream_full(window),

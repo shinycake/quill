@@ -95,9 +95,7 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(in crate::ui) demo_feed: Option<DemoFeed>,
     /// The live controller's states over the picture: when each began.
     pub(super) overlay: crate::ui::video_player::controls::LiveOverlayClock,
-    /// The header's volume slider (`calls::stream_volume`).
     pub(in crate::ui) volume: Option<Entity<gpui_kit::component::slider::SliderState>>,
-    /// Whether the slider's pill under the sound toggle is open.
     pub(in crate::ui) volume_pill: crate::ui::calls::stream_volume::VolumePill,
 }
 

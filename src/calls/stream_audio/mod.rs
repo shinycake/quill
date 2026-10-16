@@ -25,15 +25,10 @@ use ring::SampleRing;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use watch::PlaybackHealth;
 
-/// How much audio the ring holds at most before it drops the oldest.
-const RING_MS: u32 = 200;
-/// An overrun drops this much of the oldest audio.
-const DROP_MS: u32 = 20;
-/// The output waits for this much audio before it plays, and again
-/// after an underrun.
-const PRIME_MS: u32 = 60;
+const RING_CAPACITY_MS: u32 = 200;
+const OVERRUN_DROP_MS: u32 = 20;
+const PLAYOUT_PRIME_MS: u32 = 60;
 
-/// The PCM the ring carries: ntgcalls resamples to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PcmFormat {
     pub rate: u32,
@@ -42,8 +37,6 @@ pub struct PcmFormat {
 }
 
 impl PcmFormat {
-    /// The format for an output device: its rate, and stereo unless it
-    /// has a single channel.
     pub fn for_output(rate: u32, device_channels: u16) -> Self {
         Self {
             rate: rate.max(1),
@@ -51,14 +44,12 @@ impl PcmFormat {
         }
     }
 
-    /// Interleaved samples in `ms` milliseconds.
-    pub fn samples(&self, ms: u32) -> usize {
+    pub fn interleaved_samples(&self, ms: u32) -> usize {
         let frames = u64::from(self.rate) * u64::from(ms) / 1000;
         usize::try_from(frames.saturating_mul(u64::from(self.channels))).unwrap_or(usize::MAX)
     }
 }
 
-/// One stream's sound between the frames callback and the output.
 pub struct StreamAudio {
     format: PcmFormat,
     ring: SampleRing,
@@ -71,7 +62,10 @@ impl StreamAudio {
     pub fn new(format: PcmFormat, volume: f32, muted: bool) -> Self {
         Self {
             format,
-            ring: SampleRing::new(format.samples(RING_MS), format.samples(DROP_MS)),
+            ring: SampleRing::new(
+                format.interleaved_samples(RING_CAPACITY_MS),
+                format.interleaved_samples(OVERRUN_DROP_MS),
+            ),
             gain: Gain::new(volume, muted),
             frames: AtomicU64::new(0),
             output_failed: AtomicBool::new(false),
@@ -90,14 +84,10 @@ impl StreamAudio {
         &self.gain
     }
 
-    /// Samples the output buffers before it starts playing.
     pub fn prime_samples(&self) -> usize {
-        self.format.samples(PRIME_MS)
+        self.format.interleaved_samples(PLAYOUT_PRIME_MS)
     }
 
-    /// The frames callback: one batch, a 10 ms frame per source, mixed
-    /// into one frame and queued. Runs on an ntgcalls thread and never
-    /// blocks.
     pub fn push_frames<'a>(&self, frames: impl IntoIterator<Item = &'a [u8]>) {
         let mixed = mix(frames);
         if mixed.is_empty() {
@@ -107,7 +97,6 @@ impl StreamAudio {
         self.frames.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// The output stopped for good (device gone, stream invalidated).
     pub fn mark_output_failed(&self) {
         self.output_failed.store(true, Ordering::Relaxed);
     }
@@ -153,7 +142,6 @@ pub fn quill_plays_streams() -> bool {
     )
 }
 
-/// [`quill_plays_streams`] for a given build and `QUILL_STREAM_AUDIO_DEVICE`.
 pub fn plays_streams_from(has_output: bool, env: Option<&str>) -> bool {
     has_output && env.map(str::trim) != Some("1")
 }
@@ -224,9 +212,11 @@ mod tests {
         assert_eq!(PcmFormat::for_output(44_100, 2).channels, 2);
         assert_eq!(PcmFormat::for_output(48_000, 6).channels, 2);
         let stereo = PcmFormat::for_output(48_000, 2);
-        // ntgcalls' 10 ms frame: 480 samples per channel.
-        assert_eq!(stereo.samples(10), 960);
-        assert_eq!(PcmFormat::for_output(44_100, 1).samples(10), 441);
+        assert_eq!(stereo.interleaved_samples(10), 960);
+        assert_eq!(
+            PcmFormat::for_output(44_100, 1).interleaved_samples(10),
+            441
+        );
     }
 
     #[test]
@@ -234,9 +224,9 @@ mod tests {
         for channels in [1u16, 2] {
             let format = PcmFormat::for_output(48_000, channels);
             let audio = StreamAudio::new(format, 1.0, false);
-            let frame = bytes(&vec![3; format.samples(10)]);
+            let frame = bytes(&vec![3; format.interleaved_samples(10)]);
             audio.push_frames([frame.as_slice()]);
-            assert_eq!(audio.ring().len(), format.samples(10));
+            assert_eq!(audio.ring().len(), format.interleaved_samples(10));
             assert_eq!(audio.health().frames, 1);
         }
     }
@@ -245,13 +235,13 @@ mod tests {
     fn a_stalled_output_keeps_the_newest_200_ms() {
         let format = PcmFormat::for_output(48_000, 2);
         let audio = StreamAudio::new(format, 1.0, false);
-        let frame = bytes(&vec![1; format.samples(10)]);
+        let frame = bytes(&vec![1; format.interleaved_samples(10)]);
         for _ in 0..50 {
             audio.push_frames([frame.as_slice()]);
         }
         let len = audio.ring().len();
-        assert!(len <= format.samples(200), "{len}");
-        assert!(len >= format.samples(180), "{len}");
+        assert!(len <= format.interleaved_samples(200), "{len}");
+        assert!(len >= format.interleaved_samples(180), "{len}");
     }
 
     #[test]

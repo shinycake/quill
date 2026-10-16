@@ -243,7 +243,6 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
     })
 }
 
-/// One frame's bytes, borrowed for the callback; `None` when empty.
 fn frame_bytes(frame: &ntg_frame) -> Option<&[u8]> {
     if frame.data.is_null() || frame.data_len == 0 {
         return None;

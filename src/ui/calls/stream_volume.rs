@@ -2,16 +2,6 @@
 //! in the pill under the live story header's sound toggle (tdesktop
 //! `VideoStream::setVolume`, which starts at the media viewer's
 //! `videoVolume` and writes back to it).
-//! It is 0 to 100 % and shows only while Quill plays the stream itself
-//! (`calls::stream_audio`); on ntgcalls' device playback there is no gain
-//! and mute stays the only control. Mute keeps its own meaning: the slider
-//! value survives it.
-//!
-//! The one source of truth is the media viewer's volume
-//! (`playback.volume`): the slider is rebuilt from it whenever they
-//! differ, and every change goes through `set_playback_volume`, which
-//! also hands it to the driver. Up and Down in the stream window move it
-//! by 5 %.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -20,10 +10,8 @@ use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
-/// Up / Down step.
-const KEY_STEP: f32 = 0.05;
+pub(crate) const KEY_STEP: f32 = 0.05;
 
-/// Where a stream volume slider sits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VolumeHost {
     StreamWindow,
@@ -45,14 +33,11 @@ impl VolumePill {
         self.toggle || self.pill || self.dragging
     }
 
-    /// Returns whether the pill opened or closed.
-    pub(crate) fn hover(&mut self, part: VolumePart, inside: bool) -> bool {
-        let was = self.open();
+    pub(crate) fn hover(&mut self, part: VolumePart, inside: bool) {
         match part {
             VolumePart::Toggle => self.toggle = inside,
             VolumePart::Pill => self.pill = inside,
         }
-        was != self.open()
     }
 
     fn drag(&mut self, dragging: bool) {
@@ -61,17 +46,14 @@ impl VolumePill {
 }
 
 impl QuillApp {
-    /// The volume as the slider shows it, 0 to 100.
     fn stream_volume_percent(&self) -> f32 {
         (self.playback.volume * 100.0).round()
     }
 
-    /// Whether group call `call_id`'s stream has a volume: Quill plays its
-    /// sound. The screenshot fixtures have no engine and always show it.
     pub(crate) fn stream_volume_shown(&self, call_id: Option<i32>) -> bool {
         match self.live.as_ref() {
             Some(live) => call_id.is_some_and(|id| live.driver.stream_has_volume(id)),
-            None => true,
+            None => self.demo_session.is_some(),
         }
     }
 
@@ -82,9 +64,6 @@ impl QuillApp {
         }
     }
 
-    /// The host's slider for group call `call_id`, at the current volume,
-    /// or `None` when the stream has no volume. Also brings the driver's
-    /// copy of the volume in line (a new account's driver starts at 100 %).
     pub(crate) fn stream_volume_slider(
         &mut self,
         host: VolumeHost,
@@ -94,10 +73,6 @@ impl QuillApp {
         if !self.stream_volume_shown(call_id) {
             *self.volume_slot(host) = None;
             return None;
-        }
-        let volume = self.playback.volume;
-        if let Some(live) = self.live.as_mut() {
-            live.driver.set_stream_volume(volume);
         }
         let percent = self.stream_volume_percent();
         if let Some(slider) = self.volume_slot(host).as_ref()
@@ -113,8 +88,6 @@ impl QuillApp {
                 .default_value(percent)
                 .label(tr(keys::Q_AV_VOLUME_2))
         });
-        // Every move applies at once: a stream's gain changes without a
-        // restart (tdesktop sets it on each change).
         cx.subscribe(&slider, move |this, _, event: &SliderEvent, cx| {
             let (value, dragging) = match event {
                 SliderEvent::Change(value) => (value.end(), true),
@@ -130,17 +103,15 @@ impl QuillApp {
         Some(slider)
     }
 
-    /// Up / Down: the volume 5 % up or down, while the stream has one.
     pub(crate) fn step_stream_volume(
         &mut self,
-        up: bool,
+        step: f32,
         call_id: Option<i32>,
         cx: &mut Context<Self>,
     ) {
         if !self.stream_volume_shown(call_id) {
             return;
         }
-        let step = if up { KEY_STEP } else { -KEY_STEP };
         let next = ((self.playback.volume + step) / KEY_STEP).round() * KEY_STEP;
         self.set_playback_volume(next.clamp(0.0, 1.0), cx);
     }
@@ -154,12 +125,14 @@ mod tests {
     #[test]
     fn the_pill_stays_open_across_toggle_pill_and_drag() {
         let mut pill = VolumePill::default();
-        assert!(pill.hover(VolumePart::Toggle, true), "opens on the toggle");
-        assert!(!pill.hover(VolumePart::Pill, true));
-        assert!(!pill.hover(VolumePart::Toggle, false), "into the pill");
+        pill.hover(VolumePart::Toggle, true);
+        assert!(pill.open(), "opens on the toggle");
+        pill.hover(VolumePart::Pill, true);
+        pill.hover(VolumePart::Toggle, false);
+        assert!(pill.open(), "into the pill");
         pill.drag(true);
-        assert!(!pill.hover(VolumePart::Pill, false), "a drag holds it");
-        assert!(pill.open());
+        pill.hover(VolumePart::Pill, false);
+        assert!(pill.open(), "a drag holds it");
         pill.drag(false);
         assert!(!pill.open());
     }

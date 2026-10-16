@@ -1,30 +1,21 @@
-//! Stream-mode calls play their sound through Quill
-//! (`calls::stream_audio`): the playback description asks ntgcalls for
-//! external frames, and Quill's output plays them at the stream volume.
-//! Every other call keeps ntgcalls' device output.
 use super::*;
 use crate::calls::stream_audio::watch::PlaybackHealth;
 use crate::calls::stream_audio::{StreamPlayer, gain::clamp_volume, quill_plays_streams};
 use ntgcalls_sys::ntg_audio_description;
 
-/// A stream's open output and the speaker it was opened for.
 pub(super) struct StreamOutput {
     speaker: Option<String>,
     player: StreamPlayer,
 }
 
 impl NtgcallsEngine {
-    /// The playback sound description of a stream Quill plays on
-    /// `speaker`, opening (or reopening, for another speaker) its output.
-    /// `None`: ntgcalls plays the call on the device, because it is not a
-    /// stream, device playback is forced, or the output did not open.
-    pub(super) fn stream_sound_description(
+    pub(super) fn open_stream_sound(
         &mut self,
         group_call_id: i32,
         speaker: Option<&str>,
     ) -> Option<ntg_audio_description> {
         let media = self.group_calls.get(&group_call_id)?;
-        if !media.mode.is_stream() || media.device_playback || !quill_plays_streams() {
+        if !media.mode.is_stream() || media.forced_device_playback || !quill_plays_streams() {
             self.close_stream_output(group_call_id);
             return None;
         }
@@ -34,7 +25,7 @@ impl NtgcallsEngine {
             .get(&group_call_id)
             .is_some_and(|output| output.speaker.as_deref() == speaker);
         if !open {
-            let name = self.speaker_name(speaker);
+            let name = self.cpal_speaker_name(speaker);
             match StreamPlayer::open(name.as_deref(), self.stream_volume, muted) {
                 Ok(player) => {
                     self.callback
@@ -68,11 +59,9 @@ impl NtgcallsEngine {
         })
     }
 
-    /// From now on ntgcalls plays this stream on the device; Quill's
-    /// output closes.
     pub(super) fn force_device_playback(&mut self, group_call_id: i32) {
         if let Some(media) = self.group_calls.get_mut(&group_call_id) {
-            media.device_playback = true;
+            media.forced_device_playback = true;
         }
         self.close_stream_output(group_call_id);
     }
@@ -86,9 +75,7 @@ impl NtgcallsEngine {
         }
     }
 
-    /// A mute or unmute of a stream Quill plays: the gain only, so the
-    /// output and the frame count go on. `false` when ntgcalls plays it.
-    pub(super) fn mute_stream_sound(&self, group_call_id: i32, muted: bool) -> bool {
+    pub(super) fn try_mute_quill_stream(&self, group_call_id: i32, muted: bool) -> bool {
         let Some(output) = self.stream_outputs.get(&group_call_id) else {
             return false;
         };
@@ -109,8 +96,6 @@ impl NtgcallsEngine {
             .map(|output| output.player.audio().health())
     }
 
-    /// The self-healing fallback: the stream goes to ntgcalls' device
-    /// playback, re-issued at once when it is connected.
     pub(super) fn fall_back_to_device(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         self.force_device_playback(group_call_id);
         let connected = self
@@ -125,9 +110,7 @@ impl NtgcallsEngine {
         }
     }
 
-    /// The name cpal knows a speaker by, from its ntgcalls id. `None`
-    /// (the system default) for no speaker or an unlisted one.
-    fn speaker_name(&self, speaker: Option<&str>) -> Option<String> {
+    fn cpal_speaker_name(&self, speaker: Option<&str>) -> Option<String> {
         let id = speaker?;
         self.media_devices()
             .ok()?

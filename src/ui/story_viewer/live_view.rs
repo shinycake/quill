@@ -49,8 +49,6 @@ pub(super) fn sender_avatar(session: &Session, sender: MessageSender, size: f32)
 }
 
 impl QuillApp {
-    /// The header's volume slider (`calls::stream_volume`), while the
-    /// watched story's stream has a volume.
     pub(super) fn live_story_volume(
         &mut self,
         cx: &mut Context<Self>,
@@ -66,8 +64,7 @@ impl QuillApp {
     }
 
     /// The header's LIVE badge with " {count} viewers" and the sound
-    /// toggle, whose pill holds the volume slider while the pointer is on
-    /// it (tdesktop's volume button): the live controller's header.
+    /// toggle (tdesktop's volume button): the live controller's header.
     pub(super) fn live_story_header(
         &self,
         volume: Option<Entity<SliderState>>,
@@ -82,7 +79,10 @@ impl QuillApp {
         let volume_hover = volume.is_some().then(|| -> VolumeHoverHandler {
             Rc::new(move |part, inside, _, cx| {
                 let _ = pill_view.update(cx, |this, cx| {
-                    if this.stories.live.volume_pill.hover(part, inside) {
+                    let pill = &mut this.stories.live.volume_pill;
+                    let was = pill.open();
+                    pill.hover(part, inside);
+                    if pill.open() != was {
                         cx.notify();
                     }
                 });
@@ -91,7 +91,8 @@ impl QuillApp {
         let facts = LiveFacts {
             viewers: call.viewer_count,
             muted,
-            volume: volume.filter(|_| self.stories.live.volume_pill.open()),
+            volume,
+            volume_open: self.stories.live.volume_pill.open(),
             fullscreen: false,
         };
         let actions = LiveActions {

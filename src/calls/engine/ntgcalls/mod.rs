@@ -33,9 +33,7 @@ pub struct NtgcallsEngine {
     callback: Arc<CallbackShared>,
     /// Feeder threads' access to the native instance (`external.rs`).
     external_gate: Arc<external::ExternalGate>,
-    /// Streams whose sound Quill plays, by TDLib group call id.
     stream_outputs: HashMap<i32, stream_audio::StreamOutput>,
-    /// Their volume, 0.0 to 1.0.
     stream_volume: f32,
     _driver_thread_only: PhantomData<Rc<()>>,
 }
@@ -357,14 +355,13 @@ impl NtgcallsEngine {
             .cloned()
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
         let instance = self.ensure_instance()?;
-        let external = self.stream_sound_description(group_call_id, speaker);
+        let external = self.open_stream_sound(group_call_id, speaker);
         let speaker_input = match external {
             Some(_) => None,
             None => self.device_input(speaker, MediaDeviceKind::Speaker)?,
         };
         // Everyone else's voices: the call mixes them into its playback
-        // "microphone" receiver, which names the output device. A stream
-        // Quill plays always keeps its description: the mute is its gain.
+        // "microphone" receiver, which names the output device.
         let mut speaker_audio =
             external.unwrap_or_else(|| audio_description(speaker_input.as_ref()));
         // Every picture (a stream's, and participants' camera and screen
@@ -375,8 +372,9 @@ impl NtgcallsEngine {
         // drops frames without one. NULL descriptions would silently drop
         // all incoming video, so RTC calls pass them too.
         let (mut playback_camera, mut playback_screen) = Self::external_playback_video();
+        let writer_off = media.playback_muted && external.is_none();
         let playback = ntg_media_description {
-            microphone: if media.playback_muted && external.is_none() {
+            microphone: if writer_off {
                 null_mut()
             } else {
                 &mut speaker_audio

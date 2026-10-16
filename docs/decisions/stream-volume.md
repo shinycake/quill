@@ -36,8 +36,9 @@ source:
   system default otherwise), at 48 kHz when the device takes it. It
   reopens when the speaker changes. The ring is mono or stereo at the
   device rate, and ntgcalls resamples to it.
-- The gain is an atomic `f32` clamped to 0 to 2. The slider uses 0 to
-  100 %, the tdesktop range for a stream. Mute sets the gain to 0 and
+- The gain is an atomic `f32` clamped to 0 to 1, the slider's 0 to
+  100 % (tdesktop's range for a stream; the stage slider's 200 % is for
+  a participant). Mute sets the gain to 0 and
   keeps the description, so the slider value survives mute and frames
   keep arriving.
 - The volume is the media viewer's volume (`playback.volume`), as

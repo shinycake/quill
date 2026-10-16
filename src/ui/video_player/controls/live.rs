@@ -80,9 +80,10 @@ pub(crate) struct LiveFacts {
     /// The picture's sound is muted for you.
     pub(crate) muted: bool,
     /// The volume slider (0–100), only where the engine can set the
-    /// volume; `None` leaves it out. The header shows it in its pill, so
-    /// a header host passes it only while the pill is open.
+    /// volume; `None` leaves it out.
     pub(crate) volume: Option<Entity<SliderState>>,
+    /// The header's volume pill is open; the bar ignores it.
+    pub(crate) volume_open: bool,
     /// The host is full screen (or maximized, for the stream window).
     pub(crate) fullscreen: bool,
 }
@@ -96,15 +97,11 @@ pub(crate) struct LiveActions {
     pub(crate) pip: Option<Handler>,
     /// The pointer entered or left the controls (the fade's hover).
     pub(crate) hover: Option<Rc<dyn Fn(bool, &mut Window, &mut App)>>,
-    /// The pointer entered or left the header's sound toggle or its
-    /// volume pill; `None`: the picture has no volume.
     pub(crate) volume_hover: Option<VolumeHoverHandler>,
 }
 
 pub(crate) type VolumeHoverHandler = Rc<dyn Fn(VolumePart, bool, &mut Window, &mut App)>;
 
-/// The header's two hover targets: the pill stays open while the
-/// pointer is on either.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VolumePart {
     Toggle,
@@ -394,9 +391,9 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
             .on_click(move |_, window, cx| pip(window, cx))
     });
     let hover = this.actions.volume_hover;
-    let pill = this.facts.volume.map(|slider| {
+    let open = this.facts.volume_open;
+    let pill = this.facts.volume.filter(|_| open).map(|slider| {
         let hover = hover.clone();
-        // Deferred so it paints over the picture below the header.
         deferred(
             div()
                 .id(("live-volume", row_id))
@@ -456,8 +453,8 @@ pub(crate) enum LiveKeyAction {
     /// Taken and ignored: Space pauses nothing on a live picture.
     Nothing,
     ToggleMute,
-    /// Up (`true`) or Down: the volume by a step.
-    Volume(bool),
+    VolumeUp,
+    VolumeDown,
     ToggleFullscreen,
     LeaveFullscreen,
 }
@@ -477,8 +474,8 @@ pub(crate) fn live_key_action(
     match key {
         "space" if plain => Some(LiveKeyAction::Nothing),
         "m" if plain && !modifiers.shift => Some(LiveKeyAction::ToggleMute),
-        "up" if plain && !modifiers.shift => Some(LiveKeyAction::Volume(true)),
-        "down" if plain && !modifiers.shift => Some(LiveKeyAction::Volume(false)),
+        "up" if plain && !modifiers.shift => Some(LiveKeyAction::VolumeUp),
+        "down" if plain && !modifiers.shift => Some(LiveKeyAction::VolumeDown),
         "f" if plain && !modifiers.shift => Some(LiveKeyAction::ToggleFullscreen),
         "escape" if fullscreen => Some(LiveKeyAction::LeaveFullscreen),
         _ => None,
@@ -507,11 +504,11 @@ mod tests {
         );
         assert_eq!(
             live_key_action("up", &none, false),
-            Some(LiveKeyAction::Volume(true))
+            Some(LiveKeyAction::VolumeUp)
         );
         assert_eq!(
             live_key_action("down", &none, true),
-            Some(LiveKeyAction::Volume(false))
+            Some(LiveKeyAction::VolumeDown)
         );
         assert_eq!(
             live_key_action("escape", &none, true),

@@ -1,13 +1,8 @@
-//! The stream's volume and your local mute, read by the output callback
-//! on every buffer and written from the driver thread.
 #![deny(clippy::indexing_slicing)]
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-/// The highest gain the engine accepts. The slider stops at 1.0 (100 %,
-/// tdesktop's stream range); 2.0 leaves room for a boost like the stage
-/// slider's.
-pub const MAX_GAIN: f32 = 2.0;
+pub const MAX_GAIN: f32 = 1.0;
 
 /// A volume (0.0 to [`MAX_GAIN`]) and a mute that silences without
 /// losing the volume.
@@ -41,13 +36,11 @@ impl Gain {
         self.muted.load(Ordering::Relaxed)
     }
 
-    /// What a sample is multiplied by now.
     pub fn factor(&self) -> f32 {
         if self.muted() { 0.0 } else { self.volume() }
     }
 }
 
-/// A volume in range; anything that is not a number is silence.
 pub fn clamp_volume(volume: f32) -> f32 {
     if volume.is_finite() {
         volume.clamp(0.0, MAX_GAIN)
@@ -56,7 +49,6 @@ pub fn clamp_volume(volume: f32) -> f32 {
     }
 }
 
-/// One sample at `factor`, as the output's `-1.0..=1.0` float.
 pub fn scaled(sample: i16, factor: f32) -> f32 {
     (f32::from(sample) / 32_768.0 * factor).clamp(-1.0, 1.0)
 }
@@ -70,7 +62,6 @@ mod tests {
         assert_eq!(scaled(16_384, 1.0), 0.5);
         assert_eq!(scaled(16_384, 0.5), 0.25);
         assert_eq!(scaled(-32_768, 1.0), -1.0);
-        assert_eq!(scaled(30_000, MAX_GAIN), 1.0, "a boost clips");
         assert_eq!(scaled(12_345, 0.0), 0.0);
     }
 

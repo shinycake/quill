@@ -4,28 +4,23 @@
 //! playback must never leave a stream silent.
 #![deny(clippy::indexing_slicing)]
 
+use crate::calls::engine::StreamState;
 use std::time::{Duration, Instant};
 
-/// How long a live stream may go without a playback frame.
 pub const NO_SOUND_LIMIT: Duration = Duration::from_secs(5);
 
-/// What the output side reports for one stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PlaybackHealth {
-    /// Playback frames received since the output opened.
     pub frames: u64,
-    /// The output device stopped for good.
     pub output_failed: bool,
 }
 
-/// Why a stream went back to device playback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FallBack {
     NoSound,
     OutputFailed,
 }
 
-/// One stream's watch, fed on every driver poll.
 #[derive(Debug, Default)]
 pub struct PlaybackWatch {
     live_since: Option<Instant>,
@@ -33,14 +28,12 @@ pub struct PlaybackWatch {
 }
 
 impl PlaybackWatch {
-    /// `live`: segments are flowing (the stream is not just connecting
-    /// or waiting for a broadcaster, when no sound is expected). Returns
-    /// a reason the first time the stream should fall back, and `None`
-    /// on every call after that.
+    /// Returns a reason the first time the stream should fall back, and
+    /// `None` on every call after that.
     pub fn observe(
         &mut self,
         now: Instant,
-        live: bool,
+        state: StreamState,
         health: PlaybackHealth,
     ) -> Option<FallBack> {
         if self.fell_back {
@@ -50,7 +43,7 @@ impl PlaybackWatch {
             Some(FallBack::OutputFailed)
         } else if health.frames > 0 {
             None
-        } else if !live {
+        } else if state != StreamState::Live {
             self.live_since = None;
             None
         } else {
@@ -65,6 +58,7 @@ impl PlaybackWatch {
 #[cfg(test)]
 mod tests {
     use super::{FallBack, NO_SOUND_LIMIT, PlaybackHealth, PlaybackWatch};
+    use crate::calls::engine::StreamState::{Connecting, Live, NoStream};
     use std::time::{Duration, Instant};
 
     const SILENT: PlaybackHealth = PlaybackHealth {
@@ -76,15 +70,15 @@ mod tests {
     fn five_silent_live_seconds_fall_back_once() {
         let start = Instant::now();
         let mut watch = PlaybackWatch::default();
-        assert_eq!(watch.observe(start, true, SILENT), None);
+        assert_eq!(watch.observe(start, Live, SILENT), None);
         let almost = start + NO_SOUND_LIMIT - Duration::from_millis(1);
-        assert_eq!(watch.observe(almost, true, SILENT), None);
+        assert_eq!(watch.observe(almost, Live, SILENT), None);
         assert_eq!(
-            watch.observe(start + NO_SOUND_LIMIT, true, SILENT),
+            watch.observe(start + NO_SOUND_LIMIT, Live, SILENT),
             Some(FallBack::NoSound)
         );
         assert_eq!(
-            watch.observe(start + NO_SOUND_LIMIT * 3, true, SILENT),
+            watch.observe(start + NO_SOUND_LIMIT * 3, Live, SILENT),
             None,
             "once"
         );
@@ -94,26 +88,24 @@ mod tests {
     fn the_clock_starts_when_the_stream_goes_live() {
         let start = Instant::now();
         let mut watch = PlaybackWatch::default();
-        // Ten seconds of connecting, or of nobody broadcasting.
         assert_eq!(
-            watch.observe(start + Duration::from_secs(10), false, SILENT),
+            watch.observe(start + Duration::from_secs(10), Connecting, SILENT),
             None
         );
         let live = start + Duration::from_secs(11);
-        assert_eq!(watch.observe(live, true, SILENT), None);
+        assert_eq!(watch.observe(live, Live, SILENT), None);
         assert_eq!(
-            watch.observe(live + Duration::from_secs(4), true, SILENT),
+            watch.observe(live + Duration::from_secs(4), Live, SILENT),
             None
         );
-        // Going back to waiting restarts the clock.
         assert_eq!(
-            watch.observe(live + Duration::from_secs(4), false, SILENT),
+            watch.observe(live + Duration::from_secs(4), NoStream, SILENT),
             None
         );
         let again = live + Duration::from_secs(6);
-        assert_eq!(watch.observe(again, true, SILENT), None);
+        assert_eq!(watch.observe(again, Live, SILENT), None);
         assert_eq!(
-            watch.observe(again + NO_SOUND_LIMIT, true, SILENT),
+            watch.observe(again + NO_SOUND_LIMIT, Live, SILENT),
             Some(FallBack::NoSound)
         );
     }
@@ -126,9 +118,9 @@ mod tests {
             frames: 3,
             output_failed: false,
         };
-        assert_eq!(watch.observe(start, true, playing), None);
+        assert_eq!(watch.observe(start, Live, playing), None);
         assert_eq!(
-            watch.observe(start + Duration::from_secs(60), true, playing),
+            watch.observe(start + Duration::from_secs(60), Live, playing),
             None
         );
     }
@@ -142,9 +134,9 @@ mod tests {
             output_failed: true,
         };
         assert_eq!(
-            watch.observe(start, true, failed),
+            watch.observe(start, Live, failed),
             Some(FallBack::OutputFailed)
         );
-        assert_eq!(watch.observe(start, true, failed), None);
+        assert_eq!(watch.observe(start, Live, failed), None);
     }
 }

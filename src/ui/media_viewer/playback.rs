@@ -426,7 +426,6 @@ impl QuillApp {
     pub(in crate::ui) fn set_playback_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         self.playback.volume = volume.clamp(0.0, 1.0);
         self.playback.audio.set_volume(self.playback.volume);
-        // Live streams follow it too (`calls::stream_volume`).
         if let Some(live) = self.live.as_mut() {
             live.driver.set_stream_volume(self.playback.volume);
         }

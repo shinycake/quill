@@ -36,10 +36,7 @@ pub(crate) struct GroupCallStreams {
     events_rx: Mutex<Receiver<EngineEvent>>,
     feeders: HashMap<i64, StreamFeeder>,
     quality: HashMap<i64, StreamQualityTracker>,
-    /// The self-healing watch of each stream Quill plays, by group call.
     sound_watch: HashMap<i32, PlaybackWatch>,
-    /// The streams' volume, 0.0 to 1.0: the media viewer's, as the UI
-    /// last set it.
     volume: f32,
 }
 
@@ -150,7 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// as tdesktop's stream starts at `videoVolume`), now and for later
     /// joins.
     pub fn set_stream_volume(&mut self, volume: f32) {
-        let volume = clamp_volume(volume).min(1.0);
+        let volume = clamp_volume(volume);
         if volume == self.group_call_streams.volume {
             return;
         }
@@ -172,11 +169,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|engine| engine.stream_sound_health(group_call_id).is_some())
     }
 
-    /// The self-healing rule (`calls::stream_audio::watch`): a live
-    /// stream that sent Quill no sound for 5 s, or whose output stopped,
-    /// goes to ntgcalls' device playback, once, with a warning. It runs
-    /// on every poll and needs no deadline: a live stream's part requests
-    /// wake the poll loop several times a second.
     fn watch_stream_sound(&mut self, now: Instant) {
         let Some(engine) = self.call_engine.as_deref_mut() else {
             return;
@@ -191,17 +183,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             let Some(health) = engine.stream_sound_health(group_call_id) else {
                 continue;
             };
-            let live = self
+            let state = self
                 .session
                 .calls
                 .group_call(group_call_id)
-                .is_some_and(|call| call.stream == StreamState::Live);
+                .map(|call| call.stream)
+                .unwrap_or_default();
             let watch = self
                 .group_call_streams
                 .sound_watch
                 .entry(group_call_id)
                 .or_default();
-            let Some(reason) = watch.observe(now, live, health) else {
+            let Some(reason) = watch.observe(now, state, health) else {
                 continue;
             };
             let line = format!(

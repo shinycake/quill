@@ -1,7 +1,5 @@
-//! The stream volume slider over the screenshot demo's live story: a
-//! move writes the media viewer's volume, and the slider follows the
-//! volume when something else changes it. Nothing reaches Telegram.
 use crate::ui::app::QuillApp;
+use crate::ui::calls::stream_volume::KEY_STEP;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -81,7 +79,7 @@ fn the_slider_follows_the_volume_and_steps_by_five(cx: &mut TestAppContext) {
             .session()
             .and_then(|s| s.calls.story_stream.as_ref())
             .map(|c| c.id);
-        app.step_stream_volume(true, call, cx);
+        app.step_stream_volume(KEY_STEP, call, cx);
     });
     frames(vcx);
     assert!(
@@ -90,7 +88,7 @@ fn the_slider_follows_the_volume_and_steps_by_five(cx: &mut TestAppContext) {
     );
     app.update(vcx, |app, cx| {
         app.set_playback_volume(1.0, cx);
-        app.step_stream_volume(true, None, cx);
+        app.step_stream_volume(KEY_STEP, None, cx);
     });
     assert!((volume(&app, vcx) - 1.0).abs() < 1e-6, "100 % is the top");
 }

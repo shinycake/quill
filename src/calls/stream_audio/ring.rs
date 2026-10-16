@@ -1,22 +1,13 @@
-//! The sample ring between ntgcalls' frames callback (the one producer)
-//! and the output callback (the one consumer). Neither side ever waits:
-//! every slot is an atomic, the write index is the producer's, and the
-//! read index moves by compare-and-swap so the producer can drop the
-//! oldest audio when the consumer falls behind.
-//!
-//! Indices only grow (wrapping), so the read index never returns to a
-//! value the consumer saw: a consumer whose swap fails knows the producer
-//! dropped the samples it was reading, and reads again.
 #![deny(clippy::indexing_slicing)]
 
 use std::sync::atomic::{AtomicI16, AtomicUsize, Ordering};
 
-/// Interleaved 16-bit samples, at most `capacity` of them.
+const POP_ATTEMPTS: usize = 4;
+
 pub struct SampleRing {
     slots: Box<[AtomicI16]>,
     read: AtomicUsize,
     write: AtomicUsize,
-    /// How much an overrun drops at least (20 ms of audio, whole frames).
     drop_chunk: usize,
 }
 
@@ -38,7 +29,6 @@ impl SampleRing {
         self.slots.len()
     }
 
-    /// Samples waiting to be played.
     pub fn len(&self) -> usize {
         let write = self.write.load(Ordering::Acquire);
         write.wrapping_sub(self.read.load(Ordering::Acquire))
@@ -98,9 +88,7 @@ impl SampleRing {
     /// Consumer: move up to `out.len()` samples into `out`. Returns how
     /// many were written; the rest of `out` is left as it was.
     pub fn pop(&self, out: &mut [i16]) -> usize {
-        // A producer dropping audio under us makes the swap fail; it
-        // drops at most once per 10 ms frame, so a second try succeeds.
-        for _ in 0..4 {
+        for _ in 0..POP_ATTEMPTS {
             let write = self.write.load(Ordering::Acquire);
             let read = self.read.load(Ordering::Acquire);
             let count = write.wrapping_sub(read).min(out.len());
@@ -188,7 +176,6 @@ mod tests {
     fn an_overrun_drops_the_oldest_whole_chunks() {
         let ring = SampleRing::new(8, 4);
         ring.push(&ramp(1, 8));
-        // One sample more drops a whole chunk of the oldest four.
         assert_eq!(ring.push(&[9]), 4);
         assert_eq!(ring.len(), 5);
         let mut out = [0; 5];
@@ -272,7 +259,6 @@ mod tests {
                 if let Some(prev) = last
                     && sample != 0
                 {
-                    // Drops skip ahead, but never go back.
                     assert!(sample > prev || prev > 29_000, "{prev} then {sample}");
                 }
                 last = Some(sample);

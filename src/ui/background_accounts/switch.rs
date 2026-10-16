@@ -92,6 +92,7 @@ impl QuillApp {
         live.attach_call_engine(&MemorySink::new());
         // The auto-switch runs on screen; its settings are the app's.
         live.driver.reload_proxy_prefs();
+        live.driver.set_stream_volume(self.playback.volume);
         self.live = Some(live);
         self.reload_account_keybindings(cx);
         self.spawn_poll_loop(cx);

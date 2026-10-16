@@ -1,7 +1,3 @@
-//! The stream's output through cpal, the backend the file player and the
-//! call microphone already use. The device runs at its own format; the
-//! ring carries that rate (ntgcalls resamples to the description) in
-//! mono or stereo, spread over the device's channels here.
 #![deny(clippy::indexing_slicing)]
 
 use super::gain::scaled;
@@ -79,7 +75,6 @@ fn find_output(host: &cpal::Host, name: Option<&str>) -> Option<cpal::Device> {
     host.default_output_device()
 }
 
-/// The device's default format, at 48 kHz when it offers that.
 fn output_config(device: &cpal::Device) -> Result<SupportedStreamConfig, String> {
     let default = device
         .default_output_config()
@@ -143,8 +138,6 @@ where
         .map_err(|err| err.to_string())
 }
 
-/// One frame of the ring (mono or stereo) on a device frame: mono on every
-/// channel, stereo on the first two and silence on the rest.
 fn spread<T: Sample + FromSample<f32>>(frame: &[i16], out: &mut [T], factor: f32) {
     let mono = frame.len() == 1;
     for (channel, sample) in out.iter_mut().enumerate() {

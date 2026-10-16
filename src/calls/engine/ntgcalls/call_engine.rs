@@ -345,7 +345,7 @@ impl CallEngine for NtgcallsEngine {
         media.speaker = speaker.map(str::to_owned);
         media.playback_muted = muted;
         let connected = media.connected;
-        if !speaker_changed && self.mute_stream_sound(group_call_id, muted) {
+        if !speaker_changed && self.try_mute_quill_stream(group_call_id, muted) {
             return Ok(());
         }
         if changed && connected {

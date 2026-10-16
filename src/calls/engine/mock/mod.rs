@@ -64,7 +64,6 @@ struct MockInner {
     live_frame_hook: Option<LiveFrameCallback>,
     stream_qualities: Vec<(i64, StreamQuality)>,
     group_playbacks: Vec<(i32, Option<String>, bool)>,
-    /// Streams the engine plays itself, and how.
     stream_sound: HashMap<i32, crate::calls::stream_audio::watch::PlaybackHealth>,
     stream_volumes: Vec<f32>,
     device_playbacks: Vec<i32>,
@@ -219,8 +218,6 @@ impl MockEngine {
         self.inner.lock_or_recover().group_playbacks.clone()
     }
 
-    /// Group call `group_call_id`'s stream plays through the engine with
-    /// `health`.
     pub fn set_stream_sound(
         &self,
         group_call_id: i32,
@@ -236,7 +233,6 @@ impl MockEngine {
         self.inner.lock_or_recover().stream_volumes.clone()
     }
 
-    /// Group calls sent back to device playback.
     pub fn device_playbacks(&self) -> Vec<i32> {
         self.inner.lock_or_recover().device_playbacks.clone()
     }

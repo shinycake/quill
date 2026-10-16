@@ -1,6 +1,3 @@
-//! Driver tests: a stream's sound through Quill's output. The volume
-//! reaches the engine, and the self-healing watch sends a live stream
-//! that brings no sound back to device playback, once.
 use super::*;
 use crate::calls::engine::{GroupCallMode, StreamState};
 use crate::calls::stream_audio::watch::{NO_SOUND_LIMIT, PlaybackHealth};
@@ -63,7 +60,6 @@ fn a_live_stream_without_sound_falls_back_after_five_seconds_once() {
     let (dir, mut driver, _recorder, handle, ..) = joined_stream();
     handle.set_stream_sound(555, SILENT);
     let start = Instant::now();
-    // Connecting: no sound expected yet, however long it takes.
     driver.request_tick(start);
     driver.request_tick(start + Duration::from_secs(30));
     assert!(handle.device_playbacks().is_empty());

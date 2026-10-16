@@ -12,9 +12,7 @@
 //!   Server URL and Stream Key with their copy buttons and the "…" Revoke
 //!   for managers once the URL is known, mute for me, and End Live Stream
 //!   for managers. tdesktop's volume slider here is the bar's slider in
-//!   Quill (`calls::stream_volume`). The local mute
-//!   (`set_group_call_playback_muted`) silences the stream's gain, or
-//!   removes ntgcalls' output writer on device playback.
+//!   Quill (`calls::stream_volume`).
 //! - The Stream Key is hidden until a click and a warning, as tdesktop's
 //!   spoiler (`FillRtmpRows`).
 //! - Leave (`LeaveBox`): managers choose between leaving and ending the
