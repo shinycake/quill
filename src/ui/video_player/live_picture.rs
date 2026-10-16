@@ -128,7 +128,8 @@ thread_local! {
 }
 
 /// The images made since the last call, for tests.
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 pub(crate) fn take_made_images() -> Vec<std::sync::Weak<RenderImage>> {
     MADE.with(|made| std::mem::take(&mut *made.borrow_mut()))
 }

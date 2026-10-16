@@ -563,7 +563,8 @@ impl VideoPlayer {
 
     /// How many times a frame redrew the view (the off-screen policy's
     /// count, for tests).
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn live_asks(&self) -> u64 {
         self.0.live.as_ref().map_or(0, |core| core.asks.get())
     }
@@ -610,7 +611,8 @@ impl VideoPlayer {
     }
 
     /// How many frames this player converted (tests).
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn live_conversions(&self) -> u64 {
         self.0
             .live
@@ -619,7 +621,8 @@ impl VideoPlayer {
     }
 
     /// Tests: read `at` as the time from now on.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn set_live_clock(&self, at: Instant) {
         if let Some(core) = self.0.live.as_ref() {
             core.clock.set(Some(at));

@@ -29,7 +29,8 @@ impl Drop for DemoFeed {
 
 impl DemoFeed {
     /// A feed with nothing sending: tests push through `source`.
-    #[cfg(all(test, feature = "demo-capture"))]
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(crate) fn manual() -> Self {
         let (sink, source) = LiveSink::new();
         Self {
