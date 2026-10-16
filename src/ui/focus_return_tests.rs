@@ -1,4 +1,5 @@
-#![cfg(all(test, feature = "demo-capture"))]
+#![cfg(test)]
+#![cfg(feature = "demo-capture")]
 //! Hand-drawn layers give focus back to the composer when they close,
 //! whether by Escape, by their close button, or by a direct close call.
 
