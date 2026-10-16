@@ -146,8 +146,12 @@ for the 512 px sticker), counted against the sticker cache's byte budget.
 - Demo capture (`ready-sticker-playback`, `QUILL_DEMO_HISTORY_ANIM=stickers`)
   with the library and without it: the WebM sticker draws the same, on a
   transparent background, in both.
-- Linux and Windows CI built the shim with their FFmpeg (gcc and MinGW,
-  `-Werror`) on the `cursor/sweep-webm-stickers` push; results in the PR.
+- CI on the `cursor/sweep-webm-stickers` push (run 38903313707): Linux
+  rebuilt FFmpeg and the shim with gcc `-Werror` and ran
+  `video_decode_webm_sticker_keeps_vp9_alpha` against it (passed, not
+  skipped); Windows built `quillvideo.dll` with MinGW `-Werror`, and the
+  Windows package, PE dependency check and launch smoke passed; the macOS
+  package passed.
 
 ## Not covered
 
@@ -155,8 +159,8 @@ for the 512 px sticker), counted against the sticker cache's byte budget.
   `codex-video-cross-platform.md`), so on macOS video stickers still need a
   system `ffmpeg` with libvpx, as before. Bundling the FFmpeg libraries in
   `Quill.app` would remove that and is a packaging change of its own.
-- Not run on real Windows or Linux desktops; CI compiles the shim and runs
-  the fixture test on Linux. The Windows job builds the DLL but runs no
-  decoder tests (unchanged workflow, owned by #859).
+- Not run on real Windows or Linux desktops. The Windows job builds the DLL
+  but runs no decoder tests (that workflow is changed by #859, so this PR
+  leaves it alone).
 - 10-bit or 4:4:4 VP9 stickers decode opaque (the alpha merge handles 8-bit
   4:2:0, which is what Telegram's sticker encoders produce).
