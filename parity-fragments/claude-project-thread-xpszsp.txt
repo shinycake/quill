@@ -1,2 +1,0 @@
-# Language packs: TDLib packs, every UI area converted, CI strings check
-parity:appearance-localization
