@@ -20,20 +20,43 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
     }
     let key = (candidate.to_owned(), roots_key(allowed_roots));
     let now = std::time::Instant::now();
-    if let Some((at, verdict)) = VERDICTS.lock_or_recover().get(&key)
-        && now.duration_since(*at) < VERDICT_TTL
+    if let Some((at, verdict, ttl)) = VERDICTS.lock_or_recover().get(&key)
+        && now.duration_since(*at) < *ttl
     {
         return verdict.clone();
     }
     let verdict = sandboxed_display_path_uncached(candidate, allowed_roots);
+    // A plain file (final component not a symlink) that passed stays valid
+    // for the long TTL: scrolling the chat list asks for thousands of
+    // paths and each fresh check is a realpath walk. Anything else (a
+    // symlink, a miss) is re-checked after a second.
+    let ttl = if verdict.is_some() && is_plain_file(Path::new(candidate)) {
+        VERDICT_TTL_PLAIN
+    } else {
+        VERDICT_TTL
+    };
     let mut cache = VERDICTS.lock_or_recover();
     make_room(&mut cache, now);
-    cache.insert(key, (now, verdict.clone()));
+    cache.insert(key, (now, verdict.clone(), ttl));
     drop(cache);
     verdict
 }
 
 const VERDICT_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+const VERDICT_TTL_PLAIN: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn is_plain_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file())
+}
+
+/// Forget the memoized verdicts for `candidate`: its file was (re)written
+/// or finished downloading (TDLib `updateFile`), so the next display check
+/// looks at the disk again.
+pub fn invalidate_display_path(candidate: &str) {
+    VERDICTS
+        .lock_or_recover()
+        .retain(|(path, _), _| path != candidate);
+}
 const VERDICT_CAP: usize = 8192;
 
 /// Keep the memo below [`VERDICT_CAP`] after one more insert: drop expired
@@ -42,19 +65,23 @@ fn make_room(cache: &mut VerdictCache, now: std::time::Instant) {
     if cache.len() < VERDICT_CAP {
         return;
     }
-    cache.retain(|_, (at, _)| now.duration_since(*at) < VERDICT_TTL);
+    cache.retain(|_, (at, _, ttl)| now.duration_since(*at) < *ttl);
     if cache.len() < VERDICT_CAP {
         return;
     }
     let excess = cache.len() + 1 - VERDICT_CAP;
-    let mut ages: Vec<_> = cache.iter().map(|(k, (at, _))| (*at, k.clone())).collect();
+    let mut ages: Vec<_> = cache
+        .iter()
+        .map(|(k, (at, _, _))| (*at, k.clone()))
+        .collect();
     ages.sort_by_key(|(at, _)| *at);
     for (_, key) in ages.into_iter().take(excess) {
         cache.remove(&key);
     }
 }
 
-type VerdictCache = HashMap<(String, u64), (std::time::Instant, Option<PathBuf>)>;
+type VerdictCache =
+    HashMap<(String, u64), (std::time::Instant, Option<PathBuf>, std::time::Duration)>;
 static VERDICTS: LazyLock<Mutex<VerdictCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static CANONICAL_ROOTS: LazyLock<Mutex<HashMap<PathBuf, PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -192,14 +219,64 @@ pub fn sweep_media_caches() {
     ENSURED_DIRS.lock_or_recover().clear();
     CANONICAL_ROOTS.lock_or_recover().clear();
     VERDICTS.lock_or_recover().clear();
-    let _ = std::fs::remove_dir_all(cache_temp_dir().join("quill-media-cache"));
-    for legacy in [
+    let temp = cache_temp_dir();
+    let mut tombs = Vec::new();
+    for name in [
+        "quill-media-cache",
         "quill-gif-frames",
         "quill-video-frames",
         "quill-viewer-frames",
         "quill-video-note-thumbs",
     ] {
-        let _ = std::fs::remove_dir_all(cache_temp_dir().join(legacy));
+        if let Some(tomb) = tombstone(&temp, name) {
+            tombs.push(tomb);
+        }
+    }
+    // The directories can hold thousands of files: delete them off the
+    // calling thread (the startup sweep runs before the window opens).
+    // Leftovers of an interrupted run are picked up too.
+    let spawned = crate::thread_guard::spawn_guarded("quill-cache-sweep", move || {
+        for tomb in tombs {
+            let _ = std::fs::remove_dir_all(tomb);
+        }
+        remove_stale_tombstones(&temp);
+    });
+    let _ = spawned;
+}
+
+const TOMB_MARK: &str = ".tomb-";
+
+/// Move `{temp}/{name}` out of the way with one rename so it is gone from
+/// its real path at once. Returns the new path to delete later. When the
+/// rename fails the directory is removed in place instead (still gone on
+/// return); `None` when there was nothing to remove.
+fn tombstone(temp: &Path, name: &str) -> Option<PathBuf> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let dir = temp.join(name);
+    if std::fs::symlink_metadata(&dir).is_err() {
+        return None;
+    }
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tomb = temp.join(format!("{name}{TOMB_MARK}{}-{seq}", std::process::id()));
+    if std::fs::rename(&dir, &tomb).is_ok() {
+        Some(tomb)
+    } else {
+        let _ = std::fs::remove_dir_all(&dir);
+        None
+    }
+}
+
+/// Delete tombstones an earlier run left behind (killed mid-delete).
+fn remove_stale_tombstones(temp: &Path) {
+    let Ok(entries) = std::fs::read_dir(temp) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("quill-") && name.contains(TOMB_MARK) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
     }
 }
 
@@ -284,15 +361,86 @@ mod tests {
         for i in 0..VERDICT_CAP {
             // All fresh (inside the TTL), so only the cap can evict; entry 0 is oldest.
             let at = base + std::time::Duration::from_micros(i as u64);
-            cache.insert((format!("p{i}"), 1), (at, None));
+            cache.insert((format!("p{i}"), 1), (at, None, VERDICT_TTL));
         }
         let now = base + std::time::Duration::from_millis(500);
         make_room(&mut cache, now);
         assert_eq!(cache.len(), VERDICT_CAP - 1);
         assert!(!cache.contains_key(&("p0".to_owned(), 1)));
         assert!(cache.contains_key(&(format!("p{}", VERDICT_CAP - 1), 1)));
-        cache.insert(("new".to_owned(), 1), (now, None));
+        cache.insert(("new".to_owned(), 1), (now, None, VERDICT_TTL));
         assert_eq!(cache.len(), VERDICT_CAP);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn plain_file_verdict_is_kept_until_invalidated() {
+        let root = scratch("verdict-keep");
+        let file = root.join("a.jpg");
+        fs::write(&file, b"x").unwrap();
+        let path = file.to_str().unwrap().to_owned();
+        let roots = vec![root.clone()];
+        assert!(sandboxed_display_path(&path, &roots).is_some());
+        // Gone from disk, still memoized (no syscalls while scrolling).
+        fs::remove_file(&file).unwrap();
+        assert!(sandboxed_display_path(&path, &roots).is_some());
+        // The file update for that path drops the verdict.
+        invalidate_display_path(&path);
+        assert!(sandboxed_display_path(&path, &roots).is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_verdict_is_rechecked_quickly() {
+        let root = scratch("verdict-link");
+        let outside = scratch("verdict-outside");
+        let target = outside.join("secret");
+        fs::write(&target, b"x").unwrap();
+        let link = root.join("l");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let roots = vec![root.clone()];
+        let path = link.to_str().unwrap().to_owned();
+        assert!(sandboxed_display_path(&path, &roots).is_none());
+        // A symlink never gets the long TTL even when it points inside.
+        let inside = root.join("real");
+        fs::write(&inside, b"x").unwrap();
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&inside, &link).unwrap();
+        let key = (path.clone(), roots_key(&roots));
+        invalidate_display_path(&path);
+        assert!(sandboxed_display_path(&path, &roots).is_some());
+        let ttl = VERDICTS.lock_or_recover().get(&key).map(|(_, _, ttl)| *ttl);
+        assert_eq!(ttl, Some(VERDICT_TTL));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn sweep_removes_dirs_at_once_and_tombstones_in_background() {
+        let _guard = lock_shared_media_cache();
+        let base = media_cache_base();
+        fs::create_dir_all(base.join("x")).unwrap();
+        fs::write(base.join("x").join("f"), b"1").unwrap();
+        sweep_media_caches();
+        assert!(!cache_temp_dir().join("quill-media-cache").exists());
+        // The tombstones disappear shortly after.
+        let temp = cache_temp_dir();
+        let has_tomb = || {
+            fs::read_dir(&temp).is_ok_and(|rd| {
+                rd.flatten().any(|e| {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    n.starts_with("quill-media-cache") && n.contains(TOMB_MARK)
+                })
+            })
+        };
+        for _ in 0..100 {
+            if !has_tomb() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(!has_tomb());
     }
 
     fn scratch(label: &str) -> PathBuf {

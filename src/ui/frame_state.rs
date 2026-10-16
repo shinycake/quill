@@ -24,6 +24,8 @@ pub(crate) struct FrameUi {
     pub(super) window_active: std::cell::Cell<bool>,
     /// The title last handed to the platform window (`window_chrome`).
     pub(super) window_title_shown: std::cell::RefCell<String>,
+    /// Unread badge memo for the title (`tray::badge_cache`).
+    pub(super) title_badge: std::cell::RefCell<quill::tray::badge_cache::BadgeCache>,
     /// `media_display_roots`, computed once per frame (rows ask for it
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
@@ -57,6 +59,7 @@ impl FrameUi {
             animation_sound: Default::default(),
             window_active: std::cell::Cell::new(true),
             window_title_shown: Default::default(),
+            title_badge: Default::default(),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             motion: Default::default(),

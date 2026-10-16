@@ -390,3 +390,26 @@ fn closing_runs_in_the_background_only_with_a_tray() {
     // Linux and Windows cannot hide a GPUI window: minimize it.
     assert_eq!(close_outcome(true, true, false, false), Minimize);
 }
+
+#[test]
+fn badge_cache_follows_revision_and_prefs() {
+    use super::badge_cache::BadgeCache;
+    let mut session = session_with(&[3, 4]);
+    let prefs = BadgePrefs::default();
+    let mut cache = BadgeCache::default();
+    assert_eq!(cache.get(&session, &prefs), 7);
+    // Same revision: the memo answers without recounting.
+    if let Some(chat) = session.chats.get_mut(&0) {
+        chat.unread_count = 10;
+    }
+    assert_eq!(cache.get(&session, &prefs), 7);
+    // An applied update bumps the revision: recounted.
+    session.revision += 1;
+    assert_eq!(cache.get(&session, &prefs), 14);
+    // Preferences are part of the key.
+    let no_messages = BadgePrefs {
+        count_messages: false,
+        ..prefs
+    };
+    assert_eq!(cache.get(&session, &no_messages), 2);
+}

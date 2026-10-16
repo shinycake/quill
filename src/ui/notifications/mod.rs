@@ -786,10 +786,12 @@ impl QuillApp {
             .unwrap_or_default();
         // tdesktop skips its own sound and the Dock bounce / taskbar flash
         // while the system is in Do Not Disturb; the OS banner is the OS's.
-        let dnd = quill::notify_focus::dnd_active();
         let wants_attention = self.live.as_mut().is_some_and(|live| {
             std::mem::take(&mut live.driver.session.settings.pending_attention)
         });
+        // Only probe the OS when there is something to decide about.
+        let dnd = quill::notify_focus::needs_probe(wants_attention, queued.len())
+            && quill::notify_focus::dnd_active();
         if wants_attention
             && quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
                 flash_enabled: true,

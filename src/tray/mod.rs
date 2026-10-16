@@ -29,6 +29,7 @@
 use crate::settings::BadgePrefs;
 use crate::state::Session;
 
+pub mod badge_cache;
 pub mod monochrome;
 pub mod work_mode;
 
