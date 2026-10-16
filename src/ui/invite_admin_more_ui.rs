@@ -206,12 +206,7 @@ impl QuillApp {
                 ),
         );
         block = match &state.active {
-            InviteLinkFetch::Loading => block.child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(tr(keys::Q_OPS_LOADING)),
-            ),
+            InviteLinkFetch::Loading => block.child(super::invite_admin_ui::loading_row(muted)),
             InviteLinkFetch::Failed(message) => {
                 block.child(div().text_xs().text_color(muted).child(message.clone()))
             }
