@@ -21,6 +21,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::FileId;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::track_name;
 use quill::telegram::envelope::ProfileAudio;
 
@@ -149,8 +150,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&[file_id]);
             }
-            self.connection.status_note =
-                "downloading… choose Save As again when it finishes".into();
+            self.connection.status_note = tr(keys::Q_AV_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN).into();
             cx.notify();
             return;
         };
@@ -181,7 +181,7 @@ impl QuillApp {
                         "saved to {}",
                         dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
                     ),
-                    Err(err) => format!("couldn't save: {err}"),
+                    Err(err) => tr_with(keys::Q_AV_COULDNT_SAVE, &[("err", &err.to_string())]),
                 };
                 cx.notify();
             });
@@ -203,7 +203,7 @@ impl QuillApp {
                     &track.file_name,
                 ) {
                     Ok(_) => ADDED_TOAST.into(),
-                    Err(_) => "could not save to your profile".into(),
+                    Err(_) => tr(keys::Q_AV_COULD_NOT_SAVE_TO_YOUR).into(),
                 };
             }
             None => {
@@ -219,10 +219,10 @@ impl QuillApp {
     fn save_playlist_track_to_saved_messages(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         self.connection.status_note = match self.live.as_mut() {
             Some(live) => match live.driver.send_track_to_saved_messages(file_id) {
-                Ok(_) => "saved to Saved Messages".into(),
-                Err(_) => "could not save to Saved Messages".into(),
+                Ok(_) => tr(keys::Q_AV_SAVED_TO_SAVED_MESSAGES).into(),
+                Err(_) => tr(keys::Q_AV_COULD_NOT_SAVE_TO_SAVED).into(),
             },
-            None => "demo — Saved Messages needs live TDLib".into(),
+            None => tr(keys::Q_AV_DEMO_SAVED_MESSAGES_NEEDS_LIVE).into(),
         };
         cx.notify();
     }
@@ -279,7 +279,7 @@ impl QuillApp {
                 row(
                     "playlist-menu-back",
                     IconName::ChevronLeft,
-                    "Save to...",
+                    tr(keys::Q_AV_SAVE_TO),
                     false,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -295,7 +295,7 @@ impl QuillApp {
                     row(
                         "playlist-save-profile",
                         IconName::User,
-                        "... Profile",
+                        tr(keys::Q_AV_PROFILE),
                         false,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -309,7 +309,7 @@ impl QuillApp {
                 row(
                     "playlist-save-saved",
                     IconName::Bookmark,
-                    "... Saved Messages",
+                    tr(keys::Q_AV_SAVED_MESSAGES),
                     false,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -322,7 +322,7 @@ impl QuillApp {
                 row(
                     "playlist-save-downloads",
                     IconName::Download,
-                    "... Downloads",
+                    tr(keys::Q_AV_DOWNLOADS),
                     false,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -356,9 +356,9 @@ impl QuillApp {
                         "playlist-menu-folder",
                         IconName::FolderOpen,
                         if finder {
-                            "Show in Finder"
+                            tr(keys::Q_AV_SHOW_IN_FINDER)
                         } else {
-                            "Show in Folder"
+                            tr(keys::Q_AV_SHOW_IN_FOLDER)
                         },
                         false,
                     )
@@ -375,7 +375,7 @@ impl QuillApp {
                     row(
                         "playlist-menu-save-as",
                         IconName::Download,
-                        "Save As...",
+                        tr(keys::Q_AV_SAVE_AS),
                         false,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -385,19 +385,24 @@ impl QuillApp {
                     .into_any_element(),
                 );
                 rows.push(
-                    row("playlist-menu-delete", IconName::Trash, "Delete", true)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            close(this);
-                            this.ask_remove_playlist_track(file_id, cx);
-                        }))
-                        .into_any_element(),
+                    row(
+                        "playlist-menu-delete",
+                        IconName::Trash,
+                        tr(keys::BOX_DELETE),
+                        true,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        close(this);
+                        this.ask_remove_playlist_track(file_id, cx);
+                    }))
+                    .into_any_element(),
                 );
             } else {
                 rows.push(
                     row(
                         "playlist-menu-save-to",
                         IconName::Download,
-                        "Save to...",
+                        tr(keys::Q_AV_SAVE_TO),
                         false,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -497,7 +502,7 @@ impl QuillApp {
                 .gap_2()
                 .child(
                     Button::new("remove-playlist-cancel")
-                        .label("Cancel")
+                        .label(tr(keys::CANCEL))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.playback.playlist_remove = None;
                             cx.notify();
@@ -510,7 +515,7 @@ impl QuillApp {
                 )
                 .child(
                     Button::new("remove-playlist-confirm")
-                        .label("Delete")
+                        .label(tr(keys::BOX_DELETE))
                         .danger()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_remove_playlist_track(cx);
@@ -523,7 +528,7 @@ impl QuillApp {
                 );
             finish_dialog(
                 dialog,
-                "Delete".to_string(),
+                tr(keys::BOX_DELETE).to_string(),
                 body.into_any_element(),
                 Some(footer.into_any_element()),
                 on_close,

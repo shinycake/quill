@@ -13,6 +13,7 @@ use gpui_kit::TestSupportExt;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::video_edit::{quality_label, quality_levels};
 use quill::video_timeline::{
     QUALITY_DOT, QUALITY_DOT_ACTIVE, QUALITY_HEIGHT, QUALITY_LABEL_SKIP, QUALITY_LINE,
@@ -287,7 +288,7 @@ impl QuillApp {
             .rounded_full()
             .bg(palette::bar())
             .child(
-                text_button("video-editor-cancel", "Cancel", palette::text()).on_click(
+                text_button("video-editor-cancel", tr(keys::CANCEL), palette::text()).on_click(
                     cx.listener(|this, _, window, cx| {
                         this.close_video_editor(cx);
                         this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
@@ -300,7 +301,7 @@ impl QuillApp {
                     Icon::new(gpui_kit::assets::IconName::RotateCwSquare),
                     false,
                 )
-                .tooltip(|window, cx| Tooltip::new("Rotate").build(window, cx))
+                .tooltip(|window, cx| Tooltip::new(tr(keys::Q_AV_ROTATE)).build(window, cx))
                 .on_click(cx.listener(|this, _, _, cx| this.rotate_video_editor(cx))),
             )
             .child(
@@ -309,7 +310,9 @@ impl QuillApp {
                     Icon::new(gpui_kit::assets::IconName::FlipHorizontal2),
                     flipped,
                 )
-                .tooltip(|window, cx| Tooltip::new("Flip").build(window, cx))
+                .tooltip(|window, cx| {
+                    Tooltip::new(tr(keys::PHOTO_EDITOR_MENU_FLIP)).build(window, cx)
+                })
                 .on_click(cx.listener(|this, _, _, cx| this.flip_video_editor(cx))),
             )
             .when(gif_allowed, |bar| {
@@ -325,7 +328,7 @@ impl QuillApp {
                         .cursor_pointer()
                         .hover(|style| style.bg(palette::hover()))
                         .tooltip(|window, cx| {
-                            Tooltip::new("Send as GIF, without sound").build(window, cx)
+                            Tooltip::new(tr(keys::Q_AV_SEND_AS_GIF_WITHOUT_SOUND)).build(window, cx)
                         })
                         .child(gif_glyph(gif))
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_video_editor_gif(cx))),
@@ -334,7 +337,7 @@ impl QuillApp {
             .child(
                 text_button(
                     "video-editor-done",
-                    "Done",
+                    tr(keys::BOX_DONE),
                     if ready {
                         palette::link()
                     } else {

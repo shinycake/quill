@@ -11,6 +11,7 @@ use super::video_editor::{VideoEditorDialog, palette};
 use super::video_editor_timeline::StagePress;
 use super::video_player::{PlayState, Purpose, VideoPlayer, supported, video_frame};
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::sticker_video::square_crop;
 use quill::video_edit::{Crop, quality_levels, turned_size};
 use quill::video_timeline::{CropArea, crop_dragged, crop_grab_at};
@@ -61,7 +62,7 @@ impl QuillApp {
                 editor.playback_ms = Some(editor.edits.from_ms);
                 editor.player = Some(video);
             }
-            Err(_) => editor.note = Some("Quill can't play this video here.".into()),
+            Err(_) => editor.note = Some(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into()),
         }
         cx.notify();
     }
@@ -84,7 +85,7 @@ impl QuillApp {
             .is_some_and(|video| video.state() == PlayState::Failed)
         {
             editor.player = None;
-            editor.note = Some("Quill can't play this video here.".into());
+            editor.note = Some(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into());
         }
         if !held && let Some(video) = editor.player.as_ref() {
             match video.state() {

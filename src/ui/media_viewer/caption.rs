@@ -22,6 +22,7 @@
 use super::*;
 use crate::ui::motion::Glide;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use quill::lang::{keys, tr};
 use std::time::Instant;
 
 /// `st::fadeWrapDuration`.
@@ -203,7 +204,11 @@ impl QuillApp {
         let toggle = cut.then(|| {
             div().flex().justify_end().child(
                 Button::new(("media-viewer-caption-toggle", row_id))
-                    .label(if expanded { "Show less" } else { "Show more" })
+                    .label(if expanded {
+                        tr(keys::Q_AV_SHOW_LESS)
+                    } else {
+                        tr(keys::Q_AV_SHOW_MORE)
+                    })
                     .ghost()
                     .xsmall()
                     .text_color(gpui_kit::white())

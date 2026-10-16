@@ -17,6 +17,7 @@ use gpui_kit::*;
 use quill::calls::ptt::{PttAction, PttConfig, PushToTalk};
 use quill::calls::ptt_global::{HookState, KeyEdge, Sink};
 use quill::calls::tile_pin::TileKey;
+use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::MessageSender;
 use std::time::Duration;
 
@@ -295,7 +296,7 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.choose_group_call_join_as(sender).is_err() {
-                self.connection.status_note = "Couldn't change who you join as.".into();
+                self.connection.status_note = tr(keys::Q_AV_COULDNT_CHANGE_WHO_YOU_JOIN).into();
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_group_call_join_as(Some(sender));
@@ -307,7 +308,7 @@ impl QuillApp {
     pub(super) fn join_as_label(&self, sender: Option<MessageSender>) -> String {
         match sender {
             Some(sender) => self.group_call_participant_name(&sender),
-            None => "Yourself".into(),
+            None => tr(keys::Q_AV_YOURSELF).into(),
         }
     }
 
@@ -337,7 +338,7 @@ impl QuillApp {
                 .child(
                     Switch::new("call-pref-ptt-switch")
                         .checked(config.enabled)
-                        .accessibility_label("Push-to-talk")
+                        .accessibility_label(tr(keys::Q_AV_PUSH_TO_TALK))
                         .on_click(cx.listener(|this, &on, _, cx| {
                             this.group_call.ptt_capture = false;
                             this.set_call_pref(|prefs| prefs.push_to_talk.enabled = on, cx);
@@ -347,12 +348,12 @@ impl QuillApp {
                     div()
                         .flex()
                         .flex_col()
-                        .child(div().text_sm().child("Push-to-talk"))
+                        .child(div().text_sm().child(tr(keys::Q_AV_PUSH_TO_TALK)))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(muted)
-                                .child("Hold a key to talk in voice chats"),
+                                .child(tr(keys::Q_AV_HOLD_A_KEY_TO_TALK)),
                         ),
                 ),
         );
@@ -368,12 +369,12 @@ impl QuillApp {
                             div()
                                 .text_xs()
                                 .font_weight(FontWeight::MEDIUM)
-                                .child("Shortcut"),
+                                .child(tr(keys::Q_AV_SHORTCUT)),
                         )
                         .child(
                             Button::new("call-pref-ptt-key")
                                 .label(if capturing {
-                                    "Press a key…".to_string()
+                                    tr(keys::Q_AV_PRESS_A_KEY).to_string()
                                 } else {
                                     ptt_key_label(&config.key)
                                 })
@@ -401,7 +402,7 @@ impl QuillApp {
                         .px_2()
                         .child(
                             Button::new("call-pref-ptt-open-settings")
-                                .label("Open Settings")
+                                .label(tr(keys::GROUP_CALL_MAC_SETTINGS))
                                 .small()
                                 .on_click(cx.listener(|_, _, _, _| {
                                     quill::calls::ptt_global::open_permission_settings();
@@ -409,7 +410,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("call-pref-ptt-recheck")
-                                .label("Check again")
+                                .label(tr(keys::Q_AV_CHECK_AGAIN))
                                 .small()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.recheck_global_ptt(cx);
@@ -424,9 +425,12 @@ impl QuillApp {
     /// "Hold Space to talk" while push-to-talk is on.
     pub(super) fn ptt_hint(&self) -> Option<String> {
         let config = self.ptt_config();
-        config
-            .enabled
-            .then(|| format!("Hold {} to talk", ptt_key_label(&config.key)))
+        config.enabled.then(|| {
+            tr_with(
+                keys::Q_AV_HOLD_TO_TALK,
+                &[("key", &(ptt_key_label(&config.key)).to_string())],
+            )
+        })
     }
 
     /// The pre-join "Join as" picker (tdesktop's join-as box): shown on an
@@ -467,7 +471,7 @@ impl QuillApp {
                     div()
                         .text_size(px(13.))
                         .text_color(rgb(0x91979e))
-                        .child("Join as"),
+                        .child(tr(keys::Q_AV_JOIN_AS)),
                 )
                 .child(
                     Button::new("group-call-join-as")
@@ -510,7 +514,7 @@ pub(super) fn ptt_key_label(key: &str) -> String {
         return key.to_uppercase();
     }
     match key {
-        "escape" => "Esc".into(),
+        "escape" => tr(keys::Q_AV_ESC).into(),
         _ => {
             let mut chars = key.chars();
             chars

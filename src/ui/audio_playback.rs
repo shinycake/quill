@@ -8,6 +8,7 @@ use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::playback::PlaybackClock;
 use quill::state::Session;
@@ -273,8 +274,8 @@ impl QuillApp {
             self.connection.status_note = format!(
                 "{} — seek {}",
                 match self.active_playback_kind() {
-                    PlaybackKind::Voice => "playing voice note",
-                    PlaybackKind::Audio => "playing audio",
+                    PlaybackKind::Voice => tr(keys::Q_AV_PLAYING_VOICE_NOTE),
+                    PlaybackKind::Audio => tr(keys::Q_AV_PLAYING_AUDIO),
                 },
                 format_voice_duration(offset as i32)
             );
@@ -335,7 +336,7 @@ impl QuillApp {
                             if let Some(id) = finished_id {
                                 this.playback.positions.insert(id, 0.0);
                             }
-                            this.connection.status_note = "playback finished".into();
+                            this.connection.status_note = tr(keys::Q_AV_PLAYBACK_FINISHED).into();
                             if let Some((chat, id)) = next {
                                 this.play_message(chat, id, cx);
                             }
@@ -460,10 +461,10 @@ impl QuillApp {
                 .is_some_and(PlaybackClock::is_playing);
             if playing {
                 self.pause_active_playback();
-                self.connection.status_note = "voice note paused".into();
+                self.connection.status_note = tr(keys::Q_AV_VOICE_NOTE_PAUSED).into();
             } else {
                 self.resume_active_playback(cx);
-                self.connection.status_note = "playing voice note".into();
+                self.connection.status_note = tr(keys::Q_AV_PLAYING_VOICE_NOTE).into();
             }
             cx.notify();
             return;
@@ -486,7 +487,7 @@ impl QuillApp {
         self.playback.pending_voice_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection.status_note = "voice file is outside the account files".into();
+            self.connection.status_note = tr(keys::Q_AV_VOICE_FILE_IS_OUTSIDE_THE).into();
             cx.notify();
             return;
         };
@@ -510,9 +511,9 @@ impl QuillApp {
         }
         let playing = self.start_player(&safe, offset);
         self.connection.status_note = if playing {
-            "playing voice note".into()
+            tr(keys::Q_AV_PLAYING_VOICE_NOTE).into()
         } else {
-            "voice note can't be played".into()
+            tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED).into()
         };
         cx.notify();
     }
@@ -536,10 +537,10 @@ impl QuillApp {
                 .is_some_and(PlaybackClock::is_playing);
             if playing {
                 self.pause_active_playback();
-                self.connection.status_note = "audio paused".into();
+                self.connection.status_note = tr(keys::Q_AV_AUDIO_PAUSED).into();
             } else {
                 self.resume_active_playback(cx);
-                self.connection.status_note = "playing audio".into();
+                self.connection.status_note = tr(keys::Q_AV_PLAYING_AUDIO).into();
             }
             cx.notify();
             return;
@@ -561,7 +562,7 @@ impl QuillApp {
         self.playback.pending_audio_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection.status_note = "audio file is outside the account files".into();
+            self.connection.status_note = tr(keys::Q_AV_AUDIO_FILE_IS_OUTSIDE_THE).into();
             cx.notify();
             return;
         };
@@ -583,9 +584,9 @@ impl QuillApp {
         self.playback.path = Some(safe.clone());
         let playing = self.start_player(&safe, offset);
         self.connection.status_note = if playing {
-            "playing audio".into()
+            tr(keys::Q_AV_PLAYING_AUDIO).into()
         } else {
-            "audio can't be played".into()
+            tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED).into()
         };
         cx.notify();
     }

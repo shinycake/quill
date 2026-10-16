@@ -447,6 +447,15 @@ toasts, language link boxes and others. The baseline drops from 204 to
 like text, playback files, `history/session_history_row.rs` (needs a
 split) and `security/passkeys.rs` (another thread is changing it).
 
+## PR 16: media viewer, players and group calls
+
+Converted after the video player overhaul (PRs 1 to 5) and call capture
+merged: the media viewer, the video player controls, inline and audio
+playback, the player bar and playlists, the video editor, and group calls
+(`lang/en/av.strings`). The strings check no longer skips these paths.
+`group_call_panel.rs` and `group_call_window.rs` stay in the baseline
+until the live story viewer (#852) merges, since it changes both.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

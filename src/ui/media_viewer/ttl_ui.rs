@@ -4,6 +4,7 @@
 //! opened, and keeping save, copy and forward away from the media.
 
 use super::*;
+use quill::lang::{keys, tr_with};
 use quill::media_viewer::{ViewerTtl, viewer_ttl};
 use quill::state::unix_ms_now;
 use std::f32::consts::{FRAC_PI_2, TAU};
@@ -111,9 +112,12 @@ impl QuillApp {
                 .text_sm()
                 .text_color(gpui_kit::white())
                 .role(Role::Status)
-                .aria_label(format!(
-                    "Disappears in {}",
-                    quill::media_viewer::seconds_tiny(left)
+                .aria_label(tr_with(
+                    keys::MEDIAVIEW_TTL_IN,
+                    &[(
+                        "time",
+                        &(quill::media_viewer::seconds_tiny(left)).to_string(),
+                    )],
                 ))
                 .child(ring)
                 .child(quill::media_viewer::seconds_tiny(left))

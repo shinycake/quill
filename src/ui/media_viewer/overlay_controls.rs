@@ -2,6 +2,7 @@
 //! (the video controller is `controller.rs`).
 
 use super::*;
+use quill::lang::{keys, tr};
 
 impl QuillApp {
     /// Parity slice 5: zoom controls share a row with the video
@@ -19,7 +20,7 @@ impl QuillApp {
             .child(
                 Button::new(("media-viewer-zoom-out", row_id))
                     .label("−")
-                    .accessibility_label("Zoom Out")
+                    .accessibility_label(tr(keys::MEDIA_ZOOM_OUT))
                     .ghost()
                     .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -35,7 +36,7 @@ impl QuillApp {
             .child(
                 Button::new(("media-viewer-zoom-in", row_id))
                     .label("+")
-                    .accessibility_label("Zoom In")
+                    .accessibility_label(tr(keys::MEDIA_ZOOM_IN))
                     .ghost()
                     .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -44,7 +45,7 @@ impl QuillApp {
             )
             .child(
                 Button::new(("media-viewer-zoom-reset", row_id))
-                    .label("Reset")
+                    .label(tr(keys::Q_AV_RESET))
                     .ghost()
                     .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -92,7 +93,7 @@ impl QuillApp {
                                 .label(toast.text.folder.clone())
                                 .link()
                                 .small()
-                                .tooltip("Show in folder")
+                                .tooltip(tr(keys::Q_AV_SHOW_IN_FOLDER_2))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.reveal_saved_toast_file(cx);
                                 })),

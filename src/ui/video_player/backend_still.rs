@@ -9,6 +9,7 @@
 use super::transport::BackendStatus;
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
 use gpui_kit::RenderImage;
+use quill::lang::{keys, tr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,8 +27,9 @@ pub(super) struct StillBackend {
 
 impl StillBackend {
     pub(super) fn open(path: &Path) -> Result<Self, PlayerError> {
-        let (picture, duration) = still_picture(path, 0.0)
-            .ok_or_else(|| PlayerError::new(ErrorKind::Open, "This video can't be played."))?;
+        let (picture, duration) = still_picture(path, 0.0).ok_or_else(|| {
+            PlayerError::new(ErrorKind::Open, tr(keys::Q_AV_THIS_VIDEO_CANT_BE_PLAYED))
+        })?;
         Ok(Self {
             path: path.to_path_buf(),
             picture: Some(picture),

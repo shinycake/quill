@@ -19,6 +19,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::share_links::{InviteRowAction, InviteRowFacts, copy_label, invite_row_action};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::send_rights::{SendKind, SendRights};
 use quill::state::{ActiveGroupCall, ChatSummary, DeepLinkAction};
 use quill::telegram::envelope::{ChatKind, MessageSender};
@@ -27,7 +28,7 @@ use quill::telegram::envelope::{ChatKind, MessageSender};
 const SHARE_CHOICES: usize = 14;
 
 /// tdesktop `lng_group_invite_copied`.
-pub(super) const LINK_COPIED: &str = "Invite link copied to clipboard.";
+pub(super) const LINK_COPIED: quill::lang::Key = keys::GROUP_INVITE_COPIED;
 
 impl QuillApp {
     /// The chat a video chat belongs to.
@@ -134,7 +135,7 @@ impl QuillApp {
             self.group_call.share_speaker = true;
             self.group_call.share_copied = false;
         } else {
-            self.connection.status_note = "Couldn't get the invite link.".into();
+            self.connection.status_note = tr(keys::Q_AV_COULDNT_GET_THE_INVITE_LINK).into();
         }
         cx.notify();
     }
@@ -220,7 +221,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("No chats loaded yet."),
+                    .child(tr(keys::Q_AV_NO_CHATS_LOADED_YET)),
             );
         }
         for (id, title, photo) in choices {
@@ -253,7 +254,11 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Share to"))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(tr(keys::SHARE_TITLE)),
+            )
             .child(list)
             .child(
                 div()
@@ -267,7 +272,7 @@ impl QuillApp {
             .when(links.speaker_link().is_some(), |card| {
                 card.child(
                     Checkbox::new("group-call-share-speaker")
-                        .label("Users with this link can speak")
+                        .label(tr(keys::GROUP_CALL_SHARE_SPEAKER))
                         .checked(speaker_checked)
                         .on_click(cx.listener(|this, &on, _, cx| {
                             this.group_call.share_speaker = on;
@@ -282,7 +287,7 @@ impl QuillApp {
                         .id("group-call-share-copied")
                         .text_xs()
                         .text_color(muted)
-                        .child(LINK_COPIED),
+                        .child(tr(LINK_COPIED)),
                 )
             })
             .child(
@@ -292,7 +297,7 @@ impl QuillApp {
                     .gap(px(8.))
                     .child(
                         Button::new("group-call-share-cancel")
-                            .label("Cancel")
+                            .label(tr(keys::CALL_CANCEL))
                             .ghost()
                             .small()
                             .on_click(

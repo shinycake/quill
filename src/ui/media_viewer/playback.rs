@@ -2,6 +2,7 @@
 //! preferences, the media-session tick, and zoom/pan.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// MED1: `SliderEvent` sink for the viewer video seek slider. Drag
@@ -158,7 +159,7 @@ impl QuillApp {
         match path {
             Some(path) => self.open_file_guarded(path, cx),
             None => {
-                self.connection.status_note = "download the media first to open it".into();
+                self.connection.status_note = tr(keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO_2).into();
                 cx.notify();
             }
         }
@@ -277,7 +278,10 @@ impl QuillApp {
         }
         if !restarted {
             // Nothing playing: the speed applies to the next play.
-            self.connection.status_note = format!("playback speed {}×", Self::speed_label(next));
+            self.connection.status_note = tr_with(
+                keys::Q_AV_PLAYBACK_SPEED,
+                &[("self_speed_label", &(Self::speed_label(next)).to_string())],
+            );
         }
         cx.notify();
     }
@@ -376,8 +380,8 @@ impl QuillApp {
             .label(Self::speed_label(shown))
             .ghost()
             .text_color(gpui_kit::white())
-            .tooltip("Playback speed")
-            .accessibility_label("Playback speed")
+            .tooltip(tr(keys::Q_AV_PLAYBACK_SPEED_2))
+            .accessibility_label(tr(keys::Q_AV_PLAYBACK_SPEED_2))
     }
 
     /// MED1: short "1.5×" style label for the speed button.
@@ -423,7 +427,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.media_prefs = prefs;
             if let Err(err) = live.driver.save_media_prefs() {
-                self.connection.status_note = format!("couldn't save media settings: {err}");
+                self.connection.status_note = tr_with(
+                    keys::Q_AV_COULDNT_SAVE_MEDIA_SETTINGS,
+                    &[("err", &err.to_string())],
+                );
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.media_prefs = prefs;

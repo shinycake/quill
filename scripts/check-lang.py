@@ -9,7 +9,7 @@ Fails when:
 
 Text is a string literal of at least two words that starts with a capital
 letter, outside test files and the lines of logs, panics and attributes.
-The media viewer and player files are skipped until they are converted.
+Test, demo and fixture files are skipped.
 
 --update lowers baseline entries to the current counts and drops the ones
 now at zero; it never adds or raises an entry.
@@ -21,7 +21,7 @@ import re
 import sys
 
 BASELINE = 'scripts/lang-baseline.txt'
-SKIP_PATH = re.compile(r'test|demo|fixture|video|player|media_viewer|group_call')
+SKIP_PATH = re.compile(r'test|demo|fixture')
 SKIP_LINE = re.compile(
     r'^\s*(#\[|//)|\b(debug|info|warn|error|trace|log|eprintln|println|panic|unreachable|todo|assert\w*)!'
     r'|\.expect\(|\bQUILL_|concat!|include_str!'

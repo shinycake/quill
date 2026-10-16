@@ -8,6 +8,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{ActiveGroupCall, HistoryMessage};
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 impl QuillApp {
@@ -26,12 +27,12 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.user(*user_id))
                 .map(|u| u.display_name())
-                .unwrap_or_else(|| format!("User {user_id}")),
+                .unwrap_or_else(|| tr_with(keys::Q_AV_USER, &[("user_id", &user_id.to_string())])),
             MessageSender::Chat { chat_id } => self
                 .session()
                 .and_then(|s| s.chats.get(chat_id))
                 .map(|c| c.title.clone())
-                .unwrap_or_else(|| format!("Chat {chat_id}")),
+                .unwrap_or_else(|| tr_with(keys::Q_AV_CHAT, &[("chat_id", &chat_id.to_string())])),
         }
     }
 
@@ -79,7 +80,7 @@ impl QuillApp {
                     div()
                         .text_xs()
                         .text_color(text_faint())
-                        .child("Starting camera…"),
+                        .child(tr(keys::Q_AV_STARTING_CAMERA)),
                 )
                 .into_any_element(),
             (false, _) => div().child(initials_avatar(name, 56.)).into_any_element(),
@@ -108,13 +109,13 @@ impl QuillApp {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .child(div().text_xs().font_semibold().child("Chat"));
+            .child(div().text_xs().font_semibold().child(tr(keys::Q_AV_CHAT_2)));
         if !call.are_messages_allowed {
             section = section.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Chat is turned off in this voice chat."),
+                    .child(tr(keys::Q_AV_CHAT_IS_TURNED_OFF_IN)),
             );
         }
         if !call.messages.is_empty() {
@@ -136,12 +137,12 @@ impl QuillApp {
             section = section
                 .child(
                     Textarea::new(&self.group_call.composer)
-                        .aria_label("Voice chat message")
+                        .aria_label(tr(keys::Q_AV_VOICE_CHAT_MESSAGE))
                         .h(px(40.)),
                 )
                 .child(
                     Button::new("group-call-message-send")
-                        .label("Send")
+                        .label(tr(keys::Q_AV_SEND))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.send_group_call_message(window, cx);
                         })),
@@ -151,7 +152,7 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("You can't send messages in this voice chat."),
+                    .child(tr(keys::Q_AV_YOU_CANT_SEND_MESSAGES_IN)),
             );
         }
         card.child(section)
@@ -192,13 +193,13 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .font_semibold()
-                            .child("Invite to voice chat"),
+                            .child(tr(keys::Q_AV_INVITE_TO_VOICE_CHAT)),
                     )
                     .child(
                         Button::new("group-call-invite-close")
                             .icon(gpui_kit::assets::IconName::X)
-                            .tooltip("Close")
-                            .accessibility_label("Close")
+                            .tooltip(tr(keys::GROUP_CALL_CLOSE))
+                            .accessibility_label(tr(keys::GROUP_CALL_CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.group_call.invite_open = false;
@@ -223,7 +224,7 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.user(*user_id))
                 .map(|u| u.display_name())
-                .unwrap_or_else(|| format!("User {user_id}"));
+                .unwrap_or_else(|| tr_with(keys::Q_AV_USER, &[("user_id", &user_id.to_string())]));
             let uid = *user_id;
             rows = rows.child(
                 div()
@@ -233,7 +234,7 @@ impl QuillApp {
                     .child(div().text_sm().child(name))
                     .child(
                         Button::new(format!("gc-invite-{uid}"))
-                            .label("Invite")
+                            .label(tr(keys::GROUP_CALL_INVITE_BUTTON))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.invite_group_call_participant(uid, cx);
@@ -247,7 +248,7 @@ impl QuillApp {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No contacts to invite."),
+                    .child(tr(keys::Q_AV_NO_CONTACTS_TO_INVITE)),
             );
         } else {
             panel = panel.child(rows);
@@ -267,7 +268,11 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<QuillApp>,
     ) -> impl IntoElement {
-        let kind = if is_video { "video chat" } else { "voice chat" };
+        let kind = if is_video {
+            tr(keys::Q_AV_VIDEO_CHAT)
+        } else {
+            tr(keys::Q_AV_VOICE_CHAT)
+        };
         let mut inner = div().flex().flex_col().items_center().gap_2();
         if !message.is_outgoing && !is_active && !was_missed {
             let chat_id = message.chat_id;
@@ -277,7 +282,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .font_semibold()
-                        .child(format!("📞 Incoming {kind} invitation")),
+                        .child(tr_with(keys::Q_AV_INCOMING_INVITATION, &[("kind", kind)])),
                 )
                 .child(
                     div()
@@ -285,14 +290,14 @@ impl QuillApp {
                         .gap_2()
                         .child(
                             Button::new(format!("gc-invite-accept-{}", message_id.0))
-                                .label("Accept")
+                                .label(tr(keys::CALL_ACCEPT))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.accept_group_call_invitation(chat_id, message_id, cx);
                                 })),
                         )
                         .child(
                             Button::new(format!("gc-invite-decline-{}", message_id.0))
-                                .label("Decline")
+                                .label(tr(keys::CALL_DECLINE))
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.decline_group_call_invitation(chat_id, message_id, cx);
@@ -301,9 +306,9 @@ impl QuillApp {
                 );
         } else {
             let state = if was_missed {
-                " · missed"
+                tr(keys::Q_AV_MISSED)
             } else if is_active {
-                " · in progress"
+                tr(keys::Q_AV_IN_PROGRESS)
             } else {
                 ""
             };
@@ -311,7 +316,10 @@ impl QuillApp {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("📞 {kind} invitation{state}")),
+                    .child(tr_with(
+                        keys::Q_AV_INVITATION,
+                        &[("kind", kind), ("state", state)],
+                    )),
             );
         }
         div()

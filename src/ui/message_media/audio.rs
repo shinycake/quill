@@ -2,6 +2,7 @@
 //! transcription.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 /// Round video note. tdesktop paints `history/view/media` round video as a
 /// circle (JPEG thumb, duration, play). Quill uses the same ffmpeg frames as
@@ -26,11 +27,11 @@ pub(in crate::ui) fn transcription_row(
             .items_center()
             .gap_2()
             .child(
-                inline_link(("transcribe", row), "Transcribe", accent)
+                inline_link(("transcribe", row), tr(keys::Q_AV_TRANSCRIBE), accent)
                     .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(
-                            "Send speech-recognition request to Telegram",
-                        )
+                        gpui_kit::component::tooltip::Tooltip::new(tr(
+                            keys::Q_AV_SEND_SPEECH_RECOGNITION_REQUEST_TO,
+                        ))
                         .build(window, cx)
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -42,9 +43,12 @@ pub(in crate::ui) fn transcription_row(
             .text_xs()
             .opacity(0.7)
             .child(if partial_text.is_empty() {
-                "Transcribing…".to_string()
+                tr(keys::Q_AV_TRANSCRIBING).to_string()
             } else {
-                format!("Transcribing… {partial_text}")
+                tr_with(
+                    keys::Q_AV_TRANSCRIBING_2,
+                    &[("partial_text", &partial_text.to_string())],
+                )
             })
             .into_any_element(),
         Some(SpeechRecognition::Text { text }) => div()
@@ -61,18 +65,16 @@ pub(in crate::ui) fn transcription_row(
             .items_start()
             .gap_1()
             .text_xs()
+            .child(div().w_full().opacity(0.7).child(tr_with(
+                keys::Q_AV_TRANSCRIPTION_FAILED,
+                &[("message", &message.to_string())],
+            )))
             .child(
-                div()
-                    .w_full()
-                    .opacity(0.7)
-                    .child(format!("Transcription failed: {message}")),
-            )
-            .child(
-                inline_link(("transcribe-retry", row), "Retry", accent).on_click(cx.listener(
-                    move |this, _, _, cx| {
+                inline_link(("transcribe-retry", row), tr(keys::Q_AV_RETRY), accent).on_click(
+                    cx.listener(move |this, _, _, cx| {
                         this.request_transcription(chat_id, message_id, cx);
-                    },
-                )),
+                    }),
+                ),
             )
             .into_any_element(),
     }
@@ -161,7 +163,7 @@ pub(in crate::ui) fn seek_bar_element(row_key: u64, seek: &SeekBarView, color: H
         div()
             .id(("seek-bar", row_key))
             .role(gpui_kit::Role::Group)
-            .aria_label("Playback position")
+            .aria_label(tr(keys::Q_AV_PLAYBACK_POSITION))
             .w_full()
             .child(Slider::new(slider).bg(color).text_color(color))
             .into_any_element()
@@ -209,7 +211,7 @@ pub(in crate::ui) fn voice_note_row(
     // The widest the status line gets ("played / total").
     let widest_status = format!("{total} / {total}");
     let meta = if downloading_now && !seek.is_playing {
-        "Downloading…".to_string()
+        tr(keys::Q_AV_DOWNLOADING_4).to_string()
     } else if active {
         format!(
             "{} / {total}",
@@ -220,15 +222,23 @@ pub(in crate::ui) fn voice_note_row(
     };
     let unheard = !outgoing && !note.is_listened && !active;
     let (icon, label, ring) = if seek.is_playing {
-        (gpui_kit::assets::IconName::Pause, "Pause", None)
+        (
+            gpui_kit::assets::IconName::Pause,
+            tr(keys::MAC_MENU_PLAYER_PAUSE),
+            None,
+        )
     } else if downloading_now {
         (
             gpui_kit::assets::IconName::X,
-            "Downloading",
+            tr(keys::SR_MESSAGE_DOWNLOADING),
             Some(download_fraction(file_id, files)),
         )
     } else {
-        (gpui_kit::assets::IconName::Play, "Play voice message", None)
+        (
+            gpui_kit::assets::IconName::Play,
+            tr(keys::Q_AV_PLAY_VOICE_MESSAGE),
+            None,
+        )
     };
     let row_key = message_id.0 as u64;
     // Telegram Desktop: an unplayed incoming note shows its whole
@@ -331,7 +341,7 @@ pub(in crate::ui) fn audio_row(
     } else if !audio.file_name.is_empty() {
         audio.file_name.clone()
     } else {
-        "Audio".to_string()
+        tr(keys::Q_AV_AUDIO).to_string()
     };
     // Phase 4.6: the active row shows elapsed / total (tdesktop-style).
     let total = voice::format_voice_duration(audio.duration);
@@ -344,22 +354,26 @@ pub(in crate::ui) fn audio_row(
         total
     };
     let meta = if downloading_now && !seek.is_playing {
-        "Downloading…".to_string()
+        tr(keys::Q_AV_DOWNLOADING_4).to_string()
     } else if audio.performer.is_empty() {
         duration_label
     } else {
         format!("{} · {duration_label}", audio.performer)
     };
     let (icon, label, ring) = if seek.is_playing {
-        (gpui_kit::assets::IconName::Pause, "Pause", None)
+        (
+            gpui_kit::assets::IconName::Pause,
+            tr(keys::MAC_MENU_PLAYER_PAUSE),
+            None,
+        )
     } else if downloading_now {
         (
             gpui_kit::assets::IconName::X,
-            "Downloading",
+            tr(keys::SR_MESSAGE_DOWNLOADING),
             Some(download_fraction(file_id, files)),
         )
     } else {
-        (gpui_kit::assets::IconName::Play, "Play", None)
+        (gpui_kit::assets::IconName::Play, tr(keys::Q_AV_PLAY), None)
     };
     let row_key = message_id.0 as u64;
     let cover_id = audio.cover_file_id().unwrap_or(FileId(0));

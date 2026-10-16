@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::ui::image_decode::DecodeSize;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// MED1: rotate the viewer photo 90° clockwise (photos only).
@@ -54,12 +55,12 @@ impl QuillApp {
                     self.viewer.rotated = Some((path, orientation.code(), image));
                 }
                 None => {
-                    self.connection.status_note = "couldn't rotate this photo".into();
+                    self.connection.status_note = tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO).into();
                     (self.viewer.orientation, self.viewer.rotated) = previous;
                 }
             },
             None => {
-                self.connection.status_note = "download the photo first to rotate it".into();
+                self.connection.status_note = tr(keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO).into();
                 (self.viewer.orientation, self.viewer.rotated) = previous;
             }
         }
@@ -152,11 +153,12 @@ impl QuillApp {
                     self.show_saved_toast(dest, item.kind.is_playable(), cx);
                 }
                 Err(err) => {
-                    self.connection.status_note = format!("couldn't save: {err}");
+                    self.connection.status_note =
+                        tr_with(keys::Q_AV_COULDNT_SAVE, &[("err", &err.to_string())]);
                 }
             },
             None => {
-                self.connection.status_note = "download the media first to save it".into();
+                self.connection.status_note = tr(keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO).into();
             }
         }
         cx.notify();
@@ -200,7 +202,7 @@ impl QuillApp {
             return;
         };
         if !quill::platform::reveal_in_file_manager(&toast.dest) {
-            self.connection.status_note = "couldn't open the folder".into();
+            self.connection.status_note = tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER).into();
         }
         cx.notify();
     }
@@ -301,7 +303,7 @@ impl QuillApp {
             return;
         };
         if !item.kind.is_picture() {
-            self.connection.status_note = "only photos can be copied".into();
+            self.connection.status_note = tr(keys::Q_AV_ONLY_PHOTOS_CAN_BE_COPIED).into();
             cx.notify();
             return;
         }
@@ -315,18 +317,18 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let orientation = self.viewer.orientation;
         let png = viewer_display_path(&item, &files, &roots)
-            .ok_or("download the photo first to copy it")
+            .ok_or(tr(keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO_2))
             .and_then(|path| {
                 let rgba = crate::ui::image_decode::decode_file(&path, DecodeSize::FULL)
-                    .map_err(|_| "couldn't copy this photo")?;
+                    .map_err(|_| tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))?;
                 let (pixels, width, height) =
                     orient_rgba(rgba.as_raw(), rgba.width(), rgba.height(), orientation);
                 let oriented = image::RgbaImage::from_raw(width, height, pixels)
-                    .ok_or("couldn't copy this photo")?;
+                    .ok_or(tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))?;
                 let mut bytes = std::io::Cursor::new(Vec::new());
                 image::DynamicImage::ImageRgba8(oriented)
                     .write_to(&mut bytes, image::ImageFormat::Png)
-                    .map_err(|_| "couldn't copy this photo")?;
+                    .map_err(|_| tr(keys::Q_AV_COULDNT_COPY_THIS_PHOTO))?;
                 Ok(bytes.into_inner())
             });
         match png {
@@ -335,7 +337,7 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.connection.status_note = "photo copied".into();
+                self.connection.status_note = tr(keys::Q_AV_PHOTO_COPIED).into();
             }
             Err(note) => self.connection.status_note = note.into(),
         }
@@ -355,24 +357,24 @@ impl QuillApp {
         }
         let png = self
             .viewer_oriented_frame()
-            .ok_or("a frame can only be copied once the video has loaded")
+            .ok_or(tr(keys::Q_AV_A_FRAME_CAN_ONLY_BE))
             .and_then(|frame| {
                 let size = frame.size(0);
                 let (width, height) = (size.width.0 as u32, size.height.0 as u32);
                 let mut pixels = frame
                     .as_bytes(0)
-                    .ok_or("couldn't copy this frame")?
+                    .ok_or(tr(keys::Q_AV_COULDNT_COPY_THIS_FRAME))?
                     .to_vec();
                 // RenderImage pixels are BGRA.
                 for pixel in pixels.as_chunks_mut::<4>().0 {
                     pixel.swap(0, 2);
                 }
                 let rgba = image::RgbaImage::from_raw(width, height, pixels)
-                    .ok_or("couldn't copy this frame")?;
+                    .ok_or(tr(keys::Q_AV_COULDNT_COPY_THIS_FRAME))?;
                 let mut bytes = std::io::Cursor::new(Vec::new());
                 image::DynamicImage::ImageRgba8(rgba)
                     .write_to(&mut bytes, image::ImageFormat::Png)
-                    .map_err(|_| "couldn't copy this frame")?;
+                    .map_err(|_| tr(keys::Q_AV_COULDNT_COPY_THIS_FRAME))?;
                 Ok(bytes.into_inner())
             });
         match png {
@@ -381,7 +383,7 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.connection.status_note = "Frame copied".into();
+                self.connection.status_note = tr(keys::Q_AV_FRAME_COPIED).into();
             }
             Err(note) => self.connection.status_note = note.into(),
         }
@@ -554,7 +556,7 @@ impl QuillApp {
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.connection.status_note = "could not load the attached stickers".into();
+            self.connection.status_note = tr(keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED).into();
         }
         cx.notify();
     }
@@ -586,7 +588,7 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.can_pin_messages());
         if !can_pin {
-            self.connection.status_note = "you can't pin messages in this chat".into();
+            self.connection.status_note = tr(keys::Q_AV_YOU_CANT_PIN_MESSAGES_IN).into();
             cx.notify();
             return;
         }
@@ -613,12 +615,12 @@ impl QuillApp {
                     self.apply_demo_pin_toggle(chat_id, *id);
                 }
             }
-            self.connection.status_note = "demo: album pin updated".into();
+            self.connection.status_note = tr(keys::Q_AV_DEMO_ALBUM_PIN_UPDATED).into();
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = "no live connection".into();
+            self.connection.status_note = tr(keys::Q_AV_NO_LIVE_CONNECTION).into();
             cx.notify();
             return;
         };
@@ -630,9 +632,12 @@ impl QuillApp {
                 }
             }
             self.connection.status_note = if failed == 0 {
-                "pinning album…".into()
+                tr(keys::Q_AV_PINNING_ALBUM).into()
             } else {
-                format!("couldn't pin {failed} album item(s)")
+                tr_with(
+                    keys::Q_AV_COULDNT_PIN_ALBUM_ITEM_S,
+                    &[("failed", &failed.to_string())],
+                )
             };
         } else {
             for id in &pinned {
@@ -641,9 +646,12 @@ impl QuillApp {
                 }
             }
             self.connection.status_note = if failed == 0 {
-                "unpinning album…".into()
+                tr(keys::Q_AV_UNPINNING_ALBUM).into()
             } else {
-                format!("couldn't unpin {failed} album item(s)")
+                tr_with(
+                    keys::Q_AV_COULDNT_UNPIN_ALBUM_ITEM_S,
+                    &[("failed", &failed.to_string())],
+                )
             };
         }
         cx.notify();

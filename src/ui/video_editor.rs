@@ -23,6 +23,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::{AttachmentExtras, AttachmentKind, EditMediaKind};
+use quill::lang::{keys, tr};
 use quill::sticker_set_box::SetKind;
 use quill::video_edit::{VideoEdits, VideoSource, probe_source, render_edited, render_frame};
 use quill::video_timeline::Timeline;
@@ -248,7 +249,7 @@ impl QuillApp {
             still_wanted: None,
             serial,
             busy: false,
-            note: Some("Reading the video…".into()),
+            note: Some(tr(keys::Q_AV_READING_THE_VIDEO).into()),
             player: None,
             user_paused: false,
             playback_ms: None,
@@ -315,7 +316,7 @@ impl QuillApp {
         }
         let Some(info) = info else {
             if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-                editor.note = Some("This isn't a video Quill can read.".into());
+                editor.note = Some(tr(keys::Q_AV_THIS_ISNT_A_VIDEO_QUILL).into());
             }
             cx.notify();
             return;
@@ -469,7 +470,7 @@ impl QuillApp {
         }
         editor.player = None;
         editor.busy = true;
-        editor.note = Some("Preparing the video…".into());
+        editor.note = Some(tr(keys::Q_AV_PREPARING_THE_VIDEO).into());
         editor.serial += 1;
         let serial = editor.serial;
         let encode_source = source.clone();
@@ -554,9 +555,9 @@ impl QuillApp {
                 attachment.path = output;
                 attachment.extras = extras;
                 if edits.gif && info.has_audio && several {
-                    "The GIF leaves the album and goes out on its own"
+                    tr(keys::Q_AV_THE_GIF_LEAVES_THE_ALBUM)
                 } else {
-                    "Video edits saved"
+                    tr(keys::Q_AV_VIDEO_EDITS_SAVED)
                 }
             }
             Some(EditorTarget::MessageEdit) => {
@@ -576,7 +577,7 @@ impl QuillApp {
                 extras.gif = false;
                 extras.sound_removed = false;
                 edit.media_edit.video_extras = extras;
-                "Video edits saved"
+                tr(keys::Q_AV_VIDEO_EDITS_SAVED)
             }
             Some(EditorTarget::Set { .. } | EditorTarget::Avatar) | None => return,
         };

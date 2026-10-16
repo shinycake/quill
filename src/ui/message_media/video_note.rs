@@ -1,6 +1,7 @@
 //! Round video messages.
 
 use super::*;
+use quill::lang::{keys, tr};
 
 /// Round video message diameter.
 /// Telegram Desktop `maxVideoMessageSize`.
@@ -110,7 +111,7 @@ pub(in crate::ui) fn video_note_attachment(
                         div()
                             .text_xs()
                             .text_color(text_muted())
-                            .child("Video message"),
+                            .child(tr(keys::IN_DLG_VIDEO_MESSAGE)),
                     )
                 })
                 .into_any_element(),
@@ -150,9 +151,9 @@ pub(in crate::ui) fn video_note_attachment(
                 })
                 .role(gpui_kit::Role::Button)
                 .aria_label(if sounding {
-                    "Pause video message"
+                    tr(keys::Q_AV_PAUSE_VIDEO_MESSAGE)
                 } else {
-                    "Play video message"
+                    tr(keys::Q_AV_PLAY_VIDEO_MESSAGE)
                 })
                 .tab_index(0)
                 .cursor_pointer()

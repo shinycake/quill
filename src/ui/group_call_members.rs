@@ -11,7 +11,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenu, Po
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 
@@ -21,9 +21,12 @@ pub(super) fn member_status(p: &ParsedGroupCallParticipant, speaking: bool) -> (
     if speaking {
         ("speaking", MEMBER_ACTIVE)
     } else if p.is_hand_raised {
-        ("wants to speak", MEMBER_INACTIVE_STATUS)
+        (
+            tr(keys::GROUP_CALL_RAISED_HAND_STATUS),
+            MEMBER_INACTIVE_STATUS,
+        )
     } else if p.is_muted_for_current_user {
-        ("muted for you", MEMBER_MUTED_ICON)
+        (tr(keys::GROUP_CALL_MUTED_BY_ME_STATUS), MEMBER_MUTED_ICON)
     } else {
         ("listening", MEMBER_INACTIVE_STATUS)
     }
@@ -59,13 +62,13 @@ impl QuillApp {
                 };
                 if call.is_joined && screen_source {
                     menu = menu.item(item(
-                        if call.screen_sharing || call.screen_share_pending { "Stop Sharing Screen" } else { "Share Screen" },
+                        if call.screen_sharing || call.screen_share_pending { tr(keys::Q_AV_STOP_SHARING_SCREEN) } else { tr(keys::GROUP_CALL_TOOLTIP_SCREEN) },
                         |this, _, cx| this.toggle_group_call_screen_share(cx),
                     ));
                 }
                 if call.are_messages_allowed || !call.messages.is_empty() {
                     menu = menu.item(item(
-                        if chat_shown { "Hide Chat" } else { "Show Chat" },
+                        if chat_shown { tr(keys::Q_AV_HIDE_CHAT) } else { tr(keys::Q_AV_SHOW_CHAT) },
                         |this, _, cx| {
                             this.group_call.chat_shown = !this.group_call.chat_shown;
                             cx.notify();
@@ -73,37 +76,37 @@ impl QuillApp {
                     ));
                 }
                 if share_link {
-                    menu = menu.item(item("Share Invite Link", |this, _, cx| this.open_group_call_share_links(cx)));
+                    menu = menu.item(item(tr(keys::GROUP_CALL_SHARE), |this, _, cx| this.open_group_call_share_links(cx)));
                 }
                 // tdesktop's menu: "Settings" opens the call settings box.
                 menu = menu.item(item(tr(keys::GROUP_CALL_SETTINGS), |this, _, cx| this.open_group_call_settings(cx)));
                 if call.can_be_managed {
                     if call.share_links.listener.is_some() {
-                        menu = menu.item(item("Revoke Invite Link", |this, _, cx| this.revoke_group_call_invite_link(cx)));
+                        menu = menu.item(item(tr(keys::Q_AV_REVOKE_INVITE_LINK), |this, _, cx| this.revoke_group_call_invite_link(cx)));
                     }
-                    menu = menu.item(item("Stream With…", |this, _, cx| this.fetch_video_chat_rtmp_url(cx)));
+                    menu = menu.item(item(tr(keys::MENU_START_GROUP_CALL_WITH), |this, _, cx| this.fetch_video_chat_rtmp_url(cx)));
                     menu = menu
                         .separator()
-                        .item(item("Edit Title", |this, window, cx| this.open_group_call_title_dialog(window, cx)))
+                        .item(item(tr(keys::Q_AV_EDIT_TITLE), |this, window, cx| this.open_group_call_title_dialog(window, cx)))
                         .item(item(
-                            if call.record_duration > 0 { "Stop Recording" } else { "Start Recording" },
+                            if call.record_duration > 0 { tr(keys::GROUP_CALL_PTT_RECORDING) } else { tr(keys::GROUP_CALL_RECORDING_START) },
                             |this, _, cx| this.toggle_group_call_recording(cx),
                         ));
                     if call.can_toggle_mute_new_participants {
                         menu = menu.item(
-                            item("Mute New Participants", |this, _, cx| this.toggle_video_chat_mute_new(cx))
+                            item(tr(keys::GROUP_CALL_NEW_MUTED), |this, _, cx| this.toggle_video_chat_mute_new(cx))
                                 .checked(call.mute_new_participants),
                         );
                     }
                     if call.can_toggle_are_messages_allowed {
                         menu = menu.item(
-                            item("Allow Chat", |this, _, cx| this.toggle_group_call_chat(cx))
+                            item(tr(keys::Q_AV_ALLOW_CHAT), |this, _, cx| this.toggle_group_call_chat(cx))
                                 .checked(call.are_messages_allowed),
                         );
                     }
                     menu = menu
                         .separator()
-                        .item(item("End Video Chat", |this, _, cx| this.end_active_group_call(cx)));
+                        .item(item(tr(keys::GROUP_CALL_END), |this, _, cx| this.end_active_group_call(cx)));
                 }
                 menu
             })
@@ -175,7 +178,7 @@ impl QuillApp {
                             .font_weight(FontWeight::MEDIUM)
                             .truncate()
                             .child(if me {
-                                format!("{name} (you)")
+                                tr_with(keys::Q_AV_YOU, &[("name", &name.to_string())])
                             } else {
                                 name.clone()
                             }),
@@ -209,12 +212,12 @@ impl QuillApp {
             if me {
                 if p.is_hand_raised {
                     menu = menu.item(item(
-                        "Lower Hand".into(),
+                        tr(keys::Q_AV_LOWER_HAND).into(),
                         Box::new(|this, cx| this.toggle_group_call_self_hand(false, cx)),
                     ));
                 } else if force_muted {
                     menu = menu.item(item(
-                        "Raise Hand".into(),
+                        tr(keys::Q_AV_RAISE_HAND).into(),
                         Box::new(|this, cx| this.toggle_group_call_self_hand(true, cx)),
                     ));
                 }
@@ -225,13 +228,13 @@ impl QuillApp {
                 let lower = sender;
                 menu = menu
                     .item(item(
-                        "Allow to Speak".into(),
+                        tr(keys::GROUP_CALL_CONTEXT_UNMUTE).into(),
                         Box::new(move |this, cx| {
                             this.toggle_group_call_participant_muted(allow, false, cx)
                         }),
                     ))
                     .item(item(
-                        "Lower Hand".into(),
+                        tr(keys::Q_AV_LOWER_HAND).into(),
                         Box::new(move |this, cx| {
                             this.toggle_group_call_participant_hand(lower, false, cx)
                         }),
@@ -239,9 +242,9 @@ impl QuillApp {
             } else if p.can_be_muted_for_all_users || p.can_be_muted_for_current_user {
                 let sender = sender;
                 let label = if p.can_be_muted_for_all_users {
-                    "Mute"
+                    tr(keys::GROUP_CALL_CONTEXT_MUTE)
                 } else {
-                    "Mute for Me"
+                    tr(keys::GROUP_CALL_CONTEXT_MUTE_FOR_ME)
                 };
                 menu = menu.item(item(
                     label.into(),
@@ -252,9 +255,9 @@ impl QuillApp {
             } else if p.can_be_unmuted_for_all_users || p.can_be_unmuted_for_current_user {
                 let sender = sender;
                 let label = if p.can_be_unmuted_for_all_users {
-                    "Allow to Speak"
+                    tr(keys::GROUP_CALL_CONTEXT_UNMUTE)
                 } else {
-                    "Unmute for Me"
+                    tr(keys::GROUP_CALL_CONTEXT_UNMUTE_FOR_ME)
                 };
                 menu = menu.item(item(
                     label.into(),
@@ -265,8 +268,14 @@ impl QuillApp {
             }
             let volume = p.volume_level / 100;
             for (label, delta) in [
-                (format!("Louder ({volume}%)"), 2000),
-                (format!("Quieter ({volume}%)"), -2000),
+                (
+                    tr_with(keys::Q_AV_LOUDER, &[("volume", &volume.to_string())]),
+                    2000,
+                ),
+                (
+                    tr_with(keys::Q_AV_QUIETER, &[("volume", &volume.to_string())]),
+                    -2000,
+                ),
             ] {
                 let sender = sender;
                 menu = menu.item(item(
@@ -278,7 +287,7 @@ impl QuillApp {
             }
             if let Some(user_id) = user_id.filter(|_| owned) {
                 menu = menu.separator().item(item(
-                    "Remove".into(),
+                    tr(keys::GROUP_CALL_CONTEXT_REMOVE).into(),
                     Box::new(move |this, cx| this.ban_group_call_participant(user_id, cx)),
                 ));
             }

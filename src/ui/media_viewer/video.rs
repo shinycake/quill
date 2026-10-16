@@ -3,6 +3,7 @@
 //! helpers shared with inline playback and calls.
 
 use super::*;
+use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     /// Start viewer playback when the current item is a video whose clip is
@@ -278,7 +279,7 @@ impl QuillApp {
                 .min(0.0)
                 .max(100.0)
                 .default_value((self.playback.volume * 100.0).round())
-                .label("Volume")
+                .label(tr(keys::Q_AV_VOLUME_2))
         });
         cx.subscribe(&volume, |this, _, event, cx| {
             this.on_viewer_volume_event(event, cx);
@@ -301,7 +302,7 @@ impl QuillApp {
                 .max(max as f32)
                 .step(0.1)
                 .default_value(position.min(max) as f32)
-                .label("Seek")
+                .label(tr(keys::Q_AV_SEEK))
         });
         cx.subscribe(&slider, |this, _, event, cx| {
             this.on_viewer_seek_event(event, cx);
@@ -425,8 +426,10 @@ pub(super) fn viewer_error_message(
         "video"
     };
     match error.kind {
-        ErrorKind::Unsupported => format!("{noun} format not supported"),
-        ErrorKind::Open | ErrorKind::Decode => format!("couldn't play this {noun}"),
+        ErrorKind::Unsupported => tr_with(keys::Q_AV_FORMAT_NOT_SUPPORTED, &[("noun", noun)]),
+        ErrorKind::Open | ErrorKind::Decode => {
+            tr_with(keys::Q_AV_COULDNT_PLAY_THIS, &[("noun", noun)])
+        }
     }
 }
 

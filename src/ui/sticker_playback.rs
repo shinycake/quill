@@ -4,6 +4,7 @@ use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::FileId;
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::power_saving;
 use quill::telegram::envelope::StickerFormat;
@@ -273,7 +274,7 @@ impl QuillApp {
                                         let mut rgba =
                                             image::RgbaImage::from_raw(edge, edge, bytes)
                                                 .ok_or_else(|| {
-                                                    "Invalid sticker frame".to_string()
+                                                    tr(keys::Q_AV_INVALID_STICKER_FRAME).to_string()
                                                 })?;
                                         // rlottie is premultiplied; GPUI expects straight BGRA.
                                         for pixel in rgba.as_chunks_mut::<4>().0 {
@@ -304,7 +305,9 @@ impl QuillApp {
                                 let mut frames = Vec::with_capacity(decoded.frames.len());
                                 for path in decoded.frames {
                                     if cancel.load(Ordering::SeqCst) {
-                                        return Err("Sticker playback cancelled".into());
+                                        return Err(
+                                            tr(keys::Q_AV_STICKER_PLAYBACK_CANCELLED).into()
+                                        );
                                     }
                                     let rgba =
                                         image::open(path).map_err(|e| e.to_string())?.into_rgba8();
@@ -322,10 +325,10 @@ impl QuillApp {
                                 }
                                 (frames, decoded.fps)
                             }
-                            _ => return Err("Unsupported animated sticker".into()),
+                            _ => return Err(tr(keys::Q_AV_UNSUPPORTED_ANIMATED_STICKER).into()),
                         };
                         if frames.is_empty() {
-                            return Err("Sticker has no frames".to_string());
+                            return Err(tr(keys::Q_AV_STICKER_HAS_NO_FRAMES).to_string());
                         }
                         let duration = Duration::from_secs_f64(frames.len() as f64 / fps);
                         let frames: Arc<[Arc<RenderImage>]> = frames
