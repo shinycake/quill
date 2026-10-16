@@ -872,3 +872,17 @@ mod demo_websites;
 #[allow(unused_imports)]
 pub use demo_websites::*;
 mod apply_demo_album;
+
+/// Tests: adds the stress fixture's `chats` chats to a demo session, for a
+/// chat list long enough to scroll.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(super) fn add_stress_chats(session: &mut Session, chats: usize) {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(session.last_seq);
+    for json in stress_fixture(chats, 0) {
+        if let Some(owned) = copy_and_parse(&json, &seq, &sink) {
+            session.apply(owned);
+        }
+    }
+}

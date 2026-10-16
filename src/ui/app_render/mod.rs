@@ -708,6 +708,7 @@ impl Render for QuillApp {
                                         show_code,
                                         show_password,
                                         show_qr,
+                                        window,
                                         cx,
                                     ))
                                 }

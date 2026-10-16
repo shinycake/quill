@@ -306,11 +306,17 @@ impl QuillApp {
         .detach();
     }
 
+    /// Enter in the search field: open the selected result, else the
+    /// first one (tdesktop `Widget::submit`).
     pub(in crate::ui) fn activate_first_search_result(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(row) = self.chat_list.keys.search_selection() {
+            self.open_search_row(row, window, cx);
+            return;
+        }
         let chat = self
             .session()
             .and_then(|session| session.search.search.merged_chat_ids().first().copied());
@@ -428,6 +434,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("sidebar-search-field")
+                    .key_context(crate::ui::chat_list_keys::CHAT_SEARCH_CONTEXT)
                     .flex_1()
                     .on_click(cx.listener(|this, _, window, cx| {
                         if !this.search_is_open() {

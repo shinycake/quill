@@ -19,9 +19,16 @@ impl PressableDiv for gpui_kit::Stateful<Div> {
     /// theme and a light lift in the night theme, not an accent tint.
     fn pressable(self, theme: &Theme) -> Self {
         let fg = theme.foreground;
-        self.hover(move |s| s.bg(fg.opacity(0.06)))
+        let over = hover_fill(theme);
+        self.hover(move |s| s.bg(over))
             .active(move |s| s.bg(fg.opacity(0.11)))
     }
+}
+
+/// The hover fill of a pressable surface; the chat list also paints its
+/// keyboard selection with it (tdesktop's selected row is the hovered one).
+pub(super) fn hover_fill(theme: &Theme) -> Hsla {
+    theme.foreground.opacity(0.06)
 }
 
 /// Full-width, left-aligned action row for panels and sheets (kit buttons

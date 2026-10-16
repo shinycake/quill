@@ -287,6 +287,11 @@ pub(super) fn chat_row_height(tags: &[FolderTag], preview_lines: u8) -> Pixels {
 
 impl QuillApp {}
 
+/// The open chat's row under the pointer (or the keyboard selection).
+pub(super) fn open_row_hover_fill(theme: &Theme) -> Hsla {
+    theme.primary.opacity(0.3)
+}
+
 pub(super) fn session_chat_row(
     chat: &ChatSummary,
     selected: bool,
@@ -339,7 +344,7 @@ pub(super) fn session_chat_row(
     story_ring: Option<StoryRing>,
     muted_fg: Hsla,
     cx: &mut Context<QuillApp>,
-) -> impl IntoElement {
+) -> impl IntoElement + Styled + StatefulInteractiveElement + use<> {
     let id = chat.id;
     // The selected row sits on a tinted fill; its secondary text uses a
     // foreground tuned for AA contrast there (the grey muted token is 3.2:1).
@@ -444,7 +449,7 @@ pub(super) fn session_chat_row(
         .test_support()
         .aria_selected(selected)
         .when(selected, |this| {
-            this.hover(|s| s.bg(cx.theme().primary.opacity(0.3)))
+            this.hover(|s| s.bg(open_row_hover_fill(cx.theme())))
                 .active(|s| s.bg(cx.theme().primary.opacity(0.4)))
         })
         .bg(if selected {

@@ -1,6 +1,7 @@
 //! Methods moved out of `chat_row.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chat_list_keys::ListRow;
 
 impl QuillApp {
     /// `(id, name, colour)` of the folders plus whether tags are on.
@@ -179,8 +180,10 @@ impl QuillApp {
                     story_ring,
                     muted_fg,
                     cx,
-                )
-                .into_any_element();
+                );
+                let row = self
+                    .chat_list_nav_row(row, ListRow::Chat(id), selected, cx)
+                    .into_any_element();
                 let row = self.chat_swipe_wrap(row, id, swipe_label, height, cx);
                 match pin_slide {
                     // A row shifted by the pinned drag: the dragged row

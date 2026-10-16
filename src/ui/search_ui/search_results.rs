@@ -1,10 +1,18 @@
 //! Methods moved out of `search_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chat_list_keys::SearchRow;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
-    pub(in crate::ui) fn search_results(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(in crate::ui) fn search_results(
+        &self,
+        focus_visible: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        // The keys walk the results in the order this frame draws them.
+        self.chat_list.keys.begin_search_rows();
         let session = self.session();
         let status = session
             .map(|s| s.search.search.status)
@@ -221,30 +229,38 @@ impl QuillApp {
                 )
             })
             .when(!chats.is_empty() && show_chats, |this| {
-                let mut block = div().id("search-chats").flex().flex_col().gap_1().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(div().text_xs().font_semibold().child(chat_heading))
-                        // Slice CL2: "Clear" on the Recent heading —
-                        // `clearRecentlyFoundChats` (TGX
-                        // `SearchManager.clearRecentlyFoundChats`).
-                        .when(recents, |this| {
-                            this.child(
-                                Button::new("clear-search-recents")
-                                    .label(tr(keys::Q_CHAT_CLEAR))
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.set_search_prompt(
-                                            Some(SearchConfirm::ClearRecents),
-                                            None,
-                                            cx,
-                                        );
-                                    })),
-                            )
-                        }),
-                );
+                let keys: Vec<SearchRow> =
+                    chats.iter().map(|(id, ..)| SearchRow::Chat(*id)).collect();
+                let mut block = div()
+                    .on_children_prepainted(self.chat_list.keys.section_bounds_recorder(keys))
+                    .id("search-chats")
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().text_xs().font_semibold().child(chat_heading))
+                            // Slice CL2: "Clear" on the Recent heading —
+                            // `clearRecentlyFoundChats` (TGX
+                            // `SearchManager.clearRecentlyFoundChats`).
+                            .when(recents, |this| {
+                                this.child(
+                                    Button::new("clear-search-recents")
+                                        .label(tr(keys::Q_CHAT_CLEAR))
+                                        .ghost()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.set_search_prompt(
+                                                Some(SearchConfirm::ClearRecents),
+                                                None,
+                                                cx,
+                                            );
+                                        })),
+                                )
+                            }),
+                    );
                 for (id, title, preview) in chats {
                     let photo = self.chat_photo_for_row(id);
                     let row_title = title.clone();
@@ -258,6 +274,7 @@ impl QuillApp {
                         cx,
                         move |this, window, cx| this.select_search_chat(id, window, cx),
                     );
+                    let row = self.chat_search_nav_row(row, SearchRow::Chat(id), cx);
                     block = block.child(if recents {
                         // tdesktop: "Remove from Recent" on each entry.
                         div()
@@ -290,7 +307,12 @@ impl QuillApp {
                 this.child(section)
             })
             .when(!public_chats.is_empty() && show_chats, |this| {
+                let keys: Vec<SearchRow> = public_chats
+                    .iter()
+                    .map(|(id, ..)| SearchRow::PublicChat(*id))
+                    .collect();
                 let mut block = div()
+                    .on_children_prepainted(self.chat_list.keys.section_bounds_recorder(keys))
                     .id("search-public-chats")
                     .flex()
                     .flex_col()
@@ -303,7 +325,7 @@ impl QuillApp {
                     );
                 for (id, title, preview) in public_chats {
                     let photo = self.chat_photo_for_row(id);
-                    block = block.child(search_result_row(
+                    let row = search_result_row(
                         ("search-public-chat", id.0 as u64),
                         title,
                         preview,
@@ -312,7 +334,9 @@ impl QuillApp {
                         photo,
                         cx,
                         move |this, window, cx| this.select_search_chat(id, window, cx),
-                    ));
+                    );
+                    block =
+                        block.child(self.chat_search_nav_row(row, SearchRow::PublicChat(id), cx));
                 }
                 this.child(block)
             })
@@ -320,7 +344,12 @@ impl QuillApp {
                 if let Some(media) = tab.media_tab() {
                     return this.children(self.search_media_block(media, cx));
                 }
+                let keys: Vec<SearchRow> = messages
+                    .iter()
+                    .map(|(chat_id, message_id, ..)| SearchRow::Message(*chat_id, *message_id))
+                    .collect();
                 let mut block = div()
+                    .on_children_prepainted(self.chat_list.keys.section_bounds_recorder(keys))
                     .id("search-messages")
                     .flex()
                     .flex_col()
@@ -328,7 +357,7 @@ impl QuillApp {
                     .child(div().text_xs().font_semibold().child(message_heading));
                 for (chat_id, message_id, title, preview, date) in messages {
                     let photo = self.chat_photo_for_row(chat_id);
-                    block = block.child(search_result_row(
+                    let row = search_result_row(
                         ("search-msg", message_id.0 as u64),
                         title,
                         preview,
@@ -339,6 +368,11 @@ impl QuillApp {
                         move |this, window, cx| {
                             this.select_search_message(chat_id, message_id, window, cx);
                         },
+                    );
+                    block = block.child(self.chat_search_nav_row(
+                        row,
+                        SearchRow::Message(chat_id, message_id),
+                        cx,
                     ));
                 }
                 this.child(block)
@@ -348,11 +382,15 @@ impl QuillApp {
             });
         div()
             .id("search-results")
+            .relative()
             .flex()
             .flex_col()
             .gap_2()
             .flex_1()
             .min_h_0()
+            .rounded_md()
+            .when(focus_visible, |this| this.focus_ring_style(window, cx))
+            .on_mouse_move(cx.listener(|this, _, _, cx| this.chat_list_mouse_moved(cx)))
             .children(bar)
             .child(body)
     }

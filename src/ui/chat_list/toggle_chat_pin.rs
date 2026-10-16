@@ -149,13 +149,17 @@ impl QuillApp {
         show_code: bool,
         show_password: bool,
         show_qr: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mode = self.pane_mode();
+        // The list (or the search results) rings while it has the keyboard.
+        let focus_visible = self.chat_list_focus_visible(window);
         let mut list = div()
             .id("sidebar")
             .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())
             .track_focus(&self.focus_sidebar)
+            .map(|this| self.chat_list_key_handlers(this, cx))
             .w(self.frame.sidebar_width)
             .flex_none()
             .h_full()
@@ -254,7 +258,7 @@ impl QuillApp {
                         list = list.child(self.new_secret_picker_panel(cx));
                     }
                     if self.search_is_open() {
-                        list = list.child(self.search_results(cx));
+                        list = list.child(self.search_results(focus_visible, window, cx));
                     } else {
                         let folder = self.folders.tab;
                         let filter = self.chat_list.filter;
@@ -592,11 +596,19 @@ impl QuillApp {
                         self.chat_list.items = items;
                         list = list.child(
                             div()
+                                .relative()
                                 .flex()
                                 .flex_col()
                                 .flex_1()
                                 .min_h_0()
                                 .w_full()
+                                .rounded_md()
+                                .when(focus_visible, |this| this.focus_ring_style(window, cx))
+                                // A mouse move takes the selection back
+                                // from the keys.
+                                .on_mouse_move(
+                                    cx.listener(|this, _, _, cx| this.chat_list_mouse_moved(cx)),
+                                )
                                 // Pinned drag: the pointer position drives
                                 // the live reorder; a release anywhere
                                 // ends it.

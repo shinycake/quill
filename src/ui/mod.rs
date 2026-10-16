@@ -185,6 +185,8 @@ mod chat;
 mod chat_bars;
 mod chat_header_menu_ui;
 mod chat_list;
+mod chat_list_keys;
+mod chat_list_keys_tests;
 mod chat_look_ui;
 mod chat_row;
 mod chat_swipe_ui;
