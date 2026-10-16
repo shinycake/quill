@@ -24,6 +24,7 @@ use crate::telegram::requests::{
 
 mod admin;
 mod controls;
+pub use controls::SelfMuteError;
 mod join;
 mod link;
 pub(crate) mod live_feeds;
@@ -61,6 +62,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             self.close_call_feeds(before_id);
             self.group_camera_state.remove(&before_id);
+            self.group_mute_state.remove(&before_id);
         }
         let Some(group_call_id) = active_group_call_after else {
             return Ok(());
@@ -103,8 +105,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .active_group_call
                     .as_ref()
                     .is_some_and(|call| call.is_muted_self);
-                if let Some(engine) = self.call_engine.as_deref_mut() {
-                    let _ = engine.set_group_muted(group_call_id, muted);
+                if let Some(engine) = self.call_engine.as_deref_mut()
+                    && engine.set_group_muted(group_call_id, muted).is_ok()
+                {
+                    self.group_mute_state.insert(group_call_id, muted);
                 }
             }
             let connected = result.is_ok();
@@ -144,6 +148,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !transport_ready {
             return Ok(());
         }
+        // The microphone follows the tracked `is_muted_self`, which Telegram
+        // settles through the participant update for you: when the server
+        // muted you (an admin, or another device), the engine is muted to
+        // match. Re-issued only on change, and retried while it fails.
+        let wanted_mute = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_muted_self);
+        if self.group_mute_state.get(&group_call_id) != Some(&wanted_mute)
+            && let Some(engine) = self.call_engine.as_deref_mut()
+        {
+            match engine.set_group_muted(group_call_id, wanted_mute) {
+                Ok(()) => {
+                    self.group_mute_state.insert(group_call_id, wanted_mute);
+                }
+                Err(err) => {
+                    // Retried on the next tick; the error is recorded once
+                    // so a failing engine does not rewrite it every tick.
+                    if let Some(call) = self.session.calls.active_group_call.as_mut()
+                        && call.transport_error.is_none()
+                    {
+                        call.transport_error = Some(err.to_string());
+                    }
+                }
+            }
+        }
         // Outgoing camera follows the TDLib video flags; re-issue only on
         // change (mirrors the 1:1 `set_call_camera` discipline).
         let wanted_camera = self
@@ -167,7 +199,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                 }
                 Err(err) => {
-                    if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                    // Retried on the next tick; the error is recorded once
+                    // so a failing engine does not rewrite it every tick.
+                    if let Some(call) = self.session.calls.active_group_call.as_mut()
+                        && call.transport_error.is_none()
+                    {
                         call.transport_error = Some(err.to_string());
                     }
                 }

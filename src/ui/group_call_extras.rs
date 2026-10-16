@@ -17,6 +17,7 @@ use gpui_kit::*;
 use quill::calls::ptt::{PttAction, PttConfig, PushToTalk};
 use quill::calls::ptt_global::{HookState, KeyEdge, Sink};
 use quill::calls::tile_pin::TileKey;
+use quill::connect::SelfMuteError;
 use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::MessageSender;
 use std::time::Duration;
@@ -38,10 +39,23 @@ impl QuillApp {
             .is_some_and(|call| call.is_joined)
     }
 
+    /// Say why a mute change did not fully go through. A refused unmute
+    /// (the admin hold) needs no note: the button already shows it.
+    pub(super) fn note_self_mute_failure(&mut self, err: &SelfMuteError) {
+        let note = match err {
+            SelfMuteError::Engine(_) => tr(keys::Q_AV_COULDNT_CHANGE_THE_MICROPHONE),
+            SelfMuteError::Send(_) => tr(keys::Q_AV_MICROPHONE_CHANGED_OTHERS_NOT_TOLD),
+            SelfMuteError::NotAllowed => return,
+        };
+        self.connection.status_note = note.into();
+    }
+
     /// Mute or unmute the microphone without a toggle round trip.
     pub(super) fn set_group_call_self_mute_to(&mut self, muted: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.set_group_call_self_mute(muted);
+            if let Err(err) = live.driver.set_group_call_self_mute(muted) {
+                self.note_self_mute_failure(&err);
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_group_call_self_muted(muted);
         }

@@ -783,7 +783,8 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{MuteState, mute_state};
-    use crate::ui::group_call_members::member_status;
+    use crate::ui::group_call_members::{member_look, member_status};
+    use gpui_kit::assets::IconName;
     use quill::state::ActiveGroupCall;
     use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 
@@ -837,5 +838,37 @@ mod tests {
         assert_eq!(member_status(&p, p.is_speaking).0, "wants to speak");
         p.is_speaking = true;
         assert_eq!(member_status(&p, p.is_speaking).0, "speaking");
+    }
+
+    /// Your own row reads the call's `is_muted_self`, the same flag as the
+    /// call bar and the big button, not the participant's server fields.
+    #[test]
+    fn own_row_follows_the_call_mute_flag() {
+        let p = me(false, true, false);
+        let (status, _, mic, _) = member_look(&p, false, true);
+        assert_eq!(status, "muted");
+        assert!(matches!(mic, IconName::MicOff));
+        let (status, _, mic, _) = member_look(&p, false, false);
+        assert_eq!(status, "listening");
+        assert!(matches!(mic, IconName::Mic));
+        // Muted wins over the level tap; unmuted shows it.
+        assert_eq!(member_look(&p, true, true).0, "muted");
+        assert_eq!(member_look(&p, true, false).0, "speaking");
+        // An admin hold and a raised hand outrank your own flag.
+        let held = me(true, false, false);
+        assert_eq!(member_look(&held, false, false).0, "Muted by admin");
+        let raised = me(true, false, true);
+        assert!(matches!(
+            member_look(&raised, false, true).2,
+            IconName::Hand
+        ));
+        // Other members still come from their own fields.
+        let mut other = me(true, true, false);
+        other.is_current_user = false;
+        assert_eq!(member_look(&other, false, false).0, "listening");
+        assert!(matches!(
+            member_look(&other, false, false).2,
+            IconName::MicOff
+        ));
     }
 }

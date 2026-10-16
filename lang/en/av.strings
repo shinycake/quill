@@ -89,6 +89,7 @@
 "qll_av_could_not_save_to_your" = "could not save to your profile";
 "qll_av_couldnt_ban_the_participant" = "Couldn't ban the participant.";
 "qll_av_couldnt_change_the_hand_state" = "Couldn't change the hand state.";
+"qll_av_couldnt_change_the_microphone" = "Couldn't change the microphone.";
 "qll_av_couldnt_change_the_participant_mute" = "Couldn't change the participant mute.";
 "qll_av_couldnt_change_the_participant_volume" = "Couldn't change the participant volume.";
 "qll_av_couldnt_change_who_you_join" = "Couldn't change who you join as.";
@@ -182,7 +183,9 @@
 "qll_av_louder" = "Louder ({volume}%)";
 "qll_av_lower_hand" = "Lower Hand";
 "qll_av_messages_need_a_live_connection" = "Messages need a live connection.";
+"qll_av_microphone_changed_others_not_told" = "Microphone changed, but other participants may not see it.";
 "qll_av_missed" = " · missed";
+"qll_av_muted_status" = "muted";
 "qll_av_mute_new_needs_a_live" = "Mute-new needs a live connection.";
 "qll_av_muting_participant" = "Muting participant…";
 "qll_av_next" = "Next";

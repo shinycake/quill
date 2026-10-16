@@ -1,5 +1,6 @@
 //! Driver tests: group-call native transport, video routing and screen sharing.
 use super::*;
+use crate::connect::SelfMuteError;
 
 /// Phase C2g: the join carries the native offer (not the no-device
 /// fallback) and the audio SSRC parsed from it.
@@ -544,12 +545,203 @@ fn group_call_self_mute_reaches_the_microphone_and_telegram() {
         &sink,
         &group_participant_json(7, true, "null", "null"),
     );
-    driver.toggle_group_call_self_mute();
+    driver.toggle_group_call_self_mute().expect("mute");
     assert_eq!(handle.group_mutes(), vec![(555, true)]);
     let sent = sent_request(&recorder, "toggleGroupCallParticipantIsMuted");
     assert_eq!(sent["participant_id"]["user_id"], 7);
     assert_eq!(sent["is_muted"], true);
-    driver.toggle_group_call_self_mute();
+    driver.toggle_group_call_self_mute().expect("mute");
     assert_eq!(handle.group_mutes(), vec![(555, true), (555, false)]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+const JOINED_GROUP_CALL: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":true,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":false,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#;
+
+fn is_muted_self(driver: &ConnectDriver<Arc<RecordingSender>>) -> bool {
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .is_some_and(|call| call.is_muted_self)
+}
+
+/// Unmuting is engine-first: a failing engine leaves you muted, nothing is
+/// sent to Telegram, and the error reaches the caller (the UI shows it as
+/// the status note).
+#[test]
+fn group_call_unmute_failure_leaves_you_muted() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, JOINED_GROUP_CALL);
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &group_participant_json(7, true, "null", "null"),
+    );
+    driver.set_group_call_self_mute(true).expect("mute");
+    handle.fail_group_mute();
+    let sent_before = recorder.snapshot().len();
+    let result = driver.toggle_group_call_self_mute();
+    assert!(matches!(result, Err(SelfMuteError::Engine(_))));
+    assert!(is_muted_self(&driver), "a failed unmute must stay muted");
+    assert_eq!(recorder.snapshot().len(), sent_before, "nothing sent");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// When Telegram says you are muted (an admin, or another device) the
+/// button follows the server and the engine is muted to match; when it
+/// later says unmuted, the engine opens again.
+#[test]
+fn group_call_server_mute_settles_the_button_and_the_engine() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    let extra = driver.join_video_chat(555).expect("join tracked call");
+    ingest_call_json(&mut driver, &seq, &sink, JOINED_GROUP_CALL);
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+            extra.0
+        ),
+    );
+    let me = group_participant_json(7, true, "null", "null");
+    let muted_by_admin = me.replace(
+        r#""is_muted_for_all_users":false"#,
+        r#""is_muted_for_all_users":true"#,
+    );
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(!is_muted_self(&driver));
+    ingest_call_json(&mut driver, &seq, &sink, &muted_by_admin);
+    assert!(is_muted_self(&driver));
+    assert_eq!(handle.group_mutes().last(), Some(&(555, true)));
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(!is_muted_self(&driver));
+    assert_eq!(handle.group_mutes().last(), Some(&(555, false)));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Push-to-talk press and release go through the same engine-first path.
+#[test]
+fn group_call_push_to_talk_drives_the_engine_first() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, JOINED_GROUP_CALL);
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &group_participant_json(7, true, "null", "null"),
+    );
+    driver.set_group_call_self_mute(true).expect("hold closed");
+    driver.set_group_call_self_mute(false).expect("press");
+    assert_eq!(handle.group_mutes(), vec![(555, true), (555, false)]);
+    assert!(!is_muted_self(&driver));
+    handle.fail_group_mute();
+    assert!(driver.set_group_call_self_mute(true).is_err());
+    assert!(is_muted_self(&driver), "a failed release still closes it");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn join_tracked_call(
+    driver: &mut ConnectDriver<Arc<RecordingSender>>,
+    seq: &std::sync::atomic::AtomicU64,
+    sink: &Arc<dyn crate::diagnostics::DiagnosticSink>,
+) {
+    let extra = driver.join_video_chat(555).expect("join tracked call");
+    ingest_call_json(driver, seq, sink, JOINED_GROUP_CALL);
+    ingest_call_json(
+        driver,
+        seq,
+        sink,
+        &format!(
+            r#"{{"@type":"text","text":"join-answer","@extra":{}}}"#,
+            extra.0
+        ),
+    );
+}
+
+fn transport_error(driver: &ConnectDriver<Arc<RecordingSender>>) -> Option<String> {
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .and_then(|call| call.transport_error.clone())
+}
+
+/// Muting fails closed: when the engine refuses, the flag still says
+/// muted (the capture gate stops the audio), Telegram is told, the error
+/// is reported, and the pump keeps retrying the engine, recording the
+/// failure once rather than every tick.
+#[test]
+fn group_call_mute_failure_fails_closed_and_the_pump_retries() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    join_tracked_call(&mut driver, &seq, &sink);
+    let me = group_participant_json(7, true, "null", "null");
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    handle.fail_group_mute();
+    let result = driver.set_group_call_self_mute(true);
+    assert!(matches!(result, Err(SelfMuteError::Engine(_))));
+    assert!(is_muted_self(&driver), "the microphone must not stay live");
+    let sent = sent_request(&recorder, "toggleGroupCallParticipantIsMuted");
+    assert_eq!(sent["is_muted"], true);
+    // The pump retries on later updates; the failure is recorded once.
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    let first = transport_error(&driver);
+    assert!(first.is_some(), "the retry failure is surfaced");
+    if let Some(call) = driver.session.calls.active_group_call.as_mut() {
+        call.transport_error = Some("kept".into());
+    }
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert_eq!(transport_error(&driver).as_deref(), Some("kept"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An own-participant update that was already in flight when you muted
+/// (it still says unmuted) must not reopen the microphone. Once the toggle
+/// request completed, the server's word settles the flag again.
+#[test]
+fn group_call_stale_own_update_does_not_undo_a_local_mute() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    join_tracked_call(&mut driver, &seq, &sink);
+    let me = group_participant_json(7, true, "null", "null");
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    driver.set_group_call_self_mute(true).expect("mute");
+    assert!(is_muted_self(&driver));
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(is_muted_self(&driver), "a stale update must not unmute");
+    assert_eq!(handle.group_mutes().last(), Some(&(555, true)));
+    let toggle = sent_request(&recorder, "toggleGroupCallParticipantIsMuted");
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":{}}}"#, toggle["@extra"]),
+    );
+    ingest_call_json(&mut driver, &seq, &sink, &me);
+    assert!(!is_muted_self(&driver), "settled once the request is done");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Nobody can unmute themselves while an admin holds them muted
+/// (`can_unmute_self` false, which includes a raised hand).
+#[test]
+fn group_call_unmute_is_refused_while_force_muted() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    join_tracked_call(&mut driver, &seq, &sink);
+    let held = group_participant_json(7, true, "null", "null").replace(
+        r#""is_muted_for_all_users":false"#,
+        r#""is_muted_for_all_users":true"#,
+    );
+    ingest_call_json(&mut driver, &seq, &sink, &held);
+    assert!(is_muted_self(&driver));
+    let sent_before = recorder.snapshot().len();
+    let mutes_before = handle.group_mutes();
+    let result = driver.set_group_call_self_mute(false);
+    assert!(matches!(result, Err(SelfMuteError::NotAllowed)));
+    assert!(is_muted_self(&driver));
+    assert_eq!(handle.group_mutes(), mutes_before, "the engine stays shut");
+    assert_eq!(recorder.snapshot().len(), sent_before);
     let _ = std::fs::remove_dir_all(&dir);
 }

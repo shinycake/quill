@@ -98,42 +98,69 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Phase C3a: local-only self mute toggle. There is no TDLib "mute
-    /// self" for group calls outside the join parameters — the UI labels
-    /// this honestly as local-only; the state rides on the next (re)join.
-    /// Mute or unmute yourself in the joined group call: the
-    /// microphone goes quiet at once (the engine), and Telegram learns
-    /// it so everyone sees the muted icon
-    /// (`toggleGroupCallParticipantIsMuted` on yourself).
-    pub fn toggle_group_call_self_mute(&mut self) {
+    /// Mute or unmute yourself in the joined group call (see
+    /// [`Self::set_group_call_self_mute`]).
+    pub fn toggle_group_call_self_mute(&mut self) -> Result<(), SelfMuteError> {
         let Some(call) = self.session.calls.active_group_call.as_ref() else {
-            return;
+            return Ok(());
         };
         let muted = !call.is_muted_self;
-        self.set_group_call_self_mute(muted);
+        self.set_group_call_self_mute(muted)
     }
 
     /// Set (rather than flip) the self-mute state; push-to-talk drives
     /// this. A no-op when the state already matches.
-    pub fn set_group_call_self_mute(&mut self, muted: bool) {
+    ///
+    /// The tracked `is_muted_self` flag is what the mute button shows and
+    /// what the capture gates read. Muting fails closed: the flag is set
+    /// even when the engine refuses (the driver-side capture gate then
+    /// stops the audio) and the engine error is reported; the pump retries
+    /// the engine. Unmuting is engine-first (the 1:1 `set_call_muted`
+    /// discipline): an engine error leaves you muted. Unmuting is refused
+    /// while an admin holds you muted (`can_unmute_self` false, which
+    /// includes a raised hand). Telegram is told afterwards
+    /// (`toggleGroupCallParticipantIsMuted` on yourself); while that
+    /// request is in flight `Session` ignores own-participant updates that
+    /// disagree, and the driver pump makes the engine follow the settled
+    /// flag.
+    pub fn set_group_call_self_mute(&mut self, muted: bool) -> Result<(), SelfMuteError> {
         let Some(call) = self.session.calls.active_group_call.as_ref() else {
-            return;
+            return Ok(());
         };
         if call.is_muted_self == muted {
-            return;
+            return Ok(());
         }
         let group_call_id = call.id;
-        let me = call
-            .participants
-            .iter()
-            .find(|p| p.is_current_user)
-            .map(|p| p.participant_id);
-        self.session.set_group_call_self_muted(muted);
-        if let Some(engine) = self.call_engine.as_deref_mut() {
-            let _ = engine.set_group_muted(group_call_id, muted);
+        let me_row = call.participants.iter().find(|p| p.is_current_user);
+        if !muted && me_row.is_some_and(|me| me.is_muted_for_all_users && !me.can_unmute_self) {
+            return Err(SelfMuteError::NotAllowed);
         }
+        let me = me_row.map(|p| p.participant_id);
+        // Before the transport is up the engine only stores the state for
+        // the connect; with it up the call is real and may fail.
+        let applied = match self.call_engine.as_deref_mut() {
+            Some(engine) if engine.is_available() => {
+                Some(engine.set_group_muted(group_call_id, muted))
+            }
+            _ => None,
+        };
+        let mut engine_error = None;
+        match applied {
+            Some(Ok(())) => {
+                self.group_mute_state.insert(group_call_id, muted);
+            }
+            Some(Err(err)) if !muted => return Err(SelfMuteError::Engine(err)),
+            Some(Err(err)) => engine_error = Some(err),
+            None => {}
+        }
+        self.session.set_group_call_self_muted(muted);
         if let Some(me) = me {
-            let _ = self.toggle_group_call_participant_muted(me, muted);
+            self.toggle_group_call_participant_muted(me, muted)
+                .map_err(SelfMuteError::Send)?;
+        }
+        match engine_error {
+            Some(err) => Err(SelfMuteError::Engine(err)),
+            None => Ok(()),
         }
     }
 
@@ -434,4 +461,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         Ok(extra)
     }
+}
+
+/// Why a self-mute change did not fully go through.
+#[derive(Debug)]
+pub enum SelfMuteError {
+    /// The engine refused. An unmute changed nothing; a mute still took
+    /// effect (the capture gate closes the microphone) and the pump retries
+    /// the engine.
+    Engine(crate::calls::engine::EngineError),
+    /// The microphone changed but Telegram could not be told, so other
+    /// participants may still see the old icon.
+    Send(ConnectSendError),
+    /// An admin holds you muted (or your hand is raised): you cannot
+    /// unmute yourself.
+    NotAllowed,
 }

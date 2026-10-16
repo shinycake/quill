@@ -966,7 +966,14 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             let mut other = std::path::PathBuf::from(&path).into_os_string();
                             other.push(format!(".window{n}.png"));
                             let result = handle
-                                .update(cx, |_, window, _| window.render_to_image())
+                                .update(cx, |_, window, cx| {
+                                    // A second window that is not on screen
+                                    // gets no display-link frames, so its
+                                    // last painted frame can predate state
+                                    // changes: draw it now, then capture.
+                                    window.draw(cx).clear(cx);
+                                    window.render_to_image()
+                                })
                                 .map_err(|err| err.to_string())
                                 .and_then(|image| image.map_err(|err| err.to_string()))
                                 .and_then(|image| {

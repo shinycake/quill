@@ -127,12 +127,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase C3a: local-only self mute — no TDLib request (group calls
-    /// have no "mute self" outside the join parameters, and no audio
-    /// path exists yet). The state rides on the next (re)join.
+    /// Toggle your microphone: the driver applies it to the engine and
+    /// tells Telegram (`set_group_call_self_mute`).
     pub(super) fn toggle_group_call_self_mute(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.toggle_group_call_self_mute();
+            if let Err(err) = live.driver.toggle_group_call_self_mute() {
+                self.note_self_mute_failure(&err);
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             let muted = !session
                 .calls

@@ -284,11 +284,28 @@ impl Session {
         group_call_id: i32,
         participant: &ParsedGroupCallParticipant,
     ) {
+        // Your own mute change is in flight: an own-row update that
+        // disagrees is older than the change (a stale speaking or volume
+        // update) and must not undo it, or the microphone would reopen for
+        // a round trip. Once the request completed the next update settles.
+        let toggle_in_flight = self.requests.has_purpose(RequestPurpose::Calls(
+            CallsPurpose::ToggleGroupCallParticipantMute { group_call_id },
+        ));
         let Some(tracked) = self.calls.active_group_call.as_mut() else {
             return;
         };
         if tracked.id != group_call_id {
             return;
+        }
+        // Telegram is the truth for your own mute once joined (it reports
+        // a mute you asked for, and one an admin imposed); the driver pump
+        // makes the engine follow.
+        if participant.is_current_user
+            && tracked.is_joined
+            && !participant.order.is_empty()
+            && !toggle_in_flight
+        {
+            tracked.is_muted_self = participant.is_muted_for_all_users;
         }
         if participant.order.is_empty() {
             tracked
@@ -477,10 +494,9 @@ impl Session {
         self.calls.call_link = None;
     }
 
-    /// Phase C3a: flip the local-only self-mute state. There is no
-    /// TDLib "mute self" request for group calls outside the join
-    /// parameters, and no audio path exists yet (C2) — the UI labels
-    /// this honestly as local-only.
+    /// Set the tracked self-mute flag (what the mute button shows and the
+    /// capture gates read). The driver applies it to the engine and tells
+    /// Telegram; the demo session just flips it.
     pub fn set_group_call_self_muted(&mut self, muted: bool) {
         if let Some(tracked) = self.calls.active_group_call.as_mut() {
             tracked.is_muted_self = muted;
