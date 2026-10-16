@@ -6,7 +6,11 @@ Usage: python3 scripts/analyze-video-trace.py <trace.log> [display_hz]
 Per player: pull count and spacing, new pictures shown and their spacing,
 a histogram of the gaps between new pictures in display vsyncs (120 Hz by
 default), and how many new pictures skipped a source frame ("double
-steps": an item-time step over 1.5 times the typical one).
+steps": an item-time step over 1.5 times the typical one). Then, when the
+log has them, the decoded pictures per player and layout (`VF` lines:
+bytes the renderer uploads and the CPU conversion time) and the Windows
+renderer's uploads per path (`VU` lines: NV12 surface textures or the
+image atlas). docs/decisions/video-player-nv12.md has a before/after run.
 """
 
 import collections
@@ -27,11 +31,29 @@ def main():
         return 2
     tick_ms = 1000.0 / (float(sys.argv[2]) if len(sys.argv) > 2 else 120.0)
     rows = []
+    # (player, format) -> [(bytes, convert_us)], from `VF` lines.
+    pictures = collections.defaultdict(list)
+    # path -> [(bytes, upload_us)], from `VU` lines.
+    uploads = collections.defaultdict(list)
     with open(sys.argv[1], errors="replace") as log:
         for line in log:
+            fields = line.strip().split(",")
+            if line.startswith("VF,"):
+                try:
+                    pictures[(int(fields[1]), fields[2])].append(
+                        (int(fields[5]), int(fields[6]))
+                    )
+                except (IndexError, ValueError):
+                    pass
+                continue
+            if line.startswith("VU,"):
+                try:
+                    uploads[fields[1]].append((int(fields[2]), int(fields[3])))
+                except (IndexError, ValueError):
+                    pass
+                continue
             if not line.startswith("VT,"):
                 continue
-            fields = line.strip().split(",")
             try:
                 rows.append(
                     (
@@ -87,6 +109,21 @@ def main():
                 f"  wall advance {(last[1] - first[1]) / 1000:.0f} ms vs item advance "
                 f"{last[2] - first[2]:.0f} ms (display ts advance {last[4] - first[4]:.0f})"
             )
+    for (player, layout), shown in sorted(pictures.items()):
+        sizes = [size for size, _ in shown]
+        convert = [us for _, us in shown]
+        print(
+            f"player {player} {layout}: {len(shown)} pictures, "
+            f"{statistics.mean(sizes) / 1024:.0f} KiB each, convert us: "
+            f"p50={quantile(convert, .5)} p90={quantile(convert, .9)} max={max(convert)}"
+        )
+    for path, done in sorted(uploads.items()):
+        sizes = [size for size, _ in done]
+        took = [us for _, us in done]
+        print(
+            f"upload {path}: {len(done)} uploads, {sum(sizes) / 1048576:.1f} MiB, "
+            f"us: p50={quantile(took, .5)} p90={quantile(took, .9)} max={max(took)}"
+        )
     return 0
 
 
