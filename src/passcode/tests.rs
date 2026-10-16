@@ -12,6 +12,92 @@ fn idle_cache_extrapolates_and_fails_closed() {
     assert_eq!(sample.read(1000), Some(500));
     assert_eq!(sample.read(2500), Some(2000));
     assert_eq!(sample.read(900), Some(500));
+    let huge = IdleCache::Sample {
+        ms: u64::MAX,
+        taken_ms: 0,
+    };
+    assert_eq!(huge.read(10), Some(u64::MAX));
+}
+
+#[test]
+fn failed_cache_means_no_backend_answered() {
+    let candidates = candidate_backends(SessionEnv { x11: true });
+    let answer = select_backend(candidates, |_| None);
+    assert_eq!(answer, None);
+    let cache = match answer {
+        Some((_, ms)) => IdleCache::Sample { ms, taken_ms: 0 },
+        None => IdleCache::Failed,
+    };
+    assert_eq!(cache, IdleCache::Failed);
+}
+
+#[test]
+fn session_env_detects_real_x11_only() {
+    let x11 = |t, w, d| SessionEnv::from_vars(t, w, d).x11;
+    assert!(x11(Some("x11"), None, Some(":0")));
+    assert!(x11(Some("x11"), Some("wayland-0"), Some(":0")));
+    assert!(!x11(Some("wayland"), Some("wayland-0"), Some(":0")));
+    assert!(!x11(Some("wayland"), None, Some(":0")));
+    assert!(x11(None, None, Some(":0")));
+    assert!(x11(Some("tty"), Some(""), Some(":0")));
+    assert!(!x11(None, Some("wayland-0"), Some(":0")));
+    assert!(!x11(None, None, None));
+    assert!(!x11(None, None, Some("")));
+}
+
+#[test]
+fn candidates_skip_x11_outside_x11_sessions() {
+    assert_eq!(
+        candidate_backends(SessionEnv { x11: false }),
+        &[IdleBackend::Mutter, IdleBackend::ScreenSaver]
+    );
+    assert_eq!(
+        candidate_backends(SessionEnv { x11: true }),
+        &[
+            IdleBackend::Mutter,
+            IdleBackend::ScreenSaver,
+            IdleBackend::X11ScreenSaver
+        ]
+    );
+}
+
+#[test]
+fn backend_selection_keeps_the_first_that_answers() {
+    let all = candidate_backends(SessionEnv { x11: true });
+    let only = |want: &'static [IdleBackend]| move |b: IdleBackend| want.contains(&b).then_some(42);
+    assert_eq!(
+        select_backend(all, only(&[IdleBackend::X11ScreenSaver])),
+        Some((IdleBackend::X11ScreenSaver, 42))
+    );
+    assert_eq!(
+        select_backend(
+            all,
+            only(&[IdleBackend::ScreenSaver, IdleBackend::X11ScreenSaver])
+        ),
+        Some((IdleBackend::ScreenSaver, 42))
+    );
+    assert_eq!(
+        select_backend(all, only(&[IdleBackend::Mutter, IdleBackend::ScreenSaver])),
+        Some((IdleBackend::Mutter, 42))
+    );
+    // Probing stops at the first answer.
+    let mut probed = Vec::new();
+    let _ = select_backend(all, |b| {
+        probed.push(b);
+        Some(0)
+    });
+    assert_eq!(probed, [IdleBackend::Mutter]);
+    // A zero reading (just typed) is an answer, not a failure.
+    assert_eq!(
+        select_backend(all, |_| Some(0)),
+        Some((IdleBackend::Mutter, 0))
+    );
+    // An X11-only candidate list never reaches the X backend on Wayland.
+    let wayland = candidate_backends(SessionEnv { x11: false });
+    assert_eq!(
+        select_backend(wayland, only(&[IdleBackend::X11ScreenSaver])),
+        None
+    );
 }
 
 #[test]

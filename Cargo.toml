@@ -210,8 +210,9 @@ zbus = { version = "5", optional = true }
 async-io = { version = "2", optional = true }
 futures-lite = { version = "2", optional = true }
 # System-wide push-to-talk (docs/decisions/codex-ptt-global.md): the X11 RECORD
-# extension. Same x11rb 0.13 GPUI already links; only the `record` feature is new.
-x11rb = { version = "0.13", default-features = false, features = ["record", "composite", "randr"] }
+# extension. Same x11rb 0.13 GPUI already links; only the `record` feature is new. `screensaver` (MIT-SCREEN-SAVER QueryInfo)
+# gives OS idle time on X11 sessions (src/passcode/idle.rs).
+x11rb = { version = "0.13", default-features = false, features = ["record", "composite", "randr", "screensaver"] }
 # Screen sharing (src/calls/capture/screen_linux.rs): the screen cast portal on
 # Wayland (async-io and futures-lite are declared above);
 # libpipewire is loaded at run time (pipewire_dl.rs), so no build dependency.
