@@ -102,6 +102,8 @@ pub static CHROME: Signal = Signal::new();
 pub static PASSCODE: Signal = Signal::new();
 /// The "save power on low battery" switch changed.
 pub static BATTERY: Signal = Signal::new();
+/// macOS Reduce transparency or Increase contrast changed.
+pub static GLASS: Signal = Signal::new();
 
 /// The main window came to the front (or the OS resumed): everything that
 /// sleeps on a long timeout re-checks now, since monotonic timers pause in

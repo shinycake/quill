@@ -211,6 +211,7 @@ fn ui_main(args: &[String]) {
         // kit Phase 9: honor the OS reduce-motion preference.
         quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
         cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+        ui::glass_watch::start(cx);
         ui::bind_keys(cx);
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
@@ -617,6 +618,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             // kit Phase 9: honor the OS reduce-motion preference.
             quill::power_saving::set_os_reduce_motion(os_prefers_reduced_motion());
             cx.set_reduce_motion(quill::power_saving::reduce_motion_now());
+            ui::glass_watch::start(cx);
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
             cx.spawn(async move |cx| {
