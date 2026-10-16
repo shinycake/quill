@@ -104,6 +104,7 @@ pub use closing::*;
 pub use connect_flow::*;
 pub use deep_links::detect_deep_link_arg;
 pub use flood_retry::{FLOOD_RETRY_MAX_ATTEMPTS, FLOOD_RETRY_MAX_WAIT};
+pub use group_calls::SelfMuteError;
 pub use live::*;
 pub use message_menu::{ADDED_REACTIONS_PAGE, ModerationChoice};
 pub use sender::*;

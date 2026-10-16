@@ -32,6 +32,64 @@ pub(super) fn member_status(p: &ParsedGroupCallParticipant, speaking: bool) -> (
     }
 }
 
+/// What a member row shows: status text and color, mic icon and color.
+/// Your own row derives from the call's `is_muted_self` (the one source
+/// the call bar and the big button read), not from the participant's
+/// server-side fields, which lag the local change.
+pub(super) fn member_look(
+    p: &ParsedGroupCallParticipant,
+    speaking: bool,
+    self_muted: bool,
+) -> (&'static str, u32, IconName, u32) {
+    let force_muted = p.is_muted_for_all_users && !p.can_unmute_self;
+    if p.is_current_user {
+        return if p.is_hand_raised {
+            (
+                tr(keys::GROUP_CALL_RAISED_HAND_STATUS),
+                MEMBER_INACTIVE_STATUS,
+                IconName::Hand,
+                MEMBER_INACTIVE_STATUS,
+            )
+        } else if force_muted {
+            (
+                tr(keys::GROUP_CALL_FORCE_MUTED),
+                MEMBER_MUTED_ICON,
+                IconName::MicOff,
+                MEMBER_MUTED_ICON,
+            )
+        } else if self_muted {
+            (
+                tr(keys::Q_AV_MUTED_STATUS),
+                MEMBER_INACTIVE_STATUS,
+                IconName::MicOff,
+                MEMBER_INACTIVE_ICON,
+            )
+        } else if speaking {
+            ("speaking", MEMBER_ACTIVE, IconName::Mic, MEMBER_ACTIVE)
+        } else {
+            (
+                "listening",
+                MEMBER_INACTIVE_STATUS,
+                IconName::Mic,
+                MEMBER_INACTIVE_ICON,
+            )
+        };
+    }
+    let (status, status_color) = member_status(p, speaking);
+    let (mic, mic_color) = if p.is_hand_raised {
+        (IconName::Hand, MEMBER_INACTIVE_STATUS)
+    } else if force_muted || p.is_muted_for_current_user {
+        (IconName::MicOff, MEMBER_MUTED_ICON)
+    } else if p.is_muted_for_all_users {
+        (IconName::MicOff, MEMBER_INACTIVE_ICON)
+    } else if speaking {
+        (IconName::Mic, MEMBER_ACTIVE)
+    } else {
+        (IconName::Mic, MEMBER_INACTIVE_ICON)
+    };
+    (status, status_color, mic, mic_color)
+}
+
 impl QuillApp {
     /// The "⋯" menu: the chat's settings and admin tools.
     pub(super) fn group_call_menu(
@@ -134,19 +192,9 @@ impl QuillApp {
             quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
         });
         let speaking = participant.is_speaking || (participant.is_current_user && self_speaking);
-        let (status, status_color) = member_status(participant, speaking);
+        let (status, status_color, mic, mic_color) =
+            member_look(participant, speaking, call.is_muted_self);
         let force_muted = participant.is_muted_for_all_users && !participant.can_unmute_self;
-        let (mic, mic_color) = if participant.is_hand_raised {
-            (IconName::Hand, MEMBER_INACTIVE_STATUS)
-        } else if force_muted || participant.is_muted_for_current_user {
-            (IconName::MicOff, MEMBER_MUTED_ICON)
-        } else if participant.is_muted_for_all_users {
-            (IconName::MicOff, MEMBER_INACTIVE_ICON)
-        } else if speaking {
-            (IconName::Mic, MEMBER_ACTIVE)
-        } else {
-            (IconName::Mic, MEMBER_INACTIVE_ICON)
-        };
         let me = participant.is_current_user;
         let sender = participant.participant_id;
         let user_id = match sender {

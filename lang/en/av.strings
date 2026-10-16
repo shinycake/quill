@@ -183,7 +183,9 @@
 "qll_av_louder" = "Louder ({volume}%)";
 "qll_av_lower_hand" = "Lower Hand";
 "qll_av_messages_need_a_live_connection" = "Messages need a live connection.";
+"qll_av_microphone_changed_others_not_told" = "Microphone changed, but other participants may not see it.";
 "qll_av_missed" = " · missed";
+"qll_av_muted_status" = "muted";
 "qll_av_mute_new_needs_a_live" = "Mute-new needs a live connection.";
 "qll_av_muting_participant" = "Muting participant…";
 "qll_av_next" = "Next";

@@ -20,32 +20,46 @@ wins.
 
 ## What changed
 
-- `set_group_call_self_mute` (driver) calls the engine first. A failure returns
-  `SelfMuteError::Engine`, leaves `is_muted_self` as it was, and sends nothing to
-  Telegram. After the engine succeeds the flag flips and the request goes out; a
-  failed send returns `SelfMuteError::Send` (the button is truthful, other
-  participants may see the old icon).
-- The UI (button and push-to-talk) shows the existing status-note path with a
-  new string, "Couldn't change the microphone." (`lang/en/av.strings`).
+- `set_group_call_self_mute` (driver) is fail-closed for mute and engine-first
+  for unmute. Muting always sets `is_muted_self` (the capture gates in
+  `call_capture.rs` and `call_audio.rs` then stop audio on their own), tells
+  Telegram, and reports `SelfMuteError::Engine` if the engine refused; the
+  pump retries the engine. Unmuting calls the engine first and an error leaves
+  you muted. Unmuting is refused at the source with `SelfMuteError::NotAllowed`
+  while `can_unmute_self` is false (admin hold or raised hand).
 - `Session::accept_group_call_participant_update` settles `is_muted_self` from
-  the own participant's `is_muted_for_all_users` once the call is joined.
-- The group-call transport pump reconciles the engine with `is_muted_self`
-  (new `group_mute_state`, the same pattern the camera already used), so a mute
-  imposed by the server mutes the engine, and a failure is retried on the next
-  update and surfaced as `transport_error`. Capture was already gated on
-  `is_muted_self`, so a muted button never feeds the microphone.
-- Mock engine: `fail_group_mute()` for tests.
-
-Camera and screen share: the camera already follows the TDLib flag through the
-pump (`group_camera_state`), and screen share starts engine-first with rollback
-(`start_group_call_screen_share`). Neither flips UI state ahead of the engine,
-so they are unchanged.
+  your own participant row, but ignores it while a
+  `ToggleGroupCallParticipantMute` request is in flight, so a stale update
+  cannot reopen the microphone right after a local mute.
+- The pump reconciles the engine with `is_muted_self` (`group_mute_state`) and
+  records a retry failure in `transport_error` once instead of every tick.
+- The voice chat window's own member row derives its icon and status from
+  `call.is_muted_self` (`member_look`), with the admin hold and raised hand
+  outranking it; new string `qll_av_muted_status` ("muted").
+- A failure to tell Telegram after the engine changed shows its own note
+  (`qll_av_microphone_changed_others_not_told`) instead of "Couldn't change the
+  microphone." Chosen over a pump retry because the local state is already
+  truthful and the next participant update settles the server side.
+- Stale doc comments fixed. Mock engine: `fail_group_mute()`.
+- Capture harness (`QUILL_DEMO_CAPTURE_WINDOWS`): a second window that is not
+  on screen gets no display-link frames, so `render_to_image` returned its
+  first frame ("You are Live" next to a muted bar). The harness now draws each
+  extra window before capturing it. This was the cause of the earlier stale
+  screenshot; the app itself repaints both windows (both observe `QuillApp`).
 
 ## Verification
 
-- Driver tests (`src/connect/tests/group_calls/transport.rs`): engine failure
-  keeps the state and sends nothing; a server mute settles the flag and mutes
-  the engine, an unmute opens it again; push-to-talk press/release go through
-  the engine first and a failed release keeps the mic open.
-- Visual capture of the voice chat panel, muted and unmuted, light and dark.
+- Driver tests (`src/connect/tests/group_calls/transport.rs`):
+  `group_call_unmute_failure_leaves_you_muted`,
+  `group_call_mute_failure_fails_closed_and_the_pump_retries`,
+  `group_call_stale_own_update_does_not_undo_a_local_mute`,
+  `group_call_unmute_is_refused_while_force_muted`,
+  `group_call_server_mute_settles_the_button_and_the_engine`,
+  `group_call_push_to_talk_drives_the_engine_first` (a failed release now
+  stays muted), `group_call_self_mute_reaches_the_microphone_and_telegram`.
+- UI test: `own_row_follows_the_call_mute_flag` (group_call_panel.rs).
+- Captures of `ready-call-screen-share` after the call bar mic click and an 800 ms
+  pause, light and dark, main window and voice chat window: bar, big button
+  ("Unmute") and own row ("muted", crossed mic) agree; unmuted shows
+  "You are Live" and "listening".
 - `gate.sh`.

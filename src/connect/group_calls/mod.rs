@@ -24,6 +24,7 @@ use crate::telegram::requests::{
 
 mod admin;
 mod controls;
+pub use controls::SelfMuteError;
 mod join;
 mod link;
 pub(crate) mod live_feeds;
@@ -165,7 +166,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.group_mute_state.insert(group_call_id, wanted_mute);
                 }
                 Err(err) => {
-                    if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                    // Retried on the next tick; the error is recorded once
+                    // so a failing engine does not rewrite it every tick.
+                    if let Some(call) = self.session.calls.active_group_call.as_mut()
+                        && call.transport_error.is_none()
+                    {
                         call.transport_error = Some(err.to_string());
                     }
                 }
@@ -194,7 +199,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }
                 }
                 Err(err) => {
-                    if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                    // Retried on the next tick; the error is recorded once
+                    // so a failing engine does not rewrite it every tick.
+                    if let Some(call) = self.session.calls.active_group_call.as_mut()
+                        && call.transport_error.is_none()
+                    {
                         call.transport_error = Some(err.to_string());
                     }
                 }
