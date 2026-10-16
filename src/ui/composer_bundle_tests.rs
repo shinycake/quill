@@ -92,9 +92,7 @@ fn the_repeat_choice_rides_the_schedule_for_premium(cx: &mut TestAppContext) {
         assert_eq!(options.schedule_repeat_period, 7 * DAY);
         // The choice is as one-shot as the schedule: clearing the schedule
         // drops it from the options.
-        if let Some(send) = app.pending_send_mut() {
-            send.scheduling = ComposerScheduling::None;
-        }
+        app.update_pending_send(|send| send.scheduling = ComposerScheduling::None);
         assert_eq!(app.composer_send_options().schedule_repeat_period, 0);
     });
 }

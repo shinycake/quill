@@ -325,9 +325,9 @@ impl QuillApp {
                     self.connection.status_note = tr(keys::Q_OPS_FORWARDING).into();
                     self.share.pending_forward = None;
                     self.share.forward_bar_dest = None;
-                    if let Some(send) = self.pending_send_mut() {
-                        send.scheduling = quill::composer::ComposerScheduling::None;
-                    }
+                    self.update_pending_send(|send| {
+                        send.scheduling = quill::composer::ComposerScheduling::None
+                    });
                 }
                 Err(_) => {
                     self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_FORWARD_MESSAGES).into()

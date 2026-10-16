@@ -55,10 +55,12 @@ fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
 }
 
 fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
-    *app.pending_attachments_mut().expect("an open chat") = files
+    let files: Vec<_> = files
         .iter()
         .map(|(name, kind)| ComposerAttachment::pick(&fixture(name), *kind).unwrap())
         .collect();
+    app.update_pending_attachments(|tray| *tray = files)
+        .expect("an open chat");
 }
 
 #[gpui_kit::test]
@@ -125,20 +127,18 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, _| {
         tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
         assert!(!app.tray_has_large_photo());
-        app.pending_attachments_mut()
-            .expect("an open chat")
-            .push(ComposerAttachment::pick(&big, AttachmentKind::Photo).unwrap());
+        let photo = ComposerAttachment::pick(&big, AttachmentKind::Photo).unwrap();
+        app.update_pending_attachments(|tray| tray.push(photo))
+            .expect("an open chat");
         assert!(app.tray_has_large_photo());
         assert!(!app.composer_media_options().hd_photos);
-        if let Some(send) = app.pending_send_mut() {
-            send.hd_photos = true;
-        }
+        app.update_pending_send(|send| send.hd_photos = true);
         assert!(app.composer_media_options().hd_photos);
         // Sent as files, the quality choice means nothing.
-        quill::composer::ComposerAttachment::set_send_as_files(
-            app.pending_attachments_mut().expect("an open chat"),
-            true,
-        );
+        app.update_pending_attachments(|tray| {
+            quill::composer::ComposerAttachment::set_send_as_files(tray, true)
+        })
+        .expect("an open chat");
         assert!(!app.composer_media_options().hd_photos);
     });
     let _ = std::fs::remove_dir_all(&dir);

@@ -8,6 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer_sends::SendSlot;
 use super::message_text::format_unix_date_time;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
@@ -94,6 +95,9 @@ pub(super) struct SchedulePicker {
     /// With `send_after`: the effect that send carries (the "Send with
     /// Effect" card's Schedule item); zero for none.
     pub send_effect: i64,
+    /// For the composer: the chat the picker was opened in, which the
+    /// chosen time goes to.
+    pub slot: Option<SendSlot>,
 }
 
 /// The test environment of Telegram adds two short repeat periods
@@ -256,6 +260,10 @@ impl QuillApp {
             .filter(|date| validate_send_date(*date, now).is_ok())
             .unwrap_or_else(|| default_schedule_time(now));
         let date = new_date_time_picker(window, cx, initial, MAX_SCHEDULE_SECS);
+        let slot = match target {
+            ScheduleTarget::Composer => self.send_slot(),
+            _ => None,
+        };
         self.composer_ui.schedule_picker = Some(SchedulePicker {
             target,
             date,
@@ -263,6 +271,7 @@ impl QuillApp {
             repeat,
             send_after: false,
             send_effect: 0,
+            slot,
         });
         self.composer_ui.schedule_popup_open = true;
         cx.notify();
@@ -319,12 +328,19 @@ impl QuillApp {
         let kind = self.schedule_kind();
         // The Repeat choice counts for Premium only (the locked button never
         // sets it, and a lapsed subscription drops it).
-        let (repeat, send_after, send_effect) = self
+        let (repeat, send_after, send_effect, picker_slot) = self
             .composer_ui
             .schedule_picker
-            .as_ref()
-            .map(|picker| (picker.repeat, picker.send_after, picker.send_effect))
-            .unwrap_or((0, false, 0));
+            .take()
+            .map(|picker| {
+                (
+                    picker.repeat,
+                    picker.send_after,
+                    picker.send_effect,
+                    picker.slot,
+                )
+            })
+            .unwrap_or((0, false, 0, None));
         let repeat = if self.repeat_allowed(target)
             && matches!(scheduling, ComposerScheduling::SendAtDate(_))
         {
@@ -333,13 +349,19 @@ impl QuillApp {
             0
         };
         self.composer_ui.schedule_popup_open = false;
-        self.composer_ui.schedule_picker = None;
         match target {
             ScheduleTarget::Composer => {
-                if let Some(send) = self.pending_send_mut() {
+                // The picker's own chat, which may no longer be on screen.
+                let open = self.send_slot();
+                let Some(slot) = picker_slot.or_else(|| open.clone()) else {
+                    return;
+                };
+                self.composer_sends.update(&slot, |send| {
                     send.scheduling = scheduling;
                     send.schedule_repeat = repeat;
-                }
+                });
+                // Sending now would send another chat's text.
+                let send_after = send_after && open.as_ref() == Some(&slot);
                 self.connection.status_note = match (scheduling, kind) {
                     (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => tr_with(
                         keys::Q_OPS_REMINDER_SET_FOR,

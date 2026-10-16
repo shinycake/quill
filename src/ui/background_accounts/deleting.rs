@@ -247,6 +247,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.background.deleting.extend(keys.iter().cloned());
+        for key in &keys {
+            self.forget_account_sends(key);
+        }
         let waiting = keys.clone();
         self.after_closing(
             cx,

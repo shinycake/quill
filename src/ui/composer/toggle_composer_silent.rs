@@ -291,9 +291,9 @@ impl QuillApp {
                 .checked(!preview_off)
                 .on_click(move |_, _, cx| {
                     let _ = toggle_preview.update(cx, |this, cx| {
-                        if let Some(send) = this.pending_send_mut() {
-                            send.preview.disabled = !send.preview.disabled;
-                        }
+                        this.update_pending_send(|send| {
+                            send.preview.disabled = !send.preview.disabled
+                        });
                         cx.notify();
                     });
                 }),
@@ -380,9 +380,9 @@ impl QuillApp {
                             .accessibility_label(tr(keys::CONTEXT_SEND_NOW_MSG))
                             .swallow_press()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(send) = this.pending_send_mut() {
-                                    send.scheduling = ComposerScheduling::None;
-                                }
+                                this.update_pending_send(|send| {
+                                    send.scheduling = ComposerScheduling::None
+                                });
                                 cx.notify();
                             })),
                     ),
@@ -398,9 +398,7 @@ impl QuillApp {
                         .ghost()
                         .accessibility_label(tr(keys::Q_CHAT_SHOW_LINK_PREVIEW))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(send) = this.pending_send_mut() {
-                                send.preview.disabled = false;
-                            }
+                            this.update_pending_send(|send| send.preview.disabled = false);
                             cx.notify();
                         })),
                 ),

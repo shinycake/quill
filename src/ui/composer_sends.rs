@@ -1,24 +1,30 @@
-//! The next send's choices, kept per chat and topic: the attachment tray
-//! and its options, the schedule and the link preview choice, plus each
-//! chat's "send silently" override. The composer reads the entry for the
-//! open chat on every render, so opening another chat by any path shows
-//! that chat's entry and nothing chosen elsewhere goes with its messages
+//! The next send's choices, kept per account, chat and topic: the
+//! attachment tray and its options, the schedule and the link preview
+//! choice, plus each chat's "send silently" override. The composer reads
+//! the entry for the open chat on every render, so opening another chat
+//! (or account) by any path shows that chat's entry and nothing chosen
+//! elsewhere goes with its messages
 //! (docs/decisions/sweep-per-chat-composer.md).
 //!
 //! The store lives on `QuillApp`, outside the per-window slot
-//! (`chat_window::slot`), so it is keyed by chat, never by window.
+//! (`chat_window::slot`), so it is keyed by chat, never by window. Chat ids
+//! repeat across accounts (a group both accounts are in, or a private chat
+//! with the same user), so every entry sits under its account; an account
+//! in the background keeps its entries, and logging out or removing it
+//! drops them.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
 };
-use quill::ids::ChatId;
+use quill::ids::{AccountKey, ChatId};
 use quill::telegram::requests::SelfDestructSend;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// What the next send from one slot carries besides its text.
+#[derive(Debug, PartialEq)]
 pub(crate) struct PendingSend {
     /// Local files the user attached (canonical paths via `pick`). One item
     /// sends with `sendMessage`; two or more photos/videos send as an album.
@@ -66,6 +72,10 @@ impl PendingSend {
         self.hd_photos = false;
         self.paid_stars = 0;
     }
+
+    fn is_empty(&self) -> bool {
+        *self == Self::EMPTY
+    }
 }
 
 impl Default for PendingSend {
@@ -76,9 +86,26 @@ impl Default for PendingSend {
 
 static NOTHING_PENDING: PendingSend = PendingSend::EMPTY;
 
-/// Per-chat send state for every chat and topic the user touched.
+/// One composer's slot: the account, and the chat and topic in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SendSlot {
+    pub(super) account: AccountKey,
+    pub(super) draft: DraftKey,
+}
+
+/// A tray item as it was when a step that answers later started (a
+/// picker, an editor). Its result lands only in that slot, and only while
+/// the item at `index` is still the same file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TrayItem {
+    pub(super) slot: SendSlot,
+    pub(super) index: usize,
+    pub(super) path: PathBuf,
+}
+
+/// One account's entries.
 #[derive(Default)]
-pub(crate) struct ComposerSends {
+struct AccountSends {
     /// Keyed like the text draft (tdesktop's `Data::DraftKey`).
     slots: HashMap<DraftKey, PendingSend>,
     /// "Send silently" chosen against the chat's
@@ -87,65 +114,214 @@ pub(crate) struct ComposerSends {
     silent: HashMap<ChatId, bool>,
 }
 
+impl AccountSends {
+    fn is_empty(&self) -> bool {
+        self.slots.is_empty() && self.silent.is_empty()
+    }
+}
+
+/// Per-chat send state for every chat and topic the user touched, per
+/// account. An entry that is back to nothing chosen is dropped.
+#[derive(Default)]
+pub(crate) struct ComposerSends {
+    accounts: HashMap<AccountKey, AccountSends>,
+}
+
 impl ComposerSends {
-    pub(super) fn get(&self, slot: DraftKey) -> &PendingSend {
-        self.slots.get(&slot).unwrap_or(&NOTHING_PENDING)
+    pub(super) fn get(&self, slot: &SendSlot) -> &PendingSend {
+        self.accounts
+            .get(&slot.account)
+            .and_then(|account| account.slots.get(&slot.draft))
+            .unwrap_or(&NOTHING_PENDING)
     }
 
-    pub(super) fn get_mut(&mut self, slot: DraftKey) -> &mut PendingSend {
-        self.slots.entry(slot).or_default()
+    /// Change the slot's entry. Every write goes through here (or
+    /// [`Self::update_item`]), so an entry `f` leaves empty is dropped.
+    pub(super) fn update<R>(
+        &mut self,
+        slot: &SendSlot,
+        f: impl FnOnce(&mut PendingSend) -> R,
+    ) -> R {
+        let account = self.accounts.entry(slot.account.clone()).or_default();
+        let send = account.slots.entry(slot.draft).or_default();
+        let result = f(send);
+        if send.is_empty() {
+            account.slots.remove(&slot.draft);
+        }
+        self.drop_if_empty(&slot.account);
+        result
+    }
+
+    /// Change the tray item `item` names, if it is still there: `None`
+    /// when that slot's tray no longer holds the same file at that place.
+    pub(super) fn update_item<R>(
+        &mut self,
+        item: &TrayItem,
+        f: impl FnOnce(&mut ComposerAttachment) -> R,
+    ) -> Option<R> {
+        self.accounts
+            .get_mut(&item.slot.account)?
+            .slots
+            .get_mut(&item.slot.draft)?
+            .attachments
+            .get_mut(item.index)
+            .filter(|attachment| attachment.path == item.path)
+            .map(f)
     }
 
     /// The slot's send went: hand back what it held.
-    pub(super) fn finish(&mut self, slot: DraftKey) -> Option<PendingSend> {
-        self.slots.remove(&slot)
+    pub(super) fn finish(&mut self, slot: &SendSlot) -> Option<PendingSend> {
+        let sent = self
+            .accounts
+            .get_mut(&slot.account)?
+            .slots
+            .remove(&slot.draft);
+        self.drop_if_empty(&slot.account);
+        sent
     }
 
-    /// Every tray entry for `path`, whichever chat it waits in: a file
-    /// check that finishes after the user moved on still lands.
+    /// Every tray entry for `path`, whichever account and chat it waits
+    /// in: a file check that finishes after the user moved on still lands.
     pub(super) fn attachments_at_mut<'a>(
         &'a mut self,
         path: &'a Path,
     ) -> impl Iterator<Item = &'a mut ComposerAttachment> + 'a {
-        self.slots
+        self.accounts
             .values_mut()
+            .flat_map(|account| account.slots.values_mut())
             .flat_map(|send| send.attachments.iter_mut())
             .filter(move |attachment| attachment.path == path)
     }
 
-    pub(super) fn silent_override(&self, chat_id: ChatId) -> Option<bool> {
-        self.silent.get(&chat_id).copied()
+    /// Some tray, in any account and chat, holds `path`.
+    pub(super) fn holds(&self, path: &Path) -> bool {
+        self.accounts
+            .values()
+            .flat_map(|account| account.slots.values())
+            .flat_map(|send| send.attachments.iter())
+            .any(|attachment| attachment.path == path)
     }
 
-    pub(super) fn set_silent(&mut self, chat_id: ChatId, silent: bool, chat_default: bool) {
+    pub(super) fn silent_override(&self, account: &AccountKey, chat_id: ChatId) -> Option<bool> {
+        self.accounts.get(account)?.silent.get(&chat_id).copied()
+    }
+
+    pub(super) fn set_silent(
+        &mut self,
+        account: &AccountKey,
+        chat_id: ChatId,
+        silent: bool,
+        chat_default: bool,
+    ) {
         if silent == chat_default {
-            self.silent.remove(&chat_id);
+            if let Some(sends) = self.accounts.get_mut(account) {
+                sends.silent.remove(&chat_id);
+            }
+            self.drop_if_empty(account);
         } else {
-            self.silent.insert(chat_id, silent);
+            self.accounts
+                .entry(account.clone())
+                .or_default()
+                .silent
+                .insert(chat_id, silent);
         }
+    }
+
+    /// The account logged out or was removed: its choices go with it.
+    /// Hands back the trays it held.
+    pub(super) fn forget_account(&mut self, account: &AccountKey) -> Vec<ComposerAttachment> {
+        self.accounts
+            .remove(account)
+            .map(|sends| {
+                sends
+                    .slots
+                    .into_values()
+                    .flat_map(|send| send.attachments)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn drop_if_empty(&mut self, account: &AccountKey) {
+        if self
+            .accounts
+            .get(account)
+            .is_some_and(AccountSends::is_empty)
+        {
+            self.accounts.remove(account);
+        }
+    }
+
+    /// How many slots hold something, over every account.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn slot_count(&self) -> usize {
+        self.accounts
+            .values()
+            .map(|account| account.slots.len())
+            .sum()
     }
 }
 
 impl QuillApp {
-    /// The slot the composer on screen sends from: the open chat (the
-    /// window's own while a chat window is in scope) and its topic.
-    pub(super) fn send_slot(&self) -> Option<DraftKey> {
+    /// The slot the composer on screen sends from: the account on screen,
+    /// the open chat (the window's own while a chat window is in scope)
+    /// and its topic.
+    pub(super) fn send_slot(&self) -> Option<SendSlot> {
+        let account = self.session()?.account.clone();
         let chat_id = self.open_chat_id()?;
-        Some(self.open_draft_topic(chat_id).key(chat_id.0))
+        Some(SendSlot {
+            account,
+            draft: self.open_draft_topic(chat_id).key(chat_id.0),
+        })
     }
 
     /// The open slot's next send. Nothing pending when no chat is open.
     pub(super) fn pending_send(&self) -> &PendingSend {
         match self.send_slot() {
-            Some(slot) => self.composer_sends.get(slot),
+            Some(slot) => self.composer_sends.get(&slot),
             None => &NOTHING_PENDING,
         }
     }
 
-    /// The open slot's next send, to change. `None` when no chat is open.
-    pub(super) fn pending_send_mut(&mut self) -> Option<&mut PendingSend> {
+    /// Change the open slot's next send. `None` when no chat is open.
+    pub(super) fn update_pending_send<R>(
+        &mut self,
+        f: impl FnOnce(&mut PendingSend) -> R,
+    ) -> Option<R> {
         let slot = self.send_slot()?;
-        Some(self.composer_sends.get_mut(slot))
+        Some(self.composer_sends.update(&slot, f))
+    }
+
+    /// Change the open slot's attachment tray.
+    pub(super) fn update_pending_attachments<R>(
+        &mut self,
+        f: impl FnOnce(&mut Vec<ComposerAttachment>) -> R,
+    ) -> Option<R> {
+        self.update_pending_send(|send| f(&mut send.attachments))
+    }
+
+    /// Change one attachment of the open slot's tray, now.
+    pub(super) fn update_pending_attachment<R>(
+        &mut self,
+        index: usize,
+        f: impl FnOnce(&mut ComposerAttachment) -> R,
+    ) -> Option<R> {
+        let item = self.tray_item(index)?;
+        self.composer_sends.update_item(&item, f)
+    }
+
+    /// The open slot's tray item at `index`, for a step that answers later.
+    pub(super) fn tray_item(&self, index: usize) -> Option<TrayItem> {
+        let slot = self.send_slot()?;
+        let path = self
+            .composer_sends
+            .get(&slot)
+            .attachments
+            .get(index)?
+            .path
+            .clone();
+        Some(TrayItem { slot, index, path })
     }
 
     /// A screenshot demo starts with these in the open chat's tray.
@@ -153,26 +329,12 @@ impl QuillApp {
         if attachments.is_empty() {
             return;
         }
-        if let Some(tray) = self.pending_attachments_mut() {
-            *tray = attachments;
-        }
+        self.update_pending_attachments(|tray| *tray = attachments);
     }
 
     /// The open slot's attachment tray.
     pub(super) fn pending_attachments(&self) -> &[ComposerAttachment] {
         &self.pending_send().attachments
-    }
-
-    /// The open slot's attachment tray, to change.
-    pub(super) fn pending_attachments_mut(&mut self) -> Option<&mut Vec<ComposerAttachment>> {
-        self.pending_send_mut().map(|send| &mut send.attachments)
-    }
-
-    pub(super) fn pending_attachment_mut(
-        &mut self,
-        index: usize,
-    ) -> Option<&mut ComposerAttachment> {
-        self.pending_attachments_mut()?.get_mut(index)
     }
 
     /// The open slot's send went: it starts over (tdesktop clears the field
@@ -182,48 +344,65 @@ impl QuillApp {
         let Some(slot) = self.send_slot() else {
             return;
         };
-        if let Some(sent) = self.composer_sends.finish(slot) {
-            self.composer_ui.send_box.forget(
-                sent.attachments
-                    .iter()
-                    .map(|attachment| attachment.path.as_path()),
-            );
+        if let Some(sent) = self.composer_sends.finish(&slot) {
+            self.forget_tray_checks(&sent.attachments);
         }
     }
 
     /// Drop the open slot's tray and the choices made for it; the schedule
     /// and link preview choice stay.
     pub(super) fn clear_pending_attachments(&mut self) {
-        let Some(send) = self.pending_send_mut() else {
-            return;
-        };
-        let dropped = std::mem::take(&mut send.attachments);
-        send.clear_attachments();
-        self.composer_ui
-            .send_box
-            .forget(dropped.iter().map(|attachment| attachment.path.as_path()));
+        let dropped = self
+            .update_pending_send(|send| {
+                let dropped = std::mem::take(&mut send.attachments);
+                send.clear_attachments();
+                dropped
+            })
+            .unwrap_or_default();
+        self.forget_tray_checks(&dropped);
+    }
+
+    /// `account` logged out or was removed: drop its choices.
+    pub(in crate::ui) fn forget_account_sends(&mut self, account: &AccountKey) {
+        let dropped = self.composer_sends.forget_account(account);
+        self.forget_tray_checks(&dropped);
+    }
+
+    /// These attachments left their tray: forget what this window read
+    /// about their files, unless another tray still holds the same file.
+    pub(super) fn forget_tray_checks(&mut self, dropped: &[ComposerAttachment]) {
+        let sends = &self.composer_sends;
+        self.composer_ui.send_box.forget(
+            dropped
+                .iter()
+                .map(|attachment| attachment.path.as_path())
+                .filter(|path| !sends.holds(path)),
+        );
     }
 
     /// Whether the next send from the open chat goes without sound: the
     /// user's choice for this chat, else the chat's
     /// `default_disable_notification`.
     pub(super) fn composer_effective_silent(&self) -> bool {
-        let Some(chat_id) = self.open_chat_id() else {
+        let Some(slot) = self.send_slot() else {
             return false;
         };
+        let chat_id = ChatId(slot.draft.chat_id);
         self.composer_sends
-            .silent_override(chat_id)
+            .silent_override(&slot.account, chat_id)
             .unwrap_or_else(|| self.chat_default_silent(chat_id))
     }
 
     /// Flip "send silently" for the open chat; stays until flipped back.
     pub(in crate::ui) fn toggle_composer_silent(&mut self) {
-        let Some(chat_id) = self.open_chat_id() else {
+        let Some(slot) = self.send_slot() else {
             return;
         };
+        let chat_id = ChatId(slot.draft.chat_id);
         let next = !self.composer_effective_silent();
         let chat_default = self.chat_default_silent(chat_id);
-        self.composer_sends.set_silent(chat_id, next, chat_default);
+        self.composer_sends
+            .set_silent(&slot.account, chat_id, next, chat_default);
     }
 
     fn chat_default_silent(&self, chat_id: ChatId) -> bool {

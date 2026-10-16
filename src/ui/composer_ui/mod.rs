@@ -802,9 +802,9 @@ impl QuillApp {
                                 .label(tr(keys::Q_CHAT_SEND_WITHOUT_COMPRESSION))
                                 .checked(as_files)
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(tray) = this.pending_attachments_mut() {
-                                        ComposerAttachment::set_send_as_files(tray, !as_files);
-                                    }
+                                    this.update_pending_attachments(|tray| {
+                                        ComposerAttachment::set_send_as_files(tray, !as_files)
+                                    });
                                     // Back to media: read the videos again.
                                     this.composer_ui.send_box.sound_checked.clear();
                                     this.check_tray_videos(cx);

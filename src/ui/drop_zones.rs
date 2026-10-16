@@ -8,6 +8,7 @@
 
 use super::app::{PaneMode, QuillApp};
 use super::chat_theme::accent;
+use super::composer_sends::SendSlot;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -84,14 +85,15 @@ impl QuillApp {
         };
         match plan_drop(action, paths, &folder_files) {
             DropPlan::Attach(planned) => {
-                let Some(tray) = self.pending_attachments_mut() else {
+                let Some(appended) = self.update_pending_attachments(|tray| {
+                    ComposerAttachment::append_planned(tray, &planned)
+                }) else {
                     return;
                 };
-                self.connection.status_note =
-                    match ComposerAttachment::append_planned(tray, &planned) {
-                        Ok(count) => trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count),
-                        Err(note) => note.into(),
-                    };
+                self.connection.status_note = match appended {
+                    Ok(count) => trn(keys::Q_MISC_ATTACHED_FILES_SEND_TO_UPLOAD, count),
+                    Err(note) => note.into(),
+                };
                 cx.notify();
             }
             DropPlan::Reject(note) => {
@@ -99,7 +101,7 @@ impl QuillApp {
                 cx.notify();
             }
             DropPlan::Archive(source) => {
-                let Some(chat) = self.open_chat_id() else {
+                let Some(slot) = self.send_slot() else {
                     return;
                 };
                 self.connection.status_note = tr(keys::Q_MISC_PREPARING_THE_ARCHIVE).into();
@@ -112,7 +114,7 @@ impl QuillApp {
                             build_archive(&source, &dir, ARCHIVE_SIZE_LIMIT)
                         })
                         .await;
-                    let _ = this.update(cx, |this, cx| this.archive_ready(chat, built, cx));
+                    let _ = this.update(cx, |this, cx| this.archive_ready(slot, built, cx));
                 })
                 .detach();
             }
@@ -121,26 +123,26 @@ impl QuillApp {
 
     fn archive_ready(
         &mut self,
-        chat: quill::ids::ChatId,
+        slot: SendSlot,
         built: Result<PathBuf, ArchiveError>,
         cx: &mut Context<Self>,
     ) {
         match built {
             Ok(path) => {
-                // The person moved on to another chat while it was zipped.
-                if self.open_chat_id() != Some(chat) {
+                // The person moved on to another chat (or account) while
+                // it was zipped.
+                if self.send_slot().as_ref() != Some(&slot) {
                     if let Some(folder) = path.parent() {
                         let _ = std::fs::remove_dir_all(folder);
                     }
                     return;
                 }
-                let Some(tray) = self.pending_attachments_mut() else {
+                let Some(appended) = self.update_pending_attachments(|tray| {
+                    ComposerAttachment::append_planned(tray, &[(path, AttachmentKind::Document)])
+                }) else {
                     return;
                 };
-                self.connection.status_note = match ComposerAttachment::append_planned(
-                    tray,
-                    &[(path, AttachmentKind::Document)],
-                ) {
+                self.connection.status_note = match appended {
                     Ok(_) => tr(keys::Q_MISC_ATTACHED_THE_ARCHIVE_SEND_TO).into(),
                     Err(note) => note.into(),
                 };

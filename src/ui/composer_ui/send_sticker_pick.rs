@@ -218,9 +218,7 @@ impl QuillApp {
         match self.composer_ui.pending_edit.as_mut() {
             Some(edit) => edit.link_preview = choice,
             None => {
-                if let Some(send) = self.pending_send_mut() {
-                    send.preview = choice;
-                }
+                self.update_pending_send(|send| send.preview = choice);
             }
         }
     }
@@ -629,8 +627,10 @@ impl QuillApp {
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(edit) = this.composer_ui.pending_edit.as_mut() {
                                             edit.caption_above = !edit.caption_above;
-                                        } else if let Some(send) = this.pending_send_mut() {
-                                            send.caption_above = !send.caption_above;
+                                        } else {
+                                            this.update_pending_send(|send| {
+                                                send.caption_above = !send.caption_above
+                                            });
                                         }
                                         cx.notify();
                                     })),

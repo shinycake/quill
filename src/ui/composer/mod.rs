@@ -584,10 +584,12 @@ impl QuillApp {
             }
             return;
         }
-        let Some(tray) = self.pending_attachments_mut() else {
+        let Some(appended) = self.update_pending_attachments(|tray| {
+            ComposerAttachment::append_dropped_files(tray, paths)
+        }) else {
             return;
         };
-        self.connection.status_note = match ComposerAttachment::append_dropped_files(tray, paths) {
+        self.connection.status_note = match appended {
             Ok(count) => trn(keys::Q_CHAT_ATTACHED_FILES_SEND_TO_UPLOAD, count),
             Err(note) => note.into(),
         };
@@ -642,8 +644,10 @@ impl QuillApp {
 
     fn attach_picked(&mut self, paths: Vec<PathBuf>, as_files: bool, cx: &mut Context<Self>) {
         self.attach_dropped_files(&paths, cx);
-        if as_files && let Some(tray) = self.pending_attachments_mut() {
-            ComposerAttachment::set_send_as_files(tray, true);
+        if as_files {
+            self.update_pending_attachments(|tray| {
+                ComposerAttachment::set_send_as_files(tray, true)
+            });
         }
     }
 
@@ -720,9 +724,9 @@ impl QuillApp {
             Some(att) => {
                 let name = att.file_name.clone();
                 let before = self.pending_attachments().len();
-                if let Some(tray) = self.pending_attachments_mut() {
-                    ComposerAttachment::push_attachment(tray, att);
-                }
+                self.update_pending_attachments(|tray| {
+                    ComposerAttachment::push_attachment(tray, att)
+                });
                 self.connection.status_note = if self.pending_attachments().len() == before {
                     tr_with(
                         keys::Q_CHAT_ALBUM_IS_FULL,
@@ -742,23 +746,23 @@ impl QuillApp {
 
     /// Drop one picked file; the batch options reset with the last one.
     pub(super) fn toggle_attachment_spoiler(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(attachment) = self.pending_attachment_mut(index) {
-            attachment.spoiler = !attachment.spoiler;
+        if self
+            .update_pending_attachment(index, |attachment| attachment.spoiler = !attachment.spoiler)
+            .is_some()
+        {
             cx.notify();
         }
     }
 
     pub(super) fn remove_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(tray) = self
-            .pending_attachments_mut()
-            .filter(|tray| index < tray.len())
+        let Some(removed) = self
+            .update_pending_attachments(|tray| (index < tray.len()).then(|| tray.remove(index)))
+            .flatten()
         else {
             return;
         };
-        let removed = tray.remove(index);
-        // Added again later, the picture gets its thumbnail again.
-        self.composer_ui.send_box.thumbnailed.remove(&removed.path);
-        self.composer_ui.send_box.thumbnailing.remove(&removed.path);
+        // Added again later, the file is read again.
+        self.forget_tray_checks(std::slice::from_ref(&removed));
         if self.pending_attachments().is_empty() {
             self.clear_attachment(cx);
         } else {
@@ -819,9 +823,7 @@ impl QuillApp {
         next: Option<SelfDestructSend>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(send) = self.pending_send_mut() {
-            send.self_destruct = next;
-        }
+        self.update_pending_send(|send| send.self_destruct = next);
         self.connection.status_note = match next {
             None => tr(keys::Q_CHAT_SELF_DESTRUCT_OFF).into(),
             Some(SelfDestructSend::Timer(secs)) => {

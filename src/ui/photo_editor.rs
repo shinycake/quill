@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer_sends::TrayItem;
 use super::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
 use super::photo_editor_items::ItemDrag;
 use gpui_kit::component::button::*;
@@ -47,10 +48,10 @@ pub(super) enum EditorMode {
 }
 
 /// What the edited picture is for.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum EditorPurpose {
-    /// A pending composer attachment, by index.
-    Attachment(usize),
+    /// A pending composer attachment, as it was when the editor opened.
+    Attachment(TrayItem),
     /// The media of a message being edited (`edit_media_tools.rs`).
     MessageEdit,
     /// A new sticker or emoji for a set the user owns: the image sits on a
@@ -302,10 +303,10 @@ impl PhotoEditor {
 impl QuillApp {
     /// Open the editor on a pending photo attachment.
     pub(super) fn open_photo_editor(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(attachment) = self.pending_attachments().get(index) else {
+        let Some(item) = self.tray_item(index) else {
             return;
         };
-        let path = attachment.path.clone();
+        let path = item.path.clone();
         self.decode_image_then(
             path,
             move |this, result, cx| {
@@ -314,7 +315,7 @@ impl QuillApp {
                         // Another editor opened while this one decoded: keep it.
                         if this.viewer.photo_editor.is_none() {
                             this.viewer.photo_editor =
-                                Some(PhotoEditor::new(EditorPurpose::Attachment(index), pixels));
+                                Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                         }
                     }
                     Err(_) => {
@@ -335,12 +336,12 @@ impl QuillApp {
 
     /// Render the edit at full resolution into a new PNG and send that
     /// instead of the original.
-    fn save_photo_editor(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn save_photo_editor(&mut self, cx: &mut Context<Self>) {
         let Some(editor) = self.viewer.photo_editor.take() else {
             return;
         };
-        let index = match editor.purpose {
-            EditorPurpose::Attachment(index) => index,
+        let item = match &editor.purpose {
+            EditorPurpose::Attachment(item) => item.clone(),
             EditorPurpose::MessageEdit => {
                 let placed: Vec<Placed> =
                     editor.placed.iter().map(|(item, _)| item.clone()).collect();
@@ -349,7 +350,7 @@ impl QuillApp {
                 self.finish_edit_image(saved, cx);
                 return;
             }
-            EditorPurpose::Set { set_id, kind } => {
+            &EditorPurpose::Set { set_id, kind } => {
                 // The canvas render and the fit run off the UI thread.
                 let job = editor.set_render_job();
                 self.finish_set_image(set_id, kind, job, editor.corners, cx);
@@ -358,22 +359,26 @@ impl QuillApp {
         };
         let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
         let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
-        let saved = super::edit_media_tools::write_edited_png(&edited);
-        match (saved, self.pending_attachment_mut(index)) {
-            (Some(path), Some(attachment)) => {
-                let stem = attachment
-                    .path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("photo")
-                    .to_string();
-                attachment.path = path;
-                attachment.file_name = format!("{stem}.png");
-                attachment.kind = quill::composer::AttachmentKind::Photo;
-            }
-            _ => {
-                self.connection.status_note = tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO).into()
-            }
+        let Some(saved) = super::edit_media_tools::write_edited_png(&edited) else {
+            self.connection.status_note = tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO).into();
+            cx.notify();
+            return;
+        };
+        // The edit replaces the photo in the chat it was opened from, as
+        // long as that photo is still in its tray.
+        let replaced = self.composer_sends.update_item(&item, |attachment| {
+            let stem = attachment
+                .path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("photo")
+                .to_string();
+            attachment.path = saved.clone();
+            attachment.file_name = format!("{stem}.png");
+            attachment.kind = quill::composer::AttachmentKind::Photo;
+        });
+        if replaced.is_none() {
+            let _ = std::fs::remove_file(&saved);
         }
         cx.notify();
     }

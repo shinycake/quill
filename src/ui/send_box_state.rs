@@ -45,9 +45,9 @@ impl SendBoxUi {
         }
     }
 
-    /// A batch went or was dropped: forget what was read about its files,
-    /// so the same file attached again is read again. Other chats' trays
-    /// keep theirs.
+    /// Files left their tray: forget what was read about them, so the same
+    /// file attached again is read again. Callers pass only files no tray
+    /// holds any more (`QuillApp::forget_tray_checks`).
     pub(super) fn forget<'a>(&mut self, paths: impl Iterator<Item = &'a Path>) {
         let mut sizes = self.photo_sizes.borrow_mut();
         for path in paths {

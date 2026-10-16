@@ -8,6 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer_sends::{SendSlot, TrayItem};
 use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -31,6 +32,8 @@ pub(super) struct PriceDialog {
     pub(super) input: Entity<InputState>,
     /// The typed price is over the limit (`field->showError()`).
     pub(super) too_high: bool,
+    /// The chat the price is for: the one open when the box opened.
+    pub(super) slot: SendSlot,
 }
 
 impl QuillApp {
@@ -174,9 +177,7 @@ impl QuillApp {
                     .label(tr(keys::SEND_HIGH_QUALITY))
                     .checked(self.pending_send().hd_photos)
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(send) = this.pending_send_mut() {
-                            send.hd_photos = !send.hd_photos;
-                        }
+                        this.update_pending_send(|send| send.hd_photos = !send.hd_photos);
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -290,8 +291,12 @@ impl QuillApp {
     }
 
     /// "Edit Cover" on a tray video: choose an image (tdesktop
-    /// `VideoCoverUploader::choose`).
+    /// `VideoCoverUploader::choose`). The picker answers later: the cover
+    /// goes to this video in this chat, wherever the user is by then.
     fn pick_attachment_cover(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(item) = self.tray_item(index) else {
+            return;
+        };
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -302,46 +307,47 @@ impl QuillApp {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.first().cloned()
             {
-                let _ = this.update(cx, |this, cx| this.set_attachment_cover(index, &path, cx));
+                let _ = this.update(cx, |this, cx| this.set_attachment_cover(&item, &path, cx));
             }
         })
         .detach();
     }
 
-    /// Stage a picked cover on a tray video.
+    /// Stage a picked cover on the tray video `item`; nothing happens when
+    /// that video has left its tray (sent, removed or replaced) meanwhile.
     pub(super) fn set_attachment_cover(
         &mut self,
-        index: usize,
+        item: &TrayItem,
         path: &Path,
         cx: &mut Context<Self>,
     ) {
-        if index >= self.pending_attachments().len() {
+        let Some(cover) = cover_send_path(path) else {
+            self.connection.status_note = quill::composer::EDIT_MEDIA_INVALID_FILE.into();
+            cx.notify();
+            return;
+        };
+        let name = cover
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("image")
+            .to_string();
+        if self
+            .composer_sends
+            .update_item(item, |attachment| attachment.extras.cover = Some(cover))
+            .is_none()
+        {
             return;
         }
-        match cover_send_path(path) {
-            Some(cover) => {
-                self.connection.status_note = tr_with(
-                    keys::Q_OPS_COVER_WILL_BE_SENT_WITH,
-                    &[(
-                        "unwrap_or",
-                        (cover
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("image")),
-                    )],
-                );
-                if let Some(attachment) = self.pending_attachment_mut(index) {
-                    attachment.extras.cover = Some(cover);
-                }
-            }
-            None => self.connection.status_note = quill::composer::EDIT_MEDIA_INVALID_FILE.into(),
-        }
+        self.connection.status_note =
+            tr_with(keys::Q_OPS_COVER_WILL_BE_SENT_WITH, &[("unwrap_or", &name)]);
         cx.notify();
     }
 
     fn clear_attachment_cover(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(attachment) = self.pending_attachment_mut(index) {
-            attachment.extras.cover = None;
+        if self
+            .update_pending_attachment(index, |attachment| attachment.extras.cover = None)
+            .is_some()
+        {
             self.connection.status_note = tr(keys::Q_OPS_COVER_CLEARED).into();
             cx.notify();
         }
@@ -350,7 +356,10 @@ impl QuillApp {
     // The "Paid Content" box.
 
     pub(super) fn open_price_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let stars = self.pending_send().paid_stars;
+        let Some(slot) = self.send_slot() else {
+            return;
+        };
+        let stars = self.composer_sends.get(&slot).paid_stars;
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(tr(keys::Q_OPS_STARS_TO_UNLOCK))
@@ -364,6 +373,7 @@ impl QuillApp {
         self.composer_ui.send_box.price = Some(PriceDialog {
             input,
             too_high: false,
+            slot,
         });
         cx.notify();
     }
@@ -395,10 +405,10 @@ impl QuillApp {
                     PriceInput::Price(price) => price,
                     _ => 0,
                 };
+                let slot = dialog.slot.clone();
                 self.composer_ui.send_box.price = None;
-                if let Some(send) = self.pending_send_mut() {
-                    send.paid_stars = price;
-                }
+                self.composer_sends
+                    .update(&slot, |send| send.paid_stars = price);
                 self.connection.status_note = if price > 0 {
                     tr_with(
                         keys::Q_OPS_THE_MEDIA_WILL_UNLOCK_FOR,

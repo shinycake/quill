@@ -16,6 +16,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer_sends::TrayItem;
 use super::shell::{DialogKind, QuillShell};
 use super::video_editor_timeline::EditorMotion;
 use super::video_player::VideoPlayer;
@@ -33,10 +34,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 /// What the edited copy replaces.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum EditorTarget {
-    /// The video at this place in the tray.
-    Tray(usize),
+    /// A tray video, as it was when the editor opened.
+    Tray(TrayItem),
     /// The replacement video of the message being edited.
     MessageEdit,
     /// A video sticker for an owned set (`video_editor_set.rs`): three
@@ -50,17 +51,17 @@ pub(super) enum EditorTarget {
 
 impl EditorTarget {
     /// The crop is always a square (`exactSize` in tdesktop).
-    pub(super) fn square(self) -> bool {
+    pub(super) fn square(&self) -> bool {
         matches!(self, Self::Set { .. } | Self::Avatar)
     }
 
     /// The crop is shown as a circle (`CropType::Ellipse`, an avatar).
-    pub(super) fn round(self) -> bool {
-        self == Self::Avatar
+    pub(super) fn round(&self) -> bool {
+        *self == Self::Avatar
     }
 
     /// The longest and the shortest range in ms; 0 is no limit.
-    fn range_limits(self) -> (i64, i64) {
+    fn range_limits(&self) -> (i64, i64) {
         match self {
             Self::Set { .. } => (
                 quill::sticker_video::MAX_DURATION_MS,
@@ -182,6 +183,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(item) = self.tray_item(index) else {
+            return;
+        };
         let Some(attachment) = self.pending_attachments().get(index) else {
             return;
         };
@@ -202,7 +206,7 @@ impl QuillApp {
                 ..VideoEdits::full(0)
             })
         });
-        self.open_video_editor(EditorTarget::Tray(index), source, initial, window, cx);
+        self.open_video_editor(EditorTarget::Tray(item), source, initial, window, cx);
     }
 
     /// Open the editor on the replacement video of the edit box.
@@ -289,7 +293,7 @@ impl QuillApp {
             .send_box
             .video_editor
             .as_ref()
-            .map(|editor| editor.target)
+            .map(|editor| editor.target.clone())
         else {
             return;
         };
@@ -524,7 +528,7 @@ impl QuillApp {
             .send_box
             .video_editor
             .as_ref()
-            .map(|editor| editor.target);
+            .map(|editor| editor.target.clone());
         let edited = output != source;
         let untouched = edits == VideoEdits::full(info.duration_ms);
         let mut extras = AttachmentExtras {
@@ -539,21 +543,28 @@ impl QuillApp {
             ..AttachmentExtras::default()
         };
         let note = match target {
-            Some(EditorTarget::Tray(index)) => {
-                let several = self.pending_attachments().len() > 1;
-                let Some(attachment) = self.pending_attachment_mut(index) else {
+            Some(EditorTarget::Tray(item)) => {
+                // The copy replaces the video in the chat the editor was
+                // opened from, as long as that video is still in its tray.
+                let several = self.composer_sends.get(&item.slot).attachments.len() > 1;
+                let replaced = self.composer_sends.update_item(&item, |attachment| {
+                    if is_editor_copy(&attachment.path) && attachment.path != output {
+                        let _ = std::fs::remove_file(&attachment.path);
+                    }
+                    extras.cover = attachment.extras.cover.take();
+                    extras.gif = edits.gif;
+                    if edited {
+                        attachment.file_name = mp4_name(&attachment.file_name);
+                    }
+                    attachment.path = output.clone();
+                    attachment.extras = extras;
+                });
+                if replaced.is_none() {
+                    if edited && is_editor_copy(&output) {
+                        let _ = std::fs::remove_file(&output);
+                    }
                     return;
-                };
-                if is_editor_copy(&attachment.path) && attachment.path != output {
-                    let _ = std::fs::remove_file(&attachment.path);
                 }
-                extras.cover = attachment.extras.cover.take();
-                extras.gif = edits.gif;
-                if edited {
-                    attachment.file_name = mp4_name(&attachment.file_name);
-                }
-                attachment.path = output;
-                attachment.extras = extras;
                 if edits.gif && info.has_audio && several {
                     tr(keys::Q_AV_THE_GIF_LEAVES_THE_ALBUM)
                 } else {

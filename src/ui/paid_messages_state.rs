@@ -3,9 +3,17 @@
 //! `paid_messages_channel.rs`).
 #![deny(clippy::indexing_slicing)]
 
+use super::composer_sends::SendSlot;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::paid_messages::PaidConfirm;
+
+/// The confirmation before a composer send, and the chat it was asked in:
+/// Pay sends only there.
+pub(crate) struct ComposerPaidConfirm {
+    pub(super) ask: PaidConfirm,
+    pub(super) slot: SendSlot,
+}
 
 /// A price chosen on a slider: the steps it moves over and the value.
 pub(crate) struct PriceSlider {
@@ -36,7 +44,7 @@ pub(crate) struct PaidMessagesUi {
     /// this staged price. Nothing is charged until Save.
     pub(super) charge: Option<PriceSlider>,
     /// The confirmation before a paid send.
-    pub(super) confirm: Option<PaidConfirm>,
+    pub(super) confirm: Option<ComposerPaidConfirm>,
     /// "Don't ask me again" in the confirmation.
     pub(super) confirm_trust: bool,
     pub(super) remove_fee: Option<RemoveFeeBox>,

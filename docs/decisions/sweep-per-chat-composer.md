@@ -70,10 +70,50 @@ assert, "attachment leaked".
   group upgrade now run it as well; the story path also saves the leaving
   draft and restores the new chat's.
 - The tray's file checks (`SendBoxUi`: photo sizes, sound probes, thumbnails)
-  are keyed by path. A send or clear now forgets only its own files
-  (`forget`), so another chat's tray keeps its checks, and a check that
+  are keyed by path. A send, clear or removal forgets only files no tray in
+  any chat or account still holds (`forget_tray_checks`), and a check that
   finishes after the user moved on updates every tray holding that file
   (`attachments_at_mut`) instead of whatever chat is open.
+
+### Per account (review fix)
+
+Chat ids repeat across accounts: a group both accounts are in, or private
+chats with the same user. The store is keyed by `SendSlot` (the account on
+screen plus the `DraftKey`), and the silent overrides by account and chat,
+so account B never sees or sends account A's tray or options. An account in
+the background keeps its entries (switching back shows them), and they are
+dropped when it is removed or its local data wiped (`delete_after_close`),
+when the account on screen logs out (`saw_logging_out` in the poll), and
+when a background account reaches SignedOut or NeedsSignIn.
+
+### Results that arrive later (review fix)
+
+A step that answers after the user may have moved on captures its target
+when it starts and writes only there:
+
+- The cover picker, the photo editor (`EditorPurpose::Attachment`) and the
+  video editor (`EditorTarget::Tray`) capture a `TrayItem`: slot, index and
+  file path. `ComposerSends::update_item` writes only while that slot's tray
+  still has the same file at that index; otherwise the result is dropped
+  (and an edited copy written for it is deleted).
+- The schedule picker and the price box capture the `SendSlot` they opened
+  in. A schedule confirmed after a switch is set on its own chat, and the
+  "Schedule" shortcut's send is skipped, since it would send the open chat's
+  text. A folder drop's archive already compared the chat; it now compares
+  the slot.
+- Pay in the paid-message confirmation (`ComposerPaidConfirm`) sends only
+  when the slot on screen is the one it was asked in. Otherwise nothing is
+  sent, as on Cancel, and the text waits in its own chat's composer.
+
+### Memory (review fix)
+
+Every write to the store goes through `ComposerSends::update`, which drops
+an entry that is back to nothing chosen (`PendingSend::EMPTY`), and an
+account with no entries left. Toggling previews off and on, removing the
+last file or clearing a schedule leaves nothing behind. Measured by the
+slot count in `an_entry_back_to_nothing_chosen_is_dropped`: without the
+pruning, one previews off/on round trip leaves 1 entry; with it, 0 after
+each round trip.
 
 ## Not changed, and why
 
@@ -95,6 +135,14 @@ assert, "attachment leaked".
   draft). That gap predates this change.
 - The similar-channels strip already opened chats through
   `select_listed_chat`; the finding listed it wrongly.
+- Saved Messages sublists still share the Saved Messages `DraftKey`.
+  Giving them their own needs a new `DraftTopic` variant, which reaches the
+  cloud draft requests (`setChatDraftMessage.topic_id`), the draft store and
+  `accepts_composer_draft`; not a small change. Follow-up.
+- The attach menu's file picker answers into the window that asked
+  (`in_window_scope`) but at whatever chat that window shows by then; the
+  video sound checks run only for the open tray, so writing into another
+  chat's tray needs those checks keyed by slot first. Follow-up.
 
 ## Verification
 
@@ -109,10 +157,26 @@ assert, "attachment leaked".
   - silent follows each chat's default and its own override, and an override
     equal to the default is dropped;
   - a chat window's choices are stored under its chat: B's window sees only
-    B's tray, the main window only A's.
+    B's tray, the main window only A's;
+  - another account with the same chat id open sees nothing of A's, A's
+    come back, and B's entries go when B logs out
+    (`another_account_never_sees_this_accounts_choices_for_the_same_chat_id`);
+  - a cover, a photo edit, a schedule and a price completed after a chat
+    switch land in the chat they started in and leave the open chat alone;
+    a cover for a file that left its place is dropped;
+  - Pay after a chat or account switch sends nothing; in its own chat it
+    sends (`pay_sends_only_in_the_chat_and_account_it_was_asked_in`);
+  - entries back to nothing chosen are dropped, and a file another tray
+    holds keeps its checks when one tray drops it.
+- `background_accounts/deleting_tests.rs`:
+  `a_removed_account_takes_its_composer_choices_with_it`.
+- Each new test was run against a mutated build (account ignored in the
+  slot, no pruning, cover/photo/schedule/price written to the open chat, no
+  Pay check) and failed there.
+- The video editor's late write uses the same `update_item` path but has no
+  UI test: it needs a real decode and transcode.
 - Existing composer, send box and image editor tests pass with the store.
 - Captures (demo `ready-send-media`, 1200x800): chat A with `demo-notes.txt`
   in the tray, chat B after clicking it in the list (empty composer), and A
-  again (tray back), light and dark.
-
-No perf or memory work here, so no measurements.
+  again (tray back), light and dark. The demos run one account, so the
+  account switch is covered by the GPUI test only.
