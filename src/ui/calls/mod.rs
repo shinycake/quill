@@ -42,6 +42,15 @@ pub(super) fn call_message_peer(
 }
 
 impl QuillApp {
+    /// The camera and microphone picked in the call menu, read from the
+    /// driver that owns the pick (demo mode has no device names: defaults).
+    pub(crate) fn capture_choice(&self) -> quill::capture_choice::CaptureChoice {
+        self.live
+            .as_ref()
+            .map(|live| live.driver.capture_choice())
+            .unwrap_or_default()
+    }
+
     /// Phase C1b: `createCall` from a user profile. `is_video: true`
     /// starts video-call *signaling* — media transport is still Phase
     /// C2, so the call carries no audio or video and the UI says so.

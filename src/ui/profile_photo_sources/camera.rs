@@ -48,7 +48,8 @@ impl QuillApp {
         sources.serial += 1;
         let serial = sources.serial;
         let log = work_dir().join("camera.log");
-        let worker = cx.background_spawn(async move { CameraStream::start(&log) });
+        let choice = self.capture_choice();
+        let worker = cx.background_spawn(async move { CameraStream::start(&log, &choice) });
         cx.spawn_in(window, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {

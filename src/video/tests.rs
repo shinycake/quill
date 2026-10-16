@@ -103,7 +103,7 @@ fn video_note_capture_start_fails_honestly_without_camera() {
     if !crate::media_tools::v4l2_capture_devices().is_empty() {
         return;
     }
-    let err = match VideoNoteCapture::start(false) {
+    let err = match VideoNoteCapture::start(false, &Default::default()) {
         Ok(_) => panic!("expected no-camera error"),
         Err(err) => err,
     };

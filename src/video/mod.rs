@@ -508,8 +508,8 @@ pub const ROUND_MAX_SECS: i32 = 60;
 pub type PreviewFrame = Arc<Mutex<(u64, Vec<u8>)>>;
 
 /// In-progress round video-note camera capture (tdesktop
-/// `RoundVideoRecorder`): ffmpeg records the default camera and
-/// microphone, center-crops to a square and mirrors it (selfie view, as
+/// `RoundVideoRecorder`): ffmpeg records the camera and
+/// microphone picked in the call menu (else the defaults), center-crops to a square and mirrors it (selfie view, as
 /// tdesktop sends it), encodes H.264 + AAC, and streams small BGRA
 /// frames back for the live round preview.
 pub struct VideoNoteCapture {
@@ -523,11 +523,11 @@ pub struct VideoNoteCapture {
 
 impl VideoNoteCapture {
     /// Start recording. Fails when there is no camera or ffmpeg is missing.
-    pub fn start(hq: bool) -> Result<Self, String> {
+    pub fn start(hq: bool, choice: &crate::capture_choice::CaptureChoice) -> Result<Self, String> {
         if !crate::media_tools::is_installed("ffmpeg") {
             return Err(crate::media_tools::ffmpeg_missing_message("Video messages"));
         }
-        let input = crate::media_tools::capture_input()?;
+        let input = crate::media_tools::capture_input(choice)?;
         let path = crate::voice::capture_path("video-note", "mp4");
         let log = path.with_extension("log");
         let log_file = std::fs::File::create(&log).map_err(|err| err.to_string())?;

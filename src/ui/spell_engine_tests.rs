@@ -4,13 +4,16 @@
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
+use crate::ui::spell_state::EngineBuilder;
 use crate::ui::spellcheck_ui::SpellInfo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::spell_dict::EngineKind;
 use quill::spellcheck::SpellChecker;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -34,9 +37,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, VisualTestContext::from_window(handle.into(), cx))
 }
 
-/// A backend whose init takes a while, like a cold COM or spell-server start.
-fn slow_engine(chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
-    std::thread::sleep(Duration::from_millis(300));
+fn engine_for(chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
     (
         Arc::new(SpellChecker::wordlist()),
         SpellInfo {
@@ -48,23 +49,70 @@ fn slow_engine(chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
     )
 }
 
+/// A backend that builds at once.
+fn fast_engine(chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
+    engine_for(chosen)
+}
+
+/// One test's gate: a build made by `builder` waits until `open` is called,
+/// like a cold COM or spell-server start finishing. No clock and no shared
+/// statics: every test owns its gate, so tests cannot affect each other.
+#[derive(Default)]
+struct Gate {
+    open: Mutex<bool>,
+    opened: Condvar,
+    build_finished: AtomicBool,
+}
+
+impl Gate {
+    fn open(&self) {
+        *self.open.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.opened.notify_all();
+    }
+
+    fn build_finished(&self) -> bool {
+        self.build_finished.load(Ordering::SeqCst)
+    }
+
+    /// The 30 s cap only keeps a broken test from hanging forever; it is
+    /// not an assertion.
+    fn build(&self, chosen: &[String]) -> (Arc<SpellChecker>, SpellInfo) {
+        let open = self.open.lock().unwrap_or_else(|e| e.into_inner());
+        let _released = self
+            .opened
+            .wait_timeout_while(open, Duration::from_secs(30), |open| !*open)
+            .unwrap_or_else(|e| e.into_inner());
+        self.build_finished.store(true, Ordering::SeqCst);
+        engine_for(chosen)
+    }
+}
+
+fn gated_builder(gate: &Arc<Gate>) -> EngineBuilder {
+    let gate = gate.clone();
+    Arc::new(move |chosen| gate.build(chosen))
+}
+
 #[gpui_kit::test]
 fn slow_engine_build_does_not_block_and_swaps_in(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let old = app.update_in(&mut vcx, |app, _, _| app.spell.checker.clone());
-    let started = Instant::now();
+    let gate = Arc::new(Gate::default());
     app.update_in(&mut vcx, |app, _, cx| {
-        app.spell.engine_builder = slow_engine;
+        app.spell.engine_builder = gated_builder(&gate);
         app.set_spell_languages(vec!["xx".into()], cx);
     });
-    // Starting the build returned at once, with the old engine in place.
-    assert!(started.elapsed() < Duration::from_millis(250));
+    // Starting the build returned while the build is still blocked on the
+    // gate, with the old engine in place.
+    assert!(!gate.build_finished());
     app.update_in(&mut vcx, |app, _, _| {
         assert!(app.spell.engine_task.is_some());
         assert!(Arc::ptr_eq(&app.spell.checker, &old));
         assert_eq!(app.spell.info.chosen, vec!["xx".to_string()]);
     });
+    // Releasing the build lets the swap happen, and only then.
+    gate.open();
     vcx.run_until_parked();
+    assert!(gate.build_finished());
     app.update_in(&mut vcx, |app, _, _| {
         assert!(app.spell.engine_task.is_none());
         assert!(!Arc::ptr_eq(&app.spell.checker, &old));
@@ -77,7 +125,7 @@ fn words_learned_while_loading_survive_the_swap(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         app.spell.checker.set_app_words(["zorbleflux".to_string()]);
-        app.spell.engine_builder = slow_engine;
+        app.spell.engine_builder = Arc::new(fast_engine);
         app.start_spell_engine(Vec::new(), cx);
     });
     vcx.run_until_parked();

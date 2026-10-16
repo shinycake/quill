@@ -189,7 +189,7 @@ impl QuillApp {
     /// it resolves (the old checker keeps answering meanwhile). A newer
     /// call replaces a pending one.
     pub(super) fn start_spell_engine(&mut self, chosen: Vec<String>, cx: &mut Context<Self>) {
-        let build = self.spell.engine_builder;
+        let build = self.spell.engine_builder.clone();
         self.spell.engine_task = Some(cx.spawn(async move |this, cx| {
             let (checker, info) = cx.background_spawn(async move { build(&chosen) }).await;
             let _ = this.update(cx, |this, cx| this.install_spell_engine(checker, info, cx));

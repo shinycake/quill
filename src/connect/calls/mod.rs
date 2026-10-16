@@ -93,6 +93,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         )
     }
 
+    /// The listed name of device `id` of `kind` (what ffmpeg capture
+    /// matches on); `None` for the default or an unknown id.
+    fn call_device_name(&self, id: Option<&str>, kind: MediaDeviceKind) -> Option<String> {
+        let id = id?;
+        self.call_devices_cache
+            .iter()
+            .find(|device| device.kind == kind && device.id == id)
+            .map(|device| device.name.clone())
+    }
+
+    /// The camera and microphone the user picked in the call device menu,
+    /// by listed name, for ffmpeg capture (round videos, profile-photo
+    /// camera). Derived on demand from the selected ids and the device list,
+    /// so it can never disagree with the menu; an unset or unlisted pick is
+    /// `None` (system default).
+    pub fn capture_choice(&self) -> crate::capture_choice::CaptureChoice {
+        crate::capture_choice::CaptureChoice {
+            camera: self.call_device_name(self.selected_camera.as_deref(), MediaDeviceKind::Camera),
+            microphone: self.call_device_name(
+                self.selected_devices.0.as_deref(),
+                MediaDeviceKind::Microphone,
+            ),
+        }
+    }
+
     /// Phase C2c: best-effort device re-enumeration. A missing or
     /// unavailable engine leaves the cache untouched.
     pub fn refresh_call_devices(&mut self) {

@@ -165,7 +165,7 @@ impl QuillApp {
         let hq = self
             .session()
             .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
-        match VideoNoteCapture::start(hq) {
+        match VideoNoteCapture::start(hq, &self.capture_choice()) {
             Ok(capture) => {
                 self.recording.video_note_capture = Some(capture);
                 self.recording.locked = lock;

@@ -326,6 +326,71 @@ fn select_call_camera_without_transport_stores_selection() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The camera and microphone picked in the call menu reach ffmpeg capture:
+/// the driver's own selection (ids) is resolved through its device list to
+/// the names `media_tools` matches, with no second copy to go stale.
+#[test]
+fn call_menu_pick_reaches_the_capture_input() {
+    let (dir, mut driver, handle, _sink, _seq) = ready_call_driver();
+    let device = |id: &str, name: &str, kind| MediaDevice {
+        id: id.into(),
+        name: name.into(),
+        kind,
+    };
+    handle.set_devices(vec![
+        device("cam-a", "FaceTime HD Camera", MediaDeviceKind::Camera),
+        device("cam-b", "Studio Display Camera", MediaDeviceKind::Camera),
+        device(
+            "mic-a",
+            "MacBook Pro Microphone",
+            MediaDeviceKind::Microphone,
+        ),
+        device(
+            "mic-b",
+            "Studio Display Microphone",
+            MediaDeviceKind::Microphone,
+        ),
+    ]);
+    driver.refresh_call_devices();
+    assert_eq!(driver.capture_choice(), Default::default());
+
+    assert!(driver.select_call_camera(Some("cam-b".into())).is_ok());
+    assert!(
+        driver
+            .select_call_devices(Some("mic-b".into()), None)
+            .is_ok()
+    );
+    let choice = driver.capture_choice();
+    assert_eq!(choice.camera.as_deref(), Some("Studio Display Camera"));
+    assert_eq!(
+        choice.microphone.as_deref(),
+        Some("Studio Display Microphone")
+    );
+
+    // The resolved ffmpeg argument for that pick (AVFoundation indices).
+    let listing = "[AVFoundation indev @ 0x1] AVFoundation video devices:\n\
+        [AVFoundation indev @ 0x1] [0] FaceTime HD Camera\n\
+        [AVFoundation indev @ 0x1] [1] Studio Display Camera\n\
+        [AVFoundation indev @ 0x1] AVFoundation audio devices:\n\
+        [AVFoundation indev @ 0x1] [0] MacBook Pro Microphone\n\
+        [AVFoundation indev @ 0x1] [1] Studio Display Microphone\n";
+    let devices = crate::capture_choice::parse_avfoundation_devices(listing);
+    assert_eq!(
+        crate::media_tools::avfoundation_specifiers(&choice, &devices),
+        ("1".to_string(), "1".to_string())
+    );
+
+    // Going back to the default clears the pick; an unplugged device
+    // (gone from the refreshed list) falls back to the system default.
+    assert!(driver.select_call_camera(None).is_ok());
+    assert_eq!(driver.capture_choice().camera, None);
+    assert!(driver.select_call_camera(Some("cam-a".into())).is_ok());
+    handle.set_devices(Vec::new());
+    driver.refresh_call_devices();
+    assert_eq!(driver.capture_choice(), Default::default());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Phase C2e: no camera enumerated → a video call must not
 /// negotiate video.
 #[test]
