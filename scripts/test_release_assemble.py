@@ -33,6 +33,9 @@ class DefuseMentions(unittest.TestCase):
             "* Inline `@gif` results load at once by @shinycake in https://github.com/shinycake/quill/pull/880",
         )
 
+        first = "* @shinycake made their first contribution in https://github.com/shinycake/quill/pull/1"
+        self.assertEqual(ra.defuse_mentions(first), first)
+
 
 if __name__ == "__main__":
     unittest.main()

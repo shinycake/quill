@@ -102,6 +102,7 @@ def human(size: int) -> str:
 MENTION = re.compile(r"(?<![\w@/.`-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)(?![\w-])")
 # GitHub's generated changelog credits authors as "by @login in https://...": keep those.
 CREDIT = re.compile(r" by @[A-Za-z0-9-]+ in https://\S+$")
+FIRST_CONTRIBUTION = re.compile(r"^\* @[A-Za-z0-9-]+ made their first contribution in https://\S+$")
 
 
 def defuse_mentions(text: str) -> str:
@@ -113,7 +114,7 @@ def defuse_mentions(text: str) -> str:
             fenced = not fenced
             out.append(line)
             continue
-        if fenced:
+        if fenced or FIRST_CONTRIBUTION.match(line):
             out.append(line)
             continue
         credit = CREDIT.search(line)
