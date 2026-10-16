@@ -322,7 +322,6 @@
 "qll_people_default" = "Default";
 "qll_people_default_icon" = "Default icon";
 "qll_people_default_permissions" = "Default permissions";
-"qll_people_delay_between_messages_for_members" = "Delay between messages for members";
 "qll_people_delete_all_messages_in_this" = "Delete all messages in this chat for everyone? This cannot be undone.";
 "qll_people_delete_all_messages_in_this_2" = "Delete all messages in this chat for you? This cannot be undone.";
 "qll_people_delete_and_all_its_messages" = "Delete {name} and all its messages? This cannot be undone.";
@@ -757,3 +756,9 @@
 "qll_people_your_birthday" = "Your birthday";
 "qll_people_your_recent_and_favorite_animated" = "Your recent and favorite animated stickers show up here.";
 "qll_people_your_saved_messages_are_being" = "Your saved messages are being grouped by chat.";
+"lng_rights_slowmode_about" = "Members will be able to send only one message per this interval.";
+"lng_rights_slowmode_about_interval" = "Members will be able to send only one message {interval}.";
+"lng_rights_slowmode_interval_seconds#one" = "every {count} second";
+"lng_rights_slowmode_interval_seconds#other" = "every {count} seconds";
+"lng_rights_slowmode_interval_minutes#one" = "every {count} minute";
+"lng_rights_slowmode_interval_minutes#other" = "every {count} minutes";

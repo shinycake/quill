@@ -22,6 +22,18 @@ pub(crate) fn subscription_price_label(pricing: &StarSubscriptionPricing) -> Str
     )
 }
 
+/// The "Loading..." line of the invite-link blocks, with the kit spinner.
+pub(crate) fn loading_row(color: Hsla) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_xs()
+        .text_color(color)
+        .child(gpui_kit::component::spinner::Spinner::new().xsmall())
+        .child(tr(keys::Q_OPS_LOADING))
+}
+
 /// "3 invite links" / "1 invite link", with revoked links appended
 /// (tdesktop `lng_group_invite_other_count`).
 pub(crate) fn invite_link_count_label(active: i32, revoked: i32) -> String {
@@ -327,26 +339,27 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let open = self.admin.revoked_links_open;
         let mut block = div().flex().flex_col().w_full().gap_1().pt_1().child(
-            div()
-                .flex()
-                .items_center()
-                .w_full()
-                .gap_1()
-                .child(self.invite_block_title(tr(keys::GROUP_INVITE_REVOKED_TITLE), cx))
-                .child(div().flex_1())
-                .child(
-                    Button::new("revoked-links-toggle")
-                        .label(if open {
-                            tr(keys::Q_OPS_HIDE)
-                        } else {
-                            tr(keys::Q_OPS_SHOW)
-                        })
-                        .ghost()
-                        .small()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_revoked_links(chat_id, cx);
-                        })),
-                ),
+            div().flex().items_center().w_full().gap_1().child(
+                // A disclosure row: the section title with a chevron
+                // that turns when the list is open.
+                Button::new("revoked-links-toggle")
+                    .icon(if open {
+                        gpui_kit::assets::IconName::ChevronDown
+                    } else {
+                        gpui_kit::assets::IconName::ChevronRight
+                    })
+                    .label(tr(keys::GROUP_INVITE_REVOKED_TITLE))
+                    .ghost()
+                    .small()
+                    .tooltip(if open {
+                        tr(keys::Q_OPS_HIDE)
+                    } else {
+                        tr(keys::Q_OPS_SHOW)
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_revoked_links(chat_id, cx);
+                    })),
+            ),
         );
         if !open {
             return block.into_any_element();
@@ -357,12 +370,7 @@ impl QuillApp {
             .cloned();
         match fetch {
             None | Some(InviteLinkFetch::Loading) => {
-                block = block.child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(tr(keys::Q_OPS_LOADING)),
-                );
+                block = block.child(loading_row(muted));
             }
             Some(InviteLinkFetch::Failed(message)) => {
                 block = block.child(div().text_xs().text_color(muted).child(message));

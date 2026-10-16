@@ -1,5 +1,6 @@
 //! Methods moved out of `group_panels.rs` to keep files under 1000 lines.
 
+use super::slow_mode::SlowModeSlider;
 use super::*;
 use quill::lang::{keys, tr, tr_with};
 
@@ -492,28 +493,11 @@ impl QuillApp {
         // delay arrives via `updateSupergroupFullInfo`.
         if !is_channel && self.can_change_slow_mode(supergroup_id) {
             let current_delay = info.as_ref().map(|i| i.slow_mode_delay).unwrap_or(0);
-            let mut value_row = div().id("slow-mode-values").flex().flex_wrap().gap_1();
-            for (label, value) in [
-                (tr(keys::Q_PEOPLE_OFF), 0),
-                ("5s", 5),
-                ("10s", 10),
-                ("30s", 30),
-                ("1m", 60),
-                ("5m", 300),
-                ("15m", 900),
-                ("1h", 3600),
-            ] {
-                value_row = value_row.child(
-                    Button::new(format!("slow-mode-set-{value}"))
-                        .label(label)
-                        .small()
-                        .outline()
-                        .selected(value == current_delay)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_slow_mode_delay(chat_id, value, cx);
-                        })),
-                );
-            }
+            let app = cx.entity().downgrade();
+            let slider = SlowModeSlider::new(chat_id.0, current_delay, move |delay, cx| {
+                app.update(cx, |this, cx| this.set_slow_mode_delay(chat_id, delay, cx))
+                    .ok();
+            });
             body = body.child(
                 div()
                     .flex()
@@ -527,13 +511,7 @@ impl QuillApp {
                             .text_color(cx.theme().muted_foreground)
                             .child(tr(keys::Q_PEOPLE_SLOW_MODE)),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::Q_PEOPLE_DELAY_BETWEEN_MESSAGES_FOR_MEMBERS)),
-                    )
-                    .child(value_row),
+                    .child(slider),
             );
         }
         // Phase D2: statistics entry point — shown only when

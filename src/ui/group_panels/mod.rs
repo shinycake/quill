@@ -657,6 +657,13 @@ pub(super) fn format_birthday(date: quill::telegram::envelope::Birthdate) -> Str
     }
 }
 
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod invite_disclosure_tests;
+mod slow_mode;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod slow_mode_tests;
 mod user_info_panel;
 
 #[cfg(test)]
