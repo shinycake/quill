@@ -4,10 +4,18 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::gif_clip::GifClip;
+use super::gif_clip::{GifClip, GifError};
+use super::inline_players::Demand;
+use super::inline_video::InlineTile;
+use super::message_media::MediaFrameKind;
 use gpui_kit::*;
 use quill::ids::{FileId, MessageId};
 use quill::local_path::sandboxed_display_path;
+use quill::telegram::envelope::MessageContent;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 impl QuillApp {
@@ -35,8 +43,7 @@ impl QuillApp {
         {
             return;
         }
-        let quill::telegram::envelope::MessageContent::Animation(animation) = &row.message.content
-        else {
+        let MessageContent::Animation(animation) = &row.message.content else {
             return;
         };
         if animation.is_secret || animation.has_spoiler {
@@ -64,15 +71,19 @@ impl QuillApp {
     }
 
     pub(super) fn stop_animation_playback(&mut self) {
-        self.playback.gif_epoch = self.playback.gif_epoch.wrapping_add(1);
-        self.playback.playing_animation = None;
-        if let Some(clip) = self.playback.gif.take() {
-            super::image_budget::retire_all(clip.into_images());
+        // A decode still running stops before its next frame.
+        for cancel in self.playback.gif_decodes.values() {
+            cancel.store(true, Ordering::Relaxed);
         }
+        self.playback.playing_animation = None;
+        // The clip hands its pictures to the atlas sweeper when it drops.
+        self.playback.gif = None;
         self.playback.gif_started_at = None;
         self.playback.pending_gif_play = None;
     }
 
+    /// The GIF's play disc: an `image/gif` file loops here, decoded in
+    /// process; an MP4 GIF plays on demand on the inline player.
     pub(super) fn toggle_animation_playback(
         &mut self,
         message_id: MessageId,
@@ -87,6 +98,34 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        if mime != "image/gif" {
+            self.play_open_chat_clip(message_id, file_id, Demand::Loop, cx);
+            return;
+        }
+        self.play_gif_file(message_id, file_id, mime, cx);
+    }
+
+    /// A clip of the open chat on demand on the inline player.
+    fn play_open_chat_clip(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        demand: Demand,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+            return;
+        };
+        self.play_inline_on_demand(chat_id, message_id, file_id, demand, cx);
+    }
+
+    fn play_gif_file(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        mime: String,
+        cx: &mut Context<Self>,
+    ) {
         let path = self.session().and_then(|session| {
             session
                 .media
@@ -111,36 +150,99 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
-        let epoch = self.playback.gif_epoch;
         self.playback.playing_animation = Some(message_id);
         self.connection.status_note = "Loading GIF playback…".into();
+        self.spawn_gif_decode(message_id, file_id, safe, cx);
+        cx.notify();
+    }
+
+    /// Decode the GIF off the UI thread. One decode per GIF: one still
+    /// running (stopped, then started again before it saw the stop) is
+    /// taken back instead of starting a second.
+    fn spawn_gif_decode(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(cancel) = self.playback.gif_decodes.get(&message_id) {
+            cancel.store(false, Ordering::Relaxed);
+            return;
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.playback.gif_decodes.insert(message_id, cancel.clone());
+        let max_edge = self.gif_decode_edge(message_id, cx);
         cx.spawn(async move |this, cx| {
             let decoded = cx
                 .background_executor()
-                .spawn(async move { GifClip::decode(&safe) })
+                .spawn(async move { GifClip::decode(&path, max_edge, &cancel) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.playback.gif_epoch != epoch
-                    || this.playback.playing_animation != Some(message_id)
-                {
-                    // Stopped or replaced meanwhile: the pictures were never shown.
-                    return;
-                }
-                match decoded {
-                    Ok(clip) => {
-                        this.playback.gif = Some(clip);
-                        this.playback.gif_started_at = Some(Instant::now());
-                        this.connection.status_note = "Playing GIF".into();
-                    }
-                    Err(_) => {
-                        this.stop_animation_playback();
-                        this.connection.status_note = "Could not play GIF.".into();
-                    }
-                }
-                cx.notify();
+                this.gif_decoded(message_id, file_id, decoded, cx);
             });
         })
         .detach();
+    }
+
+    /// The longer side to decode the GIF at: its tile in device pixels
+    /// (`InlineTile::decode_edge`, capped at `INLINE_MAX_EDGE`).
+    fn gif_decode_edge(&self, message_id: MessageId, cx: &mut Context<Self>) -> u32 {
+        let scale = self.playback.inline_videos.scale();
+        let message = self.session().and_then(|session| {
+            let chat = session.open_chat?;
+            session.histories.get(&chat.0)?.messages.get(&message_id.0)
+        });
+        let (width, height, caption) = match message {
+            Some(message) => match &message.content {
+                MessageContent::Animation(animation) => (
+                    animation.width,
+                    animation.height,
+                    self.inline_caption_width(message, cx),
+                ),
+                _ => (0, 0, 0),
+            },
+            None => (0, 0, 0),
+        };
+        InlineTile::media(MediaFrameKind::Gif, width, height, caption).decode_edge(scale)
+    }
+
+    fn gif_decoded(
+        &mut self,
+        message_id: MessageId,
+        file_id: FileId,
+        decoded: Result<GifClip, GifError>,
+        cx: &mut Context<Self>,
+    ) {
+        self.playback.gif_decodes.remove(&message_id);
+        if self.playback.playing_animation != Some(message_id) || self.playback.gif.is_some() {
+            // Stopped or replaced meanwhile: the pictures were never shown.
+            return;
+        }
+        match decoded {
+            Ok(clip) => {
+                self.playback.gif = Some(Rc::new(clip));
+                self.playback.gif_started_at = Some(Instant::now());
+                self.connection.status_note = "Playing GIF".into();
+            }
+            // Started again after this decode saw the stop: decode anew.
+            Err(GifError::Cancelled) => {
+                self.playback.playing_animation = None;
+                self.play_gif_file(message_id, file_id, "image/gif".into(), cx);
+                return;
+            }
+            // Labelled `image/gif`, but a video: the inline player takes it.
+            Err(GifError::NotGif) => {
+                self.stop_animation_playback();
+                self.play_open_chat_clip(message_id, file_id, Demand::Loop, cx);
+                return;
+            }
+            Err(_) => {
+                self.stop_animation_playback();
+                self.connection.status_note = "Could not play GIF.".into();
+            }
+        }
+        self.notify_conversation(cx);
         cx.notify();
     }
 

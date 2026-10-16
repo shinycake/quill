@@ -42,18 +42,20 @@ pub(crate) struct PlaybackUi {
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<MessageId, f64>,
-    /// History row whose GIF is looping (tdesktop clip / Unigram player).
+    /// Animated stickers in the history and the panels.
     pub(super) sticker_playback: super::sticker_playback::StickerPlayback,
     /// Animated custom emoji (smaller frames, more clips).
     pub(super) emoji_playback: super::sticker_playback::StickerPlayback,
+    /// History row whose `image/gif` file is looping (`inline_playback`).
     pub(super) playing_animation: Option<MessageId>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
-    /// The playing GIF's held pictures (`gif_clip`), once decoded.
-    pub(super) gif: Option<super::gif_clip::GifClip>,
+    /// The playing GIF's held pictures (`gif_clip`), once decoded. Shared
+    /// with the history row (and its animation layer) that draws it.
+    pub(super) gif: Option<std::rc::Rc<super::gif_clip::GifClip>>,
     pub(super) gif_started_at: Option<Instant>,
-    /// Bumped whenever GIF playback stops, so a decode that finishes late
-    /// is dropped.
-    pub(super) gif_epoch: u64,
+    /// The GIF decodes running, by message, and their cancel flags (set
+    /// when playback stops; one decode per GIF at a time).
+    pub(super) gif_decodes: HashMap<MessageId, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Play was tapped before the clip was local. Resume when `downloadFile` finishes.
     pub(super) pending_gif_play: Option<(MessageId, FileId, String)>,
     /// A linked `?t=` media timestamp waiting for its message to load
@@ -76,22 +78,13 @@ pub(crate) struct PlaybackUi {
 }
 
 impl PlaybackUi {
-    /// The picture of the playing GIF now.
-    pub(super) fn gif_frame(&self) -> Option<std::sync::Arc<RenderImage>> {
-        let clip = self.gif.as_ref()?;
-        let elapsed = self
-            .gif_started_at
-            .map(|at| at.elapsed())
-            .unwrap_or_default();
-        // A screenshot capture shows the first picture, so it is the same
-        // every run.
-        #[cfg(feature = "demo-capture")]
-        let elapsed = if std::env::var_os("QUILL_DEMO_CAPTURE").is_some() {
-            std::time::Duration::ZERO
-        } else {
-            elapsed
-        };
-        clip.frame_at(elapsed).cloned()
+    /// The playing GIF, for its history row.
+    pub(super) fn gif_play(&self) -> Option<super::gif_clip::GifPlay> {
+        let clip = self.gif.clone()?;
+        Some(super::gif_clip::GifPlay::new(
+            clip,
+            self.gif_started_at.unwrap_or_else(Instant::now),
+        ))
     }
 
     pub(super) fn new(audio_output: &super::audio::SharedOutput) -> Self {
@@ -117,7 +110,7 @@ impl PlaybackUi {
             autoplayed_gifs: Default::default(),
             gif: None,
             gif_started_at: None,
-            gif_epoch: 0,
+            gif_decodes: HashMap::new(),
             pending_gif_play: None,
             pending_media_seek: None,
             inline_videos: Default::default(),
