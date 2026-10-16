@@ -252,6 +252,11 @@ fn windows_icon(manifest: &Path, out: &Path) -> Result<(), String> {
     let app_manifest = app_manifest.to_string_lossy().replace('\\', "/");
     std::fs::write(&rc, format!("1 ICON \"{icon}\"\n1 24 \"{app_manifest}\"\n"))
         .map_err(|err| format!("write rc: {err}"))?;
+    // The MSVC linker also generates a default manifest (id 1) unless told
+    // not to; two RT_MANIFEST 1 resources fail with CVT1100.
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/MANIFEST:NO");
+    }
     embed_resource::compile(&rc, embed_resource::NONE)
         .manifest_required()
         .map_err(|err| format!("embed application icon: {err:?}"))
