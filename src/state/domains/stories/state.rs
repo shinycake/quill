@@ -94,6 +94,13 @@ pub struct StoriesState {
     /// reachable): a forwarded-story card then says "This story has
     /// expired" (tdesktop `NoStory::Deleted`).
     pub missing: HashSet<(i64, i32)>,
+    /// The live story the viewer is watching.
+    pub live: Option<LiveStoryState>,
+    /// Paid live story comment levels from `updateGroupCallMessageLevels`,
+    /// lowest first; empty until TDLib sends them.
+    pub live_levels: Vec<crate::telegram::envelope::GroupCallMessageLevel>,
+    /// `paid_group_call_message_star_count_max`, once known.
+    pub live_max_stars: Option<i64>,
 }
 
 impl StoriesState {
@@ -123,6 +130,9 @@ impl StoriesState {
             stories_active_loaded: false,
             reply_attempted: HashSet::new(),
             missing: HashSet::new(),
+            live: None,
+            live_levels: Vec::new(),
+            live_max_stars: None,
         }
     }
 }

@@ -98,4 +98,6 @@ pub enum CallsPayload {
     /// base64; consumed by the driver's stream feeder. `None` when the
     /// answer has no `data` string, which the feeder answers RESYNC_NEEDED.
     Data { base64: Option<String> },
+    /// Live story updates and answers (`envelope::live_story`).
+    LiveStory(LiveStoryPayload),
 }

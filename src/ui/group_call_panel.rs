@@ -658,7 +658,8 @@ impl QuillApp {
     /// title and count, leave; a click brings the window back.
     pub(super) fn group_call_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
-        if !call.is_joined {
+        // A live story plays in the story viewer, without the call bar.
+        if !call.is_joined || call.is_live_story {
             return None;
         }
         let state = mute_state(call);

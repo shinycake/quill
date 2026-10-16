@@ -1,4 +1,5 @@
 //! Request purposes for stories, story albums and close friends.
+use crate::state::LiveStoryPurpose;
 use crate::state::request_purpose::flat_purposes;
 
 /// In-flight requests for stories, story albums and close friends; wrapped as
@@ -126,6 +127,8 @@ pub enum StoriesPurpose {
     /// B14: `toggleStoryIsPostedToChatPage` (post to / remove from
     /// profile). Response is `ok`; the flag arrives via `updateStory`.
     ToggleStoryIsPostedToChatPage,
+    /// Live story requests (`domains::stories::live`).
+    Live(LiveStoryPurpose),
 }
 
 flat_purposes!(Stories(StoriesPurpose) {

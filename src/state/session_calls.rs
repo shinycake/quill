@@ -214,6 +214,16 @@ impl Session {
             }
             return;
         }
+        // A call you are in is not replaced by one you only looked up (a
+        // `getGroupCall` or an update for another chat's call).
+        if self
+            .calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|c| c.id != group_call.id && c.is_joined && !group_call.is_joined)
+        {
+            return;
+        }
         let tracked = self
             .calls
             .active_group_call
@@ -248,6 +258,8 @@ impl Session {
         tracked.can_delete_messages = group_call.can_delete_messages;
         tracked.record_duration = group_call.record_duration;
         tracked.is_video_recorded = group_call.is_video_recorded;
+        tracked.paid_message_star_count = group_call.paid_message_star_count;
+        tracked.message_sender_id = group_call.message_sender_id;
         tracked.recent_speaker_order = group_call
             .recent_speakers
             .iter()
@@ -340,6 +352,11 @@ impl Session {
             .any(|m| m.message_id == message.message_id)
         {
             tracked.messages.push(message.clone());
+            if tracked.is_live_story {
+                // Live stories keep pinned comments past the cap.
+                self.after_live_story_message(group_call_id, message);
+                return;
+            }
             // ponytail: hard cap — no history API exists to backfill.
             if tracked.messages.len() > 200 {
                 tracked.messages.remove(0);

@@ -76,7 +76,12 @@ impl QuillApp {
         // `path` is the poster: a video story's `display_file_ids` hold
         // only its thumbnail (`quill::story_viewer`), never the clip.
         let video_frame = self.story_video_element(path.clone());
-        let visual: AnyElement = if let Some(frame) = video_frame {
+        // A joined live story: the stream and its comments.
+        let live_media = self.live_story_media(&item, cx);
+        let live_watch = live_media.is_some();
+        let visual: AnyElement = if let Some(media) = live_media {
+            media
+        } else if let Some(frame) = video_frame {
             frame
         } else if let Some(path) = path {
             img(path)
@@ -123,12 +128,10 @@ impl QuillApp {
                 ),
                 _ => status,
             };
-            // stories-live-play: live stories backed by an ordinary group
-            // call get a Join button; unverified RTMP playback
-            // and unsupported content keep an
-            // honest placeholder.
-            let joinable = matches!(item.kind, StoryViewerKind::Live)
-                && item.live_call.is_some_and(|call| !call.is_rtmp_stream);
+            // stories-live-play: the viewer joins a live story by itself;
+            // the Join button stays for a join that was refused (another
+            // call holds the slot) and for the demo.
+            let joinable = matches!(item.kind, StoryViewerKind::Live) && item.live_call.is_some();
             let body: AnyElement = if joinable {
                 let chat_id = item.chat_id;
                 let story_id = item.story_id;
@@ -152,12 +155,7 @@ impl QuillApp {
                     )
                     .into_any_element()
             } else {
-                let status = if matches!(item.kind, StoryViewerKind::Live) {
-                    tr_with(
-                        keys::Q_MEDIA_RTMP_PLAYBACK_IS_NOT_SUPPORTED,
-                        &[("kind_label", kind_label)],
-                    )
-                } else if matches!(item.kind, StoryViewerKind::Unsupported) {
+                let status = if matches!(item.kind, StoryViewerKind::Unsupported) {
                     tr_with(
                         keys::Q_MEDIA_NOT_SUPPORTED_IN_THIS_SLICE,
                         &[("kind_label", kind_label)],
@@ -271,7 +269,9 @@ impl QuillApp {
             .children(area_chips)
             .children(paused_chip)
             .into_any_element();
-        let caption: Option<AnyElement> = (!item.caption.is_empty()).then(|| {
+        // A live stream has no caption, progress or reactions row
+        // (tdesktop hides them for a video stream).
+        let caption: Option<AnyElement> = (!item.caption.is_empty() && !live_watch).then(|| {
             rich_text_line(
                 &item.caption,
                 &item.caption_entities,
@@ -286,7 +286,9 @@ impl QuillApp {
             )
         });
         // Phase 9.2: own-story interaction counters under the caption.
-        let counts: Option<String> = self.story_viewer_counts();
+        let counts: Option<String> = self.story_viewer_counts().filter(|_| !live_watch);
+        let live_header = self.live_story_header(cx);
+        let live_composer = self.live_story_composer(cx);
         div()
             .id("story-viewer-overlay")
             .occlude()
@@ -322,7 +324,9 @@ impl QuillApp {
                     .p_4()
                     .max_w(px(480.))
                     .max_h_full()
-                    .child(self.story_progress_bar(position, total, now))
+                    .when(!live_watch, |this| {
+                        this.child(self.story_progress_bar(position, total, now))
+                    })
                     .child(
                         div()
                             .flex()
@@ -337,6 +341,7 @@ impl QuillApp {
                                     .truncate()
                                     .child(super::bidi_line::one_line_plain(header_label)),
                             )
+                            .children(live_header)
                             .child(
                                 div()
                                     .id("story-viewer-close")
@@ -366,8 +371,11 @@ impl QuillApp {
                     .when_some(self.story_viewer_meta_line(), |this, meta| {
                         this.child(div().text_xs().text_color(text_muted()).child(meta))
                     })
-                    .child(self.story_more_row(cx))
-                    .child(self.story_action_row(cx))
+                    .when(!live_watch, |this| {
+                        this.child(self.story_more_row(cx))
+                            .child(self.story_action_row(cx))
+                    })
+                    .children(live_composer)
                     .child(
                         div()
                             .flex()

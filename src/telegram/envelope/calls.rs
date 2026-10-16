@@ -387,6 +387,12 @@ pub struct ParsedGroupCall {
     /// video file is being recorded.
     pub record_duration: i32,
     pub is_video_recorded: bool,
+    /// `paid_message_star_count`: the Stars a viewer pays for each
+    /// comment in a live story (0 = free).
+    pub paid_message_star_count: i64,
+    /// `message_sender_id`: who your live story comments are sent as;
+    /// `None` outside live stories.
+    pub message_sender_id: Option<MessageSender>,
 }
 
 pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall> {
@@ -514,6 +520,12 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
             .get("is_video_recorded")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        paid_message_star_count: value
+            .get("paid_message_star_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .max(0),
+        message_sender_id: parse_message_sender(value.get("message_sender_id")).ok(),
     })
 }
 
@@ -529,7 +541,10 @@ pub struct ParsedGroupCallMessage {
     pub message_id: i32,
     pub sender_id: MessageSender,
     pub date: i32,
+    /// Empty for a paid reaction in a live story.
     pub text: String,
+    /// The Stars paid for the message (live stories only).
+    pub paid_message_star_count: i64,
     pub is_from_owner: bool,
     pub can_be_deleted: bool,
 }
@@ -545,6 +560,11 @@ pub(crate) fn parse_group_call_message(value: Option<&Value>) -> Option<ParsedGr
             .unwrap_or(0)
             .sat_i32(),
         text: parse_formatted_text(value.get("text")),
+        paid_message_star_count: value
+            .get("paid_message_star_count")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .max(0),
         is_from_owner: value
             .get("is_from_owner")
             .and_then(Value::as_bool)

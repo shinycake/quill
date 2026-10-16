@@ -14,6 +14,9 @@ impl Session {
         // Phase 9.3: a `postStory` / `canPostStory` error — the
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::Stories(StoriesPurpose::Live(purpose))) => {
+                self.apply_live_story_error(purpose, err);
+            }
             Some(RequestPurpose::PostStory) => {
                 self.stories.post.outcome =
                     StoryPostOutcome::Failed(format!("Posting failed: {}", error_reason(err)));

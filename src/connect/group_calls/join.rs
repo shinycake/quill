@@ -164,8 +164,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The chat a tracked voice chat belongs to (`groupCall` carries no
-    /// chat id; the chat's `video_chat` association does).
-    pub(super) fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
+    /// chat id; the chat's `video_chat` association does). A live story
+    /// has no `video_chat`: its poster's chat is the one.
+    pub(crate) fn group_call_chat_id(&self, group_call_id: i32) -> Option<i64> {
         self.session
             .chats
             .values()
@@ -175,6 +176,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .is_some_and(|video_chat| video_chat.group_call_id == group_call_id)
             })
             .map(|chat| chat.id.0)
+            .or_else(|| {
+                self.session
+                    .stories
+                    .live
+                    .as_ref()
+                    .filter(|live| live.group_call_id == group_call_id)
+                    .map(|live| live.chat_id)
+            })
     }
 
     /// `getVideoChatAvailableParticipants`, once per unjoined chat-bound
@@ -260,6 +269,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed — a later tap can retry). The group-call overlay's Join
     /// button stays the manual fallback either way.
     pub(crate) fn maybe_join_live_story(&mut self) -> Result<(), ConnectSendError> {
+        self.maybe_fetch_live_story_extras()?;
         let intent = match self.session.calls.pending_live_story_join {
             Some(intent) => intent,
             None => return Ok(()),
@@ -434,16 +444,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The native call key is the chat id; resolve it through the
         // chat's `video_chat` association (schema `groupCall` carries no
         // chat id).
-        let chat_id = self
-            .session
-            .chats
-            .values()
-            .find(|chat| {
-                chat.video_chat
-                    .as_ref()
-                    .is_some_and(|video_chat| video_chat.group_call_id == group_call_id)
-            })
-            .map(|chat| chat.id.0);
+        let chat_id = self.group_call_chat_id(group_call_id);
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {
                 let offer = engine.create_group_call(group_call_id, chat_id);

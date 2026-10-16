@@ -26,6 +26,8 @@ pub(crate) struct StoryUi {
     pub(super) reply_open: bool,
     /// Phase 9.2: reply-to-story draft (the viewer overlay's reply row).
     pub(super) reply_input: Entity<TextareaState>,
+    /// The live story the viewer plays (its picture, field and boxes).
+    pub(super) live: super::story_viewer::LiveStoryUi,
     /// The shared emoji / sticker / GIF panel was opened from the reply row.
     pub(super) reply_panel: bool,
     /// A voice message for the reply is being recorded.
@@ -160,6 +162,7 @@ impl StoryUi {
         Self {
             strip: Default::default(),
             reply_input: story_reply_input,
+            live: super::story_viewer::LiveStoryUi::new(window, cx),
             viewers_open: false,
             stats_open: false,
             report_open: false,

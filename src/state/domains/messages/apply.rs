@@ -34,7 +34,12 @@ impl Session {
                 message_sender,
             } => self.set_chat_message_sender(chat_id, message_sender),
             MessagesPayload::ChatMessageSenders { senders } => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(RequestPurpose::Stories(StoriesPurpose::Live(
+                    LiveStoryPurpose::GetMessageSenders { group_call_id },
+                ))) = pending.map(|p| p.purpose)
+                {
+                    self.set_live_story_senders(group_call_id, senders);
+                } else if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.chats_state.send_as_options.insert(chat_id.0, senders);
                 }
             }

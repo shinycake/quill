@@ -99,9 +99,13 @@ impl Session {
             }
             CallsPayload::UpdateGroupCallMessageSendFailed {
                 group_call_id,
-                message_id: _,
+                message_id,
                 error,
             } => {
+                // A live story comment stays, marked as failed.
+                if self.live_story_message_failed(group_call_id, message_id) {
+                    return;
+                }
                 if self
                     .calls
                     .active_group_call
@@ -119,7 +123,9 @@ impl Session {
                 message_ids,
             } => {
                 self.accept_group_call_messages_deleted(group_call_id, &message_ids);
+                self.after_live_story_messages_deleted(group_call_id);
             }
+            CallsPayload::LiveStory(payload) => self.apply_live_story_payload(payload, pending),
             // Phase C2h: `rtmpUrl` — the `getVideoChatRtmpUrl` /
             // `replaceVideoChatRtmpUrl` answer. Stored on the tracked
             // call whose chat the request targeted.

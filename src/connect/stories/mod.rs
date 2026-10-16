@@ -126,6 +126,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.fetch_group_call(group_call_id)?;
+        self.session
+            .begin_live_story(chat_id.0, story_id, group_call_id);
         self.session.calls.pending_live_story_join = Some(LiveStoryJoinIntent {
             group_call_id,
             request: extra,

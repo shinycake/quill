@@ -140,6 +140,7 @@ impl QuillApp {
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         self.ensure_story_custom_emoji_downloads();
+        self.sync_live_story(cx);
     }
 
     /// Phase 9.2: the viewer story's freshest `ParsedStory` (reaction
@@ -764,6 +765,7 @@ impl QuillApp {
             let _ = live.driver.close_story(item.chat_id, item.story_id);
         }
         self.stories.viewer.close();
+        self.leave_live_story_view(cx);
         self.chat_list.pending_story_open = None;
         self.stories.reaction_picker_open = false;
         self.end_story_reply(cx);
@@ -821,6 +823,7 @@ impl QuillApp {
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
         self.ensure_story_custom_emoji_downloads();
+        self.sync_live_story(cx);
         cx.notify();
     }
 
@@ -874,6 +877,7 @@ impl QuillApp {
                             .set_paused(user_paused || video_driven, now);
                         this.apply_story_native_pause(user_paused);
                         this.tick_close_friends(cx);
+                        this.live_story_tick(cx);
                         if this.story_segment_finished(now) {
                             this.advance_story_playback(cx);
                         }
@@ -917,5 +921,17 @@ impl QuillApp {
 }
 
 mod ensure_story_download;
+mod live_composer;
+#[cfg(feature = "demo-capture")]
+mod live_demo;
+mod live_stars_box;
+mod live_state;
+mod live_story;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod live_tests;
+mod live_view;
 mod reply_media;
 mod story_viewer_overlay;
+
+pub(in crate::ui) use live_state::LiveStoryUi;
