@@ -12,7 +12,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Instant,
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -440,6 +439,8 @@ impl WindowsPlatform {
             // Not joined: the thread can be sending this thread a message. It exits after its
             // next vsync, and drops its reference to the devices then.
             stop.store(true, Ordering::Release);
+            // Quill: it may be asleep with every window parked; wake it so it exits.
+            FRAME_GATE.wake();
         }
         if let Some(text_system) = &self.direct_write_text_system {
             text_system.release_gpu();
@@ -471,16 +472,13 @@ impl WindowsPlatform {
             .name("VSyncProvider".to_owned())
             .spawn(move || {
                 let vsync_provider = VSyncProvider::new();
-                // Quill: parked windows still get one invalidation this often.
-                let mut next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
                 loop {
                     // Quill: sleep while every window's frames are parked
-                    // (see `FrameGate`), until one unparks or the heartbeat.
-                    if !FRAME_GATE.wait_for_frames(
-                        &all_windows,
-                        TrackedWindow::as_raw,
-                        next_heartbeat,
-                    ) {
+                    // (see `FrameGate`), with no timeout, until one unparks
+                    // or this thread must stop or check its device.
+                    if !FRAME_GATE.wait_for_frames(&all_windows, TrackedWindow::as_raw, || {
+                        stop.load(Ordering::Acquire) || invalidate_devices.load(Ordering::Acquire)
+                    }) {
                         break;
                     }
                     let signal_source = vsync_provider.wait_for_vsync();
@@ -523,15 +521,9 @@ impl WindowsPlatform {
                     let Some(all_windows) = all_windows.upgrade() else {
                         break;
                     };
-                    // Quill: skip parked windows, except on the heartbeat. The
-                    // parked set is read before the window list (lock order).
-                    let heartbeat = Instant::now() >= next_heartbeat;
-                    let parked = if heartbeat {
-                        next_heartbeat = Instant::now() + PARKED_HEARTBEAT;
-                        ParkedWindows::default()
-                    } else {
-                        FRAME_GATE.parked_windows()
-                    };
+                    // Quill: skip parked windows. The parked set is read
+                    // before the window list (lock order).
+                    let parked = FRAME_GATE.parked_windows();
                     for hwnd in all_windows.read().iter() {
                         if parked.contains(hwnd.as_raw()) {
                             continue;
@@ -835,8 +827,14 @@ impl Platform for WindowsPlatform {
             frame_signal: window.state.frame_signal.clone(),
         });
         // Quill: a new window starts with frames running; wake the vsync
-        // thread if every other window is parked.
-        FRAME_GATE.unpark(handle);
+        // thread if every other window is parked. One created hidden starts
+        // parked (it gets no WM_PAINT until shown, so nothing would park it,
+        // and showing it resumes it).
+        if window.visibility() == WindowVisibility::Visible {
+            FRAME_GATE.unpark(handle);
+        } else {
+            window.park_frames();
+        }
 
         Ok(Box::new(window))
     }
@@ -1489,6 +1487,8 @@ impl Drop for WindowsPlatform {
     fn drop(&mut self) {
         if let Some(stop) = self.vsync_stop.borrow_mut().take() {
             stop.store(true, Ordering::Release);
+            // Quill: wake it if it sleeps with every window parked.
+            FRAME_GATE.wake();
         }
         unsafe {
             if let Some(notification) = self.suspend_resume_notification.borrow_mut().take() {

@@ -1,8 +1,9 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// reports when a touchpad gesture needs vsync frames. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// reports when a touchpad gesture needs vsync frames or a slower poll. See
+// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use gpui::*;
@@ -21,12 +22,12 @@ use crate::*;
 /// visual output.
 const DEFAULT_VIEWPORT_SIZE: i32 = 1000;
 
-/// Quill: how long a touchpad contact handed to Direct Manipulation keeps the
-/// window's vsync frames running before the gesture is recognized. The
-/// viewport runs in manual-update mode, so it only advances when
-/// `draw_window` calls `update`; a parked window would not recognize the
-/// gesture until the next heartbeat.
-const CONTACT_KEEPS_FRAMES: Duration = Duration::from_secs(5);
+// Quill: the viewport runs in manual-update mode, so it only advances when the
+// window calls `update` (every frame in `draw_window`). How long a touchpad
+// contact keeps the window's frames running, and how long it is polled after
+// that so a resting finger that starts moving later is still recognized, is
+// decided by `contact_frames` in `frame_idle.rs` (`CONTACT_KEEPS_FRAMES`,
+// `CONTACT_POLLED_FOR`); the poll runs on a window timer (`events.rs`).
 
 pub(crate) struct DirectManipulationHandler {
     manager: IDirectManipulationManager,
@@ -108,15 +109,25 @@ impl DirectManipulationHandler {
         }
     }
 
+    /// Quill: what the window owes the viewport (see `contact_frames`).
+    pub fn contact_frames(&self) -> ContactFrames {
+        contact_frames(
+            self.last_contact.get().map(|contact| contact.elapsed()),
+            self.gesture_active.get(),
+        )
+    }
+
     /// Quill: whether a touchpad gesture may be in progress, so the window
     /// must keep calling `update` every vblank: the viewport is running or
-    /// in inertia, or a contact was handed to it recently.
+    /// in inertia, or a contact was handed to it within
+    /// `CONTACT_KEEPS_FRAMES`.
     pub fn keeps_frames_running(&self) -> bool {
-        self.gesture_active.get()
-            || self
-                .last_contact
-                .get()
-                .is_some_and(|contact| contact.elapsed() < CONTACT_KEEPS_FRAMES)
+        self.contact_frames() == ContactFrames::Frames
+    }
+
+    /// Quill: `update` produced input that `draw_window` has not delivered.
+    pub fn has_pending_events(&self) -> bool {
+        !self.pending_events.borrow().is_empty()
     }
 
     pub fn set_scale_factor(&self, scale_factor: f32) {

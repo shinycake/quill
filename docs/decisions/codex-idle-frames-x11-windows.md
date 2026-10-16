@@ -1,5 +1,9 @@
 # Idle frames on X11 and Windows
 
+> Update: the one-second heartbeat of parked windows described below was
+> removed in `sweep-idle-heartbeat.md`; a parked window now gets no frames
+> until GPUI demands one, as on macOS.
+
 Follow-up to `codex-idle-cpu.md`, which stopped the macOS display link while
 a window has nothing to draw. GPUI 0.3.7's X11 and Windows backends have the
 same always-on frame source:

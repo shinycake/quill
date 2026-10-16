@@ -9,12 +9,12 @@
 //! second. This is the decision the platforms share: after
 //! [`FRAME_IDLE_AFTER`] of frames that neither drew, presented nor asked for
 //! another frame, with no frame demand from GPUI in between, the source
-//! *parks* and only delivers a [`PARKED_HEARTBEAT`]-spaced frame. GPUI's frame
-//! waker ([`FrameIdle::demand`]) unparks it at once.
+//! *parks* and delivers no frames at all ([`next_frame_at`] is `None`), like
+//! the macOS display link, which stops. GPUI's frame waker
+//! ([`FrameIdle::demand`]) unparks it at once.
 //!
 //! Fail-safe by construction: anything that counts as activity keeps the
-//! source running, a demand always unparks, and the heartbeat bounds how long
-//! a demand that somehow bypassed the waker can go unserved.
+//! source running, and a demand always unparks.
 //!
 //! Kill switch: `QUILL_IDLE_FRAMES=0` (or `off`) in the environment, read
 //! once, makes every frame count as active, so frame sources never park and
@@ -51,19 +51,18 @@ fn idle_frames_enabled_from(value: Option<&OsStr>) -> bool {
 /// macOS display link uses the same value.
 pub(crate) const FRAME_IDLE_AFTER: Duration = Duration::from_millis(250);
 
-/// While parked, a window still gets one frame request this often. Normally it
-/// finds nothing to do; it exists so a frame demand that never reached the
-/// frame waker is served within this interval instead of never.
-pub(crate) const PARKED_HEARTBEAT: Duration = Duration::from_secs(1);
+/// The refresh interval used when the display reports none (a zero interval
+/// would make a frame source spin).
+pub(crate) const FALLBACK_REFRESH: Duration = Duration::from_micros(16_667);
 
 /// What the frame source must do after [`FrameIdle::frame`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Transition {
-    /// Keep the current pacing (refresh rate, or heartbeat while parked).
+    /// Keep the current pacing (refresh rate, or none while parked).
     Keep,
-    /// Switch from the refresh rate to the heartbeat.
+    /// Stop delivering frames until the next demand.
     Park,
-    /// Switch from the heartbeat back to the refresh rate.
+    /// Go back to the refresh rate.
     Resume,
 }
 
@@ -82,8 +81,7 @@ impl FrameIdle {
         }
     }
 
-    // Not every platform uses every method (Windows tracks the parked state
-    // in its vsync gate and has no restart path).
+    // Windows tracks the parked state in its vsync gate.
     #[allow(dead_code)]
     pub(crate) fn is_parked(&self) -> bool {
         self.parked
@@ -119,11 +117,115 @@ impl FrameIdle {
         }
     }
 
+    /// The platform stopped the source for its own reason (the window was
+    /// hidden or minimized, so no frame runs the decision). Parks it, so the
+    /// first demand after the window comes back reports a resume.
+    // Not every platform uses every method (X11 has no timer while hidden).
+    #[allow(dead_code)]
+    pub(crate) fn park(&mut self) {
+        self.parked = true;
+    }
+
     /// The source was (re)started for another reason (the window was shown
     /// again): start from running, with a fresh grace period.
+    // Windows tracks its restarts through `demand`.
     #[allow(dead_code)]
     pub(crate) fn reset(&mut self, now: Instant) {
         *self = Self::new(now);
+    }
+}
+
+/// When a periodic frame source delivers its next frame, after handling the
+/// frame that was due at `due` at time `now`. Running: the first instant of
+/// the `due + k * refresh` grid that is after `now`, so frames that were
+/// missed are skipped rather than delivered in a burst. Parked: `None`, no
+/// frame at all; only a frame demand restarts the source.
+// Windows paces its frames by the vblank instead.
+#[allow(dead_code)]
+pub(crate) fn next_frame_at(
+    parked: bool,
+    due: Instant,
+    refresh: Duration,
+    now: Instant,
+) -> Option<Instant> {
+    if parked {
+        return None;
+    }
+    let refresh = if refresh.is_zero() {
+        FALLBACK_REFRESH
+    } else {
+        refresh
+    };
+    let late = now.saturating_duration_since(due);
+    // Whole periods to skip, plus the next one; `refresh` is not zero here.
+    let periods = (late.as_nanos() / refresh.as_nanos()).saturating_add(1);
+    let offset = u64::try_from(periods.saturating_mul(refresh.as_nanos()))
+        .ok()
+        .map(Duration::from_nanos);
+    offset
+        .and_then(|offset| due.checked_add(offset))
+        .or_else(|| now.checked_add(refresh))
+        .or(Some(now))
+}
+
+/// Windows vsync thread: whether it has work this round, given whether each
+/// window's frames are parked. It works while any window is not parked, or
+/// when it was asked to wake (to stop, or to check its GPU device). Otherwise
+/// it sleeps until a window unparks or it is asked to wake; there is no
+/// timeout. With no windows at all it sleeps too.
+// X11 runs one timer per window instead.
+#[allow(dead_code)]
+pub(crate) fn vsync_has_work(parked: impl IntoIterator<Item = bool>, wake_requested: bool) -> bool {
+    wake_requested || parked.into_iter().any(|parked| !parked)
+}
+
+/// How long a touchpad contact handed to Windows Direct Manipulation keeps
+/// the window's frames running at the refresh rate before a gesture is
+/// recognized.
+pub(crate) const CONTACT_KEEPS_FRAMES: Duration = Duration::from_secs(5);
+
+/// After [`CONTACT_KEEPS_FRAMES`], how long the contact is still polled at
+/// [`CONTACT_POLL_INTERVAL`], so fingers that rest before they move still
+/// start a gesture.
+pub(crate) const CONTACT_POLLED_FOR: Duration = Duration::from_secs(60);
+
+/// How often a resting touchpad contact is polled.
+// Only Windows has Direct Manipulation.
+#[allow(dead_code)]
+pub(crate) const CONTACT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// What a window with a touchpad contact needs (Windows Direct Manipulation,
+/// whose viewport only advances when the window updates it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContactFrames {
+    /// A gesture is running, or the contact is recent: frames at the refresh
+    /// rate (each frame updates the viewport).
+    Frames,
+    /// The contact rests: update the viewport every
+    /// [`CONTACT_POLL_INTERVAL`], and resume frames once a gesture starts.
+    Poll,
+    /// No contact, or it is old: nothing.
+    Idle,
+}
+
+/// The decision for [`ContactFrames`]: `since_contact` is the time since the
+/// last touchpad contact was handed to the viewport, `gesture_active` whether
+/// the viewport is running or coasting.
+// Only Windows has Direct Manipulation.
+#[allow(dead_code)]
+pub(crate) fn contact_frames(
+    since_contact: Option<Duration>,
+    gesture_active: bool,
+) -> ContactFrames {
+    if gesture_active {
+        return ContactFrames::Frames;
+    }
+    match since_contact {
+        Some(since) if since < CONTACT_KEEPS_FRAMES => ContactFrames::Frames,
+        Some(since) if since < CONTACT_KEEPS_FRAMES.saturating_add(CONTACT_POLLED_FOR) => {
+            ContactFrames::Poll
+        }
+        _ => ContactFrames::Idle,
     }
 }
 
@@ -162,7 +264,8 @@ mod tests {
         assert!(!idle.is_parked());
         assert_eq!(idle.frame(false, t0 + FRAME_IDLE_AFTER), Transition::Park);
         assert!(idle.is_parked());
-        // Further idle frames (heartbeats) keep it parked without transitions.
+        // A frame while parked (forced by the platform) keeps it parked
+        // without transitions.
         assert_eq!(idle.frame(false, t0 + ms(1250)), Transition::Keep);
         assert!(idle.is_parked());
     }
@@ -199,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_that_finds_work_resumes() {
+    fn an_active_frame_while_parked_resumes() {
         let t0 = Instant::now();
         let mut idle = FrameIdle::new(t0);
         assert_eq!(idle.frame(false, t0 + ms(250)), Transition::Park);
@@ -226,10 +329,133 @@ mod tests {
         assert!(!idle.is_parked());
     }
 
+    /// A window hidden while its frames were running (hide to tray right
+    /// after a click) must report a resume on the first demand once shown,
+    /// or a platform that only restarts its source on a resume would never
+    /// deliver another frame.
+    #[test]
+    fn a_source_parked_by_the_platform_resumes_on_the_first_demand() {
+        let t0 = Instant::now();
+        let mut idle = FrameIdle::new(t0);
+        assert_eq!(idle.frame(true, t0 + ms(16)), Transition::Keep);
+        idle.park();
+        assert!(idle.is_parked());
+        assert!(idle.demand(t0 + ms(30_000)));
+        assert!(!idle.is_parked());
+    }
+
+    #[test]
+    fn a_parked_source_schedules_no_frame() {
+        let t0 = Instant::now();
+        assert_eq!(next_frame_at(true, t0, ms(16), t0), None);
+        assert_eq!(next_frame_at(true, t0, ms(16), t0 + ms(5000)), None);
+    }
+
+    #[test]
+    fn a_running_source_ticks_on_the_refresh_grid() {
+        let t0 = Instant::now();
+        let refresh = ms(16);
+        // On time: the next instant.
+        assert_eq!(next_frame_at(false, t0, refresh, t0), Some(t0 + ms(16)));
+        // Late by less than a period.
+        assert_eq!(
+            next_frame_at(false, t0, refresh, t0 + ms(5)),
+            Some(t0 + ms(16))
+        );
+        // Missed frames are skipped, not delivered in a burst.
+        assert_eq!(
+            next_frame_at(false, t0, refresh, t0 + ms(50)),
+            Some(t0 + ms(64))
+        );
+        // Exactly on a grid instant: the one after it, never `now` (which
+        // would fire the timer again at once).
+        assert_eq!(
+            next_frame_at(false, t0, refresh, t0 + ms(32)),
+            Some(t0 + ms(48))
+        );
+        // Fired early (a clock that went backwards): one period after `due`.
+        let later = t0 + ms(100);
+        assert_eq!(
+            next_frame_at(false, later, refresh, t0),
+            Some(later + ms(16))
+        );
+    }
+
+    #[test]
+    fn a_zero_refresh_interval_does_not_spin() {
+        let t0 = Instant::now();
+        assert_eq!(
+            next_frame_at(false, t0, Duration::ZERO, t0),
+            Some(t0 + FALLBACK_REFRESH)
+        );
+    }
+
+    #[test]
+    fn a_long_stall_lands_after_now() {
+        let t0 = Instant::now();
+        let now = t0 + Duration::from_secs(3 * 24 * 3600);
+        let next = next_frame_at(false, t0, Duration::from_nanos(1), now);
+        assert!(next.is_some_and(|next| next > now));
+    }
+
+    /// The idle floor of one window: after its last active frame, how many
+    /// times does a frame source following `next_frame_at` wake in 10 s?
+    /// Only through the grace period; with the old one-second heartbeat it
+    /// was ten more.
+    #[test]
+    fn an_idle_window_stops_waking_after_the_grace_period() {
+        let t0 = Instant::now();
+        let refresh = ms(16);
+        let end = t0 + Duration::from_secs(10);
+        let mut idle = FrameIdle::new(t0);
+        assert_eq!(idle.frame(true, t0), Transition::Keep);
+        let mut wakeups = 0;
+        let mut last_wakeup = t0;
+        let mut next = next_frame_at(idle.is_parked(), t0, refresh, t0);
+        while let Some(at) = next.filter(|at| *at < end) {
+            wakeups += 1;
+            last_wakeup = at;
+            idle.frame(false, at);
+            next = next_frame_at(idle.is_parked(), at, refresh, at);
+        }
+        assert!(idle.is_parked());
+        assert_eq!(wakeups, 16, "250 ms of 16 ms frames, then none");
+        assert!(last_wakeup <= t0 + FRAME_IDLE_AFTER + refresh);
+    }
+
+    #[test]
+    fn the_vsync_thread_sleeps_only_when_every_window_is_parked() {
+        assert!(!vsync_has_work([], false));
+        assert!(!vsync_has_work([true, true], false));
+        assert!(vsync_has_work([true, false], false));
+        assert!(vsync_has_work([false], false));
+        // Asked to stop or to check its device: runs even with no windows.
+        assert!(vsync_has_work([], true));
+        assert!(vsync_has_work([true], true));
+    }
+
+    #[test]
+    fn a_touchpad_contact_runs_frames_then_polls_then_stops() {
+        assert_eq!(contact_frames(None, false), ContactFrames::Idle);
+        assert_eq!(contact_frames(None, true), ContactFrames::Frames);
+        assert_eq!(contact_frames(Some(ms(0)), false), ContactFrames::Frames);
+        assert_eq!(
+            contact_frames(Some(ms(4_999)), false),
+            ContactFrames::Frames
+        );
+        assert_eq!(contact_frames(Some(ms(5_000)), false), ContactFrames::Poll);
+        assert_eq!(contact_frames(Some(ms(64_999)), false), ContactFrames::Poll);
+        assert_eq!(contact_frames(Some(ms(65_000)), false), ContactFrames::Idle);
+        // A gesture keeps frames running however old the contact is.
+        assert_eq!(
+            contact_frames(Some(ms(90_000)), true),
+            ContactFrames::Frames
+        );
+    }
+
     /// Drives the state the way a platform does: frames at a refresh rate
-    /// while running and at the heartbeat while parked, demands at random
-    /// times, frames active at random. Checks the invariants the platforms
-    /// rely on.
+    /// while running and none while parked, demands at random times, frames
+    /// active at random. Checks the invariants the platforms rely on.
     #[test]
     fn simulated_frame_source_never_strands_a_demand() {
         // Small xorshift so the test needs no dependencies and is repeatable.
@@ -246,26 +472,30 @@ mod tests {
         let mut idle = FrameIdle::new(t0);
         // Mirrors the platform: running or parked, and when the next frame is.
         let mut parked = false;
-        let mut next_frame = t0;
+        let mut next_frame = Some(t0);
         let mut last_active_or_demand = t0;
         let mut parks = 0;
         let mut resumes = 0;
         for _ in 0..200_000 {
             let roll = next() % 100;
-            if roll < 3 {
-                // A demand arrives between frames.
-                now += Duration::from_micros(next() % 2_000);
+            // While parked nothing happens until a demand arrives.
+            if roll < 3 || next_frame.is_none() {
+                now += Duration::from_micros(next() % 2_000_000);
                 last_active_or_demand = now;
                 if idle.demand(now) {
                     assert!(parked, "resume requested while running");
                     parked = false;
                     resumes += 1;
-                    next_frame = now;
+                    next_frame = Some(now);
                 }
                 assert!(!idle.is_parked());
+                assert!(next_frame.is_some(), "a demand left the source stopped");
                 continue;
             }
-            now = now.max(next_frame);
+            let Some(due) = next_frame else {
+                unreachable!("handled above");
+            };
+            now = now.max(due);
             let active = roll < 3 + (next() % 30);
             if active {
                 last_active_or_demand = now;
@@ -278,14 +508,11 @@ mod tests {
                     parked = true;
                     parks += 1;
                 }
-                Transition::Resume => {
-                    assert!(parked && active);
-                    parked = false;
-                    resumes += 1;
-                }
+                Transition::Resume => unreachable!("a parked source gets no frames"),
             }
             assert_eq!(parked, idle.is_parked());
-            next_frame = now + if parked { PARKED_HEARTBEAT } else { refresh };
+            next_frame = next_frame_at(parked, due, refresh, now);
+            assert_eq!(next_frame.is_none(), parked);
             // While running, the source never sits idle past the grace period
             // plus one refresh without parking.
             if !parked {

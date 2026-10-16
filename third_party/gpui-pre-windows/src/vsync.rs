@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// adds `FrameGate`, which lets the vsync thread sleep while every window is idle.
+// adds `FrameGate`, which lets the vsync thread sleep, with no timeout, while
+// every window is idle.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     sync::LazyLock,
@@ -11,6 +12,8 @@ use gpui::FrameRequestSource;
 use gpui_util::ResultExt;
 use parking_lot::{Condvar, Mutex, RwLock};
 use smallvec::SmallVec;
+
+use crate::vsync_has_work;
 
 use windows::Win32::{
     Foundation::HWND,
@@ -89,9 +92,10 @@ fn get_dwm_interval() -> Result<Duration> {
 /// Upstream's vsync thread invalidates every window on every vblank, so each
 /// visible window gets a `WM_PAINT` and a GPUI frame request 60–144 times a
 /// second even when nothing changes. A window that stays idle parks here; the
-/// vsync thread skips parked windows (except for a heartbeat invalidation
-/// every `PARKED_HEARTBEAT`) and sleeps on the condition variable while
-/// every window is parked. The window's frame waker unparks it.
+/// vsync thread skips parked windows and sleeps on the condition variable,
+/// with no timeout, while every window is parked. The window's frame waker
+/// unparks it; `wake` wakes the thread for its own work (stopping, or
+/// checking its GPU device).
 ///
 /// Lock order: the vsync thread takes `parked`, then the window list's read
 /// lock. The UI thread never takes `parked` while holding the window list.
@@ -134,30 +138,42 @@ impl FrameGate {
         self.parked.lock().retain(|parked| *parked != key);
     }
 
-    /// Blocks the vsync thread while every window is parked, until a window
-    /// unparks or `heartbeat_at`. Returns `false` once the window list is
-    /// gone (the platform was dropped). `raw` gives each list entry's handle.
+    /// Wakes the vsync thread for its own work: `wake_requested` (given to
+    /// `wait_for_frames`) became true. Takes the lock first, so a thread that
+    /// just checked the predicate is already waiting when notified.
+    pub(crate) fn wake(&self) {
+        drop(self.parked.lock());
+        self.unparked.notify_all();
+    }
+
+    /// Blocks the vsync thread while every window is parked (or there are
+    /// none) and `wake_requested` is false, until a window unparks or `wake`
+    /// is called; there is no timeout. Returns `false` once the window list
+    /// is gone (the platform was dropped). `raw` gives each list entry's
+    /// handle.
     pub(crate) fn wait_for_frames<W>(
         &self,
         all_windows: &std::sync::Weak<RwLock<SmallVec<[W; 4]>>>,
         raw: impl Fn(&W) -> HWND,
-        heartbeat_at: Instant,
+        wake_requested: impl Fn() -> bool,
     ) -> bool {
         let mut parked = self.parked.lock();
         loop {
             let Some(windows) = all_windows.upgrade() else {
                 return false;
             };
-            let any_awake = windows
-                .read()
-                .iter()
-                .any(|window| !parked.contains(&hwnd_key(raw(window))));
+            let has_work = vsync_has_work(
+                windows
+                    .read()
+                    .iter()
+                    .map(|window| parked.contains(&hwnd_key(raw(window)))),
+                wake_requested(),
+            );
             drop(windows);
-            let now = Instant::now();
-            if any_awake || now >= heartbeat_at {
+            if has_work {
                 return true;
             }
-            self.unparked.wait_for(&mut parked, heartbeat_at - now);
+            self.unparked.wait(&mut parked);
         }
     }
 

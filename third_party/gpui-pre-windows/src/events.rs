@@ -47,6 +47,8 @@ pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: u32 = WM_USER + 11;
 pub(crate) const WM_GPUI_GPU_DEVICE_GONE: u32 = WM_USER + 12;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
+/// Quill: polls a resting touchpad contact (`poll_touchpad_contact`).
+const DM_CONTACT_TIMER_ID: usize = 2;
 
 /// Coordinates window draws on the UI thread. Owned by the platform and
 /// shared with every window (like `WindowsPlatformState::cursor_visible`),
@@ -177,7 +179,7 @@ impl WindowsWindowInner {
             WM_GPUI_FORCE_UPDATE_WINDOW => self.draw_window(handle, true),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(handle, lparam),
             WM_GPUI_DESTROY_AFTER_DEVICE_LOST => self.handle_destroy_after_device_lost(handle),
-            DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(wparam),
+            DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(handle, wparam),
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
             _ => None,
         };
@@ -248,6 +250,9 @@ impl WindowsWindowInner {
             self.state
                 .restore_from_minimized
                 .set(self.state.callbacks.request_frame.take());
+            // Quill: without its frame callback a minimized window never runs
+            // the idle decision, so park its vsync invalidations here.
+            self.park_frames();
             return Some(0);
         }
 
@@ -267,6 +272,9 @@ impl WindowsWindowInner {
         }
 
         self.handle_size_change(new_size, scale_factor, should_resize_renderer);
+        // Quill: restored or resized, so frames are wanted (this unparks a
+        // window parked while minimized).
+        self.demand_frames();
         Some(0)
     }
 
@@ -286,6 +294,8 @@ impl WindowsWindowInner {
             self.state
                 .invalidate_devices
                 .store(true, std::sync::atomic::Ordering::Release);
+            // Quill: the vsync thread may be asleep with every window parked.
+            FRAME_GATE.wake();
         }
         if let Some(mut callback) = self.state.callbacks.resize.take() {
             callback(new_logical_size, scale_factor);
@@ -325,6 +335,9 @@ impl WindowsWindowInner {
                 WindowsDispatcher::execute_runnable(runnable);
             }
             self.handle_paint_msg(handle)
+        } else if wparam.0 == DM_CONTACT_TIMER_ID {
+            self.poll_touchpad_contact(handle);
+            Some(0)
         } else {
             None
         }
@@ -1282,12 +1295,13 @@ impl WindowsWindowInner {
         self.report_visibility();
         if wparam.0 == 1 {
             // Quill: shown again (e.g. from the tray), so frames are wanted.
-            self.demand_frames();
+            // Not yet visible while this message is handled.
+            self.resume_frames();
             self.draw_window(handle, false);
         } else {
             // Quill: a hidden window gets no WM_PAINT, so the idle decision
             // would never run; park it until it is shown.
-            FRAME_GATE.park(handle);
+            self.park_frames();
         }
         None
     }
@@ -1364,12 +1378,52 @@ impl WindowsWindowInner {
         Some(0)
     }
 
-    fn handle_dm_pointer_hit_test(&self, wparam: WPARAM) -> Option<isize> {
+    fn handle_dm_pointer_hit_test(&self, handle: HWND, wparam: WPARAM) -> Option<isize> {
         self.state.direct_manipulation.on_pointer_hit_test(wparam);
         // Quill: the gesture advances only in `draw_window`; resume vsync
         // frames if they were parked.
         self.demand_frames();
+        // Quill: once those frames stop, keep polling a resting contact for a
+        // while (`poll_touchpad_contact`). Re-arming replaces the timer.
+        let interval =
+            u32::try_from(CONTACT_POLL_INTERVAL.as_millis()).unwrap_or(USER_TIMER_MINIMUM);
+        // SAFETY: a timer on this window, posted to this thread's queue.
+        if unsafe { SetTimer(Some(handle), DM_CONTACT_TIMER_ID, interval, None) } == 0 {
+            log::warn!(
+                "touchpad contact poll timer: {}",
+                std::io::Error::last_os_error()
+            );
+        }
         None
+    }
+
+    /// Quill: the touchpad contact timer. While the contact is fresh the
+    /// window's frames update the viewport; after that it is updated here
+    /// every `CONTACT_POLL_INTERVAL`, and frames resume as soon as a gesture
+    /// starts or input is waiting. An old contact stops the timer, so an idle
+    /// window has none.
+    fn poll_touchpad_contact(&self, handle: HWND) {
+        let direct_manipulation = &self.state.direct_manipulation;
+        match direct_manipulation.contact_frames() {
+            ContactFrames::Frames => {}
+            ContactFrames::Poll => {
+                // Never inside a draw (a nested message loop can deliver this).
+                let Some(guard) = self.state.draw_coordinator.try_begin_draw() else {
+                    return;
+                };
+                direct_manipulation.update();
+                let wanted = direct_manipulation.keeps_frames_running()
+                    || direct_manipulation.has_pending_events();
+                drop(guard);
+                if wanted {
+                    self.demand_frames();
+                }
+            }
+            ContactFrames::Idle => {
+                // SAFETY: the timer was set on this window by this thread.
+                unsafe { KillTimer(Some(handle), DM_CONTACT_TIMER_ID) }.log_err();
+            }
+        }
     }
 
     #[inline]

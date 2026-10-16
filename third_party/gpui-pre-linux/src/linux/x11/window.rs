@@ -330,10 +330,10 @@ pub(crate) struct X11WindowStatePtr {
 }
 
 /// Quill: upstream's refresh timer asks a visible window for a frame at the
-/// refresh rate forever. The timer now parks (one heartbeat frame a second)
-/// after `FRAME_IDLE_AFTER` of frames that neither drew, presented nor asked
-/// for another frame, and the frame waker resumes it at once. All of it runs
-/// on the main thread.
+/// refresh rate forever. The timer now parks after `FRAME_IDLE_AFTER` of
+/// frames that neither drew, presented nor asked for another frame: it drops
+/// itself, so an idle window has no timer at all, and the frame waker starts
+/// a new one at once. All of it runs on the main thread.
 pub(crate) struct X11FrameIdle {
     /// Something drew, presented or asked for another frame since the
     /// refresh timer last ran.
@@ -343,6 +343,12 @@ pub(crate) struct X11FrameIdle {
     /// refresh rate. Unset if the ping could not be created; the window then
     /// never parks.
     pub(crate) resume: OnceCell<calloop::ping::Ping>,
+    /// Which refresh timer is the window's current one; each start counts up,
+    /// so a timer callback can tell it was replaced.
+    timer: Cell<u64>,
+    /// Whether the current timer is still registered with the event loop (a
+    /// parked timer drops itself, and its token must not be removed again).
+    timer_registered: Cell<bool>,
 }
 
 impl X11FrameIdle {
@@ -351,6 +357,8 @@ impl X11FrameIdle {
             activity: Cell::new(false),
             idle: Cell::new(FrameIdle::new(Instant::now())),
             resume: OnceCell::new(),
+            timer: Cell::new(0),
+            timer_registered: Cell::new(false),
         }
     }
 
@@ -369,7 +377,7 @@ impl X11FrameIdle {
     }
 
     /// After the refresh timer's frame request; returns whether the timer
-    /// should run at the heartbeat instead of the refresh rate.
+    /// should park (stop until the frame waker restarts it).
     fn after_frame(&self, keep_running: bool) -> bool {
         // Never parks with the kill switch (`QUILL_IDLE_FRAMES=0`) or
         // without a way to resume.
@@ -383,11 +391,35 @@ impl X11FrameIdle {
         idle.is_parked()
     }
 
-    /// The refresh timer was (re)started at the refresh rate.
-    pub(crate) fn reset(&self) {
+    /// A refresh timer is being started at the refresh rate: it becomes the
+    /// current one, registered, with a fresh grace period. Returns its
+    /// number for `is_current_timer` and `timer_parked`.
+    pub(crate) fn start_timer(&self) -> u64 {
         let mut idle = self.idle.get();
         idle.reset(Instant::now());
         self.idle.set(idle);
+        let timer = self.timer.get().wrapping_add(1);
+        self.timer.set(timer);
+        self.timer_registered.set(true);
+        timer
+    }
+
+    /// Whether `timer` is still the window's current refresh timer.
+    pub(crate) fn is_current_timer(&self, timer: u64) -> bool {
+        self.timer.get() == timer
+    }
+
+    /// The current refresh timer `timer` parked and drops itself.
+    pub(crate) fn timer_parked(&self, timer: u64) {
+        if self.is_current_timer(timer) {
+            self.timer_registered.set(false);
+        }
+    }
+
+    /// The current timer is about to be removed: returns whether it is still
+    /// registered (so its token must be removed), and forgets it either way.
+    pub(crate) fn take_registered_timer(&self) -> bool {
+        self.timer_registered.replace(false)
     }
 }
 
@@ -1259,7 +1291,7 @@ impl X11WindowStatePtr {
     }
 
     /// Quill: called by the refresh timer after `refresh`; returns whether
-    /// the timer should park (run at the heartbeat). A pending forced render
+    /// the timer should park (stop until a frame demand). A pending forced render
     /// after GPU recovery keeps it running.
     pub(crate) fn frame_idle_after_refresh(&self) -> bool {
         let recovering = self.state.borrow().force_render_after_recovery;

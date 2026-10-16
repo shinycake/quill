@@ -16,36 +16,57 @@ The Quill project changed it in 2026 so an idle window stops receiving a
   `third_party/gpui-pre-linux/src/linux/x11/frame_idle.rs`): the idle
   decision. After 250 ms of frames that neither drew, presented nor asked for
   another frame, with no frame demand from GPUI in between, a window parks
-  and gets one heartbeat invalidation a second; a demand unparks it. Unit
-  tests run with `scripts/test-frame-idle.sh`. `QUILL_IDLE_FRAMES=0` (or
-  `off`), read once, disables parking (upstream behavior).
+  and gets no invalidations at all; a demand unparks it. `vsync_has_work`
+  decides when the vsync thread may sleep, `contact_frames` what a touchpad
+  contact needs. Unit tests run with `scripts/test-frame-idle.sh`.
+  `QUILL_IDLE_FRAMES=0` (or `off`), read once, disables parking (upstream
+  behavior).
 - `src/vsync.rs`: `FrameGate`, the set of parked windows shared with the
-  vsync thread, which sleeps on a condition variable while every window is
-  parked (waking for the heartbeat or an unpark). It is generic over the
-  window list's entry type (0.3.8 tracks each window with its frame signal),
-  and `parked_windows` snapshots the parked set before the vsync thread
-  reads the window list.
+  vsync thread, which sleeps on a condition variable, with no timeout, while
+  every window is parked (or there is none), until an unpark or `wake` (the
+  thread must stop or check its device). It is generic over the window
+  list's entry type (0.3.8 tracks each window with its frame signal), and
+  `parked_windows` snapshots the parked set before the vsync thread reads the
+  window list.
 - `src/platform.rs`: upstream's `begin_vsync_thread` invalidates every window
   on every vblank. It now waits on `FrameGate` first and skips parked windows
-  except on the heartbeat (parked windows get no frame signal either); the
-  device-lost check and 0.3.8's stop flag still run on every iteration. A new window is unparked (in case a closed one had the same
-  handle); a closed one is forgotten.
+  (they get no frame signal either); the device-lost check and 0.3.8's stop
+  flag still run on every iteration it is awake. Stopping vsync (headless
+  mode, dropping the platform) wakes it. A new window is unparked (in case a
+  closed one had the same handle), or parked if it was created hidden; a
+  closed one is forgotten.
 - `src/window.rs`: `draw` and `schedule_frame` mark activity; the new
   `frame_waker` unparks a parked window and invalidates it at once
-  (`demand_frames`); `frames_after_draw` applies the idle decision.
+  (`demand_frames`), except while the window is hidden or minimized;
+  `resume_frames` does the same without that check; `park_frames` parks the
+  window and its idle state together; `frames_after_draw` applies the idle
+  decision.
 - `src/events.rs`: `draw_window` applies the idle decision after each frame
   request, kept running while a forced render is pending (device-loss
   recovery) or a touchpad gesture may be in progress; a draw deferred because
   another draw was in progress, and a Direct Manipulation hit test, unpark
   the window. `WM_SHOWWINDOW` parks a window that was hidden (it gets no
-  `WM_PAINT`, so the idle decision could not run) and unparks one that is
+  `WM_PAINT`, so the idle decision could not run) and resumes one that is
   shown again (Quill hides the main window to the tray with `ShowWindow`,
-  `docs/decisions/codex-gpui-window-controls.md`).
+  `docs/decisions/codex-gpui-window-controls.md`); minimizing parks it the
+  same way, and every other `WM_SIZE` demands frames. A renderer resize
+  failure wakes the vsync thread for its device check. A touchpad contact
+  arms a 250 ms window timer (`poll_touchpad_contact`): after the contact's
+  5 s of frames it updates the viewport, resumes frames once a gesture
+  starts or input is waiting, and stops 60 s later.
 - `src/direct_manipulation.rs`: the viewport runs in manual-update mode and
-  only advances when `draw_window` calls `update`, so it reports whether a
-  gesture may be in progress: the viewport is running or in inertia, or a
-  touchpad contact was handed to it in the last 5 s.
+  only advances when `draw_window` calls `update`, so it reports what the
+  window owes it (`contact_frames`): frames while it is running or in
+  inertia or a touchpad contact was handed to it in the last 5 s, a poll for
+  the next 60 s.
 - `src/gpui_windows.rs`: declares the new module.
+
+Until `docs/decisions/sweep-idle-heartbeat.md` a parked window still got one
+invalidation a second as a fail-safe; that heartbeat is gone. Those changes
+are type-checked and linted with `cargo clippy --target
+x86_64-pc-windows-msvc` on macOS and ran in CI's WARP launch smoke (idle
+wakeups printed there); not run on a Windows machine with a GPU, a touchpad
+or a second monitor.
 
 The Quill project also changed it in 2026 so a toast can carry the sender's
 picture and an inline reply field, which GPUI's `SystemNotification` (in the
