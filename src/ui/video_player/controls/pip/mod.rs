@@ -243,7 +243,7 @@ impl VideoPip {
             snapped,
             controls_on_left: controls_on_left(cx),
             wayland,
-            over: OverState::None,
+            over: initial_over(),
             edge: RectPart::Center,
             presses: Presses::default(),
             press: None,
@@ -518,4 +518,14 @@ fn position_fraction(position: f64, total: f64) -> f32 {
         return 0.0;
     }
     (position / total).clamp(0.0, 1.0) as f32
+}
+
+/// Where the pointer starts: nowhere, or over the window for a capture
+/// with `QUILL_DEMO_PIP_CONTROLS=1`, which shows the controls.
+fn initial_over() -> OverState {
+    #[cfg(feature = "demo-capture")]
+    if std::env::var_os("QUILL_DEMO_PIP_CONTROLS").is_some() {
+        return OverState::Other;
+    }
+    OverState::None
 }

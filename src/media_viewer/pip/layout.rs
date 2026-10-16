@@ -155,6 +155,25 @@ impl ControlsLayout {
         }
     }
 
+    /// A live picture's layout: no volume line and no playback line, so
+    /// the mute button takes the volume side's top corner, as close does
+    /// its own.
+    pub fn live(mut self) -> Self {
+        let toggle = &mut self.volume_toggle;
+        let on_right = self.close.area.x == self.inner.x;
+        let x = if on_right {
+            self.inner.right() - toggle.area.w
+        } else {
+            self.inner.x
+        };
+        let shift = x - toggle.area.x;
+        toggle.area.x += shift;
+        toggle.icon.x += shift;
+        self.volume_controller = Control::default();
+        self.playback = Control::default();
+        self
+    }
+
     /// `computeState`: what is under `point`.
     pub fn state_at(&self, point: PipPoint) -> OverState {
         if !self.inner.contains(point) {
@@ -309,6 +328,27 @@ mod tests {
         assert_eq!(mac.play, PipRect::new(145, 75, 30, 30));
         assert_eq!(mac.playback.area, PipRect::new(0, 168, 320, 12));
         assert_eq!(mac.playback.icon, PipRect::new(4, 172, 312, 4));
+    }
+
+    #[test]
+    fn a_live_picture_has_mute_in_the_corner_and_no_lines() {
+        let inner = PipRect::new(0, 0, 320, 180);
+        let mac = ControlsLayout::new(inner, true).live();
+        assert_eq!(mac.volume_toggle.area, PipRect::new(284, 0, 36, 36));
+        assert_eq!(mac.volume_toggle.icon, PipRect::new(290, 6, 24, 24));
+        assert_eq!(mac.close, ControlsLayout::new(inner, true).close);
+        let other = ControlsLayout::new(inner, false).live();
+        assert_eq!(other.volume_toggle.area, PipRect::new(0, 0, 36, 36));
+        for layout in [mac, other] {
+            assert!(layout.volume_controller.area.is_empty());
+            assert!(layout.playback.area.is_empty());
+            let at = |x, y| layout.state_at(PipPoint::new(x, y));
+            assert_eq!(at(160, 175), OverState::Other, "the picture, not a line");
+        }
+        assert_eq!(
+            mac.state_at(PipPoint::new(300, 10)),
+            OverState::VolumeToggle
+        );
     }
 
     #[test]

@@ -18,7 +18,15 @@ impl VideoPip {
     pub(super) fn layout(&self, window: &Window) -> ControlsLayout {
         let viewport = window.viewport_size();
         let inner = place::to_rect(Bounds::new(Point::default(), viewport));
-        ControlsLayout::new(PipRect::new(0, 0, inner.w, inner.h), self.controls_on_left)
+        let layout =
+            ControlsLayout::new(PipRect::new(0, 0, inner.w, inner.h), self.controls_on_left);
+        // A live window has no lines: their areas are picture, which
+        // moves the window.
+        if self.live.is_some() {
+            layout.live()
+        } else {
+            layout
+        }
     }
 
     pub(super) fn set_over(&mut self, over: OverState, cx: &mut Context<Self>) {

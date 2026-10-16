@@ -346,7 +346,7 @@ impl QuillApp {
                         Button::new("live-story-leave-other-confirm")
                             .debug_selector(|| "live-story-leave-other-confirm".into())
                             .label(tr(keys::Q_MEDIA_LIVE_LEAVE_AND_WATCH))
-                            .danger()
+                            .custom(chrome::attention(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.leave_other_call_for_live_story(cx);
                             })),

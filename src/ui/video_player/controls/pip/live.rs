@@ -19,16 +19,10 @@ use std::rc::Rc;
 const BADGE_BACKING: f32 = 0.34;
 
 impl VideoPip {
-    /// What the pointer is over at `local`. A live window has no lines:
-    /// their areas are picture, which moves the window.
+    /// What the pointer is over at `local` (a live window's layout has
+    /// no lines: `ControlsLayout::live`).
     pub(super) fn over_at(&self, window: &Window, local: PipPoint) -> OverState {
-        let over = self.layout(window).state_at(local);
-        match over {
-            OverState::Playback | OverState::VolumeController if self.live.is_some() => {
-                OverState::Other
-            }
-            over => over,
-        }
+        self.layout(window).state_at(local)
     }
 
     /// M mutes a live picture, as in the stream window. `true` when taken.

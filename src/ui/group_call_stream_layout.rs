@@ -910,7 +910,7 @@ fn title_row(
 
 #[cfg(feature = "demo-capture")]
 #[path = "group_call_stream_demo.rs"]
-mod demo;
+pub(super) mod demo;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

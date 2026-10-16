@@ -112,7 +112,7 @@ impl QuillApp {
         self.close_story_viewer(cx);
     }
 
-    fn open_live_pip(
+    pub(super) fn open_live_pip(
         &mut self,
         player: VideoPlayer,
         source: LivePipSource,
