@@ -8,6 +8,7 @@ mod bots_profile;
 mod chat_list;
 mod composer;
 mod derived_state;
+mod glass_lab;
 mod groups_admin;
 mod media;
 mod messages;
