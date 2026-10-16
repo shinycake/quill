@@ -132,7 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let group_call_id = call.id;
         let me_row = call.participants.iter().find(|p| p.is_current_user);
-        if !muted && me_row.is_some_and(|me| me.is_muted_for_all_users && !me.can_unmute_self) {
+        if !muted && call.is_force_muted() {
             return Err(SelfMuteError::NotAllowed);
         }
         let me = me_row.map(|p| p.participant_id);
@@ -473,7 +473,8 @@ pub enum SelfMuteError {
     /// The microphone changed but Telegram could not be told, so other
     /// participants may still see the old icon.
     Send(ConnectSendError),
-    /// An admin holds you muted (or your hand is raised): you cannot
-    /// unmute yourself.
+    /// An admin holds you muted (`can_unmute_self` false): you cannot unmute
+    /// yourself. A raised hand is the same server state, so it is covered
+    /// (tdesktop treats `RaisedHand` and `ForceMuted` alike here).
     NotAllowed,
 }

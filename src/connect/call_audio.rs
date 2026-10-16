@@ -166,10 +166,10 @@ pub fn tap_wanted(call: &ActiveGroupCall) -> Option<(i32, i32)> {
     if !call.is_joined || call.is_muted_self {
         return None;
     }
-    let me = call.participants.iter().find(|p| p.is_current_user)?;
-    if me.is_muted_for_all_users && !me.can_unmute_self {
+    if call.is_force_muted() {
         return None;
     }
+    let me = call.participants.iter().find(|p| p.is_current_user)?;
     Some((call.id, me.audio_source_id))
 }
 

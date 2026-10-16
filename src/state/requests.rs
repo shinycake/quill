@@ -68,6 +68,18 @@ impl PasswordOp {
 }
 
 impl RequestPurpose {
+    /// Mutations that only guard local UI state and are dropped by the sweep
+    /// when TDLib never answers. Unlike [`Self::is_sweepable`] lookups they
+    /// are user actions, so their errors still surface. Your own group-call
+    /// mute toggle is the one: while it is pending, own-row updates are held
+    /// back from `is_muted_self`, which would otherwise stay frozen forever.
+    pub fn is_swept_without_error(self) -> bool {
+        matches!(
+            self,
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantMute { .. })
+        )
+    }
+
     /// R5: whether an unanswered request of this purpose may be dropped by
     /// the periodic sweep. Only dedupe-guarded lookups (history pages,
     /// searches, shared media, per-entity info) qualify: dropping them
@@ -672,7 +684,7 @@ impl RequestRegistry {
             .pending
             .values()
             .filter(|p| {
-                p.purpose.is_sweepable()
+                (p.purpose.is_sweepable() || p.purpose.is_swept_without_error())
                     && now.saturating_duration_since(p.created_at) >= ttl
                     && !keep(p.id)
             })

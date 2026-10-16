@@ -243,6 +243,18 @@ pub struct LiveStoryJoinIntent {
 }
 
 impl ActiveGroupCall {
+    /// An admin holds you muted: your own participant is muted for all and
+    /// may not unmute itself. tdesktop's `MuteState::ForceMuted`; a raised
+    /// hand (`RaisedHand`) is the same server state (`can_self_unmute`
+    /// false) with a hand rating, so it is covered. Derived from the
+    /// participant row, never stored.
+    pub fn is_force_muted(&self) -> bool {
+        self.participants
+            .iter()
+            .find(|p| p.is_current_user)
+            .is_some_and(|me| me.is_muted_for_all_users && !me.can_unmute_self)
+    }
+
     /// Blank tracked call for a newly seen call id. Participant state
     /// repopulates from updates.
     pub fn fresh(id: i32) -> Self {

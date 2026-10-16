@@ -151,13 +151,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The microphone follows the tracked `is_muted_self`, which Telegram
         // settles through the participant update for you: when the server
         // muted you (an admin, or another device), the engine is muted to
-        // match. Re-issued only on change, and retried while it fails.
+        // match. An admin hold also wins while a local toggle is in flight
+        // (the reducer then ignores the row for `is_muted_self`), so it is
+        // read off the row here. Re-issued only on change, and retried
+        // while it fails.
         let wanted_mute = self
             .session
             .calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| call.is_muted_self);
+            .is_some_and(|call| call.is_muted_self || call.is_force_muted());
         if self.group_mute_state.get(&group_call_id) != Some(&wanted_mute)
             && let Some(engine) = self.call_engine.as_deref_mut()
         {
