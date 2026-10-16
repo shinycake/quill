@@ -244,19 +244,8 @@ fn windows_icon(manifest: &Path, out: &Path) -> Result<(), String> {
     let icon = manifest.join("assets/icons/Quill.ico");
     let rc = out.join("quill.rc");
     let icon = icon.to_string_lossy().replace('\\', "/");
-    // gpui is built with `windows-manifest-provided-by-host`, so this exe must
-    // carry the manifest itself (RT_MANIFEST = 24, id 1): per-monitor-v2 DPI,
-    // long paths, UTF-8 code page, common controls 6.
-    println!("cargo:rerun-if-changed=assets/windows/quill.manifest");
-    let app_manifest = manifest.join("assets/windows/quill.manifest");
-    let app_manifest = app_manifest.to_string_lossy().replace('\\', "/");
-    std::fs::write(&rc, format!("1 ICON \"{icon}\"\n1 24 \"{app_manifest}\"\n"))
+    std::fs::write(&rc, format!("1 ICON \"{icon}\"\n"))
         .map_err(|err| format!("write rc: {err}"))?;
-    // The MSVC linker also generates a default manifest (id 1) unless told
-    // not to; two RT_MANIFEST 1 resources fail with CVT1100.
-    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        println!("cargo:rustc-link-arg-bins=/MANIFEST:NO");
-    }
     embed_resource::compile(&rc, embed_resource::NONE)
         .manifest_required()
         .map_err(|err| format!("embed application icon: {err:?}"))

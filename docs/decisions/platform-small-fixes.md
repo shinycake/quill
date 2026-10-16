@@ -1,4 +1,4 @@
-# Platform small fixes (Windows manifest, Linux desktop id, file names)
+# Platform small fixes (Linux desktop id, file names, paths)
 
 Source: quality-sweep platform audit, findings P2, P5, P7, P10. tdesktop reference: it ships a
 Windows manifest with per-monitor DPI and `longPathAware`, and its Linux desktop file is named after
@@ -6,13 +6,13 @@ the app id (`org.telegram.desktop.desktop`) with a matching `StartupWMClass`.
 
 ## What changed
 
-- **P2 manifest.** gpui-fast is built with `windows-manifest-provided-by-host`, and the repo had no
-  RT_MANIFEST (build.rs only embedded the icon), so the host exe had to carry it. Added
-  `assets/windows/quill.manifest` (PerMonitorV2 + dpiAware, longPathAware, UTF-8 active code page,
-  Common-Controls 6, Win10/11 supportedOS, asInvoker) and build.rs now writes `1 24 "<manifest>"`
-  next to the icon in the same .rc, so there is a single resource script (no duplicate-resource
-  link hazard). `tests/windows_manifest.rs` checks the manifest settings and that build.rs embeds it,
-  on every platform.
+- **P2 manifest: not a bug, dropped.** The audit read gpui-base's `windows-manifest-provided-by-host`
+  and concluded quill.exe had no manifest. It has one: gpui-pre's default `windows-manifest` feature is
+  still enabled through another dependency path and embeds `gpui.manifest.xml` (PerMonitorV2 +
+  dpiAware, Common-Controls 6, Win10 supportedOS, asInvoker, SegmentHeap). Adding Quill's own made the
+  Windows link fail with CVT1100 (duplicate RT_MANIFEST 1, Windows CI on `cursor/platform-small-fixes`),
+  even with `/MANIFEST:NO`. Only `longPathAware` and the UTF-8 code page are missing; a follow-up can
+  add them by patching the vendored gpui manifest rather than adding a second one.
 - **P5 desktop id.** `assets/quill.desktop` is now `assets/org.shinycake.quill.desktop` with
   `StartupWMClass=org.shinycake.quill`, matching the window app_id. Package script, installer
   (`linux-install.sh`, keeps a hidden `NoDisplay` `quill.desktop` alias only where an old one existed,
@@ -40,11 +40,8 @@ the app id (`org.telegram.desktop.desktop`) with a matching `StartupWMClass`.
 ## Verification
 
 gate.sh: GATE OK (core 4808, ui 907). Unit tests for the sanitizer (reserved names, trailing
-dots, extension kept, byte cap), XDG_CONFIG_HOME, tilde expansion, desktop id, manifest contents,
+dots, extension kept, byte cap), XDG_CONFIG_HOME, tilde expansion, desktop id,
 and create_new de-dup (a race cannot be unit-tested; the test covers existing-file collisions).
 
-Compile/inspect-only: the actual embedding of the manifest into quill.exe (Windows-only
-`windows_icon` path in build.rs, `1 24` resource syntax, forward-slash paths as for the icon) was not
-built on Windows; platform CI does not run on PRs. The Linux shell/installer changes and the
-GNOME/KDE grouping were not run on a Linux desktop. A dumpbin/`mt.exe -inputresource` check on a
-Windows build is the remaining manual step.
+Windows CI (`cursor/platform-small-fixes`) builds the branch. The Linux shell/installer changes and the
+GNOME/KDE grouping were not run on a Linux desktop.
