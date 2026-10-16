@@ -511,6 +511,7 @@ impl Backend for LiveBackend {
             picture: newest.and_then(|landed| self.core.show(landed)),
             item_secs: 0.0,
             display_secs: None,
+            stats: None,
         }
     }
 
