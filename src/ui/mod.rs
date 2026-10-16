@@ -52,6 +52,8 @@ mod esc_stack;
 mod folders_state;
 mod force_reply;
 mod frame_clock;
+mod wake_wait;
+pub use wake_wait::sleep_or_wake;
 #[cfg(feature = "frame-profiler")]
 mod frame_profile;
 mod frame_state;

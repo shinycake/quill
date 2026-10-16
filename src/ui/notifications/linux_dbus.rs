@@ -221,6 +221,8 @@ impl Notifier {
             (None, chat_id) => lock(&self.clicks).push((chat_id, action)),
             (Some(account), chat_id) => lock(&self.account_clicks).push((account, chat_id, action)),
         }
+        // The poll loop sleeps while idle; wake it for the click.
+        quill::wake::UPDATES.poke();
     }
 
     fn handle(&self, signal: Signal) {

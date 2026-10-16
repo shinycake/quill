@@ -372,10 +372,11 @@ impl QuillApp {
         let generation = self.background.generation;
         cx.spawn(async move |this, cx| {
             const BUSY: Duration = Duration::from_millis(40);
-            const IDLE_MAX: Duration = Duration::from_millis(400);
+            // Idle sleeps are cut short by the receive thread's poke.
+            const IDLE_MAX: Duration = Duration::from_secs(2);
             let mut delay = Duration::from_millis(100);
             loop {
-                cx.background_executor().timer(delay).await;
+                let seen = quill::wake::UPDATES.epoch();
                 let step = this
                     .update(cx, |this, cx| {
                         if generation != this.background.generation {
@@ -396,6 +397,13 @@ impl QuillApp {
                     Some(true) => delay = BUSY,
                     Some(false) => delay = (delay * 2).clamp(BUSY, IDLE_MAX),
                 }
+                super::wake_wait::sleep_or_wake(
+                    cx.background_executor(),
+                    &quill::wake::UPDATES,
+                    seen,
+                    delay,
+                )
+                .await;
             }
         })
         .detach();

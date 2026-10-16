@@ -689,6 +689,7 @@ impl QuillApp {
                 }
             }
         }
+        quill::wake::UPDATES.poke();
     }
 
     fn unlink_notification(&mut self, id: u64, cx: &mut Context<Self>) {

@@ -326,13 +326,25 @@ fn install_link_inbox(
         let window_handle = window.window_handle();
         async move |cx| {
             loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(250))
-                    .await;
+                // Asleep until a link, activation or quit request arrives
+                // (the OS callback and the single-instance listener poke
+                // `wake::LINKS`); links waiting behind another flow are
+                // retried at the old cadence.
+                let seen = quill::wake::LINKS.epoch();
+                let wait = if quill::deep_link_inbox::has_pending_links() {
+                    std::time::Duration::from_millis(250)
+                } else {
+                    std::time::Duration::from_secs(60)
+                };
+                ui::sleep_or_wake(cx.background_executor(), &quill::wake::LINKS, seen, wait).await;
                 let alive = view
                     .update(cx, |this, _| {
                         if this.pending_deep_link.is_none() {
                             this.pending_deep_link = quill::deep_link_inbox::pop_link();
+                            if this.pending_deep_link.is_some() {
+                                // The poll loop starts the flow.
+                                quill::wake::UPDATES.poke();
+                            }
                         }
                     })
                     .is_ok();
@@ -420,10 +432,16 @@ fn install_main_window_tray(
         let tray_view = view.downgrade();
         let tray_window = window.window_handle();
         async move |cx| {
+            // Fallback for what no event announces (a tray host that
+            // appears late, the menu bar theme); everything else pokes
+            // `wake::CHROME` (applied updates, tray menu clicks, settings).
+            let mut wait = std::time::Duration::from_secs(10);
+            let mut seen = quill::wake::CHROME.epoch();
             loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_secs(1))
-                    .await;
+                ui::sleep_or_wake(cx.background_executor(), &quill::wake::CHROME, seen, wait).await;
+                // Taken before the work: a poke during it runs the loop again.
+                seen = quill::wake::CHROME.epoch();
+                wait = std::time::Duration::from_secs(10);
                 let alive = tray_view
                     .update(cx, |this, _| {
                         quill::tray::sync_tray(this.session());
@@ -453,6 +471,9 @@ fn install_main_window_tray(
                             if let Some(native) = view.window()
                                 && native.isMiniaturized()
                             {
+                                // Check again soon; a minimized window
+                                // has no event to announce its state.
+                                wait = std::time::Duration::from_secs(1);
                                 // Keep it minimized while hidden. Deminiaturizing
                                 // here would finish its animation by unhiding the app.
                                 cx.hide();

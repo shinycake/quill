@@ -409,7 +409,10 @@ pub fn close_outcome(
 static TRAY_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 pub fn set_tray_enabled(enabled: bool) {
-    TRAY_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    let before = TRAY_ENABLED.swap(enabled, std::sync::atomic::Ordering::Relaxed);
+    if before != enabled {
+        crate::wake::CHROME.poke();
+    }
 }
 
 pub fn tray_enabled() -> bool {
@@ -573,6 +576,11 @@ impl Tray {
         #[cfg(not(target_os = "macos"))]
         let builder = builder.with_icon(icon);
         let tray = builder.build().ok()?;
+        // Menu clicks wake the UI's tray task, which sleeps between events.
+        tray_icon::menu::MenuEvent::set_event_handler(Some(|event: tray_icon::menu::MenuEvent| {
+            crate::locks::lock_or_recover(&MENU_CLICKS).push(event.id.as_ref().to_owned());
+            crate::wake::CHROME.poke();
+        }));
         Some(Self {
             icon: tray,
             notifications_item,
@@ -782,6 +790,11 @@ pub fn tray_available() -> bool {
     TRAY.with(|cell| cell.borrow().available())
 }
 
+/// Ids of the tray menu items clicked since the last drain (the menu
+/// event handler runs wherever the OS delivers the click).
+#[cfg(all(feature = "ui", not(target_os = "linux")))]
+static MENU_CLICKS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
 /// What the tray menu asked for since the last call, plus "Quit" when a
 /// later `quill --quit` launch (Windows jump list, Linux desktop action)
 /// asked the running instance to quit.
@@ -796,9 +809,9 @@ pub fn take_tray_actions() -> Vec<TrayAction> {
 
 #[cfg(all(feature = "ui", not(target_os = "linux")))]
 fn native_tray_actions() -> Vec<TrayAction> {
-    tray_icon::menu::MenuEvent::receiver()
-        .try_iter()
-        .filter_map(|event| menu_action(event.id.as_ref()))
+    std::mem::take(&mut *crate::locks::lock_or_recover(&MENU_CLICKS))
+        .iter()
+        .filter_map(|id| menu_action(id))
         .collect()
 }
 

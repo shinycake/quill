@@ -52,6 +52,7 @@ impl QuillApp {
             self.connection.status_note =
                 tr(keys::Q_PREFS_DEMO_DESKTOP_NOTIFICATIONS_ARE_NOT).into();
         }
+        quill::wake::CHROME.poke();
         cx.notify();
     }
 

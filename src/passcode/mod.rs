@@ -651,6 +651,9 @@ pub struct IdleTracker {
     last_tick_ms: Option<u64>,
     last_idle_ms: u64,
     suspended_ms: u64,
+    /// How long the caller meant to sleep after the last tick: a gap up to
+    /// this plus [`SUSPEND_GAP_MS`] is a normal wait, not a suspend.
+    planned_ms: u64,
 }
 
 const SUSPEND_GAP_MS: u64 = 5_000;
@@ -665,7 +668,7 @@ impl IdleTracker {
         }
         if let Some(last) = self.last_tick_ms {
             let gap = now_ms.saturating_sub(last);
-            if gap > SUSPEND_GAP_MS {
+            if gap > SUSPEND_GAP_MS.saturating_add(self.planned_ms) {
                 self.suspended_ms = self.suspended_ms.saturating_add(gap);
             }
         }
@@ -673,6 +676,42 @@ impl IdleTracker {
         self.last_idle_ms = idle_ms;
         idle_ms.saturating_add(self.suspended_ms)
     }
+
+    /// Say how long the caller sleeps before the next tick.
+    pub fn plan_sleep(&mut self, planned_ms: u64) {
+        self.planned_ms = planned_ms;
+    }
+
+    /// Forget the history, for a tick after a long pause in ticking (the
+    /// timer was parked while auto-lock was off or the app was locked).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// Longest sleep between auto-lock checks. The check re-reads the OS idle
+/// time, so a sleep up to the deadline is exact when the user stays away,
+/// and wakes once per timeout at most when they keep working.
+pub const AUTOLOCK_MAX_SLEEP_MS: u64 = 60_000;
+/// Shortest sleep between auto-lock checks.
+pub const AUTOLOCK_MIN_SLEEP_MS: u64 = 1_000;
+
+/// How long to sleep before the next auto-lock check, given the current
+/// effective idle time: until the deadline, clamped. `None` when there is
+/// nothing to time (the lock is off, or the app is locked already).
+pub fn autolock_sleep_ms(
+    enabled: bool,
+    locked: bool,
+    timeout_secs: u32,
+    effective_idle_ms: u64,
+) -> Option<u64> {
+    if !enabled || locked || timeout_secs == 0 {
+        return None;
+    }
+    Some(
+        autolock_remaining_ms(effective_idle_ms, timeout_secs)
+            .clamp(AUTOLOCK_MIN_SLEEP_MS, AUTOLOCK_MAX_SLEEP_MS),
+    )
 }
 
 /// Parse the custom "HH:MM" auto-lock time of tdesktop's box.

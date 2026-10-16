@@ -340,11 +340,15 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
     let observed = main_active.clone();
     cx.observe_window_activation(window, move |_, window, _| {
         observed.set(window.is_window_active());
+        // The menus and the tray's minimized-window check follow it.
+        quill::wake::CHROME.poke();
     })
     .detach();
     cx.spawn(async move |this, cx| {
         let mut installed: Option<(DockModel, WindowMenuState)> = None;
         loop {
+            // Taken before the work: a poke during it runs the loop again.
+            let seen = quill::wake::CHROME.epoch();
             let registry = cx
                 .background_executor()
                 .spawn(async { read_registry() })
@@ -372,6 +376,18 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
             if !alive {
                 break;
             }
+            // Event-driven: applied updates, activation, lock changes,
+            // notification toggles and player changes poke `CHROME`. The
+            // timeout covers what nothing announces (the account registry
+            // on disk).
+            super::wake_wait::sleep_or_wake(
+                cx.background_executor(),
+                &quill::wake::CHROME,
+                seen,
+                Duration::from_secs(10),
+            )
+            .await;
+            // A burst of pokes rebuilds the menus at most once a second.
             cx.background_executor().timer(Duration::from_secs(1)).await;
         }
     })

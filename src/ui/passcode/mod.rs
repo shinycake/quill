@@ -332,6 +332,7 @@ impl QuillApp {
                 Ok(()) => {
                     this.account.passcode.enabled = true;
                     this.account.passcode.autolock_secs = passcode::DEFAULT_AUTOLOCK_SECS;
+                    quill::wake::PASSCODE.poke();
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
                     this.connection.status_note = tr(keys::Q_PREFS_LOCAL_PASSCODE_TURNED_ON).into();
                 }
@@ -415,6 +416,7 @@ impl QuillApp {
             |this, result, window, cx| match result {
                 Ok(()) => {
                     this.account.passcode.enabled = false;
+                    quill::wake::PASSCODE.poke();
                     this.account.passcode.system_unlock = false;
                     this.account.passcode.system_unlock_key = None;
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
@@ -430,6 +432,7 @@ impl QuillApp {
 
     pub(crate) fn set_autolock_secs(&mut self, secs: u32, cx: &mut Context<Self>) {
         self.account.passcode.autolock_secs = secs;
+        quill::wake::PASSCODE.poke();
         if !self.account.passcode.demo
             && let Some(root) = self.passcode_root()
         {
@@ -488,6 +491,8 @@ impl QuillApp {
         // (or the system prompt that still holds it for this process).
         state.clear();
         self.account.passcode.locked = true;
+        quill::wake::PASSCODE.poke();
+        quill::wake::CHROME.poke();
         self.account.passcode.focus_lock_input = true;
         self.account.passcode.suggest_system_unlock =
             self.account.passcode.system_unlock_key.is_some();
@@ -510,6 +515,8 @@ impl QuillApp {
 
     fn unlock_done(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.account.passcode.locked = false;
+        quill::wake::PASSCODE.poke();
+        quill::wake::CHROME.poke();
         self.account.passcode.lock_error = None;
         self.account.passcode.flood_until = None;
         self.account.passcode.logout_confirm = false;
@@ -529,6 +536,7 @@ impl QuillApp {
 
     fn lock_failed(&mut self, message: String, cx: &mut Context<Self>) {
         self.account.passcode.lock_error = Some(message);
+        quill::wake::PASSCODE.poke();
         self.account.passcode.shake_started = Some(Instant::now());
         self.account.passcode.focus_lock_input = true;
         cx.notify();
@@ -624,9 +632,12 @@ impl QuillApp {
         .detach();
     }
 
-    /// Once a second: auto-lock by idle time, and refresh the flood
-    /// countdown. Notifies only when something changed.
-    pub(crate) fn passcode_tick(&mut self, cx: &mut Context<Self>) {
+    /// Auto-lock by idle time, and the flood countdown on the lock screen.
+    /// Returns how long to sleep before the next check: until the lock
+    /// deadline (re-read from the idle time then, so activity re-arms it),
+    /// a second during a flood countdown, or `None` when there is nothing
+    /// to time and the task parks until [`quill::wake::PASSCODE`].
+    pub(crate) fn passcode_tick(&mut self, cx: &mut Context<Self>) -> Option<Duration> {
         let ui = &mut self.account.passcode;
         if ui.locked {
             if ui.flood_until.is_some_and(|t| Instant::now() >= t) {
@@ -636,26 +647,53 @@ impl QuillApp {
             } else if ui.flood_until.is_some() {
                 cx.notify();
             }
-            return;
+            return ui.flood_until.map(|_| Duration::from_secs(1));
         }
         if !ui.enabled || ui.demo {
-            return;
+            return None;
         }
         // OS idle where available ("away"), else input to this window.
         let idle = passcode::os_idle_ms().unwrap_or_else(super::presence::idle_ms);
         let effective = ui.idle.effective_idle(passcode::unix_ms_now(), idle);
         if passcode::autolock_due(effective, ui.autolock_secs) {
             self.lock_by_passcode(cx);
+            return None;
         }
+        let wait = passcode::autolock_sleep_ms(
+            true,
+            false,
+            self.account.passcode.autolock_secs,
+            effective,
+        )?;
+        self.account.passcode.idle.plan_sleep(wait);
+        Some(Duration::from_millis(wait))
     }
 
     pub(crate) fn spawn_passcode_tick(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
+            // Parked: nothing to time, so the next tick follows a long gap.
+            let mut parked = true;
             loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-                if this.update(cx, |this, cx| this.passcode_tick(cx)).is_err() {
+                let seen = quill::wake::PASSCODE.epoch();
+                let step = this.update(cx, |this, cx| {
+                    if parked {
+                        this.account.passcode.idle.reset();
+                    }
+                    this.passcode_tick(cx)
+                });
+                let Ok(wait) = step else {
                     break;
-                }
+                };
+                parked = wait.is_none();
+                // Parked, a poke (settings, lock, unlock) wakes the task;
+                // the long timeout is only a safety net.
+                super::wake_wait::sleep_or_wake(
+                    cx.background_executor(),
+                    &quill::wake::PASSCODE,
+                    seen,
+                    wait.unwrap_or(Duration::from_secs(300)),
+                )
+                .await;
             }
         })
         .detach();
@@ -675,6 +713,7 @@ impl QuillApp {
             wiping = true;
         }
         self.account.passcode.enabled = false;
+        quill::wake::PASSCODE.poke();
         self.account.passcode.system_unlock = false;
         self.account.passcode.system_unlock_key = None;
         self.account.passcode.logout_confirm = false;
