@@ -1,12 +1,14 @@
-//! Pure conversions for pushed frames: I420 turned or mirrored, interleaved into NV12
-//! (macOS pixel buffers), expanded to BGRA (GPUI images on Windows and
-//! Linux), shrunk and blurred for the paused tile, and back from RGBA for
+//! Pure conversions for pushed frames: I420 turned or mirrored,
+//! interleaved into NV12 (macOS pixel buffers, Windows surface frames),
+//! expanded to BGRA (GPUI images on Linux, and the fallback elsewhere),
+//! shrunk and blurred for the paused tile, and back from RGBA for
 //! pictures Quill makes itself (your shared screen's preview, fixtures).
 //!
 //! The colour math is the one the engine's RGBA conversion used before
-//! every picture became a live feed: BT.601 with full-range luma, which is also the matrix GPUI's surface
-//! shader applies to a full-range NV12 buffer, so every path shows the
-//! same colours.
+//! every picture became a live feed: BT.601 with full-range luma, which
+//! is also the matrix GPUI's macOS surface shader applies to a full-range
+//! NV12 buffer and the one Windows NV12 live frames carry, so every path
+//! shows the same colours.
 #![deny(clippy::indexing_slicing)]
 
 use super::LiveRotation;
@@ -177,6 +179,64 @@ pub fn i420_to_nv12(
         let Some(out) = out.get_mut(..cw * 2) else {
             return false;
         };
+        let (pairs, _) = out.as_chunks_mut::<2>();
+        for (pair, (u, v)) in pairs.iter_mut().zip(u_row.iter().zip(v_row)) {
+            *pair = [*u, *v];
+        }
+    }
+    true
+}
+
+/// Bytes of a tightly packed NV12 frame (Y `w × h`, then Cb and Cr
+/// interleaved, `w × h / 2`): what a GPUI NV12 surface frame holds.
+/// `None` for a zero or odd side (NV12 surfaces need even sides) or a
+/// size that overflows.
+pub fn nv12_packed_len(width: usize, height: usize) -> Option<usize> {
+    if width == 0 || height == 0 || !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+        return None;
+    }
+    let luma = width.checked_mul(height)?;
+    luma.checked_add(luma / 2)
+}
+
+/// The size a `width × height` frame packs into as NV12: an odd side
+/// loses its last column or row (NV12 surfaces need even sides; the
+/// dropped pixels are the only ones the last chroma sample covered, so
+/// the rest stays exact). `None` below 2 × 2.
+pub fn nv12_packed_size(width: usize, height: usize) -> Option<(usize, usize)> {
+    let (w, h) = (width & !1, height & !1);
+    (w > 0 && h > 0).then_some((w, h))
+}
+
+/// The Y plane copied and U and V interleaved, as [`i420_to_nv12`] does,
+/// into one tightly packed buffer (rows of exactly the packed width, the
+/// chroma plane right after the luma plane), the layout a Windows NV12
+/// surface frame holds; an odd frame is cut to [`nv12_packed_size`].
+/// `false`, with nothing written, unless `out` is exactly
+/// [`nv12_packed_len`] of that size.
+pub fn i420_to_nv12_packed(src: &I420, out: &mut [u8]) -> bool {
+    let (w, h) = (src.width, src.height);
+    let Some((pw, ph)) = nv12_packed_size(w, h) else {
+        return false;
+    };
+    if nv12_packed_len(pw, ph) != Some(out.len()) {
+        return false;
+    }
+    let (cw, _) = src.chroma_size();
+    let Some((y_out, uv_out)) = out.split_at_mut_checked(pw * ph) else {
+        return false;
+    };
+    let rows = src.y.chunks_exact(w).zip(y_out.chunks_exact_mut(pw));
+    for (row, out) in rows.take(ph) {
+        let Some(row) = row.get(..pw) else {
+            return false;
+        };
+        out.copy_from_slice(row);
+    }
+    // `pw / 2` chroma samples a row, `ph / 2` rows: a packed row is `pw`
+    // bytes of (Cb, Cr) pairs.
+    let chroma = src.u.chunks_exact(cw).zip(src.v.chunks_exact(cw));
+    for ((u_row, v_row), out) in chroma.zip(uv_out.chunks_exact_mut(pw)).take(ph / 2) {
         let (pairs, _) = out.as_chunks_mut::<2>();
         for (pair, (u, v)) in pairs.iter_mut().zip(u_row.iter().zip(v_row)) {
             *pair = [*u, *v];
