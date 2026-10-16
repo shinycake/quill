@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(due, Some(connecting_at));
         let (overlay, _) = clock.observe(
             input(Some(PlayState::Buffering)),
-            connecting_at - Duration::from_millis(1),
+            t0 + CONNECTING_AFTER.saturating_sub(Duration::from_millis(1)),
         );
         assert_eq!(overlay, LiveOverlay::Stalled { connecting: false });
         let (overlay, due) = clock.observe(input(Some(PlayState::Buffering)), connecting_at);
