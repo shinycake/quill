@@ -136,7 +136,7 @@ impl QuillApp {
     ) {
         self.playback.player.chat = Some(chat);
         self.playback.player.meta = Some(self.track_meta_for(chat, id, kind));
-        let duration = self.playback.track_duration.map_or(0.1, |d| d.max(0.1));
+        let duration = self.playback.track_duration().map_or(0.1, |d| d.max(0.1));
         let offset = self.playback.active_position_secs().unwrap_or(0.0);
         let slider = cx.new(|_| {
             SliderState::new()
@@ -264,7 +264,7 @@ impl QuillApp {
 
     /// Pause when playing, resume when paused.
     pub(super) fn toggle_active_playback(&mut self, cx: &mut Context<Self>) {
-        if self.playback.track_duration.is_none() {
+        if self.playback.track_duration().is_none() {
             return;
         }
         if self.playback.is_playing() {
@@ -305,7 +305,7 @@ impl QuillApp {
     pub(super) fn publish_now_playing(&mut self) {
         let (Some(id), Some(duration), Some(position)) = (
             self.active_playback_id(),
-            self.playback.track_duration,
+            self.playback.track_duration(),
             self.playback.active_position_secs(),
         ) else {
             media_session::publish(None);
@@ -347,7 +347,7 @@ impl QuillApp {
     /// The bar, when a voice note or music file is active.
     pub(super) fn player_bar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = self.active_playback_id()?;
-        let duration = self.playback.track_duration?;
+        let duration = self.playback.track_duration()?;
         let position = self.playback.active_position_secs()?;
         let kind = self.active_playback_kind();
         let meta = match (&self.playback.player.meta, self.playback.player.chat) {
@@ -373,7 +373,11 @@ impl QuillApp {
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
         let muted = self.playback.volume < 0.01;
-        let speed_trigger = self.speed_label_trigger("player-bar-speed");
+        // The shared trigger is white for the video overlay; the bar sits on
+        // the theme surface.
+        let speed_trigger = self
+            .speed_label_trigger("player-bar-speed")
+            .text_color(text_primary());
         let speed_dial = self.speed_dial("player-bar-speed", speed_trigger, cx);
 
         let icon_button = |id: &'static str, icon: IconName, label: &'static str| {

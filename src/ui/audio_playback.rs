@@ -102,7 +102,7 @@ impl QuillApp {
         ) {
             self.playback.positions.insert(message_id, position);
         }
-        self.playback.track_duration = None;
+        self.playback.track_length = None;
         quill::wake::CHROME.poke();
         self.playback.seek_slider = None;
         self.playback.player.slider = None;
@@ -152,7 +152,7 @@ impl QuillApp {
             PlaybackKind::Voice => self.playback.playing_voice = Some(message_id),
             PlaybackKind::Audio => self.playback.playing_audio = Some(message_id),
         }
-        self.playback.track_duration = Some(duration_secs.max(0.0));
+        self.playback.track_length = Some(duration_secs.max(0.0));
         quill::wake::CHROME.poke();
         let slider = cx.new(|_| {
             SliderState::new()
@@ -175,7 +175,7 @@ impl QuillApp {
 
     /// Start the in-process player on `path` at `offset_secs` with the
     /// current volume and speed. Returns true when it is playing; on false
-    /// the engine is `Failed` and `playback.error` says why. The screenshot
+    /// the engine is `Failed` and `audio.error()` says why. The screenshot
     /// demos have no audio device and use the engine's explicit simulation.
     pub(super) fn start_player(
         &mut self,
@@ -197,15 +197,9 @@ impl QuillApp {
             self.playback.speed,
             duration_secs,
         ) {
-            Ok(()) => {
-                self.playback.error = None;
-                true
-            }
-            // MED1: honest error instead of a silent failure.
-            Err(err) => {
-                self.playback.error = Some(err.to_string());
-                false
-            }
+            Ok(()) => true,
+            // The engine keeps the reason (`audio.error()`).
+            Err(_) => false,
         }
     }
 
@@ -224,7 +218,7 @@ impl QuillApp {
 
     /// Resume the active track from where the sound is. A failure leaves the
     /// engine in the state it reports (still paused, or failed), with the
-    /// reason in `playback.error`.
+    /// reason in `audio.error()`.
     pub(super) fn resume_active_playback(&mut self, cx: &mut Context<Self>) {
         let Some(position) = self.playback.active_position_secs() else {
             self.stop_voice_playback();
@@ -232,10 +226,8 @@ impl QuillApp {
             return;
         };
         self.sound_starts(cx);
-        match self.playback.audio.resume(position) {
-            Ok(()) => self.playback.error = None,
-            Err(err) => self.playback.error = Some(err.to_string()),
-        }
+        // A failure is kept by the engine (`audio.error()`).
+        let _ = self.playback.audio.resume(position);
         quill::wake::CHROME.poke();
     }
 
@@ -261,7 +253,7 @@ impl QuillApp {
     /// not playing just moves the held position; the sound catches up on
     /// resume.
     pub(super) fn seek_active_to(&mut self, secs: f64, cx: &mut Context<Self>) {
-        let Some(duration) = self.playback.track_duration else {
+        let Some(duration) = self.playback.track_duration() else {
             return;
         };
         let offset = secs.clamp(0.0, duration.max(0.0));
@@ -269,9 +261,8 @@ impl QuillApp {
         if let Some(id) = self.active_playback_id() {
             self.playback.positions.insert(id, offset);
         }
-        if let Err(err) = self.playback.audio.seek(offset, was_playing) {
-            self.playback.error = Some(err.to_string());
-        }
+        // A failure is kept by the engine (`audio.error()`).
+        let _ = self.playback.audio.seek(offset, was_playing);
         if was_playing {
             self.connection.status_note = format!(
                 "{} — seek {}",
@@ -403,10 +394,10 @@ impl QuillApp {
                 display_secs: display.unwrap_or(0.0),
                 duration_secs,
                 is_playing: self.playback.is_playing(),
-                // MED1: speed/mute/error shown on the active row.
+                // Speed, mute and the engine's error show on the active row.
                 speed: self.playback.speed,
                 muted: self.playback.volume < 0.01,
-                error: self.playback.error.clone(),
+                error: self.playback.audio.error().map(audio_error_text),
             }
         } else {
             SeekBarView {
@@ -624,4 +615,15 @@ impl QuillApp {
             session.apply(owned);
         }
     }
+}
+
+/// What the row says for an engine error (sentence case, localized).
+fn audio_error_text(error: super::audio::AudioError) -> String {
+    use super::audio::AudioError;
+    match error {
+        AudioError::Open => tr(keys::Q_AV_COULDNT_OPEN_THE_AUDIO_FILE),
+        AudioError::Unsupported => tr(keys::Q_AV_THIS_AUDIO_FORMAT_CANT_BE_PLAYED),
+        AudioError::NoOutput => tr(keys::Q_AV_NO_AUDIO_OUTPUT_DEVICE),
+    }
+    .to_string()
 }

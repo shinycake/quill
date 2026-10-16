@@ -89,7 +89,7 @@ pub(super) fn format_hint(extension: Option<&str>, mime: Option<&str>) -> Option
         .or_else(|| mime.and_then(by_mime))
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AudioError {
     /// The file can't be read.
     Open,

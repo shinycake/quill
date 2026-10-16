@@ -16,3 +16,19 @@ is running; `QUILL_DEMO_AUDIO_FAIL=1` shows the failed start). Real playback nev
 
 Verified: engine tests drive a real rodio mixer by hand (no hardware); demo captures in light and dark for
 playing, paused and failed.
+
+## Review round (PR #898)
+
+- The failure text was a UI-side mirror (`playback.error`, set by hand on start, resume and seek), so a failed
+  seek left the text up while the engine kept playing and a later good seek did not clear it. The engine now
+  keeps its last error (`AudioEngine::error()`): set by a failed start, resume or seek, cleared by the next one
+  that works and by `stop`. The audio row reads only that. `playback.error` stays for the video viewer.
+- `AudioError` Display stays for logs. The row maps the error kind to `qll_av_*` lang keys in sentence case
+  ("No audio output device.", "Couldn't open the audio file.", "This audio format can't be played.").
+- `track_duration` was a second hand-kept "a track is active" flag. The field is now `track_length` (plain
+  data) and `PlaybackUi::track_duration()` returns it only while `playing_voice` or `playing_audio` is set, so
+  activity has one source and a stale length cannot show a phantom track.
+- The player bar's speed label used the video overlay's fixed white text and vanished on the light surface.
+  The bar now sets `text_primary()` on that trigger (the shared helper is in `media_viewer/`, left alone).
+- Tests: in-place seek while playing, speed change mid-track, error kept and cleared (start, seek, resume),
+  a stale length is never active.

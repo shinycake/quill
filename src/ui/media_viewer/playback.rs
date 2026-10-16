@@ -265,7 +265,7 @@ impl QuillApp {
         self.viewer.controls.boost_timer = None;
         let _ = self.viewer.controls.boost.cancel();
         let mut restarted = false;
-        if self.playback.track_duration.is_some() {
+        if self.playback.track_duration().is_some() {
             let was_playing = self.playback.is_playing();
             // The tempo stretcher follows the new speed on the fly.
             self.playback.audio.set_speed(next);

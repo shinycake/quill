@@ -98,7 +98,7 @@ impl QuillApp {
             can_previous,
             can_next,
             position: self.playback.active_position_secs().unwrap_or(0.),
-            duration: self.playback.track_duration.unwrap_or(0.),
+            duration: self.playback.track_duration().unwrap_or(0.),
         })
     }
 
@@ -277,7 +277,7 @@ impl QuillApp {
             Command::PlayerClose => self.close_player(cx),
             Command::PlayerSeek { fraction, done } => {
                 // tdesktop seeks on release (`finishSeeking`).
-                if done && let Some(duration) = self.playback.track_duration {
+                if done && let Some(duration) = self.playback.track_duration() {
                     let secs = fraction.clamp(0., 1.) * duration;
                     self.seek_active_to(secs, cx);
                 }

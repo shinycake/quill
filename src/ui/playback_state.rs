@@ -24,10 +24,10 @@ pub(crate) struct PlaybackUi {
     pub(super) pending_voice_play: Option<(ChatId, MessageId, FileId, bool, f64)>,
     /// In-process player for the active voice note / audio file.
     pub(super) audio: super::audio::AudioEngine,
-    /// Length of the active track (TDLib's rounded duration), `Some` exactly
-    /// when `playing_voice` or `playing_audio` is. Whether it is playing and
-    /// where it is come from `audio`, never from here.
-    pub(super) track_duration: Option<f64>,
+    /// Length of the loaded track (TDLib's rounded duration). Plain data:
+    /// whether a track is active comes from `playing_voice`/`playing_audio`
+    /// (see `track_duration`) and whether it plays, and where, from `audio`.
+    pub(super) track_length: Option<f64>,
     /// Interactive seek slider bound to the active row (Phase 4.6).
     pub(super) seek_slider: Option<Entity<SliderState>>,
     /// True while the user is dragging the seek slider (Change without Release yet).
@@ -69,8 +69,8 @@ pub(crate) struct PlaybackUi {
     pub(super) volume: f32,
     /// MED1: last non-zero volume, restored by the mute toggle.
     pub(super) unmuted_volume: f32,
-    /// MED1: honest playback error for the active track — set instead of
-    /// the old silent failure (e.g. unsupported format, no output device).
+    /// The media viewer's playback error. The audio rows read
+    /// `audio.error()` instead.
     pub(super) error: Option<String>,
 }
 
@@ -82,6 +82,12 @@ impl PlaybackUi {
             clip,
             self.gif_started_at.unwrap_or_else(Instant::now),
         ))
+    }
+
+    /// Length of the active track; `None` when no row is active.
+    pub(super) fn track_duration(&self) -> Option<f64> {
+        self.playing_voice.or(self.playing_audio)?;
+        self.track_length
     }
 
     /// What the active track's sound is doing (`Idle` with no track).
@@ -97,7 +103,7 @@ impl PlaybackUi {
     /// Where the active track is, in seconds, from the frames the output
     /// consumed. `None` with no active track.
     pub(super) fn active_position_secs(&self) -> Option<f64> {
-        let duration = self.track_duration?;
+        let duration = self.track_duration()?;
         Some(self.audio.position_secs().clamp(0.0, duration.max(0.0)))
     }
 
@@ -111,7 +117,7 @@ impl PlaybackUi {
             playlist_remove: None,
             pending_voice_play: None,
             audio: super::audio::AudioEngine::new(audio_output.clone()),
-            track_duration: None,
+            track_length: None,
             seek_slider: None,
             seek_scrubbing: false,
             seek_preview_secs: None,
@@ -140,6 +146,7 @@ mod tests {
     use super::PlaybackUi;
     use crate::ui::audio::engine::test_support::{RATE, device, pull, track};
     use crate::ui::audio::{EngineState, SharedOutput, Simulation};
+    use quill::ids::MessageId;
     use std::path::Path;
 
     fn ui_without_output() -> PlaybackUi {
@@ -149,7 +156,8 @@ mod tests {
     #[test]
     fn a_failed_start_never_shows_playing() {
         let mut ui = ui_without_output();
-        ui.track_duration = Some(30.0);
+        ui.playing_audio = Some(MessageId(1));
+        ui.track_length = Some(30.0);
         let started = ui
             .audio
             .start(Path::new("missing.ogg"), 4.0, 1.0, 1.0, 30.0)
@@ -165,7 +173,8 @@ mod tests {
         let (output, _device) = device();
         let mut ui = PlaybackUi::new(&output);
         let path = track("ui-resume.wav", 4);
-        ui.track_duration = Some(4.0);
+        ui.playing_audio = Some(MessageId(1));
+        ui.track_length = Some(4.0);
         ui.audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
         assert!(ui.is_playing());
         ui.audio.pause();
@@ -182,7 +191,8 @@ mod tests {
         let (output, mut source) = device();
         let mut ui = PlaybackUi::new(&output);
         let path = track("ui-position.wav", 4);
-        ui.track_duration = Some(4.0);
+        ui.playing_audio = Some(MessageId(1));
+        ui.track_length = Some(4.0);
         ui.audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(250));
         assert!(ui.active_position_secs().unwrap_or(9.0) < 0.05);
@@ -194,7 +204,8 @@ mod tests {
     #[test]
     fn a_track_that_ended_resets_the_button() {
         let mut ui = ui_without_output();
-        ui.track_duration = Some(5.0);
+        ui.playing_audio = Some(MessageId(1));
+        ui.track_length = Some(5.0);
         ui.audio.set_simulation(Some(Simulation { fail: false }));
         ui.audio
             .start(Path::new("a.ogg"), 5.0, 1.0, 1.0, 5.0)
@@ -202,6 +213,16 @@ mod tests {
         assert_eq!(ui.engine_state(), EngineState::Ended);
         assert!(!ui.is_playing());
         assert_eq!(ui.active_position_secs(), Some(5.0));
+    }
+
+    #[test]
+    fn a_stale_length_never_makes_a_track_active() {
+        let mut ui = ui_without_output();
+        ui.track_length = Some(30.0);
+        assert_eq!(ui.track_duration(), None);
+        assert_eq!(ui.active_position_secs(), None);
+        ui.playing_voice = Some(MessageId(2));
+        assert_eq!(ui.track_duration(), Some(30.0));
     }
 
     #[test]

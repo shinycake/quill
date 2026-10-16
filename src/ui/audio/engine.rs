@@ -162,6 +162,9 @@ pub(in crate::ui) struct AudioEngine {
     /// seeked while paused).
     parked_secs: f64,
     failed: bool,
+    /// Why the last start, resume or seek did not work. Cleared by the next
+    /// one that does, and by `stop`. The row's error line reads only this.
+    error: Option<AudioError>,
     /// Set by the screenshot demos only.
     simulation: Option<Simulation>,
     sim_clock: Option<PlaybackClock>,
@@ -180,6 +183,7 @@ impl AudioEngine {
             stale: false,
             parked_secs: 0.0,
             failed: false,
+            error: None,
             simulation: None,
             sim_clock: None,
             sim_duration: 0.0,
@@ -190,6 +194,16 @@ impl AudioEngine {
     /// device-less demo simulation.
     pub(in crate::ui) fn set_simulation(&mut self, simulation: Option<Simulation>) {
         self.simulation = simulation;
+    }
+
+    /// Why the last start, resume or seek failed, if it did and nothing has
+    /// worked since.
+    pub(in crate::ui) fn error(&self) -> Option<AudioError> {
+        self.error
+    }
+
+    fn note(&mut self, result: &Result<(), AudioError>) {
+        self.error = result.as_ref().err().copied();
     }
 
     /// What the track is doing, read from the sound itself.
@@ -245,6 +259,7 @@ impl AudioEngine {
         self.parked_secs = offset;
         let started = self.begin(path, offset);
         self.failed = started.is_err();
+        self.note(&started);
         started
     }
 
@@ -316,6 +331,7 @@ impl AudioEngine {
                 clock.seek(0.0);
             }
             clock.resume();
+            self.error = None;
             return Ok(());
         }
         let ended = self.player.as_ref().is_none_or(Player::empty);
@@ -332,11 +348,13 @@ impl AudioEngine {
             if started.is_ok() {
                 self.failed = false;
             }
+            self.note(&started);
             return started;
         }
         if let Some(player) = &self.player {
             player.play();
         }
+        self.error = None;
         Ok(())
     }
 
@@ -347,6 +365,12 @@ impl AudioEngine {
         offset_secs: f64,
         playing: bool,
     ) -> Result<(), AudioError> {
+        let moved = self.seek_to(offset_secs, playing);
+        self.note(&moved);
+        moved
+    }
+
+    fn seek_to(&mut self, offset_secs: f64, playing: bool) -> Result<(), AudioError> {
         let offset = offset_secs.max(0.0);
         if let Some(clock) = self.sim_clock.as_mut() {
             clock.seek(offset);
@@ -394,6 +418,7 @@ impl AudioEngine {
         self.path = None;
         self.stale = false;
         self.failed = false;
+        self.error = None;
     }
 }
 
@@ -458,7 +483,7 @@ pub(in crate::ui) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{RATE, device, pull, track};
-    use super::{AudioEngine, EngineState, Simulation};
+    use super::{AudioEngine, AudioError, EngineState, Simulation};
     use crate::ui::audio::SharedOutput;
     use rodio::mixer::MixerSource;
     use std::path::PathBuf;
@@ -595,5 +620,103 @@ mod tests {
         engine.seek(12.0, false).unwrap();
         engine.resume(12.0).unwrap();
         assert_eq!(engine.state(), EngineState::Ended);
+    }
+    /// `Player::try_seek` waits for the audio thread, so the fake device has
+    /// to keep pulling on its own thread while a seek is in flight.
+    fn seek_while_pulling(
+        engine: &mut AudioEngine,
+        device: &mut MixerSource,
+        to: f64,
+    ) -> Result<(), AudioError> {
+        let done = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !done.load(std::sync::atomic::Ordering::Acquire) {
+                    device.next();
+                }
+            });
+            let moved = engine.seek(to, true);
+            done.store(true, std::sync::atomic::Ordering::Release);
+            moved
+        })
+    }
+
+    #[test]
+    fn an_in_place_seek_while_playing_moves_the_position() {
+        let (mut engine, mut device) = rig();
+        let path = track("seek-playing.wav", 6);
+        engine.start(&path, 0.0, 1.0, 1.0, 6.0).unwrap();
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        seek_while_pulling(&mut engine, &mut device, 4.0).unwrap();
+        assert_eq!(engine.state(), EngineState::Playing);
+        let after_seek = engine.position_secs();
+        assert!((3.95..=5.5).contains(&after_seek), "got {after_seek}");
+        let before = engine.position_secs();
+        pull(&mut device, usize::try_from(RATE).unwrap() / 2);
+        let later = engine.position_secs();
+        assert!(
+            later - before > 0.3 && later - before < 0.7,
+            "got {before} then {later}"
+        );
+    }
+
+    #[test]
+    fn a_speed_change_mid_track_keeps_track_time() {
+        let (mut engine, mut device) = rig();
+        let path = track("speed-change.wav", 8);
+        engine.start(&path, 0.0, 1.0, 1.0, 8.0).unwrap();
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        let before = engine.position_secs();
+        assert!((0.9..=1.3).contains(&before), "got {before}");
+        engine.set_speed(2.0);
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        let after = engine.position_secs();
+        assert!((2.7..=3.6).contains(&after), "got {after}");
+        assert!(after > before, "time never runs backwards");
+    }
+
+    #[test]
+    fn the_engine_keeps_why_it_failed_until_something_works() {
+        let mut engine = AudioEngine::new(SharedOutput::for_test(None));
+        let path = track("error-kept.wav", 2);
+        assert_eq!(engine.error(), None);
+        assert!(engine.start(&path, 0.0, 1.0, 1.0, 2.0).is_err());
+        assert_eq!(engine.error(), Some(AudioError::NoOutput));
+        assert_eq!(engine.state(), EngineState::Failed);
+        engine.stop();
+        assert_eq!(engine.error(), None);
+    }
+
+    #[test]
+    fn a_failed_seek_is_cleared_by_the_next_good_one() {
+        let (mut engine, mut device) = rig();
+        let path = track("error-seek.wav", 1);
+        engine.start(&path, 0.0, 1.0, 1.0, 1.0).unwrap();
+        pull(&mut device, usize::try_from(RATE).unwrap() * 2);
+        assert_eq!(engine.state(), EngineState::Ended);
+        std::fs::remove_file(&path).unwrap();
+        assert!(engine.seek(0.5, true).is_err());
+        assert_eq!(engine.error(), Some(AudioError::Open));
+        track("error-seek.wav", 1);
+        engine.seek(0.5, true).unwrap();
+        assert_eq!(engine.error(), None);
+        assert_eq!(engine.state(), EngineState::Playing);
+    }
+
+    #[test]
+    fn a_failed_resume_error_goes_away_with_the_next_resume_that_works() {
+        let (mut engine, _device) = rig();
+        let path = track("error-resume.wav", 4);
+        engine.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
+        engine.pause();
+        engine.seek(2.0, false).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(engine.resume(2.0).is_err());
+        assert_eq!(engine.error(), Some(AudioError::Open));
+        assert_eq!(engine.state(), EngineState::Paused);
+        track("error-resume.wav", 4);
+        engine.resume(2.0).unwrap();
+        assert_eq!(engine.error(), None);
+        assert_eq!(engine.state(), EngineState::Playing);
     }
 }
