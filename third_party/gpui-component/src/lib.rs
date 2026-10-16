@@ -48,6 +48,8 @@ pub mod diff;
 pub mod dock;
 pub mod empty;
 pub mod form;
+// QUILL: liquid glass surfaces (see QUILL-CHANGES.md).
+pub mod glass;
 pub mod group_box;
 pub mod highlighter;
 pub mod history;

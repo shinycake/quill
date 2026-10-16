@@ -28,6 +28,7 @@ Notes on specific crates:
 | gpui-pre-macos 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre-macos`; the changes are listed in `third_party/gpui-pre-macos/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-pre-linux 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre-linux`; the changes are listed in `third_party/gpui-pre-linux/QUILL-CHANGES.md` and marked in each changed file. |
 | gpui-pre-windows 0.3.9 | Apache-2.0 | Patched copy in `third_party/gpui-pre-windows`; the changes are listed in `third_party/gpui-pre-windows/QUILL-CHANGES.md` and marked in each changed file. |
+| Liquid glass (`third_party/gpui-component/src/glass.rs`; the backdrop blur in gpui-pre and gpui-pre-apple) | MIT (bezel); Apache-2.0 (crabtalk/zed) | `GlassSurface` is ported from bezel's `Surface` (github.com/crabtalk/bezel; notice in `licenses/bezel-MIT.txt`). The backdrop-blur primitive and its Metal pass are ported from bezel's GPUI fork, github.com/crabtalk/zed, at commit 693d6a82. The changes are listed in each crate's `QUILL-CHANGES.md`. |
 | gpui-kit-assets 0.7.3 | Apache-2.0; bundled Lucide icons ISC, some derived from Feather (MIT) | The icon license is in `licenses/lucide-ISC.txt` (copied from the crate's `LICENSE-LUCIDE`). |
 | spellbook, symphonia (via rodio), dwrote, option-ext | MPL-2.0 | Unmodified crates.io releases. MPL-2.0 is file-level copyleft; the source of these files is on crates.io and in each project's repository (links in `THIRD_PARTY_LICENSES.md`). |
 | webpki-roots | CDLA-Permissive-2.0 | Mozilla CA certificate data. |

@@ -15,3 +15,16 @@ selected tab keeps the key and springs as before; a bounds-only change
 value immediately, so the indicator jumps. The indicator carries a
 `tab-indicator` debug selector under `test` / `test-support`. Background:
 `docs/decisions/folder-tabs-no-badge-spring.md`.
+
+Liquid glass on macOS (2026). `src/glass.rs` (new, exported as
+`gpui_kit::component::glass`): `GlassVariant`, `GlassStyle` (a
+`gpui::GlassEffect` and an optional 1px border), the `GlassProvider` global
+the app installs, `glass_style()`, and `GlassSurface`, an element ported from
+bezel's `Surface` (github.com/crabtalk/bezel, MIT, `crates/ui/src/surface.rs`;
+notice in `licenses/bezel-MIT.txt`). `GlassSurface` paints its child in one
+scene layer: the backdrop blur, the drop shadows cut to outside the shape,
+the border, then the child. `src/menu/popup_menu.rs`: when
+`glass_style(GlassVariant::Regular, cx)` is `Some`, the menu drops
+`popover_style`'s fill and shadow and renders inside a `GlassSurface` that
+paints the popover shadow outside the shape; when `None`, it renders as
+before. The primitive comes from gpui-pre (see its QUILL-CHANGES.md).

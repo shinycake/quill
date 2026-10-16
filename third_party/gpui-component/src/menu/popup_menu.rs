@@ -1,6 +1,7 @@
 use crate::ThemeStyled as _;
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
 use crate::actions::{SelectLeft, SelectRight};
+use crate::glass::{GlassSurface, GlassVariant, glass_style};
 use crate::menu::menu_item::MenuItemElement;
 use crate::scroll::ScrollableElement;
 use crate::{ActiveTheme, ElementExt, Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -1483,7 +1484,11 @@ impl Render for PopupMenu {
             radius: cx.theme().radius.min(px(8.)),
         };
 
-        v_flex()
+        // QUILL: with glass on, the menu drops the popover fill and shadow and
+        // sits on a glass surface that paints them; off, it renders as before.
+        let glass = glass_style(GlassVariant::Regular, cx);
+        let radius = cx.theme().radius;
+        let menu = v_flex()
             .id("popup-menu")
             .test_support()
             .role(Role::Menu)
@@ -1496,7 +1501,10 @@ impl Render for PopupMenu {
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::dismiss))
             .on_mouse_down_out(cx.listener(Self::on_mouse_down_out))
-            .popover_style(cx)
+            .map(|this| match glass {
+                Some(_) => this.rounded(radius),
+                None => this.popover_style(cx),
+            })
             .text_color(cx.theme().popover_foreground)
             .relative()
             .occlude()
@@ -1525,7 +1533,16 @@ impl Render for PopupMenu {
             )
             .when(self.scrollable, |this| {
                 this.vertical_scrollbar(&self.scroll_handle)
-            })
+            });
+        match glass {
+            Some(style) => GlassSurface::new(style, radius, menu)
+                .shadows(crate::styled::popover_shadow(
+                    crate::styled::popover_ring(cx),
+                    1.,
+                ))
+                .into_any_element(),
+            None => menu.into_any_element(),
+        }
     }
 }
 
