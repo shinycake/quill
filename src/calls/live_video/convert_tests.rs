@@ -556,18 +556,35 @@ fn packed_nv12_needs_even_sides_and_the_exact_length() {
     }
     assert_eq!(nv12_packed_len(1920, 1080), Some(1920 * 1080 * 3 / 2));
     assert_eq!(nv12_packed_len(usize::MAX - 1, 2), None, "overflow");
-    // An odd frame is a valid I420 frame but not an NV12 surface.
-    let odd = gradient(5, 3);
-    let odd = I420::new(&odd, 5, 3).expect("frame");
-    let mut out = vec![0u8; 64];
-    assert!(!i420_to_nv12_packed(&odd, &mut out));
-    assert!(out.iter().all(|byte| *byte == 0), "nothing written");
     let even = gradient(4, 2);
     let even = I420::new(&even, 4, 2).expect("frame");
     for len in [0, 11, 13, 16] {
         let mut out = vec![0u8; len];
         assert!(!i420_to_nv12_packed(&even, &mut out), "{len} bytes");
+        assert!(out.iter().all(|byte| *byte == 0), "nothing written");
     }
+}
+
+#[test]
+fn an_odd_frame_packs_without_its_last_column_and_row() {
+    assert_eq!(nv12_packed_size(5, 3), Some((4, 2)));
+    assert_eq!(nv12_packed_size(1100, 739), Some((1100, 738)));
+    assert_eq!(nv12_packed_size(1920, 1080), Some((1920, 1080)));
+    for (w, h) in [(1usize, 1usize), (1, 4), (4, 1), (0, 0)] {
+        assert_eq!(nv12_packed_size(w, h), None, "{w}x{h}");
+    }
+    // 5 × 3: luma rows of 5, chroma 3 × 2 (U 100.., V 200..).
+    let mut planes: Vec<u8> = (0..15).collect();
+    planes.extend([100, 101, 102, 103, 104, 105]);
+    planes.extend([200, 201, 202, 203, 204, 205]);
+    let odd = I420::new(&planes, 5, 3).expect("frame");
+    // Packed as 4 × 2: the full-size buffer is refused.
+    let mut wrong = vec![0u8; 5 * 3 * 3 / 2];
+    assert!(!i420_to_nv12_packed(&odd, &mut wrong));
+    let mut out = vec![0u8; nv12_packed_len(4, 2).expect("even")];
+    assert!(i420_to_nv12_packed(&odd, &mut out));
+    // Rows 0 and 1 without column 4; chroma row 0 without sample 2.
+    assert_eq!(out, [0, 1, 2, 3, 5, 6, 7, 8, 100, 200, 101, 201]);
 }
 
 #[test]

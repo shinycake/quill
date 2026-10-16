@@ -36,18 +36,34 @@ fn a_frame_packs_into_an_nv12_surface_frame_with_the_live_colour() {
 }
 
 #[test]
-fn odd_sides_stay_bgra() {
+fn an_odd_frame_packs_without_its_last_column_and_row() {
     let state = LiveNv12::default();
     let now = Instant::now();
-    for (w, h) in [(63, 36), (64, 35), (1, 1)] {
+    for (w, h) in [(63, 36), (64, 35), (1100, 739), (2, 2)] {
+        assert!(state.takes(w, h, now), "{w}x{h}");
+    }
+    for (w, h) in [(1, 1), (1, 36), (64, 1)] {
         assert!(!state.takes(w, h, now), "{w}x{h}");
     }
-    assert!(state.takes(2, 2, now));
-    // A buffer for another size is not filled.
+    let planes = planes(63, 35);
+    let src = I420::new(&planes, 63, 35).expect("frame");
+    let mut state = LiveNv12::default();
+    let bytes = state.buffer(63, 35, now).expect("nv12");
+    assert_eq!(bytes.len(), 62 * 34 * 3 / 2);
+    let picture = fill(&src, bytes).expect("filled");
+    assert_eq!(picture.size(), (62, 34));
+    let (luma, _) = picture.frame.nv12_planes().expect("planes");
+    for (row, packed) in luma.as_chunks::<62>().0.iter().enumerate() {
+        assert_eq!(packed[..], src.y[row * 63..row * 63 + 62], "row {row}");
+    }
+}
+
+#[test]
+fn a_shared_or_wrong_sized_buffer_is_not_filled() {
     let planes = planes(64, 36);
     let src = I420::new(&planes, 64, 36).expect("frame");
     assert!(fill(&src, Arc::from(vec![0u8; 100])).is_none());
-    // Nor a shared one: nothing may read it while it is written.
+    // Nothing may read a buffer while it is written.
     let shared: Arc<[u8]> = Arc::from(vec![0u8; 64 * 36 * 3 / 2]);
     let _reader = shared.clone();
     assert!(fill(&src, shared).is_none());

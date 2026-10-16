@@ -480,12 +480,20 @@ fn nv12_frames_convert_during_the_pull_up_to_the_inline_edge() {
     assert!(matches!(target, Target::Nv12(_)));
     core.landed(landed(&big, target));
     assert_eq!(format(&backend.take_picture(&present())), Some("nv12"));
-    // An odd size is BGRA, so it converts off the UI thread too.
+    // An odd size packs without its last column and row.
     source.push(frame(3, 321, 181, t0));
+    let pulled = backend.take_picture(&present());
+    let stats = pulled.stats.expect("a VF line");
+    assert_eq!(
+        (stats.format, stats.width, stats.height),
+        ("nv12", 320, 180)
+    );
+    // Too thin for a surface (1 px): BGRA, off the UI thread.
+    source.push(frame(4, 1, 36, t0));
     assert!(backend.take_picture(&present()).picture.is_none());
-    let (odd, target) = core.take_background().expect("a background job");
+    let (thin, target) = core.take_background().expect("a background job");
     assert!(matches!(target, Target::Bgra));
-    core.landed(landed(&odd, target));
+    core.landed(landed(&thin, target));
     assert_eq!(format(&backend.take_picture(&present())), Some("bgra"));
     assert!(core.track.borrow().nv12.shown_frame().is_none(), "an image");
 }

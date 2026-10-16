@@ -199,21 +199,50 @@ pub fn nv12_packed_len(width: usize, height: usize) -> Option<usize> {
     luma.checked_add(luma / 2)
 }
 
-/// [`i420_to_nv12`] into one tightly packed buffer (rows of exactly the
-/// frame's width, the chroma plane right after the luma plane), as a
-/// Windows NV12 surface frame wants it. `false`, with nothing written
-/// past a bound, for an odd side or a buffer not exactly
-/// [`nv12_packed_len`] long.
+/// The size a `width × height` frame packs into as NV12: an odd side
+/// loses its last column or row (NV12 surfaces need even sides; the
+/// dropped pixels are the only ones the last chroma sample covered, so
+/// the rest stays exact). `None` below 2 × 2.
+pub fn nv12_packed_size(width: usize, height: usize) -> Option<(usize, usize)> {
+    let (w, h) = (width & !1, height & !1);
+    (w > 0 && h > 0).then_some((w, h))
+}
+
+/// The Y plane copied and U and V interleaved, as [`i420_to_nv12`] does,
+/// into one tightly packed buffer (rows of exactly the packed width, the
+/// chroma plane right after the luma plane), the layout a Windows NV12
+/// surface frame holds; an odd frame is cut to [`nv12_packed_size`].
+/// `false`, with nothing written, unless `out` is exactly
+/// [`nv12_packed_len`] of that size.
 pub fn i420_to_nv12_packed(src: &I420, out: &mut [u8]) -> bool {
     let (w, h) = (src.width, src.height);
-    if nv12_packed_len(w, h) != Some(out.len()) {
-        return false;
-    }
-    let Some((y, uv)) = out.split_at_mut_checked(w * h) else {
+    let Some((pw, ph)) = nv12_packed_size(w, h) else {
         return false;
     };
-    // Even sides: a chroma row is `w / 2` pairs, `w` bytes.
-    i420_to_nv12(src, y, w, uv, w)
+    if nv12_packed_len(pw, ph) != Some(out.len()) {
+        return false;
+    }
+    let (cw, _) = src.chroma_size();
+    let Some((y_out, uv_out)) = out.split_at_mut_checked(pw * ph) else {
+        return false;
+    };
+    let rows = src.y.chunks_exact(w).zip(y_out.chunks_exact_mut(pw));
+    for (row, out) in rows.take(ph) {
+        let Some(row) = row.get(..pw) else {
+            return false;
+        };
+        out.copy_from_slice(row);
+    }
+    // `pw / 2` chroma samples a row, `ph / 2` rows: a packed row is `pw`
+    // bytes of (Cb, Cr) pairs.
+    let chroma = src.u.chunks_exact(cw).zip(src.v.chunks_exact(cw));
+    for ((u_row, v_row), out) in chroma.zip(uv_out.chunks_exact_mut(pw)).take(ph / 2) {
+        let (pairs, _) = out.as_chunks_mut::<2>();
+        for (pair, (u, v)) in pairs.iter_mut().zip(u_row.iter().zip(v_row)) {
+            *pair = [*u, *v];
+        }
+    }
+    true
 }
 
 /// The per-byte terms of the engine's conversion, computed once a frame

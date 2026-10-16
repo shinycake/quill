@@ -12,8 +12,9 @@
 //!   once its frame is shown, and is filled again once no frame holds it
 //!   any more (nothing else can then read it). Sizes other than the last
 //!   are dropped.
-//! - Odd sides stay BGRA (NV12 surfaces need even sides), as in the file
-//!   player.
+//! - An odd side loses its last column or row (NV12 surfaces need even
+//!   sides; `nv12_packed_size`), so odd frames (a screen share of a window,
+//!   the demo photos) stay on the GPU path too.
 //! - When a window's renderer refuses the frame on screen, the player asks
 //!   the backend for the same picture as an image (`replace_refused`): it
 //!   is converted on the CPU, and the feed converts to BGRA for
@@ -30,7 +31,9 @@ use super::backend_ffmpeg::{NV12_RETRY, nv12_allowed};
 use super::live_picture::render_image;
 use super::surface::gpui_color;
 use gpui_kit::{RenderImage, SurfaceDrawState, SurfaceFormat, SurfaceFrame};
-use quill::calls::live_video::convert::{I420, i420_to_nv12_packed, nv12_packed_len};
+use quill::calls::live_video::convert::{
+    I420, i420_to_nv12_packed, nv12_packed_len, nv12_packed_size,
+};
 use quill::video_decode::{YuvColor, YuvMatrix, nv12_to_bgra};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -96,14 +99,15 @@ pub(super) struct Nv12Shown {
 
 /// Pack `src` into `bytes`, a buffer from [`LiveNv12::buffer`]. `None`
 /// (the frame converts to BGRA instead) when the buffer is shared or not
-/// the frame's size, or the frame has an odd side.
+/// the frame's packed size.
 pub(super) fn fill(src: &I420, mut bytes: Arc<[u8]>) -> Option<Nv12Picture> {
     let out = Arc::get_mut(&mut bytes)?;
     if !i420_to_nv12_packed(src, out) {
         return None;
     }
-    let width = u32::try_from(src.width).ok()?;
-    let height = u32::try_from(src.height).ok()?;
+    let (width, height) = nv12_packed_size(src.width, src.height)?;
+    let width = u32::try_from(width).ok()?;
+    let height = u32::try_from(height).ok()?;
     let frame = SurfaceFrame::new(width, height, SurfaceFormat::Nv12, bytes.clone())
         .ok()?
         .with_yuv(gpui_color(LIVE_COLOR));
@@ -150,7 +154,7 @@ pub(super) struct LiveNv12 {
 
 impl LiveNv12 {
     /// Whether a frame shown at `width × height` converts to NV12 at
-    /// `now`: even sides, and not in the pause after a refusal.
+    /// `now`: at least 2 × 2, and not in the pause after a refusal.
     pub(super) fn takes(&self, width: u32, height: u32, now: Instant) -> bool {
         nv12_allowed(self.paused_until, now) && packed_len(width, height).is_some()
     }
@@ -228,8 +232,11 @@ impl LiveNv12 {
     }
 }
 
+/// The bytes a frame shown at `width × height` packs into.
 fn packed_len(width: u32, height: u32) -> Option<usize> {
-    nv12_packed_len(usize::try_from(width).ok()?, usize::try_from(height).ok()?)
+    let (width, height) =
+        nv12_packed_size(usize::try_from(width).ok()?, usize::try_from(height).ok()?)?;
+    nv12_packed_len(width, height)
 }
 
 #[cfg(test)]
