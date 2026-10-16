@@ -140,6 +140,9 @@ impl QuillApp {
         #[cfg(test)]
         quill::power_saving::isolate_for_tests();
         quill::power_saving::set(self.appearance.power_saving);
+        #[cfg(test)]
+        quill::glass::isolate_for_tests();
+        quill::glass::set_setting(self.appearance.glass_effects);
         let ignored_before = quill::battery_saving::ignored();
         quill::battery_saving::set_ignore(self.appearance.ignore_battery_saving);
         if ignored_before != self.appearance.ignore_battery_saving {
@@ -388,6 +391,9 @@ impl QuillApp {
                 body = body.child(this.appearance_bubble_section(cx));
                 body = body.child(this.appearance_chat_list_section(cx));
                 body = body.child(this.appearance_power_section(cx));
+                if let Some(section) = this.glass_section(cfg!(target_os = "macos"), cx) {
+                    body = body.child(section);
+                }
                 body = body.child(this.appearance_send_key_section(cx));
                 body = body.child(this.general_autostart_section(cx));
                 body = body.child(this.general_link_handler_section(cx));
@@ -738,6 +744,10 @@ mod appearance_keybindings_section;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod glass_readability_tests;
+mod glass_section;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod glass_tests;
 mod new_accent_picker;
 mod send_to_menu_section;
 mod telegram_wallpapers;
