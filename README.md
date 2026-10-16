@@ -737,7 +737,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
 - [x] Watch channel live streams (RTMP): ntgcalls stream mode fed by getGroupCallStreamSegment, wide stream window, fullscreen, no-stream and connecting states, settings with speakers, stream key and revoke (#814, #823, #837; not tried on a live stream) <!-- parity:calls-rtmp-viewing -->
 - [ ] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
-- [ ] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
+- [x] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
 - [x] Incoming call system notification with Accept and Decline when the window is hidden <!-- parity:calls-incoming-notification -->
 - [x] Call settings: input and output test meters, system sound preferences, accept calls on this device <!-- parity:calls-settings-meters -->
 
