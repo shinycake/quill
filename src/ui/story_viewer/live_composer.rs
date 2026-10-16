@@ -37,7 +37,7 @@ impl QuillApp {
         let live = session.stories.live.as_ref()?;
         let call = session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
             .filter(|call| call.id == live.group_call_id);
         let admin = self.live_story_admin();

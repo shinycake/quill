@@ -18,7 +18,6 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::slider::Slider;
-use quill::calls::group_call_create::LeaveText;
 use quill::lang::trn;
 use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
@@ -362,32 +361,6 @@ impl QuillApp {
                 }))
                 .on_close(on_close)
         })
-    }
-}
-
-/// tdesktop `confirmLeaveCurrent`'s question for a live story, said by the
-/// in-frame card (`live_view::live_leave_other_card`); its button is
-/// Quill's "Leave call and watch".
-pub(super) fn leave_other_question(text: LeaveText) -> quill::lang::Key {
-    match text {
-        LeaveText::EndCall { to_channel: false } => keys::CALL_LEAVE_TO_OTHER_SURE,
-        LeaveText::EndCall { to_channel: true } => keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
-        LeaveText::LeaveGroupCall {
-            from_channel: true,
-            to_channel: true,
-        } => keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE_CHANNEL,
-        LeaveText::LeaveGroupCall {
-            from_channel: true,
-            to_channel: false,
-        } => keys::GROUP_CALL_LEAVE_CHANNEL_TO_OTHER_SURE,
-        LeaveText::LeaveGroupCall {
-            from_channel: false,
-            to_channel: true,
-        } => keys::GROUP_CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
-        LeaveText::LeaveGroupCall {
-            from_channel: false,
-            to_channel: false,
-        } => keys::GROUP_CALL_LEAVE_TO_OTHER_SURE,
     }
 }
 

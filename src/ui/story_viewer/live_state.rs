@@ -11,7 +11,6 @@ use crate::ui::video_player::VideoPlayer;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
-use quill::calls::group_call_create::LeaveText;
 use quill::ids::ChatId;
 use quill::live_story::{level_for_stars, pin_finish};
 use quill::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
@@ -84,11 +83,6 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(super) chosen_stars: i64,
     pub(super) stars_box: Option<LiveStarsBox>,
     pub(super) delete: Option<LiveDelete>,
-    /// Another call holds the call slot: the confirm to leave it.
-    pub(super) leave_other: Option<LeaveText>,
-    /// The other call is being left: the join is tried again each tick,
-    /// since this time (Unix ms).
-    pub(super) retry_join: Option<u64>,
     /// The Stars box's amount when it sent the viewer to top up, so the
     /// box opens on it again.
     pub(super) stars_before_top_up: Option<(StarsBoxMode, i64)>,
@@ -135,8 +129,6 @@ impl LiveStoryUi {
             chosen_stars: 0,
             stars_box: None,
             delete: None,
-            leave_other: None,
-            retry_join: None,
             stars_before_top_up: None,
             flying: Vec::new(),
             scroll: ScrollHandle::new(),
@@ -153,8 +145,6 @@ impl LiveStoryUi {
         self.chosen_stars = 0;
         self.stars_box = None;
         self.delete = None;
-        self.leave_other = None;
-        self.retry_join = None;
         self.stars_before_top_up = None;
         self.flying.clear();
         self.last_comment = None;

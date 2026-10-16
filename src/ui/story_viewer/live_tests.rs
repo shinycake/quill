@@ -2,8 +2,9 @@
 //! the effects clock, and UI flows over the screenshot demo's live story
 //! (comments over the picture, the Stars button with its toast and Undo,
 //! the comments toggle, the Stars box for a comment, comments disabled,
-//! deleting a comment, the viewer closing when the stream ends, and the
-//! header drawn by the live controller). Nothing reaches Telegram: the app
+//! deleting a comment, the viewer closing when the stream ends, the story
+//! playing beside a 1:1 call, and the header drawn by the live
+//! controller). Nothing reaches Telegram: the app
 //! has no connection and joins nothing.
 use super::live_state::{
     EFFECT_DURATION, SendAction, StarsBoxMode, effect_progress, pin_label, pinned_comments,
@@ -279,7 +280,7 @@ fn comments_off_replaces_the_field(cx: &mut TestAppContext) {
         if let Some(call) = app
             .demo_session
             .as_mut()
-            .and_then(|s| s.calls.active_group_call.as_mut())
+            .and_then(|s| s.calls.story_stream.as_mut())
         {
             call.are_messages_allowed = false;
         }
@@ -305,7 +306,7 @@ fn a_comment_is_deleted_from_its_menu(cx: &mut TestAppContext) {
     frames(vcx);
     let left: Vec<i32> = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
+            .and_then(|s| s.calls.story_stream.as_ref())
             .map(|call| call.messages.iter().map(|m| m.message_id).collect())
             .unwrap_or_default()
     });
@@ -321,7 +322,7 @@ fn an_ended_stream_closes_the_viewer(cx: &mut TestAppContext) {
         if let Some(call) = app
             .demo_session
             .as_mut()
-            .and_then(|s| s.calls.active_group_call.as_mut())
+            .and_then(|s| s.calls.story_stream.as_mut())
         {
             call.stream = StreamState::Ended;
         }
@@ -427,175 +428,26 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn another_call_is_left_only_after_the_confirm(cx: &mut TestAppContext) {
-    use quill::calls::group_call_create::LeaveText;
-    let (app, mut vcx) = open_live(cx, "ready-live-story");
-    let vcx = &mut vcx;
-    let ask = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.update(vcx, |app, cx| {
-            app.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
-            cx.notify();
-        });
-        frames(vcx);
-    };
-    ask(&app, vcx);
-    // The frame asks in place of the picture.
-    assert!(find(vcx, "live-story-leave-other-card").is_some());
-    assert!(find(vcx, "live-story-leave-other").is_some());
-    assert!(find(vcx, "live-story-frame").is_none(), "no picture");
-    // Cancel: nothing was left and the viewer stays (the demo's picture
-    // is back; a refused join has none and shows its Join button).
-    click(vcx, "live-story-leave-other-cancel");
-    frames(vcx);
-    assert!(find(vcx, "live-story-leave-other-card").is_none());
-    app.read_with(vcx, |app, _| {
-        assert!(app.stories.live.leave_other.is_none());
-        assert!(app.stories.live.retry_join.is_none(), "nothing was left");
-        assert!(app.stories.viewer.is_open(), "the viewer stays");
-    });
-    assert!(find(vcx, "live-story-frame").is_some());
-    // Asked again, "Leave call and watch" leaves the other call and joins
-    // once the slot is free.
-    ask(&app, vcx);
-    click(vcx, "live-story-leave-other-confirm");
-    frames(vcx);
-    assert!(find(vcx, "live-story-leave-other-card").is_none());
-    app.read_with(vcx, |app, _| {
-        assert!(app.stories.live.leave_other.is_none());
-        assert!(
-            app.stories.live.retry_join.is_some(),
-            "the join is tried again"
-        );
-    });
-}
-
-#[gpui_kit::test]
-fn escape_on_the_leave_card_is_cancel(cx: &mut TestAppContext) {
-    use quill::calls::group_call_create::LeaveText;
+fn a_story_that_ends_before_its_call_closes_the_viewer(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
-        cx.notify();
-    });
-    frames(vcx);
-    assert!(find(vcx, "live-story-leave-other-card").is_some());
-    app.update_in(vcx, |app, window, cx| {
-        let focus = gpui_kit::Focusable::focus_handle(app, cx);
-        window.focus(&focus, cx);
-    });
-    vcx.simulate_keystrokes("escape");
-    frames(vcx);
-    assert!(find(vcx, "live-story-leave-other-card").is_none());
-    app.read_with(vcx, |app, _| {
-        assert!(app.stories.viewer.is_open(), "Esc cancels the card only");
-        assert!(app.stories.live.leave_other.is_none());
-        assert!(app.stories.live.retry_join.is_none(), "nothing was left");
-    });
-    // With the card gone, Esc closes the viewer as before.
-    vcx.simulate_keystrokes("escape");
-    frames(vcx);
-    assert!(app.read_with(vcx, |app, _| !app.stories.viewer.is_open()));
-}
-
-/// The 1:1 call the demo cannot hang up stands for a leave that failed.
-/// The story is not joined while the frame asks, so the demo's own call
-/// for it goes.
-fn hold_the_slot_with_a_call(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
-    use std::sync::Arc;
-    use std::sync::atomic::Ordering;
-    app.update(vcx, |app, _| {
         app.stories.live.seen_call = false;
-        if let Some(session) = app.demo_session.as_mut() {
-            session.end_live_story();
-            session.calls.active_group_call = None;
-            app.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            let sink: Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
-            crate::ui::calls::call_video_demo::seed_video_call(
-                session,
-                false,
-                &sink,
-                &app.demo_ui.seq,
-            );
-        }
-    });
-}
-
-#[gpui_kit::test]
-fn a_leave_that_fails_asks_again(cx: &mut TestAppContext) {
-    use quill::calls::group_call_create::LeaveText;
-    let (app, mut vcx) = open_live(cx, "ready-live-story");
-    let vcx = &mut vcx;
-    hold_the_slot_with_a_call(&app, vcx);
-    app.update(vcx, |app, cx| {
-        app.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
-        cx.notify();
-    });
-    frames(vcx);
-    click(vcx, "live-story-leave-other-confirm");
-    frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.stories.live.retry_join.is_some()));
-    // The call is still there past the limit: the frame asks again.
-    app.update(vcx, |app, cx| {
-        app.stories.live.retry_join = Some(1);
-        app.sync_live_story(cx);
-    });
-    frames(vcx);
-    app.read_with(vcx, |app, _| {
-        assert!(app.stories.live.retry_join.is_none(), "it stops trying");
-        assert_eq!(
-            app.stories.live.leave_other,
-            Some(LeaveText::EndCall { to_channel: true }),
-            "the card is back"
-        );
-        assert!(app.connection.status_note.contains("could not join"));
-        assert!(app.stories.viewer.is_open());
-    });
-    assert!(find(vcx, "live-story-leave-other-card").is_some());
-}
-
-#[gpui_kit::test]
-fn a_story_that_ends_while_asking_closes_the_viewer(cx: &mut TestAppContext) {
-    use quill::calls::group_call_create::LeaveText;
-    let (app, mut vcx) = open_live(cx, "ready-live-story");
-    let vcx = &mut vcx;
-    app.update(vcx, |app, cx| {
-        app.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
-        cx.notify();
-    });
-    frames(vcx);
-    assert!(find(vcx, "live-story-leave-other-card").is_some());
-    // The stream ends while the frame asks: the story is no longer live.
-    app.update(vcx, |app, cx| {
         let watched = app.stories.live.watching;
-        if let (Some(session), Some((chat_id, story_id))) = (app.demo_session.as_mut(), watched)
-            && let Some(story) = session.stories.stories.get_mut(&(chat_id.0, story_id))
-        {
-            story.content = quill::telegram::envelope::StoryContentView::Unsupported;
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.story_stream = None;
+            if let Some((chat_id, story_id)) = watched
+                && let Some(story) = session.stories.stories.get_mut(&(chat_id.0, story_id))
+            {
+                story.content = quill::telegram::envelope::StoryContentView::Unsupported;
+            }
         }
         app.sync_live_story(cx);
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.stories.viewer.is_open(), "closed as an ended stream");
-        assert!(app.stories.live.leave_other.is_none(), "the card went");
         assert!(app.stories.live.watching.is_none());
-    });
-    assert!(find(vcx, "live-story-leave-other-card").is_none());
-}
-
-#[gpui_kit::test]
-fn a_join_that_cannot_proceed_says_so(cx: &mut TestAppContext) {
-    let (app, mut vcx) = open_live(cx, "ready-live-story");
-    let vcx = &mut vcx;
-    // The other call has been "leaving" for longer than the limit.
-    app.update(vcx, |app, cx| {
-        app.stories.live.retry_join = Some(1);
-        app.sync_live_story(cx);
-    });
-    app.read_with(vcx, |app, _| {
-        assert!(app.stories.live.retry_join.is_none(), "it stops trying");
-        assert!(app.connection.status_note.contains("could not join"));
     });
 }
 
@@ -632,10 +484,19 @@ fn a_live_story_plays_beside_a_one_to_one_call(cx: &mut TestAppContext) {
         assert!(app.stories.viewer.is_open());
     });
     assert!(find(vcx, "live-story-frame").is_some(), "the picture plays");
-    assert!(
-        find(vcx, "live-story-leave-other-card").is_none(),
-        "nothing asks"
-    );
+}
+
+#[gpui_kit::test]
+fn the_in_call_demo_shows_the_story_beside_the_call(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story-in-call");
+    let vcx = &mut vcx;
+    app.read_with(vcx, |app, _| {
+        let calls = &app.demo_session.as_ref().expect("the demo session").calls;
+        assert!(calls.active_call.is_some());
+        assert!(calls.story_stream.is_some());
+        assert!(app.stories.viewer.is_open());
+    });
+    assert!(find(vcx, "live-story-frame").is_some());
 }
 
 #[gpui_kit::test]
@@ -689,7 +550,7 @@ fn the_header_is_the_live_controller(cx: &mut TestAppContext) {
     );
     let row = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
+            .and_then(|s| s.calls.story_stream.as_ref())
             .map(|call| u64::from(call.id.unsigned_abs()))
             .expect("the story's call")
     });

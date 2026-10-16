@@ -75,7 +75,6 @@ impl QuillApp {
         let Some(call_id) = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
-            .filter(|call| !call.is_live_story)
             .map(|call| call.id)
         else {
             return;
@@ -298,17 +297,21 @@ impl QuillApp {
         let Some(calls) = self.session().map(|s| &s.calls) else {
             return false;
         };
-        let call = calls.active_group_call.as_ref();
         match source {
-            LivePipSource::Stream { call_id } => call.is_some_and(|call| {
-                call.id == call_id
-                    && (call.is_joined || call.rejoining())
-                    && calls.left_group_call != Some(call_id)
-                    && call.stream != StreamState::Ended
-            }),
+            LivePipSource::Stream { call_id } => {
+                calls.active_group_call.as_ref().is_some_and(|call| {
+                    call.id == call_id
+                        && (call.is_joined || call.rejoining())
+                        && calls.left_group_call != Some(call_id)
+                        && call.stream != StreamState::Ended
+                })
+            }
             LivePipSource::Story { chat_id, story_id } => {
                 self.stories.live.watching == Some((chat_id, story_id))
-                    && !call.is_some_and(|call| call.stream == StreamState::Ended)
+                    && !calls
+                        .story_stream
+                        .as_ref()
+                        .is_some_and(|call| call.stream == StreamState::Ended)
             }
         }
     }
@@ -327,13 +330,28 @@ impl QuillApp {
     }
 
     /// The badge and the mute toggle's state.
-    fn live_pip_facts(&self) -> LivePipFacts {
+    fn live_pip_facts(&self, source: LivePipSource) -> LivePipFacts {
+        let calls = self.session().map(|s| &s.calls);
+        let (call, muted) = match source {
+            LivePipSource::Stream { .. } => (
+                calls.and_then(|c| c.active_group_call.as_ref()),
+                self.stream_muted(),
+            ),
+            LivePipSource::Story { .. } => (
+                calls.and_then(|c| c.story_stream.as_ref()),
+                self.live_story_muted(),
+            ),
+        };
         LivePipFacts {
-            viewers: self
-                .session()
-                .and_then(|s| s.calls.active_group_call.as_ref())
-                .map_or(0, |call| call.viewer_count),
-            muted: self.stream_muted(),
+            viewers: call.map_or(0, |call| call.viewer_count),
+            muted,
+        }
+    }
+
+    fn toggle_live_pip_mute(&mut self, source: LivePipSource, cx: &mut Context<Self>) {
+        match source {
+            LivePipSource::Stream { .. } => self.toggle_stream_mute(cx),
+            LivePipSource::Story { .. } => self.toggle_live_story_sound(cx),
         }
     }
 }
@@ -382,11 +400,11 @@ fn live_pip_controls(app: WeakEntity<QuillApp>, source: LivePipSource) -> LivePi
         facts: Rc::new(move |cx| {
             facts
                 .upgrade()
-                .map(|app| app.read(cx).live_pip_facts())
+                .map(|app| app.read(cx).live_pip_facts(source))
                 .unwrap_or_default()
         }),
         toggle_mute: Rc::new(move |cx| {
-            let _ = app.update(cx, |app, cx| app.toggle_stream_mute(cx));
+            let _ = app.update(cx, |app, cx| app.toggle_live_pip_mute(source, cx));
         }),
         back_label: match source {
             LivePipSource::Stream { .. } => tr(keys::Q_AV_LIVE_PIP_BACK_STREAM),

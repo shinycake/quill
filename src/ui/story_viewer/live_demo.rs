@@ -3,8 +3,9 @@
 //! picture sent at 30 fps with the LIVE badge, three top donors, four comments (one
 //! paid and pinned) and a paid comment price; the same with your Stars
 //! waiting under the Undo toast and their effect rising; the Stars box for
-//! a comment; and a portrait stream that fills the frame (the landscape
-//! one is shown whole over its blurred copy).
+//! a comment; a portrait stream that fills the frame (the landscape one is
+//! shown whole over its blurred copy); and the live story playing beside a
+//! 1:1 call.
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::StarsBoxMode;
@@ -15,7 +16,6 @@ use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::calls::engine::{GroupCallMode, StreamState};
-use quill::calls::group_call_create::LeaveText;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
 use quill::live_story::PendingLiveReaction;
@@ -60,10 +60,10 @@ register_demos![
     )
     .setup(QuillApp::demo_live_story_portrait),
     DemoSpec::chats(
-        "ready-live-story-leave",
-        "screenshot demo — live story asking to leave another call"
+        "ready-live-story-in-call",
+        "screenshot demo — live story playing beside a 1:1 call"
     )
-    .setup(QuillApp::demo_live_story_leave),
+    .setup(QuillApp::demo_live_story_in_call),
 ];
 
 impl QuillApp {
@@ -97,11 +97,18 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn demo_live_story_leave(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_live_story_in_call(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+            crate::ui::calls::call_video_demo::seed_video_call(
+                session,
+                false,
+                &sink,
+                &self.demo_ui.seq,
+            );
+        }
         self.seed_demo_live_story(cx);
-        // The join was refused: another call holds the slot.
-        self.stories.live.leave_other = Some(LeaveText::EndCall { to_channel: true });
-        cx.notify();
     }
 
     fn seed_demo_live_story(&mut self, cx: &mut Context<Self>) {
@@ -170,7 +177,7 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
             is_from_owner: owner,
             can_be_deleted: true,
         };
-    session.calls.active_group_call = Some(ActiveGroupCall {
+    session.calls.story_stream = Some(ActiveGroupCall {
         is_live_story: true,
         is_joined: true,
         is_video_chat: true,
@@ -201,7 +208,7 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
     };
     let messages = session
         .calls
-        .active_group_call
+        .story_stream
         .as_ref()
         .map(|call| call.messages.clone())
         .unwrap_or_default();

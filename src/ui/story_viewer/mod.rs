@@ -199,7 +199,7 @@ impl QuillApp {
 
     /// stories-live-play: the viewer Join button for a live story.
     /// The driver two-steps (`getGroupCall`, then the pump issues
-    /// `join_video_chat` once the tracker exists); failures surface as a
+    /// `joinLiveStory` once the tracker exists); failures surface as a
     /// status note instead of a silent no-op.
     pub(super) fn join_live_story_from_viewer(
         &mut self,
@@ -207,12 +207,6 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
-        // The watched story asks again when another call holds the slot.
-        if self.live.is_some() && self.stories.live.watching == Some((chat_id, story_id)) {
-            self.join_watched_live_story(cx);
-            cx.notify();
-            return;
-        }
         if let Some(live) = self.live.as_mut() {
             self.connection.status_note = match live.driver.join_live_story(chat_id, story_id) {
                 Ok(_) => tr(keys::Q_MEDIA_JOINING_LIVE_STORY).into(),
