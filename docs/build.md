@@ -95,6 +95,16 @@ The package is a flat directory: `quill.exe` plus the DLLs beside it. Everything
   between `new=1` lines, in display vsyncs, show the pacing; the analysis
   script and how to run a measurement are in
   `docs/decisions/video-player-core.md`.
+  On the FFmpeg backend, a pull that took a new decoded picture also
+  prints `VF,<player_id>,<format>,<width>,<height>,<bytes>,<convert_us>`:
+  `format` is `nv12` (a GPU surface, Windows) or `bgra` (an image),
+  `bytes` is what the renderer uploads for it and `convert_us` the CPU
+  time spent turning the decoder's picture into it. On Windows the
+  renderer adds `VU,nv12,<bytes>,<upload_us>` for each NV12 surface
+  upload and `VU,atlas,<bytes>,<upload_us>` for image atlas uploads of
+  64 KiB or more (video pictures, not glyphs). The analysis script
+  summarises both; the NV12 before/after run is in
+  `docs/decisions/video-player-nv12.md`.
 - `QUILL_VIDEO_BACKEND=ffmpeg` (macOS, development) plays through the
   bundled FFmpeg shim instead of AVPlayer, the path Linux and Windows use.
 

@@ -8,7 +8,7 @@
 //! ([`request_video_frame`]), redrawing only the view it is in, and wakes
 //! the player's watchers (the controls) at most every 100 ms.
 //!
-//! A GPU surface (AVPlayer) can't be clipped by GPUI, so rounded corners
+//! A surface (AVPlayer on macOS, NV12 on Windows) can't be rounded by GPUI, so corners
 //! over a surface are cut by painting the background color over the
 //! corner outsides (`inline_video::corner_mask`); images round themselves.
 //!
@@ -217,7 +217,7 @@ fn has_radius(radii: Corners<Pixels>) -> bool {
     .any(|radius| *radius > px(0.0))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> AnyElement {
     match picture {
         Picture::Surface(buffer) => gpui_kit::surface(buffer)
@@ -228,7 +228,7 @@ fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> 
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> AnyElement {
     let Picture::Image(image) = picture;
     image_element(image, fit, radii)
@@ -250,7 +250,7 @@ fn image_element(
 }
 
 /// Paint `colors` over the outsides of the rounded corners.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn paint_corner_mask(
     bounds: Bounds<Pixels>,
     radii: Corners<Pixels>,
@@ -278,7 +278,7 @@ fn paint_corner_mask(
     let _ = window.paint_image(bounds, bounds, Corners::default(), mask, 0, false);
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn paint_corner_mask(_: Bounds<Pixels>, _: Corners<Pixels>, _: [Hsla; 4], _: &mut Window) {}
 
 /// The display link's next present time (with its host ticks) and refresh

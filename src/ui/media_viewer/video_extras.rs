@@ -51,9 +51,10 @@ impl QuillApp {
     }
 
     /// The frame on screen (already turned to the viewer's orientation),
-    /// when it is a decoded image; a GPU surface can't be read back.
+    /// when it is a decoded image or CPU surface pixels (Windows NV12); a
+    /// GPU surface (macOS) can't be read back.
     pub(in crate::ui) fn viewer_oriented_frame(&self) -> Option<Arc<RenderImage>> {
-        self.viewer.player.as_ref()?.current_picture()?.image()
+        self.viewer.player.as_ref()?.current_picture()?.snapshot()
     }
 
     /// The playback position of the playing video, in whole seconds.

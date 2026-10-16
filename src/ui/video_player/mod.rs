@@ -5,7 +5,10 @@
 //! - macOS: AVPlayer decodes in hardware ([`backend_avplayer`]); pictures
 //!   are GPU pixel buffers drawn through GPUI's `surface`.
 //! - Linux and Windows (and macOS with `QUILL_VIDEO_BACKEND=ffmpeg`): the
-//!   bundled FFmpeg shim ([`backend_ffmpeg`]); pictures are BGRA images.
+//!   bundled FFmpeg shim ([`backend_ffmpeg`]); pictures are BGRA images,
+//!   except on Windows, where the decoder hands over NV12 and the DirectX
+//!   renderer converts it on the GPU ([`surface`],
+//!   `docs/decisions/video-player-nv12.md`).
 //! - Live feeds (streams, live stories, video chat tracks): frames pushed
 //!   by the call engine ([`backend_live`], [`VideoPlayer::live`]).
 //!
@@ -24,7 +27,9 @@ pub(crate) mod controls;
 mod element;
 mod live_picture;
 pub(super) mod pacing;
+mod picture;
 mod rotate;
+mod surface;
 mod transport;
 
 #[cfg(target_os = "macos")]
@@ -41,6 +46,10 @@ pub(crate) use element::{WidthReport, video_frame};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(crate) use live_picture::{bgra_only, take_made_images};
+pub(crate) use picture::Picture;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use picture::SurfaceHandle;
+use picture::turn;
 pub(crate) use transport::{PlayState, Transport};
 
 use gpui_kit::*;
@@ -72,75 +81,6 @@ pub(crate) enum Purpose {
     /// (`tile: false`), or a video chat track (`tile: true`, which stops
     /// redrawing while it is off screen).
     Live { tile: bool },
-}
-
-/// A picture to draw.
-#[derive(Clone)]
-pub(crate) enum Picture {
-    /// A GPU pixel buffer (AVPlayer), drawn by GPUI's `surface`.
-    #[cfg(target_os = "macos")]
-    Surface(objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>),
-    /// A decoded BGRA image (FFmpeg, still frames), drawn by `img`.
-    Image(Arc<RenderImage>),
-}
-
-// `Picture` has one variant off macOS, so its matches are split by
-// platform instead of carrying a cfg'd arm.
-impl Picture {
-    /// The decoded image, when the picture is one (not a GPU surface).
-    #[cfg(target_os = "macos")]
-    pub(crate) fn image(&self) -> Option<Arc<RenderImage>> {
-        match self {
-            Picture::Image(image) => Some(image.clone()),
-            Picture::Surface(_) => None,
-        }
-    }
-
-    /// The decoded image (every picture is one off macOS).
-    #[cfg(not(target_os = "macos"))]
-    pub(crate) fn image(&self) -> Option<Arc<RenderImage>> {
-        let Picture::Image(image) = self;
-        Some(image.clone())
-    }
-
-    /// A GPU surface, which GPUI can't clip (corners are masked instead).
-    #[cfg(target_os = "macos")]
-    pub(crate) fn is_surface(&self) -> bool {
-        matches!(self, Picture::Surface(_))
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub(crate) fn is_surface(&self) -> bool {
-        false
-    }
-
-    /// The picture's size in pixels (as shown, after any turn).
-    #[cfg(target_os = "macos")]
-    pub(crate) fn size(&self) -> (u32, u32) {
-        match self {
-            Picture::Image(image) => image_size(image),
-            Picture::Surface(buffer) => {
-                let side = |pixels: usize| u32::try_from(pixels).unwrap_or(u32::MAX);
-                (
-                    side(objc2_core_video::CVPixelBufferGetWidth(buffer)),
-                    side(objc2_core_video::CVPixelBufferGetHeight(buffer)),
-                )
-            }
-        }
-    }
-
-    /// The picture's size in pixels (as shown, after any turn).
-    #[cfg(not(target_os = "macos"))]
-    pub(crate) fn size(&self) -> (u32, u32) {
-        let Picture::Image(image) = self;
-        image_size(image)
-    }
-}
-
-fn image_size(image: &RenderImage) -> (u32, u32) {
-    let size = image.size(0);
-    let side = |pixels: i32| u32::try_from(pixels).unwrap_or(0);
-    (side(size.width.0), side(size.height.0))
 }
 
 /// Why a clip can't play.
@@ -194,6 +134,22 @@ pub(super) struct Pulled {
     item_secs: f64,
     /// The new picture's own time (seconds).
     display_secs: Option<f64>,
+    /// What the new picture cost to make (decoded pictures only).
+    stats: Option<PictureStats>,
+}
+
+/// The `QUILL_TRACE_VIDEO` `VF` line's columns for a new picture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PictureStats {
+    /// `bgra` or `nv12`: what the renderer uploads.
+    pub(super) format: &'static str,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    /// Bytes the renderer uploads for it.
+    pub(super) bytes: usize,
+    /// Microseconds spent converting it (decoder conversion or plane copy,
+    /// packing, and any CPU fallback conversion).
+    pub(super) convert_us: u32,
 }
 
 /// A decoder. Every call is made on the main thread.
@@ -217,6 +173,12 @@ trait Backend {
     /// [`Self::status`] (`None`: a file).
     fn live_status(&mut self, now: Instant) -> Option<LiveStatus> {
         let _ = now;
+        None
+    }
+    /// The renderer refused the surface on screen (Windows NV12): the same
+    /// picture as an image, as decoded (the player turns it), and images
+    /// for a while. `None` when the backend has no such surface.
+    fn replace_refused(&mut self, _now: Instant) -> Option<Picture> {
         None
     }
 }
@@ -682,6 +644,7 @@ impl VideoPlayer {
             return self.current_picture();
         };
         self.update_status(now);
+        self.replace_refused(now);
         let state = self.state();
         let pulled = if matches!(state, PlayState::Opening | PlayState::Failed) {
             Pulled::default()
@@ -703,6 +666,9 @@ impl VideoPlayer {
                     rate
                 )
             );
+            if let Some(stats) = pulled.stats {
+                eprintln!("{}", picture_trace_line(id, &stats));
+            }
         }
         if let Some(picture) = pulled.picture {
             let (turns, mirrored) = self
@@ -716,6 +682,39 @@ impl VideoPlayer {
             });
         }
         self.current_picture()
+    }
+
+    /// The renderer refused the surface on screen (Windows NV12, this
+    /// window couldn't draw it): show the same picture as an image, from
+    /// the backend (which owns it and goes on with images for a while) or,
+    /// failing that, converted here.
+    fn replace_refused(&self, now: Instant) {
+        let refused = self
+            .read_inner(|inner| inner.shown.as_ref().is_some_and(Picture::refused))
+            .unwrap_or(false);
+        if !refused {
+            return;
+        }
+        let raw = self
+            .with_backend(|backend| backend.replace_refused(now))
+            .flatten();
+        let (turns, mirrored) = self
+            .read_inner(|inner| (inner.turns, inner.mirrored))
+            .unwrap_or((0, false));
+        if let Some(raw) = raw {
+            // Turning copies the picture: no borrow held meanwhile.
+            let turned = turn(&raw, turns, mirrored);
+            self.with_inner(|inner| inner.show(raw, turned));
+            return;
+        }
+        let image = self
+            .read_inner(|inner| inner.shown.as_ref().and_then(Picture::snapshot))
+            .flatten();
+        self.with_inner(|inner| match image {
+            // Already turned: kept as the turned image, so it is retired.
+            Some(image) => inner.show(Picture::Image(image.clone()), Some(Picture::Image(image))),
+            None => inner.shown = None,
+        });
     }
 
     /// After the picture was painted: what the next frame request needs.
@@ -732,8 +731,12 @@ impl VideoPlayer {
                 transport.state == PlayState::Opening
                     || now.saturating_duration_since(since) < AWAIT_PICTURE
             });
+            // A surface the renderer hasn't drawn yet, or refused: another
+            // frame settles it (drawn, or replaced by an image), even while
+            // paused.
+            let settling = inner.shown.as_ref().is_some_and(Picture::unsettled);
             FrameDemand {
-                animates: (transport.state.animates() || awaiting)
+                animates: (transport.state.animates() || awaiting || settling)
                     && transport.state != PlayState::Failed
                     && !inner.asleep,
                 plays_sound: transport.has_sound && transport.volume > 0.0,
@@ -810,32 +813,6 @@ impl Drop for Inner {
             super::image_budget::retire_all([old]);
         }
     }
-}
-
-/// The picture turned for the orientation; `None` when it needs no turn
-/// or turning failed (the picture is shown as it is).
-#[cfg(target_os = "macos")]
-fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
-    if turns == 0 && !mirrored {
-        return None;
-    }
-    match picture {
-        Picture::Image(image) => {
-            rotate::turn_render_image(image, turns, mirrored).map(Picture::Image)
-        }
-        Picture::Surface(buffer) => {
-            rotate::turn_surface(buffer, turns, mirrored).map(Picture::Surface)
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn turn(picture: &Picture, turns: u8, mirrored: bool) -> Option<Picture> {
-    if turns == 0 && !mirrored {
-        return None;
-    }
-    let Picture::Image(image) = picture;
-    rotate::turn_render_image(image, turns, mirrored).map(Picture::Image)
 }
 
 /// The backend for this file: a still first picture in screenshot
@@ -935,5 +912,15 @@ pub(crate) fn trace_line(
         item_secs * 1000.0,
         u8::from(fresh),
         display_secs.map_or(-1000.0, |secs| secs * 1000.0),
+    )
+}
+
+/// One `QUILL_TRACE_VIDEO` picture line, printed after the `VT` line of
+/// the pull that took a new decoded picture:
+/// `VF,<player>,<format>,<width>,<height>,<bytes>,<convert_us>`.
+pub(super) fn picture_trace_line(player: u64, stats: &PictureStats) -> String {
+    format!(
+        "VF,{player},{},{},{},{},{}",
+        stats.format, stats.width, stats.height, stats.bytes, stats.convert_us
     )
 }

@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// `QUILL_TRACE_VIDEO` upload lines for large images. See
+// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use etagere::BucketedAtlasAllocator;
 use parking_lot::Mutex;
 use windows::Win32::Graphics::{
@@ -300,6 +303,10 @@ impl DirectXAtlasTexture {
             );
             return;
         }
+        // Quill: `QUILL_TRACE_VIDEO` times image uploads of 64 KiB and up
+        // (video pictures drawn as images), against the NV12 path.
+        let started = (crate::surface_support::trace_uploads() && expected >= 64 * 1024)
+            .then(std::time::Instant::now);
         unsafe {
             device_context.UpdateSubresource(
                 &self.texture,
@@ -316,6 +323,9 @@ impl DirectXAtlasTexture {
                 bounds.size.width.to_bytes(self.bytes_per_pixel as u8),
                 0,
             );
+        }
+        if let Some(started) = started {
+            crate::surface_support::trace_upload("atlas", expected, started);
         }
     }
 

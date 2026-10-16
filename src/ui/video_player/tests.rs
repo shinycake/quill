@@ -5,8 +5,8 @@
 
 use super::transport::BackendStatus;
 use super::{
-    Backend, ErrorKind, Picture, PlayState, PlayerError, Present, Pulled, VideoPlayer,
-    WATCH_INTERVAL, trace_line,
+    Backend, ErrorKind, Picture, PictureStats, PlayState, PlayerError, Present, Pulled,
+    VideoPlayer, WATCH_INTERVAL, picture_trace_line, trace_line,
 };
 use gpui_kit::{EntityId, RenderImage};
 use std::cell::{Cell, RefCell};
@@ -126,6 +126,7 @@ impl Backend for Scripted {
             display_secs: picture.as_ref().map(|_| script.position),
             picture,
             item_secs: script.position,
+            stats: None,
         }
     }
     fn next_due(&self, _now: Instant, _interval: Duration) -> Option<Instant> {
@@ -318,6 +319,21 @@ fn the_trace_line_has_the_documented_columns() {
     assert_eq!(columns[6], "1.50");
     let none = trace_line(7, Instant::now(), 0.0, false, None, 0.0);
     assert!(none.ends_with(",0,-1000.000,0.00"), "{none}");
+}
+
+#[test]
+fn the_picture_trace_line_has_the_documented_columns() {
+    let stats = PictureStats {
+        format: "nv12",
+        width: 1920,
+        height: 1080,
+        bytes: 1920 * 1080 * 3 / 2,
+        convert_us: 412,
+    };
+    assert_eq!(
+        picture_trace_line(7, &stats),
+        "VF,7,nv12,1920,1080,3110400,412"
+    );
 }
 
 /// Inline tiles and round videos in a chat on scripted players.
