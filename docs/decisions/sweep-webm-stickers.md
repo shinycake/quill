@@ -42,10 +42,10 @@ shim's existing `libvpx-vp9` preference never applies. Two options:
 | What | the shim runs the native `vp9`/`vp8` decoder twice: once on the packet, once on its alpha side data, and hands swscale a YUVA420P picture made of the first's Y/U/V and the second's Y | build libvpx (BSD) on Linux, macOS and MSYS2, `--enable-libvpx`, ship `libvpx` or link it statically into `avcodec` |
 | Build | no change to FFmpeg; one more C file in the shim | a new native dependency on three hosts, its own version pinning, deps-watch entry, licence texts, package checks (`check-bundle-pe.ps1`, `check-bundle-elf.sh`) |
 | Output | bit-identical to `ffmpeg -c:v libvpx-vp9` on both demo fixtures (every byte of the first 224 px frame, all four channels) | identical by definition |
-| Size | +~400 lines of C | +~1–2 MB per package |
+| Size | +~400 lines of C | +~1-2 MB per package |
 
-(a) does exactly what libvpxdec does, with decoders the build already has,
-so it is the sane choice. The video player keeps its own path (the shim's
+I chose (a): it is what libvpxdec does, using decoders the build already
+has, and it adds no native dependency. The video player keeps its own path (the shim's
 `qv_*` functions are unchanged; this PR doesn't touch any file of the open
 Windows NV12 PR #859).
 
@@ -90,7 +90,7 @@ Windows NV12 PR #859).
 ## Measurements
 
 macOS arm64, debug test build of Quill (the shim and FFmpeg are built at
-`-O2`), seven runs per case, median (min–max). "Before" is main: the same
+`-O2`), seven runs per case, median (min-max). "Before" is main: the same
 loop over `decode_webm_sized` plus the UI's PNG read, square overlay and BGRA
 swap, run as a temporary test. "Fallback" and "after" are
 `cargo test --lib webm_decode_bench -- --ignored --nocapture` on this branch
@@ -98,14 +98,14 @@ without and with `QUILL_VIDEO_LIB`, including the square step.
 
 | Sticker, box, max frames | frames | before (main) | of which ffprobe + ffmpeg | fallback (this branch, no library) | after (in process) |
 | --- | --- | --- | --- | --- | --- |
-| demo 128 px 2 s, 224, 120 | 48 | 376 ms (366–460) | 93 ms | 280 ms (273–288) | **17 ms** (17–34) |
-| demo 128 px 2 s, 56, 36 | 24 | 100 ms (97–105) | 87 ms | 97 ms (94–103) | **3.2 ms** (3.2–3.4) |
-| 512 px 3 s, 224, 120 | 72 | 604 ms (601–620) | 150 ms | 471 ms (465–483) | **77 ms** (74–80) |
-| 512 px 3 s, 56, 36 | 27 | 108 ms (105–163) | 93 ms | 104 ms (100–157) | **28 ms** (27–29) |
+| demo 128 px 2 s, 224, 120 | 48 | 376 ms (366-460) | 93 ms | 280 ms (273-288) | 17 ms (17-34) |
+| demo 128 px 2 s, 56, 36 | 24 | 100 ms (97-105) | 87 ms | 97 ms (94-103) | 3.2 ms (3.2-3.4) |
+| 512 px 3 s, 224, 120 | 72 | 604 ms (601-620) | 150 ms | 471 ms (465-483) | 77 ms (74-80) |
+| 512 px 3 s, 56, 36 | 27 | 108 ms (105-163) | 93 ms | 104 ms (100-157) | 28 ms (27-29) |
 
 Part of "before" is PNG decoding in a debug build. The two processes alone
-(independent of the build profile, and matching the audit's 92–145 ms) take
-2–27 times as long as the whole in-process decode. On Windows each spawn
+(independent of the build profile, and matching the audit's 92-145 ms) take
+2-27 times as long as the whole in-process decode. On Windows each spawn
 also goes through antivirus scanning.
 
 Peak memory, one fresh test process per file (both box sizes), growth of
