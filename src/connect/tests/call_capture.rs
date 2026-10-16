@@ -106,7 +106,9 @@ fn group_driver() -> (
     let mut handle = mock.clone();
     driver.set_call_engine(Box::new(mock));
     // The group transport is up: the engine has the call's sources.
-    handle.create_group_call(77, -100).unwrap();
+    handle
+        .create_group_call(77, -100, crate::calls::engine::GroupCallRole::Member)
+        .unwrap();
     handle.connect_group_call(77, "answer", false).unwrap();
     let mics = install_fake_mic(&mut driver);
     (dir, driver, handle, mics)

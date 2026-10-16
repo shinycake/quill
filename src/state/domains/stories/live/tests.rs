@@ -15,7 +15,7 @@ fn session() -> Session {
     let mut call = ActiveGroupCall::fresh(42);
     call.is_live_story = true;
     call.paid_message_star_count = 5;
-    session.calls.active_group_call = Some(call);
+    session.calls.story_stream = Some(call);
     session.begin_live_story(7, 6, 42);
     session
 }
@@ -38,7 +38,7 @@ fn comment(id: i32, sender: i64, text: &str, stars: i64) -> ParsedGroupCallMessa
 }
 
 fn arrive(session: &mut Session, message: ParsedGroupCallMessage) {
-    if let Some(call) = session.calls.active_group_call.as_mut() {
+    if let Some(call) = session.calls.story_stream.as_mut() {
         call.messages.push(message.clone());
     }
     session.after_live_story_message(42, &message);
@@ -152,7 +152,7 @@ fn cheap_reaction_rows_leave_and_comments_toggle_follows() {
     arrive(&mut session, comment(1, 9, "", 2));
     let count = session
         .calls
-        .active_group_call
+        .story_stream
         .as_ref()
         .map_or(0, |c| c.messages.len());
     assert_eq!(count, 0, "a reaction under the price is not a comment");
@@ -160,7 +160,7 @@ fn cheap_reaction_rows_leave_and_comments_toggle_follows() {
     assert_eq!(live(&session).comments.state(), CommentsState::Shown);
     arrive(&mut session, comment(3, 9, "", 25));
     assert_eq!(live(&session).effects.last().map(|e| e.stars), Some(25));
-    if let Some(call) = session.calls.active_group_call.as_mut() {
+    if let Some(call) = session.calls.story_stream.as_mut() {
         call.messages.clear();
     }
     session.after_live_story_messages_deleted(42);

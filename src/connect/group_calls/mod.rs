@@ -1,6 +1,6 @@
 //! Connect driver: group calls and video chats.
 use super::*;
-use crate::calls::engine::{GroupVideoSource, group_offer_audio_source_id};
+use crate::calls::engine::{GroupCallRole, GroupVideoSource, group_offer_audio_source_id};
 use crate::ids::RequestId;
 use crate::locks::LockExt;
 use crate::state::CallsPurpose;
@@ -35,38 +35,31 @@ pub(crate) mod stream;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: native group-call transport lifecycle, after every
-    /// reducer update. Finishes the `ntg_connect` handshake once the
-    /// `joinVideoChat` `Text` answer arrives, keeps the outgoing camera
-    /// and the incoming video subscriptions in sync with the tracked
-    /// participants, finishes the presentation handshake, and tears the
-    /// transport down when the tracked call goes away.
+    /// reducer update. Finishes the `ntg_connect` handshake once the join answer arrives,
+    /// keeps the outgoing camera and the incoming video subscriptions in
+    /// sync with the tracked participants, finishes the presentation
+    /// handshake, and tears the transport down when a tracked call goes
+    /// away.
     pub(crate) fn pump_group_call_transport(
         &mut self,
-        active_group_call_before: Option<i32>,
+        before: [Option<i32>; 2],
     ) -> Result<(), ConnectSendError> {
-        let active_group_call_after = self
-            .session
-            .calls
-            .active_group_call
-            .as_ref()
-            .map(|call| call.id);
-        if active_group_call_after != active_group_call_before
-            && let Some(before_id) = active_group_call_before
-        {
-            // The tracked call ended or was replaced: the native transport
-            // must not linger, and stale frames must not render. A stream's
-            // pending parts are answered first.
-            self.drain_stream_feeder(before_id);
-            if let Some(engine) = self.call_engine.as_deref_mut() {
-                let _ = engine.leave_group_call(before_id);
+        let after = self.session.calls.group_call_ids();
+        for before_id in before.into_iter().flatten() {
+            if !after.contains(&Some(before_id)) {
+                // The tracked call ended or was replaced: the native
+                // transport must not linger, and stale frames must not
+                // render. A stream's pending parts are answered first.
+                self.teardown_group_call_transport(before_id);
             }
-            self.close_call_feeds(before_id);
-            self.group_camera_state.remove(&before_id);
-            self.group_mute_state.remove(&before_id);
         }
-        let Some(group_call_id) = active_group_call_after else {
-            return Ok(());
-        };
+        for group_call_id in after.into_iter().flatten() {
+            self.pump_one_group_call(group_call_id)?;
+        }
+        Ok(())
+    }
+
+    fn pump_one_group_call(&mut self, group_call_id: i32) -> Result<(), ConnectSendError> {
         // Track feeds whose video went off end now, engine or not.
         self.sync_call_feeds(group_call_id);
         let engine_available = self
@@ -81,8 +74,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let join_answer = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .filter(|call| !call.transport_ready)
             .map(|call| {
                 (
@@ -102,8 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 let muted = self
                     .session
                     .calls
-                    .active_group_call
-                    .as_ref()
+                    .group_call(group_call_id)
                     .is_some_and(|call| call.is_muted_self);
                 if let Some(engine) = self.call_engine.as_deref_mut()
                     && engine.set_group_muted(group_call_id, muted).is_ok()
@@ -116,7 +107,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .as_ref()
                 .err()
                 .is_some_and(|err| err.is_stream_unsupported());
-            if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
                     Ok(()) => {
                         call.transport_ready = true;
@@ -142,8 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let transport_ready = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .is_some_and(|call| call.transport_ready);
         if !transport_ready {
             return Ok(());
@@ -158,8 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let wanted_mute = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .is_some_and(|call| call.is_muted_self || call.is_force_muted());
         if self.group_mute_state.get(&group_call_id) != Some(&wanted_mute)
             && let Some(engine) = self.call_engine.as_deref_mut()
@@ -171,7 +160,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err) => {
                     // Retried on the next tick; the error is recorded once
                     // so a failing engine does not rewrite it every tick.
-                    if let Some(call) = self.session.calls.active_group_call.as_mut()
+                    if let Some(call) = self.session.calls.group_call_mut(group_call_id)
                         && call.transport_error.is_none()
                     {
                         call.transport_error = Some(err.to_string());
@@ -184,8 +173,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let wanted_camera = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .map(|call| call.is_my_video_enabled && !call.is_my_video_paused)
             .unwrap_or(false);
         if self.group_camera_state.get(&group_call_id) != Some(&wanted_camera) {
@@ -197,14 +185,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             match result {
                 Ok(()) => {
                     self.group_camera_state.insert(group_call_id, wanted_camera);
-                    if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                    if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                         call.transport_error = None;
                     }
                 }
                 Err(err) => {
                     // Retried on the next tick; the error is recorded once
                     // so a failing engine does not rewrite it every tick.
-                    if let Some(call) = self.session.calls.active_group_call.as_mut()
+                    if let Some(call) = self.session.calls.group_call_mut(group_call_id)
                         && call.transport_error.is_none()
                     {
                         call.transport_error = Some(err.to_string());
@@ -217,8 +205,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sources: Vec<GroupVideoSource> = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .map(|call| group_video_sources(&call.participants))
             .unwrap_or_default();
         // A live story's streamer may not be in the participant list (and
@@ -233,7 +220,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         if let Err(err) = engine.sync_group_video(group_call_id, &sources)
-            && let Some(call) = self.session.calls.active_group_call.as_mut()
+            && let Some(call) = self.session.calls.group_call_mut(group_call_id)
         {
             call.transport_error = Some(err.to_string());
         }
@@ -242,8 +229,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let share_answer = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .filter(|call| call.screen_share_pending)
             .map(|call| call.screen_share_answer.clone());
         if let Some(answer) = share_answer
@@ -253,7 +239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(());
             };
             let result = engine.connect_screen_share(group_call_id, &answer);
-            if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
                     Ok(()) => {
                         call.screen_share_pending = false;
@@ -277,8 +263,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let want_presentation = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
         if !want_presentation
             && let Some(engine) = self.call_engine.as_deref_mut()

@@ -1,7 +1,6 @@
 //! Connect-driver tests: a live story plays in its own receive-only slot
 //! beside a 1:1 call or a video chat (tdesktop `registerVideoStream`), and
 //! is never the current call.
-use super::super::*;
 use super::live_story::{Harness, LIVE_CALL, harness, watching};
 use super::*;
 use crate::calls::engine::MockEngine;
@@ -22,7 +21,6 @@ fn video_chat(active: bool, joined: bool) -> String {
         .replace("JOINED", &joined.to_string())
 }
 
-/// The supergroup -100 whose video chat is 555.
 fn add_team_chat(h: &mut Harness) {
     h.ingest(
         r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"Team","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0}}"#,
@@ -32,7 +30,6 @@ fn add_team_chat(h: &mut Harness) {
     );
 }
 
-/// Opens the live story (7, 6) and lets its call arrive, not joined yet.
 fn open_story(h: &mut Harness) {
     h.ingest(STORY);
     h.driver
@@ -144,7 +141,6 @@ fn a_video_chat_joins_beside_an_open_story() {
     let mut h = watching();
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
     add_team_chat(&mut h);
-    // A video chat looked at from its chat takes the current slot.
     h.ingest(&video_chat(true, false));
     assert_eq!(current_id(&h), Some(555));
     h.driver

@@ -28,14 +28,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
-    /// The tracked live story call you joined, if it is the one watched.
     fn watched_live_call(&self) -> Option<&crate::state::ActiveGroupCall> {
         let live = self.session.stories.live.as_ref()?;
         self.session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
-            .filter(|call| call.id == live.group_call_id && call.is_live_story)
+            .filter(|call| call.id == live.group_call_id)
     }
 
     /// Once the `joinLiveStory` answer is in: `getLiveStoryStreamer` (not
@@ -281,7 +280,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| set_live_story_message_sender(extra, group_call_id, sender),
         )?;
         // Shown at once; `updateGroupCall` confirms.
-        if let Some(call) = self.session.calls.active_group_call.as_mut() {
+        if let Some(call) = self.session.calls.story_stream.as_mut() {
             call.message_sender_id = Some(sender);
         }
         Ok(extra)
@@ -309,7 +308,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             })?,
         };
         // tdesktop removes them at once.
-        if let Some(call) = self.session.calls.active_group_call.as_mut() {
+        if let Some(call) = self.session.calls.story_stream.as_mut() {
             call.messages.retain(|m| match all_from {
                 Some(sender) => m.sender_id != sender,
                 None => m.message_id != message_id,
@@ -321,7 +320,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The viewer left the live story: pending Stars are dropped (tdesktop
-    /// `undoScheduledPaidOnDestroy`) and the call is left.
+    /// `undoScheduledPaidOnDestroy`) and its stream is left. The current
+    /// call, if any, stays.
     pub fn leave_live_story(&mut self) -> Result<(), ConnectSendError> {
         let Some(live) = self.session.stories.live.take() else {
             return Ok(());
@@ -348,24 +348,32 @@ impl<S: JsonSender> ConnectDriver<S> {
                 &remove_pending_live_story_reactions(extra, group_call_id),
             );
         }
-        let tracked = self
+        let Some(stream) = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
-            .is_some_and(|call| call.id == group_call_id);
-        if !tracked {
+            .story_stream
+            .take_if(|call| call.id == group_call_id)
+        else {
+            return Ok(());
+        };
+        self.teardown_group_call_transport(group_call_id);
+        // Not joined yet: TDLib has nothing to leave (and would answer an
+        // error), so the slot is only dropped.
+        let joining =
+            self.session
+                .requests
+                .has_purpose(RequestPurpose::Calls(CallsPurpose::JoinVideoChat {
+                    group_call_id,
+                }));
+        if !(stream.is_joined || stream.reconnecting || stream.need_rejoin || joining) {
             return Ok(());
         }
-        // Not joined yet: TDLib has nothing to leave (and would answer an
-        // error), so the tracker is only dropped.
-        let left = if self.session.group_call_joined_or_joining(None) {
-            self.leave_group_call().map(|_| ())
-        } else {
-            Ok(())
-        };
-        self.drop_group_call_locally();
-        left
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }),
+            None,
+        );
+        self.send_json_request(extra, &leave_group_call(extra, group_call_id))
+            .map(|_| ())
     }
 
     /// The feed the live story's picture comes from: the stream feed of

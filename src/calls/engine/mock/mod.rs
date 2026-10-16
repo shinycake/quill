@@ -39,6 +39,7 @@ struct MockInner {
     device_selections: Vec<(i32, Option<String>, Option<String>)>,
     /// Phase C2g: group transport recording for driver tests.
     group_offers: Vec<(i32, i64)>,
+    group_roles: Vec<(i32, GroupCallRole)>,
     group_connects: Vec<(i32, String, bool)>,
     group_video_syncs: Vec<(i32, Vec<GroupVideoSource>)>,
     group_camera_changes: Vec<(i32, bool, Option<String>)>,
@@ -147,6 +148,10 @@ impl MockEngine {
     /// Phase C2g: recorded group transport calls for driver tests.
     pub fn group_offers(&self) -> Vec<(i32, i64)> {
         self.inner.lock_or_recover().group_offers.clone()
+    }
+
+    pub fn group_roles(&self) -> Vec<(i32, GroupCallRole)> {
+        self.inner.lock_or_recover().group_roles.clone()
     }
 
     pub fn group_connects(&self) -> Vec<(i32, String, bool)> {
@@ -461,12 +466,14 @@ impl CallEngine for MockEngine {
         &mut self,
         group_call_id: i32,
         chat_id: i64,
+        role: GroupCallRole,
     ) -> Result<String, EngineError> {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
         }
         inner.group_offers.push((group_call_id, chat_id));
+        inner.group_roles.push((group_call_id, role));
         Ok(format!("mock-group-offer-{group_call_id}"))
     }
 

@@ -737,23 +737,6 @@ fn driver_join_live_story_two_step_and_gates() {
             .unwrap(),
         )
         .unwrap();
-    // An active one-to-one call refuses a competing live-story join.
-    driver
-        .ingest(copy_and_parse(&ready_video_call_json(), &seq, &dyn_sink).unwrap())
-        .unwrap();
-    assert!(driver.session.calls.active_call.is_some());
-    assert_eq!(
-        driver.join_live_story(ChatId(7), 6),
-        Err(ConnectSendError::InvalidRequest)
-    );
-    driver.session.calls.active_call = None;
-    // An existing tracked call refuses a competing live-story join.
-    driver.session.calls.active_group_call = Some(tracked_group_call(false, false, false));
-    assert_eq!(
-        driver.join_live_story(ChatId(7), 6),
-        Err(ConnectSendError::InvalidRequest)
-    );
-    driver.session.calls.active_group_call = None;
     // Failed fetch clears the intent so the next tap can retry.
     let failed = driver.join_live_story(ChatId(7), 6).unwrap();
     driver
@@ -819,20 +802,16 @@ fn driver_join_live_story_two_step_and_gates() {
         driver
             .session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
-            .unwrap()
-            .is_live_story
+            .is_some_and(|call| call.is_live_story)
     );
+    assert!(driver.session.calls.active_group_call.is_none());
     // Reconnect uses the same live-story method, not joinVideoChat.
-    driver
-        .session
-        .calls
-        .active_group_call
-        .as_mut()
-        .unwrap()
-        .reconnecting = true;
-    driver.rejoin_group_call(false).unwrap();
+    if let Some(call) = driver.session.calls.story_stream.as_mut() {
+        call.reconnecting = true;
+    }
+    driver.maybe_auto_rejoin_group_call().unwrap();
     let retry = sent_request(&recorder, "joinLiveStory");
     assert_eq!(retry["group_call_id"], 4242);
     assert!(

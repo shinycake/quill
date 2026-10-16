@@ -206,7 +206,7 @@ impl NtgcallsEngine {
             .group_calls
             .get(&group_call_id)
             .ok_or(EngineError::NoSuchCall(group_call_id))?;
-        if !media.connected {
+        if !media.connected || media.role == GroupCallRole::Viewer {
             return Ok(());
         }
         let (chat_id, muted) = (media.chat_id, media.muted);
@@ -287,7 +287,7 @@ impl NtgcallsEngine {
         // `set_stream_sources`). An MTProto stream carries nothing
         // outgoing: ntgcalls only sends media again after a new connect
         // with an RTC answer, which issues capture then.
-        if !media.mode.is_stream() {
+        if !media.mode.is_stream() && media.role == GroupCallRole::Member {
             // SAFETY: `instance` is live and the descriptions are
             // stack-local for the duration of this synchronous C call.
             let rc = unsafe {

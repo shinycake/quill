@@ -107,7 +107,7 @@ impl Session {
                     join_as.answer = Some(Err(()));
                 }
             }
-            Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { .. })) => {
+            Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {
                 // Phase C2f: a failed rejoin re-arms
                 // `reconnecting` so the driver's auto-rejoin
                 // retries (max 3 attempts, the C2d discipline);
@@ -115,29 +115,29 @@ impl Session {
                 // `rejoin_attempts > 0` marks the failed join
                 // as a rejoin (only `rejoin_group_call`
                 // increments the counter).
-                let rejoin_attempt = self
-                    .calls
-                    .active_group_call
-                    .as_ref()
-                    .map(|call| call.rejoin_attempts)
-                    .unwrap_or(0);
-                if rejoin_attempt > 0 {
-                    if let Some(call) = self.calls.active_group_call.as_mut() {
-                        // Keep the banner + manual Rejoin
-                        // available even after exhaustion.
-                        call.reconnecting = true;
-                        if call.rejoin_attempts >= crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS {
-                            self.calls.group_call_error =
-                                Some("Reconnect attempts exhausted.".to_string());
-                        }
+                let current = self.calls.is_current_group_call(group_call_id);
+                let Some(call) = self.calls.group_call_mut(group_call_id) else {
+                    return;
+                };
+                if call.rejoin_attempts > 0 {
+                    // Keep the banner + manual Rejoin
+                    // available even after exhaustion.
+                    call.reconnecting = true;
+                    let exhausted =
+                        call.rejoin_attempts >= crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+                    if current && exhausted {
+                        self.calls.group_call_error =
+                            Some("Reconnect attempts exhausted.".to_string());
                     }
-                } else {
+                } else if current {
                     self.calls.group_call_error = Some(call_request_error_line(
                         err,
                         "Could not join the voice chat",
                     ));
                 }
             }
+            Some(RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }))
+                if !self.calls.is_current_group_call(group_call_id) => {}
             // Phase C2g: a failed screen-sharing handshake must
             // not leave the call stuck "sharing" — clear the
             // pending/active flags and surface an honest error.

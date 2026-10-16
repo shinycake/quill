@@ -1,7 +1,7 @@
 //! The live story open in the story viewer: the streamer, top donors, who
 //! comments are sent as, the pending Star reaction and the comments
-//! toggle. The call itself is the tracked group call
-//! (`calls.active_group_call`); its comments are that call's messages.
+//! toggle. The call itself is the story stream (`calls.story_stream`);
+//! its comments are that call's messages.
 use crate::live_story::{CommentsTracker, PendingLiveReaction, normalize_levels, retain_comments};
 use crate::state::*;
 use crate::telegram::envelope::{
@@ -157,6 +157,7 @@ impl Session {
     /// Stops watching (the viewer left the story).
     pub fn end_live_story(&mut self) {
         self.stories.live = None;
+        self.calls.story_stream = None;
     }
 
     /// The live story behind `group_call_id`, when it is the one watched.
@@ -210,7 +211,7 @@ impl Session {
     /// yourself.
     pub fn live_story_sender(&self) -> Option<MessageSender> {
         self.calls
-            .active_group_call
+            .story_stream
             .as_ref()
             .and_then(|call| call.message_sender_id)
             .or_else(|| {
@@ -297,9 +298,9 @@ impl Session {
         let now = i64::try_from(unix_ms_now() / 1000).unwrap_or(i64::MAX);
         let Some(call) = self
             .calls
-            .active_group_call
+            .story_stream
             .as_mut()
-            .filter(|call| call.id == group_call_id && call.is_live_story)
+            .filter(|call| call.id == group_call_id)
         else {
             return;
         };
@@ -325,7 +326,7 @@ impl Session {
     /// Comments were deleted: the toggle follows.
     pub(crate) fn after_live_story_messages_deleted(&mut self, group_call_id: i32) {
         let me = self.live_story_sender();
-        let messages = match self.calls.active_group_call.as_ref() {
+        let messages = match self.calls.story_stream.as_ref() {
             Some(call) if call.id == group_call_id => call.messages.clone(),
             _ => return,
         };

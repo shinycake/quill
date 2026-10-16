@@ -142,9 +142,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
-            .is_some_and(|call| call.is_live_story)
+            .is_some_and(|call| call.id == id)
         {
             join_live_story_request(extra, id, params)
         } else {
@@ -196,12 +196,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let group_call_id = match &self.session.calls.active_group_call {
-            Some(call)
-                if !call.is_joined
-                    && !call.join_as_requested
-                    && !call.is_live_story
-                    && call.is_video_chat =>
-            {
+            Some(call) if !call.is_joined && !call.join_as_requested && call.is_video_chat => {
                 call.id
             }
             _ => return Ok(()),
@@ -281,12 +276,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let ready = self
             .session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
             .is_some_and(|call| call.id == intent.group_call_id && !call.is_joined);
         if ready {
             self.session.calls.pending_live_story_join = None;
-            self.join_video_chat(intent.group_call_id)?;
+            self.join_story_stream(intent.group_call_id)?;
             return Ok(());
         }
         // The `getGroupCall` request finished without producing a
@@ -298,6 +293,33 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.calls.pending_live_story_join = None;
         }
         Ok(())
+    }
+
+    /// `joinLiveStory` for the story stream: muted, beside any call you
+    /// are in (tdesktop's video stream is never the current call).
+    fn join_story_stream(&mut self, group_call_id: i32) -> Result<RequestId, ConnectSendError> {
+        if !self
+            .session
+            .calls
+            .story_stream
+            .as_ref()
+            .is_some_and(|call| call.id == group_call_id && !call.is_joined)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let params = self.group_join_params(group_call_id, true);
+        let extra = self.session.request(
+            RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id }),
+            None,
+        );
+        if let Err(err) =
+            self.sender
+                .send_json(&self.group_join_request(extra, group_call_id, &params))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(extra)
     }
 
     /// Phase C3a: `getGroupCall` for a known call id (schema 1.8.67,
@@ -349,18 +371,35 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// resets the counter — explicit user intent starts the attempts
     /// over.
     pub fn rejoin_group_call(&mut self, manual: bool) -> Result<RequestId, ConnectSendError> {
+        let Some(group_call_id) = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .map(|call| call.id)
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        self.rejoin_tracked_group_call(group_call_id, manual)
+    }
+
+    fn rejoin_tracked_group_call(
+        &mut self,
+        group_call_id: i32,
+        manual: bool,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if manual && let Some(call) = self.session.calls.active_group_call.as_mut() {
+        if manual && let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rejoin_attempts = 0;
         }
-        let (group_call_id, is_muted) = match &self.session.calls.active_group_call {
+        let is_muted = match self.session.calls.group_call(group_call_id) {
             Some(call)
                 if call.reconnecting
                     && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS =>
             {
-                (call.id, call.is_muted_self)
+                call.is_muted_self
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
@@ -396,7 +435,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             // The attempt never went out: re-arm so the next ingest
             // retries instead of stranding the call.
-            if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 call.reconnecting = true;
             }
             return Err(err);
@@ -404,7 +443,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if orphaned_presentation && let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.stop_screen_share(group_call_id);
         }
-        if let Some(call) = self.session.calls.active_group_call.as_mut() {
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
             call.rejoin_attempts += 1;
             call.reconnecting = false;
             // Review fix: the fresh native context must run the join
@@ -425,17 +464,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// reconnecting and attempts remain (the `rejoin_group_call`
     /// guard caps at 3, the C2d discipline).
     pub(crate) fn maybe_auto_rejoin_group_call(&mut self) -> Result<(), ConnectSendError> {
-        let wants = self
-            .session
-            .calls
-            .active_group_call
-            .as_ref()
-            .is_some_and(|call| {
-                call.reconnecting
-                    && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS
-            });
-        if wants {
-            let _ = self.rejoin_group_call(false);
+        for group_call_id in self.session.calls.group_call_ids().into_iter().flatten() {
+            let wants = self
+                .session
+                .calls
+                .group_call(group_call_id)
+                .is_some_and(|call| {
+                    call.reconnecting
+                        && call.rejoin_attempts < crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS
+                });
+            if wants {
+                let _ = self.rejoin_tracked_group_call(group_call_id, false);
+            }
         }
         Ok(())
     }
@@ -448,22 +488,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         let is_my_video_enabled = self
             .session
             .calls
-            .active_group_call
-            .as_ref()
+            .group_call(group_call_id)
             .is_some_and(|call| call.is_my_video_enabled);
         // The native call key is the chat id; resolve it through the
         // chat's `video_chat` association (schema `groupCall` carries no
         // chat id).
         let chat_id = self.group_call_chat_id(group_call_id);
+        let role = if self
+            .session
+            .calls
+            .story_stream
+            .as_ref()
+            .is_some_and(|call| call.id == group_call_id)
+        {
+            GroupCallRole::Viewer
+        } else {
+            GroupCallRole::Member
+        };
         let offer = match (chat_id, self.call_engine.as_deref_mut()) {
             (Some(chat_id), Some(engine)) if engine.is_available() => {
-                let offer = engine.create_group_call(group_call_id, chat_id);
+                let offer = engine.create_group_call(group_call_id, chat_id, role);
                 // The output device chosen in settings, kept for connect.
                 if offer.is_ok()
                     && let Err(err) = engine.set_group_playback(
                         group_call_id,
                         self.selected_devices.1.as_deref(),
-                        self.group_playback_muted == Some(group_call_id),
+                        self.group_playback_muted.contains(&group_call_id),
                     )
                 {
                     eprintln!("quill: group call output device not set: {err}");
@@ -480,7 +530,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 is_my_video_enabled,
             },
             Some(Err(err)) => {
-                if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                     call.transport_error = Some(err.to_string());
                 }
                 let mut params = GroupCallJoinParams::honest_no_device();

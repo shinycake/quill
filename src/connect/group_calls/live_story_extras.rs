@@ -38,7 +38,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(call) = self
             .session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
             .filter(|call| call.id == group_call_id)
         else {
@@ -100,9 +100,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let manage = self
             .session
             .calls
-            .active_group_call
+            .story_stream
             .as_ref()
-            .is_some_and(|call| call.is_live_story && call.can_be_managed);
+            .is_some_and(|call| call.can_be_managed);
         if !manage {
             return Err(ConnectSendError::InvalidRequest);
         }

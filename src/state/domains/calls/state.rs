@@ -135,6 +135,14 @@ impl CallsState {
         ]
     }
 
+    /// Whether the id is the current group call, whose errors the call
+    /// window shows.
+    pub fn is_current_group_call(&self, group_call_id: i32) -> bool {
+        self.active_group_call
+            .as_ref()
+            .is_some_and(|call| call.id == group_call_id)
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             active_call: None,

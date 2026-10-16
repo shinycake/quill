@@ -221,15 +221,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             engine.select_devices(call.id, selection.0.as_deref(), selection.1.as_deref())?;
         }
-        // A group call (a live stream's Speakers row) plays on the new
-        // output right away, also while its join is on the way.
-        if let Some(call) = self.session.calls.active_group_call.as_ref()
-            && let Some(engine) = self.call_engine.as_deref_mut()
-        {
+        for group_call_id in self.session.calls.group_call_ids().into_iter().flatten() {
+            let Some(engine) = self.call_engine.as_deref_mut() else {
+                break;
+            };
             match engine.set_group_playback(
-                call.id,
+                group_call_id,
                 selection.1.as_deref(),
-                self.group_playback_muted == Some(call.id),
+                self.group_playback_muted.contains(&group_call_id),
             ) {
                 // No native call (joined without the engine): nothing plays.
                 Ok(()) | Err(EngineError::NoSuchCall(_)) => {}
@@ -240,35 +239,40 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// Mute or unmute the tracked group call's sound for yourself only
-    /// (tdesktop's local mute in the live stream's settings).
-    pub fn set_group_call_playback_muted(&mut self, muted: bool) -> Result<(), EngineError> {
-        let Some(id) = self
-            .session
-            .calls
-            .active_group_call
-            .as_ref()
-            .map(|call| call.id)
-        else {
-            return Err(EngineError::NoSuchCall(0));
-        };
+    /// Mute or unmute group call `group_call_id`'s sound for yourself only
+    /// (tdesktop's local mute in the live stream's settings, the live
+    /// story's sound toggle).
+    pub fn set_group_call_playback_muted(
+        &mut self,
+        group_call_id: i32,
+        muted: bool,
+    ) -> Result<(), EngineError> {
+        if self.session.calls.group_call(group_call_id).is_none() {
+            return Err(EngineError::NoSuchCall(group_call_id));
+        }
         if let Some(engine) = self.call_engine.as_deref_mut() {
-            match engine.set_group_playback(id, self.selected_devices.1.as_deref(), muted) {
+            match engine.set_group_playback(
+                group_call_id,
+                self.selected_devices.1.as_deref(),
+                muted,
+            ) {
                 Ok(()) | Err(EngineError::NoSuchCall(_)) => {}
                 Err(err) => return Err(err),
             }
         }
-        self.group_playback_muted = muted.then_some(id);
+        self.group_playback_muted
+            .retain(|id| self.session.calls.group_call(*id).is_some());
+        if muted {
+            self.group_playback_muted.insert(group_call_id);
+        } else {
+            self.group_playback_muted.remove(&group_call_id);
+        }
         Ok(())
     }
 
-    /// Whether you muted the tracked group call's sound for yourself.
-    pub fn group_call_playback_muted(&self) -> bool {
-        self.session
-            .calls
-            .active_group_call
-            .as_ref()
-            .is_some_and(|call| self.group_playback_muted == Some(call.id))
+    pub fn group_call_playback_muted(&self, group_call_id: i32) -> bool {
+        self.session.calls.group_call(group_call_id).is_some()
+            && self.group_playback_muted.contains(&group_call_id)
     }
 
     /// Phase C1: `sendCallRating` for the last ended call (the 1–5

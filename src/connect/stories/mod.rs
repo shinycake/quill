@@ -1,6 +1,5 @@
 //! Connect driver: stories.
 use super::*;
-use crate::calls::group_call_create::CurrentCall;
 use crate::ids::{ChatId, RequestId};
 use crate::state::LiveStoryJoinIntent;
 use crate::state::RequestPurpose;
@@ -96,16 +95,12 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// stories-live-play: join the group call behind a live story
     /// (`storyContentLive.group_call_id`, `schema/td_api.tl:6662`).
-    /// Two-step, reusing the C3a machinery: `getGroupCall` (via the
-    /// existing `fetch_group_call`) creates the unjoined tracker, and the
-    /// ingest pump issues `join_video_chat` once the tracker exists
-    /// (`pending_live_story_join`). Refuses while a 1:1 call is active or
-    /// while another group call is current (joined, joining, reconnecting
-    /// or scheduled). A tracked call you only looked at, and a live story
-    /// join still waiting for its `getGroupCall` answer, are dropped
-    /// locally, native transport included: tdesktop has no current call
-    /// then and sends nothing. A second join for the same story
-    /// while its first is pending is refused.
+    /// Two-step: `getGroupCall` (via `fetch_group_call`) creates the
+    /// story stream's unjoined tracker, and the ingest pump issues
+    /// `joinLiveStory` once it exists (`pending_live_story_join`). The
+    /// story plays beside any 1:1 call or video chat you are in, which
+    /// stay as they are (tdesktop `registerVideoStream`). A second join
+    /// for the same story while its first is pending is refused.
     pub fn join_live_story(
         &mut self,
         chat_id: ChatId,
@@ -121,14 +116,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             None => return Err(ConnectSendError::InvalidRequest),
         };
-        // A 1:1 call, a joined, joining or reconnecting video chat, or a
-        // scheduled one (tdesktop's current call) keeps the slot: the
-        // viewer asks to leave it first.
-        if self.session.calls.active_call.is_some()
-            || self.session.current_call_for_create(None) != CurrentCall::None
-        {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         // This story's join is already on its way.
         if self
             .session
@@ -138,8 +125,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.calls.active_group_call.is_some() {
-            self.drop_group_call_locally();
+        if self
+            .session
+            .stories
+            .live
+            .as_ref()
+            .is_some_and(|live| live.group_call_id != group_call_id)
+        {
+            self.leave_live_story()?;
         }
         self.session.calls.pending_live_story_join = None;
         let extra = self.fetch_group_call(group_call_id)?;
