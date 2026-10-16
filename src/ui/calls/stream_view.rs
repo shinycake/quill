@@ -69,6 +69,9 @@ impl QuillApp {
             _ => false,
         };
         if !same {
+            if let Some(old) = stream.player.take() {
+                old.release_live(cx);
+            }
             stream.player =
                 sink.map(|sink| VideoPlayer::live(sink, Purpose::Live { tile: false }, cx));
         }
@@ -92,6 +95,10 @@ impl StreamPictureView {
     pub(crate) fn new(owner: &Entity<QuillApp>, cx: &mut Context<Self>) -> Self {
         Self {
             owner: owner.downgrade(),
+            // Every change to QuillApp redraws the picture's view (not the
+            // panel), as the stream window's root does: the parts it reads
+            // (the feed, the photo, the name) have no narrower signal.
+            // Frames themselves come with the player's waker.
             _observe: cx.observe(owner, |_, _, cx| cx.notify()),
         }
     }

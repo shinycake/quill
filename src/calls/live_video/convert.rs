@@ -12,7 +12,9 @@
 use super::LiveRotation;
 use crate::wallpaper_raster::{Raster, blur};
 
-/// Bytes of an I420 frame: Y `w × h`, U and V `⌈w/2⌉ × ⌈h/2⌉`.
+/// Bytes of an I420 frame: Y `w × h`, U and V `⌈w/2⌉ × ⌈h/2⌉`. Not
+/// checked: with `u16` sides the sum passes `usize` only on 32-bit
+/// targets, which Quill does not build for.
 pub fn i420_size(width: u16, height: u16) -> usize {
     let (w, h) = (usize::from(width), usize::from(height));
     let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));

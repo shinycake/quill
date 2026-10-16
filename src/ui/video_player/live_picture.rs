@@ -136,7 +136,7 @@ pub(crate) fn take_made_images() -> Vec<std::sync::Weak<RenderImage>> {
 /// Whether every picture is BGRA: on Windows and Linux, and on macOS
 /// with `QUILL_LIVE_BGRA=1` in a demo-capture build, to run the other
 /// platforms' path (its memory, its atlas) here.
-pub(super) fn bgra_only() -> bool {
+pub(crate) fn bgra_only() -> bool {
     if !cfg!(target_os = "macos") {
         return true;
     }
@@ -158,7 +158,15 @@ pub(super) struct Surfaces {
         (u32, u32),
         objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBufferPool>,
     )>,
+    /// A pool that could not be made, for that size and since then: tried
+    /// again after [`POOL_RETRY`], not on every frame.
+    #[cfg(target_os = "macos")]
+    failed: Option<((u32, u32), std::time::Instant)>,
 }
+
+/// How long a size whose pool failed converts to BGRA before trying again.
+#[cfg(target_os = "macos")]
+const POOL_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl Surfaces {
     /// What a frame shown at `width × height` converts into: a buffer
@@ -168,12 +176,19 @@ impl Surfaces {
         if bgra_only() {
             return Target::Bgra;
         }
-        if self
-            .pool
-            .as_ref()
-            .is_none_or(|(size, _)| *size != (width, height))
-        {
-            self.pool = new_pool(width, height).map(|pool| ((width, height), pool));
+        let size = (width, height);
+        let backing_off = self
+            .failed
+            .is_some_and(|(failed, at)| failed == size && at.elapsed() < POOL_RETRY);
+        if !backing_off && self.pool.as_ref().is_none_or(|(made, _)| *made != size) {
+            self.pool = new_pool(width, height).map(|pool| (size, pool));
+            self.failed = match self.pool {
+                Some(_) => None,
+                None => Some((size, std::time::Instant::now())),
+            };
+        }
+        if backing_off {
+            return Target::Bgra;
         }
         self.pool
             .as_ref()
@@ -269,12 +284,15 @@ fn pool_buffer(
 fn fill_nv12(buffer: &objc2_core_video::CVPixelBuffer, src: &I420) -> bool {
     use objc2_core_video::{
         CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
-        CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPlaneCount, CVPixelBufferGetWidth,
-        CVPixelBufferLockFlags,
+        CVPixelBufferGetHeight, CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPlaneCount,
+        CVPixelBufferGetWidth, CVPixelBufferLockFlags,
     };
     use quill::calls::live_video::convert::i420_to_nv12;
 
-    if CVPixelBufferGetPlaneCount(buffer) != 2 || CVPixelBufferGetWidth(buffer) != src.width {
+    if CVPixelBufferGetPlaneCount(buffer) != 2
+        || CVPixelBufferGetWidth(buffer) != src.width
+        || CVPixelBufferGetHeight(buffer) != src.height
+    {
         return false;
     }
     if !super::rotate::lock(buffer, CVPixelBufferLockFlags::empty()) {

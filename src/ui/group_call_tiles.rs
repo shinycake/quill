@@ -52,7 +52,9 @@ impl QuillApp {
             return Some(player.clone());
         }
         let player = VideoPlayer::live(sink, Purpose::Live { tile: true }, cx);
-        self.group_call.players.insert(key, player.clone());
+        if let Some(old) = self.group_call.players.insert(key, player.clone()) {
+            old.release_live(cx);
+        }
         Some(player)
     }
 
@@ -76,7 +78,9 @@ impl QuillApp {
             screen,
         };
         let player = self.group_tile_player(key, cx)?;
-        // The pause comes with the participant update, not the engine.
+        // The pause comes with the participant update, not the engine: no
+        // engine signal sets a track's state (only a stream's). One that
+        // did would be masked here, as this sets it on every render.
         if let Some(sink) = player.live_sink() {
             sink.set_state(if paused {
                 LiveState::Paused
@@ -111,9 +115,13 @@ impl QuillApp {
         cx: &mut App,
     ) -> Vec<Tile> {
         // Players of another call, or of streams that are gone, go.
-        self.group_call
-            .players
-            .retain(|key, _| key.call_id() == Some(call.id) && call_streams(call, *key));
+        self.group_call.players.retain(|key, player| {
+            let keep = key.call_id() == Some(call.id) && call_streams(call, *key);
+            if !keep {
+                player.release_live(cx);
+            }
+            keep
+        });
         let mut built: Vec<Tile> = Vec::new();
         for participant in &call.participants {
             let name = self.group_call_participant_name(&participant.participant_id);

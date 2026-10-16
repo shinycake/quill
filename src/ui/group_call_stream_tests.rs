@@ -12,7 +12,7 @@ use crate::ui::frame_clock::take_slice_renders;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
-use crate::ui::video_player::take_made_images;
+use crate::ui::video_player::{bgra_only, take_made_images};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -354,7 +354,7 @@ fn stream_pictures_stay_bounded_with_the_main_window_idle(cx: &mut TestAppContex
         player.live_asks()
     );
     assert!(player.live_asks() >= 190, "the frames were drawn");
-    if cfg!(target_os = "macos") {
+    if !bgra_only() {
         assert!(made.is_empty(), "surfaces, not images: {}", made.len());
     } else {
         assert!(
@@ -363,10 +363,13 @@ fn stream_pictures_stay_bounded_with_the_main_window_idle(cx: &mut TestAppContex
             made.len()
         );
     }
-    assert!(
-        alive <= 2,
-        "only the shown image and the one before: {alive}"
-    );
+    // The shown image, the one before, and the one the last draw retired
+    // (dropped at the next wake, or when the player is released).
+    assert!(alive <= 3, "only the last pictures: {alive}");
+    call.update(|_, cx| player.release_live(cx));
+    let alive = made.iter().filter(|image| image.strong_count() > 0).count();
+    // The player's own picture (what it draws next) is all that is left.
+    assert!(alive <= 1, "released with the player: {alive}");
 }
 
 /// At 30 fps the stream window redraws its picture, not the panel above

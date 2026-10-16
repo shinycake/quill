@@ -148,6 +148,7 @@ impl RenderOnce for VideoFrame {
                 if visible {
                     player.note_shown();
                 }
+                player.note_live_paint(visible);
                 // An inline tile's row, painted under the copy the
                 // conversation's animation layer draws: the layer asks for
                 // the frames, so the conversation is not redrawn for them.

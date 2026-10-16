@@ -24,9 +24,16 @@
 //! time), then every 250 ms while it is. Pictures themselves come with
 //! the waker, on the first display frame after they arrive.
 //!
-//! An off-screen tile (`Purpose::Live { tile: true }` painted outside the
-//! visible area for two wakes) stops redrawing on each frame, and looks
-//! again once a second. A live player never hibernates.
+//! The off-screen policy runs before a frame is converted: a picture
+//! painted out of sight, or not painted at all for 500 ms (a minimized or
+//! hidden window), for two wakes stops redrawing and converting on each
+//! frame, and looks again once a second (a tile) or four times a second
+//! (a stream or a story). The frame stays in the feed for that look or
+//! for the next draw. A live player never hibernates.
+//!
+//! A picture of an older frame never replaces a newer one: a large frame
+//! still converting in the background when a smaller, newer one was
+//! drawn (a quality switch) is dropped when it lands.
 #![deny(clippy::indexing_slicing)]
 
 use super::live_picture::{self, Prepared, Surfaces, Target};
@@ -51,15 +58,27 @@ const GAPS: usize = 8;
 /// The stall time is at least this many median gaps: a screen share of a
 /// still window sends a frame a second or less.
 const STALL_GAPS: u32 = 4;
-/// A tile woken this many times without being painted in view stops
+/// A picture woken this many times without being painted in view stops
 /// redrawing on each frame...
 const UNSEEN_WAKES: u32 = 2;
-/// ...counting only wakes this long after the last redraw, so frames
-/// that arrive before the window drew once do not count.
-const UNSEEN_GRACE: Duration = Duration::from_millis(100);
-/// ...and looks again this often, so a window back from behind another
-/// (whose cached views replay without painting) catches up.
+/// ...a wake counting when the element painted out of sight since the
+/// last one, or did not paint at all for this long after a redraw (its
+/// window is not drawing); a slow window that draws a few times a second
+/// keeps its pictures...
+const UNSEEN_STALE: Duration = Duration::from_millis(500);
+/// ...and a tile looks again this often, so a window back from behind
+/// another (whose cached views replay without painting) catches up...
 const UNSEEN_PROBE: Duration = Duration::from_secs(1);
+/// ...a stream or a story sooner: it is the window's whole content.
+const UNSEEN_PROBE_PICTURE: Duration = Duration::from_millis(250);
+/// Pixel buffers kept after they were shown, so the pool does not refill
+/// one a frame still in flight may read: GPUI's Metal renderer drops the
+/// plane textures once encoded (`metal_renderer.rs`, `draw_surfaces`) and
+/// keeps up to three drawables (`set_maximum_drawable_count(3)`).
+const SURFACES_HELD: usize = 3;
+/// The paused picture (and the live story's backdrop) is made again at
+/// most this often.
+const PAUSED_REFRESH: Duration = Duration::from_millis(500);
 
 /// The last arrivals of a feed's frames.
 #[derive(Clone, Debug, Default)]
@@ -144,19 +163,36 @@ fn converts_in_background(frame: &LiveFrame) -> bool {
     live_picture::bgra_only() || u32::from(frame.width.max(frame.height)) > INLINE_MAX_EDGE
 }
 
+/// A converted frame and its sequence number.
+pub(super) struct Landed {
+    pub(super) seq: u64,
+    pub(super) prepared: Prepared,
+}
+
 /// The live state shared by the backend, the player and the waker task.
 pub(super) struct LiveCore {
     sink: LiveSink,
-    /// A video chat tile: the off-screen policy applies.
+    /// A video chat tile: looks again once a second while unseen.
     tile: bool,
     /// Every frame converts on the UI thread: a screenshot capture shows
     /// the first frame in its first draw.
     inline_always: bool,
     track: RefCell<Track>,
-    /// The view the element draws in, redrawn when a frame lands.
+    /// The view the element draws in, redrawn when a frame lands. A live
+    /// player is drawn in one view: a tile or the stage only in the call
+    /// window's panel, the stream picture only in its own view, the live
+    /// story only in the story viewer. A later view (the window opened
+    /// again) takes over from the old one, which is gone.
     view: Cell<Option<EntityId>>,
+    /// Paints of the element, in sight or not.
+    painted: Cell<u64>,
     /// How many times a frame redrew the view.
     asks: Cell<u64>,
+    /// How many frames were converted.
+    conversions: Cell<u64>,
+    /// Tests: the time the core reads instead of the clock.
+    #[cfg(test)]
+    clock: Cell<Option<Instant>>,
 }
 
 #[derive(Default)]
@@ -164,21 +200,31 @@ struct Track {
     gaps: ArrivalGaps,
     surfaces: Surfaces,
     /// A large frame converted off the UI thread, not drawn yet.
-    ready: Option<Prepared>,
+    ready: Option<Landed>,
+    /// The newest frame shown; pictures of older ones are dropped.
+    shown_seq: Option<u64>,
     /// BGRA images: the one shown and the one before it, which the last
     /// drawn frame may still use.
     shown_image: Option<Arc<RenderImage>>,
     previous_image: Option<Arc<RenderImage>>,
+    /// Pixel buffers: the last [`SURFACES_HELD`] shown.
+    held_surfaces: VecDeque<Picture>,
     /// Images to drop from every window's atlas (`App::drop_image`).
     retired: Vec<Arc<RenderImage>>,
-    /// The paused picture, made from frame `seq`.
-    paused: Option<(u64, Arc<RenderImage>)>,
-    /// The off-screen policy: the shown count at the last wake, wakes
-    /// since it last grew, and when the last look went out.
+    /// The paused picture, made from frame `seq` at a time, and the one
+    /// before it (kept as the shown images are).
+    paused: Option<(u64, Instant, Arc<RenderImage>)>,
+    paused_previous: Option<Arc<RenderImage>>,
+    /// The off-screen policy: the in-sight and all paint counts at the
+    /// last wake, wakes counted unseen since, when the last look went
+    /// out, since when no paint came, and whether the last wake was let
+    /// go (a redraw for another reason then converts nothing either).
     seen: u64,
+    painted: u64,
     unseen: u32,
     probed: Option<Instant>,
-    notified: Option<Instant>,
+    unpainted_since: Option<Instant>,
+    quiet: bool,
 }
 
 impl LiveCore {
@@ -189,12 +235,26 @@ impl LiveCore {
             inline_always: capture_mode(),
             track: RefCell::new(Track::default()),
             view: Cell::new(None),
+            painted: Cell::new(0),
             asks: Cell::new(0),
+            conversions: Cell::new(0),
+            #[cfg(test)]
+            clock: Cell::new(None),
         }
+    }
+
+    /// The time: `now`, or in tests the injected clock.
+    fn time(&self, now: Instant) -> Instant {
+        #[cfg(test)]
+        if let Some(clock) = self.clock.get() {
+            return clock;
+        }
+        now
     }
 
     /// The feed's status at `now` and when to look again.
     fn status(&self, now: Instant) -> (LiveStatus, Option<Instant>) {
+        let now = self.time(now);
         let snapshot = self.sink.snapshot();
         let latest_at = snapshot.latest.map(|(_, at)| at);
         let decide = |gaps: &ArrivalGaps| {
@@ -218,12 +278,16 @@ impl LiveCore {
     /// target; large frames are left to the waker task.
     fn take_inline(&self) -> Option<(Arc<LiveFrame>, Target)> {
         let mut track = self.track.try_borrow_mut().ok()?;
+        if track.quiet {
+            return None;
+        }
         let inline = self.inline_always;
         let frame = self
             .sink
             .take_if(|frame| inline || !converts_in_background(frame))?;
         let (width, height) = frame.shown_size();
         let target = track.surfaces.target(width, height);
+        self.conversions.set(self.conversions.get().wrapping_add(1));
         Some((frame, target))
     }
 
@@ -236,39 +300,57 @@ impl LiveCore {
         let frame = self.sink.take_if(converts_in_background)?;
         let (width, height) = frame.shown_size();
         let target = track.surfaces.target(width, height);
+        self.conversions.set(self.conversions.get().wrapping_add(1));
         Some((frame, target))
     }
 
-    /// A frame converted off the UI thread, drawn on the next pull (an
-    /// older one not drawn yet is replaced: its buffer goes back to the
-    /// pool).
-    fn landed(&self, prepared: Option<Prepared>) {
-        if let (Some(prepared), Ok(mut track)) = (prepared, self.track.try_borrow_mut()) {
-            track.ready = Some(prepared);
+    /// A frame converted off the UI thread, drawn on the next pull. One
+    /// older than the shown frame or the one already waiting is dropped
+    /// (a pixel buffer goes back to the pool).
+    fn landed(&self, landed: Option<Landed>) {
+        let (Some(landed), Ok(mut track)) = (landed, self.track.try_borrow_mut()) else {
+            return;
+        };
+        let stale = track.shown_seq.is_some_and(|shown| landed.seq <= shown)
+            || track
+                .ready
+                .as_ref()
+                .is_some_and(|ready| landed.seq <= ready.seq);
+        if !stale {
+            track.ready = Some(landed);
         }
     }
 
-    fn take_ready(&self) -> Option<Prepared> {
+    fn take_ready(&self) -> Option<Landed> {
         self.track.try_borrow_mut().ok()?.ready.take()
     }
 
-    /// Make `prepared` the shown picture; the image from two pictures
-    /// back is retired.
-    fn show(&self, prepared: Prepared) -> Option<Picture> {
-        let (picture, image) = prepared.into_picture()?;
-        if let Ok(mut track) = self.track.try_borrow_mut() {
-            let track = &mut *track;
-            let older = match image {
-                Some(image) => {
-                    let shown = track.shown_image.replace(image);
-                    std::mem::replace(&mut track.previous_image, shown)
-                }
-                // A surface after images (a pool that failed earlier):
-                // the images go.
-                None => track.shown_image.take().or(track.previous_image.take()),
-            };
-            track.retired.extend(older);
+    /// Make `landed` the shown picture, unless a newer frame is shown
+    /// already; the image from two pictures back is retired.
+    fn show(&self, landed: Landed) -> Option<Picture> {
+        let mut track = self.track.try_borrow_mut().ok()?;
+        let track = &mut *track;
+        if track.shown_seq.is_some_and(|shown| landed.seq <= shown) {
+            return None;
         }
+        let (picture, image) = landed.prepared.into_picture()?;
+        track.shown_seq = Some(landed.seq);
+        let older = match image {
+            Some(image) => {
+                let shown = track.shown_image.replace(image);
+                std::mem::replace(&mut track.previous_image, shown)
+            }
+            // A surface after images (a pool that failed earlier): the
+            // images go.
+            None => {
+                track.held_surfaces.push_back(picture.clone());
+                while track.held_surfaces.len() > SURFACES_HELD {
+                    track.held_surfaces.pop_front();
+                }
+                track.shown_image.take().or(track.previous_image.take())
+            }
+        };
+        track.retired.extend(older);
         Some(picture)
     }
 
@@ -279,68 +361,105 @@ impl LiveCore {
             .unwrap_or_default()
     }
 
+    /// Every image the player holds, for its owner to drop from the
+    /// windows' atlases as the player goes.
+    fn take_all_images(&self) -> Vec<Arc<RenderImage>> {
+        let Ok(mut track) = self.track.try_borrow_mut() else {
+            return Vec::new();
+        };
+        let track = &mut *track;
+        std::mem::take(&mut track.retired)
+            .into_iter()
+            .chain(track.shown_image.take())
+            .chain(track.previous_image.take())
+            .chain(track.paused.take().map(|(_, _, image)| image))
+            .chain(track.paused_previous.take())
+            .collect()
+    }
+
     /// The view to redraw for a wake, after the off-screen policy:
-    /// `shown` is the player's count of paints in view.
+    /// `shown` is the player's count of paints in view. `None`: nothing
+    /// to redraw, and nothing to convert.
     fn wake_view(&self, shown: u64, now: Instant) -> Option<EntityId> {
+        let now = self.time(now);
         let view = self.view.get()?;
-        if self.tile {
-            let mut track = self.track.try_borrow_mut().ok()?;
-            if shown != track.seen {
-                track.seen = shown;
-                track.unseen = 0;
-                track.probed = None;
-            } else if track
-                .notified
-                .is_none_or(|at| now.saturating_duration_since(at) >= UNSEEN_GRACE)
-            {
+        let painted = self.painted.get();
+        let mut track = self.track.try_borrow_mut().ok()?;
+        if shown != track.seen {
+            // Painted in sight since the last wake.
+            track.seen = shown;
+            track.painted = painted;
+            track.unseen = 0;
+            track.probed = None;
+            track.unpainted_since = None;
+        } else if painted != track.painted {
+            // Painted, but out of sight.
+            track.painted = painted;
+            track.unseen = track.unseen.saturating_add(1);
+            track.unpainted_since = None;
+        } else {
+            // Not painted since the last wake: a slow window that has not
+            // drawn yet, or, past 500 ms, one that is not drawing
+            // (minimized, or behind another).
+            let since = *track.unpainted_since.get_or_insert(now);
+            if now.saturating_duration_since(since) >= UNSEEN_STALE {
                 track.unseen = track.unseen.saturating_add(1);
             }
-            if track.unseen >= UNSEEN_WAKES {
-                let due = track
-                    .probed
-                    .is_some_and(|at| now.saturating_duration_since(at) >= UNSEEN_PROBE);
-                if track.probed.is_some() && !due {
-                    return None;
-                }
-                let first = track.probed.is_none();
-                track.probed = Some(now);
-                if first {
-                    return None;
-                }
-            }
-            track.notified = Some(now);
         }
+        if track.unseen >= UNSEEN_WAKES {
+            let probe = if self.tile {
+                UNSEEN_PROBE
+            } else {
+                UNSEEN_PROBE_PICTURE
+            };
+            let quiet = match track.probed {
+                None => true,
+                Some(at) => now.saturating_duration_since(at) < probe,
+            };
+            if quiet {
+                track.probed.get_or_insert(now);
+                track.quiet = true;
+                return None;
+            }
+            track.probed = Some(now);
+        }
+        track.quiet = false;
         self.asks.set(self.asks.get().wrapping_add(1));
         Some(view)
     }
 
     /// The newest frame shrunk to 90 px and blurred (tdesktop's paused
-    /// tile), made again only for a new frame.
+    /// tile), made again for a new frame at most every 500 ms.
     fn paused_picture(&self) -> Option<Arc<RenderImage>> {
         let frame = self.sink.latest()?;
+        let now = self.time(Instant::now());
         let mut track = self.track.try_borrow_mut().ok()?;
-        if let Some((seq, image)) = track.paused.as_ref()
-            && *seq == frame.seq
+        if let Some((seq, made, image)) = track.paused.as_ref()
+            && (*seq == frame.seq || now.saturating_duration_since(*made) < PAUSED_REFRESH)
         {
             return Some(image.clone());
         }
         let raster = paused_raster(&frame.i420()?, frame.rotation)?;
         let image = live_picture::render_image(raster.bgra, raster.width, raster.height)?;
-        if let Some((_, old)) = track.paused.replace((frame.seq, image.clone())) {
-            track.retired.push(old);
+        if let Some((_, _, old)) = track.paused.replace((frame.seq, now, image.clone())) {
+            let older = track.paused_previous.replace(old);
+            track.retired.extend(older);
         }
         Some(image)
     }
 }
 
 impl Drop for LiveCore {
+    /// What the owner did not release ([`VideoPlayer::release_live`])
+    /// leaves the atlas at the next sweep.
     fn drop(&mut self) {
         let track = self.track.get_mut();
         let images = std::mem::take(&mut track.retired)
             .into_iter()
             .chain(track.shown_image.take())
             .chain(track.previous_image.take())
-            .chain(track.paused.take().map(|(_, image)| image));
+            .chain(track.paused.take().map(|(_, _, image)| image))
+            .chain(track.paused_previous.take());
         super::super::image_budget::retire_all(images);
     }
 }
@@ -376,12 +495,20 @@ impl Backend for LiveBackend {
     fn step_frame(&mut self, _forward: bool) {}
 
     fn take_picture(&mut self, _present: &Present) -> Pulled {
-        let prepared = self.core.take_ready().or_else(|| {
-            let (frame, target) = self.core.take_inline()?;
-            live_picture::convert(&frame, target)
+        let ready = self.core.take_ready();
+        let inline = self.core.take_inline().and_then(|(frame, target)| {
+            live_picture::convert(&frame, target).map(|prepared| Landed {
+                seq: frame.seq,
+                prepared,
+            })
         });
+        // The newer of the two; the other's buffer goes back to the pool.
+        let newest = match (ready, inline) {
+            (Some(ready), Some(inline)) if ready.seq > inline.seq => Some(ready),
+            (ready, inline) => inline.or(ready),
+        };
         Pulled {
-            picture: prepared.and_then(|prepared| self.core.show(prepared)),
+            picture: newest.and_then(|landed| self.core.show(landed)),
             item_secs: 0.0,
             display_secs: None,
         }
@@ -448,14 +575,68 @@ impl VideoPlayer {
         }
     }
 
+    /// The element painted the picture, in sight or not. Back in sight
+    /// while the feed was let go, the waker runs once (as for a frame) to
+    /// convert and draw the frame waiting in the feed.
+    pub(super) fn note_live_paint(&self, visible: bool) {
+        let Some(core) = self.0.live.as_ref() else {
+            return;
+        };
+        core.painted.set(core.painted.get().wrapping_add(1));
+        let back = visible
+            && core.track.try_borrow_mut().is_ok_and(|mut track| {
+                let quiet = std::mem::take(&mut track.quiet);
+                if quiet {
+                    track.unseen = 0;
+                    track.probed = None;
+                    track.unpainted_since = None;
+                }
+                quiet
+            });
+        if back {
+            core.sink.poke();
+        }
+    }
+
+    /// The player is going: drop its images from every window's atlas
+    /// now, rather than at the main window's next sweep.
+    pub(crate) fn release_live(&self, cx: &mut App) {
+        let Some(core) = self.0.live.as_ref() else {
+            return;
+        };
+        for image in core.take_all_images() {
+            cx.drop_image(image, None);
+        }
+    }
+
+    /// How many frames this player converted (tests).
+    #[cfg(all(test, feature = "demo-capture"))]
+    pub(crate) fn live_conversions(&self) -> u64 {
+        self.0
+            .live
+            .as_ref()
+            .map_or(0, |core| core.conversions.get())
+    }
+
+    /// Tests: read `at` as the time from now on.
+    #[cfg(all(test, feature = "demo-capture"))]
+    pub(crate) fn set_live_clock(&self, at: Instant) {
+        if let Some(core) = self.0.live.as_ref() {
+            core.clock.set(Some(at));
+        }
+    }
+
     pub(super) fn is_live(&self) -> bool {
         self.0.live.is_some()
     }
 }
 
-/// Arm the sink, wait for a frame (or a state change, or the end),
-/// convert a large frame off the UI thread, then redraw the view and drop
-/// retired images from every window. Ends with the feed or the player.
+/// Arm the sink and wait for a frame (or a state change, or the end).
+/// Then the off-screen policy decides first: a picture nobody sees is
+/// neither converted nor redrawn, and its frame waits in the feed. A
+/// large frame is converted off the UI thread, then the view redrawn and
+/// retired images dropped from every window. Ends with the feed or the
+/// player.
 fn spawn_waker(
     core: Weak<LiveCore>,
     player: Weak<super::PlayerCell>,
@@ -471,27 +652,31 @@ fn spawn_waker(
             if rx.await.is_err() {
                 return;
             }
-            let job = match core.upgrade() {
-                Some(core) => core.take_background(),
-                None => return,
+            let (view, job) = {
+                let (Some(live), Some(player)) = (core.upgrade(), player.upgrade()) else {
+                    return;
+                };
+                let shown = VideoPlayer(player).shown_count();
+                let view = live.wake_view(shown, Instant::now());
+                let job = view.and_then(|_| live.take_background());
+                (view, job)
             };
             if let Some((frame, target)) = job {
+                let seq = frame.seq;
                 let prepared = cx
                     .background_spawn(async move { live_picture::convert(&frame, target) })
                     .await;
                 match core.upgrade() {
-                    Some(core) => core.landed(prepared),
+                    Some(live) => live.landed(prepared.map(|prepared| Landed { seq, prepared })),
                     None => return,
                 }
             }
-            let (Some(core), Some(player)) = (core.upgrade(), player.upgrade()) else {
+            let Some(live) = core.upgrade() else {
                 return;
             };
-            let shown = VideoPlayer(player).shown_count();
-            let view = core.wake_view(shown, Instant::now());
-            let retired = core.take_retired();
-            let ended = core.sink.snapshot().end.is_some();
-            drop(core);
+            let retired = live.take_retired();
+            let ended = live.sink.snapshot().end.is_some();
+            drop(live);
             cx.update(|cx| {
                 for image in retired {
                     cx.drop_image(image, None);

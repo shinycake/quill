@@ -150,8 +150,10 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.end_live_story();
         }
-        // The player's images leave the atlas with it.
-        self.stories.live.player = None;
+        // The player's images leave every window's atlas with it.
+        if let Some(player) = self.stories.live.player.take() {
+            player.release_live(cx);
+        }
         // The emoji panel the comment field opened goes with it.
         if self.stories.reply_open {
             self.end_story_reply(cx);

@@ -202,7 +202,8 @@ fn measure_1080p_frame_costs() {
         ));
     });
     let rgba = i420_to_rgba(w, h, &ntgcalls, NTG_VIDEO_ROTATION_VIDEO_ROTATION_0).expect("rgba");
-    // UI side, before (`stream_picture::frame_image`): clone and swap to BGRA.
+    // UI side, before (the former `stream_picture::frame_image`, gone with
+    // the live backend): clone and swap to BGRA.
     let old_ui = median_us(runs, || {
         let mut bgra = black_box(&rgba).clone();
         for pixel in bgra.as_chunks_mut::<4>().0 {

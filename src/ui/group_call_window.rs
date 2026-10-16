@@ -79,9 +79,13 @@ impl QuillApp {
         let wanted = call.filter(|(id, _)| self.group_call.window_closed_by_user != Some(*id));
         // Tile players of a call that is no longer shown go.
         let shown = wanted.map(|(id, _)| id);
-        self.group_call
-            .players
-            .retain(|key, _| key.call_id().is_some() && key.call_id() == shown);
+        self.group_call.players.retain(|key, player| {
+            let keep = key.call_id().is_some() && key.call_id() == shown;
+            if !keep {
+                player.release_live(cx);
+            }
+            keep
+        });
         if wanted.is_none_or(|(_, stream)| !stream) {
             self.group_call.stream.clear(cx);
         }

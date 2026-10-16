@@ -139,7 +139,9 @@ impl StreamWindow {
         if let Some(image) = self.photo.take().and_then(|(_, image)| image) {
             cx.drop_image(image, None);
         }
-        self.player = None;
+        if let Some(player) = self.player.take() {
+            player.release_live(cx);
+        }
         self.photo_task = None;
         self.demo_feed = None;
         self.overlay = None;

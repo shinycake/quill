@@ -40,7 +40,7 @@ mod tests;
 pub(crate) use backend_live::STALL_AFTER;
 pub(crate) use element::{WidthReport, video_frame};
 #[cfg(all(test, feature = "demo-capture"))]
-pub(crate) use live_picture::take_made_images;
+pub(crate) use live_picture::{bgra_only, take_made_images};
 pub(crate) use transport::{PlayState, Transport};
 
 use gpui_kit::*;

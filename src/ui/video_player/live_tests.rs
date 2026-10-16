@@ -219,7 +219,7 @@ fn large_frames_wait_for_the_background_and_small_ones_convert_at_once() {
     // ...but for the waker task, which lands it for the next pull.
     let (big, target) = core.take_background().expect("a background job");
     assert_eq!(big.width, 1280);
-    core.landed(live_picture::convert(&big, target));
+    core.landed(landed(&big, target));
     assert!(backend.take_picture(&present()).picture.is_some());
     // A small tile frame converts during the pull on macOS (NV12);
     // elsewhere (BGRA) it waits for the background too.
@@ -231,46 +231,115 @@ fn large_frames_wait_for_the_background_and_small_ones_convert_at_once() {
         assert!(backend.take_picture(&present()).picture.is_none());
         assert!(core.take_background().is_some());
     }
+    assert_eq!(core.conversions.get(), 2);
+}
+
+fn landed(frame: &LiveFrame, target: Target) -> Option<Landed> {
+    let prepared = live_picture::convert(frame, target)?;
+    Some(Landed {
+        seq: frame.seq,
+        prepared,
+    })
+}
+
+fn bgra(seq: u64) -> Landed {
+    Landed {
+        seq,
+        prepared: Prepared::Bgra {
+            bgra: vec![seq as u8; 2 * 2 * 4],
+            width: 2,
+            height: 2,
+        },
+    }
 }
 
 #[test]
 fn images_from_two_pictures_back_are_retired() {
     let (core, _source) = feed(false);
-    let image = |n: u8| Prepared::Bgra {
-        bgra: vec![n; 2 * 2 * 4],
-        width: 2,
-        height: 2,
-    };
-    for n in 0..4 {
-        core.show(image(n));
+    for seq in 1..=4 {
+        assert!(core.show(bgra(seq)).is_some());
     }
     // Shown and previous stay; the two before them leave.
     assert_eq!(core.take_retired().len(), 2);
     assert!(core.take_retired().is_empty());
+    // The owner releases the rest as the player goes.
+    assert_eq!(core.take_all_images().len(), 2);
 }
 
 #[test]
-fn an_off_screen_tile_stops_redrawing_after_two_wakes() {
-    let (core, _source) = feed(true);
-    let view = EntityId::from(7u64);
+fn an_older_picture_never_replaces_a_newer_one() {
+    let (core, _source) = feed(false);
+    // A 1080p frame converts in the background while the sender drops
+    // to a smaller size, which converts at once and is drawn first.
+    assert!(core.show(bgra(5)).is_some());
+    core.landed(Some(bgra(4)));
+    assert!(core.take_ready().is_none(), "the late picture is dropped");
+    assert!(core.show(bgra(3)).is_none(), "nor shown");
+    // A newer one lands; an older one landing after it does not win.
+    core.landed(Some(bgra(7)));
+    core.landed(Some(bgra(6)));
+    assert_eq!(core.take_ready().map(|ready| ready.seq), Some(7));
+}
+
+#[test]
+fn the_pull_shows_the_newer_of_a_landed_and_an_inline_frame() {
+    let (core, source) = inline_feed();
+    let mut backend = LiveBackend { core: core.clone() };
     let t0 = Instant::now();
-    // Not drawn yet: nothing to redraw.
-    assert_eq!(core.wake_view(0, t0), None);
+    core.landed(Some(bgra(1)));
+    source.push(frame(2, 64, 36, t0));
+    let picture = backend.take_picture(&present()).picture.expect("drawn");
+    assert_eq!(picture.size(), (64, 36), "frame 2, not the landed 1");
+    assert!(backend.take_picture(&present()).picture.is_none());
+}
+
+#[test]
+fn a_size_change_mid_stream_shows_the_new_size() {
+    let (core, source) = inline_feed();
+    let mut backend = LiveBackend { core: core.clone() };
+    let t0 = Instant::now();
+    source.push(frame(1, 64, 36, t0));
+    let first = backend.take_picture(&present()).picture.expect("first");
+    assert_eq!(first.size(), (64, 36));
+    source.push(frame(2, 128, 72, t0 + 33 * MS));
+    let second = backend.take_picture(&present()).picture.expect("second");
+    assert_eq!(second.size(), (128, 72));
+    source.push(frame(3, 64, 36, t0 + 66 * MS));
+    let third = backend.take_picture(&present()).picture.expect("third");
+    assert_eq!(third.size(), (64, 36));
+}
+
+/// A core drawn in a view.
+fn watched(tile: bool) -> (Rc<LiveCore>, LiveSource, EntityId) {
+    let (core, source) = feed(tile);
+    let view = EntityId::from(7u64);
     core.view.set(Some(view));
+    (core, source, view)
+}
+
+fn paint(core: &LiveCore) {
+    core.painted.set(core.painted.get() + 1);
+}
+
+#[test]
+fn a_tile_painted_out_of_sight_stops_after_two_wakes() {
+    let (core, _source, view) = watched(true);
+    let t0 = Instant::now();
     // Painted in view (the count grows): every wake redraws.
     for (shown, at) in [(1, 0), (2, 33), (3, 66)] {
+        paint(&core);
         assert_eq!(core.wake_view(shown, t0 + at * MS), Some(view));
     }
-    // Off screen: one more redraw, then none...
-    let mut at = t0 + 200 * MS;
-    assert_eq!(core.wake_view(3, at), Some(view));
-    at += 200 * MS;
-    assert_eq!(core.wake_view(3, at), None);
-    at += 200 * MS;
-    assert_eq!(core.wake_view(3, at), None);
+    // Painted off screen: one more redraw, then none...
+    paint(&core);
+    assert_eq!(core.wake_view(3, t0 + 100 * MS), Some(view));
+    paint(&core);
+    assert_eq!(core.wake_view(3, t0 + 133 * MS), None);
+    assert!(core.take_inline().is_none(), "nothing converts meanwhile");
+    assert_eq!(core.wake_view(3, t0 + 166 * MS), None);
     let asks = core.asks.get();
     // ...but a look once a second.
-    at += UNSEEN_PROBE;
+    let at = t0 + 133 * MS + UNSEEN_PROBE;
     assert_eq!(core.wake_view(3, at), Some(view));
     assert_eq!(core.asks.get(), asks + 1);
     // Back in view: every frame again.
@@ -279,40 +348,75 @@ fn an_off_screen_tile_stops_redrawing_after_two_wakes() {
 }
 
 #[test]
-fn wakes_close_together_do_not_count_as_unseen() {
-    let (core, _source) = feed(true);
-    let view = EntityId::from(7u64);
-    core.view.set(Some(view));
+fn a_window_that_stopped_drawing_lets_its_pictures_go() {
+    let (core, _source, view) = watched(false);
     let t0 = Instant::now();
     assert_eq!(core.wake_view(1, t0), Some(view));
-    // Frames faster than the window draws: still redrawn.
-    for at in [5, 10, 15, 20] {
-        assert_eq!(core.wake_view(1, t0 + at * MS), Some(view));
+    // No paint at all (minimized): redrawn for half a second...
+    for at in [33, 66, 400, 532] {
+        assert_eq!(core.wake_view(1, t0 + at * MS), Some(view), "{at} ms");
     }
+    // ...then two wakes past it count, and it goes quiet...
+    assert_eq!(core.wake_view(1, t0 + 566 * MS), Some(view));
+    assert_eq!(core.wake_view(1, t0 + 600 * MS), None);
+    assert_eq!(core.wake_view(1, t0 + 700 * MS), None);
+    // ...looking four times a second, as a stream or a story.
+    assert_eq!(core.wake_view(1, t0 + 850 * MS), Some(view));
 }
 
 #[test]
-fn a_stream_window_is_always_redrawn() {
-    let (core, _source) = feed(false);
-    let view = EntityId::from(9u64);
-    core.view.set(Some(view));
+fn a_slow_window_keeps_its_pictures() {
+    let (core, _source, view) = watched(true);
     let t0 = Instant::now();
-    for n in 0..5 {
-        assert_eq!(core.wake_view(0, t0 + n * 500 * MS), Some(view));
+    // 30 fps frames, the window drawing (in sight) every 150 ms.
+    let mut shown = 0;
+    for n in 0..60u32 {
+        if n % 5 == 0 {
+            shown += 1;
+            paint(&core);
+        }
+        assert_eq!(
+            core.wake_view(shown, t0 + n * 33 * MS),
+            Some(view),
+            "wake {n}"
+        );
     }
 }
 
 #[test]
-fn the_paused_picture_is_made_once_per_frame() {
+fn a_stream_window_drawn_in_sight_is_always_redrawn() {
+    let (core, _source, view) = watched(false);
+    let t0 = Instant::now();
+    for n in 0..5u32 {
+        paint(&core);
+        assert_eq!(
+            core.wake_view(u64::from(n) + 1, t0 + n * 500 * MS),
+            Some(view)
+        );
+    }
+}
+
+#[test]
+fn the_paused_picture_is_made_at_most_every_half_second() {
     let (core, source) = feed(true);
     assert!(core.paused_picture().is_none());
     let t0 = Instant::now();
+    core.clock.set(Some(t0));
     source.push(frame(1, 320, 180, t0));
     let first = core.paused_picture().expect("picture");
     let size = first.size(0);
     assert_eq!((size.width.0, size.height.0), (90, 51));
     assert!(Arc::ptr_eq(&first, &core.paused_picture().expect("same")));
+    // A new frame within half a second: the same picture.
     source.push(frame(2, 320, 180, t0));
-    assert!(!Arc::ptr_eq(&first, &core.paused_picture().expect("new")));
-    assert_eq!(core.take_retired().len(), 1);
+    assert!(Arc::ptr_eq(&first, &core.paused_picture().expect("held")));
+    // Past it: a new one; the old one stays as the previous.
+    core.clock.set(Some(t0 + PAUSED_REFRESH));
+    let second = core.paused_picture().expect("new");
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert!(core.take_retired().is_empty());
+    source.push(frame(3, 320, 180, t0));
+    core.clock.set(Some(t0 + 2 * PAUSED_REFRESH));
+    assert!(core.paused_picture().is_some());
+    assert_eq!(core.take_retired().len(), 1, "the first goes");
 }

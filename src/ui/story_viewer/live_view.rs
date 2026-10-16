@@ -125,6 +125,9 @@ impl QuillApp {
             _ => false,
         };
         if !same {
+            if let Some(old) = live.player.take() {
+                old.release_live(cx);
+            }
             live.player =
                 sink.map(|sink| VideoPlayer::live(sink, Purpose::Live { tile: false }, cx));
         }
