@@ -5,7 +5,6 @@ use super::*;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 
 pub(crate) struct GroupCallUi {
@@ -52,10 +51,10 @@ pub(crate) struct GroupCallUi {
     /// at.
     pub(super) level_anim: quill::calls::audio_level::LevelAnimation,
     pub(super) level_seen: f32,
-    /// Phase C2g: group-call video tiles cached by
-    /// `(group_call_id, user_id, is_screen)` → `(frame seq, image)`,
-    /// rebuilt only when that slot's frame sequence changes.
-    pub(super) video_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
+    /// The video tiles' live players, by feed (`(call, user, screen)`,
+    /// or your camera), for the tracked call only.
+    pub(super) players:
+        HashMap<quill::calls::live_video::LiveKey, super::video_player::VideoPlayer>,
     /// The live stream layout (RTMP): picture, placeholder and controls.
     pub(super) stream: super::group_call_stream_layout::StreamWindow,
     /// The "Stream with other apps" box (`dialogs/rtmp_stream.rs`).
@@ -90,7 +89,7 @@ impl GroupCallUi {
                 quill::calls::audio_level::LEVEL_ANIMATION_MS,
             ),
             level_seen: 0.0,
-            video_images: HashMap::new(),
+            players: HashMap::new(),
             stream: Default::default(),
             rtmp_start: Default::default(),
         }

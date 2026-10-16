@@ -6,6 +6,8 @@
 //!   are GPU pixel buffers drawn through GPUI's `surface`.
 //! - Linux and Windows (and macOS with `QUILL_VIDEO_BACKEND=ffmpeg`): the
 //!   bundled FFmpeg shim ([`backend_ffmpeg`]); pictures are BGRA images.
+//! - Live feeds (streams, live stories, video chat tracks): frames pushed
+//!   by the call engine ([`backend_live`], [`VideoPlayer::live`]).
 //!
 //! Consumers hold a [`VideoPlayer`] and draw [`element::video_frame`] from
 //! it. The element pulls the picture due when its frame will be on screen
@@ -15,10 +17,12 @@
 #![deny(clippy::indexing_slicing)]
 
 mod backend_ffmpeg;
+mod backend_live;
 #[cfg(feature = "demo-capture")]
 mod backend_still;
 pub(crate) mod controls;
 mod element;
+mod live_picture;
 pub(super) mod pacing;
 mod rotate;
 mod transport;
@@ -27,9 +31,18 @@ mod transport;
 mod backend_avplayer;
 
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod live_view_tests;
+#[cfg(test)]
 mod tests;
 
-pub(crate) use element::video_frame;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) use backend_live::STALL_AFTER;
+pub(crate) use element::{WidthReport, video_frame};
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) use live_picture::{bgra_only, take_made_images};
 pub(crate) use transport::{PlayState, Transport};
 
 use gpui_kit::*;
@@ -39,7 +52,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use transport::{BackendStatus, Command, PlayStart, TransportMachine};
+use transport::{BackendStatus, Command, LiveStatus, PlayStart, TransportMachine};
 
 /// What a clip is opened for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +70,10 @@ pub(crate) enum Purpose {
     Inline { max_edge: u32 },
     /// A story in the story viewer: full size, with sound.
     Story,
+    /// A live feed ([`VideoPlayer::live`]): a stream or live story
+    /// (`tile: false`), or a video chat track (`tile: true`, which stops
+    /// redrawing while it is off screen).
+    Live { tile: bool },
 }
 
 /// A picture to draw.
@@ -198,6 +215,12 @@ trait Backend {
     /// display's frame interval).
     fn next_due(&self, now: Instant, interval: Duration) -> Option<Instant>;
     fn error(&self) -> Option<PlayerError>;
+    /// A live feed's status, which the transport takes instead of
+    /// [`Self::status`] (`None`: a file).
+    fn live_status(&mut self, now: Instant) -> Option<LiveStatus> {
+        let _ = now;
+        None
+    }
 }
 
 /// The player. Cheap to clone (a shared handle); the clip stops when the
@@ -228,6 +251,10 @@ struct PlayerCell {
     /// How many times the picture was painted inside the visible area
     /// (the inline players' off-screen policy compares it across a pass).
     shown: Cell<u64>,
+    /// A live player's feed state (`backend_live`).
+    live: Option<Rc<backend_live::LiveCore>>,
+    /// The width last reported through `video_frame(..).on_width`.
+    reported_width: Rc<Cell<f32>>,
 }
 
 /// Shared with `frame_clock::request_video_frame`.
@@ -291,10 +318,36 @@ impl VideoPlayer {
 
     /// A player over an opened backend (no open poll: `pull` polls too).
     fn from_backend(backend: Box<dyn Backend>, duration_hint: Option<f64>) -> Self {
+        let now = Instant::now();
+        Self::assemble(
+            backend,
+            TransportMachine::new(duration_hint, now),
+            Some(now),
+            None,
+        )
+    }
+
+    /// A player over a live feed's backend: nothing is awaited (the first
+    /// frame comes with the feed's waker).
+    fn from_live(backend: Box<dyn Backend>, core: Rc<backend_live::LiveCore>) -> Self {
+        Self::assemble(
+            backend,
+            TransportMachine::live(Instant::now()),
+            None,
+            Some(core),
+        )
+    }
+
+    fn assemble(
+        backend: Box<dyn Backend>,
+        machine: TransportMachine,
+        awaiting: Option<Instant>,
+        live: Option<Rc<backend_live::LiveCore>>,
+    ) -> Self {
         Self(Rc::new(PlayerCell {
             inner: RefCell::new(Inner {
                 id: next_player_id(),
-                machine: TransportMachine::new(duration_hint, Instant::now()),
+                machine,
                 estimator: PresentEstimator::default(),
                 raw: None,
                 shown: None,
@@ -303,7 +356,7 @@ impl VideoPlayer {
                 mirrored: false,
                 error: None,
                 asleep: false,
-                awaiting: Some(Instant::now()),
+                awaiting,
                 watchers: Vec::new(),
                 watched: None,
                 _poll: None,
@@ -311,6 +364,8 @@ impl VideoPlayer {
             backend: Cell::new(Some(backend)),
             requested: Rc::new(Cell::new(None)),
             shown: Cell::new(0),
+            live,
+            reported_width: Rc::new(Cell::new(-1.0)),
         }))
     }
 
@@ -514,6 +569,11 @@ impl VideoPlayer {
         Rc::ptr_eq(&self.0, &other.0)
     }
 
+    /// The width last reported to the element's `on_width`.
+    pub(super) fn reported_width(&self) -> Rc<Cell<f32>> {
+        self.0.reported_width.clone()
+    }
+
     /// The size of the picture on screen, once there is one.
     pub(crate) fn picture_size(&self) -> Option<(u32, u32)> {
         self.current_picture().map(|picture| picture.size())
@@ -556,9 +616,9 @@ impl VideoPlayer {
     /// Poll the backend and fold its status into the transport; carry out
     /// what that asks of the backend (start once open, loop at the end).
     fn update_status(&self, now: Instant) {
-        let Some(status) = self.with_backend(|backend| {
-            let status = backend.status();
-            (status, backend.error())
+        let Some(status) = self.with_backend(|backend| match backend.live_status(now) {
+            Some(live) => (Polled::Live(live), backend.error()),
+            None => (Polled::File(backend.status()), backend.error()),
         }) else {
             return;
         };
@@ -569,6 +629,13 @@ impl VideoPlayer {
                 inner.error = Some(error);
                 return None;
             }
+            let status = match status {
+                Polled::File(status) => status,
+                Polled::Live(live) => {
+                    inner.machine.observe_live(&live, now);
+                    return None;
+                }
+            };
             inner
                 .machine
                 .observe(&status, now)
@@ -708,6 +775,12 @@ impl VideoPlayer {
         })
         .unwrap_or_default()
     }
+}
+
+/// What a backend poll reported.
+enum Polled {
+    File(BackendStatus),
+    Live(LiveStatus),
 }
 
 /// What the video element needs to ask for the next frame.

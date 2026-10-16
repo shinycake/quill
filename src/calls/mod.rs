@@ -7,6 +7,7 @@ pub mod engine;
 pub mod group_call_create;
 #[cfg(feature = "ui")]
 pub mod level_tap;
+pub mod live_video;
 pub mod proxy;
 pub mod ptt;
 pub mod ptt_global;

@@ -209,7 +209,7 @@ fn new_pixel_buffer(
 
 /// Lock a pixel buffer's base address; `false` when CoreVideo refuses.
 #[cfg(target_os = "macos")]
-fn lock(
+pub(super) fn lock(
     buffer: &objc2_core_video::CVPixelBuffer,
     flags: objc2_core_video::CVPixelBufferLockFlags,
 ) -> bool {
@@ -221,7 +221,7 @@ fn lock(
 
 /// Undo a successful [`lock`] with the same flags.
 #[cfg(target_os = "macos")]
-fn unlock(
+pub(super) fn unlock(
     buffer: &objc2_core_video::CVPixelBuffer,
     flags: objc2_core_video::CVPixelBufferLockFlags,
 ) {

@@ -45,7 +45,8 @@ fn options(purpose: Purpose) -> OpenOptions {
             ..OpenOptions::viewer()
         },
         Purpose::Inline { max_edge } => OpenOptions::inline(max_edge.max(16)),
-        Purpose::Story => OpenOptions::viewer(),
+        // Live players never open files.
+        Purpose::Story | Purpose::Live { .. } => OpenOptions::viewer(),
     }
 }
 

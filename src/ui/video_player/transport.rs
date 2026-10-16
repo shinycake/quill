@@ -50,6 +50,9 @@ pub(crate) struct Transport {
     pub(crate) volume: f32,
     /// The clip has a soundtrack that is playing out.
     pub(crate) has_sound: bool,
+    /// A live feed (a stream, a live story, a video chat track): no
+    /// position, duration or rate, nothing to seek or pause.
+    pub(crate) live: bool,
 }
 
 impl Transport {
@@ -80,6 +83,20 @@ pub(crate) struct BackendStatus {
     pub(crate) at_end: bool,
     pub(crate) buffered: Vec<Range<f64>>,
     pub(crate) has_sound: bool,
+}
+
+/// What a live feed reported when it was polled
+/// (`backend_live.rs`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LiveStatus {
+    /// A frame has arrived (the last picture is kept from then on).
+    pub(crate) has_frame: bool,
+    /// No frame for the stall time while the sender is active.
+    pub(crate) stalled: bool,
+    /// What the sender's video is doing, once known.
+    pub(crate) sender: Option<quill::calls::live_video::LiveState>,
+    /// The feed ended: `Some(true)` when the engine failed.
+    pub(crate) ended: Option<bool>,
 }
 
 /// What the player must do to the backend after a status update.
@@ -116,6 +133,8 @@ pub(crate) struct TransportMachine {
     rate: f64,
     volume: f32,
     has_sound: bool,
+    /// A live feed: driven by [`Self::observe_live`] only.
+    live: bool,
 }
 
 impl TransportMachine {
@@ -133,6 +152,17 @@ impl TransportMachine {
             rate: 1.0,
             volume: 1.0,
             has_sound: false,
+            live: false,
+        }
+    }
+
+    /// A machine for a live feed: Opening until its first frame; play,
+    /// pause, seek and rate do nothing.
+    pub(crate) fn live(now: Instant) -> Self {
+        Self {
+            live: true,
+            wants_play: true,
+            ..Self::new(None, now)
         }
     }
 
@@ -160,7 +190,8 @@ impl TransportMachine {
     /// The position at `now`, extrapolated from the last pull while the
     /// clock runs, never past the end.
     pub(crate) fn position_at(&self, now: Instant) -> f64 {
-        let running = self.state == PlayState::Playing;
+        // A live feed has no position.
+        let running = self.state == PlayState::Playing && !self.live;
         let mut position = self.position;
         if running {
             position += now.saturating_duration_since(self.pulled_at).as_secs_f64() * self.rate;
@@ -180,6 +211,7 @@ impl TransportMachine {
             rate: self.rate,
             volume: self.volume,
             has_sound: self.has_sound,
+            live: self.live,
         }
     }
 
@@ -187,6 +219,9 @@ impl TransportMachine {
     /// (it is open), and whether it must first go back to the start (it
     /// had ended).
     pub(crate) fn play(&mut self, now: Instant) -> PlayStart {
+        if self.live {
+            return PlayStart::Already;
+        }
         self.wants_play = true;
         match self.state {
             PlayState::Opening | PlayState::Failed => PlayStart::Later,
@@ -206,6 +241,9 @@ impl TransportMachine {
     }
 
     pub(crate) fn pause(&mut self, now: Instant) {
+        if self.live {
+            return;
+        }
         self.wants_play = false;
         if self.state.animates() {
             self.position = self.position_at(now);
@@ -230,6 +268,9 @@ impl TransportMachine {
     /// Seek to `secs` (clamped to the clip). Playing stays playing; an
     /// ended clip becomes paused there.
     pub(crate) fn seek(&mut self, secs: f64, now: Instant) -> f64 {
+        if self.live {
+            return 0.0;
+        }
         let secs = if secs.is_finite() { secs } else { 0.0 };
         let target = match self.duration() {
             Some(total) => secs.clamp(0.0, total),
@@ -246,6 +287,9 @@ impl TransportMachine {
 
     /// A new rate keeps the position where it is.
     pub(crate) fn set_rate(&mut self, rate: f64, now: Instant) -> f64 {
+        if self.live {
+            return 1.0;
+        }
         self.position = self.position_at(now);
         self.pulled_at = now;
         self.rate = if rate.is_finite() && rate > 0.0 {
@@ -339,6 +383,30 @@ impl TransportMachine {
             _ => {}
         }
         None
+    }
+}
+
+impl TransportMachine {
+    /// Take in what a live feed reported: Opening until the first frame,
+    /// Playing while frames come, Buffering on a stall (the picture
+    /// stays), Paused while the sender paused, Ready while the sender has
+    /// no video, Ended once the feed ended, Failed on an engine error.
+    pub(crate) fn observe_live(&mut self, status: &LiveStatus, now: Instant) {
+        use quill::calls::live_video::LiveState;
+        if self.state == PlayState::Failed {
+            return;
+        }
+        self.pulled_at = now;
+        self.state = match (status.ended, status.sender) {
+            (Some(true), _) => PlayState::Failed,
+            (Some(false), _) => PlayState::Ended,
+            (None, Some(LiveState::Paused)) => PlayState::Paused,
+            (None, Some(LiveState::Inactive)) => PlayState::Ready,
+            (None, _) if !status.has_frame => PlayState::Opening,
+            (None, _) if status.stalled => PlayState::Buffering,
+            (None, _) => PlayState::Playing,
+        };
+        self.wants_play = !matches!(self.state, PlayState::Ended | PlayState::Failed);
     }
 }
 

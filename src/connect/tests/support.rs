@@ -420,6 +420,11 @@ pub(crate) fn call_state_for_rejoin(driver: &mut ConnectDriver<Arc<RecordingSend
         .reconnecting = true;
 }
 
+/// A participant's camera on (`video_info`), for `group_participant_json`.
+pub(crate) const CAMERA_INFO: &str = r#"{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[111,112]}],"endpoint_id":"ep-42","is_paused":false}"#;
+/// A participant's screen on (`screen_sharing_video_info`).
+pub(crate) const SCREEN_INFO: &str = r#"{"@type":"groupCallParticipantVideoInfo","source_groups":[{"@type":"groupCallVideoSourceGroup","semantics":"SIM","source_ids":[222]}],"endpoint_id":"ep-42-screen","is_paused":false}"#;
+
 pub(crate) fn group_participant_json(
     user_id: i64,
     current: bool,

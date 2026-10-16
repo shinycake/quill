@@ -404,7 +404,6 @@ fn mock_frame_callback_plumbing() {
         height: 2,
         rgba: vec![1, 2, 3, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         is_local: true,
-        participant_user_id: None,
         is_screen: false,
     };
     engine.emit_video_frame(77, frame.clone());

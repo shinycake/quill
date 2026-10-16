@@ -34,7 +34,6 @@ fn frame_slots_latest_wins() {
         height: 2,
         rgba: vec![0u8; 16],
         is_local,
-        participant_user_id: None,
         is_screen: false,
     };
     handle.emit_video_frame(77, frame(false));
@@ -56,7 +55,6 @@ fn p2p_screen_frame_routes_to_own_slot() {
         height: 2,
         rgba: vec![0u8; 16],
         is_local: false,
-        participant_user_id: None,
         is_screen: screen,
     };
     handle.emit_video_frame(77, frame(false));
@@ -88,7 +86,6 @@ fn remote_screen_state_inactive_clears_screen_slot() {
         height: 2,
         rgba: vec![0u8; 16],
         is_local: false,
-        participant_user_id: None,
         is_screen: screen,
     };
     let pump = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
@@ -382,7 +379,6 @@ fn frame_slots_cleared_on_call_end() {
             height: 2,
             rgba: vec![0u8; 16],
             is_local: false,
-            participant_user_id: None,
             is_screen: false,
         },
     );

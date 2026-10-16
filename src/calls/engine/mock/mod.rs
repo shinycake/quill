@@ -56,7 +56,7 @@ struct MockInner {
     /// Test-only: the next `connect_group_call` fails with this code.
     fail_group_connect: Option<i32>,
     engine_event_hook: Option<EngineEventCallback>,
-    stream_frame_hook: Option<StreamFrameCallback>,
+    live_frame_hook: Option<LiveFrameCallback>,
     stream_qualities: Vec<(i64, StreamQuality)>,
     group_playbacks: Vec<(i32, Option<String>, bool)>,
     broadcast_timestamps: Vec<(i64, i64)>,
@@ -221,15 +221,16 @@ impl MockEngine {
         }
     }
 
-    /// Deliver a synthetic stream picture for `chat_id`.
-    pub fn emit_stream_frame(&self, chat_id: i64, mut frame: VideoFrame) {
+    /// Deliver a synthetic group-call or stream picture to `key`'s feed,
+    /// assigning the next sequence number.
+    pub fn emit_live_frame(&self, key: LiveKey, mut frame: LiveFrame) {
         let mut inner = self.inner.lock_or_recover();
         frame.seq = inner.frame_seq;
         inner.frame_seq += 1;
-        let hook = inner.stream_frame_hook.clone();
+        let hook = inner.live_frame_hook.clone();
         drop(inner);
         if let Some(hook) = hook {
-            hook(chat_id, frame);
+            hook(key, frame);
         }
     }
 
@@ -517,8 +518,8 @@ impl CallEngine for MockEngine {
         self.inner.lock_or_recover().engine_event_hook = Some(callback);
     }
 
-    fn set_stream_frame_callback(&mut self, callback: StreamFrameCallback) {
-        self.inner.lock_or_recover().stream_frame_hook = Some(callback);
+    fn set_live_frame_callback(&mut self, callback: LiveFrameCallback) {
+        self.inner.lock_or_recover().live_frame_hook = Some(callback);
     }
 
     fn group_call_mode(&self, chat_id: i64) -> Option<GroupCallMode> {

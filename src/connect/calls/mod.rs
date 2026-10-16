@@ -63,23 +63,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.install_remote_state_hooks(engine.as_mut());
         self.install_stream_hooks(engine.as_mut());
         let video_frame_slots = self.video_frame_slots.clone();
-        let group_video_frame_slots = self.group_video_frame_slots.clone();
         engine.set_video_frame_callback(Arc::new(move |call_id, frame| {
-            // Phase C2g: group-call frames carry the participant they were
-            // subscribed for; they live in their own slots so the 1:1
-            // (call id, is_local) keys stay untouched.
-            if let Some(user_id) = frame.participant_user_id {
-                group_video_frame_slots
-                    .lock_or_recover()
-                    .insert((call_id, user_id, frame.is_screen), Arc::new(frame));
-            } else {
-                // Phase C2j: the screen share gets its own slot keyed on
-                // `is_screen` so it never clobbers the peer camera frame.
-                video_frame_slots
-                    .lock_or_recover()
-                    .insert((call_id, frame.is_local, frame.is_screen), frame);
-            }
+            // 1:1 calls only. Phase C2j: the screen share gets its own slot
+            // keyed on `is_screen` so it never clobbers the peer camera
+            // frame.
+            video_frame_slots
+                .lock_or_recover()
+                .insert((call_id, frame.is_local, frame.is_screen), frame);
         }));
+        // Group calls and streams: planes into their live feeds.
+        engine.set_live_frame_callback(crate::connect::group_calls::live_feeds::live_frame_hook(
+            self.live_feeds.clone(),
+        ));
         self.call_engine = Some(engine);
     }
 
@@ -241,24 +236,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             .lock_or_recover()
             .get(&(call_id, false, true))
             .cloned()
-    }
-
-    /// Phase C2g: newest decoded group video frame for a participant;
-    /// `screen` selects the screen-share stream (`true`) or the camera
-    /// (`false`). `None` when no frame has arrived yet.
-    pub fn latest_group_video_frame(
-        &self,
-        group_call_id: i32,
-        user_id: i64,
-        screen: bool,
-    ) -> Option<VideoFrame> {
-        // The `Arc` is taken under the lock; the picture is copied after.
-        let frame = self
-            .group_video_frame_slots
-            .lock_or_recover()
-            .get(&(group_call_id, user_id, screen))
-            .cloned();
-        frame.map(Arc::unwrap_or_clone)
     }
 
     /// Phase C2e: selected camera device id; `None` is the engine default.

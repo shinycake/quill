@@ -27,7 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_capture: Default::default(),
             call_screen: Default::default(),
             video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
-            group_video_frame_slots: Arc::new(Mutex::new(HashMap::new())),
+            live_feeds: Arc::new(Mutex::new(HashMap::new())),
             group_camera_state: HashMap::new(),
             group_call_streams: Default::default(),
             selected_camera: None,

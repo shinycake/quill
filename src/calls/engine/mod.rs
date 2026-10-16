@@ -17,6 +17,9 @@ pub use stream::*;
 pub use stream_feeder::*;
 pub use types::*;
 
+/// Group-call and stream frames go to live feeds as planes.
+use crate::calls::live_video::{LiveFrame, LiveKey, LiveRotation};
+
 pub(crate) use native::{
     append_devices, audio_description, broadcast_part_trampoline, broadcast_timestamp_trampoline,
     c_string_pointer_array, c_strings, connection_trampoline, frames_trampoline, native_input,

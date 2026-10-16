@@ -227,7 +227,7 @@ block2 = { version = "0.6", optional = true }
 objc2-core-media = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CMTime", "CMTimeRange", "CMSampleBuffer", "objc2-core-video"] }
 # GPUI's `surface` takes a `CFRetained<CVPixelBuffer>`; `CVHostTime` paces
 # AVPlayer pulls on Mach host ticks.
-objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2", "CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "CVHostTime", "bitflags"] }
+objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2", "CVPixelBuffer", "CVPixelBufferPool", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase", "CVHostTime", "bitflags"] }
 # Screen sharing in calls (src/calls/capture/screen_mac.rs): sources,
 # thumbnails and the NV12 stream from ScreenCaptureKit.
 objc2-screen-capture-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "SCShareableContent", "SCStream", "SCScreenshotManager", "SCError", "block2", "dispatch2", "libc", "objc2-core-media", "objc2-core-graphics", "objc2-core-foundation"] }

@@ -1,0 +1,372 @@
+//! Pure conversions for pushed frames: I420 turned, interleaved into NV12
+//! (macOS pixel buffers), expanded to BGRA (GPUI images on Windows and
+//! Linux), shrunk and blurred for the paused tile, and back from RGBA for
+//! pictures Quill makes itself (your shared screen's preview, fixtures).
+//!
+//! The colour math is the engine's (`engine::native::i420_to_rgba`):
+//! BT.601 with full-range luma, which is also the matrix GPUI's surface
+//! shader applies to a full-range NV12 buffer, so every path shows the
+//! same colours.
+#![deny(clippy::indexing_slicing)]
+
+use super::LiveRotation;
+use crate::wallpaper_raster::{Raster, blur};
+
+/// Bytes of an I420 frame: Y `w × h`, U and V `⌈w/2⌉ × ⌈h/2⌉`. Not
+/// checked: with `u16` sides the sum passes `usize` only on 32-bit
+/// targets, which Quill does not build for.
+pub fn i420_size(width: u16, height: u16) -> usize {
+    let (w, h) = (usize::from(width), usize::from(height));
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    w * h + 2 * cw * ch
+}
+
+/// Borrowed I420 planes of one frame.
+#[derive(Clone, Copy, Debug)]
+pub struct I420<'a> {
+    pub y: &'a [u8],
+    pub u: &'a [u8],
+    pub v: &'a [u8],
+    pub width: usize,
+    pub height: usize,
+}
+
+impl<'a> I420<'a> {
+    /// Split `planes`; `None` unless it holds exactly one frame.
+    pub fn new(planes: &'a [u8], width: u16, height: u16) -> Option<Self> {
+        if width == 0 || height == 0 || planes.len() != i420_size(width, height) {
+            return None;
+        }
+        let (w, h) = (usize::from(width), usize::from(height));
+        let chroma = w.div_ceil(2) * h.div_ceil(2);
+        let (y, rest) = planes.split_at_checked(w * h)?;
+        let (u, v) = rest.split_at_checked(chroma)?;
+        Some(Self {
+            y,
+            u,
+            v,
+            width: w,
+            height: h,
+        })
+    }
+
+    /// The chroma planes' width and height.
+    pub fn chroma_size(&self) -> (usize, usize) {
+        (self.width.div_ceil(2), self.height.div_ceil(2))
+    }
+}
+
+/// Where the pixel at `(x, y)` of a `w × h` plane lands once turned, as
+/// the engine turns RGBA (`rotate_rgba`): 90 moves the right column to
+/// the top row.
+fn turned(x: usize, y: usize, w: usize, h: usize, rotation: LiveRotation) -> (usize, usize) {
+    match rotation {
+        LiveRotation::R90 => (y, w.saturating_sub(1 + x)),
+        LiveRotation::R180 => (w.saturating_sub(1 + x), h.saturating_sub(1 + y)),
+        LiveRotation::R270 => (h.saturating_sub(1 + y), x),
+        LiveRotation::None => (x, y),
+    }
+}
+
+fn rotate_plane(src: &[u8], w: usize, h: usize, rotation: LiveRotation, dst: &mut [u8]) {
+    let dw = if rotation.swaps_sides() { h } else { w };
+    for (y, row) in src.chunks_exact(w.max(1)).take(h).enumerate() {
+        for (x, value) in row.iter().enumerate() {
+            let (dx, dy) = turned(x, y, w, h, rotation);
+            if let Some(out) = dst.get_mut(dy * dw + dx) {
+                *out = *value;
+            }
+        }
+    }
+}
+
+/// The frame turned by `rotation`, as new I420 planes with the turned
+/// width and height. `None` when there is nothing to turn (or the size
+/// does not fit a frame). Odd sides keep their chroma grid, so they are
+/// exact only for even sizes (which is what WebRTC sends).
+pub fn rotate_planes(src: &I420, rotation: LiveRotation) -> Option<(Vec<u8>, u16, u16)> {
+    if rotation == LiveRotation::None {
+        return None;
+    }
+    let (w, h) = (src.width, src.height);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let (cw, ch) = src.chroma_size();
+    let (dw, dh) = if rotation.swaps_sides() {
+        (h, w)
+    } else {
+        (w, h)
+    };
+    let (out_w, out_h) = (u16::try_from(dw).ok()?, u16::try_from(dh).ok()?);
+    let mut out = vec![0u8; i420_size(out_w, out_h)];
+    let (dcw, dch) = (dw.div_ceil(2), dh.div_ceil(2));
+    let (y_out, rest) = out.split_at_mut_checked(dw * dh)?;
+    let (u_out, v_out) = rest.split_at_mut_checked(dcw * dch)?;
+    rotate_plane(src.y, w, h, rotation, y_out);
+    rotate_plane(src.u, cw, ch, rotation, u_out);
+    rotate_plane(src.v, cw, ch, rotation, v_out);
+    Some((out, out_w, out_h))
+}
+
+/// Copy the Y plane and interleave U and V into a bi-planar (NV12)
+/// destination with the given row strides. `false` (nothing written past
+/// a bound) when a destination is too small.
+pub fn i420_to_nv12(
+    src: &I420,
+    y_dst: &mut [u8],
+    y_stride: usize,
+    uv_dst: &mut [u8],
+    uv_stride: usize,
+) -> bool {
+    let (w, h) = (src.width, src.height);
+    let (cw, ch) = src.chroma_size();
+    if w == 0 || h == 0 || y_stride < w || uv_stride < cw * 2 {
+        return false;
+    }
+    let y_needed = y_stride.saturating_mul(h - 1).saturating_add(w);
+    let uv_needed = uv_stride.saturating_mul(ch - 1).saturating_add(cw * 2);
+    if y_dst.len() < y_needed || uv_dst.len() < uv_needed {
+        return false;
+    }
+    for (row, out) in src.y.chunks_exact(w).zip(y_dst.chunks_mut(y_stride)) {
+        let Some(out) = out.get_mut(..w) else {
+            return false;
+        };
+        out.copy_from_slice(row);
+    }
+    let rows = src.u.chunks_exact(cw).zip(src.v.chunks_exact(cw));
+    for ((u_row, v_row), out) in rows.zip(uv_dst.chunks_mut(uv_stride)) {
+        let Some(out) = out.get_mut(..cw * 2) else {
+            return false;
+        };
+        let (pairs, _) = out.as_chunks_mut::<2>();
+        for (pair, (u, v)) in pairs.iter_mut().zip(u_row.iter().zip(v_row)) {
+            *pair = [*u, *v];
+        }
+    }
+    true
+}
+
+/// The per-byte terms of the engine's conversion, computed once a frame
+/// with the same operations, so the result is bit-exact.
+struct Terms {
+    rv: [f32; 256],
+    gu: [f32; 256],
+    gv: [f32; 256],
+    bu: [f32; 256],
+}
+
+impl Terms {
+    fn new() -> Self {
+        let mut terms = Self {
+            rv: [0.; 256],
+            gu: [0.; 256],
+            gv: [0.; 256],
+            bu: [0.; 256],
+        };
+        for (i, (((rv, gu), gv), bu)) in terms
+            .rv
+            .iter_mut()
+            .zip(terms.gu.iter_mut())
+            .zip(terms.gv.iter_mut())
+            .zip(terms.bu.iter_mut())
+            .enumerate()
+        {
+            let c = i as f32 - 128.0;
+            *rv = 1.402 * c;
+            *gu = 0.344_136 * c;
+            *gv = 0.714_136 * c;
+            *bu = 1.772 * c;
+        }
+        terms
+    }
+
+    /// `[b, g, r, 255]` for one pixel.
+    fn bgra(&self, y: u8, u: u8, v: u8) -> [u8; 4] {
+        let y = f32::from(y);
+        let (u, v) = (usize::from(u), usize::from(v));
+        let pick = |table: &[f32; 256], at: usize| table.get(at).copied().unwrap_or(0.);
+        let r = y + pick(&self.rv, v);
+        let g = y - pick(&self.gu, u) - pick(&self.gv, v);
+        let b = y + pick(&self.bu, u);
+        let byte = |value: f32| value.clamp(0.0, 255.0).round() as u8;
+        [byte(b), byte(g), byte(r), 255]
+    }
+}
+
+/// BGRA8 for GPUI's `RenderImage`, one pass. `None` for a malformed frame.
+pub fn i420_to_bgra(src: &I420) -> Option<Vec<u8>> {
+    let (w, h) = (src.width, src.height);
+    let (cw, _) = src.chroma_size();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let terms = Terms::new();
+    let mut out = vec![0u8; w.checked_mul(h)?.checked_mul(4)?];
+    for (row, out_row) in out.chunks_exact_mut(w * 4).enumerate() {
+        let y_row = src.y.get(row * w..row * w + w)?;
+        let chroma = (row / 2) * cw;
+        let u_row = src.u.get(chroma..chroma + cw)?;
+        let v_row = src.v.get(chroma..chroma + cw)?;
+        let (pixels, _) = out_row.as_chunks_mut::<4>();
+        for (col, (pixel, y)) in pixels.iter_mut().zip(y_row).enumerate() {
+            let (Some(u), Some(v)) = (u_row.get(col / 2), v_row.get(col / 2)) else {
+                continue;
+            };
+            *pixel = terms.bgra(*y, *u, *v);
+        }
+    }
+    Some(out)
+}
+
+/// I420 from RGBA8 (BT.601 full range, chroma averaged over each 2 × 2
+/// block): pictures Quill makes itself, fed to the same player.
+pub fn rgba_to_i420(rgba: &[u8], width: u16, height: u16) -> Option<Vec<u8>> {
+    let (w, h) = (usize::from(width), usize::from(height));
+    if w == 0 || h == 0 || rgba.len() != w * h * 4 {
+        return None;
+    }
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let mut out = vec![0u8; i420_size(width, height)];
+    let (y_out, rest) = out.split_at_mut_checked(w * h)?;
+    let (u_out, v_out) = rest.split_at_mut_checked(cw * ch)?;
+    let (pixels, _) = rgba.as_chunks::<4>();
+    let rgb = |x: usize, y: usize| {
+        let [r, g, b, _] = pixels.get(y * w + x).copied().unwrap_or([0, 0, 0, 255]);
+        (f32::from(r), f32::from(g), f32::from(b))
+    };
+    let byte = |value: f32| value.clamp(0.0, 255.0).round() as u8;
+    for (at, out) in y_out.iter_mut().enumerate() {
+        let (r, g, b) = rgb(at % w, at / w);
+        *out = byte(0.299 * r + 0.587 * g + 0.114 * b);
+    }
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let mut sum = (0., 0., 0.);
+            let mut count = 0.;
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let (x, y) = (cx * 2 + dx, cy * 2 + dy);
+                if x < w && y < h {
+                    let (r, g, b) = rgb(x, y);
+                    sum = (sum.0 + r, sum.1 + g, sum.2 + b);
+                    count += 1.;
+                }
+            }
+            let (r, g, b) = (sum.0 / count, sum.1 / count, sum.2 / count);
+            let at = cy * cw + cx;
+            if let (Some(u), Some(v)) = (u_out.get_mut(at), v_out.get_mut(at)) {
+                *u = byte(-0.168_736 * r - 0.331_264 * g + 0.5 * b + 128.);
+                *v = byte(0.5 * r - 0.418_688 * g - 0.081_312 * b + 128.);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// tdesktop `kPausedVideoSize`: the paused picture fits 90 × 90.
+pub const PAUSED_SIZE: u32 = 90;
+/// tdesktop `kBlurRadius`.
+pub const PAUSED_BLUR: u32 = 15;
+
+/// The paused tile's picture (tdesktop `calls_group_viewport_raster.cpp`):
+/// the frame turned, fitted into 90 × 90 (each pixel the average of a
+/// 3 × 3 grid over its share of the frame) and blurred with radius 15, as
+/// BGRA. Read straight from the planes; no full-size copy is made.
+pub fn paused_raster(src: &I420, rotation: LiveRotation) -> Option<Raster> {
+    let (w, h) = (src.width, src.height);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let (shown_w, shown_h) = if rotation.swaps_sides() {
+        (h, w)
+    } else {
+        (w, h)
+    };
+    let side = PAUSED_SIZE as f32;
+    let scale = (side / shown_w as f32).min(side / shown_h as f32);
+    let fit_w = ((shown_w as f32 * scale).round() as usize).clamp(1, PAUSED_SIZE as usize);
+    let fit_h = ((shown_h as f32 * scale).round() as usize).clamp(1, PAUSED_SIZE as usize);
+    let (cw, _) = src.chroma_size();
+    let terms = Terms::new();
+    let mut bgra = Vec::with_capacity(fit_w * fit_h * 4);
+    for oy in 0..fit_h {
+        for ox in 0..fit_w {
+            let (mut sy, mut su, mut sv, mut n) = (0u32, 0u32, 0u32, 0u32);
+            for gy in 0..3 {
+                for gx in 0..3 {
+                    // The sample's place in the shown picture, then in the
+                    // frame as received.
+                    let px = ((ox * 3 + gx) * shown_w / (fit_w * 3)).min(shown_w - 1);
+                    let py = ((oy * 3 + gy) * shown_h / (fit_h * 3)).min(shown_h - 1);
+                    let (x, y) = source_of(px, py, w, h, rotation);
+                    let chroma = (y / 2) * cw + x / 2;
+                    if let (Some(yv), Some(uv), Some(vv)) =
+                        (src.y.get(y * w + x), src.u.get(chroma), src.v.get(chroma))
+                    {
+                        sy += u32::from(*yv);
+                        su += u32::from(*uv);
+                        sv += u32::from(*vv);
+                        n += 1;
+                    }
+                }
+            }
+            let n = n.max(1);
+            let avg = |sum: u32| u8::try_from(sum / n).unwrap_or(u8::MAX);
+            bgra.extend_from_slice(&terms.bgra(avg(sy), avg(su), avg(sv)));
+        }
+    }
+    let mut raster = Raster {
+        width: u32::try_from(fit_w).ok()?,
+        height: u32::try_from(fit_h).ok()?,
+        bgra,
+    };
+    blur(&mut raster, PAUSED_BLUR);
+    Some(raster)
+}
+
+/// The frame pixel shown at `(x, y)` of the turned picture (the inverse
+/// of [`turned`]).
+fn source_of(x: usize, y: usize, w: usize, h: usize, rotation: LiveRotation) -> (usize, usize) {
+    let (sx, sy) = match rotation {
+        LiveRotation::R90 => (w.saturating_sub(1 + y), x),
+        LiveRotation::R180 => (w.saturating_sub(1 + x), h.saturating_sub(1 + y)),
+        LiveRotation::R270 => (y, h.saturating_sub(1 + x)),
+        LiveRotation::None => (x, y),
+    };
+    (sx.min(w.saturating_sub(1)), sy.min(h.saturating_sub(1)))
+}
+
+/// A moving test picture as I420: a hue sweep across the width that
+/// slides by `phase` and a brightness ramp down the height. Screenshot
+/// demos and tests feed it through a `LiveSource`, so no call is needed.
+pub fn gradient_frame(width: u16, height: u16, phase: u32) -> Vec<u8> {
+    let (w, h) = (usize::from(width).max(1), usize::from(height).max(1));
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let mut out = Vec::with_capacity(i420_size(width, height));
+    for y in 0..usize::from(height) {
+        let luma = 70. + 110. * (y as f32 / h as f32);
+        for x in 0..usize::from(width) {
+            let ripple = ((x as f32 / w as f32) * std::f32::consts::TAU * 2.).sin() * 12.;
+            out.push((luma + ripple).clamp(0., 255.) as u8);
+        }
+    }
+    let shift = phase as f32 / 90.;
+    let hue = |cx: usize| (cx as f32 / cw as f32 + shift) * std::f32::consts::TAU;
+    for _ in 0..usize::from(height).div_ceil(2) {
+        for cx in 0..usize::from(width).div_ceil(2) {
+            out.push((128. + 90. * hue(cx).cos()).clamp(0., 255.) as u8);
+        }
+    }
+    for cy in 0..usize::from(height).div_ceil(2) {
+        let fade = 1. - 0.4 * (cy as f32 / ch as f32);
+        for cx in 0..usize::from(width).div_ceil(2) {
+            out.push((128. + 90. * fade * hue(cx).sin()).clamp(0., 255.) as u8);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+#[path = "convert_tests.rs"]
+mod tests;

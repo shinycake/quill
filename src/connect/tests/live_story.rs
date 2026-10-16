@@ -557,24 +557,36 @@ fn a_call_dropped_for_a_live_story_loses_its_transport() {
     let handle = mock.clone();
     h.driver.set_call_engine(Box::new(mock));
     h.ingest(&LOOKED_AT_CHAT.replace("NEED", "false"));
-    handle.emit_video_frame(
-        555,
-        crate::calls::engine::VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: false,
-            participant_user_id: Some(42),
-            is_screen: false,
-        },
+    let key = crate::calls::live_video::LiveKey::Video {
+        call_id: 555,
+        user_id: 42,
+        screen: false,
+    };
+    // 42's camera is on, and the call window asks for its feed.
+    h.ingest(&group_participant_json(42, false, CAMERA_INFO, "null"));
+    let camera = h.driver.live_sink(key).unwrap();
+    handle.emit_live_frame(
+        key,
+        crate::calls::live_video::LiveFrame::new(
+            0,
+            2,
+            2,
+            crate::calls::live_video::LiveRotation::None,
+            vec![0; 6],
+            std::time::Instant::now(),
+        )
+        .unwrap(),
     );
-    assert!(h.driver.latest_group_video_frame(555, 42, false).is_some());
+    assert!(camera.latest().is_some());
     add_other_live_story(&mut h);
     h.driver.join_live_story(ChatId(7), 8).unwrap();
     assert_eq!(tracked_id(&h), None);
     assert_eq!(handle.group_leaves(), vec![555], "the native call stops");
-    assert!(h.driver.latest_group_video_frame(555, 42, false).is_none());
+    assert_eq!(
+        camera.snapshot().end,
+        Some(crate::calls::live_video::LiveEnd::Left)
+    );
+    assert!(h.driver.live_sink(key).is_none());
 }
 
 #[test]

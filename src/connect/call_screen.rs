@@ -34,7 +34,6 @@ use crate::calls::capture::system_audio::{
 };
 use crate::calls::capture::{CaptureError, CaptureEvent, CaptureFeeder, FrameSink, VideoFrame};
 use crate::calls::engine::{CaptureTarget, TransportState, external_screen_capture_enabled};
-use crate::locks::LockExt;
 use crate::state::{CallsPurpose, RequestPurpose};
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests::toggle_group_call_screen_sharing_is_paused;
@@ -505,17 +504,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         self.call_screen.preview_seq = self.call_screen.preview_seq.wrapping_add(1);
-        let frame = crate::calls::engine::VideoFrame {
-            seq: self.call_screen.preview_seq,
+        // Your tile plays through the same live player as everyone else's:
+        // the small preview (480 px at 4 fps) goes over as I420.
+        let Some(planes) =
+            crate::calls::live_video::convert::rgba_to_i420(&picture.rgba, width, height)
+        else {
+            return;
+        };
+        let Some(frame) = crate::calls::live_video::LiveFrame::new(
+            self.call_screen.preview_seq,
             width,
             height,
-            rgba: picture.rgba,
-            is_local: true,
-            participant_user_id: Some(user_id),
-            is_screen: true,
+            crate::calls::live_video::LiveRotation::None,
+            planes,
+            std::time::Instant::now(),
+        ) else {
+            return;
         };
-        self.group_video_frame_slots
-            .lock_or_recover()
-            .insert((group_call_id, user_id, true), Arc::new(frame));
+        self.push_live_frame(
+            crate::calls::live_video::LiveKey::Video {
+                call_id: group_call_id,
+                user_id,
+                screen: true,
+            },
+            frame,
+        );
     }
 }

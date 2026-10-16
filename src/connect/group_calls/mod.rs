@@ -26,6 +26,7 @@ mod admin;
 mod controls;
 mod join;
 mod link;
+pub(crate) mod live_feeds;
 mod live_story;
 mod live_story_extras;
 mod rtmp_start;
@@ -58,9 +59,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(engine) = self.call_engine.as_deref_mut() {
                 let _ = engine.leave_group_call(before_id);
             }
-            self.group_video_frame_slots
-                .lock_or_recover()
-                .retain(|(slot_call_id, _, _), _| *slot_call_id != before_id);
+            self.close_call_feeds(before_id);
             // Slice calls-group-self-tile: the self tile lives in the
             // shared (call id, is_local, is_screen) slots — clear it too so
             // a stale local preview can't render after the call ends.
@@ -72,6 +71,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(group_call_id) = active_group_call_after else {
             return Ok(());
         };
+        // Track feeds whose video went off end now, engine or not.
+        self.sync_call_feeds(group_call_id);
         let engine_available = self
             .call_engine
             .as_ref()

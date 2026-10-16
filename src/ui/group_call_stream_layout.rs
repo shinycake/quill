@@ -16,9 +16,12 @@
 //! - Bottom bar (`updateButtonsGeometry`, wide RTMP branch): the "…" menu
 //!   for managers or Settings for viewers, the round button that toggles
 //!   full screen, Leave, on a rounded `groupCallBg` backdrop at 80 %.
-//! - Before the first picture the tile shows the chat's photo blurred
-//!   (radius 15). Nobody broadcasting: a rounded label a third of the way
-//!   down (`setupEmptyRtmp`), with the admin text when the call knows its
+//! - The picture is a live player in its own view
+//!   (`calls::stream_view`), under this layout, so a frame redraws only
+//!   the picture. Before the first picture it shows the chat's photo
+//!   blurred (radius 15), or the chat's initials without a photo. Nobody
+//!   broadcasting: a rounded label a third of the way down
+//!   (`setupEmptyRtmp`), with the admin text when the call knows its
 //!   RTMP server URL.
 //! - When the controls show: see [`StreamControls`].
 //! - Not joined (Quill only: tdesktop never shows the panel unjoined):
@@ -29,23 +32,22 @@
 
 use super::app::QuillApp;
 use super::calls::stream_controls::StreamControls;
-use super::calls::stream_picture::{StreamPicture, frame_image};
-use super::calls::stream_tile::{StreamTile, StreamTileState, WidthReport, blurred_photo};
 use super::calls::stream_title::{SEPARATOR_GAP, title_layout, title_rect};
-use super::group_call_panel::{BG, LEAVE_BG, MEMBER_NOT_JOINED, MEMBERS_BG};
+use super::calls::stream_view::blurred_photo;
+use super::group_call_panel::{LEAVE_BG, MEMBER_NOT_JOINED};
 use super::group_call_stream_boxes::StreamOverlay;
+use super::video_player::VideoPlayer;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::calls::engine::{StreamState, VideoFrame};
+use quill::calls::engine::StreamState;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::MessageSender;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -103,10 +105,10 @@ impl StreamJoinIntent {
 /// The stream window's state, kept between renders.
 #[derive(Default)]
 pub(crate) struct StreamWindow {
-    pub(super) tile: StreamTileState,
-    pub(super) picture: StreamPicture,
+    /// The stream's live player, over the driver's feed for the chat.
+    pub(super) player: Option<VideoPlayer>,
     /// The blurred chat photo for a photo path (`None` while it blurs).
-    photo: Option<(String, Option<Arc<RenderImage>>)>,
+    pub(super) photo: Option<(String, Option<Arc<RenderImage>>)>,
     photo_task: Option<Task<()>>,
     pub(super) controls: StreamControls,
     hide_task: Option<Task<()>>,
@@ -126,24 +128,22 @@ pub(crate) struct StreamWindow {
     /// Where the title band was pressed: a move past a few pixels drags
     /// the window (Linux).
     title_pressed: Option<Point<Pixels>>,
-    /// Screenshot fixtures and tests: the stream picture without a driver.
-    pub(super) demo_frame: Option<Arc<VideoFrame>>,
+    /// Screenshot fixtures and tests: the stream's feed without a driver.
+    pub(super) demo_feed: Option<super::calls::demo_feed::DemoFeed>,
 }
 
 impl StreamWindow {
-    /// The call ended or another took its place: drop the pictures from
-    /// every window and forget what the window showed.
+    /// The call ended or another took its place: drop the player and the
+    /// photo from every window and forget what the window showed.
     pub(super) fn clear(&mut self, cx: &mut App) {
-        let images = self
-            .picture
-            .clear()
-            .into_iter()
-            .chain(self.photo.take().and_then(|(_, image)| image));
-        for image in images {
+        if let Some(image) = self.photo.take().and_then(|(_, image)| image) {
             cx.drop_image(image, None);
         }
+        if let Some(player) = self.player.take() {
+            player.release_live(cx);
+        }
         self.photo_task = None;
-        self.demo_frame = None;
+        self.demo_feed = None;
         self.overlay = None;
         self.key_shown = false;
         self.joining = None;
@@ -197,6 +197,12 @@ pub(super) fn toggle_stream_full(window: &mut Window) {
     } else {
         window.toggle_fullscreen();
     }
+}
+
+/// The picture's inset from the window's sides and top
+/// (`groupCallNarrowSkip`, `groupCallWideVideoTop`); none full screen.
+pub(super) fn stream_viewport(full: bool) -> (f32, f32) {
+    if full { (0., 0.) } else { (SKIP, VIDEO_TOP) }
 }
 
 /// What the stream body needs from the window after it is built.
@@ -384,38 +390,11 @@ impl QuillApp {
             .as_ref()
             .map(|(_, name)| name.as_str())
             .unwrap_or_default();
-        let picture = chat_id.and_then(|id| self.group_call_stream_picture(id, window, cx));
-        let placeholder = chat_id.and_then(|id| self.group_call_stream_photo(id, window, cx));
-        // Redraws at the stream's rate only while pictures come.
-        let playing = facts.joined && facts.stream == StreamState::Live;
-
-        let owner = cx.entity().downgrade();
-        let report: Option<WidthReport> = chat_id.map(|chat_id| {
-            let owner = owner.clone();
-            let report: WidthReport = Rc::new(move |width, cx: &mut App| {
-                let _ = owner.update(cx, |app, _| {
-                    if let Some(live) = app.live.as_mut() {
-                        live.driver.report_stream_tile_width(chat_id, width);
-                    }
-                });
-            });
-            report
-        });
-        let tile = StreamTile::new("group-call-stream-tile", &self.group_call.stream.tile)
-            .picture(picture)
-            .placeholder(placeholder)
-            .fit(ObjectFit::Contain)
-            .frame(
-                px(if full { 0. } else { 6. }),
-                if full {
-                    black()
-                } else {
-                    rgb(MEMBERS_BG).into()
-                },
-            )
-            .playing(playing)
-            .when_some(report, |tile, report| tile.on_width(report));
-        let inset = if full { 0. } else { SKIP };
+        // The picture view shows the photo once it is blurred.
+        if let Some(id) = chat_id {
+            self.group_call_stream_photo(id, window, cx);
+        }
+        let (inset, top) = stream_viewport(full);
         let viewport = div()
             .id("group-call-stream-viewport")
             .debug_selector(|| "group-call-stream-viewport".into())
@@ -423,7 +402,7 @@ impl QuillApp {
             .left(px(inset))
             .right(px(inset))
             .bottom(px(inset))
-            .top(px(if full { 0. } else { VIDEO_TOP }))
+            .top(px(top))
             .on_hover(cx.listener(|this, inside: &bool, _, cx| {
                 this.group_call
                     .stream
@@ -437,8 +416,7 @@ impl QuillApp {
                     this.arm_stream_hide_timer(cx);
                     cx.notify();
                 }
-            }))
-            .child(tile);
+            }));
 
         let width = f32::from(window.viewport_size().width);
         let label = if facts.joined {
@@ -468,12 +446,12 @@ impl QuillApp {
             self.group_call_rename_overlay(tr(keys::GROUP_CALL_EDIT_TITLE_CHANNEL).into(), cx);
         let overlay = self.group_call_stream_overlay(facts, cx);
 
+        // No background: the window's root paints it under the picture.
         let element = div()
             .id("group-call-stream")
             .size_full()
             .relative()
             .overflow_hidden()
-            .bg(if full { black() } else { rgb(BG).into() })
             .text_color(white())
             .child(viewport)
             .children(band)
@@ -665,64 +643,6 @@ impl QuillApp {
             width,
             Some(button.into_any_element()),
         )
-    }
-
-    /// The newest stream picture of `chat_id`. A new frame is converted
-    /// off the UI thread, and the image from two frames back leaves every
-    /// window's atlas at once ([`StreamPicture`]).
-    fn group_call_stream_picture(
-        &mut self,
-        chat_id: i64,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<Arc<RenderImage>> {
-        let seq = match self.live.as_ref() {
-            Some(live) => live.driver.latest_stream_frame_seq(chat_id),
-            None => self
-                .group_call
-                .stream
-                .demo_frame
-                .as_ref()
-                .map(|frame| frame.seq),
-        };
-        if let Some(seq) = seq
-            && self.group_call.stream.picture.wants(chat_id, seq)
-        {
-            let frame = match self.live.as_ref() {
-                Some(live) => live.driver.latest_stream_frame(chat_id),
-                None => self.group_call.stream.demo_frame.clone(),
-            };
-            // A screenshot fixture's still picture is converted at once so
-            // the capture's first frame shows it; tests keep the
-            // background path the live stream takes.
-            let inline = self.live.is_none() && !cfg!(test);
-            if let Some(frame) = frame.as_ref().filter(|_| inline) {
-                let image = frame_image(frame);
-                let picture = &mut self.group_call.stream.picture;
-                picture.start(chat_id, frame.seq, Task::ready(()));
-                // Inside this window's draw: name it, or its atlas keeps
-                // the image.
-                if let Some(old) = picture.finish(chat_id, frame.seq, image) {
-                    cx.drop_image(old, Some(window));
-                }
-            } else if let Some(frame) = frame {
-                let seq = frame.seq;
-                let task = cx.spawn(async move |this, cx| {
-                    let image = cx
-                        .background_spawn(async move { frame_image(&frame) })
-                        .await;
-                    let _ = this.update(cx, |app, cx| {
-                        let picture = &mut app.group_call.stream.picture;
-                        if let Some(old) = picture.finish(chat_id, seq, image) {
-                            cx.drop_image(old, None);
-                        }
-                        cx.notify();
-                    });
-                });
-                self.group_call.stream.picture.start(chat_id, seq, task);
-            }
-        }
-        self.group_call.stream.picture.current(chat_id)
     }
 
     /// The chat's photo, blurred once per photo off the UI thread.

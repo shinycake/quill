@@ -128,6 +128,7 @@ mod ui {
             rate: 1.0,
             volume,
             has_sound: true,
+            live: false,
         }
     }
 

@@ -4,6 +4,10 @@
 //! shared window hidden): the blurred last frame under the pause icon
 //! (`group_call_paused.rs`).
 //!
+//! Each stream is a live player over the driver's feed for
+//! `(call, user, screen)`; a new frame redraws the window by itself, and
+//! a tile scrolled out of sight stops asking.
+//!
 //! tdesktop: `calls/group/calls_group_viewport.cpp` (pin) and
 //! `calls_group_viewport_raster.cpp` (paused tile).
 #![deny(clippy::indexing_slicing)]
@@ -12,10 +16,12 @@ use super::app::QuillApp;
 use super::chat_row::initials_avatar;
 use super::group_call_paused::paused_overlay;
 use super::nested_click::SwallowPress;
+use super::video_player::{Purpose, VideoPlayer, video_frame};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::calls::live_video::{LiveKey, LiveState};
 use quill::calls::tile_pin::{TileKey, stage_tile};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::ActiveGroupCall;
@@ -29,8 +35,31 @@ struct Tile {
 }
 
 impl QuillApp {
-    /// One stream's picture: the latest decoded frame (blurred and small
-    /// while paused), or `None`.
+    /// The live player of one feed, made on first use; a new feed (a
+    /// rejoin) gets a new player. `None` without a feed.
+    pub(super) fn group_tile_player(&mut self, key: LiveKey, cx: &mut App) -> Option<VideoPlayer> {
+        let sink = match self.live.as_ref() {
+            Some(live) => live.driver.live_sink(key),
+            None => self
+                .demo_ui
+                .group_feeds
+                .get(&key)
+                .map(|feed| feed.sink.clone()),
+        }?;
+        if let Some(player) = self.group_call.players.get(&key)
+            && player.live_sink().is_some_and(|own| own.same_as(&sink))
+        {
+            return Some(player.clone());
+        }
+        let player = VideoPlayer::live(sink, Purpose::Live { tile: true }, cx);
+        if let Some(old) = self.group_call.players.insert(key, player.clone()) {
+            old.release_live(cx);
+        }
+        Some(player)
+    }
+
+    /// One stream's picture: the live player once it has a frame (the
+    /// last frame small and blurred while paused), or `None`.
     fn group_stream_picture(
         &mut self,
         call: &ActiveGroupCall,
@@ -38,42 +67,66 @@ impl QuillApp {
         screen: bool,
         paused: bool,
         contain: bool,
+        cx: &mut App,
     ) -> Option<AnyElement> {
         let MessageSender::User { user_id } = participant.participant_id else {
             return None;
         };
-        let frame = if let Some(live) = self.live.as_ref() {
-            live.driver
-                .latest_group_video_frame(call.id, user_id, screen)
-        } else {
-            self.demo_ui.group_frames.get(&(user_id, screen)).cloned()
-        }?;
-        let image = if paused {
-            self.cached_paused_image(call.id, user_id, screen, &frame)?
-        } else {
-            self.cached_group_video_image(call.id, user_id, screen, &frame)?
+        let key = LiveKey::Video {
+            call_id: call.id,
+            user_id,
+            screen,
         };
+        let player = self.group_tile_player(key, cx)?;
+        // The pause comes with the participant update, not the engine: no
+        // engine signal sets a track's state (only a stream's). One that
+        // did would be masked here, as this sets it on every render.
+        if let Some(sink) = player.live_sink() {
+            sink.set_state(if paused {
+                LiveState::Paused
+            } else {
+                LiveState::Active
+            });
+        }
+        if !player.has_live_frame() {
+            return None;
+        }
+        let fit = if contain && !paused {
+            ObjectFit::Contain
+        } else {
+            ObjectFit::Cover
+        };
+        let radius = px(if contain { 0. } else { 10. });
         Some(
-            img(ImageSource::Render(image))
-                .size_full()
-                .rounded(px(if contain { 0. } else { 10. }))
-                .object_fit(if contain && !paused {
-                    ObjectFit::Contain
-                } else {
-                    ObjectFit::Cover
-                })
+            video_frame(&player)
+                .object_fit(fit)
+                .paused_overlay(true)
+                .corner_radii(Corners::all(radius), black())
                 .into_any_element(),
         )
     }
 
     /// Every stream of the call as a tile. `contain` fits video without
     /// cropping (the full-screen stage).
-    fn collect_group_tiles(&mut self, call: &ActiveGroupCall, contain: bool) -> Vec<Tile> {
+    fn collect_group_tiles(
+        &mut self,
+        call: &ActiveGroupCall,
+        contain: bool,
+        cx: &mut App,
+    ) -> Vec<Tile> {
+        // Players of another call, or of streams that are gone, go.
+        self.group_call.players.retain(|key, player| {
+            let keep = key.call_id() == Some(call.id) && call_streams(call, *key);
+            if !keep {
+                player.release_live(cx);
+            }
+            keep
+        });
         let mut built: Vec<Tile> = Vec::new();
         for participant in &call.participants {
             let name = self.group_call_participant_name(&participant.participant_id);
             if participant.is_current_user && call.is_my_video_enabled {
-                let picture = self.group_self_tile_content(call, participant, &name);
+                let picture = self.group_self_tile_content(call, participant, &name, cx);
                 built.push(Tile {
                     key: TileKey {
                         participant: participant.participant_id,
@@ -89,7 +142,7 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|info| info.is_paused);
                 if let Some(picture) =
-                    self.stream_or_placeholder(call, participant, false, &name, paused, contain)
+                    self.stream_or_placeholder(call, participant, false, &name, paused, contain, cx)
                 {
                     built.push(Tile {
                         key: TileKey {
@@ -111,7 +164,7 @@ impl QuillApp {
                     .is_some_and(|info| info.is_paused)
                     || (participant.is_current_user && call.screen_share_paused);
                 if let Some(picture) =
-                    self.stream_or_placeholder(call, participant, true, &name, paused, contain)
+                    self.stream_or_placeholder(call, participant, true, &name, paused, contain, cx)
                 {
                     built.push(Tile {
                         key: TileKey {
@@ -134,7 +187,7 @@ impl QuillApp {
         call: &ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let built = self.collect_group_tiles(call, false);
+        let built = self.collect_group_tiles(call, false, cx);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
         // The pin lasts only as long as its stream does.
         self.group_call.pin.retain_available(&keys);
@@ -171,7 +224,7 @@ impl QuillApp {
         call: &ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let built = self.collect_group_tiles(call, true);
+        let built = self.collect_group_tiles(call, true, cx);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
         self.group_call.pin.retain_available(&keys);
         let stage = stage_tile(&self.group_call.pin, &keys)?;
@@ -179,7 +232,8 @@ impl QuillApp {
         Some(stage_view(tile, cx))
     }
 
-    /// The decoded frame, or (only while paused) the avatar standing in.
+    /// The live picture, or (only while paused) the avatar standing in.
+    #[allow(clippy::too_many_arguments)]
     fn stream_or_placeholder(
         &mut self,
         call: &ActiveGroupCall,
@@ -188,9 +242,29 @@ impl QuillApp {
         name: &str,
         paused: bool,
         contain: bool,
+        cx: &mut App,
     ) -> Option<AnyElement> {
-        self.group_stream_picture(call, participant, screen, paused, contain)
+        self.group_stream_picture(call, participant, screen, paused, contain, cx)
             .or_else(|| paused.then(|| initials_avatar(name, 56.).into_any_element()))
+    }
+}
+
+/// Whether `key` is one of the call's streams: your camera, or a
+/// participant's camera or screen that is on.
+fn call_streams(call: &ActiveGroupCall, key: LiveKey) -> bool {
+    match key {
+        LiveKey::Local { .. } => call.is_my_video_enabled,
+        LiveKey::Stream { .. } => false,
+        LiveKey::Video {
+            user_id, screen, ..
+        } => call.participants.iter().any(|participant| {
+            participant.participant_id == MessageSender::User { user_id }
+                && if screen {
+                    participant.screen_sharing_enabled
+                } else {
+                    participant.video_enabled
+                }
+        }),
     }
 }
 

@@ -1,10 +1,9 @@
 //! Screen sharing UI state: the source chooser, the screen recording
-//! privacy box (`screen_chooser.rs`) and paused tiles (`group_call_paused.rs`).
+//! privacy box (`screen_chooser.rs`).
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
 use quill::calls::capture::screen::{ScreenBackend, ScreenSource, SourceId};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The call a chooser or privacy box belongs to.
@@ -47,7 +46,4 @@ pub(crate) struct ScreenShareUi {
     pub(super) demo_active_audio: bool,
     /// Show the system audio box in demos and tests, as on Windows.
     pub(super) demo_system_audio: bool,
-    /// Paused tiles: the last frame, small and blurred (tdesktop
-    /// `BlurLargeImage`), by `(call, user, screen)` and frame seq.
-    pub(super) paused_images: HashMap<(i32, i64, bool), (u64, Arc<RenderImage>)>,
 }

@@ -1,6 +1,6 @@
 //! Screenshot demos of a live story in the story viewer (injected, no live
 //! Telegram, no call, no Stars): the demo channel's live story playing a
-//! still picture with the LIVE badge, three top donors, four comments (one
+//! picture sent at 30 fps with the LIVE badge, three top donors, four comments (one
 //! paid and pinned) and a paid comment price; the same with your Stars
 //! waiting under the Undo toast and their effect rising; the Stars box for
 //! a comment; and a portrait stream that fills the frame (the landscape
@@ -9,11 +9,12 @@
 
 use super::live_state::StarsBoxMode;
 use crate::ui::app::QuillApp;
+use crate::ui::calls::demo_feed::{DemoFeed, demo_feed};
 use crate::ui::demo::demo_media_allowlist;
 use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
-use quill::calls::engine::{GroupCallMode, StreamState, VideoFrame};
+use quill::calls::engine::{GroupCallMode, StreamState};
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
 use quill::live_story::PendingLiveReaction;
@@ -86,7 +87,7 @@ impl QuillApp {
 
     fn demo_live_story_portrait(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.seed_demo_live_story(cx);
-        self.stories.live.demo_frame = demo_stream_frame(true).map(Arc::new);
+        self.stories.live.demo_feed = demo_stream_feed(true, cx);
         cx.notify();
     }
 
@@ -98,7 +99,7 @@ impl QuillApp {
         apply_ready_channels(session, &self.demo_ui.sink, &self.demo_ui.seq);
         let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         seed_live_story(session, &sink, &self.demo_ui.seq);
-        self.stories.live.demo_frame = demo_stream_frame(false).map(Arc::new);
+        self.stories.live.demo_feed = demo_stream_feed(false, cx);
         let items = quill::story_viewer::collect_found_story_items(
             &[(CHANNEL, STORY)],
             &session.stories.stories,
@@ -204,7 +205,7 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
 
 /// A still picture for the stream: a showcase photo as a frame, or its
 /// middle at 9:16 for a portrait stream.
-fn demo_stream_frame(portrait: bool) -> Option<VideoFrame> {
+fn demo_stream_feed(portrait: bool, cx: &mut App) -> Option<DemoFeed> {
     let path = demo_media_allowlist().join("showcase/p2.jpg");
     let mut rgba = image::open(path).ok()?.to_rgba8();
     if portrait {
@@ -213,13 +214,7 @@ fn demo_stream_frame(portrait: bool) -> Option<VideoFrame> {
         let left = (rgba.width() - width) / 2;
         rgba = image::imageops::crop_imm(&rgba, left, 0, width, height).to_image();
     }
-    Some(VideoFrame {
-        seq: 1,
-        width: u16::try_from(rgba.width()).ok()?,
-        height: u16::try_from(rgba.height()).ok()?,
-        rgba: rgba.into_raw(),
-        is_local: false,
-        participant_user_id: None,
-        is_screen: false,
-    })
+    let width = u16::try_from(rgba.width()).ok()?;
+    let height = u16::try_from(rgba.height()).ok()?;
+    demo_feed(rgba.as_raw(), width, height, true, cx)
 }

@@ -274,16 +274,19 @@ fn your_shared_screen_shows_in_your_tile() {
     let preview = screens.preview.lock().unwrap().clone().unwrap();
     preview.offer(&frame(128));
     driver.pump_call_screen();
-    let shown = driver.latest_group_video_frame(77, 777, true).unwrap();
-    assert!(shown.is_screen && shown.is_local);
+    let tile = driver
+        .live_sink(crate::calls::live_video::LiveKey::Video {
+            call_id: 77,
+            user_id: 777,
+            screen: true,
+        })
+        .unwrap();
+    let shown = tile.take().unwrap();
     assert_eq!((shown.width, shown.height), (320, 240));
-    let first = shown.seq;
     // The same preview is not handed over twice.
     driver.pump_call_screen();
-    assert_eq!(
-        driver.latest_group_video_frame(77, 777, true).unwrap().seq,
-        first
-    );
+    assert!(tile.take().is_none());
+    assert_eq!(tile.snapshot().pushed, 1);
     std::fs::remove_dir_all(dir).ok();
 }
 

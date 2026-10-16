@@ -415,8 +415,8 @@ impl CallEngine for NtgcallsEngine {
         set_hook(&self.callback.engine_event_hook, callback);
     }
 
-    fn set_stream_frame_callback(&mut self, callback: StreamFrameCallback) {
-        set_hook(&self.callback.stream_frame_hook, callback);
+    fn set_live_frame_callback(&mut self, callback: LiveFrameCallback) {
+        set_hook(&self.callback.live_frame_hook, callback);
     }
 
     fn group_call_mode(&self, chat_id: i64) -> Option<GroupCallMode> {

@@ -231,12 +231,6 @@ pub enum InstantViewOutcome {
 /// never clobber the peer camera frame (Phase C2j).
 type VideoFrameSlots = Arc<Mutex<HashMap<(i32, bool, bool), VideoFrame>>>;
 
-/// Phase C2g: latest decoded group video frame per (group call id,
-/// participant user id, is_screen).
-/// Each frame behind an `Arc`: a reader takes it without copying the
-/// picture while the slot is locked.
-type GroupVideoFrameSlots = Arc<Mutex<HashMap<(i32, i64, bool), Arc<VideoFrame>>>>;
-
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
@@ -264,9 +258,9 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Phase C2e: latest decoded video frame per (call id, is_local,
     /// is_screen).
     pub(crate) video_frame_slots: VideoFrameSlots,
-    /// Phase C2g: latest decoded group video frame per (group call id,
-    /// participant user id, is_screen); only the newest frame is kept.
-    pub(crate) group_video_frame_slots: GroupVideoFrameSlots,
+    /// Group-call tracks and stream pictures: one live feed each, newest
+    /// frame only (`group_calls/live_feeds.rs`).
+    pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
     /// Phase C2g: last camera-enabled value issued to the engine per
     /// group call id; the engine is only re-issued on change.
     pub(crate) group_camera_state: HashMap<i32, bool>,

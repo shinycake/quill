@@ -197,102 +197,156 @@ fn group_participant_video_syncs_subscriptions() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Phase C2g: frames with `participant_user_id` land in the group
-/// slots (camera vs screen), never in the 1:1 slots.
+fn planes() -> LiveFrame {
+    LiveFrame::new(0, 2, 2, LiveRotation::None, vec![0; 6], Instant::now()).expect("frame")
+}
+
+fn video(user_id: i64, screen: bool) -> LiveKey {
+    LiveKey::Video {
+        call_id: 555,
+        user_id,
+        screen,
+    }
+}
+
+/// Call 555 as TDLib reports it, with your camera on or off.
+fn my_video_json(on: bool) -> String {
+    r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"unique_id":"999","title":"Design voice","invite_link":"","paid_message_star_count":0,"scheduled_start_date":0,"enabled_start_notification":false,"is_active":true,"is_video_chat":true,"is_live_story":false,"is_rtmp_stream":false,"is_joined":false,"need_rejoin":false,"is_owned":false,"can_be_managed":true,"participant_count":0,"has_hidden_listeners":false,"loaded_all_participants":false,"message_sender_id":null,"recent_speakers":[],"is_my_video_enabled":ON,"is_my_video_paused":false,"can_enable_video":true,"mute_new_participants":false,"can_toggle_mute_new_participants":true,"can_send_messages":true,"are_messages_allowed":true,"can_toggle_are_messages_allowed":false,"can_delete_messages":false,"record_duration":0,"is_video_recorded":false,"duration":0}}"#
+        .replace("ON", if on { "true" } else { "false" })
+}
+
+/// Participant 42's camera and screen on, and your camera on.
+fn turn_videos_on(
+    driver: &mut ConnectDriver<Arc<RecordingSender>>,
+    seq: &std::sync::atomic::AtomicU64,
+    sink: &Arc<dyn DiagnosticSink>,
+) {
+    ingest_call_json(
+        driver,
+        seq,
+        sink,
+        &group_participant_json(42, false, CAMERA_INFO, SCREEN_INFO),
+    );
+    ingest_call_json(driver, seq, sink, &my_video_json(true));
+}
+
+/// Phase C2g: a participant's camera and screen each get their own live
+/// feed, never the 1:1 slots; a frame for a track nobody asked for, or
+/// one with no video on, makes no feed.
 #[test]
-fn group_video_frames_route_to_participant_slots() {
-    let (dir, driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
-    let frame = |screen: bool| VideoFrame {
-        seq: 0,
-        width: 2,
-        height: 2,
-        rgba: vec![0u8; 16],
-        is_local: false,
-        participant_user_id: Some(42),
-        is_screen: screen,
-    };
-    handle.emit_video_frame(555, frame(false));
-    handle.emit_video_frame(555, frame(true));
-    assert!(driver.latest_group_video_frame(555, 42, false).is_some());
-    assert!(driver.latest_group_video_frame(555, 42, true).is_some());
-    assert!(driver.latest_group_video_frame(555, 43, false).is_none());
+fn group_video_frames_route_to_participant_feeds() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    handle.emit_live_frame(video(42, false), planes());
+    turn_videos_on(&mut driver, &seq, &sink);
+    let camera = driver.live_sink(video(42, false)).expect("camera feed");
+    assert!(camera.latest().is_none(), "the early frame made no feed");
+    let screen = driver.live_sink(video(42, true)).expect("screen feed");
+    handle.emit_live_frame(video(42, false), planes());
+    handle.emit_live_frame(video(42, true), planes());
+    handle.emit_live_frame(video(43, false), planes());
+    assert!(camera.latest().is_some());
+    assert!(screen.latest().is_some());
+    assert!(
+        driver.live_sink(video(43, false)).is_none(),
+        "43 has no video"
+    );
     assert!(driver.latest_video_frame(555, false).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Slice calls-group-self-tile: a group-local frame (`is_local`,
-/// no participant — what the engine now delivers for group
-/// CAPTURE frames) lands in the shared (call id, is_local) slots,
-/// never in the participant slots.
+/// Slice calls-group-self-tile: your camera preview in a group call goes
+/// to the call's local feed, not the 1:1 slots or a participant's feed.
 #[test]
-fn group_local_frame_routes_to_shared_local_slot() {
-    let (dir, driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
-    handle.emit_video_frame(
-        555,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: true,
-            participant_user_id: None,
-            is_screen: false,
-        },
-    );
-    assert!(driver.latest_video_frame(555, true).is_some());
-    assert!(driver.latest_video_frame(555, false).is_none());
-    assert!(driver.latest_group_video_frame(555, 42, false).is_none());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Slice calls-group-self-tile: leaving the group call clears the
-/// self-tile slot along with the participant slots.
-#[test]
-fn group_call_leave_clears_local_frame_slot() {
-    let (dir, mut driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
-    handle.emit_video_frame(
-        555,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: true,
-            participant_user_id: None,
-            is_screen: false,
-        },
-    );
-    assert!(driver.latest_video_frame(555, true).is_some());
-    driver.leave_group_call().expect("leave");
+fn group_local_frame_routes_to_the_local_feed() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    turn_videos_on(&mut driver, &seq, &sink);
+    let local = driver
+        .live_sink(LiveKey::Local { call_id: 555 })
+        .expect("feed");
+    let camera = driver.live_sink(video(42, false)).expect("feed");
+    handle.emit_live_frame(LiveKey::Local { call_id: 555 }, planes());
+    assert!(local.latest().is_some());
     assert!(driver.latest_video_frame(555, true).is_none());
+    assert!(camera.latest().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Phase C2g: leaving tears the native transport down and drops the
-/// retained frames.
+/// Slice calls-group-self-tile: leaving the group call ends the self
+/// tile's feed along with the participants'.
+#[test]
+fn group_call_leave_ends_the_local_feed() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    turn_videos_on(&mut driver, &seq, &sink);
+    let local = driver
+        .live_sink(LiveKey::Local { call_id: 555 })
+        .expect("feed");
+    handle.emit_live_frame(LiveKey::Local { call_id: 555 }, planes());
+    driver.leave_group_call().expect("leave");
+    assert_eq!(local.snapshot().end, Some(LiveEnd::Left));
+    assert!(driver.live_sink(LiveKey::Local { call_id: 555 }).is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Phase C2g: leaving tears the native transport down and ends the
+/// call's feeds.
 #[test]
 fn group_call_leave_tears_down_transport_and_frames() {
-    let (dir, mut driver, _recorder, mut handle, _sink, _seq) = ready_group_call_driver();
-    handle.emit_video_frame(
-        555,
-        VideoFrame {
-            seq: 0,
-            width: 2,
-            height: 2,
-            rgba: vec![0u8; 16],
-            is_local: false,
-            participant_user_id: Some(42),
-            is_screen: false,
-        },
-    );
-    assert!(driver.latest_group_video_frame(555, 42, false).is_some());
+    let (dir, mut driver, _recorder, mut handle, sink, seq) = ready_group_call_driver();
+    turn_videos_on(&mut driver, &seq, &sink);
+    let camera = driver.live_sink(video(42, false)).expect("feed");
+    handle.emit_live_frame(video(42, false), planes());
+    assert!(camera.latest().is_some());
     // Review fix: a live presentation is stopped before the call
     // (privacy — capture ends first).
     handle.start_screen_share(555).expect("mock presentation");
     driver.leave_group_call().expect("leave");
     assert_eq!(handle.group_leaves(), vec![555]);
     assert_eq!(handle.screen_share_stops(), vec![555]);
-    assert!(driver.latest_group_video_frame(555, 42, false).is_none());
+    assert_eq!(camera.snapshot().end, Some(LiveEnd::Left));
+    assert!(driver.live_sink(video(42, false)).is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A camera or screen TDLib reports off ends its feed at once; turned on
+/// again it gets a new feed, with no frame from before.
+#[test]
+fn a_video_turned_off_ends_its_feed_and_comes_back_clean() {
+    let (dir, mut driver, _recorder, handle, sink, seq) = ready_group_call_driver();
+    turn_videos_on(&mut driver, &seq, &sink);
+    let camera = driver.live_sink(video(42, false)).expect("camera");
+    let screen = driver.live_sink(video(42, true)).expect("screen");
+    let local = driver
+        .live_sink(LiveKey::Local { call_id: 555 })
+        .expect("local");
+    handle.emit_live_frame(video(42, false), planes());
+    assert!(camera.latest().is_some());
+    // 42 turns the camera off, keeping the screen.
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &group_participant_json(42, false, "null", SCREEN_INFO),
+    );
+    assert_eq!(camera.snapshot().end, Some(LiveEnd::Left));
+    assert_eq!(screen.snapshot().end, None, "the screen goes on");
+    assert!(driver.live_sink(video(42, false)).is_none());
+    // A late frame from the engine brings nothing back.
+    handle.emit_live_frame(video(42, false), planes());
+    assert!(driver.live_sink(video(42, false)).is_none());
+    // On again: a new feed, empty until the next frame.
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &group_participant_json(42, false, CAMERA_INFO, SCREEN_INFO),
+    );
+    let again = driver.live_sink(video(42, false)).expect("camera again");
+    assert!(!again.same_as(&camera));
+    assert!(again.latest().is_none());
+    // Your camera off: the self tile's feed ends too.
+    ingest_call_json(&mut driver, &seq, &sink, &my_video_json(false));
+    assert_eq!(local.snapshot().end, Some(LiveEnd::Left));
+    assert!(driver.live_sink(LiveKey::Local { call_id: 555 }).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

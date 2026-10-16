@@ -21,10 +21,11 @@ pub(crate) struct DemoUi {
     pub(super) screen_frame: Option<quill::calls::engine::VideoFrame>,
     /// Phase C2e: demo-mode camera pick (live picks go to the driver).
     pub(super) selected_camera: Option<String>,
-    /// Phase C2g: synthetic per-participant frames injected by the
-    /// group-call demo fixture, keyed `(user_id, is_screen)`.
-    /// Injected demo data, not real media.
-    pub(super) group_frames: HashMap<(i64, bool), quill::calls::engine::VideoFrame>,
+    /// Phase C2g: synthetic per-participant feeds injected by the
+    /// group-call demo fixture, by feed. Injected demo data, not real
+    /// media.
+    pub(super) group_feeds:
+        HashMap<quill::calls::live_video::LiveKey, super::calls::demo_feed::DemoFeed>,
     /// Demo captures can't go full screen: show the stage anyway.
     pub(super) group_stage: bool,
     pub(super) seq: AtomicU64,
@@ -40,7 +41,7 @@ impl DemoUi {
             local_frame: None,
             screen_frame: None,
             selected_camera: None,
-            group_frames: HashMap::new(),
+            group_feeds: HashMap::new(),
             group_stage: false,
             seq: AtomicU64::new(0),
             sink: demo_sink,

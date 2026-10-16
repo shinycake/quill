@@ -8,24 +8,22 @@
 use super::live_comments::{MESSAGE_SKIP, live_pinned_strip};
 use super::live_state::{effect_progress, level_color, pinned_comments};
 use super::*;
-use crate::ui::calls::stream_picture::{frame_backdrop, frame_image};
-use crate::ui::calls::stream_tile::{StreamTile, frame_expands};
+use crate::ui::calls::stream_view::frame_expands;
 use crate::ui::message_text::kit_avatar_element;
 use crate::ui::screen_chooser::split_bold;
+use crate::ui::video_player::{Purpose, VideoPlayer, video_frame};
 use gpui_kit::assets::IconName;
-use quill::calls::engine::{StreamState, VideoFrame};
+use quill::calls::engine::StreamState;
+use quill::calls::live_video::LiveSink;
 use quill::lang::{trn, trn_with};
 use quill::live_story::level_for_stars;
 use quill::premium_hub::group_digits;
 use quill::state::{Session, unix_ms_now};
 use quill::telegram::envelope::{GroupCallMessageLevel, ParsedGroupCallMessage};
-use std::sync::Arc;
 
 /// The story frame (the viewer's media box).
 pub(super) const FRAME_W: f32 = 360.;
 pub(super) const FRAME_H: f32 = 640.;
-/// The box the backdrop takes its proportions from.
-const BACKDROP_BOX: (u32, u32) = (360, 640);
 /// tdesktop `FillBlurredBackground` darkens the backdrop by 48 / 255.
 const BACKDROP_SHADE: f32 = 48. / 255.;
 
@@ -55,14 +53,6 @@ pub(super) fn live_badge(cx: &App) -> Div {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(chrome::fg())
         .child(tr(keys::VIDEO_STREAM_LIVE).to_uppercase())
-}
-
-/// The pictures to draw: the frame, and its blurred backdrop when the
-/// frame is shown whole.
-struct LivePictures {
-    picture: Option<Arc<RenderImage>>,
-    backdrop: Option<Arc<RenderImage>>,
-    size: Option<(u16, u16)>,
 }
 
 impl QuillApp {
@@ -113,80 +103,35 @@ impl QuillApp {
         )
     }
 
-    /// The newest picture of the live story and its backdrop, converted
-    /// off the UI thread (one conversion at a time; the images from two
-    /// frames back leave the atlas,
-    /// [`StreamPicture`](crate::ui::calls::stream_picture)).
-    fn live_story_pictures(&mut self, key: i64, cx: &mut Context<Self>) -> LivePictures {
-        let seq = match self.live.as_ref() {
-            Some(live) => live.driver.live_story_frame_seq(),
-            None => self.stories.live.demo_frame.as_ref().map(|f| f.seq),
-        };
-        if let Some(seq) = seq
-            && self.stories.live.picture.wants(key, seq)
-        {
-            let frame: Option<Arc<VideoFrame>> = match self.live.as_ref() {
-                Some(live) => live.driver.live_story_frame(),
-                None => self.stories.live.demo_frame.clone(),
-            };
-            // A screenshot fixture's still picture is converted at once so
-            // the capture's first frame shows it.
-            let inline = self.live.is_none() && !cfg!(test);
-            if let Some(frame) = frame.as_ref().filter(|_| inline) {
-                let (image, backdrop) = (frame_image(frame), frame_backdrop(frame, BACKDROP_BOX));
-                self.finish_live_pictures(key, frame.seq, image, backdrop, cx);
-            } else if let Some(frame) = frame {
-                let seq = frame.seq;
-                let task = cx.spawn(async move |this, cx| {
-                    let (image, backdrop) = cx
-                        .background_spawn(async move {
-                            (frame_image(&frame), frame_backdrop(&frame, BACKDROP_BOX))
-                        })
-                        .await;
-                    let _ = this.update(cx, |app, cx| {
-                        app.finish_live_pictures(key, seq, image, backdrop, cx);
-                        cx.notify();
-                    });
-                });
-                self.stories.live.picture.start(key, seq, task);
-            }
-        }
-        LivePictures {
-            picture: self.stories.live.picture.current(key),
-            backdrop: self.stories.live.backdrop.current(key),
-            size: self
+    /// The live story's player, following its feed: a new feed (a
+    /// rejoin) gets a new player; no feed, no player.
+    fn live_story_player(&mut self, cx: &mut App) -> Option<VideoPlayer> {
+        let sink: Option<LiveSink> = match self.live.as_ref() {
+            Some(live) => live
+                .driver
+                .live_story_live_key()
+                .and_then(|key| live.driver.live_sink(key)),
+            None => self
                 .stories
                 .live
-                .picture
-                .current(key)
-                .map(|image| image.size(0))
-                .and_then(|size| {
-                    Some((
-                        u16::try_from(size.width.0).ok()?,
-                        u16::try_from(size.height.0).ok()?,
-                    ))
-                }),
-        }
-    }
-
-    fn finish_live_pictures(
-        &mut self,
-        key: i64,
-        seq: u64,
-        image: Option<Arc<RenderImage>>,
-        backdrop: Option<Arc<RenderImage>>,
-        cx: &mut Context<Self>,
-    ) {
+                .demo_feed
+                .as_ref()
+                .map(|feed| feed.sink.clone()),
+        };
         let live = &mut self.stories.live;
-        // The inline path and the backdrop start no task of their own.
-        live.picture.start_if_idle(key, seq);
-        if let Some(old) = live.picture.finish(key, seq, image) {
-            cx.drop_image(old, None);
+        let same = match (live.player.as_ref(), sink.as_ref()) {
+            (Some(player), Some(sink)) => player.live_sink().is_some_and(|own| own.same_as(sink)),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            if let Some(old) = live.player.take() {
+                old.release_live(cx);
+            }
+            live.player =
+                sink.map(|sink| VideoPlayer::live(sink, Purpose::Live { tile: false }, cx));
         }
-        live.backdrop.start_if_idle(key, seq);
-        if let Some(old) = live.backdrop.finish(key, seq, backdrop) {
-            cx.drop_image(old, None);
-        }
+        live.player.clone()
     }
 
     /// The live story's frame, or `None` while the viewer has not joined
@@ -200,7 +145,7 @@ impl QuillApp {
             return None;
         }
         let key = item.chat_id.0;
-        let pictures = self.live_story_pictures(key, cx);
+        let player = self.live_story_player(cx);
         let session = self.session()?;
         let live = session.stories.live.as_ref()?;
         let call = session
@@ -209,7 +154,6 @@ impl QuillApp {
             .as_ref()
             .filter(|call| call.id == live.group_call_id);
         let unsupported = call.is_some_and(|call| call.stream == StreamState::Unsupported);
-        let playing = call.is_some_and(|call| call.is_joined) && !unsupported;
         let levels = session.live_levels();
         let now = unix_ms_now() / 1000;
         let now = i64::try_from(now).unwrap_or(i64::MAX);
@@ -224,16 +168,21 @@ impl QuillApp {
         let effects = self.live_effects_layer(session, &levels, cx);
         // tdesktop `DecideFrameResize`: cover when little is cut off, else
         // the whole picture over its blurred copy.
-        let expands = pictures.size.is_none_or(|(width, height)| {
-            frame_expands((FRAME_W, FRAME_H), (f32::from(width), f32::from(height)))
+        let size = player
+            .as_ref()
+            .filter(|player| player.has_live_frame())
+            .and_then(VideoPlayer::picture_size);
+        let expands = size.is_none_or(|(width, height)| {
+            frame_expands((FRAME_W, FRAME_H), (width as f32, height as f32))
         });
         let fit = if expands {
             ObjectFit::Cover
         } else {
             ObjectFit::Contain
         };
+        // The last frame small and blurred behind a picture shown whole.
         let backdrop = (!expands)
-            .then_some(pictures.backdrop)
+            .then(|| player.as_ref().and_then(VideoPlayer::paused_picture))
             .flatten()
             .map(|image| {
                 div()
@@ -254,11 +203,17 @@ impl QuillApp {
                             .bg(hsla(0., 0., 0., BACKDROP_SHADE)),
                     )
             });
-        let tile = StreamTile::new(("live-story-tile", key as u64), &self.stories.live.tile)
-            .picture(pictures.picture)
-            .fit(fit)
-            .frame(px(6.), hsla(0., 0., 0., 0.))
-            .playing(playing);
+        let tile = player.as_ref().map(|player| {
+            div()
+                .id(("live-story-tile", key as u64))
+                .absolute()
+                .inset_0()
+                .child(
+                    video_frame(player)
+                        .object_fit(fit)
+                        .corner_radii(Corners::all(px(6.)), hsla(0., 0., 0., 0.)),
+                )
+        });
         let unsupported_label = unsupported.then(|| {
             div()
                 .absolute()
@@ -286,7 +241,7 @@ impl QuillApp {
                 .overflow_hidden()
                 .bg(chrome::compose_bg())
                 .children(backdrop)
-                .child(tile)
+                .children(tile)
                 .children(unsupported_label)
                 .child(
                     div()

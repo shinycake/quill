@@ -147,10 +147,7 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             .lock_or_recover()
             .get(&user_id)
             .copied();
-        let mut stream_chat = None;
-        let (call_id, participant_user_id, is_local, is_screen) = if let Some(group_call_id) =
-            group_call
-        {
+        let route = if let Some(group_call_id) = group_call {
             // Screen frames arrive as PLAYBACK+SCREEN; camera as
             // PLAYBACK+CAMERA. Slice calls-group-self-tile: the local
             // camera preview arrives as CAPTURE+CAMERA keyed by the chat id
@@ -159,7 +156,7 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             // and stream_manager emits device captures to the callback);
             // it renders as the self tile instead of being dropped. A
             // stream-mode chat has no ssrc map: its pictures go to the
-            // chat's stream slot.
+            // chat's stream feed.
             let is_stream_chat = shared.stream_chats.lock_or_recover().contains(&user_id);
             let target = group_video_target(user_id, is_stream_chat, mode, device, || {
                 // SAFETY: frames_len > 0 was checked above.
@@ -171,18 +168,18 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
                     .copied()
             });
             match target {
-                Some(GroupVideoTarget::Local) => (group_call_id, None, true, false),
+                Some(GroupVideoTarget::Local) => FrameRoute::Live(LiveKey::Local {
+                    call_id: group_call_id,
+                }),
                 Some(GroupVideoTarget::Participant { user_id, screen }) => {
-                    (group_call_id, Some(user_id), false, screen)
+                    FrameRoute::Live(LiveKey::Video {
+                        call_id: group_call_id,
+                        user_id,
+                        screen,
+                    })
                 }
                 Some(GroupVideoTarget::Stream { chat_id }) => {
-                    stream_chat = Some(chat_id);
-                    (
-                        group_call_id,
-                        None,
-                        false,
-                        device == NTG_STREAM_DEVICE_SCREEN,
-                    )
+                    FrameRoute::Live(LiveKey::Stream { chat_id })
                 }
                 // Audio, the screen-share capture preview and unknown
                 // ssrcs have no tile: drop rather than misattribute.
@@ -198,7 +195,11 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             let Some(call_id) = shared.user_to_call.lock_or_recover().get(&user_id).copied() else {
                 return;
             };
-            (call_id, None, is_local, is_screen)
+            FrameRoute::OneToOne {
+                call_id,
+                is_local,
+                is_screen,
+            }
         };
         // SAFETY: frames is non-null with frames_len > 0 entries (checked at
         // the top); ntgcalls keeps the array alive for this call.
@@ -211,42 +212,79 @@ pub(crate) unsafe extern "C" fn frames_trampoline(
             unsafe { std::slice::from_raw_parts(frame.data, frame.data_len) }.to_vec()
         };
         let rotation = frame.frame_data.rotation;
-        let Some(rgba) = i420_to_rgba(
-            frame.frame_data.width,
-            frame.frame_data.height,
-            &bytes,
-            rotation,
-        ) else {
-            return;
-        };
-        let (width, height) = match rotation {
-            NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => {
-                (frame.frame_data.height, frame.frame_data.width)
-            }
-            _ => (frame.frame_data.width, frame.frame_data.height),
-        };
+        let (raw_width, raw_height) = (frame.frame_data.width, frame.frame_data.height);
         let seq = shared.frame_seq.fetch_add(1, Ordering::Relaxed);
-        let frame = VideoFrame {
-            seq,
-            width,
-            height,
-            rgba,
-            is_local,
-            participant_user_id,
-            is_screen,
-        };
-        if let Some(chat_id) = stream_chat {
-            let hook = shared.stream_frame_hook.lock_or_recover().clone();
-            if let Some(hook) = hook {
-                hook(chat_id, frame);
+        match route {
+            FrameRoute::Live(key) => {
+                // The planes go over as they came: one copy out of
+                // ntgcalls' buffer, no conversion on this thread. The UI
+                // turns and converts only the frame it draws.
+                let Some(frame) = LiveFrame::new(
+                    seq,
+                    raw_width,
+                    raw_height,
+                    live_rotation(rotation),
+                    bytes,
+                    std::time::Instant::now(),
+                ) else {
+                    return;
+                };
+                let hook = shared.live_frame_hook.lock_or_recover().clone();
+                if let Some(hook) = hook {
+                    hook(key, frame);
+                }
             }
-            return;
-        }
-        let hook = shared.frame_hook.lock_or_recover().clone();
-        if let Some(hook) = hook {
-            hook(call_id, frame);
+            FrameRoute::OneToOne {
+                call_id,
+                is_local,
+                is_screen,
+            } => {
+                // 1:1 calls keep their RGBA slots.
+                let Some(rgba) = i420_to_rgba(raw_width, raw_height, &bytes, rotation) else {
+                    return;
+                };
+                let (width, height) = match rotation {
+                    NTG_VIDEO_ROTATION_VIDEO_ROTATION_90
+                    | NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => (raw_height, raw_width),
+                    _ => (raw_width, raw_height),
+                };
+                let frame = VideoFrame {
+                    seq,
+                    width,
+                    height,
+                    rgba,
+                    is_local,
+                    is_screen,
+                };
+                let hook = shared.frame_hook.lock_or_recover().clone();
+                if let Some(hook) = hook {
+                    hook(call_id, frame);
+                }
+            }
         }
     })
+}
+
+/// Where one decoded frame goes.
+enum FrameRoute {
+    /// A group call or a stream: the planes to its live feed.
+    Live(LiveKey),
+    /// A 1:1 call: RGBA into the call's slot.
+    OneToOne {
+        call_id: i32,
+        is_local: bool,
+        is_screen: bool,
+    },
+}
+
+/// ntgcalls' rotation flag as a live feed carries it.
+pub(crate) fn live_rotation(rotation: ntg_video_rotation) -> LiveRotation {
+    match rotation {
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_90 => LiveRotation::R90,
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_180 => LiveRotation::R180,
+        NTG_VIDEO_ROTATION_VIDEO_ROTATION_270 => LiveRotation::R270,
+        _ => LiveRotation::None,
+    }
 }
 
 /// Stream mode (RTMP only): ntgcalls needs the stream's current time. The
