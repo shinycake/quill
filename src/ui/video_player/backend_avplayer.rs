@@ -77,7 +77,7 @@ struct BufferState {
 /// AVPlayer drops its rate to 0 on a stall and, not waiting to minimize
 /// stalls, never raises it again: once the buffer keeps up while play is
 /// still wanted (and the clip is not at its end), it must be told again.
-fn resumes_after_stall(wants_play: bool, rate: f32, at_end: bool, keeps_up: bool) -> bool {
+pub(super) fn resumes_after_stall(wants_play: bool, rate: f32, at_end: bool, keeps_up: bool) -> bool {
     wants_play && rate == 0.0 && !at_end && keeps_up
 }
 

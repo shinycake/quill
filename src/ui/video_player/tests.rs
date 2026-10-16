@@ -242,6 +242,41 @@ fn the_transport_loops_at_the_end_and_steps_only_while_paused() {
     assert_eq!(calls(&script), ["pause", "step true", "step false"]);
 }
 
+/// The clip ends, the transport moves to Ended (no play wanted), then the
+/// scrubber seeks back: the engine must stay paused there.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_seek_after_the_end_leaves_the_engine_paused() {
+    let (player, script) = scripted(true);
+    player.play();
+    player.pull(Instant::now(), None);
+    {
+        let mut script = script.borrow_mut();
+        script.position = 10.0;
+        script.at_end = true;
+    }
+    player.pull(Instant::now(), None);
+    assert_eq!(player.state(), PlayState::Ended);
+    assert!(!player.wants_play());
+    player.seek(3.0);
+    assert!(!player.wants_play());
+    // What the backend was told to want: its last play or pause.
+    let backend_wants_play = calls(&script)
+        .iter()
+        .rev()
+        .find_map(|call| match call.as_str() {
+            "pause" => Some(false),
+            call if call.starts_with("play") => Some(true),
+            _ => None,
+        })
+        .unwrap_or(false);
+    // AVPlayer after the seek: idle, off the end, the buffer keeps up.
+    assert!(
+        !super::backend_avplayer::resumes_after_stall(backend_wants_play, 0.0, false, true),
+        "the engine restarts after the seek while the transport is paused"
+    );
+}
+
 #[test]
 fn watchers_redraw_on_changes_and_at_most_every_100_ms_while_playing() {
     let (player, script) = scripted(true);
