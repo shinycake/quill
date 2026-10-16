@@ -303,6 +303,9 @@ gpui_windows = { package = "gpui-pre-windows", version = "=0.3.9", optional = tr
 # the commit holding its pristine registry copy; a diff against it isolates the patch.
 [patch.crates-io]
 gpui-base = { path = "third_party/gpui-base" }
+# Folder tabs: the TabBar indicator jumps instead of springing when only the
+# selected tab bounds change (docs/decisions/folder-tabs-no-badge-spring.md).
+gpui-component = { path = "third_party/gpui-component" }
 # Idle CPU (docs/decisions/codex-idle-cpu.md): gpui-pre-macos 0.3.9 with a
 # display link that stops while the window has nothing to draw.
 gpui-pre-macos = { path = "third_party/gpui-pre-macos" }
