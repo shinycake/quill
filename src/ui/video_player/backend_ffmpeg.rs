@@ -21,7 +21,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::surface;
-use super::transport::{BackendStatus, Correction, Engine, Want, reconcile};
+use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
 use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
 use quill::video_decode::{OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
@@ -243,7 +243,7 @@ impl Backend for FfmpegBackend {
     }
 
     fn sync(&mut self, want: Want) {
-        if (want.rate - self.want.rate).abs() > f64::EPSILON {
+        if (want.rate - self.want.rate).abs() > RATE_TOLERANCE {
             self.player.set_rate(want.rate);
             if let Some(sound) = &self.sound {
                 sound.set_speed(want.rate);

@@ -161,7 +161,8 @@ trait Backend {
     fn status(&mut self) -> BackendStatus;
     /// Bring the engine in line with the transport's intent
     /// ([`transport::reconcile`]). Called after every poll and every user
-    /// action; a second call changes nothing.
+    /// action; a second call leaves the engine as it is (it may re-read
+    /// state, such as AVPlayer's buffer, but changes nothing).
     fn sync(&mut self, want: Want);
     fn seek(&mut self, secs: f64);
     fn set_volume(&mut self, volume: f32);

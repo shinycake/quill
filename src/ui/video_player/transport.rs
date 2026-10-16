@@ -146,6 +146,10 @@ pub(crate) enum Correction {
     Rate,
 }
 
+/// Rates closer than this are the same rate (an engine's own rate is an
+/// `f32`).
+pub(crate) const RATE_TOLERANCE: f64 = 1e-3;
+
 /// The decision behind every backend's sync. Idempotent: a sync on every
 /// poll corrects drift (a stall, the end) and otherwise changes nothing.
 pub(crate) fn reconcile(want: Want, engine: Engine) -> Option<Correction> {
@@ -153,7 +157,7 @@ pub(crate) fn reconcile(want: Want, engine: Engine) -> Option<Correction> {
         (true, false) if engine.ready && !engine.at_end && engine.keeps_up => {
             Some(Correction::Start)
         }
-        (true, true) if (engine.rate - want.rate).abs() > 1e-3 => Some(Correction::Rate),
+        (true, true) if (engine.rate - want.rate).abs() > RATE_TOLERANCE => Some(Correction::Rate),
         (false, true) => Some(Correction::Pause),
         _ => None,
     }

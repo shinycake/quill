@@ -3,7 +3,7 @@
 //! viewer opening a clip and closing while it still opens.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use super::transport::{BackendStatus, Correction, Engine, Want, reconcile};
+use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
 use super::{
     Backend, ErrorKind, Picture, PictureStats, PlayState, PlayerError, Present, Pulled,
     VideoPlayer, WATCH_INTERVAL, picture_trace_line, trace_line,
@@ -105,7 +105,7 @@ impl Backend for Scripted {
     /// rate applies at once, starts and pauses through `reconcile`.
     fn sync(&mut self, want: Want) {
         let mut script = self.0.borrow_mut();
-        if (script.rate.unwrap_or(1.0) - want.rate).abs() > f64::EPSILON {
+        if (script.rate.unwrap_or(1.0) - want.rate).abs() > RATE_TOLERANCE {
             script.rate = Some(want.rate);
             script.calls.push(format!("rate {}", want.rate));
         }

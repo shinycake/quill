@@ -11,7 +11,7 @@
 //! player only calls its backend from the UI thread).
 #![deny(clippy::indexing_slicing)]
 
-use super::transport::{BackendStatus, Correction, Engine, Want, reconcile};
+use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
 use super::{Backend, ErrorKind, Picture, PlayerError, Present, Pulled};
 #[cfg(feature = "demo-capture")]
 use gpui_kit::RenderImage;
@@ -233,7 +233,7 @@ impl Backend for AvPlayerBackend {
     }
 
     fn sync(&mut self, want: Want) {
-        if (want.rate - self.want.rate).abs() > f64::EPSILON {
+        if (want.rate - self.want.rate).abs() > RATE_TOLERANCE {
             self.apply_pitch(want.rate);
         }
         self.want = want;
@@ -267,6 +267,7 @@ impl Backend for AvPlayerBackend {
             self.player
                 .seekToTime_toleranceBefore_toleranceAfter(time, zero, zero);
         }
+        self.buffer_read = None;
     }
 
     fn set_volume(&mut self, volume: f32) {
