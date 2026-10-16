@@ -2,7 +2,11 @@
 # Linux launch smoke (docs/decisions/ci-launch-smoke.md): open the real UI window
 # of a demo-capture build on a virtual X display with software Vulkan (Mesa
 # lavapipe), screenshot it, and fail on a non-zero exit, a missing ready marker
-# or a blank picture. Usage: ci-launch-smoke.sh <quill-binary> <out-dir> [kind...]
+# or a blank picture. The first kind also gets an idle check
+# (docs/decisions/sweep-idle-heartbeat.md): the main thread's wakeups over 10 s
+# of an idle window, failing above IDLE_MAX_MAIN_PER_S, with the same count
+# under QUILL_IDLE_FRAMES=0 (frame sources never park) printed for contrast.
+# Usage: ci-launch-smoke.sh <quill-binary> <out-dir> [kind...]
 set -euo pipefail
 
 bin=${1:?usage: ci-launch-smoke.sh <quill-binary> <out-dir> [kind...]}
@@ -39,13 +43,20 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 
-failed=0
-for kind in "${kinds[@]}"; do
-  echo "::group::launch smoke: $kind"
+# Main-thread wakeups a second allowed while the window is idle. A running
+# frame source alone is 60 a second.
+idle_limit=${IDLE_MAX_MAIN_PER_S:-}
+idle_kind=${kinds[0]}
+
+# Starts the demo in the background (sets $app) and waits up to 180 s for its
+# ready marker (sets $ready).
+launch() {
+  local kind=$1 linger=$2 log=$3
+  shift 3
   rm -f "$out/.quill-ready-$kind"
-  DISPLAY=$display QUILL_DEMO_LINGER_MS=8000 QUILL_REDUCED_MOTION=1 \
-    QUILL_DEMO_WINDOW_SIZE=1200x740 \
-    "$bin" --screenshot-demo "$kind" "$out" >"$out/$kind.log" 2>&1 &
+  env DISPLAY="$display" QUILL_DEMO_LINGER_MS="$linger" QUILL_REDUCED_MOTION=1 \
+    QUILL_DEMO_WINDOW_SIZE=1200x740 "$@" \
+    "$bin" --screenshot-demo "$kind" "$out" >"$log" 2>&1 &
   app=$!
   ready=0
   for _ in $(seq 1 180); do
@@ -53,9 +64,26 @@ for kind in "${kinds[@]}"; do
     kill -0 "$app" 2>/dev/null || break
     sleep 1
   done
+}
+
+failed=0
+for kind in "${kinds[@]}"; do
+  echo "::group::launch smoke: $kind"
+  linger=8000
+  [ "$kind" = "$idle_kind" ] && linger=22000
+  launch "$kind" "$linger" "$out/$kind.log"
   if [ "$ready" = 1 ]; then
     sleep 2
     DISPLAY=$display import -window root -depth 8 "ppm:$out/$kind.ppm" || true
+    if [ "$kind" = "$idle_kind" ]; then
+      sleep 1
+      limit_args=()
+      [ -n "$idle_limit" ] && limit_args=(--max-main-per-second "$idle_limit")
+      if ! python3 -I "$here/ci-idle-wakeups.py" "$app" --seconds 10 "${limit_args[@]}" \
+        | tee "$out/idle-wakeups.txt"; then
+        failed=1
+      fi
+    fi
   fi
   status=0
   wait "$app" || status=$?
@@ -81,4 +109,16 @@ for kind in "${kinds[@]}"; do
   fi
   echo "::endgroup::"
 done
+
+# Contrast for the idle check: the same window with parking off.
+echo "::group::idle contrast: $idle_kind with QUILL_IDLE_FRAMES=0"
+launch "$idle_kind" 16000 "$out/$idle_kind-idle-off.log" QUILL_IDLE_FRAMES=0
+if [ "$ready" = 1 ]; then
+  sleep 3
+  python3 -I "$here/ci-idle-wakeups.py" "$app" --seconds 10 \
+    | tee "$out/idle-wakeups-parking-off.txt" || true
+fi
+wait "$app" || true
+app=
+echo "::endgroup::"
 exit "$failed"
