@@ -95,7 +95,7 @@ updated 2026-10-16 after release v2026.1016.2630.
 | 38 | Affordances: "Experimental settings" is bare text, slow-mode selection is only a check glyph, invite-link loading has no spinner, session rows' buttons don't align. | fixed #872, #881 |
 | 39 | Focus does not return to the trigger when hand-drawn layers close (sticker panel, forward panel, profile modal, earn layer, composer dialogs); chat rows have no tab stop and Quill has no focus ring of its own. | focus return fixed #872; chat-list keyboard navigation in progress |
 | 40 | Copy: three-dot ellipses (fixed in lang files #862); still hard-coded "Forward to…" and call status strings. | fixed #862, #875 |
-| 41 | 1545 literal `px()` values and 128 raw colours in `src/ui` keep interface zoom from scaling consistently. | open, incremental |
+| 41 | 1545 literal `px()` values and 128 raw colours in `src/ui` keep interface zoom from scaling consistently. | not a zoom defect: zoom scales the logical pixel size, so fixed px scale with text (docs/decisions/sweep-interface-zoom-core.md); colours remain a theme concern |
 | — | Selected row: tdesktop uses a solid accent fill with white text; Quill keeps a tint (now AA). Muted unread badge is 2.2:1, the same grey tdesktop uses. | owner |
 
 ### Test stability
