@@ -34,6 +34,7 @@ impl Session {
                 self.settings.storage_limits.apply_option(&name, &value);
                 self.chat_list.folder_limits.apply_option(&name, &value);
                 self.apply_privacy_option(&name, &value);
+                self.users_state.apply_option(&name, &value);
                 self.apply_quick_replies_option(&name, &value);
                 self.apply_business_option(&name, &value);
                 self.apply_earn_option(&name, &value);
