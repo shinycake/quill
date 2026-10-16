@@ -190,7 +190,7 @@ impl QuillApp {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .when(self.recording_active(), |this| {
+                        .when(self.recording_here(), |this| {
                             this.child(self.record_bar(cx))
                         })
                         .when(

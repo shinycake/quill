@@ -103,6 +103,48 @@ bash scripts/check-file-size.sh
 bash scripts/check-hotspots.sh
 ```
 
+## Window scope
+
+A chat window's state (composer, history, viewer, pickers, message menu,
+share box, and the session's view of its chat) sits in the shared
+`QuillApp` fields only while that window is drawn or handles input
+(`src/ui/chat_window/slot.rs`). Code that runs later finds whatever window's
+state is in place then, so it has to say which window it belongs to:
+
+- A timer, file picker or background job started from a window:
+  `spawn_scoped` / `spawn_scoped_in`. It finishes in that window, or not
+  at all once the window has closed.
+- Work that belongs to no chat window (the poll loop, background accounts,
+  the passcode): `QuillApp::spawn_main` / `spawn_main_in`.
+- A subscription or observer made with a window (`subscribe_in`,
+  `on_focus_out`, `observe_window_activation`, `window.defer`): run its body
+  in `in_window_of(window, cx, ...)`. GPUI calls it with the window it was
+  made in, but an edit made inside another window's scope is delivered
+  after that scope ends.
+- A subscription without a window (`cx.subscribe` on a viewer slider): read
+  `self.windows.scope` when you make it and run the body in
+  `in_window_scope(scope, ...)`.
+- State that outlives one window's draw but belongs to one window (the
+  recording) carries that window inside the value itself
+  (`recording_state::Capture::origin`), so taking or dropping the value
+  takes the window with it, and goes through `in_window_scope` with it. A
+  separate "which window" field next to it goes stale.
+
+`scripts/check-window-scope.py` (CI step "window scope") flags async calls
+in `src/ui` whose closure touches window state without one of these. Work
+that really needs no window says why in a comment on one of the three lines
+above the call:
+
+```
+// window-scope: the pending draft names its own chat and topic
+cx.spawn(async move |this, cx| { ... })
+```
+
+The check matches methods by name and can't see a window chosen wrongly:
+a scoped task started from the main window's render captures the main
+window even when the work belongs to another one. The limits are listed in
+`docs/decisions/sweep-window-slot-scope.md`.
+
 ## Screenshots
 
 - Visual checks while developing go to a temporary directory (`mktemp -d`,

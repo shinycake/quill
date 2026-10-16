@@ -144,7 +144,7 @@ impl QuillApp {
         });
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
             if matches!(event, InputEvent::PressEnter { .. }) {
-                this.apply_composer_link(window, cx);
+                this.in_window_of(window, cx, Self::apply_composer_link);
             }
         })
         .detach();
@@ -298,7 +298,7 @@ impl QuillApp {
         });
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
             if matches!(event, InputEvent::PressEnter { .. }) {
-                this.apply_code_language(window, cx);
+                this.in_window_of(window, cx, Self::apply_code_language);
             }
         })
         .detach();

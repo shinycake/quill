@@ -73,6 +73,8 @@ impl QuillApp {
         let account = self.session().map(|session| session.account.clone());
         let weak = cx.entity().downgrade();
         let hooks = pip_hooks(weak.clone());
+        // The link belongs to the viewer of the window that opened it.
+        let scope = self.windows.scope;
         // Window creation draws at once: let this update finish first.
         cx.defer(move |cx| {
             let return_to = cx.active_window();
@@ -94,19 +96,33 @@ impl QuillApp {
                 cx,
             );
             let _ = weak.update(cx, |app, cx| {
-                match opened {
+                let orphan = match opened {
                     Some(window) => {
-                        app.viewer.pip = Some(PipLink {
+                        let link = PipLink {
                             window,
                             account,
                             clip,
                             item,
                             return_to,
-                        })
+                        };
+                        let mut link = Some(link);
+                        app.in_window_scope(scope, cx, |app, _| app.viewer.pip = link.take());
+                        link
                     }
                     None => {
                         app.connection.status_note = tr(keys::Q_MEDIA_PIP_FAILED).into();
+                        None
                     }
+                };
+                // The window that opened it closed meanwhile: so does the
+                // Picture-in-Picture window.
+                if let Some(link) = orphan {
+                    cx.defer(move |cx| {
+                        let view = link.window.view.clone();
+                        let _ = link.window.window.update(cx, |_, window, cx| {
+                            let _ = view.update(cx, |pip, cx| pip.close(window, cx));
+                        });
+                    });
                 }
                 cx.notify();
             });

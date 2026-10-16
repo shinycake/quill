@@ -32,7 +32,7 @@ pub(super) fn update_stream_rate() -> Option<u32> {
 
 impl QuillApp {
     pub(super) fn spawn_demo_update_stream(&mut self, rate: u32, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+        Self::spawn_main(cx, async move |this, cx| {
             let mut step = 0_u64;
             loop {
                 cx.background_executor()

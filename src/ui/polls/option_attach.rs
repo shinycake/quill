@@ -324,7 +324,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_ATTACH).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             let Ok(Ok(Some(paths))) = picker.await else {
                 return;
             };
@@ -384,7 +384,7 @@ impl QuillApp {
                 }
             }
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             let result = read.await;
             let _ = this.update(cx, |this, cx| {
                 this.finish_poll_option_file(&shown, result, cx)

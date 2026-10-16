@@ -60,7 +60,7 @@ impl QuillApp {
             pull: Pull::Neutral,
         });
         let handle = window.window_handle();
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
                 let Ok((pointer, window_active)) =

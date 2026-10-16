@@ -220,7 +220,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MISC_CHOOSE_VIDEO_COVER).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.first().cloned()
             {

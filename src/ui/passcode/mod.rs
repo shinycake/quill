@@ -106,12 +106,14 @@ impl PasscodeUi {
         cx.subscribe_in(
             &lock_input,
             window,
-            |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::PressEnter { .. } => this.submit_unlock(window, cx),
-                InputEvent::Change if this.account.passcode.lock_error.take().is_some() => {
-                    cx.notify();
-                }
-                _ => {}
+            |this, _, event: &InputEvent, window, cx| {
+                this.in_window_of(window, cx, |this, window, cx| match event {
+                    InputEvent::PressEnter { .. } => this.submit_unlock(window, cx),
+                    InputEvent::Change if this.account.passcode.lock_error.take().is_some() => {
+                        cx.notify();
+                    }
+                    _ => {}
+                });
             },
         )
         .detach();
@@ -607,7 +609,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        cx.spawn_in(window, async move |this, cx| {
+        Self::spawn_main_in(window, cx, async move |this, cx| {
             let ok = loop {
                 match receiver.try_recv() {
                     Ok(ok) => break ok,
@@ -670,7 +672,7 @@ impl QuillApp {
     }
 
     pub(crate) fn spawn_passcode_tick(&mut self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+        Self::spawn_main(cx, async move |this, cx| {
             // Parked: nothing to time, so the next tick follows a long gap.
             let mut parked = true;
             loop {

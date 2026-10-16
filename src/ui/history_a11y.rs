@@ -390,16 +390,20 @@ fn has_caption(content: &MessageContent) -> bool {
 
 /// Track keyboard focus entering and leaving the history.
 pub(crate) fn install(handle: &FocusHandle, window: &mut Window, cx: &mut Context<QuillApp>) {
-    cx.on_focus_in(handle, window, |_, window, cx| {
+    cx.on_focus_in(handle, window, |this, window, cx| {
         // Focus listeners run at the end of a draw, where a notify does not
-        // schedule the next frame: pick the child once the draw is done.
-        cx.defer_in(window, |this, window, cx| {
-            this.history_a11y_focus_in(window, cx)
+        // schedule the next frame: pick the child once the draw is done,
+        // as the window the history is in.
+        let scope = this.window_scope_of(window);
+        cx.defer_in(window, move |this, window, cx| {
+            this.in_window_scope(scope, cx, |this, cx| this.history_a11y_focus_in(window, cx));
         });
     })
     .detach();
-    cx.on_focus_out(handle, window, |this, _, _, _| {
-        this.message_ui.a11y.focused = false;
+    cx.on_focus_out(handle, window, |this, _, window, cx| {
+        this.in_window_of(window, cx, |this, _, _| {
+            this.message_ui.a11y.focused = false
+        });
     })
     .detach();
 }

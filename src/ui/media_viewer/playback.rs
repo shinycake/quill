@@ -314,16 +314,20 @@ impl QuillApp {
                 .step(0.1)
                 .default_value(self.playback.speed as f32)
         });
-        cx.subscribe(&slider, |this, _, event, cx| match event {
-            SliderEvent::Change(value) => {
-                this.viewer.controls.speed_preview =
-                    Some(quill::viewer_extras::snap_speed(f64::from(value.end())));
-                cx.notify();
-            }
-            SliderEvent::Release(value) => {
-                let speed = quill::viewer_extras::snap_speed(f64::from(value.end()));
-                this.set_playback_speed(speed, cx);
-            }
+        // The slider is this viewer's: its events act on this window's.
+        let scope = self.windows.scope;
+        cx.subscribe(&slider, move |this, _, event, cx| {
+            this.in_window_scope(scope, cx, |this, cx| match event {
+                SliderEvent::Change(value) => {
+                    this.viewer.controls.speed_preview =
+                        Some(quill::viewer_extras::snap_speed(f64::from(value.end())));
+                    cx.notify();
+                }
+                SliderEvent::Release(value) => {
+                    let speed = quill::viewer_extras::snap_speed(f64::from(value.end()));
+                    this.set_playback_speed(speed, cx);
+                }
+            });
         })
         .detach();
         self.viewer.controls.speed = Some(slider.clone());
@@ -507,7 +511,7 @@ impl QuillApp {
             return;
         }
         self.viewer.session_tick = true;
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(250))
@@ -534,7 +538,16 @@ impl QuillApp {
                         }
                         this.viewer.player.is_some()
                     })
-                    .unwrap_or(false);
+                    .unwrap_or_else(|_| {
+                        // The clip's window closed: the OS widget must not
+                        // keep showing it, unless something else plays.
+                        let _ = this.main().update(cx, |this, _| {
+                            if this.viewer.player.is_none() && this.active_playback_id().is_none() {
+                                quill::media_session::publish(None);
+                            }
+                        });
+                        false
+                    });
                 if !cont {
                     break;
                 }

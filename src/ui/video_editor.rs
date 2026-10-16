@@ -261,7 +261,7 @@ impl QuillApp {
             set_emoji: None,
         });
         let worker = cx.background_spawn(async move { probe_source(&source) });
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             let info = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.video_editor_probed(serial, info, initial, window, cx);
@@ -383,7 +383,7 @@ impl QuillApp {
             let still = load_still(&frame);
             Ok::<_, String>((frame, still))
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
                 let Some(editor) = this
@@ -480,7 +480,7 @@ impl QuillApp {
         let encode_source = source.clone();
         let worker =
             cx.background_spawn(async move { render_edited(&encode_source, &effective, &info) });
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let current = this

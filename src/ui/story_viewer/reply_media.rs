@@ -12,6 +12,7 @@ use super::*;
 use crate::ui::composer_field::{emoji_token, field_doc};
 use crate::ui::media_panel::PanelTab;
 use crate::ui::recording::RecordMode;
+use crate::ui::recording_state::{CaptureFor, CaptureMedia};
 use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr, tr_with};
@@ -51,9 +52,9 @@ impl QuillApp {
             && self.pickers.media_panel.reaction.is_none()
     }
 
-    /// A voice recording started from the story reply row is in progress.
+    /// A recording started from the story reply row is in progress.
     pub(in crate::ui) fn story_reply_recording_active(&self) -> bool {
-        self.stories.reply_recording && self.stories.reply_open && self.recording_active()
+        self.stories.reply_open && self.recording.purpose() == Some(CaptureFor::StoryReply)
     }
 
     /// The reply row is done (sent, closed, or the story changed): close
@@ -67,7 +68,6 @@ impl QuillApp {
         }
         self.stories.reply_open = false;
         self.stories.reply_panel = false;
-        self.stories.reply_recording = false;
     }
 
     pub(super) fn toggle_story_reply_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
@@ -389,8 +389,7 @@ impl QuillApp {
             .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         match VideoNoteCapture::start(hq, &self.capture_choice()) {
             Ok(capture) => {
-                self.recording.video_note_capture = Some(capture);
-                self.stories.reply_recording = true;
+                self.hold_capture(CaptureMedia::Video(capture), CaptureFor::StoryReply);
                 self.spawn_voice_tick(cx);
                 self.connection.status_note = tr(keys::Q_MEDIA_RECORDING_VIDEO_REPLY).into();
             }
@@ -418,15 +417,14 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
-        let Some(capture) = self.recording.video_note_capture.take() else {
+        let Some(capture) = self.recording.take_video() else {
             return true;
         };
         self.recording.locked = false;
         self.recording.discard_confirm = false;
-        self.stories.reply_recording = false;
         cx.notify();
         let finished = cx.background_spawn(async move { capture.finish() });
-        cx.spawn_in(window, async move |this, cx| {
+        Self::spawn_main_in(window, cx, async move |this, cx| {
             let result = finished.await;
             let _ = this.update_in(cx, |this, _window, cx| {
                 let sent = match result {
@@ -454,8 +452,7 @@ impl QuillApp {
         }
         match VoiceCapture::start() {
             Ok(capture) => {
-                self.recording.voice_capture = Some(capture);
-                self.stories.reply_recording = true;
+                self.hold_capture(CaptureMedia::Voice(capture), CaptureFor::StoryReply);
                 self.spawn_voice_tick(cx);
                 self.connection.status_note = tr(keys::Q_MEDIA_RECORDING_VOICE_REPLY).into();
             }
@@ -481,13 +478,12 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
-        let Some(capture) = self.recording.voice_capture.take() else {
+        let Some(capture) = self.recording.take_voice() else {
             return true;
         };
         self.recording.locked = false;
         self.recording.discard_confirm = false;
         self.stop_record_preview();
-        self.stories.reply_recording = false;
         let draft = match capture.finish() {
             Ok(draft) => draft,
             Err(err) => {

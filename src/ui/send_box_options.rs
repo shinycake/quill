@@ -130,7 +130,7 @@ impl QuillApp {
             let probed = path.clone();
             let worker =
                 cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
-            cx.spawn(async move |this, cx| {
+            self.spawn_scoped(cx, async move |this, cx| {
                 let silent = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_ui.send_box;

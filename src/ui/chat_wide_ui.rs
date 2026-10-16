@@ -52,14 +52,17 @@ impl QuillApp {
                 let now = ChatLayout::for_width(f32::from(bounds.size.width));
                 if layout.replace(now) != now {
                     let app = app.clone();
-                    window.defer(cx, move |_, cx| {
+                    window.defer(cx, move |window, cx| {
                         let _ = app.update(cx, |this, cx| {
-                            // Rows change height (photos join, dates move).
-                            this.history.rows_key = None;
-                            this.history
-                                .scroller
-                                .update(cx, |state, cx| state.remeasure(cx));
-                            cx.notify();
+                            // The history painted is this window's.
+                            this.in_window_of(window, cx, |this, _, cx| {
+                                // Rows change height (photos join, dates move).
+                                this.history.rows_key = None;
+                                this.history
+                                    .scroller
+                                    .update(cx, |state, cx| state.remeasure(cx));
+                                cx.notify();
+                            });
                         });
                     });
                 }

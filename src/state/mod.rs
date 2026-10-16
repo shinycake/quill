@@ -138,6 +138,7 @@ mod session_updates;
 mod session_web_apps;
 mod session_window_chats;
 pub use session_window_chats::SessionView;
+pub use session_window_chats::WindowViews;
 mod profile_music;
 mod shared_media_months;
 mod shared_media_profile;

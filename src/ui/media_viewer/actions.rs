@@ -181,7 +181,7 @@ impl QuillApp {
         self.viewer.extra.saved_toast = Some(quill::viewer_extras::SavedToast { dest, text });
         self.viewer.extra.saved_toast_gen += 1;
         let generation = self.viewer.extra.saved_toast_gen;
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(quill::viewer_extras::SAVED_TOAST_MS))
                 .await;
@@ -520,7 +520,7 @@ impl QuillApp {
             return;
         }
         self.viewer.hide_timer = true;
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 let wait = this
                     .update(cx, |this, cx| {

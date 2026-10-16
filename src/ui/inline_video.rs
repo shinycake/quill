@@ -324,9 +324,13 @@ impl QuillApp {
                 if videos.toggle_sound(key.0, key.1) {
                     let app = cx.weak_entity();
                     let viewed = viewed.unwrap_or(true);
+                    // The history drawing it is the window's.
+                    let scope = self.windows.scope;
                     cx.defer(move |cx| {
                         let _ = app.update(cx, |this, cx| {
-                            this.round_sound_started(key, cx);
+                            this.in_window_scope(scope, cx, |this, cx| {
+                                this.round_sound_started(key, cx);
+                            });
                             if !viewed {
                                 this.mark_voice_opened(chat_id, message_id);
                             }

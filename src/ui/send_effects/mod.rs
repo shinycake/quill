@@ -157,8 +157,11 @@ impl QuillApp {
         let menu = PopupMenu::build(window, cx, move |menu, _, _| {
             QuillApp::send_options_menu(owner.clone(), state, menu)
         });
+        // The menu is its window's: its events act on that window's state.
         let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
-            this.send_menu_dismissed(window, cx);
+            this.in_window_of(window, cx, |this, window, cx| {
+                this.send_menu_dismissed(window, cx)
+            });
         });
         let focus = menu.focus_handle(cx);
         window.focus(&focus, cx);
@@ -217,12 +220,18 @@ impl QuillApp {
                 .placeholder(tr(keys::Q_MISC_SEARCH))
                 .submit_on_enter(false)
         });
-        let changed = cx.subscribe_in(&search, window, |this, state, event: &InputEvent, _, cx| {
-            if matches!(event, InputEvent::Change) {
-                let query = state.read(cx).value().to_string();
-                this.send_effects_search(query, cx);
-            }
-        });
+        let changed = cx.subscribe_in(
+            &search,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let query = state.read(cx).value().to_string();
+                    this.in_window_of(window, cx, |this, _, cx| {
+                        this.send_effects_search(query, cx)
+                    });
+                }
+            },
+        );
         let focus = search.focus_handle(cx);
         let Some(open) = self.composer_ui.send_menu.open.as_mut() else {
             return;
@@ -350,12 +359,14 @@ impl QuillApp {
                     .on_click(move |_, window, cx| schedule(window, cx)),
             )
         });
-        let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
-            if let Some(open) = this.composer_ui.send_menu.open.as_mut() {
-                open.card_menu = None;
-                open.areas.card_menu.set(None);
-            }
-            cx.notify();
+        let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
+            this.in_window_of(window, cx, |this, _, cx| {
+                if let Some(open) = this.composer_ui.send_menu.open.as_mut() {
+                    open.card_menu = None;
+                    open.areas.card_menu.set(None);
+                }
+                cx.notify();
+            });
         });
         let focus = menu.focus_handle(cx);
         window.focus(&focus, cx);

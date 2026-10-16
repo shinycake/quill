@@ -21,14 +21,17 @@
 //! message menu and selection, the pickers, the media viewer, and the
 //! session's view of the chat. `QuillApp::set_window_scope` swaps a slot
 //! in while its window is drawn or handles input, so the app's own
-//! conversation, composer and overlay code serves every window; kit
+//! conversation, composer and overlay code serves every window; work that
+//! finishes later runs in the window it started in (`scoped`); kit
 //! dialogs open in the window whose input asked for them
 //! (`QuillShell::sync_kit_dialogs_in`). On the session side the chat is
 //! one of `Session::window_chats`.
 #![deny(clippy::indexing_slicing)]
 
 mod body;
+mod recording;
 mod saved;
+mod scoped;
 mod slot;
 #[cfg(test)]
 mod tests;
@@ -39,6 +42,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::state::ChatSummary;
+pub(in crate::ui) use scoped::ScopedApp;
 pub(in crate::ui) use slot::scope_probe;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -231,6 +235,13 @@ impl QuillApp {
         self.windows.scope.or_else(|| self.open_chat_id())
     }
 
+    /// The chat whose window `window` is (`None`: the main window), for
+    /// work a window's own callback defers.
+    pub(in crate::ui) fn window_scope_of(&self, window: &Window) -> Option<ChatId> {
+        self.windows
+            .chat_for_window(window.window_handle().window_id())
+    }
+
     /// The open forum topic of the content being built now.
     pub(super) fn viewed_topic(&self) -> Option<i32> {
         self.session().and_then(|session| session.open_topic)
@@ -310,6 +321,8 @@ impl QuillApp {
             self.windows.next_bounds(main)
         });
         let owner = cx.entity();
+        // window-scope: window bookkeeping by chat id; the draft goes in with
+        // the new window's state in place (`in_window_scope` below).
         cx.defer(move |cx| {
             let opened = view::open_chat_window(owner.clone(), chat_id, bounds, cx);
             let (handle, view, slot) = match opened {
@@ -383,8 +396,9 @@ impl QuillApp {
         cx.defer(move |cx| {
             let _ = main.update(cx, |_, window, cx| {
                 owner.update(cx, |app, cx| {
-                    app.set_window_scope(None);
-                    app.select_chat_with(chat_id, thread_switch, window, cx);
+                    app.in_window_scope(None, cx, |app, cx| {
+                        app.select_chat_with(chat_id, thread_switch, window, cx);
+                    });
                 });
                 cx.activate(true);
                 window.activate_window();
@@ -422,17 +436,19 @@ impl QuillApp {
         if let Some(bounds) = reopen_at {
             self.windows.note_closed(chat_id, bounds);
         }
-        self.forget_chat_window(chat_id);
+        self.forget_chat_window(chat_id, cx);
         self.schedule_chat_windows_save(cx);
         cx.notify();
     }
 
-    /// Drop the window's bookkeeping and close its chat in TDLib.
-    fn forget_chat_window(&mut self, chat_id: ChatId) {
+    /// Drop the window's bookkeeping, end what it was recording and close
+    /// its chat in TDLib.
+    fn forget_chat_window(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         // Its state must not stay in the app's place.
         if self.windows.scope == Some(chat_id) {
             self.set_window_scope(None);
         }
+        self.end_recording_of_window(chat_id, cx);
         self.windows.open.retain(|open| open.chat_id != chat_id);
         if self.windows.last_input == Some(chat_id) {
             self.windows.last_input = None;
@@ -479,7 +495,7 @@ impl QuillApp {
         self.message_ui.pending_delete = None;
         self.message_ui.pending_stop_poll = None;
         self.notify.ttl_picker_open = false;
-        if self.recording_active() {
+        if self.recording_here() {
             self.cancel_recording(cx);
         }
         self.stop_animation_playback();

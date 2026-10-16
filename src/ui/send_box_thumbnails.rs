@@ -50,7 +50,7 @@ impl QuillApp {
             let worker = cx.background_spawn(async move { write_file_thumbnail(&source) });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            cx.spawn(async move |this, cx| {
+            self.spawn_scoped(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_ui.send_box;
@@ -60,7 +60,7 @@ impl QuillApp {
                 });
             })
             .detach();
-            cx.spawn(async move |this, cx| {
+            self.spawn_scoped(cx, async move |this, cx| {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_ui.send_box;

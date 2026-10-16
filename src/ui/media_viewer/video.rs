@@ -188,8 +188,10 @@ impl QuillApp {
                 .default_value((self.playback.volume * 100.0).round())
                 .label(tr(keys::Q_AV_VOLUME_2))
         });
-        cx.subscribe(&volume, |this, _, event, cx| {
-            this.on_viewer_volume_event(event, cx);
+        // The sliders are this viewer's: their events act on this window's.
+        let scope = self.windows.scope;
+        cx.subscribe(&volume, move |this, _, event, cx| {
+            this.in_window_scope(scope, cx, |this, cx| this.on_viewer_volume_event(event, cx));
         })
         .detach();
         self.viewer.controls.volume = Some(volume);
@@ -211,8 +213,9 @@ impl QuillApp {
                 .default_value(position.min(max) as f32)
                 .label(tr(keys::Q_AV_SEEK))
         });
-        cx.subscribe(&slider, |this, _, event, cx| {
-            this.on_viewer_seek_event(event, cx);
+        let scope = self.windows.scope;
+        cx.subscribe(&slider, move |this, _, event, cx| {
+            this.in_window_scope(scope, cx, |this, cx| this.on_viewer_seek_event(event, cx));
         })
         .detach();
         self.viewer.controls.seek = Some(slider);

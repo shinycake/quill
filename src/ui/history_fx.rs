@@ -242,15 +242,19 @@ impl QuillApp {
         Some(reveal)
     }
 
-    /// The history list scrolled (or its rows moved): refresh the pill.
+    /// The main window's history list scrolled (or its rows moved): refresh
+    /// the pill. Observed on that list's scroller, so it runs as the main
+    /// window whatever state is in place.
     pub(super) fn note_history_scroll(&mut self, cx: &mut Context<Self>) {
-        // Pinned to the live edge, rows only move because messages arrive.
-        if self.history.scroller.read(cx).is_following_tail() {
-            return;
-        }
-        self.history.scroll_date.scrolled(Instant::now(), false);
-        // The pill lives in the conversation: the chat list can replay.
-        self.notify_conversation(cx);
+        self.in_window_scope(None, cx, |this, cx| {
+            // Pinned to the live edge, rows only move because messages arrive.
+            if this.history.scroller.read(cx).is_following_tail() {
+                return;
+            }
+            this.history.scroll_date.scrolled(Instant::now(), false);
+            // The pill lives in the conversation: the chat list can replay.
+            this.notify_conversation(cx);
+        });
     }
 
     /// Resolve the probed top row to its day; a changed day while the pill

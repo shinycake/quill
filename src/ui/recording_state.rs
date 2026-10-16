@@ -1,18 +1,45 @@
 //! Voice and round video recording.
 #![deny(clippy::indexing_slicing)]
 
+use quill::ids::ChatId;
 use quill::playback::PlaybackClock;
 use quill::video::VideoNoteCapture;
 use quill::voice::VoiceCapture;
 
+use super::app::QuillApp;
+
+/// What is being recorded.
+pub(crate) enum CaptureMedia {
+    Voice(VoiceCapture),
+    Video(VideoNoteCapture),
+}
+
+/// Where the recording goes once sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CaptureFor {
+    /// A message in the chat of the window it was started in.
+    Message,
+    /// A reply to the story open in the viewer.
+    StoryReply,
+}
+
+/// A recording in progress. Its window and purpose travel with it: taking
+/// or dropping the capture takes them too, so a finished recording leaves
+/// nothing behind for the next one to inherit. Built only by
+/// [`QuillApp::hold_capture`].
+pub(crate) struct Capture {
+    media: CaptureMedia,
+    /// The chat window it was started in (`None`: the main window). It is
+    /// sent to that window's chat and ends when that window closes
+    /// (`chat_window::recording`).
+    origin: Option<ChatId>,
+    purpose: CaptureFor,
+}
+
 pub(crate) struct RecordingUi {
-    /// Parity slice: in-flight notification-sound workers; capped so a
-    /// message burst cannot stack players.
-    /// tdesktop `VoiceRecordBar` (click the record button to record in the
-    /// current mode; Cancel / Esc asks for confirmation first).
-    pub(super) voice_capture: Option<VoiceCapture>,
-    /// MED2: in-progress round video-note camera capture (video mode).
-    pub(super) video_note_capture: Option<VideoNoteCapture>,
+    /// The voice or round video message being recorded, with the window it
+    /// belongs to. One at a time, for the whole app.
+    capture: Option<Capture>,
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
     pub(super) locked: bool,
@@ -26,8 +53,6 @@ pub(crate) struct RecordingUi {
     /// "Play once": the voice message goes out as a one-time message.
     pub(super) once: bool,
     pub(super) voice_tick: bool,
-    /// A video message reached its time limit: send it next frame.
-    pub(super) auto_send: bool,
     /// The live camera image while a video message records.
     pub(super) round_preview: std::cell::RefCell<super::round_record::RoundPreview>,
 }
@@ -35,16 +60,105 @@ pub(crate) struct RecordingUi {
 impl RecordingUi {
     pub(super) fn new() -> Self {
         Self {
-            voice_capture: None,
-            video_note_capture: None,
+            capture: None,
             locked: false,
             lock_next: false,
             discard_confirm: false,
             preview: None,
             once: false,
             voice_tick: false,
-            auto_send: false,
             round_preview: Default::default(),
         }
+    }
+}
+
+impl RecordingUi {
+    pub(super) fn active(&self) -> bool {
+        self.capture.is_some()
+    }
+
+    /// The window the recording belongs to (`Some(None)`: the main
+    /// window); `None` when nothing records.
+    pub(super) fn origin(&self) -> Option<Option<ChatId>> {
+        self.capture.as_ref().map(|capture| capture.origin)
+    }
+
+    pub(super) fn purpose(&self) -> Option<CaptureFor> {
+        self.capture.as_ref().map(|capture| capture.purpose)
+    }
+
+    pub(super) fn voice(&self) -> Option<&VoiceCapture> {
+        match self.capture.as_ref().map(|capture| &capture.media) {
+            Some(CaptureMedia::Voice(voice)) => Some(voice),
+            _ => None,
+        }
+    }
+
+    pub(super) fn voice_mut(&mut self) -> Option<&mut VoiceCapture> {
+        match self.capture.as_mut().map(|capture| &mut capture.media) {
+            Some(CaptureMedia::Voice(voice)) => Some(voice),
+            _ => None,
+        }
+    }
+
+    pub(super) fn video(&self) -> Option<&VideoNoteCapture> {
+        match self.capture.as_ref().map(|capture| &capture.media) {
+            Some(CaptureMedia::Video(video)) => Some(video),
+            _ => None,
+        }
+    }
+
+    pub(super) fn video_mut(&mut self) -> Option<&mut VideoNoteCapture> {
+        match self.capture.as_mut().map(|capture| &mut capture.media) {
+            Some(CaptureMedia::Video(video)) => Some(video),
+            _ => None,
+        }
+    }
+
+    /// Take the voice recording, with its window; nothing when a video
+    /// message records.
+    pub(super) fn take_voice(&mut self) -> Option<VoiceCapture> {
+        match self.capture.take()? {
+            Capture {
+                media: CaptureMedia::Voice(voice),
+                ..
+            } => Some(voice),
+            other => {
+                self.capture = Some(other);
+                None
+            }
+        }
+    }
+
+    /// Take the video message recording, with its window; nothing when a
+    /// voice message records.
+    pub(super) fn take_video(&mut self) -> Option<VideoNoteCapture> {
+        match self.capture.take()? {
+            Capture {
+                media: CaptureMedia::Video(video),
+                ..
+            } => Some(video),
+            other => {
+                self.capture = Some(other);
+                None
+            }
+        }
+    }
+
+    /// Take whatever records, with its window.
+    pub(super) fn take(&mut self) -> Option<CaptureMedia> {
+        self.capture.take().map(|capture| capture.media)
+    }
+}
+
+impl QuillApp {
+    /// Hold a recording that just started, as the window whose state is
+    /// in place (the one whose composer or story viewer asked for it).
+    pub(super) fn hold_capture(&mut self, media: CaptureMedia, purpose: CaptureFor) {
+        self.recording.capture = Some(Capture {
+            media,
+            origin: self.windows.scope,
+            purpose,
+        });
     }
 }

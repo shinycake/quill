@@ -438,6 +438,11 @@ pub struct PendingRequest {
     /// TDLib error the pre-request value is restored so the UI never
     /// keeps showing a change the server rejected.
     pub rollback: Option<RequestRollback>,
+    /// The chat window whose view was in the session's place when the
+    /// request was registered (`None`: the main window's). An answer that
+    /// lands in a view applies to that window's
+    /// (`Session::apply_payload_in_asking_view`).
+    pub window: Option<ChatId>,
     /// When the request was registered. The periodic sweep
     /// ([`RequestRegistry::sweep_stale`]) drops dedupe-guard entries whose
     /// answer never came, so a lost response cannot block a chat forever.
@@ -448,6 +453,10 @@ pub struct PendingRequest {
 pub struct RequestRegistry {
     pub(crate) next: u64,
     pub(crate) pending: HashMap<u64, PendingRequest>,
+    /// The chat window whose view is in the session's place (`None`: the
+    /// main window's). `Session::enter_view` keeps it; every request
+    /// registered meanwhile carries it (`PendingRequest::window`).
+    pub(crate) window: Option<ChatId>,
 }
 
 impl RequestRegistry {
@@ -495,6 +504,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                window: self.window,
                 created_at: Instant::now(),
             },
         );
@@ -531,6 +541,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                window: self.window,
                 created_at: Instant::now(),
             },
         );
@@ -568,6 +579,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                window: self.window,
                 created_at: Instant::now(),
             },
         );
@@ -605,6 +617,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                window: self.window,
                 created_at: Instant::now(),
             },
         );
@@ -640,6 +653,7 @@ impl RequestRegistry {
                 scope: None,
                 secret_chat_id: None,
                 rollback: None,
+                window: self.window,
                 created_at: Instant::now(),
             },
         );

@@ -101,7 +101,7 @@ impl super::app::QuillApp {
             let prepared = prepare_startup(credentials, root, secrets().as_ref(), done);
             (swept, prepared)
         });
-        cx.spawn(async move |this, cx| {
+        Self::spawn_main(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
             let _ = this.update(cx, |this, _| {
                 this.background.screen_preparing =

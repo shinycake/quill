@@ -126,7 +126,7 @@ impl QuillApp {
             return;
         }
         self.history.self_destruct_tick_chat = Some(chat_id);
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this

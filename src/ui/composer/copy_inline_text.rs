@@ -31,7 +31,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_CHAT_CHOOSE_FILE).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.first().cloned()
             {

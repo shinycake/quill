@@ -282,7 +282,7 @@ impl QuillApp {
         self.composer_ui.inline_query_armed = Some((username.to_string(), query.to_string()));
         let username = username.to_string();
         let query = query.to_string();
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(100))
                 .await;

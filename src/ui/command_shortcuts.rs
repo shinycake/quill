@@ -29,7 +29,7 @@ impl QuillApp {
     /// commands of the button's menu apply.
     fn composer_sendable(&self, cx: &App) -> bool {
         self.composer_ui.pending_edit.is_none()
-            && !self.recording_active()
+            && !self.recording_here()
             && (!self.composer.read(cx).value().trim().is_empty()
                 || !self.pending_attachments().is_empty()
                 || self.forward_bar_here())
@@ -238,6 +238,8 @@ macro_rules! window_command {
                 .update(cx, |app, cx| {
                     app.in_window_scope(Some(chat_id), cx, |app, cx| app.$method(window, cx))
                 })
+                .ok()
+                .flatten()
                 .unwrap_or(false);
             if !handled {
                 cx.propagate();

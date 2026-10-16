@@ -46,19 +46,21 @@ impl QuillApp {
         cx.subscribe_in(
             &input,
             window,
-            |this, _, event: &gpui_kit::component::input::InputEvent, window, cx| match event {
-                gpui_kit::component::input::InputEvent::PressEnter { .. } => {
-                    if this.submit_suggest_price(cx) {
-                        this.close_kit_dialog_if_done(DialogKind::SuggestPrice, window, cx);
+            |this, _, event: &gpui_kit::component::input::InputEvent, window, cx| {
+                this.in_window_of(window, cx, |this, window, cx| match event {
+                    gpui_kit::component::input::InputEvent::PressEnter { .. } => {
+                        if this.submit_suggest_price(cx) {
+                            this.close_kit_dialog_if_done(DialogKind::SuggestPrice, window, cx);
+                        }
                     }
-                }
-                gpui_kit::component::input::InputEvent::Change => {
-                    if let Some(price) = this.suggested_posts.price.as_mut() {
-                        price.error = None;
+                    gpui_kit::component::input::InputEvent::Change => {
+                        if let Some(price) = this.suggested_posts.price.as_mut() {
+                            price.error = None;
+                        }
+                        cx.notify();
                     }
-                    cx.notify();
-                }
-                _ => {}
+                    _ => {}
+                });
             },
         )
         .detach();

@@ -593,7 +593,7 @@ impl QuillApp {
     }
 
     pub(super) fn schedule_chat_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {

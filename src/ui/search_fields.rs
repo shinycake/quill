@@ -26,27 +26,40 @@ impl QuillApp {
             &input,
             window,
             |this, state, event: &InputEvent, window, cx| {
-                let text = state.read(cx).value().to_string();
-                if matches!(event, InputEvent::Change) {
-                    this.sync_chat_search_query(&text, cx);
-                }
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if *secondary && !*shift && marked.is_none() && !this.share.reply_elsewhere_open
-                    {
-                        this.submit_share_from_search(cx);
-                    } else if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        // Not a chat composer: the send-key setting does not apply.
-                        SendKeyMode::Enter,
-                    ) {
-                        this.jump_selected_chat_search_hit(cx);
-                    }
-                }
+                this.in_window_of(window, cx, |this, window, cx| {
+                    this.on_chat_search_field_event(state, event, window, cx)
+                });
             },
         )
         .detach();
         input
+    }
+
+    /// The "Search in chat" field changed or took Enter, with its window in
+    /// place (`in_window_of`).
+    fn on_chat_search_field_event(
+        &mut self,
+        state: &Entity<TextareaState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = state.read(cx).value().to_string();
+        if matches!(event, InputEvent::Change) {
+            self.sync_chat_search_query(&text, cx);
+        }
+        if let InputEvent::PressEnter { secondary, shift } = event {
+            let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+            if *secondary && !*shift && marked.is_none() && !self.share.reply_elsewhere_open {
+                self.submit_share_from_search(cx);
+            } else if should_send_on_enter(
+                quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                // Not a chat composer: the send-key setting does not apply.
+                SendKeyMode::Enter,
+            ) {
+                self.jump_selected_chat_search_hit(cx);
+            }
+        }
     }
 
     /// The share box's "Search chats" field: its text filters the
@@ -66,30 +79,43 @@ impl QuillApp {
             &input,
             window,
             |this, state, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    let text = state.read(cx).value().to_string();
-                    this.sync_share_search(&text, cx);
-                }
-                if let InputEvent::PressEnter { secondary, shift } = event {
-                    let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
-                    if *secondary && !*shift && marked.is_none() && !this.share.reply_elsewhere_open
-                    {
-                        this.submit_share_from_search(cx);
-                    } else if should_send_on_enter(
-                        quill::composer::enter_event_from_kit(*shift, *secondary, marked),
-                        // Not a chat composer: the send-key setting does not apply.
-                        SendKeyMode::Enter,
-                    ) {
-                        if this.share.reply_elsewhere_open {
-                            this.choose_first_reply_chat(window, cx);
-                        } else {
-                            this.activate_first_forward_destination(cx);
-                        }
-                    }
-                }
+                this.in_window_of(window, cx, |this, window, cx| {
+                    this.on_forward_search_field_event(state, event, window, cx)
+                });
             },
         )
         .detach();
         input
+    }
+
+    /// The share box's search field changed or took Enter, with its window
+    /// in place (`in_window_of`).
+    fn on_forward_search_field_event(
+        &mut self,
+        state: &Entity<TextareaState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, InputEvent::Change) {
+            let text = state.read(cx).value().to_string();
+            self.sync_share_search(&text, cx);
+        }
+        if let InputEvent::PressEnter { secondary, shift } = event {
+            let marked = state.update(cx, |input, cx| input.marked_text_range(window, cx));
+            if *secondary && !*shift && marked.is_none() && !self.share.reply_elsewhere_open {
+                self.submit_share_from_search(cx);
+            } else if should_send_on_enter(
+                quill::composer::enter_event_from_kit(*shift, *secondary, marked),
+                // Not a chat composer: the send-key setting does not apply.
+                SendKeyMode::Enter,
+            ) {
+                if self.share.reply_elsewhere_open {
+                    self.choose_first_reply_chat(window, cx);
+                } else {
+                    self.activate_first_forward_destination(cx);
+                }
+            }
+        }
     }
 }

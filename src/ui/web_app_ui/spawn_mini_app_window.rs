@@ -117,7 +117,7 @@ impl QuillApp {
         }
         self.mini_apps.generation += 1;
         let generation = self.mini_apps.generation;
-        let task = cx.spawn(async move |this, cx| {
+        let task = Self::spawn_main(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(30))

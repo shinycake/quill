@@ -5,6 +5,7 @@
 use crate::ui::actions::{CloseWindow, ReopenClosedWindow};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
+use crate::ui::recording_state::{CaptureFor, CaptureMedia};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
@@ -352,11 +353,10 @@ fn a_chat_picked_inside_a_chat_window_opens_in_the_main_window(cx: &mut TestAppC
     cx.run_until_parked();
     assert_eq!(h.open_chat(cx), Some(CHANNEL), "the main window switched");
     assert_eq!(h.window_chats(cx), vec![OTHER], "the window kept its chat");
-    h.settle(cx);
-    let window_view = h.app.read_with(cx, |app, _| {
-        app.windows
-            .slot_for(OTHER)
-            .map(|slot| slot.borrow().session.open_chat)
+    let window_view = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.session().and_then(|session| session.open_chat)
+        })
     });
     assert_eq!(window_view, Some(Some(OTHER)));
 }
@@ -453,14 +453,17 @@ fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppCo
         )
     });
     // With the window's state in place the fields are the window's own.
-    let (window_search, window_forward) = h.app.update(cx, |app, cx| {
-        app.in_window_scope(Some(OTHER), cx, |app, _| {
-            (
-                app.search_ui.chat_input.entity_id(),
-                app.share.search_input.entity_id(),
-            )
+    let (window_search, window_forward) = h
+        .app
+        .update(cx, |app, cx| {
+            app.in_window_scope(Some(OTHER), cx, |app, _| {
+                (
+                    app.search_ui.chat_input.entity_id(),
+                    app.share.search_input.entity_id(),
+                )
+            })
         })
-    });
+        .expect("the window is open");
     assert_ne!(main_search, window_search);
     assert_ne!(main_forward, window_forward);
 
@@ -474,18 +477,22 @@ fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppCo
     .unwrap();
     cx.run_until_parked();
     h.settle(cx);
-    let (window_text, window_open, main_text, main_open) = h.app.read_with(cx, |app, cx| {
+    let (window_text, main_text, main_open) = h.app.read_with(cx, |app, cx| {
         let slot = app.windows.slot_for(OTHER).expect("slot");
         let slot = slot.borrow();
         (
             slot.chat_search_input.read(cx).value().to_string(),
-            slot.session.chat_search.open,
             app.search_ui.chat_input.read(cx).value().to_string(),
             app.session().is_some_and(|s| s.search.chat_search.open),
         )
     });
+    let window_open = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.session().is_some_and(|s| s.search.chat_search.open)
+        })
+    });
     assert_eq!(window_text, "later");
-    assert!(window_open, "the window's chat search opened");
+    assert_eq!(window_open, Some(true), "the window's chat search opened");
     assert_eq!(main_text, "");
     assert!(!main_open, "the main window's search stayed closed");
 }
@@ -569,4 +576,280 @@ fn reopen_closed_window_brings_back_the_window_closed_last(cx: &mut TestAppConte
         })
         .unwrap();
     assert!(!again, "the list of closed windows is used up");
+}
+
+/// The media viewer's "saved" toast of `chat`'s window (`None`: the main
+/// window's) is showing.
+fn toast_shown(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) -> bool {
+    h.settle(cx);
+    h.app.read_with(cx, |app, _| match chat {
+        Some(chat) => app
+            .windows
+            .slot_for(chat)
+            .is_some_and(|slot| slot.borrow().viewer.extra.saved_toast.is_some()),
+        None => app.viewer.extra.saved_toast.is_some(),
+    })
+}
+
+/// Show the "saved" toast in `chat`'s window (`None`: the main window),
+/// as a Save there would; its timer hides it later.
+fn show_saved_toast(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) {
+    let shown = h.app.update(cx, |app, cx| {
+        app.in_window_scope(chat, cx, |app, cx| {
+            app.show_saved_toast(std::path::PathBuf::from("/tmp/clip.mp4"), true, cx);
+        })
+    });
+    assert_eq!(shown, Some(()), "the window is open");
+    // The input that asked is over: the main window's state goes back in
+    // place, as its next draw or the poll loop puts it.
+    h.settle(cx);
+}
+
+const TOAST: std::time::Duration =
+    std::time::Duration::from_millis(quill::viewer_extras::SAVED_TOAST_MS);
+const A_MOMENT: std::time::Duration = std::time::Duration::from_millis(50);
+
+#[gpui_kit::test]
+fn a_timer_started_in_a_chat_window_finishes_in_that_window(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    // The window's toast first, the main window's half a lifetime later:
+    // each is its viewer's first, so their counters match.
+    show_saved_toast(&h, Some(OTHER), cx);
+    cx.executor().advance_clock(TOAST / 2);
+    show_saved_toast(&h, None, cx);
+    assert!(toast_shown(&h, Some(OTHER), cx));
+    assert!(toast_shown(&h, None, cx));
+
+    // The window's timer ends with the main window's state in place: it
+    // hides the window's toast, not the main window's younger one.
+    cx.executor().advance_clock(TOAST / 2 + A_MOMENT);
+    cx.run_until_parked();
+    assert!(!toast_shown(&h, Some(OTHER), cx), "the window's toast went");
+    assert!(toast_shown(&h, None, cx), "the main window's toast stays");
+
+    cx.executor().advance_clock(TOAST / 2);
+    cx.run_until_parked();
+    assert!(!toast_shown(&h, None, cx), "then the main window's goes");
+}
+
+#[gpui_kit::test]
+fn work_from_a_closed_chat_window_lands_nowhere(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    show_saved_toast(&h, Some(OTHER), cx);
+    cx.executor().advance_clock(TOAST / 2);
+    show_saved_toast(&h, None, cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+
+    let ran = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |_, _| ())
+    });
+    assert_eq!(ran, None, "a closed window's scope runs nothing");
+    // The closed window's timer ends: the main window's toast, with the
+    // same counter, is not the one it hides.
+    cx.executor().advance_clock(TOAST / 2 + A_MOMENT);
+    cx.run_until_parked();
+    assert!(toast_shown(&h, None, cx), "the main window's toast stays");
+}
+
+/// How many voice messages the main window's chat and `OTHER` hold.
+fn voice_notes(h: &Harness, cx: &mut TestAppContext) -> (usize, usize) {
+    h.settle(cx);
+    h.app.read_with(cx, |app, _| {
+        let count = |chat: ChatId| {
+            app.session()
+                .and_then(|session| session.histories.get(&chat.0))
+                .map_or(0, |history| {
+                    history
+                        .ordered()
+                        .into_iter()
+                        .filter(|message| matches!(message.content, MessageContent::VoiceNote(_)))
+                        .count()
+                })
+        };
+        (count(OPEN), count(OTHER))
+    })
+}
+
+/// A recording in `chat`'s window (`None`: the main window; a fixture
+/// voice capture, no microphone), started as `begin_voice_capture` or, for
+/// `CaptureFor::StoryReply`, `begin_story_voice_capture` start one there.
+fn record_in_window(
+    h: &Harness,
+    chat: Option<ChatId>,
+    purpose: CaptureFor,
+    cx: &mut TestAppContext,
+) {
+    h.app.update(cx, |app, cx| {
+        app.in_window_scope(chat, cx, |app, _| {
+            let path = std::env::temp_dir().join("quill-window-recording-test.ogg");
+            let capture = quill::voice::VoiceCapture::preview(path, 3, vec![4, 8, 12]);
+            app.hold_capture(CaptureMedia::Voice(capture), purpose);
+        })
+        .expect("the chat has a window");
+    });
+}
+
+/// The recording reaches its time limit (`check_recording` saw the video
+/// capture end), with the main window's state in place.
+fn reach_time_limit(h: &Harness, cx: &mut TestAppContext) {
+    h.app.update(cx, |app, cx| {
+        app.set_window_scope(None);
+        app.send_recording_at_time_limit(cx);
+    });
+}
+
+#[gpui_kit::test]
+fn a_recording_from_a_chat_window_is_never_sent_to_the_main_windows_chat(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    let (main, other) = voice_notes(&h, cx);
+    record_in_window(&h, Some(OTHER), CaptureFor::Message, cx);
+    // Its record bar is the window's, not the main window's.
+    let here = h.app.update(cx, |app, cx| {
+        let main = app.in_window_scope(None, cx, |app, _| app.recording_here());
+        let window = app.in_window_scope(Some(OTHER), cx, |app, _| app.recording_here());
+        (main, window)
+    });
+    assert_eq!(here, (Some(false), Some(true)));
+
+    // The time limit is reached with the main window's state in place, and
+    // the window it was recorded in does not draw (covered or minimized):
+    // it goes to that window's chat all the same.
+    reach_time_limit(&h, cx);
+    cx.run_until_parked();
+    assert_eq!(
+        voice_notes(&h, cx),
+        (main, other + 1),
+        "the window's chat got it, the main window's did not"
+    );
+    assert!(h.app.read_with(cx, |app, _| !app.recording_active()));
+}
+
+#[gpui_kit::test]
+fn a_main_window_recording_at_its_time_limit_is_sent_to_the_main_chat(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    let (main, other) = voice_notes(&h, cx);
+    record_in_window(&h, None, CaptureFor::Message, cx);
+    // Reached while the chat window's state is in place.
+    h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, cx| {
+            app.send_recording_at_time_limit(cx)
+        })
+        .expect("the chat has a window");
+    });
+    cx.run_until_parked();
+    assert_eq!(voice_notes(&h, cx), (main + 1, other));
+    assert!(h.app.read_with(cx, |app, _| !app.recording_active()));
+}
+
+#[gpui_kit::test]
+fn the_send_button_sends_to_the_recording_window_whichever_window_asks(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    let (main, other) = voice_notes(&h, cx);
+    record_in_window(&h, Some(OTHER), CaptureFor::Message, cx);
+    // Asked with the main window's state in place (a shortcut, the Touch
+    // Bar): it still goes to the window's chat.
+    cx.update_window(h.main, |_, window, cx| {
+        h.app.update(cx, |app, cx| {
+            app.set_window_scope(None);
+            app.send_recording(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(voice_notes(&h, cx), (main, other + 1));
+
+    // One recorded in the main window still goes to its chat.
+    record_in_window(&h, None, CaptureFor::Message, cx);
+    cx.update_window(h.main, |_, window, cx| {
+        h.app.update(cx, |app, cx| app.send_recording(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(voice_notes(&h, cx), (main + 1, other + 1));
+}
+
+#[gpui_kit::test]
+fn closing_a_chat_window_ends_the_recording_made_there(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let (main, _) = voice_notes(&h, cx);
+    record_in_window(&h, Some(OTHER), CaptureFor::Message, cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+    let (active, note) = h.app.read_with(cx, |app, _| {
+        (app.recording_active(), app.connection.status_note.clone())
+    });
+    assert!(!active, "the recording ended with its window");
+    assert_eq!(
+        note,
+        quill::lang::tr(quill::lang::keys::Q_MISC_RECORDING_DISCARDED_ITS_WINDOW_CLOSED)
+    );
+    // A time limit reported late sends nothing.
+    reach_time_limit(&h, cx);
+    cx.update_window(h.main, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        voice_notes(&h, cx).0,
+        main,
+        "nothing went to the main window's chat"
+    );
+}
+
+#[gpui_kit::test]
+fn a_sent_recording_leaves_no_window_behind_for_the_next_one(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let (_, other) = voice_notes(&h, cx);
+    record_in_window(&h, Some(OTHER), CaptureFor::Message, cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        h.app.update(cx, |app, cx| app.send_recording(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(voice_notes(&h, cx).1, other + 1);
+
+    // A story reply, recorded from the main window's story viewer.
+    record_in_window(&h, None, CaptureFor::StoryReply, cx);
+    let note_before = h
+        .app
+        .read_with(cx, |app, _| app.connection.status_note.clone());
+    let in_other = h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| app.recording_here())
+    });
+    assert_eq!(in_other, Some(false), "its record bar is not in OTHER");
+
+    // OTHER closes: the main window's recording carries on.
+    cx.update_window(chat_window, |_, window, cx| {
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+    let (active, here, note) = h.app.read_with(cx, |app, _| {
+        (
+            app.recording_active(),
+            app.recording_here(),
+            app.connection.status_note.clone(),
+        )
+    });
+    assert!(active, "the story reply still records");
+    assert!(here, "and belongs to the main window");
+    assert_eq!(note, note_before, "no \"discarded\" note");
 }

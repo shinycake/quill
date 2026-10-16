@@ -272,3 +272,38 @@ fn a_window_chat_runs_the_open_chat_follow_ups_without_moving_the_main_view() {
     assert_eq!(h.driver.session.open_chat, Some(ALICE));
     assert_eq!(h.driver.session.open_topic, Some(5));
 }
+
+#[test]
+fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    // Typed in Bob's window; the debounce ends later, as the window's work
+    // (the UI runs it with the window's state in place).
+    let typed = h
+        .driver
+        .with_window_chat(BOB, |driver| driver.set_chat_search_query("m6"))
+        .unwrap();
+    let ChatSearchQueryOutcome::Debounced { token } = typed else {
+        panic!("a typed query waits for the debounce: {typed:?}");
+    };
+    h.driver
+        .with_window_chat(BOB, |driver| driver.commit_debounced_chat_search(token))
+        .unwrap();
+    let search = h.sent("searchChatMessages", BOB);
+    let search = search.last().expect("Bob's chat was searched");
+    assert_eq!(search["query"], "m6");
+    let extra = search["@extra"].as_str().unwrap().to_string();
+
+    // The answer arrives with the main window's view in place.
+    h.ingest(&format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":1,"next_from_message_id":0,"messages":[{}]}}"#,
+        message_json(BOB.0, 60, false)
+    ));
+    assert!(!h.driver.session.search.chat_search.open);
+    let hits = h.driver.with_window_chat(BOB, |driver| {
+        let state = &driver.session.search.chat_search;
+        (state.chat_id, state.hits.len())
+    });
+    assert_eq!(hits, (Some(BOB), 1), "the hits landed in Bob's window");
+}

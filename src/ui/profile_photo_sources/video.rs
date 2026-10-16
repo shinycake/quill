@@ -20,7 +20,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_AV_CHOOSE_VIDEO).into()),
         });
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
@@ -59,7 +59,7 @@ impl QuillApp {
         let args = encode_args(&input, &output.to_string_lossy(), &edits, &info);
         let log = work_dir().join("encode.log");
         let worker = cx.background_spawn(async move { run_ffmpeg(&args, &log) });
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_scoped_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let current = this

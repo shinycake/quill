@@ -215,13 +215,13 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // confirm row (locked recordings ignore Esc beyond a hint).
     layer!(
         "record-discard-confirm",
-        |app| app.recording.discard_confirm,
+        |app| app.recording.discard_confirm && app.recording_here(),
         |app, _, cx| {
             app.recording.discard_confirm = false;
             cx.notify();
         }
     ),
-    layer!("recording", |app| app.recording_active(), |app, _, cx| {
+    layer!("recording", |app| app.recording_here(), |app, _, cx| {
         if app.recording.locked {
             app.connection.status_note = tr(keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT).into();
             cx.notify();

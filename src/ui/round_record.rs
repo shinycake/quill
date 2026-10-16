@@ -28,7 +28,7 @@ pub(super) struct RoundPreview {
 impl QuillApp {
     /// The recording circle, while a video message records.
     pub(super) fn round_record_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let capture = self.recording.video_note_capture.as_ref()?;
+        let capture = self.recording.video()?;
         self.request_animation_tick(30, cx);
         let progress = capture.progress();
         let frames = capture.preview();
