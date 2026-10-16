@@ -422,6 +422,8 @@ mod tests {
         }
     }
 
+    // Unix paths: "/cfg" is not absolute on Windows.
+    #[cfg(unix)]
     #[test]
     fn linux_autostart_honours_xdg_config_home() {
         let home = Path::new("/home/a");

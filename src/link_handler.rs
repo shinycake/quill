@@ -685,7 +685,9 @@ mod packaged_entry_tests {
     fn shipped_desktop_file_matches_the_window_app_id() {
         let app_id = LINUX_DESKTOP_FILE.trim_end_matches(".desktop");
         assert_eq!(app_id, "org.shinycake.quill");
-        assert!(SHIPPED.contains(&format!("\nStartupWMClass={app_id}\n")));
+        // lines(): a Windows checkout may have CRLF line ends.
+        let wm_class = format!("StartupWMClass={app_id}");
+        assert!(SHIPPED.lines().any(|line| line.trim_end() == wm_class));
         assert!(SHIPPED.contains("MimeType=x-scheme-handler/tg;"));
     }
 }
