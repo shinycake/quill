@@ -1,8 +1,12 @@
 //! The voice chat window's video area: one tile per camera or screen
 //! stream, a pinned tile shown large, and a "paused" state when the
 //! sender pauses (`groupCallParticipantVideoInfo.is_paused`, or your own
-//! shared window hidden): the blurred last frame under the pause icon
-//! (`group_call_paused.rs`).
+//! shared window hidden): the blurred last frame under the pause icon.
+//! A stream with no frame yet shows the avatar, with the spinner after
+//! 500 ms. Both states come from the live controller's overlay
+//! (`video_player::controls::PictureOverlay`); the tiles keep their own
+//! chrome (name, pin, full screen). The full-screen stage adds the
+//! participant's volume (`group_call_stage_volume.rs`).
 //!
 //! Each stream is a live player over the driver's feed for
 //! `(call, user, screen)`; a new frame redraws the window by itself, and
@@ -14,8 +18,8 @@
 
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
-use super::group_call_paused::paused_overlay;
 use super::nested_click::SwallowPress;
+use super::video_player::controls::{LiveInput, LiveOverlayParts, PictureOverlay, PictureState};
 use super::video_player::{Purpose, VideoPlayer, video_frame};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{Icon, Sizable};
@@ -31,7 +35,21 @@ struct Tile {
     key: TileKey,
     name: String,
     picture: AnyElement,
-    paused: bool,
+    /// The live overlay over the picture (paused, opening).
+    overlay: Option<PictureState>,
+    /// Your own tile (no volume on the stage).
+    own: bool,
+}
+
+/// A tile's id for the overlay's elements.
+fn tile_row(key: TileKey) -> u64 {
+    let id = match key.participant {
+        MessageSender::User { user_id } => user_id,
+        MessageSender::Chat { chat_id } => chat_id,
+    };
+    id.unsigned_abs()
+        .wrapping_mul(2)
+        .wrapping_add(u64::from(key.screen))
 }
 
 impl QuillApp {
@@ -58,61 +76,13 @@ impl QuillApp {
         Some(player)
     }
 
-    /// One stream's picture: the live player once it has a frame (the
-    /// last frame small and blurred while paused), or `None`.
-    fn group_stream_picture(
-        &mut self,
-        call: &ActiveGroupCall,
-        participant: &ParsedGroupCallParticipant,
-        screen: bool,
-        paused: bool,
-        contain: bool,
-        cx: &mut App,
-    ) -> Option<AnyElement> {
-        let MessageSender::User { user_id } = participant.participant_id else {
-            return None;
-        };
-        let key = LiveKey::Video {
-            call_id: call.id,
-            user_id,
-            screen,
-        };
-        let player = self.group_tile_player(key, cx)?;
-        // The pause comes with the participant update, not the engine: no
-        // engine signal sets a track's state (only a stream's). One that
-        // did would be masked here, as this sets it on every render.
-        if let Some(sink) = player.live_sink() {
-            sink.set_state(if paused {
-                LiveState::Paused
-            } else {
-                LiveState::Active
-            });
-        }
-        if !player.has_live_frame() {
-            return None;
-        }
-        let fit = if contain && !paused {
-            ObjectFit::Contain
-        } else {
-            ObjectFit::Cover
-        };
-        let radius = px(if contain { 0. } else { 10. });
-        Some(
-            video_frame(&player)
-                .object_fit(fit)
-                .paused_overlay(true)
-                .corner_radii(Corners::all(radius), black())
-                .into_any_element(),
-        )
-    }
-
     /// Every stream of the call as a tile. `contain` fits video without
     /// cropping (the full-screen stage).
     fn collect_group_tiles(
         &mut self,
         call: &ActiveGroupCall,
         contain: bool,
-        cx: &mut App,
+        cx: &mut Context<Self>,
     ) -> Vec<Tile> {
         // Players of another call, or of streams that are gone, go.
         self.group_call.players.retain(|key, player| {
@@ -122,6 +92,10 @@ impl QuillApp {
             }
             keep
         });
+        let players = &self.group_call.players;
+        self.group_call
+            .tile_overlays
+            .retain(|key, _| players.contains_key(key));
         let mut built: Vec<Tile> = Vec::new();
         for participant in &call.participants {
             let name = self.group_call_participant_name(&participant.participant_id);
@@ -134,15 +108,18 @@ impl QuillApp {
                     },
                     name: name.clone(),
                     picture,
-                    paused: call.is_my_video_paused,
+                    overlay: call
+                        .is_my_video_paused
+                        .then_some(PictureState::LivePaused { wide: contain }),
+                    own: true,
                 });
             } else if participant.video_enabled {
                 let paused = participant
                     .video_info
                     .as_ref()
                     .is_some_and(|info| info.is_paused);
-                if let Some(picture) =
-                    self.stream_or_placeholder(call, participant, false, &name, paused, contain, cx)
+                if let Some((picture, overlay)) =
+                    self.group_stream_tile(call, participant, false, &name, paused, contain, cx)
                 {
                     built.push(Tile {
                         key: TileKey {
@@ -151,7 +128,8 @@ impl QuillApp {
                         },
                         name: name.clone(),
                         picture,
-                        paused,
+                        overlay,
+                        own: participant.is_current_user,
                     });
                 }
             }
@@ -163,8 +141,8 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|info| info.is_paused)
                     || (participant.is_current_user && call.screen_share_paused);
-                if let Some(picture) =
-                    self.stream_or_placeholder(call, participant, true, &name, paused, contain, cx)
+                if let Some((picture, overlay)) =
+                    self.group_stream_tile(call, participant, true, &name, paused, contain, cx)
                 {
                     built.push(Tile {
                         key: TileKey {
@@ -173,7 +151,8 @@ impl QuillApp {
                         },
                         name: tr_with(keys::Q_AV_SCREEN, &[("name", &name.to_string())]),
                         picture,
-                        paused,
+                        overlay,
+                        own: participant.is_current_user,
                     });
                 }
             }
@@ -229,12 +208,19 @@ impl QuillApp {
         self.group_call.pin.retain_available(&keys);
         let stage = stage_tile(&self.group_call.pin, &keys)?;
         let tile = built.into_iter().find(|t| t.key == stage)?;
-        Some(stage_view(tile, cx))
+        let volume = (!tile.own)
+            .then(|| self.stage_volume_slider(call, stage.participant, cx))
+            .flatten();
+        Some(stage_view(tile, volume, cx))
     }
 
-    /// The live picture, or (only while paused) the avatar standing in.
+    /// One stream's tile content: the live player once it has a frame
+    /// (the last frame small and blurred while paused), else the avatar;
+    /// and the shared live overlay over it (tdesktop's paused shadow, or
+    /// the opening spinner after 500 ms). `None` without a feed unless
+    /// paused (the avatar stands in, as before).
     #[allow(clippy::too_many_arguments)]
-    fn stream_or_placeholder(
+    fn group_stream_tile(
         &mut self,
         call: &ActiveGroupCall,
         participant: &ParsedGroupCallParticipant,
@@ -242,10 +228,76 @@ impl QuillApp {
         name: &str,
         paused: bool,
         contain: bool,
-        cx: &mut App,
-    ) -> Option<AnyElement> {
-        self.group_stream_picture(call, participant, screen, paused, contain, cx)
-            .or_else(|| paused.then(|| initials_avatar(name, 56.).into_any_element()))
+        cx: &mut Context<Self>,
+    ) -> Option<(AnyElement, Option<PictureState>)> {
+        let MessageSender::User { user_id } = participant.participant_id else {
+            return None;
+        };
+        let key = LiveKey::Video {
+            call_id: call.id,
+            user_id,
+            screen,
+        };
+        let player = self.group_tile_player(key, cx);
+        // The pause comes with the participant update, not the engine: no
+        // engine signal sets a track's state (only a stream's). One that
+        // did would be masked here, as this sets it on every render.
+        if let Some(sink) = player.as_ref().and_then(VideoPlayer::live_sink) {
+            sink.set_state(if paused {
+                LiveState::Paused
+            } else {
+                LiveState::Active
+            });
+        }
+        let picture = match player.as_ref().filter(|player| player.has_live_frame()) {
+            Some(player) => {
+                let fit = if contain && !paused {
+                    ObjectFit::Contain
+                } else {
+                    ObjectFit::Cover
+                };
+                let radius = px(if contain { 0. } else { 10. });
+                video_frame(player)
+                    .object_fit(fit)
+                    .paused_overlay(true)
+                    .corner_radii(Corners::all(radius), black())
+                    .into_any_element()
+            }
+            None => initials_avatar(name, 56.).into_any_element(),
+        };
+        if paused {
+            self.group_call.tile_overlays.remove(&key);
+            return Some((picture, Some(PictureState::LivePaused { wide: contain })));
+        }
+        let player = player?;
+        let input = LiveInput {
+            state: Some(player.state()),
+            idle: false,
+            failed: false,
+        };
+        let now = cx.background_executor().now();
+        let (overlay, due) = self
+            .group_call
+            .tile_overlays
+            .entry(key)
+            .or_default()
+            .observe(input, now);
+        if let Some(due) = due {
+            let wait = due.saturating_duration_since(now);
+            let timer = cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            });
+            if let Some(clock) = self.group_call.tile_overlays.get_mut(&key) {
+                clock.arm(due, timer);
+            }
+        }
+        // Tiles keep their own chrome and take only the opening and
+        // paused states: a stalled tile keeps its last frame undimmed, as
+        // tdesktop's viewport does.
+        let state = PictureState::live(overlay, LiveOverlayParts::default())
+            .filter(|state| matches!(state, PictureState::LiveOpening { .. }));
+        Some((picture, state))
     }
 }
 
@@ -301,7 +353,10 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                 .justify_center()
                 .child(tile.picture),
         )
-        .when(tile.paused, |this| this.child(paused_overlay(false)))
+        .children(
+            tile.overlay
+                .map(|state| PictureOverlay::new(tile_row(key), state)),
+        )
         .child(
             div()
                 .absolute()
@@ -387,10 +442,11 @@ fn stage_button(
 
 /// The full-screen stage: the pinned video on black, name bottom-left,
 /// unpin and leave-full-screen top-right (Esc also leaves).
-fn stage_view(tile: Tile, cx: &mut Context<QuillApp>) -> AnyElement {
+fn stage_view(tile: Tile, volume: Option<AnyElement>, cx: &mut Context<QuillApp>) -> AnyElement {
     let key = tile.key;
     div()
         .id("group-call-stage")
+        .debug_selector(|| "group-call-stage".into())
         .relative()
         .size_full()
         .bg(rgb(0x000000))
@@ -403,7 +459,10 @@ fn stage_view(tile: Tile, cx: &mut Context<QuillApp>) -> AnyElement {
                 .justify_center()
                 .child(tile.picture),
         )
-        .when(tile.paused, |this| this.child(paused_overlay(true)))
+        .children(
+            tile.overlay
+                .map(|state| PictureOverlay::new(tile_row(key), state)),
+        )
         .child(
             div()
                 .absolute()
@@ -421,7 +480,9 @@ fn stage_view(tile: Tile, cx: &mut Context<QuillApp>) -> AnyElement {
                 .right(px(14.))
                 .top(px(14.))
                 .flex()
+                .items_center()
                 .gap(px(8.))
+                .children(volume)
                 .child(stage_button(
                     "group-stage-unpin",
                     tr(keys::Q_AV_UNPIN),
@@ -439,3 +500,8 @@ fn stage_view(tile: Tile, cx: &mut Context<QuillApp>) -> AnyElement {
         )
         .into_any_element()
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "group_call_tiles_tests.rs"]
+mod tests;

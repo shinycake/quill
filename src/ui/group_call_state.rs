@@ -55,6 +55,11 @@ pub(crate) struct GroupCallUi {
     /// or your camera), for the tracked call only.
     pub(super) players:
         HashMap<quill::calls::live_video::LiveKey, super::video_player::VideoPlayer>,
+    /// The tiles' live overlay clocks (opening spinner), by feed.
+    pub(super) tile_overlays:
+        HashMap<quill::calls::live_video::LiveKey, super::video_player::controls::LiveOverlayClock>,
+    /// The stage's volume slider for the pinned participant.
+    pub(super) stage_volume: Option<super::group_call_stage_volume::StageVolume>,
     /// The live stream layout (RTMP): picture, placeholder and controls.
     pub(super) stream: super::group_call_stream_layout::StreamWindow,
     /// The "Stream with other apps" box (`dialogs/rtmp_stream.rs`).
@@ -84,6 +89,8 @@ impl GroupCallUi {
             global_ptt: Default::default(),
             global_ptt_polling: false,
             pin: quill::calls::tile_pin::TilePin::default(),
+            tile_overlays: HashMap::new(),
+            stage_volume: None,
             level_anim: quill::calls::audio_level::LevelAnimation::new(
                 0.0,
                 quill::calls::audio_level::LEVEL_ANIMATION_MS,
