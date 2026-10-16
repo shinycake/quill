@@ -94,26 +94,9 @@ window and only changes its controls.
 
 ### Live story while in another call
 
-- When joining is refused because another call holds the slot, the
-  story frame shows a card in place of the picture. The card asks
-  tdesktop's `confirmLeaveCurrent` question
-  (`lng_call_leave_to_other_sure_channel` and the like) and offers
-  Cancel and "Leave call and watch" (`qll_media_live_leave_and_watch`).
-- Confirm leaves the other call and joins once the slot is free (the
-  existing `retry_join`). Cancel or Esc (a layer above the viewer's in
-  `esc_stack.rs`, as the modal had) clears the question, and the Join
-  button asks again.
-- When the leave fails and a call still holds the slot after the
-  10 s retry limit, the viewer says it could not join and the card asks
-  again. A story that stops being live while the card asks (ended or
-  deleted, seen in the session's story since nothing is joined) closes
-  the viewer, as an ended stream does, and the card goes with it.
-- The card blocks presses from reaching the backdrop, which would close
-  the viewer, and the media, which would pause it.
-- Its buttons use the viewer's always-dark chrome
-  (`chrome::ghost`, `chrome::attention`) where the old modal used the
-  kit's `danger()`: on this card `danger()` follows the app theme and
-  drew a light-theme button on the dark chrome.
+The "Leave call and watch" card that was here has been removed. The story now
+plays in its own receive-only slot beside the call, as described in
+`story-beside-call.md`.
 
 ## Deviations from the design, with reasons
 
