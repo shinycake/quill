@@ -6,9 +6,11 @@
 use super::app::{ChatListFilter, QuillApp};
 use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::folder_glyphs::folder_glyph;
+use super::folder_tabs_fit::{FADE_WIDTH, RevealKey, fade_edges, needs_reveal};
 use super::pressable::PressableDiv;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -247,28 +249,113 @@ impl QuillApp {
         let selected = selected_slot(&slots, self.chat_list.filter, self.folders.tab);
         let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
         let manage_weak = weak.clone();
-        bar.selected_index(selected)
-            // Many folders: the strip scrolls, tabs truncate long names, and
-            // an overflow menu lists every tab by its full name.
+        let scroll = self.folders.tabs_scroll.clone();
+        let key = RevealKey {
+            selected,
+            tab_count: slots.len(),
+            strip_width: f32::from(self.frame.sidebar_width) as i32,
+        };
+        if needs_reveal(self.folders.tabs_revealed.get(), key) {
+            self.folders.tabs_revealed.set(Some(key));
+            scroll.scroll_to_item(selected);
+        }
+        let fades = fade_edges(
+            f32::from(scroll.offset().x),
+            f32::from(scroll.max_offset().x),
+        );
+        let fade_color = cx.theme().sidebar;
+        let fade = |start: bool| {
+            let (from, to) = (fade_color, fade_color.opacity(0.));
+            let (left, right) = if start { (from, to) } else { (to, from) };
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .w(px(FADE_WIDTH))
+                .when(start, |this| this.left_0())
+                .when(!start, |this| this.right_0())
+                .bg(linear_gradient(
+                    90.,
+                    linear_color_stop(left, 0.),
+                    linear_color_stop(right, 1.),
+                ))
+        };
+        let menu_kinds = kinds.clone();
+        let menu_labels: Vec<SharedString> = slots
+            .iter()
+            .map(|s| SharedString::from(s.name.clone()))
+            .collect();
+        let menu_weak = weak.clone();
+        let more = Button::new("folder-tabs-more")
+            .xsmall()
+            .ghost()
+            .dropdown_caret(true)
+            .dropdown_menu(move |mut menu, _, _| {
+                menu = menu.scrollable(true);
+                for (ix, label) in menu_labels.iter().enumerate() {
+                    let weak = menu_weak.clone();
+                    let kind = menu_kinds.get(ix).copied();
+                    menu = menu.item(
+                        PopupMenuItem::new(label.clone())
+                            .checked(ix == selected)
+                            .on_click(move |_, _, cx| {
+                                if let Some(kind) = kind {
+                                    let _ = weak
+                                        .update(cx, |this, cx| this.select_folder_slot(kind, cx));
+                                }
+                            }),
+                    );
+                }
+                menu
+            })
+            .anchor(Anchor::TopRight);
+        let bar = bar
+            .selected_index(selected)
             .underline()
-            .menu(true)
             .max_width(px(140.))
-            .suffix(
-                Button::new("folder-manage")
-                    .icon(IconName::Settings)
-                    .small()
-                    .tooltip(tr(keys::Q_CHATLIST_CHAT_FOLDERS))
-                    .accessibility_label(tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS))
-                    .ghost()
-                    .on_click(move |_, _, cx| {
-                        let _ = manage_weak.update(cx, |this, cx| this.open_folder_manage(cx));
-                    }),
-            )
+            .track_scroll(&scroll)
+            .w_full()
             .on_click(move |ix, _window, cx| {
                 if let Some(kind) = kinds.get(*ix).copied() {
                     let _ = weak.update(cx, |this, cx| this.select_folder_slot(kind, cx));
                 }
-            })
+            });
+        // The strip clips at its own edge, so the chevron and the gear sit
+        // beside it as flex_none siblings and can never overlap a tab. A
+        // fade marks an edge that hides tabs; wheel and trackpad scroll it.
+        div()
+            .id("folder-tabs-row")
+            .flex()
+            .items_center()
+            .gap_0p5()
+            .w_full()
+            .min_w_0()
+            .child(
+                div()
+                    .id("folder-tabs-strip")
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
+                    .child(bar)
+                    .when(fades.start, |this| this.child(fade(true)))
+                    .when(fades.end, |this| this.child(fade(false))),
+            )
+            .child(div().flex_none().child(more))
+            .child(
+                div().flex_none().child(
+                    Button::new("folder-manage")
+                        .icon(IconName::Settings)
+                        .small()
+                        .tooltip(tr(keys::Q_CHATLIST_CHAT_FOLDERS))
+                        .accessibility_label(tr(keys::Q_CHATLIST_MANAGE_CHAT_FOLDERS))
+                        .ghost()
+                        .on_click(move |_, _, cx| {
+                            let _ = manage_weak.update(cx, |this, cx| this.open_folder_manage(cx));
+                        }),
+                ),
+            )
             .into_any_element()
     }
 
