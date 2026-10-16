@@ -100,35 +100,61 @@ That cuts the upload to 3 MB and removes the CPU conversion.
 - Textures are updated with `UpdateSubresource`, only when a slot holds a
   different frame than last time.
 - Slots are keyed by frame id:
-  - A slot is reused for a new frame of the same size that it didn't
-    already draw this frame.
+  - A slot is reused for a new frame of the same size, as long as the
+    frame it holds is not in the current scene (`begin_frame` notes the
+    scene's NV12 frames first). Two clips of one size, one paused, then
+    keep their own slots and don't re-upload every frame.
   - Different sizes get their own slots, at most 16.
   - A slot not drawn for 2 frames is released.
   - Everything is released when a frame draws no surfaces.
+- Textures have one mip level and are sampled bilinearly, so a picture
+  drawn much smaller than its texture would alias. This is accepted: the
+  decoder scales into the box the player is shown in (the viewer's
+  1920 box, an inline tile's own size), so the texture stays close to the
+  drawn size.
 - `shaders.hlsl`: `yuv_surface_fragment` samples luma and chroma, applies
   the rows and goes through the same `to_output` as everything else, so
-  the HDR swap chain still works.
+  the HDR swap chain still works. The chroma slot (t2) is unbound after
+  each draw.
 - `build.rs` compiles the new module with fxc in release builds.
-- `surface_support::nv12_available()` is the fallback switch. It is
-  cleared when the pipeline can't be created or a slot's textures can't be
-  made, and set again after a device-loss recovery that recreated the
-  pipeline. Neither case panics, and the window keeps drawing.
+- Each NV12 frame learns what the renderer did with it
+  (`SurfaceFrame::draw_state`: pending, drawn or refused). A window's
+  renderer refuses a frame when:
+  - its NV12 pipeline couldn't be created
+  - the frame's textures can't be made (it then refuses every new NV12
+    frame for 120 frames, about two seconds, and tries again)
+  - the planes don't match the size, or the frame is larger than a
+    texture can be
+
+  Nothing panics, the window keeps drawing, and the answer belongs to the
+  frame. One window's failure doesn't change what another window does,
+  and a transient failure is retried instead of disabling NV12 for the
+  session.
 - `hdr_surfaces.rs` skips NV12 frames, and `draw_surfaces` sends each
   surface to its pipeline by format.
 
 ### Player (`src/ui/video_player`)
 
-- `backend_ffmpeg.rs` asks for NV12 only on Windows, and only while
-  `nv12_available()` holds (`surface::nv12_wanted`). NV12 pictures become
+- `backend_ffmpeg.rs` asks for NV12 only on Windows
+  (`surface::NV12_SURFACES`). NV12 pictures become
   `Picture::Surface(Arc<SurfaceFrame>)` and paint through the same surface
-  element and corner mask as AVPlayer's pixel buffers.
-- When the renderer stops offering NV12:
-  - The backend switches the decoder back to BGRA.
-  - Pictures still queued as NV12 are converted on the CPU.
-  - The surface on screen is replaced by an image of itself on the next
-    paint.
+  element and corner mask as AVPlayer's pixel buffers. `show()` decides
+  once per picture whether it goes out as NV12.
+- The element keeps asking for frames while the picture on screen is a
+  surface the renderer hasn't drawn yet, so a paused clip settles too.
+- When the renderer refuses the surface on screen, the next pull replaces
+  it (`Backend::replace_refused`):
+  - The backend converts that picture on the CPU and shows it as an image.
+  - For two seconds it shows only images: the decoder goes back to BGRA,
+    and pictures still queued as NV12 are converted on the CPU.
+  - Then it tries NV12 again.
 - Copy Frame and other snapshots of a Windows surface convert it on the
-  CPU (`Picture::snapshot`).
+  CPU (`Picture::snapshot`). The CPU conversion takes the nearest chroma
+  sample, while the GPU interpolates chroma (bilinear, centre-sited), so a
+  copied frame can differ slightly from the screen at colour edges.
+- Rotated or mirrored clips in the viewer (the user's turn) are turned on
+  the CPU, one copy of both planes per picture (`surface::turn_frame`).
+  Turning in the shader instead is a follow-up.
 - macOS and Linux behave as before: macOS uses AVPlayer, and
   `QUILL_VIDEO_BACKEND=ffmpeg` on macOS stays BGRA.
 
@@ -213,10 +239,11 @@ core tests there. None of that draws a video. The owner's steps:
      `nv12` about 3 MB and no large atlas uploads.
    - `VT`: the gap histogram and double steps should be no worse.
    - `profile.txt`: `draw` and `dirty_to_present` p50/p90.
-6. Fallback check: run once with a broken pipeline by setting
-   `nv12_available` false at start (a one-line local patch in
-   `surface_support.rs`). Check that video still plays as `bgra` and the
-   `VF` lines say so.
+6. Fallback check: run once with a broken pipeline, using a one-line
+   local patch that makes `YuvSurfaces::new` in `yuv_surfaces.rs` return
+   an error. Check that video still plays, and that after the first
+   `nv12` line the `VF` lines say `bgra` for two seconds at a time. Do it
+   once paused too: the tile must show the picture, not stay empty.
 7. Device-loss check: with a video playing, switch the GPU driver or run
    `dxcap -forcetdr`. Check that playback continues without a crash.
 
@@ -247,13 +274,24 @@ core tests there. None of that draws a video. The owner's steps:
     - the GPU rows against the CPU rows
     - BT.601/709 red, green and blue in limited and full range
     - surface creation, turning and snapshot conversion
+    - a frame's draw state (pending, drawn, refused, and a refusal that
+      stays)
+    - the two-second NV12 pause after a refusal
     - the `VF` line's columns
 - The shim was compiled with `-Wall -Wextra -Werror` against Homebrew
   FFmpeg.
+- The real-shim tests also run in CI against the FFmpeg the package
+  builds: on Linux in the `linux-package` job, and on Windows in the
+  `windows-ffmpeg` job. Both set `QUILL_REQUIRE_VIDEO_LIB=1`, which turns
+  a missing shim from a skip into a failure.
 - The HLSL was checked with glslang locally. fxc compiles it in the
   Windows CI job.
-- The Windows build is checked by the `ci` workflow's `windows` job on the
-  `cursor/` branch. The PR links the run.
+- `cargo clippy -p gpui-pre-windows --target x86_64-pc-windows-msvc` is
+  clean on macOS (with a stub `llvm-rc` on `PATH` for gpui-pre's build
+  script). The app itself is built for Windows only in CI.
+- The Windows build is checked by the `ci` workflow's `windows` job, run
+  on the same commit pushed to a `cursor/` branch. The PR links the run.
+  The PR stays a draft until the Windows steps above are done.
 
 ## Not verified
 
@@ -282,7 +320,8 @@ core tests there. None of that draws a video. The owner's steps:
   linear filtering at the pixel center. H.264 streams usually site chroma
   on the left luma sample (MPEG-2 style), so colour edges sit half a luma
   pixel to the side. Nobody has looked at whether that shows. The CPU
-  fallback uses the nearest sample.
+  fallback uses the nearest sample, so Copy Frame and the screen can differ
+  slightly at colour edges.
 - **No Windows present hint.** The core PR moved the vsync thread's
   `signal_at` hint (`gpui_windows::next_present_time`) to "PR 6". It is
   not in this PR's scope, so Windows still predicts presents from draw
@@ -290,15 +329,17 @@ core tests there. None of that draws a video. The owner's steps:
 - **`SurfaceFrame::new` returns `Result`.** The brief asked for a bad
   length to come back as an error. `Option` could not say what was wrong
   with a frame, so the signature changed. `QUILL-CHANGES.md` records it.
-- **The fallback while paused waits for a paint.** When the renderer
-  stops offering NV12, a paused surface becomes an image on the next paint
-  of the player. A device loss repaints the window anyway. A texture
-  failure on a paused video leaves the tile empty until something repaints
-  it.
-- **Frames over 16384 pixels a side are skipped.** The renderer logs and
-  skips an NV12 frame larger than a D3D11 texture can be, without falling
-  back. The decoder never produces one, because the viewer's box is
-  smaller.
+- **The fallback is per frame, not a renderer switch.** The design had no
+  fallback rule. A first version cleared one process-wide flag, which let
+  one window's failure blank another window's video and turned NV12 off
+  for the session after a single transient failure. Now each frame
+  carries the renderer's answer (`SurfaceDrawState` in the vendored core),
+  the renderer retries textures after 120 frames, and the backend retries
+  NV12 after two seconds.
+- **Rotated viewers turn on the CPU.** When the user turns a clip in the
+  viewer, both planes are copied turned for every picture. Turning in the
+  shader (a rotated texture coordinate) would remove that copy and is a
+  follow-up.
 
 ## Parity
 
