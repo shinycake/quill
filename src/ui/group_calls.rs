@@ -101,7 +101,7 @@ impl QuillApp {
     pub(super) fn leave_active_group_call(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.leave_group_call();
-            live.driver.session.leave_group_call_local();
+            live.driver.drop_group_call_locally();
             self.connection.status_note = match result {
                 Ok(_) => tr(keys::Q_AV_LEFT_THE_VOICE_CHAT).into(),
                 Err(_) => tr(keys::Q_AV_LEFT_THE_VOICE_CHAT_LOCAL).into(),

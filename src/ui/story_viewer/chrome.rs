@@ -11,7 +11,11 @@ use crate::ui::group_call_panel::{
     ACTIVE_FG, BG, MEMBER_INACTIVE_ICON, MEMBER_NOT_JOINED, MEMBERS_BG, MEMBERS_BG_OVER,
 };
 use gpui_kit::component::button::ButtonCustomVariant;
-use gpui_kit::{App, Hsla, hsla, rgb};
+use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::{
+    AnyElement, App, Entity, Hsla, InteractiveElement, IntoElement, ParentElement, SharedString,
+    Styled, div, hsla, px, rgb,
+};
 
 /// Names, labels and icons over the viewer's backdrop.
 pub(in crate::ui) fn fg() -> Hsla {
@@ -77,4 +81,47 @@ pub(in crate::ui) fn compose(cx: &App) -> ButtonCustomVariant {
         .hover(compose_bg_over())
         .active(compose_bg_over())
         .shadow(false)
+}
+
+/// A search field on the viewer's chrome: `storiesComposeBg`, white text
+/// and the placeholder in `storiesComposeGrayText` (the kit field's own
+/// look and placeholder follow the app theme, so both are off).
+pub(in crate::ui) fn search_field(
+    input: &Entity<TextareaState>,
+    placeholder: SharedString,
+    selector: &'static str,
+    cx: &App,
+) -> AnyElement {
+    let empty = input.read(cx).value().is_empty();
+    let mut field = div()
+        .relative()
+        .h(px(32.))
+        .pl(px(10.))
+        .rounded(px(8.))
+        .bg(compose_bg())
+        .child(
+            Textarea::new(input)
+                .appearance(false)
+                .bordered(false)
+                .text_color(fg())
+                .aria_label(placeholder.clone())
+                .h(px(32.)),
+        );
+    if empty {
+        field = field.child(
+            div()
+                .debug_selector(move || selector.into())
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(12.))
+                .right_0()
+                .flex()
+                .items_center()
+                .truncate()
+                .text_color(gray_text())
+                .child(placeholder),
+        );
+    }
+    field.into_any_element()
 }

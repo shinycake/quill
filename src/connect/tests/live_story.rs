@@ -529,3 +529,81 @@ fn ban_user_bans_from_the_channel_or_blocks() {
             .ban_live_story_commenter(MessageSender::Chat { chat_id: -5 }),
     );
 }
+
+const LOOKED_AT_CHAT: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Chat","is_active":true,"is_video_chat":true,"is_joined":false,"need_rejoin":NEED}}"#;
+
+#[test]
+fn a_reconnecting_video_chat_keeps_the_slot() {
+    let mut h = watching();
+    h.driver.leave_live_story().unwrap();
+    // Network loss: TDLib reports the chat as not joined, needing a rejoin.
+    h.ingest(&LOOKED_AT_CHAT.replace("NEED", "true"));
+    assert!(h.driver.session.group_call_joined_or_joining(None));
+    assert_ne!(
+        h.driver.session.current_call_for_create(None),
+        crate::calls::group_call_create::CurrentCall::None,
+        "the viewer asks to leave it first"
+    );
+    add_other_live_story(&mut h);
+    assert_invalid(h.driver.join_live_story(ChatId(7), 8));
+    assert_eq!(tracked_id(&h), Some(555));
+}
+
+#[test]
+fn a_call_dropped_for_a_live_story_loses_its_transport() {
+    let mut h = watching();
+    h.driver.leave_live_story().unwrap();
+    let mock = crate::calls::engine::MockEngine::new();
+    let handle = mock.clone();
+    h.driver.set_call_engine(Box::new(mock));
+    h.ingest(&LOOKED_AT_CHAT.replace("NEED", "false"));
+    handle.emit_video_frame(
+        555,
+        crate::calls::engine::VideoFrame {
+            seq: 0,
+            width: 2,
+            height: 2,
+            rgba: vec![0u8; 16],
+            is_local: false,
+            participant_user_id: Some(42),
+            is_screen: false,
+        },
+    );
+    assert!(h.driver.latest_group_video_frame(555, 42, false).is_some());
+    add_other_live_story(&mut h);
+    h.driver.join_live_story(ChatId(7), 8).unwrap();
+    assert_eq!(tracked_id(&h), None);
+    assert_eq!(handle.group_leaves(), vec![555], "the native call stops");
+    assert!(h.driver.latest_group_video_frame(555, 42, false).is_none());
+}
+
+#[test]
+fn a_late_joined_update_for_the_call_just_left_does_not_return() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.driver.leave_live_story().unwrap();
+    add_other_live_story(&mut h);
+    h.driver.join_live_story(ChatId(7), 8).unwrap();
+    // An update sent before TDLib saw the leave.
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(tracked_id(&h), None);
+    h.ingest(OTHER_LIVE_CALL);
+    assert_eq!(tracked_id(&h), Some(4343));
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(tracked_id(&h), Some(4343), "the watched story keeps it");
+    // TDLib confirms the leave; the call counts as any other again.
+    h.ingest(&LIVE_CALL.replace("JOINED", "false"));
+    assert_eq!(h.driver.session.calls.left_group_call, None);
+}
+
+#[test]
+fn a_scheduled_video_chat_is_asked_about_not_dropped() {
+    let mut h = harness();
+    h.ingest(
+        r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":556,"title":"Later","is_active":false,"scheduled_start_date":1900000000,"is_video_chat":true,"is_joined":false}}"#,
+    );
+    assert_eq!(tracked_id(&h), Some(556));
+    add_other_live_story(&mut h);
+    assert_invalid(h.driver.join_live_story(ChatId(7), 8));
+    assert_eq!(tracked_id(&h), Some(556), "kept until the viewer confirms");
+}

@@ -172,6 +172,10 @@ impl Session {
     /// Everything here is signaling — `join_payload` is stored, never
     /// consumed (no media transport until Phase C2).
     pub(crate) fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
+        // TDLib confirms the leave: later joined updates are real again.
+        if !group_call.is_joined && self.calls.left_group_call == Some(group_call.id) {
+            self.calls.left_group_call = None;
+        }
         if !self.group_call_update_may_take_slot(group_call) {
             return;
         }
@@ -440,8 +444,6 @@ impl Session {
         }
     }
 
-    /// Phase C3a: drop the tracked group call after the local user
-    /// leaves or ends it.
     /// Whether an update (or a `getGroupCall` answer) for `group_call`
     /// may take the single call slot. An update for the tracked call
     /// always may. One you are not in never replaces:
@@ -450,10 +452,11 @@ impl Session {
     /// - the live story the viewer watches, joined or not yet.
     ///
     /// And a live story call the viewer no longer watches (a late
-    /// `getGroupCall` answer after it stepped past) is not tracked at all.
+    /// `getGroupCall` answer after it stepped past) is not tracked at all,
+    /// nor is a late joined update for the call just left.
     fn group_call_update_may_take_slot(&self, group_call: &ParsedGroupCall) -> bool {
         if group_call.is_joined {
-            return true;
+            return self.calls.left_group_call != Some(group_call.id);
         }
         let watched = self.stories.live.as_ref().map(|live| live.group_call_id);
         let tracked = self.calls.active_group_call.as_ref();
@@ -466,6 +469,9 @@ impl Session {
         !(group_call.is_live_story && watched != Some(group_call.id))
     }
 
+    /// Phase C3a: drop the tracked group call after the local user
+    /// leaves or ends it. The driver's `drop_group_call_locally` also
+    /// stops the call's native transport.
     pub fn leave_group_call_local(&mut self) {
         self.calls.active_group_call = None;
         self.calls.call_link = None;

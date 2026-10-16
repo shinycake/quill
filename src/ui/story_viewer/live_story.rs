@@ -22,6 +22,9 @@ use quill::paid_reaction::{SLIDER_STEPS, amount_for_step, step_for_amount};
 use quill::premium_hub::group_digits;
 use quill::state::{Session, unix_ms_now};
 
+/// How long the join waits for the other call to be left.
+const RETRY_JOIN_LIMIT_MS: u64 = 10_000;
+
 /// The live story under the viewer: `(poster, story)` when the current
 /// item is one.
 pub(super) fn live_item(item: Option<&StoryViewerItem>) -> Option<(ChatId, i32)> {
@@ -52,7 +55,7 @@ impl QuillApp {
         if target.is_some() && self.stories.live.watching.is_none() {
             self.stories.live.watching = target;
             self.join_watched_live_story(cx);
-        } else if self.stories.live.retry_join && self.stories.live.watching.is_some() {
+        } else if self.stories.live.retry_join.is_some() && self.stories.live.watching.is_some() {
             self.join_watched_live_story(cx);
         }
         self.check_live_story_ended(cx);
@@ -65,17 +68,25 @@ impl QuillApp {
             return;
         };
         let retrying = self.stories.live.retry_join;
-        let Some(live) = self.live.as_mut() else {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.join_live_story(chat_id, story_id).is_ok()
+        {
+            self.stories.live.retry_join = None;
+            return;
+        }
+        if let Some(since) = retrying {
+            // The other call is still being left; past the limit (a 1:1
+            // call stuck hanging up) the viewer says so and stops trying.
+            if unix_ms_now().saturating_sub(since) > RETRY_JOIN_LIMIT_MS {
+                self.stories.live.retry_join = None;
+                self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
+                cx.notify();
+            }
+            return;
+        }
+        let Some(live) = self.live.as_ref() else {
             return;
         };
-        if live.driver.join_live_story(chat_id, story_id).is_ok() {
-            self.stories.live.retry_join = false;
-            return;
-        }
-        if retrying {
-            // The other call is still being left.
-            return;
-        }
         let session = &live.driver.session;
         let to_channel = session
             .chats
@@ -97,7 +108,7 @@ impl QuillApp {
             return;
         }
         self.end_current_call_for_create(cx);
-        self.stories.live.retry_join = true;
+        self.stories.live.retry_join = Some(unix_ms_now());
         self.join_watched_live_story(cx);
         cx.notify();
     }
@@ -372,10 +383,17 @@ impl QuillApp {
     ) {
         let max = self.session().map_or(2, Session::live_max_stars);
         let min = min.clamp(1, max);
-        let current = if mode == StarsBoxMode::Comment {
-            self.stories.live.chosen_stars
-        } else {
-            0
+        let kept = self
+            .stories
+            .live
+            .stars_before_top_up
+            .take()
+            .filter(|(kept_mode, _)| *kept_mode == mode)
+            .map(|(_, stars)| stars);
+        let current = match kept {
+            Some(stars) => stars,
+            None if mode == StarsBoxMode::Comment => self.stories.live.chosen_stars,
+            None => 0,
         };
         let start = if current > 0 { current } else { DEFAULT_STARS };
         let stars = start.clamp(min, max);
@@ -425,6 +443,10 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.live_needs_top_up(boxed.stars))
         {
+            self.stories.live.stars_before_top_up = Some((boxed.mode, boxed.stars));
+            if boxed.mode == StarsBoxMode::Comment {
+                self.stories.live.chosen_stars = boxed.stars;
+            }
             self.live_top_up(boxed.stars, cx);
             return;
         }

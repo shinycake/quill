@@ -14,7 +14,7 @@ use super::app::QuillApp;
 use super::message_media::file_is_downloading;
 use super::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::component::button::*;
-use gpui_kit::component::input::Textarea;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::local_path::sandboxed_display_path;
@@ -727,11 +727,12 @@ impl QuillApp {
                     .text_color(chrome::fg())
                     .child(tr(keys::Q_MEDIA_SHARE_STORY_TO)),
             )
-            .child(
-                Textarea::new(&self.stories.more_search)
-                    .aria_label(tr(keys::Q_MEDIA_SEARCH_CHATS))
-                    .h(px(32.)),
-            )
+            .child(chrome::search_field(
+                &self.stories.more_search,
+                tr(keys::Q_MEDIA_SEARCH_CHATS).into(),
+                "story-share-placeholder",
+                cx,
+            ))
             .child(list)
             .into_any_element()
     }
@@ -759,13 +760,19 @@ impl QuillApp {
             );
         }
         for row in rows.iter().take(80) {
-            list = list.child(self.g1_contact_checkbox(
-                "story-close-friends".to_string(),
-                row,
-                edit.contains(row.user_id),
-                row.user_id,
-                cx,
-            ));
+            let (user_id, selected) = (row.user_id, edit.contains(row.user_id));
+            // The label as a child: the kit's own label takes the app
+            // theme's foreground, and this sits on the dark chrome.
+            list = list.child(
+                Checkbox::new(("story-close-friends-toggle", user_id as u64))
+                    .checked(selected)
+                    .child(div().text_color(chrome::fg()).child(row.name.clone()))
+                    .on_click(cx.listener(move |this, &on, _, cx| {
+                        if on != selected {
+                            this.toggle_close_friend(user_id, cx);
+                        }
+                    })),
+            );
         }
         let saving = self.stories.close_friends_saving;
         div()
@@ -783,11 +790,12 @@ impl QuillApp {
                         &[("count", &(edit.count()).to_string())],
                     )),
             )
-            .child(
-                Textarea::new(&self.stories.more_search)
-                    .aria_label(tr(keys::Q_MEDIA_SEARCH_CONTACTS))
-                    .h(px(32.)),
-            )
+            .child(chrome::search_field(
+                &self.stories.more_search,
+                tr(keys::Q_MEDIA_SEARCH_CONTACTS).into(),
+                "story-close-friends-placeholder",
+                cx,
+            ))
             .child(list)
             .child(
                 div()

@@ -84,7 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             LeaveKind::GroupCall { .. } => {
                 let _ = self.leave_group_call();
-                self.session.leave_group_call_local();
+                self.drop_group_call_locally();
             }
         }
         self.session.calls.call_link_after_leave = Some((confirm.chat_id, confirm.invite_hash));

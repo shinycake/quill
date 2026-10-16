@@ -391,6 +391,18 @@ fn stars_past_the_balance_open_the_stars_top_up(cx: &mut TestAppContext) {
         );
         assert!(app.connection.status_note.contains("Needed"));
     });
+    // Back from the top-up, the box opens on the same amount.
+    let chosen = app.read_with(vcx, |app, _| {
+        app.stories.live.stars_before_top_up.map(|(_, stars)| stars)
+    });
+    assert!(chosen.is_some_and(|stars| stars > 3));
+    app.update(vcx, |app, cx| {
+        app.open_live_stars_box(StarsBoxMode::Reaction, 0, false, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.stories.live.stars_box.as_ref().map(|b| b.stars), chosen);
+        assert!(app.stories.live.stars_before_top_up.is_none());
+    });
 }
 
 #[gpui_kit::test]
@@ -409,7 +421,25 @@ fn another_call_is_left_only_after_the_confirm(cx: &mut TestAppContext) {
     assert!(find(vcx, "live-story-leave-other").is_none());
     app.read_with(vcx, |app, _| {
         assert!(app.stories.live.leave_other.is_none());
-        assert!(app.stories.live.retry_join, "the join is tried again");
+        assert!(
+            app.stories.live.retry_join.is_some(),
+            "the join is tried again"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_join_that_cannot_proceed_says_so(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    // The other call has been "leaving" for longer than the limit.
+    app.update(vcx, |app, cx| {
+        app.stories.live.retry_join = Some(1);
+        app.sync_live_story(cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(app.stories.live.retry_join.is_none(), "it stops trying");
+        assert!(app.connection.status_note.contains("could not join"));
     });
 }
 

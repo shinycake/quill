@@ -129,31 +129,39 @@ const BACKDROP_BLUR: u32 = 6;
 /// outer box's proportions, scaled down to 40 pixels and blurred, drawn
 /// stretched behind a picture shown whole. `None` for a malformed frame.
 pub(crate) fn frame_backdrop(frame: &VideoFrame, outer: (u32, u32)) -> Option<Arc<RenderImage>> {
-    let (width, height) = (u32::from(frame.width), u32::from(frame.height));
-    let (outer_w, outer_h) = (outer.0.max(1), outer.1.max(1));
-    if width == 0 || height == 0 || frame.rgba.len() < (width as usize) * (height as usize) * 4 {
+    // All in usize: products of frame and box sides never wrap.
+    let (width, height) = (usize::from(frame.width), usize::from(frame.height));
+    let (outer_w, outer_h) = (outer.0.max(1) as usize, outer.1.max(1) as usize);
+    if width == 0 || height == 0 || frame.rgba.len() < width * height * 4 {
         return None;
     }
     let copy_w = width.min((outer_w * height / outer_h).max(1));
     let copy_h = height.min((outer_h * width / outer_w).max(1));
     let (left, top) = ((width - copy_w) / 2, (height - copy_h) / 2);
-    let scale = (BACKDROP_SIDE as f32 / copy_w.max(copy_h) as f32).min(1.0);
-    let small_w = ((copy_w as f32 * scale).round() as u32).max(1);
-    let small_h = ((copy_h as f32 * scale).round() as u32).max(1);
-    let mut bgra = Vec::with_capacity((small_w * small_h * 4) as usize);
+    let side = BACKDROP_SIDE as usize;
+    let longest = copy_w.max(copy_h);
+    let (small_w, small_h) = if longest > side {
+        (
+            (copy_w * side / longest).max(1),
+            (copy_h * side / longest).max(1),
+        )
+    } else {
+        (copy_w, copy_h)
+    };
+    let mut bgra = Vec::with_capacity(small_w * small_h * 4);
     for y in 0..small_h {
         // Nearest pixel (`Qt::FastTransformation`).
         let source_y = top + (y * copy_h / small_h).min(copy_h - 1);
         for x in 0..small_w {
             let source_x = left + (x * copy_w / small_w).min(copy_w - 1);
-            let at = ((source_y * width + source_x) * 4) as usize;
+            let at = (source_y * width + source_x) * 4;
             let pixel = frame.rgba.get(at..at + 4)?;
             bgra.extend_from_slice(&[*pixel.get(2)?, *pixel.get(1)?, *pixel.first()?, 255]);
         }
     }
     let mut raster = quill::wallpaper_raster::Raster {
-        width: small_w,
-        height: small_h,
+        width: u32::try_from(small_w).ok()?,
+        height: u32::try_from(small_h).ok()?,
         bgra,
     };
     quill::wallpaper_raster::blur(&mut raster, BACKDROP_BLUR);

@@ -365,7 +365,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             Ok(())
         };
-        self.session.leave_group_call_local();
+        self.drop_group_call_locally();
         left
     }
 

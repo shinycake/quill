@@ -99,6 +99,10 @@ pub struct CallsState {
     /// The confirmed link `(chat id, hash)`, offered once the old call has
     /// ended.
     pub call_link_after_leave: Option<(i64, String)>,
+    /// The group call just left with `leaveGroupCall`, until TDLib says
+    /// it is no longer joined: a late joined update for it must not take
+    /// the slot back.
+    pub left_group_call: Option<i32>,
 }
 
 impl CallsState {
@@ -132,6 +136,7 @@ impl CallsState {
             call_link: None,
             call_link_confirm: None,
             call_link_after_leave: None,
+            left_group_call: None,
         }
     }
 }

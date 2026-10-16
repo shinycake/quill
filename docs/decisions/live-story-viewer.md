@@ -81,7 +81,12 @@ Quill follows tdesktop.
   call never replaces the watched live story or a joined call (checked
   first in `accept_group_call_update`); a late `getGroupCall` answer for
   a live story you stepped past is ignored; leaving an unjoined live
-  story sends nothing. Group call video slots hold `Arc<VideoFrame>`, so a
+  story sends nothing. A call dropped locally (only looked at, or given
+  up for a live story) also loses its native transport
+  (`drop_group_call_locally`); the pump's before/after check only sees
+  reducer updates. After `leaveGroupCall`, a late joined update for that
+  call cannot take the slot back until TDLib says it is left
+  (`left_group_call`). Group call video slots hold `Arc<VideoFrame>`, so a
   reader no longer copies the picture while the slot is locked.
 - UI (`src/ui/story_viewer/`): `chrome.rs` (the fixed dark palette, used by
   the whole viewer, normal stories too), `live_view.rs` (header, picture
@@ -113,18 +118,22 @@ Quill follows tdesktop.
 
 ## Not like tdesktop (Quill)
 
-- One call slot. A joined video chat or a 1:1 call keeps the slot, and
-  the viewer asks first, with tdesktop's `confirmLeaveCurrent` words
-  (`lng_call_leave_to_other_sure_channel`,
-  `lng_group_call_leave_to_other_sure_channel`, ...), to leave it; the
-  join is retried until the slot is free. tdesktop plays the stream
+- One call slot. tdesktop's current call keeps the slot (a 1:1 call, or a
+  video chat that is joined, joining, reconnecting after a network loss,
+  or scheduled), and the viewer asks first, with tdesktop's
+  `confirmLeaveCurrent` words (`lng_call_leave_to_other_sure_channel`,
+  `lng_group_call_leave_to_other_sure_channel`, ...), to leave it. The
+  join is retried until the slot is free; after 10 s (a 1:1 call stuck
+  hanging up) the viewer says it could not join and stops. tdesktop plays the stream
   beside the call instead. Running two calls at once needs a second
   call slot in `Session` and the engine, which is beyond this PR.
 - Stars effects are drawn with GPUI (a rising ★N pill and a burst of
-  stars), not tdesktop's Lottie. tdesktop's effect is its own
-  `Resources/animations/star_reaction/effect1-3.tgs`, part of the GPL
-  tdesktop tree; Quill is MIT, and TDLib offers no paid-reaction effect
-  to download. Using them is the owner's call.
+  stars), not tdesktop's Lottie, on purpose. TDLib serves no animation
+  for a paid reaction: `reactionTypePaid` has no fields, and
+  `getEmojiReaction` only covers emoji, so there is nothing to download.
+  tdesktop bundles its own `Resources/animations/star_reaction/effect1-3.tgs`,
+  part of the GPL tdesktop tree, and Quill is MIT. Using those files is
+  the owner's call.
 - The crown's digit is drawn with stroked paths knocked out of an SVG
   crown (`live_comments.rs`), rather than tdesktop's 20 px icon and 9 px
   font.
@@ -134,7 +143,7 @@ Quill follows tdesktop.
 - Past the balance, Quill shows "{n} Stars Needed" and opens its Stars box
   with the packs ("Buy more Stars") instead of tdesktop's small balance
   box; the comment or reaction is not resent after a purchase, it stays
-  for another try.
+  for another try, and the Stars box opens again on the amount chosen.
 - The toast hides once the Stars are due, since Undo can no longer take
   them back.
 - No "sending" arc on an outgoing comment; a failed one stays, in
@@ -158,11 +167,14 @@ background task.
 
 ## Boundary notes
 
-Outside `src/ui/story_viewer/*`: `src/ui/stories_state.rs` (one field),
+Outside `src/ui/story_viewer/*`: `src/ui/stories_state.rs` (one field, and the
+search field draws no placeholder of its own),
 `src/ui/group_call_window.rs` and `src/ui/group_call_panel.rs` (ignore a
 live story call; `ACTIVE_FG` shared with the viewer palette),
 `src/ui/story_more.rs` (Space and the arrows go to the focused comment
-field; the viewer palette), `src/ui/app_render/mod.rs` (the window passed
+field; the viewer palette, the share and close-friends search fields and
+checkbox labels included), `src/ui/dialogs/group_call_create.rs`
+and `src/ui/group_calls.rs` (drop a call with its transport), `src/ui/app_render/mod.rs` (the window passed
 to that check), `src/ui/media_panel/custom_emoji_cell.rs` (emoji tab only
 for a live comment), `src/ui/calls/stream_tile.rs` and
 `stream_picture.rs` (fit and backdrop), `src/connect/calls/mod.rs`,
@@ -177,15 +189,18 @@ for a live comment), `src/ui/calls/stream_tile.rs` and
   giving way, a joined one keeping the slot, another live call not
   replacing the watched one, pending Stars counted against a paid
   comment, the total holding until the donors update, comments keeping
-  their formatting, Ban User), `src/ui/calls/stream_tile.rs` and
+  their formatting, Ban User, a reconnecting video chat keeping the
+  slot, a dropped call losing its transport, a late joined update for
+  the call just left, a scheduled video chat being asked about), `src/ui/calls/stream_tile.rs` and
   `stream_picture.rs` (fit and backdrop), `src/ui/story_viewer/live_comments.rs`
   (the comment line and crowns) and `src/ui/story_viewer/live_tests.rs`
   (GPUI flows: layout, Star tap and Undo, the toast leaving when due,
   comments toggle, Stars box and the Send menu, comments disabled,
   delete from the kit menu, the stream ending, typing "a b" with Space,
   landscape and portrait fit, the composer layout and placeholder, the
-  Stars top-up, the leave-other-call confirm, the emoji panel closing
-  with the reply row).
+  Stars top-up and the box keeping its amount, the leave-other-call
+  confirm, a join that cannot proceed, the emoji panel closing with the
+  reply row).
 - Screenshots in light and dark themes from `ready-live-story`,
   `ready-live-story-stars`, `ready-live-story-box` and
   `ready-live-story-portrait` (`QUILL_DEMO_CAPTURE`).

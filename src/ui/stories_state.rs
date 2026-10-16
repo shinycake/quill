@@ -142,8 +142,9 @@ impl StoryUi {
         // Phase 9.5: cover-frame seconds input (viewer cover editor) and
         // the privacy editor's contact search.
         let story_more_search = cx.new(|cx| {
+            // No placeholder: the viewer draws its own on the dark chrome
+            // (`chrome::search_field`).
             TextareaState::new(window, cx)
-                .placeholder(tr(keys::Q_MEDIA_SEARCH))
                 .auto_grow(1, 1)
                 .submit_on_enter(false)
         });

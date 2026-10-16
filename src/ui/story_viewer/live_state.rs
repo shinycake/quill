@@ -88,8 +88,12 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(super) delete: Option<LiveDelete>,
     /// Another call holds the call slot: the confirm to leave it.
     pub(super) leave_other: Option<LeaveText>,
-    /// The other call is being left: the join is tried again each tick.
-    pub(super) retry_join: bool,
+    /// The other call is being left: the join is tried again each tick,
+    /// since this time (Unix ms).
+    pub(super) retry_join: Option<u64>,
+    /// The Stars box's amount when it sent the viewer to top up, so the
+    /// box opens on it again.
+    pub(super) stars_before_top_up: Option<(StarsBoxMode, i64)>,
     pub(super) flying: Vec<FlyingStars>,
     /// The comments list; it follows new comments while at the bottom.
     pub(super) scroll: ScrollHandle,
@@ -134,7 +138,8 @@ impl LiveStoryUi {
             stars_box: None,
             delete: None,
             leave_other: None,
-            retry_join: false,
+            retry_join: None,
+            stars_before_top_up: None,
             flying: Vec::new(),
             scroll: ScrollHandle::new(),
             last_comment: None,
@@ -150,7 +155,8 @@ impl LiveStoryUi {
         self.stars_box = None;
         self.delete = None;
         self.leave_other = None;
-        self.retry_join = false;
+        self.retry_join = None;
+        self.stars_before_top_up = None;
         self.flying.clear();
         self.last_comment = None;
     }

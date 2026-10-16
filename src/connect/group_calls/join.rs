@@ -112,6 +112,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call) if call.id == group_call_id && !call.is_joined => call.is_muted_self,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
+        // Joining it again: its joined updates count once more.
+        if self.session.calls.left_group_call == Some(group_call_id) {
+            self.session.calls.left_group_call = None;
+        }
         // Phase C2g: the native group context is created inside
         // `group_join_params` so the join carries the real tgcalls offer.
         let params = self.group_join_params(group_call_id, is_muted_self);
@@ -510,10 +514,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.left_group_call = Some(group_call_id);
         // Phase C2g: tear the native group transport down eagerly; the
         // pump's before/after backstop covers server-driven ends.
         self.teardown_group_call_transport(group_call_id);
         Ok(extra)
+    }
+
+    /// Drop the tracked group call without a request (one only looked
+    /// at, or given up for another), and stop its native transport if it
+    /// has one: the pump's before/after check only sees reducer updates.
+    pub fn drop_group_call_locally(&mut self) {
+        let tracked = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .map(|call| call.id);
+        if let Some(group_call_id) = tracked {
+            self.teardown_group_call_transport(group_call_id);
+        }
+        self.session.leave_group_call_local();
     }
 
     /// Phase C2g: drop the native transport and retained frames for one
@@ -552,6 +573,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.left_group_call = Some(group_call_id);
         // Phase C2g: same native teardown as leaving; the server-driven
         // end also lands via the pump backstop.
         self.teardown_group_call_transport(group_call_id);
