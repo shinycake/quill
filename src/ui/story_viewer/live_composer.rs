@@ -16,6 +16,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMen
 use quill::lang::trn_with;
 use quill::live_story::{CommentsState, level_for_stars};
 use quill::premium_hub::group_digits;
+use quill::stat_chart::format_short;
 use quill::state::Session;
 
 /// The row's width: the story frame's.
@@ -93,6 +94,8 @@ impl QuillApp {
             .custom(chrome::compose(cx))
             .rounded_full()
             .size(px(BUTTON))
+            // The kit's side padding would leave the total no room.
+            .p_0()
             .tab_index(0)
             .accessibility_label(tr(keys::PAID_REACTION_TITLE))
             .child(
@@ -112,7 +115,7 @@ impl QuillApp {
                                 .line_height(px(10.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(chrome::gray_icon())
-                                .child(group_digits(total)),
+                                .child(stars_counter(total)),
                         )
                     }),
             )
@@ -167,7 +170,7 @@ impl QuillApp {
                 .rounded_full()
                 .h(px(28.))
                 .px(px(10.))
-                .label(format!("\u{2605}{}", group_digits(chosen)))
+                .label(format!("\u{2605}{}", format_short(chosen)))
         } else {
             Button::new("live-story-send")
                 .custom(chrome::compose(cx).foreground(chrome::blue()))
@@ -292,11 +295,9 @@ impl QuillApp {
                                 tr(keys::VIDEO_STREAM_EDIT_STARS),
                             )
                             .tooltip(tr(keys::VIDEO_STREAM_EDIT_STARS))
-                            .on_click(cx.listener(
-                                |this, _, _, cx| {
-                                    this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
-                                },
-                            )),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                            })),
                         ),
                 )
             })
@@ -362,7 +363,8 @@ impl QuillApp {
                             .checked(sender == current)
                             .disabled(needs_premium)
                             .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |this, cx| this.pick_live_sender(sender, cx));
+                                let _ =
+                                    owner.update(cx, |this, cx| this.pick_live_sender(sender, cx));
                             }),
                         );
                     }
@@ -378,7 +380,10 @@ impl QuillApp {
 fn comments_toggle(state: CommentsState, cx: &mut Context<QuillApp>) -> Option<AnyElement> {
     let (icon, label) = match state {
         CommentsState::Empty => return None,
-        CommentsState::Shown => (IconName::MessageSquare, tr(keys::Q_LIVE_STORY_HIDE_COMMENTS)),
+        CommentsState::Shown => (
+            IconName::MessageSquare,
+            tr(keys::Q_LIVE_STORY_HIDE_COMMENTS),
+        ),
         CommentsState::Hidden => (
             IconName::MessageSquareOff,
             tr(keys::Q_LIVE_STORY_SHOW_COMMENTS),
@@ -407,5 +412,29 @@ impl QuillApp {
     /// become the comment's entities when it is sent).
     pub(super) fn live_comment_markup(&self, cx: &App) -> String {
         field_doc(self.stories.live.input.read(cx)).to_markup()
+    }
+}
+
+/// The total under the star: the full number while it fits the round
+/// button, the short form ("1240", "12.3K") past that (tdesktop
+/// `SendStarButton::setCount`).
+fn stars_counter(total: i64) -> String {
+    let full = group_digits(total);
+    if full.chars().count() <= 4 {
+        full
+    } else {
+        format_short(total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stars_counter;
+
+    #[test]
+    fn stars_counter_shortens_past_four_characters() {
+        assert_eq!(stars_counter(999), "999");
+        assert_eq!(stars_counter(1240), "1240");
+        assert_eq!(stars_counter(12_345), "12.3K");
     }
 }

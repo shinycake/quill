@@ -148,12 +148,7 @@ pub(crate) fn frame_backdrop(frame: &VideoFrame, outer: (u32, u32)) -> Option<Ar
             let source_x = left + (x * copy_w / small_w).min(copy_w - 1);
             let at = ((source_y * width + source_x) * 4) as usize;
             let pixel = frame.rgba.get(at..at + 4)?;
-            bgra.extend_from_slice(&[
-                *pixel.get(2)?,
-                *pixel.get(1)?,
-                *pixel.first()?,
-                255,
-            ]);
+            bgra.extend_from_slice(&[*pixel.get(2)?, *pixel.get(1)?, *pixel.first()?, 255]);
         }
     }
     let mut raster = quill::wallpaper_raster::Raster {

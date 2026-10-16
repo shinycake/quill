@@ -119,7 +119,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             },
             None => return Err(ConnectSendError::InvalidRequest),
         };
-        if self.session.calls.active_call.is_some() || self.session.group_call_joined_or_joining(None)
+        if self.session.calls.active_call.is_some()
+            || self.session.group_call_joined_or_joining(None)
         {
             return Err(ConnectSendError::InvalidRequest);
         }

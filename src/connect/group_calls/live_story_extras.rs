@@ -88,7 +88,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         sender: MessageSender,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.stories.live.as_ref().map(|l| ChatId(l.chat_id)) else {
+        let Some(chat_id) = self
+            .session
+            .stories
+            .live
+            .as_ref()
+            .map(|l| ChatId(l.chat_id))
+        else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let manage = self
@@ -107,7 +113,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         match (sender, channel) {
             (MessageSender::User { user_id }, true) => self.ban_chat_member(chat_id, user_id, 0),
             (MessageSender::User { user_id }, false) => self.set_user_blocked(user_id, true),
-            (MessageSender::Chat { chat_id: sender }, true) => self.ban_chat_sender(chat_id, sender),
+            (MessageSender::Chat { chat_id: sender }, true) => {
+                self.ban_chat_sender(chat_id, sender)
+            }
             (MessageSender::Chat { .. }, false) => Err(ConnectSendError::InvalidRequest),
         }
     }

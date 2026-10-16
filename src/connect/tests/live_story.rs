@@ -427,8 +427,10 @@ fn another_live_call_does_not_replace_the_watched_one() {
 fn pending_star_reactions_count_against_a_paid_comment() {
     let mut h = watching();
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
-    h.driver.session.payments.hub.balance =
-        Some(crate::premium_hub::StarAmount { stars: 60, nanos: 0 });
+    h.driver.session.payments.hub.balance = Some(crate::premium_hub::StarAmount {
+        stars: 60,
+        nanos: 0,
+    });
     h.driver.add_live_story_reaction(20, 0).unwrap();
     // 60 less 20 waiting leaves 40: a 50 Star comment needs a top-up.
     assert!(h.driver.session.live_needs_top_up(50));
@@ -506,7 +508,10 @@ fn ban_user_bans_from_the_channel_or_blocks() {
     let mut h = watching();
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
     // Only on your own live story.
-    assert_invalid(h.driver.ban_live_story_commenter(MessageSender::User { user_id: 9 }));
+    assert_invalid(
+        h.driver
+            .ban_live_story_commenter(MessageSender::User { user_id: 9 }),
+    );
     h.ingest(&LIVE_CALL.replace("JOINED", "true").replace(
         r#""can_send_messages""#,
         r#""can_be_managed":true,"can_send_messages""#,
@@ -519,5 +524,8 @@ fn ban_user_bans_from_the_channel_or_blocks() {
         sent_request(&h.recorder, "setMessageSenderBlockList")["sender_id"]["user_id"],
         9
     );
-    assert_invalid(h.driver.ban_live_story_commenter(MessageSender::Chat { chat_id: -5 }));
+    assert_invalid(
+        h.driver
+            .ban_live_story_commenter(MessageSender::Chat { chat_id: -5 }),
+    );
 }

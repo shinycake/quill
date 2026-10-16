@@ -508,7 +508,12 @@ impl QuillApp {
             column = column.child(self.story_privacy_panel(cx));
         }
         if let Some(status) = self.story_manage_status() {
-            column = column.child(div().text_xs().text_color(chrome::secondary()).child(status));
+            column = column.child(
+                div()
+                    .text_xs()
+                    .text_color(chrome::secondary())
+                    .child(status),
+            );
         }
         column.into_any_element()
     }

@@ -319,9 +319,7 @@ fn space_types_in_the_comment_field_and_does_not_pause(cx: &mut TestAppContext) 
     let field = find(vcx, "live-story-field").expect("the comment field");
     vcx.simulate_click(field.center(), Modifiers::default());
     frames(vcx);
-    let focused = app.update_in(vcx, |app, window, cx| {
-        app.story_text_input_open(window, cx)
-    });
+    let focused = app.update_in(vcx, |app, window, cx| app.story_text_input_open(window, cx));
     assert!(focused, "the field has the keyboard");
     vcx.simulate_keystrokes("a space b");
     frames(vcx);

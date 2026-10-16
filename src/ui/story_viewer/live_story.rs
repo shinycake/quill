@@ -18,8 +18,8 @@ use quill::calls::engine::StreamState;
 use quill::calls::group_call_create::{BeforeCreate, before_create};
 use quill::lang::trn_with;
 use quill::live_story::{DEFAULT_STARS, QUICK_STARS, comment_text};
-use quill::premium_hub::group_digits;
 use quill::paid_reaction::{SLIDER_STEPS, amount_for_step, step_for_amount};
+use quill::premium_hub::group_digits;
 use quill::state::{Session, unix_ms_now};
 
 /// The live story under the viewer: `(poster, story)` when the current
@@ -421,7 +421,9 @@ impl QuillApp {
             return;
         };
         if boxed.mode != StarsBoxMode::Admin
-            && self.session().is_some_and(|s| s.live_needs_top_up(boxed.stars))
+            && self
+                .session()
+                .is_some_and(|s| s.live_needs_top_up(boxed.stars))
         {
             self.live_top_up(boxed.stars, cx);
             return;
@@ -501,11 +503,7 @@ impl QuillApp {
                 .is_ok();
             // tdesktop `deleteConfirmed`: Ban User bans the sender from the
             // channel, or blocks them on a user's live story.
-            let banned = !delete.ban
-                || live
-                    .driver
-                    .ban_live_story_commenter(delete.sender)
-                    .is_ok();
+            let banned = !delete.ban || live.driver.ban_live_story_commenter(delete.sender).is_ok();
             if !deleted || !banned {
                 self.surface_live_note();
             }

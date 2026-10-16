@@ -369,7 +369,12 @@ impl QuillApp {
                         this.child(div().text_color(chrome::fg()).child(caption))
                     })
                     .when_some(counts, |this, counts| {
-                        this.child(div().text_xs().text_color(chrome::secondary()).child(counts))
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(chrome::secondary())
+                                .child(counts),
+                        )
                     })
                     // Phase 9.5: "Reposted from …" / "edited" marker.
                     .when_some(self.story_viewer_meta_line(), |this, meta| {

@@ -443,9 +443,10 @@ fn leave_other_words(text: LeaveText) -> (quill::lang::Key, quill::lang::Key) {
         LeaveText::EndCall { to_channel: false } => {
             (keys::CALL_LEAVE_TO_OTHER_SURE, keys::CALL_BAR_HANGUP)
         }
-        LeaveText::EndCall { to_channel: true } => {
-            (keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL, keys::CALL_BAR_HANGUP)
-        }
+        LeaveText::EndCall { to_channel: true } => (
+            keys::CALL_LEAVE_TO_OTHER_SURE_CHANNEL,
+            keys::CALL_BAR_HANGUP,
+        ),
         LeaveText::LeaveGroupCall {
             from_channel: true,
             to_channel: true,

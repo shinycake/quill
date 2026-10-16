@@ -638,7 +638,12 @@ impl QuillApp {
             column = column.child(self.close_friends_panel(cx));
         }
         if let Some(notice) = self.stories.notice.clone() {
-            column = column.child(div().text_xs().text_color(chrome::secondary()).child(notice));
+            column = column.child(
+                div()
+                    .text_xs()
+                    .text_color(chrome::secondary())
+                    .child(notice),
+            );
         }
         if let Some(op) = self.session().and_then(|s| s.stories.page_op.clone()) {
             use quill::story_page::StoryPageOpState as S;
