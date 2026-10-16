@@ -270,6 +270,19 @@ impl WindowsWindowInner {
     /// restart the idle grace period. `RDW_INVALIDATE` alone sends nothing
     /// synchronously, so this is safe to call from inside GPUI updates.
     pub(crate) fn demand_frames(&self) {
+        // A hidden or minimized window stays parked: it gets no `WM_PAINT`,
+        // so nothing would park it again, and the vsync thread would
+        // invalidate it every vblank. Showing (`WM_SHOWWINDOW`) and
+        // restoring (`WM_SIZE`) resume it.
+        if self.visibility() == WindowVisibility::Hidden {
+            return;
+        }
+        self.resume_frames();
+    }
+
+    /// Quill: `demand_frames` without the visibility check, for a window
+    /// that is being shown (`WM_SHOWWINDOW` arrives before it is visible).
+    pub(crate) fn resume_frames(&self) {
         let mut idle = self.state.frame_idle.get();
         let resume = idle.demand(Instant::now());
         self.state.frame_idle.set(idle);
@@ -281,11 +294,23 @@ impl WindowsWindowInner {
         }
     }
 
+    /// Quill: the window was hidden or minimized, so it gets no `WM_PAINT`
+    /// and the idle decision can't run: park its vsync invalidations. The
+    /// idle state parks too, so the first frame demand once it is back
+    /// unparks it (and invalidates it at once).
+    pub(crate) fn park_frames(&self) {
+        let mut idle = self.state.frame_idle.get();
+        idle.park();
+        self.state.frame_idle.set(idle);
+        FRAME_GATE.park(self.hwnd);
+    }
+
     /// Quill: after GPUI handled a frame request in `draw_window`. Frames
     /// that neither drew, presented nor asked for another frame for
     /// `FRAME_IDLE_AFTER` park the window's vsync invalidations; a frame that
-    /// does (a heartbeat that found work) unparks them. `keep_running`: the
-    /// platform has its own reason to keep frames coming.
+    /// does (one drawn while parked, e.g. after `WM_PAINT` from the system)
+    /// unparks them. `keep_running`: the platform has its own reason to keep
+    /// frames coming.
     pub(crate) fn frames_after_draw(&self, keep_running: bool) {
         // The kill switch (`QUILL_IDLE_FRAMES=0`) makes every frame active.
         let active = self.state.frame_activity.take() || keep_running || !idle_frames_enabled();
