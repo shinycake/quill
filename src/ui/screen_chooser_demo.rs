@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::calls::demo_feed::{DemoFeed, demo_feed};
 use super::screen_share_state::ScreenFor;
 use super::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
@@ -15,7 +16,7 @@ use quill::calls::capture::screen::{
     SourceKind, Thumbnail,
 };
 use quill::calls::capture::{CaptureError, FrameSink, VideoFrame as CaptureFrame};
-use quill::calls::engine::VideoFrame;
+use quill::calls::live_video::LiveKey;
 use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{GroupCallVideoInfo, MessageSender, ParsedGroupCallParticipant};
 use std::sync::Arc;
@@ -164,17 +165,11 @@ fn participant(user_id: i64, me: bool) -> ParsedGroupCallParticipant {
     }
 }
 
-fn frame(user_id: i64, screen: bool, variant: usize) -> VideoFrame {
+/// A tile's feed: one made-up desktop, sent at 30 fps when `repeat`.
+fn feed(variant: usize, repeat: bool, cx: &mut App) -> Option<DemoFeed> {
     let (width, height) = (640u16, 360u16);
-    VideoFrame {
-        seq: 1,
-        width,
-        height,
-        rgba: picture(u32::from(width), u32::from(height), variant),
-        is_local: screen,
-        participant_user_id: Some(user_id),
-        is_screen: screen,
-    }
+    let rgba = picture(u32::from(width), u32::from(height), variant);
+    demo_feed(&rgba, width, height, repeat, cx)
 }
 
 impl QuillApp {
@@ -198,12 +193,22 @@ impl QuillApp {
             participants: vec![participant(me, true), participant(other, false)],
             ..ActiveGroupCall::fresh(7)
         });
-        self.demo_ui
-            .group_frames
-            .insert((me, true), frame(me, true, 2));
-        self.demo_ui
-            .group_frames
-            .insert((other, false), frame(other, false, 1));
+        // Your hidden window sent one frame before it paused; the other
+        // camera keeps sending.
+        let tiles = [
+            (me, true, feed(2, false, cx)),
+            (other, false, feed(1, true, cx)),
+        ];
+        for (user_id, screen, feed) in tiles {
+            let key = LiveKey::Video {
+                call_id: 7,
+                user_id,
+                screen,
+            };
+            if let Some(feed) = feed {
+                self.demo_ui.group_feeds.insert(key, feed);
+            }
+        }
         self.screen_share.backend = Some(Arc::new(DemoScreens {
             system_picker: false,
             access: if denied {

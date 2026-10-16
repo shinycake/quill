@@ -113,51 +113,6 @@ impl QuillApp {
         Some(image)
     }
 
-    /// Phase C2g: cached decoded tile for one group participant's video
-    /// slot, rebuilt only when that slot's frame sequence changed.
-    pub(in crate::ui) fn cached_group_video_image(
-        &mut self,
-        call_id: i32,
-        user_id: i64,
-        screen: bool,
-        frame: &quill::calls::engine::VideoFrame,
-    ) -> Option<Arc<RenderImage>> {
-        let key = (call_id, user_id, screen);
-        if self
-            .group_call
-            .video_images
-            .get(&key)
-            .is_some_and(|(seq, _)| *seq == frame.seq)
-        {
-            return self
-                .group_call
-                .video_images
-                .get(&key)
-                .map(|(_, image)| image.clone());
-        }
-        let image = Self::video_render_image(frame)?;
-        // Tiles of any other call are dead weight.
-        self.prune_group_video_images(Some(call_id));
-        // Same for the tile's previous frame.
-        if let Some(old) = replace_tile(
-            &mut self.group_call.video_images,
-            key,
-            (frame.seq, image.clone()),
-        ) {
-            crate::ui::image_budget::retire_all([old]);
-        }
-        Some(image)
-    }
-
-    /// Drop cached group-call tiles that don't belong to `live_call`
-    /// (`None`: no call, drop all), handing them to the atlas sweeper.
-    pub(in crate::ui) fn prune_group_video_images(&mut self, live_call: Option<i32>) {
-        let images = take_dead_call_tiles(&mut self.group_call.video_images, live_call)
-            .into_iter()
-            .map(|(_, image)| image);
-        crate::ui::image_budget::retire_all(images);
-    }
-
     /// Resume a parked viewer play once `downloadFile` lands the clip.
     /// Routes through `maybe_autoplay_viewer_video`: it re-derives the
     /// current item, clears the pending flag, and either reuses cached
@@ -430,57 +385,5 @@ pub(super) fn viewer_error_message(
         ErrorKind::Open | ErrorKind::Decode => {
             tr_with(keys::Q_AV_COULDNT_PLAY_THIS, &[("noun", noun)])
         }
-    }
-}
-
-/// Store `tile` under `key` and return the frame image it replaced, if
-/// any, so the caller can retire that image from the atlas.
-fn replace_tile<K: std::hash::Hash + Eq, V>(
-    tiles: &mut std::collections::HashMap<K, (u64, V)>,
-    key: K,
-    tile: (u64, V),
-) -> Option<V> {
-    tiles.insert(key, tile).map(|(_, old)| old)
-}
-
-/// Remove and return every tile whose call isn't `live_call`.
-fn take_dead_call_tiles<V>(
-    tiles: &mut std::collections::HashMap<(i32, i64, bool), V>,
-    live_call: Option<i32>,
-) -> Vec<V> {
-    let dead: Vec<_> = tiles
-        .keys()
-        .filter(|(call, _, _)| Some(*call) != live_call)
-        .copied()
-        .collect();
-    dead.into_iter()
-        .filter_map(|key| tiles.remove(&key))
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{replace_tile, take_dead_call_tiles};
-    use std::collections::HashMap;
-
-    #[test]
-    fn replacing_a_tile_hands_back_the_old_frame_to_retire() {
-        let mut tiles: HashMap<(i32, i64, bool), (u64, u8)> = HashMap::new();
-        assert_eq!(replace_tile(&mut tiles, (1, 10, false), (1, 7)), None);
-        assert_eq!(replace_tile(&mut tiles, (1, 10, false), (2, 8)), Some(7));
-        assert_eq!(tiles.get(&(1, 10, false)), Some(&(2, 8)));
-        assert_eq!(tiles.len(), 1);
-    }
-
-    #[test]
-    fn tiles_empty_when_the_call_ends_and_drop_when_it_changes() {
-        let mut tiles: HashMap<(i32, i64, bool), u8> = HashMap::new();
-        tiles.insert((1, 10, false), 0);
-        tiles.insert((1, 11, true), 1);
-        tiles.insert((2, 10, false), 2);
-        assert_eq!(take_dead_call_tiles(&mut tiles, Some(2)).len(), 2);
-        assert_eq!(tiles.len(), 1);
-        assert_eq!(take_dead_call_tiles(&mut tiles, None).len(), 1);
-        assert!(tiles.is_empty());
     }
 }

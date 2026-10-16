@@ -1,13 +1,13 @@
-//! The story viewer's state for the live story it plays: the stream
-//! picture and its blurred backdrop, the comment field, the Stars the
+//! The story viewer's state for the live story it plays: the stream's
+//! live player, the comment field, the Stars the
 //! composer will add, the boxes it opened and the Star effects in flight.
 //! The call, the comments and the donors live in the session
 //! (`stories.live`). The menus are the kit's and keep their own state.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::calls::stream_picture::StreamPicture;
-use crate::ui::calls::stream_tile::StreamTileState;
+use crate::ui::calls::demo_feed::DemoFeed;
+use crate::ui::video_player::VideoPlayer;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
@@ -73,11 +73,8 @@ pub(in crate::ui) struct FlyingStars {
 pub(in crate::ui) struct LiveStoryUi {
     /// The comment field.
     pub(in crate::ui) input: Entity<TextareaState>,
-    pub(super) picture: StreamPicture,
-    /// The picture small and blurred, behind a picture shown whole
-    /// (tdesktop `DecideFrameResize`).
-    pub(super) backdrop: StreamPicture,
-    pub(super) tile: StreamTileState,
+    /// The stream's live player, over the driver's feed.
+    pub(super) player: Option<VideoPlayer>,
     /// The live story the viewer joined: `(poster, story)`.
     pub(in crate::ui) watching: Option<(ChatId, i32)>,
     /// The call was seen tracked since the join (so its end is noticed).
@@ -99,8 +96,8 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(super) scroll: ScrollHandle,
     /// The newest comment seen.
     pub(super) last_comment: Option<i32>,
-    /// The screenshot demo's still picture (no driver, no stream).
-    pub(super) demo_frame: Option<std::sync::Arc<quill::calls::engine::VideoFrame>>,
+    /// The screenshot demo's feed (no driver, no stream).
+    pub(super) demo_feed: Option<DemoFeed>,
 }
 
 impl LiveStoryUi {
@@ -129,9 +126,7 @@ impl LiveStoryUi {
         .detach();
         Self {
             input,
-            picture: StreamPicture::default(),
-            backdrop: StreamPicture::default(),
-            tile: StreamTileState::default(),
+            player: None,
             watching: None,
             seen_call: false,
             chosen_stars: 0,
@@ -143,7 +138,7 @@ impl LiveStoryUi {
             flying: Vec::new(),
             scroll: ScrollHandle::new(),
             last_comment: None,
-            demo_frame: None,
+            demo_feed: None,
         }
     }
 

@@ -37,39 +37,34 @@ impl QuillApp {
     }
 
     /// Slice calls-group-self-tile: the current user's tile content in
-    /// the group grid. Camera on + a retained local frame → the live
-    /// local preview (decoded through the same per-participant cache as
-    /// the remote tiles); camera on with no frame yet → "Starting
-    /// camera…"; camera off → the initials avatar, consistent with every
-    /// other tile. Live mode reads the driver's group-local slot (the
-    /// engine delivers group CAPTURE frames as `is_local` with no
-    /// participant); demo mode reuses the 1:1 local fixture frame.
+    /// the group grid. Camera on with a frame → the live preview (a live
+    /// player over the call's local feed); camera on with no frame yet →
+    /// "Starting camera…"; camera off → the initials avatar, consistent
+    /// with every other tile.
     pub(super) fn group_self_tile_content(
         &mut self,
         call: &ActiveGroupCall,
         participant: &ParsedGroupCallParticipant,
         name: &str,
+        cx: &mut App,
     ) -> AnyElement {
-        let frame = if let Some(live) = self.live.as_ref() {
-            live.driver.latest_video_frame(call.id, true)
-        } else {
-            self.demo_ui.local_frame.clone()
-        };
-        let MessageSender::User { user_id } = participant.participant_id else {
+        if !matches!(participant.participant_id, MessageSender::User { .. }) {
             return div().child(initials_avatar(name, 56.)).into_any_element();
-        };
-        match (call.is_my_video_enabled, frame.as_ref()) {
-            (true, Some(frame)) => {
-                match self.cached_group_video_image(call.id, user_id, false, frame) {
-                    Some(image) => img(ImageSource::from(image))
-                        .w_full()
-                        .h(px(90.))
-                        .object_fit(ObjectFit::Contain)
-                        .into_any_element(),
-                    None => div().child(initials_avatar(name, 56.)).into_any_element(),
-                }
-            }
-            (true, None) => div()
+        }
+        if !call.is_my_video_enabled {
+            return div().child(initials_avatar(name, 56.)).into_any_element();
+        }
+        let key = quill::calls::live_video::LiveKey::Local { call_id: call.id };
+        match self
+            .group_tile_player(key, cx)
+            .filter(|player| player.has_live_frame())
+        {
+            Some(player) => div()
+                .w_full()
+                .h(px(90.))
+                .child(super::video_player::video_frame(&player).object_fit(ObjectFit::Contain))
+                .into_any_element(),
+            None => div()
                 .flex()
                 .flex_col()
                 .items_center()
@@ -83,7 +78,6 @@ impl QuillApp {
                         .child(tr(keys::Q_AV_STARTING_CAMERA)),
                 )
                 .into_any_element(),
-            (false, _) => div().child(initials_avatar(name, 56.)).into_any_element(),
         }
     }
 

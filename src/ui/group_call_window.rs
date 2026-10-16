@@ -11,7 +11,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::group_call_stream_layout::{leave_stream_full, uses_stream_layout};
+use super::calls::stream_view::StreamPictureView;
+use super::frame_clock::trace_slice_render;
+use super::group_call_panel::BG;
+use super::group_call_stream_layout::{leave_stream_full, stream_viewport, uses_stream_layout};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
@@ -74,7 +77,11 @@ impl QuillApp {
             .filter(|call| !call.is_live_story)
             .map(|call| (call.id, uses_stream_layout(call)));
         let wanted = call.filter(|(id, _)| self.group_call.window_closed_by_user != Some(*id));
-        self.prune_group_video_images(wanted.map(|(id, _)| id));
+        // Tile players of a call that is no longer shown go.
+        let shown = wanted.map(|(id, _)| id);
+        self.group_call
+            .players
+            .retain(|key, _| key.call_id().is_some() && key.call_id() == shown);
         if wanted.is_none_or(|(_, stream)| !stream) {
             self.group_call.stream.clear(cx);
         }
@@ -171,7 +178,14 @@ impl QuillApp {
                             title: None,
                         }
                     });
-                    cx.new(|cx| Root::new(view, window, cx))
+                    let picture = cx.new(|cx| StreamPictureView::new(&render_owner, cx));
+                    let root = cx.new(|cx| GroupCallRoot {
+                        owner: render_owner.downgrade(),
+                        _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                        panel: view,
+                        picture,
+                    });
+                    cx.new(|cx| Root::new(root, window, cx))
                 },
             );
             owner.update(cx, |app, cx| {
@@ -208,6 +222,58 @@ impl QuillApp {
     }
 }
 
+/// The window's root: the panel alone, or for a live stream the picture
+/// under the panel as two cached views, so a new frame redraws only the
+/// picture and the panel's chrome replays.
+struct GroupCallRoot {
+    owner: WeakEntity<QuillApp>,
+    _observe: Subscription,
+    panel: Entity<GroupCallPanel>,
+    picture: Entity<StreamPictureView>,
+}
+
+impl Render for GroupCallRoot {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let stream = self
+            .owner
+            .upgrade()
+            .is_some_and(|owner| owner.read(cx).group_call_is_stream());
+        if !stream {
+            return div()
+                .size_full()
+                .child(self.panel.clone())
+                .into_any_element();
+        }
+        let full = window.is_fullscreen() || window.is_maximized();
+        let (inset, top) = stream_viewport(full);
+        div()
+            .size_full()
+            .relative()
+            .bg(if full { black() } else { rgb(BG).into() })
+            .child(
+                div()
+                    .absolute()
+                    .left(px(inset))
+                    .right(px(inset))
+                    .bottom(px(inset))
+                    .top(px(top))
+                    .child(
+                        self.picture
+                            .clone()
+                            .cached(StyleRefinement::default().size_full()),
+                    ),
+            )
+            .child(
+                div().absolute().inset_0().child(
+                    self.panel
+                        .clone()
+                        .cached(StyleRefinement::default().size_full()),
+                ),
+            )
+            .into_any_element()
+    }
+}
+
 pub(super) struct GroupCallPanel {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
@@ -222,6 +288,7 @@ pub(super) struct GroupCallPanel {
 
 impl Render for GroupCallPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        trace_slice_render("group-call-panel");
         let Some(owner) = self.owner.upgrade() else {
             window.remove_window();
             return div().into_any_element();

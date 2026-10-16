@@ -1,16 +1,17 @@
 //! Screenshot demos of a channel's live stream window (injected, no live
 //! Telegram, no call): the demo channel (id 13) with a photo and a running
-//! RTMP stream that is connecting, playing a still picture, or not
-//! broadcasting. The stream window opens beside the main window; capture
+//! RTMP stream that is connecting, playing (a picture sent at 30 fps
+//! through a live feed), or not broadcasting. The stream window opens beside the main window; capture
 //! it with `QUILL_DEMO_CAPTURE_WINDOWS=1`.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
+use crate::ui::calls::demo_feed::{DemoFeed, demo_feed};
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
-use quill::calls::engine::{GroupCallMode, StreamState, VideoFrame};
+use quill::calls::engine::{GroupCallMode, StreamState};
 use quill::diagnostics::DiagnosticSink;
 use quill::state::{ActiveGroupCall, Session, VideoChatInfo};
 use quill::telegram::client::copy_and_parse;
@@ -46,8 +47,9 @@ impl QuillApp {
     }
 
     fn demo_rtmp_live(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.group_call.stream.demo_frame = demo_stream_frame().map(Arc::new);
         self.demo_rtmp(StreamState::Live, cx);
+        // After the setup, which clears the window's state.
+        self.group_call.stream.demo_feed = demo_stream_feed(cx);
     }
 
     fn demo_rtmp_no_stream(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -103,17 +105,11 @@ pub(super) fn seed_rtmp_stream(
     });
 }
 
-/// A still picture for the playing stream: the showcase photo as a frame.
-pub(super) fn demo_stream_frame() -> Option<VideoFrame> {
+/// The playing stream's feed: the showcase photo, sent at 30 fps.
+pub(super) fn demo_stream_feed(cx: &mut App) -> Option<DemoFeed> {
     let path = demo_media_allowlist().join("showcase/p2.jpg");
     let rgba = image::open(path).ok()?.to_rgba8();
-    Some(VideoFrame {
-        seq: 1,
-        width: u16::try_from(rgba.width()).ok()?,
-        height: u16::try_from(rgba.height()).ok()?,
-        rgba: rgba.into_raw(),
-        is_local: false,
-        participant_user_id: None,
-        is_screen: false,
-    })
+    let width = u16::try_from(rgba.width()).ok()?;
+    let height = u16::try_from(rgba.height()).ok()?;
+    demo_feed(rgba.as_raw(), width, height, true, cx)
 }
