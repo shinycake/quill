@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use quill::playback::PlaybackClock;
 use rodio::source::SeekError;
@@ -42,6 +42,40 @@ pub(in crate::ui) enum EngineState {
 pub(in crate::ui) struct Simulation {
     /// Every start fails, to show the failure state.
     pub(in crate::ui) fail: bool,
+    /// Every seek hangs, to show the stalled-device state.
+    pub(in crate::ui) stall: bool,
+}
+
+/// How long a posted seek may wait on the audio thread before the engine
+/// reports that the device isn't responding.
+const SEEK_STALL_AFTER: Duration = Duration::from_millis(2500);
+
+/// The engine's time source. Tests drive a manual one so the stall bound
+/// needs no sleeping.
+#[derive(Debug)]
+struct EngineClock {
+    origin: Instant,
+    #[cfg(test)]
+    manual: Option<Arc<AtomicU64>>,
+}
+
+impl EngineClock {
+    fn new() -> Self {
+        Self {
+            origin: Instant::now(),
+            #[cfg(test)]
+            manual: None,
+        }
+    }
+
+    /// Time since the clock began.
+    fn now(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(millis) = &self.manual {
+            return Duration::from_millis(millis.load(Ordering::Relaxed));
+        }
+        self.origin.elapsed()
+    }
 }
 
 /// Frames the mixer has taken from a track, as an absolute position.
@@ -52,6 +86,9 @@ struct Probe {
     /// Tests: stands in for a decoder that cannot seek.
     #[cfg(test)]
     refuse_seek: std::sync::atomic::AtomicBool,
+    /// Tests: seeks the audio side has handled, applied or refused.
+    #[cfg(test)]
+    seeks_handled: AtomicU64,
 }
 
 impl Probe {
@@ -139,6 +176,8 @@ impl<S: Source> Source for Counted<S> {
 
     fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
         #[cfg(test)]
+        self.probe.seeks_handled.fetch_add(1, Ordering::Relaxed);
+        #[cfg(test)]
         if self.probe.refuse_seek.load(Ordering::Relaxed) {
             return Err(SeekError::NotSupported {
                 underlying_source: "test",
@@ -165,14 +204,24 @@ struct SeekBoard {
 
 #[derive(Debug, Default)]
 struct SeekState {
-    /// The latest target not yet handed to the audio thread.
-    queued: Option<f64>,
-    /// The target the audio thread has been asked for.
-    in_flight: Option<f64>,
+    /// The latest seek not yet handed to the audio thread.
+    queued: Option<Seek>,
+    /// The seek the audio thread has been asked for.
+    in_flight: Option<Seek>,
+    /// Tests: seeks handed to the audio thread so far.
+    #[cfg(test)]
+    handed: u64,
     /// A worker is draining `queued`.
     running: bool,
     /// The newest seek's outcome, until the engine takes it.
     done: Option<SeekDone>,
+}
+
+/// A posted seek and when (engine clock) the user asked for it.
+#[derive(Clone, Copy, Debug)]
+struct Seek {
+    target: f64,
+    posted: Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -190,7 +239,8 @@ impl SeekBoard {
     /// decoder refused and the engine has not yet answered with a restart.
     fn target(&self) -> Option<f64> {
         let state = self.lock();
-        state.queued.or(state.in_flight).or_else(|| {
+        let pending = state.queued.or(state.in_flight).map(|seek| seek.target);
+        pending.or_else(|| {
             state
                 .done
                 .filter(|done| !done.moved)
@@ -198,15 +248,26 @@ impl SeekBoard {
         })
     }
 
+    /// The audio thread has held a seek for `SEEK_STALL_AFTER` without
+    /// answering: the output isn't pulling.
+    fn stalled(&self, now: Duration) -> bool {
+        self.lock()
+            .in_flight
+            .is_some_and(|seek| now.saturating_sub(seek.posted) >= SEEK_STALL_AFTER)
+    }
+
     fn take_done(&self) -> Option<SeekDone> {
         self.lock().done.take()
     }
 
     /// Queue `target` and make sure a worker will deliver it. Returns at once.
-    fn post(self: &Arc<Self>, player: &Arc<Player>, target: f64) {
+    fn post(self: &Arc<Self>, player: &Arc<Player>, target: f64, now: Duration) {
         let spawn = {
             let mut state = self.lock();
-            state.queued = Some(target);
+            state.queued = Some(Seek {
+                target,
+                posted: now,
+            });
             state.done = None;
             !std::mem::replace(&mut state.running, true)
         };
@@ -234,12 +295,16 @@ impl SeekBoard {
         loop {
             let target = {
                 let mut state = self.lock();
-                let Some(target) = state.queued.take() else {
+                let Some(seek) = state.queued.take() else {
                     state.running = false;
                     return;
                 };
-                state.in_flight = Some(target);
-                target
+                state.in_flight = Some(seek);
+                #[cfg(test)]
+                {
+                    state.handed += 1;
+                }
+                seek.target
             };
             let moved = player.try_seek(Duration::from_secs_f64(target)).is_ok();
             let mut state = self.lock();
@@ -258,6 +323,7 @@ pub(in crate::ui) struct AudioEngine {
     /// Seeks in flight on `player`; replaced with the player.
     seeks: Arc<SeekBoard>,
     probe: Arc<Probe>,
+    clock: EngineClock,
     /// The track, kept after a failed start so Play can try again.
     path: Option<PathBuf>,
     speed: SharedSpeed,
@@ -276,6 +342,8 @@ pub(in crate::ui) struct AudioEngine {
     simulation: Option<Simulation>,
     sim_clock: Option<PlaybackClock>,
     sim_duration: f64,
+    /// Simulation only: when the first seek that hangs was posted.
+    sim_stalled_since: Option<Duration>,
 }
 
 impl AudioEngine {
@@ -285,6 +353,7 @@ impl AudioEngine {
             player: None,
             seeks: Arc::default(),
             probe: Arc::new(Probe::default()),
+            clock: EngineClock::new(),
             path: None,
             speed: SharedSpeed::new(1.0),
             volume: 1.0,
@@ -295,6 +364,7 @@ impl AudioEngine {
             simulation: None,
             sim_clock: None,
             sim_duration: 0.0,
+            sim_stalled_since: None,
         }
     }
 
@@ -305,9 +375,24 @@ impl AudioEngine {
     }
 
     /// Why the last start, resume or seek failed, if it did and nothing has
-    /// worked since.
+    /// worked since. A seek the audio thread has left unanswered for
+    /// `SEEK_STALL_AFTER` reads as `DeviceStalled`, derived from the seek
+    /// board on every call.
     pub(in crate::ui) fn error(&self) -> Option<AudioError> {
+        if self.seek_stalled() {
+            return Some(AudioError::DeviceStalled);
+        }
         self.error
+    }
+
+    fn seek_stalled(&self) -> bool {
+        let now = self.clock.now();
+        if self.sim_clock.is_some() {
+            return self
+                .sim_stalled_since
+                .is_some_and(|since| now.saturating_sub(since) >= SEEK_STALL_AFTER);
+        }
+        self.player.is_some() && self.seeks.stalled(now)
     }
 
     fn note(&mut self, result: &Result<(), AudioError>) {
@@ -353,6 +438,20 @@ impl AudioEngine {
     #[cfg(test)]
     pub(in crate::ui) fn seek_pending(&self) -> bool {
         self.player.is_some() && self.seeks.target().is_some()
+    }
+
+    /// Tests: the audio side owes an answer to a seek it was handed.
+    #[cfg(test)]
+    fn seek_awaits_device(&self) -> bool {
+        self.seeks.lock().handed > self.probe.seeks_handled.load(Ordering::Relaxed)
+    }
+
+    /// Tests: an engine whose clock is the returned handle (milliseconds).
+    #[cfg(test)]
+    fn with_manual_clock(mut self) -> (Self, Arc<AtomicU64>) {
+        let millis = Arc::new(AtomicU64::new(0));
+        self.clock.manual = Some(millis.clone());
+        (self, millis)
     }
 
     /// Answer a finished seek: a decoder that refused to seek in place gets
@@ -514,6 +613,9 @@ impl AudioEngine {
         let offset = offset_secs.max(0.0);
         if let Some(clock) = self.sim_clock.as_mut() {
             clock.seek(offset);
+            if self.simulation.is_some_and(|simulation| simulation.stall) {
+                self.sim_stalled_since.get_or_insert(self.clock.now());
+            }
             return Ok(());
         }
         if !playing {
@@ -522,7 +624,7 @@ impl AudioEngine {
             return Ok(());
         }
         if let Some(player) = self.player.as_ref().filter(|p| !p.empty()) {
-            self.seeks.post(player, offset);
+            self.seeks.post(player, offset, self.clock.now());
             return Ok(());
         }
         let Some(path) = self.path.clone() else {
@@ -553,6 +655,7 @@ impl AudioEngine {
         }
         self.seeks = Arc::default();
         self.sim_clock = None;
+        self.sim_stalled_since = None;
         self.path = None;
         self.stale = false;
         self.failed = false;
@@ -725,7 +828,10 @@ mod tests {
     fn resume_after_a_failed_start_retries_the_track() {
         let (mut engine, _device) = rig();
         let path = track("retry.wav", 4);
-        engine.set_simulation(Some(Simulation { fail: true }));
+        engine.set_simulation(Some(Simulation {
+            fail: true,
+            stall: false,
+        }));
         assert!(engine.start(&path, 1.0, 1.0, 1.0, 4.0).is_err());
         assert_eq!(engine.state(), EngineState::Failed);
         engine.set_simulation(None);
@@ -748,7 +854,10 @@ mod tests {
     #[test]
     fn the_simulation_keeps_its_own_time() {
         let mut engine = AudioEngine::new(SharedOutput::for_test(None));
-        engine.set_simulation(Some(Simulation { fail: false }));
+        engine.set_simulation(Some(Simulation {
+            fail: false,
+            stall: false,
+        }));
         let path = PathBuf::from("unused.wav");
         engine.start(&path, 3.0, 1.0, 1.0, 10.0).unwrap();
         assert_eq!(engine.state(), EngineState::Playing);
@@ -759,11 +868,16 @@ mod tests {
         engine.resume(12.0).unwrap();
         assert_eq!(engine.state(), EngineState::Ended);
     }
-    /// The audio thread answers a posted seek only when the device pulls,
-    /// so pull (without any timing assumption) until the engine has settled.
+    /// The audio thread answers a posted seek only when the device pulls.
+    /// Pull one frame at a time, and only while a seek the audio side owes an
+    /// answer for is outstanding, so the position cannot drift past what the
+    /// seek itself set whatever the worker's scheduling.
     fn pull_until_settled(engine: &mut AudioEngine, device: &mut MixerSource) {
-        for _ in 0..2_000_000 {
-            pull(device, 64);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            if engine.seek_awaits_device() {
+                pull(device, 1);
+            }
             engine.settle();
             if !engine.seek_pending() {
                 return;
@@ -793,8 +907,45 @@ mod tests {
         pull_until_settled(&mut engine, &mut device);
         assert!(!engine.seek_pending());
         let confirmed = engine.position_secs();
-        assert!((4.95..=5.9).contains(&confirmed), "got {confirmed}");
+        assert!((4.95..=5.2).contains(&confirmed), "got {confirmed}");
         assert_eq!(engine.error(), None);
+    }
+
+    #[test]
+    fn a_seek_the_device_never_answers_reads_as_a_stalled_device() {
+        let (engine, mut device) = rig();
+        let (mut engine, clock) = engine.with_manual_clock();
+        let path = track("seek-stall-reported.wav", 6);
+        engine.start(&path, 0.0, 1.0, 1.0, 6.0).unwrap();
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        engine.seek(5.0, true).unwrap();
+        // The worker hands the seek over; the device pulls nothing.
+        while !engine.seek_awaits_device() {
+            std::thread::yield_now();
+        }
+        clock.store(2499, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(engine.error(), None, "inside the bound");
+        clock.store(2500, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(engine.error(), Some(AudioError::DeviceStalled));
+        assert_eq!(engine.state(), EngineState::Playing);
+        assert!((engine.position_secs() - 5.0).abs() < 1e-9);
+        // The device wakes up: the report goes away on its own.
+        pull_until_settled(&mut engine, &mut device);
+        assert_eq!(engine.error(), None);
+    }
+
+    #[test]
+    fn scrubbing_against_a_live_device_never_reads_as_stalled() {
+        let (engine, mut device) = rig();
+        let (mut engine, clock) = engine.with_manual_clock();
+        let path = track("seek-scrub-live.wav", 6);
+        engine.start(&path, 0.0, 1.0, 1.0, 6.0).unwrap();
+        for step in 0..8u64 {
+            clock.store(step * 1000, std::sync::atomic::Ordering::Relaxed);
+            engine.seek(1.0 + step as f64 * 0.5, true).unwrap();
+            pull_until_settled(&mut engine, &mut device);
+            assert_eq!(engine.error(), None, "step {step}");
+        }
     }
 
     #[test]
@@ -819,7 +970,10 @@ mod tests {
         assert_eq!(engine.error(), Some(AudioError::Open));
         assert_eq!(engine.state(), EngineState::Playing);
         let secs = engine.position_secs();
-        assert!((0.9..=1.9).contains(&secs), "back at the sound, got {secs}");
+        assert!(
+            (0.95..=1.2).contains(&secs),
+            "back at the sound, got {secs}"
+        );
     }
 
     #[test]
@@ -838,7 +992,7 @@ mod tests {
         assert_eq!(engine.state(), EngineState::Playing);
         let secs = engine.position_secs();
         assert!(
-            (3.95..=4.5).contains(&secs),
+            (3.95..=4.2).contains(&secs),
             "restarted at the target, got {secs}"
         );
     }
@@ -853,7 +1007,7 @@ mod tests {
         pull_until_settled(&mut engine, &mut device);
         assert_eq!(engine.state(), EngineState::Playing);
         let after_seek = engine.position_secs();
-        assert!((3.95..=5.5).contains(&after_seek), "got {after_seek}");
+        assert!((3.95..=4.2).contains(&after_seek), "got {after_seek}");
         let before = engine.position_secs();
         pull(&mut device, usize::try_from(RATE).unwrap() / 2);
         let later = engine.position_secs();

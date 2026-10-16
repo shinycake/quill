@@ -26,3 +26,26 @@ the position is the newest target, then the confirmed position once the device p
 at the target; a refused seek whose restart fails keeps Playing, the previous position and `AudioError::Open`.
 The "never pulls" test needs no clock; before the change it hangs. Demo captures of `ready-audio` after a
 scrub click in light and dark.
+
+## Review round: a stalled device says so
+
+- A seek the audio thread leaves unanswered no longer looks like a healthy bar. Each posted seek carries the engine
+  clock reading at post time (`Seek { target, posted }`), and it keeps it when the worker hands it to the audio
+  thread. `AudioEngine::error()` derives `AudioError::DeviceStalled` on every read while the in-flight seek is
+  `SEEK_STALL_AFTER` (2.5 s) old, and drops it as soon as the device answers. Scrubbing replaces the queued seek,
+  not the one in flight, so a live device that answers in milliseconds never trips it. The row's error line already
+  reads `audio.error()`, so the UI gets the text from the engine with no mirror: "The audio device isn't responding."
+  (`qll_av_the_audio_device_isnt_responding`). The bar still shows the target; the state stays `Playing`.
+- The clock is `EngineClock`; tests drive a manual one, so the bound is tested at 2499 ms and 2500 ms without sleeping.
+- The offline demo simulation gets the same behavior for screenshots: `QUILL_DEMO_AUDIO_STALL=1` makes every seek hang.
+- Test determinism: `pull_until_settled` pulls one frame at a time and only while the audio side owes an answer to a
+  seek it was handed (a test-only count of handed vs handled seeks). The position cannot drift past the target by
+  more than a few frames whatever the worker's scheduling, so the windows are now 0.2 s wide.
+
+Follow-ups, not done here:
+- A worker blocked in `Player::try_seek` on a stalled device is parked until the source is pulled or dropped, so each
+  track seeked during a stall leaks one thread. A single worker per engine would not help: it would sit behind the
+  blocked call and the next track's seeks would never be delivered. Fixing it needs a seek with a deadline or a way to
+  drop the source from rodio's side; bounded by user actions meanwhile.
+- A refused seek still restarts the track (file open and decoder setup) on the UI thread in `settle`. The old code did
+  the same; moving the open to a worker needs the new `Player` handed back through the board.

@@ -113,7 +113,8 @@ impl QuillApp {
             apply_ready_audio(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         // The demo has no audio device: the engine's explicit simulation plays
-        // the track (`QUILL_DEMO_AUDIO_FAIL=1` shows a failed start instead).
+        // the track (`QUILL_DEMO_AUDIO_FAIL=1` shows a failed start instead,
+        // `QUILL_DEMO_AUDIO_STALL=1` makes every seek hang).
         let track = demo_media_allowlist().join("demo-voice.ogg");
         self.begin_track_playback(
             PlaybackKind::Audio,
