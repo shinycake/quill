@@ -1,6 +1,8 @@
 //! Call-engine shared types: callbacks, media descriptions, errors.
 use super::*;
+use crate::calls::stream_audio::StreamAudio;
 use crate::locks::LockExt;
+use arc_swap::ArcSwap;
 use ntgcalls_sys::ntg_rtc_server;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -223,6 +225,10 @@ pub(crate) struct CallbackShared {
     /// Every decoded picture (group-call tracks, streams, 1:1 calls), as
     /// I420 planes.
     pub(crate) live_frame_hook: Mutex<Option<LiveFrameCallback>>,
+    /// Stream chats whose sound Quill plays: their playback frames go
+    /// here. Read lock-free on every audio frame; written only by the
+    /// engine on the driver thread.
+    pub(crate) stream_audio: ArcSwap<HashMap<i64, Arc<StreamAudio>>>,
 }
 
 impl CallbackShared {
@@ -235,6 +241,17 @@ impl CallbackShared {
             .lock_or_recover()
             .retain(|(chat, _), _| *chat != chat_id);
         self.stream_chats.lock_or_recover().remove(&chat_id);
+        self.route_stream_audio(chat_id, None);
+    }
+
+    /// Send chat `chat_id`'s playback frames to `audio`, or nowhere.
+    pub(crate) fn route_stream_audio(&self, chat_id: i64, audio: Option<Arc<StreamAudio>>) {
+        let mut routes = HashMap::clone(&self.stream_audio.load());
+        match audio {
+            Some(audio) => routes.insert(chat_id, audio),
+            None => routes.remove(&chat_id),
+        };
+        self.stream_audio.store(Arc::new(routes));
     }
 
     /// Empty routing with no hooks installed.
@@ -252,6 +269,7 @@ impl CallbackShared {
             stream_chats: Mutex::new(HashSet::new()),
             engine_event_hook: Mutex::new(None),
             live_frame_hook: Mutex::new(None),
+            stream_audio: ArcSwap::from_pointee(HashMap::new()),
         }
     }
 }
@@ -326,8 +344,12 @@ pub(crate) struct GroupCallMedia {
     pub(crate) stream_quality: Option<StreamQuality>,
     /// The output device for the call's sound; `None` is the default.
     pub(crate) speaker: Option<String>,
-    /// You muted the call's sound for yourself: no output writer.
+    /// You muted the call's sound for yourself: no output writer (gain 0
+    /// when Quill plays the stream).
     pub(crate) playback_muted: bool,
+    /// A stream that ntgcalls plays on the device after all: the
+    /// self-healing fallback ran, or Quill's output did not open.
+    pub(crate) device_playback: bool,
 }
 
 pub(crate) struct NativeRtcServers {
