@@ -41,6 +41,9 @@ typedef struct Ctx {
   AVFrame *sw_frame;
   int stand_in_pictures_left;
   int stand_in_reopen_fails;
+  /* A test stand-in for a hardware decoder: keeps QvInfo.hw set even where
+   * no GPU decodes, so the fallback paths test the same on every machine. */
+  int stand_in;
   /* File start time (seconds): pts are reported relative to it. */
   double start;
   int max_w;
@@ -304,6 +307,7 @@ void *qv_open(const char *path, const QvOptions *options, char *err,
     c->info.hw = c->vdec->hw_device_ctx != NULL;
     if (options->hw == QV_HW_FAIL_THIRD_PICTURE ||
         options->hw == QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN) {
+      c->stand_in = 1;
       c->stand_in_pictures_left = 3;
       c->stand_in_reopen_fails =
           options->hw == QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN;
@@ -711,6 +715,7 @@ static int fall_back_to_software(Ctx *c) {
   avcodec_free_context(&c->vdec);
   c->vdec = dec;
   c->hw_fmt = AV_PIX_FMT_NONE;
+  c->stand_in = 0;
   c->stand_in_pictures_left = 0;
   c->info.hw = 0;
   double after_picture = c->vskip > c->vnext ? c->vskip : c->vnext;
@@ -727,7 +732,7 @@ static int picture_in_memory(Ctx *c, const AVFrame **pic) {
   if (c->stand_in_pictures_left > 0 && --c->stand_in_pictures_left == 0)
     return AVERROR_EXTERNAL;
   if (!c->frame->hw_frames_ctx) {
-    if (c->stand_in_pictures_left == 0)
+    if (!c->stand_in)
       c->info.hw = 0;
     return 0;
   }
