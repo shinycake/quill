@@ -3,14 +3,16 @@
 //! tile and the lines [`quill::state::SharedMediaMeta`] describes.
 #![deny(clippy::indexing_slicing)]
 
-use super::accent;
 use super::app::QuillApp;
+use super::{accent, danger, success, warning};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::state::{SharedMediaItem, SharedMediaLines, SharedMediaMeta};
+use quill::local_time::now_unix;
+use quill::state::{LinkLine, SharedMediaItem, SharedMediaLines, SharedMediaMeta};
 use quill::telegram::envelope::MessageSender;
+use quill::text::LinkTarget;
 
 /// Side of the leading tile (tdesktop `fileThumbSize` is 70px at full
 /// scale; the panel is narrower).
@@ -23,8 +25,7 @@ impl QuillApp {
         item: &SharedMediaItem,
     ) -> Option<SharedMediaLines> {
         let session = self.session();
-        item.meta.lines(item.date, |sender| {
-            let name = session.and_then(|session| session.sender_name_and_accent(sender).0);
+        let named = |name: Option<String>, sender: Option<MessageSender>| {
             name.filter(|name| !name.is_empty()).unwrap_or_else(|| {
                 match sender {
                     Some(MessageSender::Chat { .. }) => tr(keys::Q_REST_A_CHANNEL),
@@ -32,7 +33,19 @@ impl QuillApp {
                 }
                 .to_string()
             })
-        })
+        };
+        item.meta.lines(
+            item.date,
+            now_unix(),
+            |sender| {
+                let name = session.and_then(|session| session.sender_name_and_accent(sender).0);
+                named(name, sender)
+            },
+            |origin| {
+                let name = session.and_then(|session| session.origin_name_and_accent(origin).0);
+                named(name, None)
+            },
+        )
     }
 
     /// Tile and text of a meta row.
@@ -54,7 +67,12 @@ impl QuillApp {
         let tile = match &item.meta {
             SharedMediaMeta::File { .. } => tile
                 .rounded_md()
-                .bg(accent())
+                .bg(match lines.tone {
+                    1 => success(),
+                    2 => danger(),
+                    3 => warning(),
+                    _ => accent(),
+                })
                 .text_color(gpui_kit::white())
                 .child(lines.badge.clone()),
             SharedMediaMeta::Link { .. } => tile
@@ -102,13 +120,13 @@ impl QuillApp {
                                 .child(lines.description.clone()),
                         )
                     })
-                    .children(lines.links.iter().map(|link| {
-                        div()
-                            .text_xs()
-                            .text_color(accent())
-                            .truncate()
-                            .child(link.clone())
-                    }))
+                    .children(
+                        lines
+                            .links
+                            .iter()
+                            .enumerate()
+                            .map(|(ix, link)| self.shared_media_link_line(item, ix, link, cx)),
+                    )
                     .when(!lines.status.is_empty(), |this| {
                         this.child(
                             div()
@@ -128,5 +146,47 @@ impl QuillApp {
                         )
                     }),
             )
+    }
+
+    /// One listed address: its own click, through the same safety check as
+    /// a link in a chat (tdesktop gives every line its own handler).
+    fn shared_media_link_line(
+        &self,
+        item: &SharedMediaItem,
+        ix: usize,
+        link: &LinkLine,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let line = div()
+            .text_xs()
+            .text_color(accent())
+            .truncate()
+            .child(link.display.clone());
+        let (Some(url), Some(chat_id)) = (
+            link.url.clone(),
+            self.session()
+                .and_then(|session| session.media.shared_media.chat_id),
+        ) else {
+            return line;
+        };
+        let message_id = item.message_id;
+        let shown = link.display.clone();
+        let label = (!url.ends_with(shown.as_str())).then_some(shown);
+        line.id(("shared-media-link", message_id.0 as u64 * 8 + ix as u64))
+            .debug_selector(move || format!("shared-media-link-{ix}"))
+            .role(gpui_kit::Role::Link)
+            .aria_label(link.display.clone())
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.queue_link(
+                    LinkTarget::Url {
+                        url: url.clone(),
+                        label: label.clone(),
+                    },
+                    (chat_id.0, message_id.0 as u64),
+                    cx,
+                );
+            }))
     }
 }

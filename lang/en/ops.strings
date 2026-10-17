@@ -1081,3 +1081,16 @@
 "lng_date_and_duration" = "{date}, {duration}";
 "qll_ops_gif" = "GIF";
 "qll_ops_unknown_track" = "Unknown Track";
+"lng_month_day" = "{month} {day}";
+"lng_month1_small" = "Jan";
+"lng_month2_small" = "Feb";
+"lng_month3_small" = "Mar";
+"lng_month4_small" = "Apr";
+"lng_month5_small" = "May";
+"lng_month6_small" = "Jun";
+"lng_month7_small" = "Jul";
+"lng_month8_small" = "Aug";
+"lng_month9_small" = "Sep";
+"lng_month10_small" = "Oct";
+"lng_month11_small" = "Nov";
+"lng_month12_small" = "Dec";

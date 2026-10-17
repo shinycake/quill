@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaAction, SharedMediaTab, calendar_media, month_sections};
+use quill::text::LinkTarget;
 
 impl QuillApp {
     /// The `Ready` body of a tab: items under their month headers.
@@ -28,6 +29,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let sections = month_sections(&state.items);
+        let state_chat = session.media.shared_media.chat_id;
         let mut list = div()
             .id(("shared-media-items", tab.index() as u64))
             .flex_1()
@@ -55,6 +57,7 @@ impl QuillApp {
             let message_id = item.message_id;
             let action = item.action;
             let link_url = item.meta.link_url().map(str::to_owned);
+            let chat_id = state_chat;
             let is_message = action == SharedMediaAction::Message;
             let item_ix = if is_message {
                 message_id.0 as u64
@@ -98,12 +101,19 @@ impl QuillApp {
                                 .child(item.label.clone()),
                         ),
                 })
-                .on_click(
-                    cx.listener(move |this, _, _, cx| match link_url.as_deref() {
-                        Some(url) => this.open_message_url(url, cx),
-                        None => this.activate_shared_media_item(action, message_id, cx),
-                    }),
-                );
+                .on_click(cx.listener(
+                    move |this, _, _, cx| match (link_url.as_ref(), chat_id) {
+                        (Some(url), Some(chat_id)) => this.queue_link(
+                            LinkTarget::Url {
+                                url: url.clone(),
+                                label: None,
+                            },
+                            (chat_id.0, message_id.0 as u64),
+                            cx,
+                        ),
+                        _ => this.activate_shared_media_item(action, message_id, cx),
+                    },
+                ));
             // Telegram Desktop's "Go To Message" on a shared media item.
             list = list.child(if is_message {
                 row.context_menu({

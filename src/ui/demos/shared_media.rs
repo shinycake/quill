@@ -55,6 +55,32 @@ fn text(text: &str, entities: Value) -> Value {
     json!({ "@type": "formattedText", "text": text, "entities": entities })
 }
 
+/// A text message with one URL entity and a page preview.
+pub(crate) fn link_message(
+    id: i64,
+    age_days: i64,
+    body: &str,
+    url: &str,
+    title: &str,
+    description: &str,
+) -> Value {
+    let offset = body.find(url).map_or(0, |at| {
+        body.get(..at).map_or(0, |head| head.encode_utf16().count())
+    });
+    message(
+        id,
+        age_days,
+        false,
+        json!({ "@type": "messageText",
+            "text": text(body, json!([{ "@type": "textEntity", "offset": offset,
+                "length": url.encode_utf16().count(),
+                "type": { "@type": "textEntityTypeUrl" } }])),
+            "link_preview": { "@type": "linkPreview", "url": url, "display_url": url,
+                "site_name": "", "title": title, "description": text(description, json!([])),
+                "type": { "@type": "linkPreviewTypeArticle" } } }),
+    )
+}
+
 fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
     let thumb = demo_thumb_png_path();
     let document = |id: i64, age: i64, name: &str, size: i64| {
@@ -90,21 +116,7 @@ fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
         )
     };
     let link = |id: i64, age: i64, body: &str, url: &str, title: &str, description: &str| {
-        let offset = body.find(url).map_or(0, |at| {
-            body.get(..at).map_or(0, |head| head.encode_utf16().count())
-        });
-        message(
-            id,
-            age,
-            false,
-            json!({ "@type": "messageText",
-                "text": text(body, json!([{ "@type": "textEntity", "offset": offset,
-                    "length": url.encode_utf16().count(),
-                    "type": { "@type": "textEntityTypeUrl" } }])),
-                "link_preview": { "@type": "linkPreview", "url": url, "display_url": url,
-                    "site_name": "", "title": title, "description": text(description, json!([])),
-                    "type": { "@type": "linkPreviewTypeArticle" } } }),
-        )
+        link_message(id, age, body, url, title, description)
     };
     let photo = |id: i64, age: i64, caption: &str| {
         message(
@@ -200,13 +212,13 @@ fn fill_tab(
     sink: &std::sync::Arc<dyn DiagnosticSink>,
     seq: &AtomicU64,
     tab: SharedMediaTab,
+    messages: Vec<Value>,
 ) {
     let generation = session.media.shared_media.begin_fetch(tab);
     let extra = session.request(
         RequestPurpose::GetSharedMedia { tab, generation },
         Some(ChatId(CHAT)),
     );
-    let messages = tab_messages(tab);
     let answer = json!({ "@type": "foundChatMessages", "@extra": extra.0,
         "total_count": messages.len(), "next_from_message_id": 0, "messages": messages });
     if let Some(owned) = copy_and_parse(&answer.to_string(), seq, sink) {
@@ -235,7 +247,27 @@ impl QuillApp {
             }
             session.open_chat(ChatId(CHAT));
             session.media.shared_media.open_for_tab(ChatId(CHAT), tab);
-            fill_tab(session, &sink, &seq, tab);
+            fill_tab(session, &sink, &seq, tab, tab_messages(tab));
+            self.demo_ui
+                .seq
+                .store(seq.load(Ordering::SeqCst), Ordering::SeqCst);
+        }
+        cx.notify();
+    }
+
+    /// Open `tab` of the gallery filled with `messages` (UI tests).
+    #[cfg(test)]
+    pub(crate) fn demo_fill_shared_media(
+        &mut self,
+        tab: SharedMediaTab,
+        messages: Vec<Value>,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        let sink: std::sync::Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+        if let Some(session) = self.demo_session.as_mut() {
+            let seq = AtomicU64::new(session.last_seq);
+            session.media.shared_media.select_tab(tab);
+            fill_tab(session, &sink, &seq, tab, messages);
             self.demo_ui
                 .seq
                 .store(seq.load(Ordering::SeqCst), Ordering::SeqCst);
