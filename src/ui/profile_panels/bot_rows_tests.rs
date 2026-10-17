@@ -16,10 +16,7 @@ fn frames(vcx: &mut VisualTestContext) {
     }
 }
 
-fn open_demo(
-    cx: &mut TestAppContext,
-    kind: &'static str,
-) -> (Entity<QuillApp>, VisualTestContext) {
+fn open_demo(cx: &mut TestAppContext, kind: &'static str) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
@@ -38,7 +35,11 @@ fn open_demo(
 
 /// The row's top edge in window points, `None` when it is not drawn.
 fn top(vcx: &mut VisualTestContext, id: &'static str) -> Option<f32> {
-    vcx.update(|window, _| window.try_find(id).map(|row| f32::from(row.bounds().origin.y)))
+    vcx.update(|window, _| {
+        window
+            .try_find(id)
+            .map(|row| f32::from(row.bounds().origin.y))
+    })
 }
 
 #[gpui_kit::test]

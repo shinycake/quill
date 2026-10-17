@@ -16,7 +16,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session, SimilarBotsFetch};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{BotInfo, CallbackQueryAnswer, ChatKind};
+use quill::telegram::envelope::{BotInfo, CallbackQueryAnswer};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;

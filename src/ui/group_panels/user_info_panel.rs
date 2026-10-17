@@ -2,6 +2,7 @@
 
 use super::slow_mode::SlowModeSlider;
 use super::*;
+use gpui_kit::TestSupportExt;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -266,7 +267,8 @@ impl QuillApp {
                         },
                         cx,
                     );
-                })),
+                }))
+                .test_support(),
             );
             if user.as_ref().is_some_and(|u| u.is_contact) {
                 danger = danger.child(

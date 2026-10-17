@@ -8,7 +8,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::pressable::action_row;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
-use gpui_kit::*;
+use gpui_kit::{TestSupportExt, *};
 use quill::bot_profile::{PrivacyTarget, find_command, privacy_target};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
@@ -64,11 +64,13 @@ impl QuillApp {
         ] {
             if let Some(command) = find_command(commands, command) {
                 let command = command.to_string();
-                column = column.child(action_row(id, Some(icon), label, false, cx).on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.send_profile_bot_command(user_id, &command, window, cx);
-                    }),
-                ));
+                column = column.child(
+                    action_row(id, Some(icon), label, false, cx)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.send_profile_bot_command(user_id, &command, window, cx);
+                        }))
+                        .test_support(),
+                );
             }
         }
         column = column.child(
@@ -81,7 +83,8 @@ impl QuillApp {
             )
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_bot_privacy_policy(user_id, window, cx);
-            })),
+            }))
+            .test_support(),
         );
         Some(column.into_any_element())
     }
@@ -110,6 +113,7 @@ impl QuillApp {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_message_report(chat_id, Vec::new(), cx);
             }))
+            .test_support()
             .into_any_element()
         })
     }
@@ -137,6 +141,7 @@ impl QuillApp {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.open_message_report(chat_id, Vec::new(), cx);
             }))
+            .test_support()
             .into_any_element()
         })
     }
@@ -160,6 +165,7 @@ impl QuillApp {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.join_channel(chat_id, cx);
             }))
+            .test_support()
             .into_any_element()
         })
     }
