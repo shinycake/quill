@@ -331,6 +331,7 @@ impl QuillApp {
         // back at its busy cadence.
         let budget_start = std::time::Instant::now();
         let mut budget_hit = false;
+        live.driver.begin_batch();
         while let Some(owned) = live.bridge.next_timeout(Duration::from_millis(0)) {
             if super::frame_clock::trace_notify() {
                 let payload = format!("{:?}", owned.envelope.payload);
@@ -354,6 +355,9 @@ impl QuillApp {
                 budget_hit = true;
                 break;
             }
+        }
+        if live.driver.end_batch().is_err() {
+            send_failed = true;
         }
         // The receive thread ended on its own (panic or closed channel):
         // nothing more will arrive, so surface it like an unexpected

@@ -60,10 +60,10 @@ impl QuillApp {
             .session()
             .map(|session| session.stickers.gifs.clone())
             .unwrap_or_default();
+        let no_files = std::collections::HashMap::new();
         let files = self
             .session()
-            .map(|session| session.media.files.clone())
-            .unwrap_or_default();
+            .map_or(&no_files, |session| &session.media.files);
         let roots = self.media_display_roots();
         let (cx_muted, cx_muted_fg) = (cx.theme().muted, cx.theme().muted_foreground);
         let mut grid = div().id("gif-grid").flex().flex_wrap().gap_2();

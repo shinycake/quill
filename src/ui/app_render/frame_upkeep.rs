@@ -45,11 +45,11 @@ impl QuillApp {
         // the form arrives — prefill the saved order info once, on the
         // first frame after the form answer lands. (This can't live in
         // `poll_live`: prefill needs a `&mut Window` for the inputs.)
-        let payment_form = self.session().and_then(|s| s.payments.form.clone());
-        if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form)
-            && !dialog.prefilled
-        {
-            dialog.prefill_from_form(&form, window, cx);
+        if self.payments.dialog.as_ref().is_some_and(|d| !d.prefilled) {
+            let payment_form = self.session().and_then(|s| s.payments.form.clone());
+            if let (Some(dialog), Some(form)) = (self.payments.dialog.as_mut(), payment_form) {
+                dialog.prefill_from_form(&form, window, cx);
+            }
         }
         // Slice msg-richtext-ai-tools: an AI answer for the open chat's
         // composer replaces the draft (this needs `&mut Window` for the

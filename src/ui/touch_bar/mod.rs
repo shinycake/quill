@@ -159,7 +159,7 @@ impl QuillApp {
                 pinned: false,
             })
         });
-        let archive = !session.ordered_archived_chats().is_empty();
+        let archive = session.has_archived_chats();
         model::pinned_panel(archive, saved, pinned)
     }
 

@@ -440,6 +440,7 @@ impl QuillApp {
             live.driver.session.app_active = app_active;
             let started = Instant::now();
             let mut ingested = false;
+            live.driver.begin_batch();
             while let Some(owned) = live.bridge.next_timeout(Duration::ZERO) {
                 let _ = live.driver.ingest(owned);
                 ingested = true;
@@ -447,6 +448,7 @@ impl QuillApp {
                     break;
                 }
             }
+            let _ = live.driver.end_batch();
             ingested |= live.driver.request_tick(now);
             // One proxy list for the app (`quill::proxy_sync`; tdesktop keeps
             // proxies app-wide): follow the account on screen, whose

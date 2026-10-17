@@ -24,15 +24,19 @@ impl QuillApp {
     /// countdown ticks.
     pub(super) fn ensure_live_location_tick(&mut self, cx: &mut Context<Self>) {
         let now = quill::local_time::now_unix();
-        let Some((chat_id, _)) = self.session().and_then(|session| {
-            Some((
-                session.open_chat?,
-                session.open_chat_live_location_refresh(now)?,
-            ))
-        }) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
             return;
         };
+        // A running tick keeps itself alive: no need to scan the history
+        // again every frame.
         if self.history.live_location_tick_chat == Some(chat_id) {
+            return;
+        }
+        if self
+            .session()
+            .and_then(|session| session.open_chat_live_location_refresh(now))
+            .is_none()
+        {
             return;
         }
         self.history.live_location_tick_chat = Some(chat_id);

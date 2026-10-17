@@ -5,7 +5,10 @@
 //! under the platform cache directory. Every failure returns `None`, so the
 //! notification still shows with the app icon.
 
+use super::QuillApp;
+use gpui_kit::{AppContext, Context};
 use image::{ImageFormat, RgbaImage, imageops};
+use quill::ids::AccountKey;
 use quill::notify::avatar::{ICON_SIZE, apply_circle_mask, existing_icon, icon_cache_path};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -35,10 +38,8 @@ fn render_circular(source: &Path) -> Option<RgbaImage> {
     Some(icon)
 }
 
-/// Path of the circular icon for the chat photo at `source`, rendering and
-/// caching it on first use. `None` when the photo is missing, unreadable or
-/// the cache cannot be written.
-pub(in crate::ui) fn circular_icon_for(source: &Path) -> Option<PathBuf> {
+/// Where the icon for `source` is cached: `(cache directory, file)`.
+fn cache_target(source: &Path) -> Option<(PathBuf, PathBuf)> {
     let meta = std::fs::metadata(source).ok()?;
     let mtime = meta
         .modified()
@@ -47,6 +48,53 @@ pub(in crate::ui) fn circular_icon_for(source: &Path) -> Option<PathBuf> {
         .map_or(0, |d| d.as_secs());
     let dir = cache_dir()?;
     let target = icon_cache_path(&dir, source, meta.len(), mtime);
+    Some((dir, target))
+}
+
+/// The icon already rendered for `source`; a stat, no decoding.
+fn cached_icon_for(source: &Path) -> Option<PathBuf> {
+    let (_, target) = cache_target(source)?;
+    existing_icon(Some(target))
+}
+
+impl QuillApp {
+    /// Show a notification with the circular avatar made from `photo`. A
+    /// cached icon shows at once; otherwise the photo decodes, scales and
+    /// encodes on a background thread and the notification follows with
+    /// the result (without an icon when that fails). `account` `None` is
+    /// the account on screen.
+    pub(in crate::ui) fn show_notification_with_photo(
+        &mut self,
+        account: Option<AccountKey>,
+        notification: quill::notify::OsNotification,
+        photo: Option<PathBuf>,
+        locked: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(photo) = photo else {
+            self.show_notification_as(account.as_ref(), notification, None, locked, cx);
+            return;
+        };
+        if let Some(icon) = cached_icon_for(&photo) {
+            self.show_notification_as(account.as_ref(), notification, Some(icon), locked, cx);
+            return;
+        }
+        let job = cx.background_spawn(async move { circular_icon_for(&photo) });
+        Self::spawn_main(cx, async move |this, cx| {
+            let icon = job.await;
+            let _ = this.update(cx, |app, cx| {
+                app.show_notification_as(account.as_ref(), notification, icon, locked, cx);
+            });
+        })
+        .detach();
+    }
+}
+
+/// Path of the circular icon for the chat photo at `source`, rendering and
+/// caching it on first use. `None` when the photo is missing, unreadable or
+/// the cache cannot be written.
+pub(in crate::ui) fn circular_icon_for(source: &Path) -> Option<PathBuf> {
+    let (dir, target) = cache_target(source)?;
     if let Some(hit) = existing_icon(Some(target.clone())) {
         return Some(hit);
     }
