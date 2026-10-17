@@ -157,6 +157,7 @@ pub mod request_share;
 pub mod rich;
 pub mod row_fx;
 pub mod schedule;
+pub mod scratch;
 pub mod search_filters;
 pub mod search_tabs;
 pub mod selection_drag;

@@ -282,7 +282,7 @@ fn slot_of(account: &AccountKey, chat: ChatId) -> SendSlot {
 
 /// A real picture file in a scratch directory (picked paths must exist).
 fn picture(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("quill-composer-sends-{}", std::process::id()));
+    let dir = quill::scratch::process_dir("quill-composer-sends");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
     image::RgbaImage::from_pixel(8, 4, image::Rgba([1, 2, 3, 255]))

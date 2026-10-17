@@ -11,7 +11,7 @@ use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::emoji_sets_style::catalog::{EmojiSetId, load_current, set_dir};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
-    let root = std::env::temp_dir().join(format!("quill-emoji-style-ui-{}", std::process::id()));
+    let root = quill::scratch::process_dir("quill-emoji-style-ui");
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
     write_fixture_pack();

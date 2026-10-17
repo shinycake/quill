@@ -26,21 +26,9 @@ pub(crate) fn test_credentials() -> TelegramCredentials {
 }
 
 pub(crate) fn prepared_tmp(store: &MemorySecretStore) -> (std::path::PathBuf, PreparedConnect) {
-    // A process-wide counter keeps parallel tests apart: the clock alone
-    // has microsecond resolution on macOS, so two threads could share a dir
-    // and one test's cleanup would delete the other's settings files.
-    static NEXT_DIR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "quill-connect-{}-{}-{}",
-        std::process::id(),
-        NEXT_DIR.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    // A unique directory per call keeps parallel tests apart; it is removed
+    // when the test process exits.
+    let dir = crate::scratch::unique_dir("quill-connect");
     let prepared =
         prepare_connect(&dir, AccountKey::primary(), store, &test_credentials()).expect("prepare");
     (dir, prepared)

@@ -13,7 +13,7 @@ use quill::notify::custom::NotifyPlatform;
 use quill::notify::{NotificationAction, OsNotification};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
-    let root = std::env::temp_dir().join(format!("quill-notify-windows-{}", std::process::id()));
+    let root = quill::scratch::process_dir("quill-notify-windows");
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
     cx.update(gpui_kit::init);

@@ -255,7 +255,7 @@ mod tests {
     const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20" viewBox="0 0 10 20"><rect x="0" y="0" width="5" height="20"/></svg>"#;
 
     fn scratch(name: &str, data: &[u8]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-wallpaper-{}", std::process::id()));
+        let dir = quill::scratch::process_dir("quill-wallpaper");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
         std::fs::write(&path, data).unwrap();
