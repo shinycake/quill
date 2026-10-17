@@ -75,8 +75,7 @@ pub fn process_dir(prefix: &str) -> PathBuf {
     dir
 }
 
-/// Subfolders of the work root (and of the shared temp dir, where older
-/// versions put them) that the startup sweep empties of stale entries.
+/// Subfolders of the work root that the startup sweep empties of stale entries.
 #[cfg(not(any(test, feature = "test-support")))]
 const WORK_NAMES: [&str; 6] = [
     "quill-send-photos",
@@ -146,7 +145,7 @@ fn user_tag() -> String {
 }
 
 /// `<work root>/<name>`, a working directory the app itself creates (edited
-/// photos, sticker clips). The startup sweep ([`sweep_work_dirs_in_background`])
+/// photos, sticker clips). The startup sweep ([`sweep_work_dirs_once`])
 /// removes what it holds after [`WORK_MAX_AGE`]. Test builds return
 /// `<temp>/<name>-<pid>` instead and remove it at exit, so a test can never
 /// delete the directory of a running app.
@@ -162,24 +161,33 @@ pub fn temp_work_dir(name: &str) -> PathBuf {
     }
 }
 
-/// Remove stale working files on a background thread: entries of the
-/// [`WORK_NAMES`] folders (in the private root, and in the shared temp dir
-/// where older versions put them) not touched for [`WORK_MAX_AGE`]. Nothing
-/// in use is that old, and recent files are never touched. A no-op in test
-/// builds.
-pub fn sweep_work_dirs_in_background() {
+/// Remove stale working files once per process, on a background thread:
+/// entries of the [`WORK_NAMES`] folders in the private work root not touched
+/// for [`WORK_MAX_AGE`]. Called only from real app startup, never from a
+/// connection restart or a demo run, so a file a tray or editor holds open
+/// in a long session is not swept from under it. Later calls do nothing. A
+/// no-op in test builds.
+pub fn sweep_work_dirs_once() {
     #[cfg(not(any(test, feature = "test-support")))]
     {
-        let _ = crate::thread_guard::spawn_guarded("quill-work-sweep", || {
-            let now = SystemTime::now();
-            let private = work_root();
-            sweep_stale(&private, &WORK_NAMES, WORK_MAX_AGE, now);
-            let shared = std::env::temp_dir();
-            if shared != private {
-                sweep_stale(&shared, &WORK_NAMES, WORK_MAX_AGE, now);
-            }
+        static SWEPT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        run_once(&SWEPT, || {
+            let _ = crate::thread_guard::spawn_guarded("quill-work-sweep", || {
+                sweep_stale(&work_root(), &WORK_NAMES, WORK_MAX_AGE, SystemTime::now());
+            });
         });
     }
+}
+
+/// Run `job` the first time `guard` is seen; returns whether it ran.
+#[cfg(any(test, not(feature = "test-support")))]
+fn run_once(guard: &std::sync::OnceLock<()>, job: impl FnOnce()) -> bool {
+    let mut ran = false;
+    guard.get_or_init(|| {
+        ran = true;
+        job();
+    });
+    ran
 }
 
 /// Remove entries of `root/<name>` (for each name) whose newest change is
@@ -244,7 +252,7 @@ fn newest_change(path: &Path, depth: u32) -> Option<SystemTime> {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_private_root, process_dir, sweep_stale, unique_dir};
+    use super::{create_private_root, process_dir, run_once, sweep_stale, unique_dir};
     use std::time::{Duration, SystemTime};
 
     const DAY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -299,6 +307,15 @@ mod tests {
             busy_old.exists() && busy_new.exists(),
             "a folder with a recent file inside is in use"
         );
+    }
+
+    #[test]
+    fn the_sweep_guard_runs_the_job_once() {
+        let guard = std::sync::OnceLock::new();
+        let mut count = 0;
+        assert!(run_once(&guard, || count += 1));
+        assert!(!run_once(&guard, || count += 1));
+        assert_eq!(count, 1);
     }
 
     #[test]

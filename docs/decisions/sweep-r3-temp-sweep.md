@@ -21,12 +21,22 @@ another user.
   (looking up to four levels inside a folder entry) is older than 24 h. Only
   age decides, so nothing a send or edit made in the last day is touched.
   A symlinked root or folder is skipped; symlinks inside are unlinked, not
-  followed. It runs on a `spawn_guarded` thread from `sweep_media_caches` (the
-  startup sweep) and also covers the old names in the shared temp dir.
+  followed. `sweep_work_dirs_once` runs it on a `spawn_guarded` thread, guarded
+  by a `OnceLock`, called from `ui_main` at real app startup only (after the
+  screenshot-demo early return). `restart_live_connection`, demo runs and
+  `sweep_media_caches` do not start it, so a mid-session sweep cannot remove
+  a file a tray or editor still holds.
+- Only the private work root is swept. The old shared-temp names are left
+  alone: a pass over a world-writable `/tmp` has a check-then-read race and no
+  owner check, and with `TMPDIR=$HOME` it would have reached `~/quill-*`.
+  Leftovers from older versions stay in the temp dir for the OS to clear.
 - `is_editor_temp` (sticker set box) accepts files in either location.
 
-Limit: a message that waits offline for more than a day to send an edited copy
-loses that copy at the next start.
+Limits: a message that waits offline for more than a day to send an edited copy
+loses that copy at the next start. Because the sweep runs once at startup, a
+file kept in a tray across a session longer than 24 h is only at risk at the
+next start, never during the run; if the app stays open for days and the file
+is older than 24 h when it restarts, it goes then.
 
 `ui/profile_photo_sources` now uses `temp_work_dir` too (it waited on #998, now merged).
 
@@ -45,11 +55,15 @@ manual `fetch_sub`s. The cap and the five-minute wait limit already existed.
 - If the settings writer thread cannot start, the bytes stay queued (reads see
   them, the next submit retries) and `flush` at quit writes them; the UI
   thread no longer fsyncs.
-- `child_reap` waits after the kill when its thread cannot start.
+- `child_reap`, when its thread cannot start, kills the child and polls
+  `try_wait` for about 50 ms, then gives up; it never blocks the caller.
+- The settings `flush` keeps its 5 s bound, including when it writes queued
+  bytes itself.
+- The mini-app reader logs an over-long line once per helper, not per line.
 
 ## Verified
 
 Unit tests: sweep by age, in-use folder kept, wholly stale folder removed,
 symlinked root and folder not followed, private root 0700 and symlink replaced,
-slot cap and release after a panic, queued write flushed. Not run on Windows or
+the once-only guard, slot cap and release after a panic, queued write flushed. Not run on Windows or
 real Linux with a second user.

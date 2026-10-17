@@ -106,6 +106,10 @@ impl DeferredWriter {
         let deadline = Instant::now() + timeout;
         let mut state = self.shared.lock();
         while state.writer_running || !state.pending.is_empty() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return;
+            }
             if !state.writer_running {
                 // Queued with no writer (its thread never started): write
                 // here, the one place that is allowed to wait for the disk.
@@ -114,10 +118,6 @@ impl DeferredWriter {
                 self.drain();
                 state = self.shared.lock();
                 continue;
-            }
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return;
             }
             state = match self.shared.idle.wait_timeout(state, left) {
                 Ok((guard, _)) => guard,
