@@ -283,6 +283,7 @@ pub fn spawn_capture(
 ) -> std::io::Result<std::process::Child> {
     let mut command = Command::new(program);
     command.args(args);
+    answer_sigint(&mut command);
     command
         .stdin(if cfg!(windows) {
             std::process::Stdio::piped()
@@ -294,6 +295,25 @@ pub fn spawn_capture(
         .no_console();
     command.spawn()
 }
+
+/// Make the child answer SIGINT whatever Quill's own disposition is: an
+/// ignored signal stays ignored across exec, and a stop that ffmpeg never
+/// sees only ends in the kill fallback with a dropped file.
+#[cfg(unix)]
+fn answer_sigint(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: `signal` is async-signal-safe and touches no Rust state, so
+    // it may run between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGINT, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn answer_sigint(_: &mut Command) {}
 
 /// Why nothing was recorded.
 pub fn no_audio_message(camera: bool) -> String {
@@ -424,10 +444,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn graceful_stop_interrupts_the_child_without_a_kill_binary() {
-        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
-        let started = std::time::Instant::now();
+        use std::os::unix::process::ExitStatusExt;
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        // Another test in this binary leaves SIGINT ignored, which a child
+        // inherits: the same situation `answer_sigint` guards the app from.
+        answer_sigint(&mut command);
+        let mut child = command.spawn().unwrap();
         stop_capture(&mut child, true);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // SIGINT ended it, not the SIGKILL the 8 s deadline falls back to.
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGINT), "{status:?}");
     }
 
     #[cfg(unix)]
