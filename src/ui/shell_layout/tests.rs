@@ -279,3 +279,28 @@ fn a_toast_centres_over_the_conversation_pane() {
     assert_eq!(list_only.chat_insets(0.), (0., 0.));
 >>>>>>> ee38d3fd (feat(toast): queue notes, pause on hover, centre over the conversation)
 }
+
+#[test]
+fn a_toast_centres_in_forum_and_fill_layouts() {
+    let beside = shell_layout(ShellInput {
+        forum: ForumColumn::Beside,
+        rail: 60.,
+        ..input(1400.)
+    });
+    assert!(matches!(beside.forum, ForumPane::Column { .. }));
+    let (left, right) = beside.chat_insets(60.);
+    assert_eq!(left, beside.list.unwrap_or(0.) + 60. + FORUM_COLUMN_WIDTH);
+    assert_eq!(right, 0.);
+    let replacing = shell_layout(ShellInput {
+        forum: ForumColumn::Replacing,
+        ..input(1400.)
+    });
+    assert_eq!(replacing.list, None);
+    assert_eq!(replacing.chat_insets(0.), (FORUM_COLUMN_WIDTH, 0.));
+    let fill = shell_layout(ShellInput {
+        panels: Some(INFO_PANEL_WIDTH),
+        ..input(900.)
+    });
+    assert_eq!(fill.panels, PanelPane::Fill);
+    assert_eq!(fill.chat_insets(0.), (0., 0.));
+}

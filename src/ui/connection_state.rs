@@ -69,6 +69,13 @@ impl ConnectionUi {
         self.toasts = ToastQueue::default();
     }
 
+    /// Drops queued toasts without touching the current note: the footer
+    /// line shows that note while there is no session.
+    pub(super) fn drop_toasts(&mut self) {
+        self.toasts = ToastQueue::default();
+        self.toast_wake = None;
+    }
+
     /// Advances the toast timers to `now`, and drops the current note once
     /// its toast is over so the same message set again shows again.
     pub(super) fn advance_toasts(&mut self, now: Instant) {

@@ -21,8 +21,12 @@ impl QuillApp {
         shell_layout(self.shell_input())
     }
 
-    /// Left and right space outside the conversation pane this frame.
+    /// Left and right space outside the conversation pane this frame. The
+    /// sign-in, passcode and onboarding screens have no columns, so none.
     pub(in crate::ui) fn chat_insets(&self) -> (Pixels, Pixels) {
+        if self.pane_mode() != PaneMode::Ready {
+            return (px(0.), px(0.));
+        }
         let (left, right) = self.shell_layout().chat_insets(self.folder_rail_width());
         (px(left), px(right))
     }

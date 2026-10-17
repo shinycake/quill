@@ -11,8 +11,8 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 /// Notes waiting behind the visible one. Past this, the oldest waiting
-/// confirmation is dropped; failures are kept.
-const MAX_WAITING: usize = 4;
+/// confirmation is dropped; when only failures wait, the oldest of them goes.
+const MAX_WAITING: usize = 8;
 
 /// The toast on screen and its remaining time.
 #[derive(Clone, Debug)]
@@ -39,6 +39,9 @@ impl Showing {
 pub(crate) struct ToastQueue {
     showing: Option<Showing>,
     waiting: VecDeque<StatusNote>,
+    /// The pointer is over the toast slot: the next toast starts paused too,
+    /// since the pointer has not left.
+    hovered: bool,
 }
 
 impl ToastQueue {
@@ -79,7 +82,8 @@ impl ToastQueue {
                 .iter()
                 .position(|queued| queued.kind() != NoteKind::Error)
             else {
-                break;
+                self.waiting.pop_front();
+                continue;
             };
             self.waiting.remove(at);
         }
@@ -99,8 +103,9 @@ impl ToastQueue {
     /// A click: the visible toast goes, the next one comes.
     pub(crate) fn dismiss(&mut self, now: Instant) {
         self.showing = None;
-        if let Some(next) = self.waiting.pop_front() {
-            self.show(next, now);
+        match self.waiting.pop_front() {
+            Some(next) => self.show(next, now),
+            None => self.hovered = false,
         }
     }
 
@@ -110,6 +115,7 @@ impl ToastQueue {
         let Some(showing) = self.showing.as_mut() else {
             return;
         };
+        self.hovered = hovered;
         match (hovered, showing.running_since) {
             (true, Some(_)) => {
                 showing.remaining = showing.left(now);
@@ -129,7 +135,11 @@ impl ToastQueue {
     pub(crate) fn deadline(&self, now: Instant) -> Option<Instant> {
         let showing = self.showing.as_ref()?;
         showing.running_since?;
-        now.checked_add(showing.left(now))
+        let left = showing.left(now);
+        if left.is_zero() {
+            return None;
+        }
+        now.checked_add(left)
     }
 
     /// Whether this note is on screen or still waiting.
@@ -146,7 +156,7 @@ impl ToastQueue {
     fn show(&mut self, note: StatusNote, now: Instant) {
         self.showing = Some(Showing {
             remaining: note.toast_duration(),
-            running_since: Some(now),
+            running_since: (!self.hovered).then_some(now),
             note,
         });
     }
@@ -241,8 +251,48 @@ mod tests {
             queue.push(StatusNote::info(format!("info {n}")), t0);
         }
         queue.push(StatusNote::error("second"), t0);
-        assert_eq!(queue.waiting(), 4);
+        assert_eq!(queue.waiting(), 8);
         queue.dismiss(t0);
         assert_eq!(text(&queue), Some("second"));
+    }
+
+    #[test]
+    fn a_flood_of_failures_stays_capped() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        for n in 0..30 {
+            queue.push(StatusNote::error(format!("error {n}")), t0);
+        }
+        assert_eq!(queue.waiting(), 8);
+        queue.dismiss(t0);
+        assert_eq!(text(&queue), Some("error 22"));
+    }
+
+    #[test]
+    fn dismissing_while_hovered_keeps_the_next_toast_paused() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.push(StatusNote::error("one"), t0);
+        queue.push(StatusNote::info("two"), t0);
+        queue.set_hovered(true, secs(t0, 1));
+        queue.dismiss(secs(t0, 1));
+        assert_eq!(text(&queue), Some("two"));
+        assert_eq!(queue.deadline(secs(t0, 2)), None);
+        queue.tick(secs(t0, 60));
+        assert_eq!(text(&queue), Some("two"));
+        queue.set_hovered(false, secs(t0, 60));
+        assert!(queue.deadline(secs(t0, 60)).is_some());
+        queue.dismiss(secs(t0, 61));
+        assert_eq!(text(&queue), None);
+        queue.push(StatusNote::info("three"), secs(t0, 62));
+        assert!(queue.deadline(secs(t0, 62)).is_some());
+    }
+
+    #[test]
+    fn an_empty_queue_has_no_deadline_after_the_time_is_up() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.push(StatusNote::info("Copied"), t0);
+        assert_eq!(queue.deadline(secs(t0, 60)), None);
     }
 }

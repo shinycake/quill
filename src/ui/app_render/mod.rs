@@ -664,6 +664,7 @@ impl Render for QuillApp {
             .when(
                 self.live.is_none()
                     && !self.connection.status_note().is_empty()
+                    && !self.demo_pins_toast()
                     && std::env::var_os("QUILL_DEMO_HIDE_STATUS").is_none(),
                 |this| {
                     this.child(
@@ -690,7 +691,11 @@ impl Render for QuillApp {
             // ("Saved to Downloads", "Frame copied"), clear of its controls.
             .when_some(status_toast, |this, note| {
                 let (left, right) = self.chat_insets();
-                let bottom = px(if viewer_open { 132. } else { 96. });
+                let bottom = if viewer_open {
+                    px(132.)
+                } else {
+                    self.toast_bottom()
+                };
                 this.child(self.status_toast_layer(&note, left, right, bottom, cx))
             })
             .children(self.custom_emoji_card(cx))

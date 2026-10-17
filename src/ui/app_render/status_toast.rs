@@ -10,13 +10,15 @@ use crate::ui::status_note::{NoteKind, StatusNote};
 const TOAST_MAX_WIDTH: f32 = 440.;
 /// Longest toast text, in lines (tdesktop's multiline toast wraps too).
 const TOAST_MAX_LINES: usize = 3;
+/// Clear space between the toast and the composer's top border.
+const TOAST_GAP: f32 = 16.;
 
 impl QuillApp {
     /// The toast on screen this frame, if any. Advances the queue's timers
     /// and schedules the re-render for the next deadline; a paused (hovered)
     /// toast has none, so it stays until the pointer leaves or it is
-    /// clicked away. Notes toast with or without a live session, so
-    /// sign-in failures show too.
+    /// clicked away. Without a live session the footer line carries the
+    /// note instead, so nothing toasts.
     pub(super) fn status_toast_visible(&mut self, cx: &mut Context<Self>) -> Option<StatusNote> {
         self.drain_suggested_post_notes(cx);
         // `QUILL_TRACE_STATUS=1`: print every status note (toasted or not)
@@ -28,6 +30,13 @@ impl QuillApp {
             {
                 eprintln!("status: {}", self.connection.status_traced);
             }
+        }
+        // Before a session exists the footer status line shows the note and
+        // keeps showing it (a blocker stays until it is resolved), so it is
+        // not toasted a second time.
+        if self.live.is_none() && !self.demo_pins_toast() {
+            self.connection.drop_toasts();
+            return None;
         }
         let now = std::time::Instant::now();
         if !self.demo_pins_toast() {
@@ -52,6 +61,19 @@ impl QuillApp {
             }
         }
         self.connection.toasts.visible().cloned()
+    }
+
+    /// How far the toast sits above the window's bottom edge: clear of the
+    /// composer by [`TOAST_GAP`], measured from the composer's laid-out
+    /// height (a taller composer, with a reply or attachments, lifts it). A toast only shows with a session, when the footer
+    /// line is absent (demos that pin the toast hide it).
+    pub(super) fn toast_bottom(&self) -> Pixels {
+        let composer = if self.session().is_some_and(|s| s.open_chat.is_some()) {
+            self.slices.composer_height()
+        } else {
+            px(0.)
+        };
+        composer + px(TOAST_GAP)
     }
 
     /// The toast, centred over the conversation pane (`left` and `right`
@@ -126,14 +148,14 @@ impl QuillApp {
     /// `QUILL_DEMO_SHOW_TOAST=1` the demo's toasts stay up (their timers do
     /// not run), for the captures that prove how a toast looks.
     #[cfg(feature = "demo-capture")]
-    fn demo_pins_toast(&self) -> bool {
+    pub(super) fn demo_pins_toast(&self) -> bool {
         self.live.is_none()
             && self.demo_session.is_some()
             && std::env::var_os("QUILL_DEMO_SHOW_TOAST").is_some()
     }
 
     #[cfg(not(feature = "demo-capture"))]
-    fn demo_pins_toast(&self) -> bool {
+    pub(super) fn demo_pins_toast(&self) -> bool {
         false
     }
 }
