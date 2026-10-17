@@ -417,7 +417,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 
 - [x] Fullscreen photo/video viewer overlay with prev/next navigation (arrow keys) and "N of M" counter (src/media_viewer.rs:74-124) <!-- parity:media-viewer -->
 - [x] Zoom viewer image via `=`/`-` keys, Cmd/Ctrl+wheel and pinch at the cursor, drag-pan when zoomed, `0` resets to fit (src/media_viewer/transform.rs) <!-- parity:media-viewer-zoom -->
-- [ ] Media viewer: a plain wheel or trackpad scroll goes to the next or previous item, one item per notch or flick; Cmd/Ctrl+wheel and pinch zoom (tdesktop `handleWheelEvent`; horizontal swipe paging is still open) <!-- parity:media-viewer-wheel-nav -->
+- [x] Media viewer: a plain wheel or trackpad scroll goes to the next or previous item, one item per notch or flick; Cmd/Ctrl+wheel and pinch zoom (tdesktop `handleWheelEvent`; horizontal swipe paging is still open) <!-- parity:media-viewer-wheel-nav -->
 - [x] Rotate photo in the viewer — Rotate button cycles 0/90/180/270, per-item, cached (media_viewer.rs `rotate_rgba_quarter_turns`) <!-- parity:media-viewer-rotate -->
 - [x] Picture-in-picture for video playback — tdesktop's PiP window on the shared player on macOS, Windows and Linux: snapping, aspect-locked resize, chrome fade, seek and volume lines, handoff to and from the viewer (`src/ui/video_player/controls/pip/`, `src/media_viewer/pip/`, docs/decisions/video-pip.md) <!-- parity:media-video-pip -->
 - [x] Viewer auto-downloads the current item when not local and resumes a parked play once `downloadFile` lands (ui/mod.rs:4926, 5179) <!-- parity:media-viewer-autodownload -->
