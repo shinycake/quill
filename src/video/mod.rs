@@ -467,7 +467,13 @@ pub(crate) fn extract_frames(
             &mut command,
             crate::child_timeout::transcode_limit(f64::from(max_frames) / fps.max(0.01)),
         )
-        .map_err(|err| format!("video playback needs ffmpeg ({err})"))?,
+        .map_err(|err| {
+            if crate::child_timeout::is_timeout(&err) {
+                crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string()
+            } else {
+                format!("video playback needs ffmpeg ({err})")
+            }
+        })?,
     };
     if !status.success() {
         return Err("ffmpeg could not read the video".into());

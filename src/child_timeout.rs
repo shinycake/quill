@@ -8,10 +8,11 @@
 //! [`io::ErrorKind::TimedOut`].
 #![deny(clippy::indexing_slicing)]
 
+use crate::locks::lock_or_recover;
 use crate::media_tools::NoConsole;
 use std::io::{self, Read};
 use std::process::{Command, ExitStatus, Output, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 /// How often a running child is checked for exit.
@@ -74,10 +75,11 @@ pub fn output_within(cmd: &mut Command, limit: Duration) -> io::Result<Output> {
             return Err(err);
         }
     };
+    let ok = status.success();
     Ok(Output {
         status,
-        stdout: collect(stdout)?,
-        stderr: collect(stderr)?,
+        stdout: collect(stdout, ok)?,
+        stderr: collect(stderr, ok)?,
     })
 }
 
@@ -129,36 +131,58 @@ pub fn is_timeout(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::TimedOut
 }
 
-/// Read `pipe` to its end on a thread of its own, so a child that fills its
-/// pipe never stalls waiting for us to read. A thread that cannot start is an
-/// error: the output would be silently empty.
-fn read_all_in_thread<R: Read + Send + 'static>(
-    mut pipe: R,
-) -> io::Result<mpsc::Receiver<Vec<u8>>> {
-    let (tx, rx) = mpsc::channel();
+/// A pipe being drained on a thread of its own.
+struct Reader {
+    /// Signalled when the pipe reached its end.
+    done: mpsc::Receiver<()>,
+    /// Everything read so far.
+    bytes: Arc<Mutex<Vec<u8>>>,
+}
+
+/// Read `pipe` on a thread of its own, so a child that fills its pipe never
+/// stalls waiting for us to read. A thread that cannot start is an error: the
+/// output would be silently empty.
+fn read_all_in_thread<R: Read + Send + 'static>(mut pipe: R) -> io::Result<Reader> {
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&bytes);
+    let (tx, done) = mpsc::channel();
     std::thread::Builder::new()
         .name("quill-child-output".into())
         .spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = pipe.read_to_end(&mut bytes);
-            let _ = tx.send(bytes);
+            let mut chunk = [0u8; 8192];
+            loop {
+                match pipe.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Some(read) = chunk.get(..n) {
+                            lock_or_recover(&sink).extend_from_slice(read);
+                        }
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
+            }
+            let _ = tx.send(());
         })?;
-    Ok(rx)
+    Ok(Reader { done, bytes })
 }
 
-/// What a reader read. A reader that has not finished within
-/// [`READER_GRACE`] of the child's exit (a grandchild kept the pipe open) is
-/// an error rather than a silently cut output.
-fn collect(reader: Option<mpsc::Receiver<Vec<u8>>>) -> io::Result<Vec<u8>> {
-    match reader {
-        None => Ok(Vec::new()),
-        Some(rx) => rx.recv_timeout(READER_GRACE).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::TimedOut,
-                "the helper program's output did not end in time",
-            )
-        }),
+/// What a reader read. A reader still open [`READER_GRACE`] after the child
+/// exited means a grandchild kept the pipe (a daemon the helper started).
+/// When the child itself succeeded the bytes read so far are its answer; after
+/// a failed exit the cut output cannot be trusted and that is a timeout.
+fn collect(reader: Option<Reader>, child_succeeded: bool) -> io::Result<Vec<u8>> {
+    let Some(reader) = reader else {
+        return Ok(Vec::new());
+    };
+    let ended = reader.done.recv_timeout(READER_GRACE).is_ok();
+    if !ended && !child_succeeded {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the helper program's output did not end in time",
+        ));
     }
+    Ok(std::mem::take(&mut *lock_or_recover(&reader.bytes)))
 }
 
 #[cfg(test)]
@@ -222,10 +246,20 @@ mod tests {
     }
 
     #[test]
-    fn output_cut_off_by_a_pipe_holding_grandchild_is_an_error() {
+    fn a_successful_child_whose_grandchild_holds_the_pipe_still_returns_its_output() {
         // The background sleep inherits stdout and keeps it open after the
-        // shell exits.
-        let err = output_within(&mut sh("echo hi; sleep 5 &"), Duration::from_secs(5)).unwrap_err();
+        // shell exits 0, like a daemon a desktop helper autolaunched.
+        let started = Instant::now();
+        let out = output_within(&mut sh("echo hi; sleep 5 &"), Duration::from_secs(5)).unwrap();
+        assert!(out.status.success());
+        assert_eq!(out.stdout, b"hi\n");
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
+
+    #[test]
+    fn output_cut_off_after_a_failed_exit_is_a_timeout() {
+        let err = output_within(&mut sh("echo hi; sleep 5 & exit 3"), Duration::from_secs(5))
+            .unwrap_err();
         assert!(is_timeout(&err));
     }
 

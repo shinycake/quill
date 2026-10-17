@@ -483,7 +483,7 @@ fn run_program(
         Ok(output) if output.status.success() => Ok(()),
         Ok(_) => Err("ffmpeg could not process this video".into()),
         Err(err) if crate::child_timeout::is_timeout(&err) => {
-            Err("ffmpeg took too long to process this video".into())
+            Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string())
         }
         Err(_) => Err("ffmpeg isn't available".to_string()),
     }

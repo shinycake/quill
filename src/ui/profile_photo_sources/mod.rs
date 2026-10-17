@@ -72,7 +72,7 @@ fn run_ffmpeg(args: &[String], log: &Path) -> Result<(), String> {
     let limit = quill::child_timeout::transcode_limit(10.0);
     let status = quill::child_timeout::status_within(&mut command, limit).map_err(|e| {
         if quill::child_timeout::is_timeout(&e) {
-            "ffmpeg took too long to make the video".to_string()
+            quill::lang::tr(quill::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string()
         } else {
             e.to_string()
         }

@@ -66,6 +66,12 @@ listings (already `stdout_within`/`stderr_within`) are unchanged.
   another try. The error toast says "Only k of n messages were sent. The rest
   are still here…" (`qll_chat_partly_sent`). Before, nothing was cleared and a
   resend duplicated the first k.
+- The stored draft is cleared again when the send is acknowledged only when
+  it is what was sent (`SentCleanup::clears_draft_on_ack`): unsent parts of a
+  partial send, or text typed since, are never wiped by the ack, also for a
+  chat that is not open. The unsent text is cut from the original markup
+  from where the first unsent part starts, so the characters at the seams
+  (a space, a blank line) stay as typed.
 - After a successful send only what Send took is cleared: text typed since is
   kept, files added since stay in the tray (`plan_cleanup`). For a chat that is
   no longer open the stored draft and tray are cleared the same way.
@@ -81,9 +87,12 @@ them set. The reduce-motion probe at startup (`defaults`, `gsettings`) moved
 from `main.rs` to `ui/reduce_motion_probe.rs` and runs on the background
 executor after the first window is up. The link handler setting
 (`link_handler::state`, called while the settings page draws) returns the last
-answer at once on every platform (macOS LaunchServices, the Windows registry
-and `xdg-mime` can all stall, and none is proven cheap) and refreshes on a
-thread; the page redraws when the read lands. Until the first read lands the
+answer at once and refreshes on a thread on Linux and Windows (`xdg-mime` and
+the registry can stall); the page redraws when the read lands. macOS reads on
+the calling (UI) thread, cached for two seconds: `NSWorkspace` is AppKit and
+Apple documents no thread safety for `URLForApplicationToOpenURL`, so it is
+not called from a helper thread; a LaunchServices lookup is a local database
+read and the cache keeps it off the per-frame path. Until the first read lands the
 state is its own `Checking` value, drawn as "Checking the default app…" with
 the control disabled, not as an unavailable handler. `invalidate` bumps a
 generation counter, so the next `state()` re-reads even right after boot.
@@ -91,9 +100,15 @@ generation counter, so the next `state()` re-reads even right after boot.
 Other children go through the helper too: `scutil --proxy`, `gsettings get`
 for the proxy, `reg query` for the privacy consent, the notification helpers
 (`notify-send --wait` waits for a click on a thread of its own, limit five
-minutes), and the test-only ffmpeg runs. An output reader that cannot start,
-or that is still open `READER_GRACE` after the child exits (a grandchild kept
-the pipe), now makes `output_within` fail instead of returning a cut output.
+minutes), and the test-only ffmpeg runs. An output reader that cannot start
+makes `output_within` fail. A reader still open `READER_GRACE` after the
+child exits means a grandchild kept the pipe (a daemon `gdbus` or `xdg-mime`
+autolaunched): when the child exited successfully the bytes read so far are
+returned as its answer; after a failed exit it is a timeout error.
+Readers append to a shared buffer, so those bytes are available. The timeout
+texts that reached users (video playback frames, the video editor, the
+profile video) are now one translated message ("The video tool took too
+long to finish.") instead of developer English.
 `status_within` leaves stdout and stderr as the caller set them (a log file
 for the avatar encode) and says in its doc that they must not be piped.
 
@@ -119,5 +134,11 @@ for the avatar encode) and says in its doc that they must not be piped.
   and albums are sent to chat 7 while chat 8 is open without reading the (junk)
   files; the unprepared junk video fails as before.
 - Screenshot demo `ready-send-preparing` in light and dark: the tray with
-  "Preparing the files…". Not exercised: a real TDLib send, a stalled network
+  "Preparing the files…". `ready-status-toast-partly-sent` (light and dark):
+  the partial-send toast; the note comes from the same `partly_sent_note` the
+  send path uses, the driver refusal itself is covered by tests.
+  `ready-link-handler-row` (`QUILL_DEMO_LINK_HANDLER=checking` pins the first
+  read state, demo-capture only): the Settings row shows "Checking the
+  default app…" with the button disabled, and after the real macOS read the
+  unbundled-build message, in light and dark. Not exercised: a real TDLib send, a stalled network
   share, a hung `gdbus` on a real Linux desktop.

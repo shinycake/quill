@@ -106,6 +106,14 @@ impl SendOrigin {
     }
 }
 
+/// The error toast of a send that stopped after `sent` of `total` messages.
+pub(in crate::ui) fn partly_sent_note(sent: usize, total: usize) -> StatusNote {
+    StatusNote::error(tr_with(
+        keys::Q_CHAT_PARTLY_SENT,
+        &[("sent", &sent.to_string()), ("total", &total.to_string())],
+    ))
+}
+
 /// What a successful send clears from its slot.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct SentCleanup {
@@ -114,6 +122,15 @@ pub(super) struct SentCleanup {
     /// The tray holds nothing but what was sent: the slot starts over.
     /// Otherwise only the sent files leave it.
     pub(super) reset_slot: bool,
+}
+
+impl SentCleanup {
+    /// Whether the stored draft is cleared when the send is acknowledged:
+    /// only when it is what was sent. Unsent parts that were kept, or text
+    /// typed since, are not.
+    pub(super) fn clears_draft_on_ack(&self, left: &str) -> bool {
+        self.clear_text && left.is_empty()
+    }
 }
 
 /// `text_now` is the composer's markup (or the slot's stored draft when it
@@ -130,21 +147,51 @@ pub(super) fn plan_cleanup(
 }
 
 /// What is left in the composer text after the first `sent` snapshots went
-/// out: a split long text keeps its unsent parts; a media caption rides the
-/// first snapshot, so once that one is out nothing of it is left.
-pub(super) fn unsent_text(snaps: &[ComposerSnapshot], sent: usize) -> String {
+/// out: a split long text keeps its unsent parts, cut from the original
+/// `markup` so the characters at the seams stay (the splitter trims them); a
+/// media caption rides the first snapshot, so once that one is out nothing of
+/// it is left.
+pub(super) fn unsent_text(markup: &str, snaps: &[ComposerSnapshot], sent: usize) -> String {
     let rest = snaps.get(sent..).unwrap_or_default();
     if rest
         .iter()
-        .all(|snap| snap.attachment.is_none() && snap.album.is_empty())
+        .any(|snap| snap.attachment.is_some() || !snap.album.is_empty())
     {
-        rest.iter()
-            .map(|snap| snap.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        String::new()
+        return String::new();
     }
+    let Some(first) = rest.first() else {
+        return String::new();
+    };
+    let whole = markup.trim();
+    // The parts are consecutive pieces of the trimmed markup: find where the
+    // first unsent one starts after the sent ones.
+    let mut at = 0usize;
+    for snap in snaps.iter().take(sent) {
+        let found = whole
+            .get(at..)
+            .and_then(|tail| tail.find(snap.text.as_str()));
+        match found {
+            Some(found) => at += found + snap.text.len(),
+            None => return joined_parts(rest),
+        }
+    }
+    let start = whole
+        .get(at..)
+        .and_then(|tail| tail.find(first.text.as_str()))
+        .map(|found| at + found);
+    match start {
+        Some(start) => whole.get(start..).unwrap_or_default().to_string(),
+        None => joined_parts(rest),
+    }
+}
+
+/// The parts one per line: the fallback when the markup cannot be matched.
+fn joined_parts(parts: &[ComposerSnapshot]) -> String {
+    parts
+        .iter()
+        .map(|snap| snap.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Read the files of every snapshot that needs it with `prepare` (off the UI
@@ -272,7 +319,7 @@ impl QuillApp {
                 origin.markup.clone(),
                 sent_snaps,
             );
-            let left = unsent_text(&snaps, sent);
+            let left = unsent_text(&origin.markup, &snaps, sent);
             self.clear_after_send(&done, is_open, &left, window, cx);
         }
         match failure {
@@ -296,10 +343,7 @@ impl QuillApp {
                 );
             }
             Some(_) if sent > 0 => {
-                self.connection.set_note(StatusNote::error(tr_with(
-                    keys::Q_CHAT_PARTLY_SENT,
-                    &[("sent", &sent.to_string()), ("total", &total.to_string())],
-                )));
+                self.connection.set_note(partly_sent_note(sent, total));
             }
             Some(_) => {
                 self.connection
@@ -360,7 +404,9 @@ impl QuillApp {
             self.composer_ui.set_reply(None);
             self.clear_suggest_bar_after_send(chat_id);
         }
-        self.composer_ui.clear_draft_on_success = Some(chat_id);
+        if plan.clears_draft_on_ack(left) {
+            self.composer_ui.clear_draft_on_success = Some(chat_id);
+        }
         if plan.clear_text {
             // `left`: the unsent parts of a split text, else nothing.
             if is_open && left.is_empty() {
@@ -622,7 +668,11 @@ mod tests {
                 reset_slot: false
             }
         );
-        assert_eq!(unsent_text(&snaps, 2), "", "a caption is not sent twice");
+        assert_eq!(
+            unsent_text("caption", &snaps, 2),
+            "",
+            "a caption is not sent twice"
+        );
     }
 
     #[test]
@@ -631,9 +681,50 @@ mod tests {
             .iter()
             .map(|text| ComposerSnapshot::capture(ChatId(11), ViewGeneration(0), *text))
             .collect();
-        assert_eq!(unsent_text(&parts, 1), "two\nthree");
-        assert_eq!(unsent_text(&parts, 3), "");
-        assert_eq!(unsent_text(&parts, 0), "one\ntwo\nthree");
+        let markup = "one\ntwo\nthree";
+        assert_eq!(unsent_text(markup, &parts, 1), "two\nthree");
+        assert_eq!(unsent_text(markup, &parts, 3), "");
+        assert_eq!(unsent_text(markup, &parts, 0), "one\ntwo\nthree");
+    }
+
+    #[test]
+    fn unsent_text_keeps_the_seam_characters_of_the_original() {
+        let parts: Vec<ComposerSnapshot> = ["aaaa", "bbbb", "cccc"]
+            .iter()
+            .map(|text| ComposerSnapshot::capture(ChatId(11), ViewGeneration(0), *text))
+            .collect();
+        // A space seam stays a space; a mixed one stays mixed; the markup's
+        // own outer whitespace is not part of the text.
+        assert_eq!(unsent_text("aaaa bbbb cccc", &parts, 1), "bbbb cccc");
+        assert_eq!(
+            unsent_text(" aaaa bbbb\n\ncccc ", &parts, 1),
+            "bbbb\n\ncccc"
+        );
+        assert_eq!(unsent_text("aaaa bbbb cccc", &parts, 2), "cccc");
+        assert_eq!(unsent_text("aaaa bbbb cccc", &parts, 3), "");
+    }
+
+    #[test]
+    fn unsent_text_falls_back_to_the_parts_when_the_markup_does_not_match() {
+        let parts: Vec<ComposerSnapshot> = ["aaaa", "bbbb"]
+            .iter()
+            .map(|text| ComposerSnapshot::capture(ChatId(11), ViewGeneration(0), *text))
+            .collect();
+        assert_eq!(unsent_text("something else", &parts, 1), "bbbb");
+    }
+
+    #[test]
+    fn the_ack_clear_only_applies_when_the_draft_is_what_was_sent() {
+        let sent = origin(&[]);
+        let all = plan_cleanup(&sent, Some("caption"), &[]);
+        assert!(all.clears_draft_on_ack(""));
+        // A partial send kept its unsent text in the draft: the ack must not
+        // clear it (the chat may not even be open).
+        assert!(!all.clears_draft_on_ack("rest of the text"));
+        // Text typed since the send: not what was sent.
+        let typed = plan_cleanup(&sent, Some("caption and more"), &[]);
+        assert!(!typed.clears_draft_on_ack(""));
+        assert!(!plan_cleanup(&sent, None, &[]).clears_draft_on_ack(""));
     }
 
     #[test]

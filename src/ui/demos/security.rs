@@ -27,6 +27,10 @@ register_demos![
     .setup(QuillApp::demo_ready_sessions),
     // Appearance dialog with the Spelling / Check spelling row visible.
     DemoSpec::chat_list("ready-spellcheck-toggle").setup(QuillApp::demo_appearance),
+    // Appearance dialog for the "Open Telegram links with Quill" row.
+    // `QUILL_DEMO_LINK_HANDLER=checking` pins the first-read state;
+    // otherwise the real read runs. `QUILL_DEMO_THEME=dark` for dark.
+    DemoSpec::chat_list("ready-link-handler-row").setup(QuillApp::demo_link_handler_row),
     // Phase S2: storage-usage overlay (injected, no live Telegram) —
     // fixture `getStorageStatistics` stats with the "Secret media and
     // files" category, dialog open.
@@ -103,6 +107,21 @@ impl QuillApp {
         self.settings.storage_usage_open = true;
         self.connection
             .set_note(StatusNote::silent("screenshot demo — data & storage"));
+    }
+
+    fn demo_link_handler_row(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.appearance.theme = if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("dark") {
+            ThemeChoice::Dark
+        } else {
+            ThemeChoice::Light
+        };
+        let checking = std::env::var("QUILL_DEMO_LINK_HANDLER").as_deref() == Ok("checking");
+        quill::link_handler::demo_pin(
+            checking.then_some(quill::link_handler::LinkHandlerState::Checking),
+        );
+        self.settings.appearance_open = true;
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — default app row"));
     }
 
     fn demo_appearance(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {

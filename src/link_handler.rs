@@ -435,23 +435,55 @@ fn lookup(cache: Option<&Cached>, generation: u64) -> (Option<LinkHandlerState>,
     }
 }
 
+/// Whether the OS read must run on the thread that asks (the UI thread).
+/// macOS: `NSWorkspace` is AppKit, and Apple documents no thread-safety for
+/// `URLForApplicationToOpenURL`, so it is never called from a helper thread.
+const READ_ON_CALLER: bool = cfg!(target_os = "macos");
+
 /// The current handler, cached briefly so rendering never spawns a process
 /// or calls the OS per frame. Reflects external changes within a couple of
 /// seconds.
 ///
-/// This is called while the settings page draws, and asking the OS can
-/// stall: `xdg-mime` on a wedged desktop, LaunchServices on macOS, the
-/// registry on Windows. So no platform reads on the caller's thread: the
-/// last answer comes back at once and a stale one is read again on a thread
-/// of its own ([`refreshing`] says when the new answer is in). The first call
-/// has no answer yet and returns [`LinkHandlerState::Checking`].
+/// This is called while the settings page draws (on the UI thread), and
+/// asking the OS can stall: `xdg-mime` on a wedged desktop, the registry on
+/// Windows. So there the last answer comes back at once and a stale one is
+/// read again on a thread of its own ([`refreshing`] says when the new answer
+/// is in); the first call has no answer yet and returns
+/// [`LinkHandlerState::Checking`]. macOS reads on the calling thread, at most
+/// once per [`CACHE_TTL`] (see [`READ_ON_CALLER`]): a LaunchServices lookup
+/// is a local database read, and the cache keeps it off the per-frame path.
 pub fn state() -> LinkHandlerState {
+    if let Some(pinned) = lock_demo_pin().clone() {
+        return pinned;
+    }
     let generation = GENERATION.load(Ordering::Acquire);
     let (cached, stale) = lookup(CACHE.lock_or_recover().as_ref(), generation);
-    if stale {
-        start_refresh();
+    if !stale {
+        return cached.unwrap_or(LinkHandlerState::Checking);
     }
+    if READ_ON_CALLER {
+        let fresh = query_state();
+        *CACHE.lock_or_recover() = Some(Cached {
+            at: Instant::now(),
+            state: fresh.clone(),
+            generation,
+        });
+        return fresh;
+    }
+    start_refresh();
     cached.unwrap_or(LinkHandlerState::Checking)
+}
+
+/// Screenshot demos: show this state instead of reading the OS (`None` goes
+/// back to the real read).
+pub fn demo_pin(state: Option<LinkHandlerState>) {
+    *lock_demo_pin() = state;
+}
+
+static DEMO_PIN: Mutex<Option<LinkHandlerState>> = Mutex::new(None);
+
+fn lock_demo_pin() -> std::sync::MutexGuard<'static, Option<LinkHandlerState>> {
+    DEMO_PIN.lock_or_recover()
 }
 
 /// A background read of the handler is running.
@@ -468,6 +500,7 @@ impl Drop for RefreshDone {
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn start_refresh() {
     if REFRESHING.swap(true, Ordering::AcqRel) {
         return;
