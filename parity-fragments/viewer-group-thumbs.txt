@@ -1,2 +1,0 @@
-# media viewer: thumbnail strip for albums (tdesktop GroupThumbs)
-parity:media-viewer-group-thumbs
