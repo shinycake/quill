@@ -1,2 +1,0 @@
-# media viewer: horizontal trackpad swipe paging
-parity:media-viewer-swipe-nav
