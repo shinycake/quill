@@ -615,7 +615,12 @@ fn the_reply_bar_fetches_a_target_that_left_memory() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
-    assert!(driver.session.reply_target(ChatId(7), MessageId(5)).is_none());
+    assert!(
+        driver
+            .session
+            .reply_target(ChatId(7), MessageId(5))
+            .is_none()
+    );
 
     assert!(
         driver

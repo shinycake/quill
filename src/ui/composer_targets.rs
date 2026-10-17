@@ -67,9 +67,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            let _ = live
-                .driver
-                .fetch_composer_reply_target(chat_id, message_id);
+            let _ = live.driver.fetch_composer_reply_target(chat_id, message_id);
         }
     }
 

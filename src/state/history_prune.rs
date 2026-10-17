@@ -390,7 +390,9 @@ impl Session {
         if let Some(history) = self.histories.remove(&chat_id) {
             self.history_pruning.remember_dropped(chat_id, &history);
         }
-        self.history_pruning.closed_chats.retain(|id| *id != chat_id);
+        self.history_pruning
+            .closed_chats
+            .retain(|id| *id != chat_id);
     }
 
     /// A chat that was left or deleted: its histories go when no view
