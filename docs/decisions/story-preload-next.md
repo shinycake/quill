@@ -33,10 +33,23 @@ next story waited for the network.
 - Priorities 7, 6, 5 for the first, second and previous story
   (`STORY_PRELOAD_PRIORITIES`): above chat auto-downloads (4), below the
   current story (32), so the story on screen is never starved.
-- `download_file_prefix` (`downloadFile` with `limit`) on the driver. Its
-  one-shot auto download ends with the prefix, and `is_stalled_auto` then
-  keeps it from being requested again, which plays the role of `_preloaded`.
-  Opening that story later requests the whole file as before.
+- `ConnectDriver::sync_story_preloads` sends the plan as `downloadFile` with
+  `limit`, recorded with its own origin (`DownloadOrigin::Preload`). A
+  preload ends with its prefix, and `is_stalled_auto` then keeps it from
+  being requested again, which plays the role of `_preloaded`.
+- A preloaded story that becomes current asks for the whole file. A preload
+  marks the file in flight, so the usual dedupe would swallow the current
+  story's request and leave the clip stuck at the prefix.
+  `download_user_file` therefore re-sends `downloadFile` (limit 0, priority
+  32) whenever the file's last request was a preload, running or ended.
+  TDLib replaces the limit and priority of an active download with the new
+  request's.
+- Stale preloads are cancelled. tdesktop holds one `StoryPreload`, and its
+  destructor cancels the download when it is replaced or the viewer closes
+  (`data_stories.cpp:2571-2620`, `data_media_preload.cpp:54-56, 147-149`).
+  Each re-plan sends `cancelDownloadFile` (`only_if_pending` false) for the
+  running preloads the new plan dropped, except the current story's files.
+  Closing the viewer cancels all of them.
 - `StoryContentView::Video` keeps `preload_prefix_size`.
 
 Not matched: tdesktop preloads one story at a time. TDLib orders concurrent

@@ -812,6 +812,7 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.close_story(item.chat_id, item.story_id);
+            let _ = live.driver.sync_story_preloads(&[], &[]);
         }
         self.stories.viewer.close();
         // A live story playing on in Picture-in-Picture stays joined.
