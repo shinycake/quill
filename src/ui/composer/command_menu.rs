@@ -1,8 +1,25 @@
 //! The bot command menu above the composer.
 
 use super::*;
+use quill::composer::{commands_with_username, complete_command_at};
+use std::ops::Range;
 
 impl QuillApp {
+    /// The `/command` token before the caret: its byte range (from the `/`
+    /// to the caret) and the text typed after the `/`. tdesktop opens the
+    /// menu only for a command at the start of the field, and not over a
+    /// selection.
+    pub(in crate::ui) fn command_trigger(&self, cx: &App) -> Option<(Range<usize>, String)> {
+        let input = self.composer.read(cx);
+        let caret = input.selected_range();
+        if !caret.is_empty() {
+            return None;
+        }
+        let text = input.value().to_string();
+        let token = command_menu_trigger(&text, caret.start)?;
+        Some((token.range, token.query.to_string()))
+    }
+
     /// Phase 3.3: recompute the `/` command menu from the composer text.
     /// Called on every composer event (`Change` path) and after
     /// programmatic `set_value` writes, which suppress `Change`. Opens
@@ -14,7 +31,7 @@ impl QuillApp {
         // Bots slice: the `@bot` inline trigger owns the composer start —
         // the `/` menu never competes with the inline-results dropdown.
         let inline_active = quill::composer::inline_query_trigger(&text).is_some();
-        let triggered = command_menu_trigger(&text).is_some() && !inline_active;
+        let triggered = self.command_trigger(cx).is_some() && !inline_active;
         let open_chat = self.session().and_then(|session| session.open_chat);
         if triggered {
             self.load_quick_replies_for_menu();
@@ -81,24 +98,20 @@ impl QuillApp {
         if !self.composer_ui.command_menu_open {
             return None;
         }
-        let text = self.composer.read(cx).value().to_string();
-        let prefix = command_menu_trigger(&text)?;
+        let (_, prefix) = self.command_trigger(cx)?;
         let chat_id = self.session()?.open_chat?;
         let items = self.session()?.command_menu_items(chat_id);
         if items.is_empty() {
             return None;
         }
-        let filtered: Vec<CommandMenuItem> = filter_command_menu_items(&items, prefix)
+        let filtered: Vec<CommandMenuItem> = filter_command_menu_items(&items, &prefix)
             .into_iter()
             .cloned()
             .collect();
         if filtered.is_empty() {
             return None;
         }
-        Some((
-            prefix.to_string(),
-            quill::quick_replies::with_edit_row(filtered),
-        ))
+        Some((prefix, quill::quick_replies::with_edit_row(filtered)))
     }
 
     /// Phase 3.3: Enter with the menu open picks the highlighted row.
@@ -184,21 +197,20 @@ impl QuillApp {
         let Some(item) = items.get(index) else {
             return;
         };
-        let command = item.command.clone();
-        let current = self.composer_markup(cx);
-        let base = strip_command_menu_trigger(&current).unwrap_or(current.as_str());
-        // Trailing space (tdesktop behavior): without it, the `/`-token
-        // trigger still matches `/command`, the menu reopens on the next
-        // Enter and consumes it in a no-op loop — Enter could never send.
-        let next = format!(
-            "{} ",
-            quill::composer::insert_bot_command_text(base, &command).trim_end()
-        );
-        self.set_composer_markup(&next, window, cx);
-        self.composer.update(cx, |input, cx| {
-            let end = input.value().len();
-            input.set_selected_range(end..end, cx);
-        });
+        let Some((range, prefix)) = self.command_trigger(cx) else {
+            return;
+        };
+        let command = item.command_text(commands_with_username(&items, &prefix));
+        let text = self.composer.read(cx).value().to_string();
+        let Some((insert, caret)) = complete_command_at(&text, range.clone(), &command) else {
+            return;
+        };
+        // A range edit keeps the formatting around it. The trailing space
+        // (tdesktop `insertTag`) moves the caret off the command, so the
+        // menu does not reopen and swallow the next Enter.
+        self.replace_composer_text(range, &insert, window, cx);
+        self.composer
+            .update(cx, |input, cx| input.set_selected_range(caret..caret, cx));
         self.close_command_menu(cx);
     }
 
@@ -221,15 +233,21 @@ impl QuillApp {
             self.send_quick_reply_row(shortcut_id, window, cx);
             return;
         }
-        let command = format!("/{}", item.command.trim_start_matches('/'));
-        let current = self.composer_markup(cx);
-        let rest = strip_command_menu_trigger(&current)
-            .unwrap_or(current.as_str())
-            .to_string();
+        let Some((range, prefix)) = self.command_trigger(cx) else {
+            return;
+        };
+        let command = item.command_text(commands_with_username(&items, &prefix));
         self.close_command_menu(cx);
-        self.set_composer_markup(rest.trim_end(), window, cx);
+        // The text after the caret stays in the field (tdesktop keeps
+        // `getTextWithTagsPart(cursor)`).
+        self.replace_composer_text(range, "", window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         self.submit_composer(command, window, cx);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "group_commands_tests.rs"]
+mod group_commands_tests;

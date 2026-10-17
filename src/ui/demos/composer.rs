@@ -31,6 +31,14 @@ register_demos![
         window,
         cx
     )),
+    // The `/` menu in a group with two bots: userpics, `/command@bot` rows
+    // and the bot that wrote last first. `QUILL_DEMO_COMMAND_TEXT` sets the
+    // typed text (default `/`).
+    DemoSpec::chats(
+        "ready-group-commands",
+        "screenshot demo — the / menu in a group with bots (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_group_commands),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,6 +75,22 @@ impl QuillApp {
         });
     }
 
+    fn demo_group_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use std::sync::atomic::Ordering;
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_group_commands(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        }
+        let text = std::env::var("QUILL_DEMO_COMMAND_TEXT").unwrap_or_else(|_| "/".into());
+        self.composer.update(cx, |input, cx| {
+            input.set_value(&text, window, cx);
+            input.focus(window, cx);
+            let end = input.value().len();
+            input.set_selected_range(end..end, cx);
+        });
+        self.sync_command_menu(cx);
+    }
+
     fn demo_ready_send_media(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer.update(cx, |input, cx| {
             input.set_value("sending a photo too", window, cx);
@@ -100,5 +124,56 @@ impl QuillApp {
             input.set_value(draft, window, cx);
         });
         self.spellcheck_now(cx);
+    }
+}
+
+/// A basic group (id -2001) with a member and two bots whose commands come
+/// with the group's full info; the second bot wrote last.
+fn apply_group_commands(
+    session: &mut quill::state::Session,
+    sink: &std::sync::Arc<quill::diagnostics::MemorySink>,
+    seq: &std::sync::atomic::AtomicU64,
+) {
+    use quill::diagnostics::DiagnosticSink;
+    use quill::telegram::client::copy_and_parse;
+    let dyn_sink: std::sync::Arc<dyn DiagnosticSink> = sink.clone();
+    session.open_chat(ChatId(-2001));
+    let bot = |id: i64, name: &str, username: &str| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"{name}","usernames":{{"@type":"usernames","active_usernames":["{username}"],"disabled_usernames":[],"editable_username":"{username}"}},"type":{{"@type":"userTypeBot","is_inline":false}},"status":{{"@type":"userStatusOffline","was_online":1}}}}}}"#
+        )
+    };
+    let message = |id: i64, sender: i64, text: &str| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":-2001,"sender_id":{{"@type":"messageSenderUser","user_id":{sender}}},"is_outgoing":false,"date":1700000{id},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#
+        )
+    };
+    let command = |name: &str, description: &str, ephemeral: bool| {
+        format!(
+            r#"{{"@type":"botCommand","command":"{name}","description":"{description}","is_ephemeral":{ephemeral}}}"#
+        )
+    };
+    let jsons = [
+        r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":1}}}"#.to_string(),
+        bot(41, "Poll Bot", "pollbot"),
+        bot(42, "Weather", "weatherbot"),
+        r#"{"@type":"updateNewChat","chat":{"id":-2001,"title":"Weekend plans","type":{"@type":"chatTypeBasicGroup","basic_group_id":2001},"unread_count":0}}"#.to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":-2001,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"50","is_pinned":false}}"#.to_string(),
+        message(10, 31, "Where should we go on Saturday?"),
+        message(11, 41, "Poll created: hike, beach or museum"),
+        message(12, 42, "Saturday: sunny, 24 degrees"),
+        format!(
+            r#"{{"@type":"updateBasicGroupFullInfo","basic_group_id":2001,"basic_group_full_info":{{"description":"","members":[],"bot_commands":[{{"@type":"botCommands","bot_user_id":41,"commands":[{},{},{}]}},{{"@type":"botCommands","bot_user_id":42,"commands":[{},{}]}}]}}}}"#,
+            command("start", "Start the bot", false),
+            command("poll", "Create a poll", false),
+            command("results", "Show the results", true),
+            command("start", "Show the weather", false),
+            command("forecast", "Five day forecast", false),
+        ),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
     }
 }

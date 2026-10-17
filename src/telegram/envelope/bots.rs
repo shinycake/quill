@@ -54,6 +54,44 @@ pub struct BotInfo {
     pub affiliate_program: Option<crate::earn::ProgramInfo>,
 }
 
+/// `botCommands bot_user_id:int53 commands:vector<botCommand>` (schema line
+/// 830): one bot's commands inside a group's full info
+/// (`basicGroupFullInfo.bot_commands`, `supergroupFullInfo.bot_commands`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupBotCommands {
+    pub bot_user_id: i64,
+    pub commands: Vec<BotCommand>,
+}
+
+/// The `bot_commands` list of a group's full info. Entries without a bot id
+/// are dropped, and so are bots with no commands.
+pub(crate) fn parse_group_bot_commands(value: Option<&Value>) -> Vec<GroupBotCommands> {
+    value
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let bot_user_id = super::json_helpers::int53(entry.get("bot_user_id")).ok()?;
+                    let commands: Vec<BotCommand> = entry
+                        .get("commands")
+                        .and_then(Value::as_array)
+                        .map(|list| {
+                            list.iter()
+                                .filter_map(|c| parse_bot_command(Some(c)))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    (!commands.is_empty()).then_some(GroupBotCommands {
+                        bot_user_id,
+                        commands,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Slice B2: `botMenuButton text:string url:string = BotMenuButton;`
 /// (schema 1.8.67 line 834).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

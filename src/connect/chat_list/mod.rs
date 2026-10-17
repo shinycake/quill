@@ -99,6 +99,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_fetch_bot_info()?;
         self.maybe_fetch_paid_messages_info()?;
         self.maybe_fetch_bot_commands()?;
+        // A failed send here must not cancel the other extras.
+        let _ = self.maybe_fetch_group_bot_commands();
         self.maybe_fetch_reply_markup()?;
         self.maybe_view_open_messages()?;
         self.maybe_download_open_thumbs()?;

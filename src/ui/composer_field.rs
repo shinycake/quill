@@ -264,11 +264,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let text = self.composer.read(cx).value().to_string();
-        let Some(query) = quill::composer::mention_trigger(&text) else {
+        let Some((range, _)) = self.mention_trigger(cx) else {
             return;
         };
-        let range = text.len() - query.len() - 1..text.len();
         let content = if !username.is_empty() {
             InputContent::new(format!("@{username} "))
         } else if self.composer_ui.rich_editor_open {

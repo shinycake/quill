@@ -27,9 +27,10 @@ pub use attachments::{
     without_sound_track,
 };
 pub use commands::{
-    CommandMenuItem, command_menu_trigger, complete_mention, filter_command_menu_items,
+    CommandBot, CommandMenuItem, TriggerToken, command_menu_trigger, commands_with_username,
+    complete_command_at, complete_mention, filter_command_menu_items, group_command_menu_items,
     inline_query_trigger, insert_bot_command_text, insert_switch_inline_text, mention_trigger,
-    merge_command_menu_items, strip_command_menu_trigger,
+    merge_command_menu_items,
 };
 pub use deferred_caption::{DeferredCaption, has_editable_caption, set_caption};
 pub use draft_topic::{DraftKey, DraftTopic};

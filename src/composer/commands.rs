@@ -1,51 +1,166 @@
 //! Bot command menu, inline-query and @mention triggers.
 
 use super::*;
+use std::ops::Range;
 
-/// The `@name` being typed at the end of the composer: the text after an
-/// `@` that starts a word, made of letters, digits and `_` only. `Some("")`
-/// right after a bare `@`; `None` once a space or other character follows.
-pub fn mention_trigger(text: &str) -> Option<&str> {
-    let at = text.rfind('@')?;
-    let query = text.get(at + 1..).unwrap_or_default();
-    let starts_word = text
-        .get(..at)
-        .unwrap_or_default()
-        .chars()
-        .next_back()
-        .is_none_or(char::is_whitespace);
-    let name_chars = query.chars().all(|c| c.is_alphanumeric() || c == '_');
-    (starts_word && name_chars && query.chars().count() <= 32).then_some(query)
+/// A `@` or `/` token being typed: `range` runs from the trigger character
+/// to the caret, `query` is the text after the trigger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TriggerToken<'a> {
+    pub range: Range<usize>,
+    pub query: &'a str,
 }
 
-/// Replace the trailing `@query` with a mention of the chosen user: their
-/// `@username` when they have one, else a `tg://user?id=` link around the
-/// name (TDLib turns it into a mention-name entity). Ends with a space.
-pub fn complete_mention(text: &str, user_id: i64, username: &str, name: &str) -> String {
-    let Some(query) = mention_trigger(text) else {
-        return text.to_string();
-    };
-    let head = text.get(..text.len() - query.len() - 1).unwrap_or_default();
-    if username.is_empty() {
+/// Longest `@name` query tdesktop scans back over.
+const MENTION_QUERY_MAX: usize = 63;
+/// Longest command name and `@bot` suffix tdesktop matches.
+const COMMAND_NAME_MAX: usize = 64;
+const COMMAND_BOT_MAX: usize = 32;
+
+fn is_name_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// The `@name` being typed at `caret` (tdesktop
+/// `ParseMentionHashtagBotCommandQuery`): letters, digits and `_` back to
+/// an `@` that does not follow a name character. Only the text before the
+/// caret counts, so editing in the middle of a message works too.
+/// `Some("")` right after a bare `@`.
+pub fn mention_trigger(text: &str, caret: usize) -> Option<TriggerToken<'_>> {
+    if !text.is_char_boundary(caret) {
+        return None;
+    }
+    let head = text.get(..caret)?;
+    let mut count = 0;
+    for (at, c) in head.char_indices().rev() {
+        if c == '@' {
+            let starts_word = head
+                .get(..at)?
+                .chars()
+                .next_back()
+                .is_none_or(|before| !is_name_char(before));
+            let query = head.get(at + 1..).unwrap_or_default();
+            // tdesktop wants a letter or digit first: `@_` is not a mention.
+            let valid_start = query.chars().next().is_none_or(char::is_alphanumeric);
+            return (starts_word && valid_start).then_some(TriggerToken {
+                range: at..caret,
+                query,
+            });
+        }
+        count += 1;
+        if !is_name_char(c) || count > MENTION_QUERY_MAX {
+            return None;
+        }
+    }
+    None
+}
+
+/// Replace the `@query` before `caret` with a mention of the chosen user:
+/// their `@username` when they have one, else a `tg://user?id=` link around
+/// the name (TDLib turns it into a mention-name entity). Ends with a space.
+/// Returns the new text and the caret after the mention.
+pub fn complete_mention(
+    text: &str,
+    caret: usize,
+    user_id: i64,
+    username: &str,
+    name: &str,
+) -> Option<(String, usize)> {
+    let token = mention_trigger(text, caret)?;
+    let head = text.get(..token.range.start)?;
+    let tail = text.get(token.range.end..)?;
+    let mention = if username.is_empty() {
         let name = name.replace(['[', ']'], "");
-        format!("{head}[{name}](tg://user?id={user_id}) ")
+        format!("[{name}](tg://user?id={user_id}) ")
     } else {
-        format!("{head}@{username} ")
+        format!("@{username} ")
+    };
+    let caret = head.len() + mention.len();
+    Some((format!("{head}{mention}{tail}"), caret))
+}
+
+/// tdesktop `HistoryWidget::insertBotCommand`: the composer text after
+/// choosing a bot command from a panel. The command goes first, then a
+/// space, then what was typed. A command already leading the field is
+/// replaced instead of stacked. The panels are in a bot's own chat, which
+/// never adds `@bot`; a clicked command link in a group message adds it in
+/// `send_bot_command`.
+pub fn insert_bot_command_text(current: &str, command: &str) -> String {
+    let mut insertion = if command.starts_with('/') {
+        command.to_string()
+    } else {
+        format!("/{command}")
+    };
+    insertion.push(' ');
+    insertion.push_str(strip_leading_command(current));
+    insertion
+}
+
+/// `current` without a leading `/command` or `/command@bot` token and the
+/// one whitespace character after it. A token longer than tdesktop's limits
+/// (64 and 32 characters) is not a command.
+fn strip_leading_command(current: &str) -> &str {
+    let Some(rest) = current.strip_prefix('/') else {
+        return current;
+    };
+    let word_len = |s: &str| {
+        s.char_indices()
+            .find(|(_, c)| !c.is_ascii_alphanumeric() && *c != '_')
+            .map_or(s.len(), |(at, _)| at)
+    };
+    let name_len = word_len(rest);
+    if name_len > COMMAND_NAME_MAX {
+        return current;
+    }
+    let after_name = rest.get(name_len..).unwrap_or_default();
+    let after = match after_name.strip_prefix('@') {
+        Some(bot) => {
+            let bot_len = word_len(bot);
+            if bot_len > COMMAND_BOT_MAX {
+                return current;
+            }
+            bot.get(bot_len..).unwrap_or_default()
+        }
+        None => after_name,
+    };
+    let mut chars = after.chars();
+    match chars.next() {
+        None => "",
+        Some(c) if c.is_whitespace() => chars.as_str(),
+        Some(_) => current,
     }
 }
 
-/// Phase 3.1: composer text after tapping a bot command. Empty field → the
-/// bare `/command`; otherwise appended after a space (or directly when the
-/// field already ends in whitespace).
-pub fn insert_bot_command_text(current: &str, command: &str) -> String {
-    let insertion = format!("/{command}");
-    if current.trim().is_empty() {
-        insertion
-    } else if current.ends_with(char::is_whitespace) {
-        format!("{current}{insertion}")
+/// What replaces the `range` token (the `/` and what was typed after it)
+/// when a `/` menu row is chosen: `command` and a space. A whitespace
+/// character already after the token is reused instead. Also returns the
+/// caret, in the new text, after that space, so the menu does not reopen.
+pub fn complete_command_at(
+    text: &str,
+    range: Range<usize>,
+    command: &str,
+) -> Option<(String, usize)> {
+    let head = text.get(..range.start)?;
+    let tail = text.get(range.end..)?;
+    let existing = tail.chars().next().filter(|c| c.is_whitespace());
+    let insert = if existing.is_some() {
+        command.to_string()
     } else {
-        format!("{current} {insertion}")
-    }
+        format!("{command} ")
+    };
+    let caret = head.len() + command.len() + existing.map_or(1, char::len_utf8);
+    Some((insert, caret))
+}
+
+/// The bot behind a `/` menu row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandBot {
+    pub user_id: i64,
+    pub username: String,
+    pub name: String,
+    /// True when the row comes from a group: choosing it inserts
+    /// `/command@bot`, because several bots may share a command name.
+    pub in_group: bool,
 }
 
 /// Phase 3.3: one row in the composer `/` command menu.
@@ -65,34 +180,57 @@ pub struct CommandMenuItem {
     /// A quick reply shortcut (Telegram Business): choosing the row sends
     /// the shortcut's messages instead of inserting the command.
     pub quick_reply: Option<i32>,
+    /// The bot the command belongs to; `None` for quick replies and the
+    /// edit row.
+    pub bot: Option<CommandBot>,
 }
 
-/// Phase 3.3: `/` command-menu trigger. Returns the filter prefix typed
-/// after the `/` when the composer text ends with a `/`-led token at a
-/// word boundary — start of text or right after whitespace — e.g.
-/// `Some("")` for a bare `/`, `Some("st")` for `/st`. Returns `None` for
-/// mid-word slashes (`a/b`, `http://…`), so the menu never opens inside
-/// words or URLs. The trailing-token convention matches the input's lack
-/// of an exposed cursor offset (documented in DECISIONS).
-pub fn command_menu_trigger(text: &str) -> Option<&str> {
-    let token = text.split(char::is_whitespace).next_back()?;
-    let prefix = token.strip_prefix('/')?;
-    // `/` alone or `/` + command chars; a second `/` (`/a/b`, `//`) is not
-    // a command token.
-    if prefix.contains('/') {
+impl CommandMenuItem {
+    /// `/command`, with `@bot` appended when `with_username` and the bot's
+    /// username is known (tdesktop shows and sends the same string).
+    pub fn command_text(&self, with_username: bool) -> String {
+        let name = self.command.trim_start_matches('/');
+        match self.bot.as_ref().filter(|bot| !bot.username.is_empty()) {
+            Some(bot) if with_username => format!("/{name}@{}", bot.username),
+            _ => format!("/{name}"),
+        }
+    }
+}
+
+/// Whether the rows show `/command@bot` (tdesktop `commandsWithUsername`):
+/// the chat is a group with bots, or the typed filter already has an `@`.
+pub fn commands_with_username(items: &[CommandMenuItem], prefix: &str) -> bool {
+    prefix.find('@').is_some_and(|at| at > 0)
+        || items
+            .iter()
+            .any(|item| item.bot.as_ref().is_some_and(|bot| bot.in_group))
+}
+
+/// `/` command-menu trigger at `caret` (tdesktop
+/// `ParseMentionHashtagBotCommandQuery`): the text before the caret is a
+/// `/` that opens the field, then a command name of letters, digits and
+/// `_`, optionally `@` and a bot name. `query` is what follows the `/`.
+/// `None` for a `/` anywhere else (`a/b`, `http://…`, after other text),
+/// for a second `/`, and once whitespace follows the command.
+pub fn command_menu_trigger(text: &str, caret: usize) -> Option<TriggerToken<'_>> {
+    if !text.is_char_boundary(caret) {
         return None;
     }
-    Some(prefix)
-}
-
-/// Phase 3.3: composer text with the trailing `/`-token removed, for menu
-/// picks. The menu replaces the partial token the user typed, so `/st` +
-/// pick `start` → `/start`, not `/st /start`. Returns `None` when there is
-/// no trigger token (the caller should not pick).
-pub fn strip_command_menu_trigger(text: &str) -> Option<&str> {
-    let prefix = command_menu_trigger(text)?;
-    let token_len = prefix.len() + 1; // leading `/`
-    text.get(..text.len() - token_len)
+    let query = text.get(..caret)?.strip_prefix('/')?;
+    let (name, bot) = match query.split_once('@') {
+        Some((name, bot)) if !name.is_empty() => (name, Some(bot)),
+        Some(_) => return None,
+        None => (query, None),
+    };
+    let valid = name.chars().all(is_name_char)
+        && name.chars().count() <= COMMAND_NAME_MAX
+        && bot.is_none_or(|bot| {
+            bot.chars().all(is_name_char) && bot.chars().count() <= COMMAND_BOT_MAX
+        });
+    valid.then_some(TriggerToken {
+        range: 0..caret,
+        query,
+    })
 }
 
 /// Bots slice: `@botname query` inline-mode trigger. Returns
@@ -131,6 +269,7 @@ pub fn merge_command_menu_items(
             global: false,
             is_ephemeral: command.is_ephemeral,
             quick_reply: None,
+            bot: None,
         })
         .collect();
     for command in global {
@@ -143,22 +282,48 @@ pub fn merge_command_menu_items(
             global: true,
             is_ephemeral: command.is_ephemeral,
             quick_reply: None,
+            bot: None,
         });
     }
     items
 }
 
+/// The menu rows of every bot in a group, in the order given (tdesktop
+/// lists the bots that wrote last first, then the rest).
+pub fn group_command_menu_items(bots: &[(CommandBot, Vec<BotCommand>)]) -> Vec<CommandMenuItem> {
+    bots.iter()
+        .flat_map(|(bot, commands)| {
+            commands.iter().map(|command| CommandMenuItem {
+                command: command.command.clone(),
+                description: command.description.clone(),
+                global: false,
+                is_ephemeral: command.is_ephemeral,
+                quick_reply: None,
+                bot: Some(bot.clone()),
+            })
+        })
+        .collect()
+}
+
 /// Phase 3.3: filter menu rows by the typed prefix (case-insensitive; bot
 /// commands are lowercase `a-z0-9_` but users may type capitals). An empty
-/// prefix matches everything.
+/// prefix matches everything. When the rows carry `@bot` (see
+/// [`commands_with_username`]) the prefix is matched against
+/// `command@bot`, so `/start@my` finds one bot's `start` among several.
 pub fn filter_command_menu_items<'a>(
     items: &'a [CommandMenuItem],
     prefix: &str,
 ) -> Vec<&'a CommandMenuItem> {
     let prefix = prefix.to_lowercase();
+    let with_username = commands_with_username(items, &prefix);
     items
         .iter()
-        .filter(|item| item.command.to_lowercase().starts_with(&prefix))
+        .filter(|item| {
+            item.command_text(with_username)
+                .trim_start_matches('/')
+                .to_lowercase()
+                .starts_with(&prefix)
+        })
         .collect()
 }
 
@@ -178,222 +343,5 @@ pub fn insert_switch_inline_text(current: &str, query: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mention_trigger_needs_a_word_start_and_name_chars() {
-        assert_eq!(mention_trigger("hi @al"), Some("al"));
-        assert_eq!(mention_trigger("@"), Some(""));
-        assert_eq!(mention_trigger("mail@host"), None);
-        assert_eq!(mention_trigger("hi @al "), None);
-        assert_eq!(mention_trigger("hi @al-x"), None);
-        assert_eq!(mention_trigger("no at"), None);
-    }
-
-    #[test]
-    fn complete_mention_prefers_username_then_name_link() {
-        assert_eq!(
-            complete_mention("hi @al", 7, "alice", "Alice"),
-            "hi @alice "
-        );
-        assert_eq!(
-            complete_mention("hi @al", 7, "", "Al [x]"),
-            "hi [Al x](tg://user?id=7) "
-        );
-        assert_eq!(complete_mention("plain", 7, "alice", "Alice"), "plain");
-    }
-    #[test]
-    fn bot_command_insert_text() {
-        // Phase 3.1: tapping a command chip composes the new composer text.
-        assert_eq!(insert_bot_command_text("", "start"), "/start");
-        assert_eq!(insert_bot_command_text("   ", "start"), "/start");
-        assert_eq!(insert_bot_command_text("hello", "start"), "hello /start");
-        assert_eq!(insert_bot_command_text("hello ", "start"), "hello /start");
-        assert_eq!(insert_bot_command_text("/help", "start"), "/help /start");
-    }
-
-    #[test]
-    fn switch_inline_insert_text() {
-        // Phase 3.2: tapping a switchInline button inserts the query.
-        assert_eq!(insert_switch_inline_text("", "pic"), "pic");
-        assert_eq!(insert_switch_inline_text("   ", "pic"), "pic");
-        assert_eq!(insert_switch_inline_text("hello", "pic"), "hello pic");
-        assert_eq!(insert_switch_inline_text("hello ", "pic"), "hello pic");
-    }
-
-    // Phase 3.3: `/` command-menu trigger / merge / filter.
-    fn bot_command(command: &str, description: &str) -> BotCommand {
-        BotCommand {
-            command: command.into(),
-            description: description.into(),
-            is_ephemeral: false,
-        }
-    }
-
-    #[test]
-    fn command_menu_trigger_matches_trailing_slash_token() {
-        assert_eq!(command_menu_trigger("/"), Some(""));
-        assert_eq!(command_menu_trigger("/st"), Some("st"));
-        assert_eq!(command_menu_trigger("hello /st"), Some("st"));
-        assert_eq!(command_menu_trigger("hi\n/he"), Some("he"));
-        assert_eq!(command_menu_trigger("/ST"), Some("ST"));
-    }
-
-    #[test]
-    fn command_menu_trigger_rejects_mid_word_slashes() {
-        assert_eq!(command_menu_trigger(""), None);
-        assert_eq!(command_menu_trigger("hello"), None);
-        assert_eq!(command_menu_trigger("a/b"), None);
-        assert_eq!(command_menu_trigger("hello a/b"), None);
-        assert_eq!(command_menu_trigger("http://x"), None);
-        assert_eq!(command_menu_trigger("/a/b"), None);
-        assert_eq!(command_menu_trigger("//"), None);
-        // Trailing whitespace ends the token: the menu closes once the
-        // user commits the token with a space.
-        assert_eq!(command_menu_trigger("/start "), None);
-        assert_eq!(command_menu_trigger("hello /st "), None);
-    }
-
-    #[test]
-    fn inline_query_trigger_parses_leading_at_token() {
-        assert_eq!(inline_query_trigger("@bot"), Some(("bot", "")));
-        assert_eq!(inline_query_trigger("@bot "), Some(("bot", "")));
-        assert_eq!(inline_query_trigger("@bot cats"), Some(("bot", "cats")));
-        assert_eq!(
-            inline_query_trigger("@gif_bot_1 cute cats"),
-            Some(("gif_bot_1", "cute cats"))
-        );
-        // Token ends at the first non-username char; the rest is query.
-        assert_eq!(inline_query_trigger("@bot!"), Some(("bot", "!")));
-    }
-
-    #[test]
-    fn inline_query_trigger_rejects_non_leading_at() {
-        assert_eq!(inline_query_trigger(""), None);
-        assert_eq!(inline_query_trigger("@"), None);
-        assert_eq!(inline_query_trigger("hi @bot"), None);
-        assert_eq!(inline_query_trigger(" @bot"), None);
-        assert_eq!(inline_query_trigger("@@bot"), None);
-    }
-
-    #[test]
-    fn strip_command_menu_trigger_removes_trailing_token() {
-        assert_eq!(strip_command_menu_trigger("/"), Some(""));
-        assert_eq!(strip_command_menu_trigger("/st"), Some(""));
-        assert_eq!(strip_command_menu_trigger("hello /st"), Some("hello "));
-        assert_eq!(strip_command_menu_trigger("hi\n/he"), Some("hi\n"));
-        assert_eq!(strip_command_menu_trigger("a/b"), None);
-        assert_eq!(strip_command_menu_trigger("/start "), None);
-    }
-
-    #[test]
-    fn merge_command_menu_items_prefers_specific_descriptions() {
-        let specific = vec![bot_command("start", "Start the bot")];
-        let global = vec![
-            bot_command("start", "Global start"),
-            bot_command("settings", "Tweak the bot"),
-        ];
-        let items = merge_command_menu_items(&specific, &global);
-        assert_eq!(items.len(), 2);
-        // Bot-specific rows first; the duplicate keeps the bot-specific
-        // description.
-        assert_eq!(
-            items[0],
-            CommandMenuItem {
-                command: "start".into(),
-                description: "Start the bot".into(),
-                global: false,
-                is_ephemeral: false,
-                quick_reply: None,
-            }
-        );
-        assert_eq!(
-            items[1],
-            CommandMenuItem {
-                command: "settings".into(),
-                description: "Tweak the bot".into(),
-                global: true,
-                is_ephemeral: false,
-                quick_reply: None,
-            }
-        );
-    }
-
-    #[test]
-    fn merge_command_menu_items_empty_sides() {
-        assert!(merge_command_menu_items(&[], &[]).is_empty());
-        let items = merge_command_menu_items(&[bot_command("start", "")], &[]);
-        assert_eq!(items.len(), 1);
-        assert!(!items[0].global);
-    }
-
-    #[test]
-    fn merge_command_menu_items_keeps_ephemeral_flag() {
-        // The `is_ephemeral` flag is what the menu icon reads — it must
-        // survive the merge from both the bot-specific and the global
-        // side.
-        let mut secret = bot_command("secret", "Only you see this");
-        secret.is_ephemeral = true;
-        let mut gsettings = bot_command("gsettings", "Global ephemeral");
-        gsettings.is_ephemeral = true;
-        let items = merge_command_menu_items(&[secret, bot_command("start", "")], &[gsettings]);
-        let secret_item = items.iter().find(|i| i.command == "secret").unwrap();
-        assert!(secret_item.is_ephemeral);
-        assert!(!secret_item.global);
-        let global_item = items.iter().find(|i| i.command == "gsettings").unwrap();
-        assert!(global_item.is_ephemeral);
-        assert!(global_item.global);
-        assert!(
-            !items
-                .iter()
-                .find(|i| i.command == "start")
-                .unwrap()
-                .is_ephemeral
-        );
-    }
-
-    #[test]
-    fn filter_command_menu_items_matches_prefix_case_insensitively() {
-        let items = vec![
-            CommandMenuItem {
-                command: "start".into(),
-                description: String::new(),
-                global: false,
-                is_ephemeral: false,
-                quick_reply: None,
-            },
-            CommandMenuItem {
-                command: "settings".into(),
-                description: String::new(),
-                global: true,
-                is_ephemeral: false,
-                quick_reply: None,
-            },
-            CommandMenuItem {
-                command: "help".into(),
-                description: String::new(),
-                global: false,
-                is_ephemeral: false,
-                quick_reply: None,
-            },
-        ];
-        let all: Vec<&str> = filter_command_menu_items(&items, "")
-            .iter()
-            .map(|item| item.command.as_str())
-            .collect();
-        assert_eq!(all, vec!["start", "settings", "help"]);
-        let st: Vec<&str> = filter_command_menu_items(&items, "st")
-            .iter()
-            .map(|item| item.command.as_str())
-            .collect();
-        assert_eq!(st, vec!["start"]);
-        // Capitalized input still matches lowercase commands.
-        let caps: Vec<&str> = filter_command_menu_items(&items, "ST")
-            .iter()
-            .map(|item| item.command.as_str())
-            .collect();
-        assert_eq!(caps, vec!["start"]);
-        assert!(filter_command_menu_items(&items, "zzz").is_empty());
-    }
-}
+#[path = "commands_tests.rs"]
+mod tests;

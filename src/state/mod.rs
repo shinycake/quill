@@ -3,7 +3,7 @@
 use crate::auth::{AuthView, view_for};
 use crate::calls::engine::{RemoteVideoState, TransportState};
 use crate::chatlist_style::{ChatPreviewStyle, preview_sender_name, preview_style};
-use crate::composer::{CommandMenuItem, ComposerScheduling, merge_command_menu_items};
+use crate::composer::{CommandMenuItem, ComposerScheduling};
 use crate::data_settings::{AutoDownloadNetSettings, DataStoragePrefs, NetworkKind};
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::emoji::EmojiPanel;

@@ -254,6 +254,8 @@ pub enum GroupsPayload {
         custom_emoji_sticker_set_id: i64,
         /// B7: admin-toggle flags of `supergroupFullInfo`.
         admin: SupergroupFullAdmin,
+        /// `bot_commands`: the commands of the bots in the group.
+        bot_commands: Vec<GroupBotCommands>,
     },
     /// Slice (communities backend core): `updateCommunity` (schema 1.8.67,
     /// line 10726) — the update carries the full `community` object and is
@@ -400,7 +402,11 @@ pub enum GroupsPayload {
     /// BasicGroupFullInfo;`
     /// Only the member list is kept (the basic-group member dialog);
     /// correlated to the chat by the request's `PendingRequest::chat_id`.
-    BasicGroupFullInfo { members: Vec<ParsedChatMember> },
+    /// `bot_commands` feeds the composer's `/` menu in groups.
+    BasicGroupFullInfo {
+        members: Vec<ParsedChatMember>,
+        bot_commands: Vec<GroupBotCommands>,
+    },
     /// Phase D3c: `chatEvents` (TDLib 1.8.67, line 7938) — the response
     /// of `getChatEventLog` (line 15252). Carries no chat id; correlated
     /// to the chat by the request's `PendingRequest::chat_id`. Events
@@ -467,6 +473,14 @@ pub enum GroupsPayload {
         custom_emoji_sticker_set_id: i64,
         /// B7: admin-toggle flags of `supergroupFullInfo`.
         admin: SupergroupFullAdmin,
+        /// `bot_commands`: the commands of the bots in the group.
+        bot_commands: Vec<GroupBotCommands>,
+    },
+    /// `updateBasicGroupFullInfo` (schema 1.8.67): only the commands of the
+    /// group's bots are kept.
+    UpdateBasicGroupFullInfo {
+        basic_group_id: i64,
+        bot_commands: Vec<GroupBotCommands>,
     },
     /// `ChatJoinResult` — `joinChat` response.
     JoinChatResult(ChatJoinResult),

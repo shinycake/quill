@@ -27,6 +27,7 @@ fn supergroup_full_info_parsed() {
             sticker_set_id,
             custom_emoji_sticker_set_id,
             admin: _,
+            bot_commands: _,
         }) => {
             assert_eq!(description, "CANARY group description");
             assert_eq!(member_count, 1234);
@@ -439,4 +440,79 @@ fn b7_chat_available_reactions_parse_all_some_and_junk() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn group_full_info_keeps_each_bots_commands() {
+    // `supergroupFullInfo` and `basicGroupFullInfo` carry
+    // `bot_commands:vector<botCommands>` (schema lines 3024 / 3102).
+    let commands = r#"[{"@type":"botCommands","bot_user_id":41,"commands":[{"@type":"botCommand","command":"start","description":"Begin","is_ephemeral":false},{"@type":"botCommand","command":"quiet","description":"","is_ephemeral":true}]},{"@type":"botCommands","bot_user_id":42,"commands":[]}]"#;
+    let expected = vec![GroupBotCommands {
+        bot_user_id: 41,
+        commands: vec![
+            BotCommand {
+                command: "start".into(),
+                description: "Begin".into(),
+                is_ephemeral: false,
+            },
+            BotCommand {
+                command: "quiet".into(),
+                description: String::new(),
+                is_ephemeral: true,
+            },
+        ],
+    }];
+    let env = parse_envelope(&format!(
+        r#"{{"@type":"supergroupFullInfo","@extra":"5","description":"","member_count":3,"bot_commands":{commands}}}"#
+    ))
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo { bot_commands, .. }) => {
+            assert_eq!(bot_commands, expected);
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(&format!(
+        r#"{{"@type":"updateSupergroupFullInfo","supergroup_id":9,"supergroup_full_info":{{"description":"","bot_commands":{commands}}}}}"#
+    ))
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroupFullInfo {
+            bot_commands, ..
+        }) => assert_eq!(bot_commands, expected),
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(&format!(
+        r#"{{"@type":"basicGroupFullInfo","@extra":"5","members":[],"bot_commands":{commands}}}"#
+    ))
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Groups(GroupsPayload::BasicGroupFullInfo { bot_commands, .. }) => {
+            assert_eq!(bot_commands, expected);
+        }
+        other => panic!("{other:?}"),
+    }
+    let env = parse_envelope(&format!(
+        r#"{{"@type":"updateBasicGroupFullInfo","basic_group_id":4,"basic_group_full_info":{{"bot_commands":{commands}}}}}"#
+    ))
+    .unwrap();
+    match env.payload {
+        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroupFullInfo {
+            basic_group_id,
+            bot_commands,
+        }) => {
+            assert_eq!(basic_group_id, 4);
+            assert_eq!(bot_commands, expected);
+        }
+        other => panic!("{other:?}"),
+    }
+    // No list: no bots.
+    let env =
+        parse_envelope(r#"{"@type":"supergroupFullInfo","@extra":"5","description":""}"#).unwrap();
+    match env.payload {
+        EnvelopePayload::Groups(GroupsPayload::SupergroupFullInfo { bot_commands, .. }) => {
+            assert!(bot_commands.is_empty());
+        }
+        other => panic!("{other:?}"),
+    }
 }

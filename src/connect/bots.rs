@@ -91,6 +91,56 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// Ask for the bots named in a group's `bot_commands` that the session
+    /// does not know (`getUser`), once each; the `/` menu fills in when the
+    /// users arrive. Returns whether anything was sent.
+    pub fn group_bot_users_tick(&mut self) -> bool {
+        if !self.chats_path_active() || self.session.bots.bot_users_wanted.is_empty() {
+            return false;
+        }
+        let wanted = std::mem::take(&mut self.session.bots.bot_users_wanted);
+        let mut sent = false;
+        for user_id in wanted {
+            if self.session.users.contains_key(&user_id)
+                || !self.session.bots.asked_bot_users.insert(user_id)
+            {
+                continue;
+            }
+            let extra = self
+                .session
+                .request(RequestPurpose::Bots(BotsPurpose::GroupBotUser), None);
+            if self
+                .sender
+                .send_json(&crate::premium_hub::ton::get_user(extra, user_id))
+                .is_err()
+            {
+                self.session.requests.take(extra);
+                continue;
+            }
+            sent = true;
+        }
+        sent
+    }
+
+    /// The commands of a group's bots come with the group's full info
+    /// (`bot_commands`). A supergroup's is already fetched for the header;
+    /// a basic group's is fetched here, once, when the chat opens.
+    pub(crate) fn maybe_fetch_group_bot_commands(&mut self) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Ok(());
+        }
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(());
+        };
+        if !matches!(
+            self.session.group_commands_key(chat_id),
+            Some(crate::state::GroupCommandsKey::BasicGroup(_))
+        ) {
+            return Ok(());
+        }
+        self.fetch_basic_group_members(chat_id).map(|_| ())
+    }
+
     /// Slice B2: `sendBotStartMessage` (schema 1.8.67, line 12216) — what
     /// the START button and "Restart bot" send. `parameter` is the
     /// `internalLinkTypeBotStart.start_parameter` (line 9399); empty for

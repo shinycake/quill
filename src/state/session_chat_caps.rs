@@ -916,27 +916,6 @@ impl Session {
     pub fn contacts_settled(&self) -> bool {
         self.users_state.contacts.is_some() || self.users_state.contacts_error
     }
-
-    /// Phase 3.3: merged `/`-menu rows for the open chat's bot — the
-    /// bot's `botInfo` commands first, then cached `getCommands`
-    /// (global scope) results below, deduped by command name. Empty for
-    /// non-bot chats, unknown chats, or when no commands are known yet.
-    pub fn command_menu_items(&self, chat_id: ChatId) -> Vec<CommandMenuItem> {
-        let Some(user_id) = self.bot_user_id_for_chat(chat_id) else {
-            return self.quick_reply_menu_items(chat_id);
-        };
-        let specific: &[BotCommand] = self
-            .bot_info_for_chat(chat_id)
-            .map(|info| info.commands.as_slice())
-            .unwrap_or(&[]);
-        let global: &[BotCommand] = self
-            .bots
-            .bot_commands
-            .get(&user_id)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        merge_command_menu_items(specific, global)
-    }
 }
 
 /// The message whose inline buttons the number keys press in fast buttons

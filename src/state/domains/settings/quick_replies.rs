@@ -105,6 +105,7 @@ impl Session {
                 global: false,
                 is_ephemeral: false,
                 quick_reply: Some(id),
+                bot: None,
             })
             .collect()
     }
