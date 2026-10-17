@@ -57,6 +57,13 @@ impl QuillApp {
         self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
         self.message_ui.menu_link = self.take_right_clicked_link(menu.position);
         self.message_ui.menu_item = self.take_right_clicked_item(menu.position);
+        // Over a poll option the menu shows the option's page.
+        if matches!(
+            self.message_ui.menu_item,
+            quill::composer::ReplyItem::PollOption(_)
+        ) {
+            self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::PollOption;
+        }
         self.message_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).

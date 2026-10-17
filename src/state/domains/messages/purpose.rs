@@ -136,6 +136,9 @@ pub enum MessagesPurpose {
     GetPollOptionProperties {
         chat_id: ChatId,
         message_id: MessageId,
+        /// `poll_option_key` of the option asked about, so an answer for
+        /// another option of the same poll is never applied to this one.
+        option_key: u64,
     },
     /// `deletePollOption`; the poll updates through `updateMessageContent`.
     DeletePollOption,

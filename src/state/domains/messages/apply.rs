@@ -540,10 +540,12 @@ impl Session {
                 if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
                     chat_id,
                     message_id,
+                    option_key,
                 })) = pending.map(|p| p.purpose)
                     && let Some(menu) = self.messages.poll_option_menu.as_mut()
                     && menu.chat_id == chat_id
                     && menu.message_id == message_id
+                    && poll_option_key(&menu.option_id) == option_key
                 {
                     menu.properties = Some(properties);
                 }

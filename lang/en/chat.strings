@@ -11,6 +11,7 @@
 "lng_chat_theme_wallpaper" = "Set Wallpaper";
 "lng_close" = "Close";
 "lng_context_copy_poll_option" = "Copy Option";
+"lng_context_copy_poll_option_link" = "Copy Option Link";
 "lng_context_copy_selected_items" = "Copy Selected as Text";
 "lng_context_delete_poll_option" = "Delete Item";
 "lng_context_mark_read" = "Mark as read";
@@ -66,6 +67,7 @@
 "lng_pinned_unpin_all#other" = "Unpin all {count} messages";
 "lng_pinned_unpin_sure" = "Would you like to unpin this message?";
 "lng_polls_menu_item" = "Poll";
+"lng_polls_option_added_by" = "Added by {user}";
 "lng_profile_copy_phone" = "Copy Phone Number";
 "lng_profile_export_chat" = "Export chat history";
 "lng_recent_chats" = "Chats";

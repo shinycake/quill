@@ -43,6 +43,9 @@ pub(super) enum MessageMenuPage {
     AddToSet { emoji: bool },
     /// Who saw / reacted to the message.
     Audience,
+    /// The page of the poll option the menu was opened over (tdesktop
+    /// `FillPollOptionPage`).
+    PollOption,
 }
 
 /// UI state of the message menu's extras.

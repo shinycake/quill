@@ -54,6 +54,17 @@ pub struct PollOptionMenu {
     pub properties: Option<crate::telegram::envelope::PollOptionProperties>,
 }
 
+/// A stable key of a poll option id, for request purposes that must be
+/// `Copy` (FNV-1a, like `reaction_filter_key`).
+pub fn poll_option_key(option_id: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in option_id.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
+}
+
 /// One list the audience dialog loads.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Audience<T> {

@@ -10,8 +10,8 @@ use crate::telegram::requests::{
     MessageSenderRef, add_profile_audio, delete_chat_messages_by_sender,
     delete_message_reactions_from_sender, delete_messages, delete_poll_option,
     get_installed_sticker_sets, get_message_added_reactions, get_message_author,
-    get_message_read_date, get_message_viewers, get_poll_option_properties, get_sticker_set,
-    report_chat_messages, report_supergroup_spam,
+    get_message_link_to_item, get_message_read_date, get_message_viewers,
+    get_poll_option_properties, get_sticker_set, report_chat_messages, report_supergroup_spam,
 };
 
 /// One page of reactors the menu list asks for (Telegram Desktop loads 50
@@ -296,6 +296,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
                 chat_id,
                 message_id,
+                option_key: crate::state::poll_option_key(option_id),
             }),
             Some(chat_id),
         );
@@ -304,6 +305,42 @@ impl<S: JsonSender> ConnectDriver<S> {
             &get_poll_option_properties(extra, chat_id, message_id, option_id),
         )?;
         Ok(extra)
+    }
+
+    /// "Copy Option Link": `getMessageLink` for the option the menu is over,
+    /// only when `pollOptionProperties.can_get_link` said so. The answer takes
+    /// the plain message link's road to the clipboard.
+    pub fn get_item_link(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        item: &crate::composer::ReplyItem,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let allowed = self
+            .session
+            .messages
+            .poll_option_menu
+            .as_ref()
+            .is_some_and(|menu| {
+                menu.chat_id == chat_id
+                    && menu.message_id == message_id
+                    && menu.option_id == item.option_id()
+                    && menu.properties.is_some_and(|p| p.can_get_link)
+            });
+        if !allowed {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::GetMessageLink, Some(chat_id));
+        self.send_audience(
+            extra,
+            &get_message_link_to_item(extra, chat_id, message_id, item),
+        )?;
+        Ok(Some(extra))
     }
 
     /// "Delete Item" on a poll option (`deletePollOption`). Allowed only

@@ -50,9 +50,16 @@ fn apply_item_menus(
         )
     };
     let user = |id: i64| format!(r#"{{"@type":"messageSenderUser","user_id":{id}}}"#);
+    // Option "a" is the user's vote; option "b" was added by Nora.
     let option = |id: &str, label: &str, votes: i32, percent: i32| {
+        let chosen = id == "a";
+        let added = if id == "b" {
+            r#","author":{"@type":"messageSenderUser","user_id":32},"addition_date":1700000000"#
+        } else {
+            ""
+        };
         format!(
-            r#"{{"@type":"pollOption","id":"{id}","text":{},"voter_count":{votes},"vote_percentage":{percent},"is_chosen":false}}"#,
+            r#"{{"@type":"pollOption","id":"{id}","text":{},"voter_count":{votes},"vote_percentage":{percent},"is_chosen":{chosen}{added}}}"#,
             text(label)
         )
     };

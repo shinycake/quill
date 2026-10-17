@@ -25,6 +25,7 @@ impl QuillApp {
         // new slot's draft to be restored into the composer.
         self.restore_draft_if_pending(window, cx);
         self.sync_composer_placeholder(window, cx);
+        self.sync_item_menu();
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
         self.restore_chat_windows(window, cx);

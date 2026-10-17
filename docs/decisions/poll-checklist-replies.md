@@ -24,17 +24,25 @@ Round 3 of the composer gap list (C6, M1, M2, M4).
 - Right-click plumbing copies the link pattern: the task and option rows note
   `(position, ReplyItem)` on mouse down, `open_message_menu` takes it by menu
   position into `menu_item`. Rows live in `src/ui/message_menu_ui/item_rows.rs`.
-- Menu over a task: "Reply to Task" replaces "Reply". Over an option: Reply to
-  Option, Copy Option, Delete Item above the usual rows. Delete Item shows only
-  when `getPollOptionProperties` answered `can_be_deleted` for that option
-  (TDLib decides; tdesktop's creator / pollAnswerDeletePeriod rule is inside
-  TDLib). `deletePollOption` is sent only when that answer is on hand.
+- Menu over a task: "Reply to Task" replaces "Reply". Over an option the menu
+  shows the option page (`MessageMenuPage::PollOption`, tdesktop
+  `FillPollOptionPage`) instead of the message menu: Retract vote (when voted),
+  Reply to Option, Copy Option, Copy Option Link, Delete Item, then "Added by
+  {user}" with the date. The kit panel swaps pages with a Back row, so the
+  option page has a Back row to the message menu that tdesktop does not show.
+  Delete Item shows only when `getPollOptionProperties` answered `can_be_deleted`
+  and Copy Option Link only when it answered `can_get_link`; the requests are
+  sent only then. The properties request carries a key of the option id, so an
+  answer for another option of the same poll is dropped.
+- A reply whose task or option disappeared falls back to a plain reply (per
+  frame upkeep), so the bar, the send and the draft agree. A closed menu forgets
+  its option and properties.
 - "Sent by {user}" under the date lines when `messageProperties.can_get_author`;
   `getMessageAuthor` runs with the other audience requests, the row is Loading,
   then the name (opens the profile), or nothing on failure.
 - "Copy Phone Number" on a contact message.
 - The reply bar shows the task or option text in place of the message preview.
-- New text: tdesktop keys `lng_context_reply_to_task`,
+- New text: tdesktop keys (also `lng_context_copy_poll_option_link`, `lng_polls_option_added_by`, and `lng_contacts_loading` for "Sent by") `lng_context_reply_to_task`,
   `lng_context_reply_to_poll_option`, `lng_context_copy_poll_option`,
   `lng_context_delete_poll_option`, `lng_context_sent_by`,
   `lng_profile_copy_phone`.
@@ -48,12 +56,8 @@ the menu's `item!` macro got `.test_support()` so tests can find the rows.
 
 ## Skipped
 
-- Retract vote inside the option menu: the message menu already has it.
-- Copy Option Link: TDLib 1.8.68 has `can_get_link` but no option-link request
-  to build the `?option=` link from.
-- The "added by" row: `pollOption` in 1.8.68 does not carry the adder.
-- Showing the task or option inside an incoming reply bubble: that is history
-  rendering.
+- Task or option text inside incoming reply bubbles: that is history rendering.
+- Retract vote stays in the message menu too (as before).
 
 ## Verified
 

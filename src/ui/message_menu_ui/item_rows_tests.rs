@@ -134,6 +134,19 @@ fn right_clicking_an_option_offers_its_rows_and_replies_to_it(cx: &mut TestAppCo
         "TDLib allowed deleting option b"
     );
     assert!(!has(vcx, "menu-reply-task"));
+    // The option page replaces the message menu (tdesktop `FillPollOptionPage`).
+    assert!(!has(vcx, "menu-reply"));
+    assert!(!has(vcx, "menu-forward"));
+    assert!(has(vcx, "menu-retract-vote"), "option a is the user's vote");
+    assert!(has(vcx, "menu-copy-option-link"), "TDLib allowed the link");
+    assert!(has(vcx, "menu-option-added-by"));
+    let added = vcx.update(|window, _| {
+        window
+            .find("menu-option-added-by")
+            .label()
+            .map(str::to_string)
+    });
+    assert_eq!(added.as_deref(), Some("Added by Nora Vale"));
     click(vcx, "menu-reply-option");
     assert_eq!(
         reply_item(&app, vcx),
@@ -163,6 +176,67 @@ fn an_option_that_cannot_be_deleted_has_no_delete_row(cx: &mut TestAppContext) {
     assert_eq!(menu_item(&app, vcx), ReplyItem::PollOption("a".into()));
     assert!(has(vcx, "menu-copy-option"));
     assert!(!has(vcx, "menu-delete-option"));
+    assert!(!has(vcx, "menu-copy-option-link"));
+    assert!(!has(vcx, "menu-option-added-by"));
+}
+
+#[gpui_kit::test]
+fn closing_the_menu_forgets_the_option(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    facts(&app, vcx, "poll");
+    vcx.update(|window, cx| window.right_click(("poll-option", (POLL * 64 + 1) as u64), cx));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| {
+        app.session()
+            .is_some_and(|s| s.messages.poll_option_menu.is_some())
+    }));
+    app.update(vcx, |app, cx| {
+        app.message_ui.menu = None;
+        cx.notify();
+    });
+    frames(vcx);
+    assert_eq!(menu_item(&app, vcx), ReplyItem::Message);
+    assert!(app.read_with(vcx, |app, _| {
+        app.session()
+            .is_some_and(|s| s.messages.poll_option_menu.is_none())
+    }));
+}
+
+#[gpui_kit::test]
+fn a_reply_to_a_vanished_task_becomes_a_plain_reply(cx: &mut TestAppContext) {
+    use quill::composer::ComposerReplyTo;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.composer_ui.set_reply(Some(
+            ComposerReplyTo::new(GROUP, MessageId(CHECKLIST)).to_item(ReplyItem::Task(99)),
+        ));
+        cx.notify();
+    });
+    frames(vcx);
+    assert_eq!(reply_item(&app, vcx), Some(ReplyItem::Message));
+    let sent = app.read_with(vcx, |app, _| {
+        app.composer_ui
+            .reply()
+            .and_then(|reply| reply.send_target(GROUP))
+    });
+    assert_eq!(sent.map(|reply| reply.item), Some(ReplyItem::Message));
+}
+
+#[gpui_kit::test]
+fn a_reply_to_an_existing_task_keeps_it(cx: &mut TestAppContext) {
+    use quill::composer::ComposerReplyTo;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.composer_ui.set_reply(Some(
+            ComposerReplyTo::new(GROUP, MessageId(CHECKLIST)).to_item(ReplyItem::Task(2)),
+        ));
+        cx.notify();
+    });
+    frames(vcx);
+    assert_eq!(reply_item(&app, vcx), Some(ReplyItem::Task(2)));
 }
 
 #[gpui_kit::test]

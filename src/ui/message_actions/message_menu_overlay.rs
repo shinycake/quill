@@ -838,6 +838,9 @@ impl QuillApp {
                     MessageMenuPage::AddToSet { emoji } => {
                         self.menu_add_to_set_rows(chat_id, message_id, emoji, cx)
                     }
+                    MessageMenuPage::PollOption => {
+                        self.menu_option_page_rows(chat_id, message_id, &message, can_reply, cx)
+                    }
                     _ => self.menu_audience_page(chat_id, &message, cx),
                 });
                 sub_rows

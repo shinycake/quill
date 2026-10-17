@@ -25,9 +25,51 @@ pub fn get_message_link_at(
     .to_string()
 }
 
+/// `getMessageLink` for one checklist task or poll option (`checklist_task_id`
+/// and `poll_option_id` in schema/td_api.tl; the link ends in `?option=...`).
+pub fn get_message_link_to_item(
+    extra: RequestId,
+    chat_id: ChatId,
+    message_id: MessageId,
+    item: &crate::composer::ReplyItem,
+) -> String {
+    json!({
+        "@type": "getMessageLink",
+        "@extra": extra.as_extra(),
+        "chat_id": chat_id.0,
+        "message_id": message_id.0,
+        "media_timestamp": 0,
+        "checklist_task_id": item.task_id(),
+        "poll_option_id": item.option_id(),
+        "for_album": false,
+        "in_message_thread": false,
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_the_task_or_option() {
+        use crate::composer::ReplyItem;
+        let value = |item: ReplyItem| -> serde_json::Value {
+            serde_json::from_str(&get_message_link_to_item(
+                RequestId(4),
+                ChatId(-100),
+                MessageId(55),
+                &item,
+            ))
+            .unwrap()
+        };
+        let option = value(ReplyItem::PollOption("AQ==".into()));
+        assert_eq!(option["poll_option_id"], "AQ==");
+        assert_eq!(option["checklist_task_id"], 0);
+        let task = value(ReplyItem::Task(3));
+        assert_eq!(task["checklist_task_id"], 3);
+        assert_eq!(task["poll_option_id"], "");
+    }
 
     #[test]
     fn carries_the_media_timestamp() {

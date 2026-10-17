@@ -8,10 +8,7 @@ use super::*;
 use quill::composer::reply_item::{item_text, option_menu};
 use quill::composer::{ComposerReplyTo, ReplyItem};
 use quill::state::PollOptionMenu;
-
-/// Where the option rows sit: ahead of the usual menu, like tdesktop's
-/// option page replaces it.
-const OPTION_ORDER: u8 = 5;
+use quill::telegram::envelope::MessageSender;
 
 impl QuillApp {
     /// Remember a right-press on a checklist task or poll option; the
@@ -40,6 +37,53 @@ impl QuillApp {
     pub(in crate::ui) fn menu_replies_to_task(&self, content: &MessageContent) -> bool {
         matches!(self.message_ui.menu_item, ReplyItem::Task(_))
             && item_text(content, &self.message_ui.menu_item).is_some()
+    }
+
+    /// A reply whose task or option is gone from the message (it was
+    /// deleted) falls back to a plain reply, so the bar, the send and the
+    /// draft all agree.
+    pub(in crate::ui) fn drop_stale_reply_item(&mut self) {
+        let Some(reply) = self.composer_ui.reply() else {
+            return;
+        };
+        if reply.item.is_message() {
+            return;
+        }
+        let stale = self
+            .session()
+            .and_then(|s| s.reply_target(reply.chat_id, reply.message_id))
+            .is_some_and(|message| {
+                item_text(
+                    quill::telegram::envelope::effective_content(
+                        &message.content,
+                        message.ephemeral.as_ref(),
+                    ),
+                    &reply.item,
+                )
+                .is_none()
+            });
+        if stale {
+            let mut plain = reply.clone();
+            plain.item = ReplyItem::Message;
+            self.composer_ui.set_reply(Some(plain));
+        }
+    }
+
+    /// Per-frame upkeep: a closed menu forgets the task or option it was
+    /// opened over (and what TDLib allowed for it), and a reply to an item
+    /// that no longer exists becomes a plain reply.
+    pub(in crate::ui) fn sync_item_menu(&mut self) {
+        if self.message_ui.menu.is_none() && !self.message_ui.menu_item.is_message() {
+            self.message_ui.menu_item = ReplyItem::Message;
+            let session = match self.live.as_mut() {
+                Some(live) => Some(&mut live.driver.session),
+                None => self.demo_session.as_mut(),
+            };
+            if let Some(session) = session {
+                session.messages.poll_option_menu = None;
+            }
+        }
+        self.drop_stale_reply_item();
     }
 
     /// What TDLib allowed for the right-clicked option, once it answered.
@@ -84,58 +128,6 @@ impl QuillApp {
                     cx,
                 ));
             }
-            ReplyItem::PollOption(option_id) => {
-                let menu = option_menu(
-                    text.is_some(),
-                    can_reply,
-                    self.option_properties(chat_id, message_id),
-                );
-                if menu.reply {
-                    rows.push(self.reply_to_item_row(
-                        OPTION_ORDER,
-                        "menu-reply-option",
-                        keys::CONTEXT_REPLY_TO_POLL_OPTION,
-                        chat_id,
-                        message_id,
-                        item.clone(),
-                        cx,
-                    ));
-                }
-                if let (true, Some(text)) = (menu.copy, text) {
-                    rows.push(menu_row(
-                        OPTION_ORDER + 1,
-                        IconName::Copy,
-                        "menu-copy-option",
-                        tr(keys::CONTEXT_COPY_POLL_OPTION),
-                        false,
-                        cx,
-                        move |this, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                            this.message_ui.menu = None;
-                            cx.notify();
-                        },
-                    ));
-                }
-                if menu.delete {
-                    let option_id = option_id.clone();
-                    rows.push(menu_row(
-                        OPTION_ORDER + 2,
-                        IconName::Trash,
-                        "menu-delete-option",
-                        tr(keys::CONTEXT_DELETE_POLL_OPTION),
-                        true,
-                        cx,
-                        move |this, _, cx| {
-                            this.delete_poll_option_item(chat_id, message_id, &option_id, cx);
-                            this.message_ui.menu = None;
-                            cx.notify();
-                        },
-                    ));
-                }
-                if !rows.is_empty() {
-                    rows.push(menu_separator(OPTION_ORDER + 3));
-                }
-            }
             _ => {}
         }
         // tdesktop: a shared contact offers its number.
@@ -159,6 +151,157 @@ impl QuillApp {
             ));
         }
         rows
+    }
+
+    /// The option page (tdesktop `FillPollOptionPage`): Retract vote, Reply
+    /// to Option, Copy Option, Copy Option Link, Delete Item and who added
+    /// the option. It replaces the message menu while it shows; Back returns.
+    pub(in crate::ui) fn menu_option_page_rows(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        message: &quill::state::HistoryMessage,
+        can_reply: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<MenuRow> {
+        let mut rows = Vec::new();
+        let item = self.message_ui.menu_item.clone();
+        let ReplyItem::PollOption(option_id) = &item else {
+            return rows;
+        };
+        let MessageContent::Poll(poll) = &message.content else {
+            return rows;
+        };
+        let Some(option) = poll.poll.options.iter().find(|o| o.id == *option_id) else {
+            return rows;
+        };
+        let properties = self.option_properties(chat_id, message_id);
+        let menu = option_menu(true, can_reply, properties);
+        if quill::poll::can_retract_vote(&poll.poll) && message.id.0 > 0 && !message.pending {
+            rows.push(menu_row(
+                1,
+                IconName::Undo2,
+                "menu-retract-vote",
+                tr(keys::Q_CHAT_RETRACT_VOTE),
+                false,
+                cx,
+                move |this, _, cx| {
+                    this.retract_poll_vote(chat_id, message_id, cx);
+                    this.message_ui.menu = None;
+                    cx.notify();
+                },
+            ));
+        }
+        if menu.reply {
+            rows.push(self.reply_to_item_row(
+                2,
+                "menu-reply-option",
+                keys::CONTEXT_REPLY_TO_POLL_OPTION,
+                chat_id,
+                message_id,
+                item.clone(),
+                cx,
+            ));
+        }
+        let text = option.text.clone();
+        rows.push(menu_row(
+            3,
+            IconName::Copy,
+            "menu-copy-option",
+            tr(keys::CONTEXT_COPY_POLL_OPTION),
+            false,
+            cx,
+            move |this, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                this.message_ui.menu = None;
+                cx.notify();
+            },
+        ));
+        if properties.is_some_and(|p| p.can_get_link) {
+            let link_item = item.clone();
+            rows.push(menu_row(
+                4,
+                IconName::Link,
+                "menu-copy-option-link",
+                tr(keys::CONTEXT_COPY_POLL_OPTION_LINK),
+                false,
+                cx,
+                move |this, _, cx| {
+                    this.copy_item_link(chat_id, message_id, &link_item, cx);
+                    this.message_ui.menu = None;
+                    cx.notify();
+                },
+            ));
+        }
+        if menu.delete {
+            let option_id = option_id.clone();
+            rows.push(menu_row(
+                5,
+                IconName::Trash,
+                "menu-delete-option",
+                tr(keys::CONTEXT_DELETE_POLL_OPTION),
+                true,
+                cx,
+                move |this, _, cx| {
+                    this.delete_poll_option_item(chat_id, message_id, &option_id, cx);
+                    this.message_ui.menu = None;
+                    cx.notify();
+                },
+            ));
+        }
+        if let Some(author) = option.author
+            && let Some(session) = self.session()
+        {
+            let name = match author {
+                MessageSender::User { user_id } => session.user(user_id).map(|u| u.display_name()),
+                MessageSender::Chat { chat_id } => {
+                    session.chats.get(&chat_id).map(|c| c.title.clone())
+                }
+            };
+            if let Some(name) = name {
+                rows.push(menu_separator(6));
+                rows.push(menu_row(
+                    7,
+                    IconName::User,
+                    "menu-option-added-by",
+                    tr_with(keys::POLLS_OPTION_ADDED_BY, &[("user", &name)]),
+                    false,
+                    cx,
+                    move |this, window, cx| {
+                        this.message_ui.menu = None;
+                        if let MessageSender::User { user_id } = author {
+                            this.open_user_panel(user_id, window, cx);
+                        }
+                    },
+                ));
+                if option.addition_date > 0 {
+                    let now = quill::local_time::civil_local(quill::local_time::now_unix());
+                    let date = quill::local_time::civil_local(i64::from(option.addition_date));
+                    rows.push(info_row(
+                        8,
+                        "menu-option-added-date",
+                        None,
+                        quill::message_menu::read_date_label(&date, &now),
+                    ));
+                }
+            }
+        }
+        rows
+    }
+
+    /// "Copy Option Link": `getMessageLink` for the item; the poll loop puts
+    /// the answer on the clipboard like any message link.
+    pub(in crate::ui) fn copy_item_link(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        item: &ReplyItem,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.get_item_link(chat_id, message_id, item);
+        }
+        cx.notify();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -210,7 +353,7 @@ impl QuillApp {
                 order::SENT + 2,
                 "menu-author-loading",
                 Some(IconName::User),
-                tr(keys::Q_CHAT_LOADING),
+                tr(keys::CONTACTS_LOADING),
             )),
             Audience::Ready(user_id) => {
                 let user_id = *user_id;
@@ -289,6 +432,7 @@ mod demo_facts {
                 option_id: "b".into(),
                 properties: Some(PollOptionProperties {
                     can_be_deleted: true,
+                    can_get_link: true,
                     can_be_replied: true,
                     ..PollOptionProperties::default()
                 }),

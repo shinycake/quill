@@ -3,9 +3,10 @@ use super::*;
 use crate::text::TextEntity;
 use serde_json::Value;
 
-/// `pollOption` (TDLib 1.8.68, `schema/td_api.tl:456`). `recent_voter_ids`,
-/// `is_being_chosen`, `author`, and `addition_date` are not kept — Quill
-/// renders the text, the picture, the bar, the count, and the chosen mark.
+/// `pollOption` (TDLib 1.8.68, `schema/td_api.tl:456`). `recent_voter_ids`
+/// and `is_being_chosen` are not kept — Quill renders the text, the picture,
+/// the bar, the count, and the chosen mark; `author` and `addition_date`
+/// feed the option menu's "Added by" row.
 /// Note: `id` is a string identifier for the option, while `setPollAnswer`
 /// takes 0-based **indexes** into `poll.options` (schema line 12932).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +21,10 @@ pub struct PollOption {
     pub voter_count: i32,
     pub vote_percentage: i32,
     pub is_chosen: bool,
+    /// Who added the option; `None` when it existed from the poll's creation.
+    pub author: Option<MessageSender>,
+    /// When it was added (Unix time); 0 when it existed from creation.
+    pub addition_date: i32,
 }
 
 impl PollOption {
@@ -33,6 +38,8 @@ impl PollOption {
             voter_count: 0,
             vote_percentage: 0,
             is_chosen: false,
+            author: None,
+            addition_date: 0,
         }
     }
 }
@@ -157,6 +164,12 @@ pub(crate) fn parse_poll_option(value: &Value) -> (PollOption, Vec<ParsedFile>) 
             .get("is_chosen")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        author: super::message::parse_message_sender(value.get("author")).ok(),
+        addition_date: value
+            .get("addition_date")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            .sat_i32(),
     };
     (option, files)
 }

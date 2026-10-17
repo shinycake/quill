@@ -210,3 +210,68 @@ fn a_reply_to_an_option_survives_in_the_draft() {
     assert_eq!(saved.item, ReplyItem::PollOption("a".to_string()));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn answer(extra: crate::ids::RequestId, deletable: bool, link: bool) -> String {
+    format!(
+        r#"{{"@type":"pollOptionProperties","@extra":"{}","can_be_deleted":{deletable},"can_be_replied":true,"can_get_link":{link}}}"#,
+        extra.0
+    )
+}
+
+#[test]
+fn a_late_answer_for_another_option_is_dropped() {
+    let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
+    ingest(&mut driver, &seq, &dyn_sink, POLL);
+    let (chat, message) = (ChatId(7), MessageId(120));
+    // Two quick right-clicks on different options of one poll.
+    let for_a = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    let for_b = driver
+        .fetch_poll_option_properties(chat, message, "b")
+        .unwrap();
+    // A's answer arrives last-but-one: it allows deleting A. The menu is on B.
+    ingest(&mut driver, &seq, &dyn_sink, &answer(for_a, true, true));
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert_eq!(menu.option_id, "b");
+    assert_eq!(menu.properties, None, "A's answer is not B's");
+    let before = recorder.snapshot().len();
+    assert_eq!(driver.delete_poll_option(chat, message, "b").unwrap(), None);
+    assert_eq!(driver.delete_poll_option(chat, message, "a").unwrap(), None);
+    assert_eq!(
+        driver
+            .get_item_link(
+                chat,
+                message,
+                &crate::composer::ReplyItem::PollOption("b".into())
+            )
+            .unwrap(),
+        None
+    );
+    assert_eq!(recorder.snapshot().len(), before);
+    // B's own answer says no.
+    ingest(&mut driver, &seq, &dyn_sink, &answer(for_b, false, false));
+    assert_eq!(driver.delete_poll_option(chat, message, "b").unwrap(), None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_option_link_is_asked_only_when_allowed() {
+    use crate::composer::ReplyItem;
+    let (dir, mut driver, recorder, _sink, dyn_sink, seq) = poll_driver();
+    ingest(&mut driver, &seq, &dyn_sink, POLL);
+    let (chat, message) = (ChatId(7), MessageId(120));
+    let item = ReplyItem::PollOption("a".into());
+    let extra = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    ingest(&mut driver, &seq, &dyn_sink, &answer(extra, false, true));
+    driver
+        .get_item_link(chat, message, &item)
+        .unwrap()
+        .expect("sent");
+    let request = last_json(&recorder);
+    assert_eq!(request["@type"], "getMessageLink");
+    assert_eq!(request["poll_option_id"], "a");
+    let _ = std::fs::remove_dir_all(&dir);
+}
