@@ -366,10 +366,57 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
     Some(item)
 }
 
+/// The story a tray tap opens: the oldest story after `max_read_story_id`,
+/// or the oldest story when all are read (tdesktop `StoriesSource::toOpen`).
+/// `0` when the poster has no active stories.
+pub fn story_to_open(view: &ChatActiveStoriesView) -> i32 {
+    let ids = || view.stories.iter().map(|info| info.story_id);
+    ids()
+        .filter(|id| *id > view.max_read_story_id)
+        .min()
+        .or_else(|| ids().min())
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::telegram::envelope::{PhotoSizeView, StoryInfoView};
+
+    fn active(max_read: i32, ids: &[i32]) -> ChatActiveStoriesView {
+        ChatActiveStoriesView {
+            chat_id: 1,
+            list: None,
+            order: 0,
+            max_read_story_id: max_read,
+            stories: ids
+                .iter()
+                .map(|id| StoryInfoView {
+                    story_id: *id,
+                    date: 0,
+                    is_for_close_friends: false,
+                    is_live: false,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn story_to_open_is_first_unread() {
+        assert_eq!(story_to_open(&active(4, &[3, 4, 5, 6])), 5);
+        assert_eq!(story_to_open(&active(0, &[9, 7, 8])), 7);
+        assert_eq!(story_to_open(&active(4, &[3, 7, 5])), 5);
+    }
+
+    #[test]
+    fn story_to_open_is_first_when_all_read() {
+        assert_eq!(story_to_open(&active(6, &[5, 3, 6])), 3);
+    }
+
+    #[test]
+    fn story_to_open_is_zero_without_stories() {
+        assert_eq!(story_to_open(&active(0, &[])), 0);
+    }
 
     fn size(file_id: i32, width: i32, height: i32) -> PhotoSizeView {
         PhotoSizeView {

@@ -21,6 +21,7 @@ use quill::local_path::sandboxed_display_path;
 use quill::stories_strip as metrics;
 use quill::stories_strip::{Axis, AxisLock};
 use quill::story_ring::StoryRing;
+use quill::story_viewer::story_to_open;
 
 /// One entry of the strip: a poster with active stories.
 #[derive(Clone)]
@@ -29,7 +30,7 @@ pub(super) struct StoryTile {
     pub title: String,
     pub photo: Option<std::path::PathBuf>,
     pub ring: Option<StoryRing>,
-    pub latest_story: i32,
+    pub open_story: i32,
 }
 
 /// Cache key for the tile list: rebuilt only when the session changed.
@@ -83,12 +84,7 @@ impl QuillApp {
                             .chat_photo_path(ChatId(entry.chat_id))
                             .and_then(|path| sandboxed_display_path(path, &roots)),
                         ring: StoryRing::from_active(entry),
-                        latest_story: entry
-                            .stories
-                            .iter()
-                            .map(|info| info.story_id)
-                            .max()
-                            .unwrap_or(0),
+                        open_story: story_to_open(entry),
                     })
                     .collect()
             })
@@ -190,7 +186,7 @@ impl QuillApp {
                 continue;
             }
             let chat_id = tile.chat_id;
-            let latest_story = tile.latest_story;
+            let open_story = tile.open_story;
             let title = tile.title.clone();
             let avatar = match tile.ring {
                 Some(ring) => super::story_ring::with_story_ring(
@@ -221,7 +217,7 @@ impl QuillApp {
                         }),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_story_viewer(ChatId(chat_id), latest_story, cx);
+                        this.open_story_viewer(ChatId(chat_id), open_story, cx);
                     })),
             );
         }
