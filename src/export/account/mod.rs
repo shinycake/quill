@@ -8,6 +8,7 @@
 //! `profile_pictures/`, `stories/`, `profile_music/files/`, `css/`, `js/`,
 //! and one `result.json` with every section.
 pub mod dialogs;
+mod folder_acl;
 pub mod handle;
 pub mod html;
 pub mod json;

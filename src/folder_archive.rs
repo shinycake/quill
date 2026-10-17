@@ -348,7 +348,18 @@ fn short_read() -> io::Error {
     io::Error::other("read returned more than the buffer")
 }
 
+/// A zip name length as the 16-bit header field; longer names cannot be
+/// written without zip64.
+fn name_len(name: &str) -> io::Result<u16> {
+    u16::try_from(name.len()).map_err(|_| io::Error::other(TooLargeMarker))
+}
+
 fn write_zip_inner<W: Write>(out: W, entries: &[Entry], limit: u64) -> io::Result<()> {
+    // The end-of-central-directory counts are 16-bit; more entries would
+    // wrap and produce an archive that lists the wrong number of files.
+    if entries.len() > usize::from(u16::MAX) {
+        return Err(io::Error::other(TooLargeMarker));
+    }
     let mut out = Counting {
         inner: out,
         written: 0,
@@ -431,7 +442,7 @@ fn write_zip_inner<W: Write>(out: W, entries: &[Entry], limit: u64) -> io::Resul
         out.write_all(&item.crc.to_le_bytes())?;
         out.write_all(&item.csize.to_le_bytes())?;
         out.write_all(&item.usize.to_le_bytes())?;
-        out.write_all(&(item.name.len() as u16).to_le_bytes())?;
+        out.write_all(&name_len(&item.name)?.to_le_bytes())?;
         out.write_all(&0u16.to_le_bytes())?; // extra
         out.write_all(&0u16.to_le_bytes())?; // comment
         out.write_all(&0u16.to_le_bytes())?; // disk
@@ -446,8 +457,9 @@ fn write_zip_inner<W: Write>(out: W, entries: &[Entry], limit: u64) -> io::Resul
     out.write_all(&0x0605_4b50u32.to_le_bytes())?;
     out.write_all(&0u16.to_le_bytes())?; // this disk
     out.write_all(&0u16.to_le_bytes())?; // directory disk
-    out.write_all(&(central.len() as u16).to_le_bytes())?;
-    out.write_all(&(central.len() as u16).to_le_bytes())?;
+    let count = u16::try_from(central.len()).map_err(|_| io::Error::other(TooLargeMarker))?;
+    out.write_all(&count.to_le_bytes())?;
+    out.write_all(&count.to_le_bytes())?;
     out.write_all(&directory_size.to_le_bytes())?;
     out.write_all(&directory_start.to_le_bytes())?;
     out.write_all(&0u16.to_le_bytes())?; // comment length
@@ -471,7 +483,7 @@ fn write_local_header<W: Write>(
     out.write_all(&0u32.to_le_bytes())?; // crc, in the descriptor
     out.write_all(&0u32.to_le_bytes())?; // compressed size
     out.write_all(&0u32.to_le_bytes())?; // size
-    out.write_all(&(name.len() as u16).to_le_bytes())?;
+    out.write_all(&name_len(name)?.to_le_bytes())?;
     out.write_all(&0u16.to_le_bytes())?; // extra
     out.write_all(name.as_bytes())
 }
@@ -712,5 +724,41 @@ mod tests {
         remove_stale(&out, Duration::from_millis(1));
         assert!(!out.join("old").exists());
         let _ = std::fs::remove_dir_all(out);
+    }
+
+    fn empty_entries(count: usize) -> Vec<Entry> {
+        (0..count)
+            .map(|i| Entry {
+                source: None,
+                name: format!("d{i}/"),
+                modified: UNIX_EPOCH,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn max_entry_count_round_trips() {
+        let mut zip = Vec::new();
+        write_zip(&mut zip, &empty_entries(65_535), u64::MAX).unwrap();
+        let eocd = zip.len() - 22;
+        assert_eq!(u16_at(&zip, eocd + 10), u16::MAX);
+    }
+
+    #[test]
+    fn too_many_entries_are_refused() {
+        let mut zip = Vec::new();
+        let result = write_zip(&mut zip, &empty_entries(65_536), u64::MAX);
+        assert!(matches!(result, Err(ArchiveError::TooLarge)));
+    }
+
+    #[test]
+    fn overlong_names_are_refused() {
+        let entries = vec![Entry {
+            source: None,
+            name: format!("{}/", "a".repeat(70_000)),
+            modified: UNIX_EPOCH,
+        }];
+        let result = write_zip(Vec::new(), &entries, u64::MAX);
+        assert!(matches!(result, Err(ArchiveError::TooLarge)));
     }
 }

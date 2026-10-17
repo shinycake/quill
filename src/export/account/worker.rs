@@ -142,7 +142,8 @@ pub struct AccountJob<'a> {
 }
 
 /// `DataExport_2023-11-14` in `parent` (tdesktop's name), private to the
-/// user on Unix: it holds the whole account.
+/// user (mode 0700 on Unix, a protected owner-and-SYSTEM DACL on Windows):
+/// it holds the whole account.
 pub fn create_folder(parent: &Path, stamp: &str) -> io::Result<PathBuf> {
     let folder = create_named_folder(parent, &format!("DataExport_{stamp}"))?;
     #[cfg(unix)]
@@ -150,6 +151,10 @@ pub fn create_folder(parent: &Path, stamp: &str) -> io::Result<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o700))?;
     }
+    // Best effort: volumes without ACLs (FAT, exFAT) refuse a DACL, and the
+    // export still has to work there.
+    #[cfg(windows)]
+    let _ = super::folder_acl::make_private(&folder);
     Ok(folder)
 }
 
