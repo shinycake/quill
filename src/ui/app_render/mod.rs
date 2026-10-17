@@ -632,15 +632,20 @@ impl Render for QuillApp {
             .when(
                 self.pane_mode() == super::app::PaneMode::Connecting,
                 |this| {
-                    // Sign-in replaces the chat layout until the account is ready.
-                    this.child(div().flex_1().min_h_0().child(self.onboarding(
-                        &auth,
-                        show_phone,
-                        show_code,
-                        show_password,
-                        show_qr,
-                        cx,
-                    )))
+                    // Sign-in replaces the chat layout until the account is
+                    // ready; the first-run onboarding comes before it.
+                    let page = match self.first_run_view(cx) {
+                        Some(first_run) => first_run,
+                        None => self.onboarding(
+                            &auth,
+                            show_phone,
+                            show_code,
+                            show_password,
+                            show_qr,
+                            cx,
+                        ),
+                    };
+                    this.child(div().flex_1().min_h_0().child(page))
                 },
             )
             .when(
@@ -735,6 +740,7 @@ impl Render for QuillApp {
             .when(self.viewer.state.is_open(), |this| {
                 this.child(self.media_viewer_overlay(window, cx))
             })
+            .children(self.first_run_window_cover(cx))
             // Live: the latest status note is a transient toast floating
             // above the composer — no layout shift, no click capture, gone
             // after a few seconds. It paints above the media viewer too

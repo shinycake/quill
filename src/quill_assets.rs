@@ -144,7 +144,10 @@ gpui_kit::assets::icon_assets!(
         CircleDollarSign,
         // Passkeys (`ui::security::passkeys`).
         UserKey,
-        ScanFace
+        ScanFace,
+        // First-run highlights (`ui::first_run_ui`).
+        CodeXml,
+        Monitor
     ]
 );
 

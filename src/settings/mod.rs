@@ -11,6 +11,7 @@ mod appearance;
 mod badge;
 mod chat_prefs;
 mod chat_windows;
+mod first_run;
 mod media;
 mod video_pip;
 pub use accounts::*;
@@ -18,6 +19,7 @@ pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;
 pub use chat_windows::*;
+pub use first_run::*;
 pub use media::*;
 pub use video_pip::*;
 
