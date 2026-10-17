@@ -18,7 +18,7 @@ mod payments;
 mod platform;
 mod privacy_media;
 mod security;
-pub(in crate::ui) mod shared_media;
+pub(crate) mod shared_media;
 mod signin;
 mod status_toasts;
 mod stories;

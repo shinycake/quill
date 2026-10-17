@@ -441,9 +441,9 @@ mod tests {
     use super::*;
     use crate::telegram::envelope::{LinkPreview, LinkPreviewKind};
 
-    // 2026-10-10 07:00 UTC; tests read local time, so they compare the
-    // pieces that do not depend on the zone.
-    const DATE: i32 = 1_791_615_600;
+    // 2026-10-10 12:00 UTC: the same calendar day in every zone from
+    // UTC-12 to UTC+11.
+    const DATE: i32 = 1_791_633_600;
     const NOW: i64 = 1_791_633_600;
 
     fn no_name(_: Option<MessageSender>) -> String {

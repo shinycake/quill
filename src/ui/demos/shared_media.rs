@@ -81,6 +81,24 @@ pub(crate) fn link_message(
     )
 }
 
+/// A text message whose `label` is a text link to `url`, with no preview.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn text_link_message(id: i64, body: &str, label: &str, url: &str) -> Value {
+    let offset = body.find(label).map_or(0, |at| {
+        body.get(..at).map_or(0, |head| head.encode_utf16().count())
+    });
+    message(
+        id,
+        0,
+        false,
+        json!({ "@type": "messageText",
+            "text": text(body, json!([{ "@type": "textEntity", "offset": offset,
+                "length": label.encode_utf16().count(),
+                "type": { "@type": "textEntityTypeTextUrl", "url": url } }])) }),
+    )
+}
+
 fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
     let thumb = demo_thumb_png_path();
     let document = |id: i64, age: i64, name: &str, size: i64| {

@@ -170,8 +170,8 @@ impl QuillApp {
             return line.into_any_element();
         };
         let message_id = item.message_id;
-        let shown = link.display.clone();
-        let label = (!url.ends_with(shown.as_str())).then_some(shown);
+        // The chat's rule: the text shown is checked against the address.
+        let label = Some(link.display.clone());
         line.id(("shared-media-link", message_id.0 as u64 * 8 + ix as u64))
             .debug_selector(move || format!("shared-media-link-{ix}"))
             .role(gpui_kit::Role::Link)
@@ -191,3 +191,8 @@ impl QuillApp {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "shared_media_row_tests.rs"]
+mod tests;

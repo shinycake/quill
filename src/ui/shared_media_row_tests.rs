@@ -2,12 +2,11 @@
 //! `demo-capture` feature for gpui-kit's test support): a click on an
 //! address goes through the same safety check as a link in a chat.
 use crate::ui::app::QuillApp;
-use crate::ui::demos::shared_media::link_message;
+use crate::ui::demos::shared_media::{link_message, text_link_message};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
-use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::state::SharedMediaTab;
 
@@ -65,4 +64,22 @@ fn a_look_alike_address_asks_before_opening(cx: &mut TestAppContext) {
         .expect("the Open this link? box");
     assert_eq!(confirm.url, url);
     assert!(!confirm.suspicious.is_empty());
+}
+
+#[gpui_kit::test]
+fn a_label_that_ends_the_address_still_asks(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // The line reads "apple.com" but leads to phish-apple.com.
+    let url = "https://phish-apple.com";
+    let message = text_link_message(301, "see apple.com", "apple.com", url);
+    app.update_in(vcx, |app, _, cx| {
+        app.demo_fill_shared_media(SharedMediaTab::Links, vec![message], cx);
+    });
+    vcx.run_until_parked();
+    click(vcx, "shared-media-link-0");
+    let confirm = app
+        .read_with(vcx, |app, _| app.message_ui.open_link_confirm.clone())
+        .expect("the Open this link? box");
+    assert_eq!(confirm.url, url);
 }
