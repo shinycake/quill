@@ -5,6 +5,18 @@ use crate::ids::{ChatId, MessageId};
 use crate::telegram::envelope::*;
 pub(crate) use parse::parse_messages_payload;
 
+/// What the menu of one poll option may offer (`pollOptionProperties`,
+/// schema 1.8.68 line 6604).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PollOptionProperties {
+    /// `deletePollOption` works ("Delete Item").
+    pub can_be_deleted: bool,
+    /// The option can be replied to.
+    pub can_be_replied: bool,
+    pub can_be_replied_in_another_chat: bool,
+    pub can_get_link: bool,
+}
+
 /// Payloads for history, sending, editing, reactions, polls, translation and message menus; wrapped as
 /// [`EnvelopePayload::Messages`].
 #[derive(Debug, Clone, PartialEq)]
@@ -156,6 +168,8 @@ pub enum MessagesPayload {
     /// driver gates the link request on it instead of letting "Share
     /// link" silently 400.
     MessageProperties(MessageActions),
+    /// `pollOptionProperties` (`getPollOptionProperties` answer).
+    PollOptionProperties(PollOptionProperties),
     /// `messageViewers` (`getMessageViewers` answer).
     MessageViewers(Vec<MessageViewer>),
     /// `MessageReadDate` (`getMessageReadDate` answer).

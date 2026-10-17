@@ -20,6 +20,11 @@ pub(crate) struct MessageUi {
     pub(super) menu_link: Option<quill::text::LinkTarget>,
     /// The link under the latest right-press, and where it was pressed.
     pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
+    /// The checklist task or poll option the open message menu was opened
+    /// over (the whole message when none).
+    pub(super) menu_item: quill::composer::ReplyItem,
+    /// The task or option under the latest right-press, and where.
+    pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
     pub(super) link_tooltip: Option<super::entity_links::LinkTooltip>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
     pub(super) open_link_confirm: Option<super::entity_links::OpenLinkConfirm>,
@@ -92,6 +97,8 @@ impl MessageUi {
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             menu_link: None,
             right_clicked_link: None,
+            menu_item: quill::composer::ReplyItem::Message,
+            right_clicked_item: None,
             link_tooltip: None,
             open_link_confirm: None,
             link_popup: None,

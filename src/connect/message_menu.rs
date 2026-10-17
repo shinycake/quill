@@ -8,8 +8,9 @@ use crate::state::{MessagesPurpose, StickersPurpose};
 use crate::telegram::envelope::{ChatKind, ChatPermissions, MessageActions, MessageSender};
 use crate::telegram::requests::{
     MessageSenderRef, add_profile_audio, delete_chat_messages_by_sender,
-    delete_message_reactions_from_sender, delete_messages, get_installed_sticker_sets,
-    get_message_added_reactions, get_message_read_date, get_message_viewers, get_sticker_set,
+    delete_message_reactions_from_sender, delete_messages, delete_poll_option,
+    get_installed_sticker_sets, get_message_added_reactions, get_message_author,
+    get_message_read_date, get_message_viewers, get_poll_option_properties, get_sticker_set,
     report_chat_messages, report_supergroup_spam,
 };
 
@@ -155,6 +156,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.send_audience(extra, &get_message_read_date(extra, chat_id, message_id))?;
             self.session.audience_read_date_loading(chat_id, message_id);
         }
+        if actions.can_get_author {
+            let extra = self.session.request(
+                RequestPurpose::Messages(MessagesPurpose::GetMessageAuthor {
+                    chat_id,
+                    message_id,
+                }),
+                Some(chat_id),
+            );
+            self.send_audience(extra, &get_message_author(extra, chat_id, message_id))?;
+            self.session.audience_author_loading(chat_id, message_id);
+        }
         if can_react_list {
             let extra = self.session.request(
                 RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {
@@ -265,6 +277,68 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .audience_tab_loading(chat_id, message_id, filter);
         }
         Ok(())
+    }
+
+    /// The menu opened on one poll option: ask what it may offer
+    /// (`getPollOptionProperties`, answered locally by TDLib).
+    pub fn fetch_poll_option_properties(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_id: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() || option_id.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.session
+            .begin_poll_option_menu(chat_id, message_id, option_id);
+        let extra = self.session.request(
+            RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
+                chat_id,
+                message_id,
+            }),
+            Some(chat_id),
+        );
+        self.send_audience(
+            extra,
+            &get_poll_option_properties(extra, chat_id, message_id, option_id),
+        )?;
+        Ok(extra)
+    }
+
+    /// "Delete Item" on a poll option (`deletePollOption`). Allowed only
+    /// when `pollOptionProperties.can_be_deleted` said so for this option.
+    pub fn delete_poll_option(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_id: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let allowed = self
+            .session
+            .messages
+            .poll_option_menu
+            .as_ref()
+            .is_some_and(|menu| {
+                menu.chat_id == chat_id
+                    && menu.message_id == message_id
+                    && menu.option_id == option_id
+                    && menu.properties.is_some_and(|p| p.can_be_deleted)
+            });
+        if !allowed {
+            return Ok(None);
+        }
+        let extra = self
+            .session
+            .request(RequestPurpose::DeletePollOption, Some(chat_id));
+        self.send_audience(
+            extra,
+            &delete_poll_option(extra, chat_id, message_id, option_id),
+        )?;
+        Ok(Some(extra))
     }
 
     fn send_audience(&mut self, extra: RequestId, json: &str) -> Result<(), ConnectSendError> {

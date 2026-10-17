@@ -139,6 +139,7 @@ pub(super) fn info_row(
         order,
         div()
             .id(id)
+            .test_support()
             .flex()
             .items_center()
             .gap_3()
@@ -624,6 +625,7 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod delete_member_reaction;
+pub(in crate::ui) mod item_rows;
 mod menu_add_to_set_rows;
 mod menu_save_to_rows;
 

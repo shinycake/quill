@@ -311,6 +311,18 @@ pub(super) fn poll_option_row(
                 )
                 .child(div().flex_grow(1.0 - fill)),
         );
+    // A right-press notes which option it is over; the message menu opened
+    // by the bubble behind it then offers the option's own rows.
+    let option_id = option.id.clone();
+    row = row.on_mouse_down(
+        MouseButton::Right,
+        cx.listener(move |this, event: &MouseDownEvent, _, _| {
+            this.note_right_clicked_item(
+                event.position,
+                quill::composer::ReplyItem::PollOption(option_id.clone()),
+            );
+        }),
+    );
     if votable {
         row = row
             .role(gpui_kit::Role::Button)
@@ -325,5 +337,5 @@ pub(super) fn poll_option_row(
                 this.vote_on_poll(chat_id, message_id, index, cx);
             }));
     }
-    row.into_any_element()
+    row.test_support().into_any_element()
 }

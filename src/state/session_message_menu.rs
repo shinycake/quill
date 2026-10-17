@@ -44,6 +44,16 @@ pub struct MessageReportFlow {
     pub previous: Vec<(String, Vec<ReportOption>)>,
 }
 
+/// The poll option a right-click opened the menu on, and what TDLib allows
+/// for it. `properties` is `None` until `getPollOptionProperties` answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollOptionMenu {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub option_id: String,
+    pub properties: Option<crate::telegram::envelope::PollOptionProperties>,
+}
+
 /// One list the audience dialog loads.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Audience<T> {
@@ -76,6 +86,9 @@ pub struct MessageAudience {
     pub viewers: Audience<Vec<MessageViewer>>,
     pub read_date: Audience<MessageReadDate>,
     pub reactions: Audience<AddedReactionsPage>,
+    /// The real author of a post sent on behalf of a chat (`getMessageAuthor`),
+    /// as a user id whose name `Session::users` holds.
+    pub author: Audience<i64>,
     /// Per-reaction tabs, by `reaction_filter_key` (the "All" tab is
     /// `reactions`).
     pub filtered: HashMap<u64, Audience<AddedReactionsPage>>,
@@ -91,6 +104,7 @@ impl MessageAudience {
             viewers: Audience::NotAsked,
             read_date: Audience::NotAsked,
             reactions: Audience::NotAsked,
+            author: Audience::NotAsked,
             filtered: HashMap::new(),
             more_loading: HashSet::new(),
         }
@@ -323,6 +337,39 @@ impl Session {
         }
     }
 
+    pub fn audience_author_loading(&mut self, chat_id: ChatId, message_id: MessageId) {
+        if let Some(a) = self.audience_for(chat_id, message_id) {
+            a.author = Audience::Loading;
+        }
+    }
+
+    /// `getMessageAuthor` answered with this user.
+    pub(crate) fn accept_message_author(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        user_id: i64,
+    ) {
+        if let Some(a) = self.audience_for(chat_id, message_id) {
+            a.author = Audience::Ready(user_id);
+        }
+    }
+
+    /// The poll option the menu opens on; its properties are asked next.
+    pub fn begin_poll_option_menu(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_id: &str,
+    ) {
+        self.messages.poll_option_menu = Some(PollOptionMenu {
+            chat_id,
+            message_id,
+            option_id: option_id.to_string(),
+            properties: None,
+        });
+    }
+
     pub fn audience_reactions_loading(&mut self, chat_id: ChatId, message_id: MessageId) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
             a.reactions = Audience::Loading;
@@ -418,6 +465,14 @@ impl Session {
             }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
                     a.read_date = Audience::Failed;
+                }
+            }
+            RequestPurpose::Messages(MessagesPurpose::GetMessageAuthor {
+                chat_id,
+                message_id,
+            }) => {
+                if let Some(a) = self.audience_for(chat_id, message_id) {
+                    a.author = Audience::Failed;
                 }
             }
             RequestPurpose::Messages(MessagesPurpose::GetMessageAddedReactions {

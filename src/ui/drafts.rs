@@ -213,6 +213,10 @@ impl QuillApp {
         let draft = stored.map(|text| ChatDraft {
             text,
             reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
+            item: reply_to
+                .as_ref()
+                .map(|reply| reply.item.clone())
+                .unwrap_or_default(),
             quote: reply_to.and_then(|reply| reply.quote),
             suggested_post: None,
         });
@@ -277,6 +281,10 @@ impl QuillApp {
             .as_ref()
             .map(|draft| draft.text.clone())
             .unwrap_or_default();
+        let item = draft
+            .as_ref()
+            .map(|draft| draft.item.clone())
+            .unwrap_or_default();
         let restored_reply = preview.map(|id| {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
@@ -286,6 +294,7 @@ impl QuillApp {
                 }
                 None => ComposerReplyTo::new(chat_id, id),
             }
+            .to_item(item)
         });
         self.composer_ui.set_reply(restored_reply);
         self.set_composer_markup(&text, window, cx);

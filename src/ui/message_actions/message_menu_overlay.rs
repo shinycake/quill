@@ -87,6 +87,7 @@ impl QuillApp {
                     $order,
                     div()
                         .id($id)
+                        .test_support()
                         .flex()
                         .items_center()
                         .gap_3()
@@ -109,7 +110,9 @@ impl QuillApp {
         // Over a text selection, Reply quotes it and Copy copies it
         // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
         let selection = self.message_ui.menu_selection.clone();
-        if can_reply {
+        let content = effective_content(&message.content, message.ephemeral.as_ref());
+        // Over a checklist task, Reply becomes "Reply to Task".
+        if can_reply && !self.menu_replies_to_task(content) {
             let quote = selection.clone();
             item!(
                 order::REPLY,
@@ -704,6 +707,8 @@ impl QuillApp {
         }
         // Telegram Desktop's media block, Report, and the audience rows.
         rows.extend(self.menu_media_rows(chat_id, &message, actions, cx));
+        // The task or poll option under the pointer, a shared contact's phone.
+        rows.extend(self.menu_item_rows(chat_id, message_id, content, can_reply, cx));
         let reportable = !message.pending
             && message.id.0 > 0
             && !message.is_outgoing
@@ -770,7 +775,8 @@ impl QuillApp {
                     .into_any_element(),
             ));
         }
-        let audience_rows = self.menu_audience_rows(chat_id, &message, cx);
+        let mut audience_rows = self.menu_audience_rows(chat_id, &message, cx);
+        audience_rows.extend(self.menu_author_row(chat_id, message_id, cx));
         if !audience_rows.is_empty() {
             rows.push(menu_separator(order::AUDIENCE - 1));
             rows.extend(audience_rows);

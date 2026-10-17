@@ -95,6 +95,7 @@ pub fn send_suggested_change(
         message_id,
         quote: None,
         source_chat: None,
+        item: Default::default(),
     };
     let content = if is_media {
         json!({

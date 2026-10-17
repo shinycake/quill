@@ -643,6 +643,7 @@ fn g1_send_reply_quote_rides_send_text() {
         message_id: MessageId(101),
         quote: Some(("sel".to_string(), 7)),
         source_chat: None,
+        item: Default::default(),
     };
     let json = send_text(
         RequestId(1),

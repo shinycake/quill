@@ -13,6 +13,7 @@ mod group_call_bar;
 mod groups_admin;
 mod info_actions;
 mod info_panels;
+mod item_menus;
 mod media;
 mod messages;
 mod payments;

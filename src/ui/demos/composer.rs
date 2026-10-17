@@ -125,12 +125,10 @@ impl QuillApp {
         match mode.as_str() {
             "reply" => {
                 self.composer_ui
-                    .set_reply(Some(quill::composer::ComposerReplyTo {
-                        chat_id: ChatId(-2002),
-                        message_id: quill::ids::MessageId(10),
-                        quote: None,
-                        target_chat: None,
-                    }));
+                    .set_reply(Some(quill::composer::ComposerReplyTo::new(
+                        ChatId(-2002),
+                        quill::ids::MessageId(10),
+                    )));
             }
             "edit" | "confirm" => {
                 let edit = self

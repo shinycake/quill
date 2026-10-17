@@ -261,6 +261,18 @@ pub(crate) fn parse_messages_payload(
                     can_set_fact_check: flag("can_set_fact_check"),
                     can_add_offer: flag("can_add_offer"),
                     can_edit_suggested_post_info: flag("can_edit_suggested_post_info"),
+                    can_get_author: flag("can_get_author"),
+                }),
+            ))
+        }
+        "pollOptionProperties" => {
+            let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+            Ok(EnvelopePayload::Messages(
+                MessagesPayload::PollOptionProperties(PollOptionProperties {
+                    can_be_deleted: flag("can_be_deleted"),
+                    can_be_replied: flag("can_be_replied"),
+                    can_be_replied_in_another_chat: flag("can_be_replied_in_another_chat"),
+                    can_get_link: flag("can_get_link"),
                 }),
             ))
         }

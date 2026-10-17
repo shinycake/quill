@@ -197,7 +197,7 @@ pub use session_history_window::MentionSearch;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
-    StickerSetView, StickerSetViewStage, reaction_filter_key,
+    PollOptionMenu, StickerSetView, StickerSetViewStage, reaction_filter_key,
 };
 pub use session_message_story::{
     StoryCardState, StoryPreview, media_unlocked_note, message_story_key,

@@ -536,6 +536,18 @@ impl Session {
             // `messageProperties`. The driver gates the chained
             // `getMessageLink` on `can_get_link` before `apply` takes
             // the pending request; nothing to reduce here.
+            MessagesPayload::PollOptionProperties(properties) => {
+                if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
+                    chat_id,
+                    message_id,
+                })) = pending.map(|p| p.purpose)
+                    && let Some(menu) = self.messages.poll_option_menu.as_mut()
+                    && menu.chat_id == chat_id
+                    && menu.message_id == message_id
+                {
+                    menu.properties = Some(properties);
+                }
+            }
             MessagesPayload::MessageProperties(actions) => {
                 if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                     chat_id,

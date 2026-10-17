@@ -798,8 +798,22 @@ impl QuillApp {
             })
             .flatten();
         let title = quill::reply_options::reply_bar_title(sender.as_deref(), from_chat.as_deref());
+        // A reply to one checklist task or poll option shows its text.
+        let item_line = message.as_ref().and_then(|m| {
+            quill::composer::reply_item::item_text(
+                quill::telegram::envelope::effective_content(&m.content, m.ephemeral.as_ref()),
+                &reply.item,
+            )
+        });
         // Slice G1: show the quoted part when the reply carries one.
         let preview: AnyElement = match (&reply.quote, message.as_ref().map(|m| &m.content)) {
+            _ if item_line.is_some() => div()
+                .text_sm()
+                .truncate()
+                .child(super::bidi_line::one_line_plain(
+                    super::search_ui::one_line_preview(&item_line.unwrap_or_default()),
+                ))
+                .into_any_element(),
             (Some(quote), _) => div()
                 .text_sm()
                 .truncate()

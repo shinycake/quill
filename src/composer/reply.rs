@@ -2,6 +2,39 @@
 
 use super::*;
 
+/// The part of a message a reply points at: the whole message, one
+/// checklist task (`checklist_task_id`) or one poll option
+/// (`poll_option_id`), as TDLib's `inputMessageReplyToMessage` carries them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ReplyItem {
+    #[default]
+    Message,
+    Task(i32),
+    PollOption(String),
+}
+
+impl ReplyItem {
+    /// `checklist_task_id` of the request; 0 when not a task.
+    pub fn task_id(&self) -> i32 {
+        match self {
+            Self::Task(id) => *id,
+            _ => 0,
+        }
+    }
+
+    /// `poll_option_id` of the request; empty when not an option.
+    pub fn option_id(&self) -> &str {
+        match self {
+            Self::PollOption(id) => id,
+            _ => "",
+        }
+    }
+
+    pub fn is_message(&self) -> bool {
+        matches!(self, Self::Message)
+    }
+}
+
 /// Message the composer is quoting (tdesktop `FieldHeader::replyToMessage`).
 /// Ids and the quote only: the bar reads the message from the history each
 /// time it draws, so an edit shows and a delete cancels.
@@ -16,6 +49,8 @@ pub struct ComposerReplyTo {
     /// "Reply in Another Chat": the chat this reply will be sent into when
     /// it is not `chat_id`. `None` for the usual same-chat reply.
     pub target_chat: Option<ChatId>,
+    /// The task or poll option the reply points at.
+    pub item: ReplyItem,
 }
 
 /// Slice G1: a quoted part of the replied-to message.
@@ -32,7 +67,14 @@ impl ComposerReplyTo {
             message_id,
             quote: None,
             target_chat: None,
+            item: ReplyItem::Message,
         }
+    }
+
+    /// Reply to one checklist task or poll option of the message.
+    pub fn to_item(mut self, item: ReplyItem) -> Self {
+        self.item = item;
+        self
     }
 
     /// Slice G1: reply carrying a validated partial quote.
@@ -42,6 +84,7 @@ impl ComposerReplyTo {
             message_id,
             quote: Some(quote),
             target_chat: None,
+            item: ReplyItem::Message,
         }
     }
 
@@ -71,13 +114,13 @@ impl ComposerReplyTo {
                 message_id: self.message_id,
                 quote,
                 source_chat: None,
+                item: self.item.clone(),
             })
         } else if self.target_chat == Some(chat) {
-            Some(crate::telegram::SendReply::external(
-                self.chat_id,
-                self.message_id,
-                quote,
-            ))
+            Some(
+                crate::telegram::SendReply::external(self.chat_id, self.message_id, quote)
+                    .with_item(self.item.clone()),
+            )
         } else {
             None
         }
@@ -101,6 +144,7 @@ impl ComposerReplyTo {
                     .as_ref()
                     .map(|quote| (quote.text.clone(), quote.position)),
                 source_chat: None,
+                item: self.item.clone(),
             }
         })
     }

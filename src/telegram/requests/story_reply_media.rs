@@ -133,6 +133,7 @@ mod tests {
                     message_id: MessageId(9),
                     quote: None,
                     source_chat: None,
+                    item: Default::default(),
                 }),
                 topic_id: Some(3),
             },

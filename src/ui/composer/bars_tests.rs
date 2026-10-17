@@ -228,12 +228,8 @@ fn the_x_button_cancels_without_asking(cx: &mut TestAppContext) {
 
 fn reply_to_ada(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     app.update(cx, |app, cx| {
-        app.composer_ui.set_reply(Some(ComposerReplyTo {
-            chat_id: GROUP,
-            message_id: MessageId(10),
-            quote: None,
-            target_chat: None,
-        }));
+        app.composer_ui
+            .set_reply(Some(ComposerReplyTo::new(GROUP, MessageId(10))));
         cx.notify();
     });
     frames(cx);

@@ -165,7 +165,16 @@ fn checklist_task_row(
         .py_1()
         .rounded_md()
         .child(mark)
-        .child(text);
+        .child(text)
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, event: &MouseDownEvent, _, _| {
+                this.note_right_clicked_item(
+                    event.position,
+                    quill::composer::ReplyItem::Task(task_id),
+                );
+            }),
+        );
     if list.can_mark_tasks_as_done {
         row = row
             .role(gpui_kit::Role::Button)
@@ -187,7 +196,7 @@ fn checklist_task_row(
                 this.toggle_checklist_task(chat_id, message_id, task_id, cx);
             }));
     }
-    row.into_any_element()
+    row.test_support().into_any_element()
 }
 
 #[cfg(test)]
