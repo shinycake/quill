@@ -63,13 +63,22 @@ UPDATE_BINARIES = {"linux-x86_64": "quill-linux-x86_64"}
 INSTALL = """\
 ## Installing
 
-**macOS (Apple Silicon, macOS 14+).** Unzip `quill-macos-aarch64.zip` and move
-`Quill.app` to Applications. The app is not notarized (Quill has no Apple
-Developer ID; it is only ad-hoc signed), so macOS blocks the first launch:
-open Quill once, then go to System Settings > Privacy & Security and click
-**Open Anyway** next to the Quill message, and confirm. On macOS 14 you can
-instead Control-click Quill.app in Finder and choose **Open**. Alternatively
-run `xattr -dr com.apple.quarantine /Applications/Quill.app` in Terminal.
+**macOS (Apple Silicon, macOS 14+).** Paste this into Terminal to install or
+update Quill in Applications:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-install.sh | bash
+```
+
+It downloads `quill-macos-aarch64.zip`, checks its SHA-256 and signature, and
+installs `Quill.app`. Quill opens straight away, with no security warning.
+
+If you download the zip in a browser instead, macOS blocks the first launch,
+because Quill is not notarized (it has no paid Apple Developer ID; it is only
+ad-hoc signed). Move `Quill.app` to Applications and run
+`xattr -dr com.apple.quarantine /Applications/Quill.app` in Terminal, or open
+Quill once, then go to System Settings > Privacy & Security, click
+**Open Anyway** next to the Quill message, and confirm.
 
 **Linux (x86_64).** `tar -xzf quill-linux-x86_64-bundle.tar.gz`, then either run
 `quill-linux-x86_64/quill` in place or `quill-linux-x86_64/install.sh` to install

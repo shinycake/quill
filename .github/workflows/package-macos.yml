@@ -140,6 +140,17 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/extract/Quill.app"
           bash scripts/check-bundle-macho.sh "$RUNNER_TEMP/extract/Quill.app"
           "$RUNNER_TEMP/extract/Quill.app/Contents/MacOS/quill" --version
+      # The one-line installer from the README, run on this build's zip.
+      - name: smoke the installer script
+        run: |
+          QUILL_ZIP_URL="file://$PWD/dist/macos/quill-macos-aarch64.zip" \
+          QUILL_SHA256="$(awk '{print $1}' dist/macos/quill-macos-aarch64.zip.sha256)" \
+          QUILL_INSTALL_DIR="$RUNNER_TEMP/apps" QUILL_NO_OPEN=1 \
+            bash scripts/macos-install.sh
+          app="$RUNNER_TEMP/apps/Quill.app"
+          if xattr -r "$app" | grep -q com.apple.quarantine; then echo "installed app is quarantined" >&2; exit 1; fi
+          codesign --verify --deep --strict "$app"
+          "$app/Contents/MacOS/quill" --version
       - uses: actions/upload-artifact@v7
         with:
           name: quill-macos-aarch64

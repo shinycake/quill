@@ -48,7 +48,15 @@ It is not a clone of Telegram Desktop. The aim is an app that feels fast, behave
 
 ## Download
 
-Release packages are published on the [GitHub Releases page](https://github.com/shinycake/quill/releases). No release has been published yet, so for now you need to build from source.
+Release packages are published on the [GitHub Releases page](https://github.com/shinycake/quill/releases).
+
+On a Mac, paste this into Terminal to install or update Quill in Applications:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-install.sh | bash
+```
+
+Quill has no paid Apple Developer ID, so it isn't notarized. A zip downloaded in a browser is quarantined and macOS blocks the first launch; the script downloads with `curl`, which doesn't quarantine, checks the release's SHA-256 and the app's signature, and Quill opens without a warning. If you did download the zip in a browser, run `xattr -dr com.apple.quarantine /Applications/Quill.app` once, or allow it under System Settings > Privacy & Security > Open Anyway.
 
 The packages target:
 

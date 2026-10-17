@@ -241,7 +241,9 @@ archive beyond ntgcalls'.
 
 ## Not done / follow-ups
 
-- No notarization or Developer ID (owner decision); Gatekeeper will warn.
+- No notarization or Developer ID (owner decision). A browser download is
+  quarantined and Gatekeeper warns; the Terminal installer avoids it
+  (docs/decisions/macos-install-without-notarization.md).
 - No Windows code signing or installer; SmartScreen will warn.
 - No in-app self-update on macOS/Windows (unchanged).
 - No Linux arm64 or Windows arm64 package.
