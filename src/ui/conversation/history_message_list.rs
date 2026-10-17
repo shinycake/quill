@@ -15,6 +15,29 @@ struct ThreadWindow {
 }
 
 impl QuillApp {
+    /// Keep the top row and its offset for the open history while the
+    /// reader is away from the tail (tdesktop `countScrollState`); at the
+    /// tail the position is forgotten (`forgetScrollState`).
+    fn remember_scroll(&mut self, key: quill::state::ScrollKey, cx: &Context<Self>) {
+        if self.history.key != Some(key)
+            || self.history.anchor_pending
+            || self.history.restore_scroll
+            || self.history.rows.is_empty()
+        {
+            return;
+        }
+        let saved = self
+            .history
+            .scroller
+            .read(cx)
+            .top_anchor()
+            .and_then(|(ix, offset)| {
+                let anchor = self.history.rows.get(ix)?.first_id()?;
+                Some(quill::state::SavedScroll { anchor, offset })
+            });
+        self.history.scroll_memory.record(key, saved);
+    }
+
     /// kit Phase 3: the shared history row list used by both chat history
     /// and per-topic history, virtualized through the kit `MessageScroller`
     /// — only visible rows build elements. `messages` are oldest-first.
@@ -269,8 +292,15 @@ impl QuillApp {
                 // A new or replaced window anchors once its rows are in.
                 self.history.window_epoch = window_epoch;
                 self.history.anchor_pending = true;
+                // The window of a chat already open was replaced (jump to
+                // the latest, a date jump): the position left behind is not
+                // where the reader goes back to.
+                if self.history.key == Some(history_key) && !self.history.restore_scroll {
+                    self.history.scroll_memory.forget(history_key);
+                }
             }
             if self.history.key != Some(history_key) {
+                self.history.restore_scroll = true;
                 // New chat/topic (or first render): reset; the anchor below
                 // picks the position.
                 self.history.key = Some(history_key);
@@ -434,6 +464,20 @@ impl QuillApp {
                 if highlighted.is_some() {
                     self.history.last_highlight = highlight_id;
                 }
+                // tdesktop reads `scrollTopItem` back when the chat is shown
+                // at its default position; a jump target wins and drops it.
+                let restore = std::mem::take(&mut self.history.restore_scroll);
+                let rows = &self.history.rows;
+                let (open, saved_row) = quill::state::scroll_open(
+                    restore
+                        .then(|| self.history.scroll_memory.get(history_key))
+                        .flatten(),
+                    highlight_id.is_some(),
+                    |id| rows.iter().position(|row| row.contains(id)),
+                );
+                if open == quill::state::ScrollOpen::Jump {
+                    self.history.scroll_memory.forget(history_key);
+                }
                 let target = highlighted.or_else(|| {
                     self.history
                         .rows
@@ -442,11 +486,16 @@ impl QuillApp {
                         // A little context above the divider.
                         .map(|ix| ix.saturating_sub(1))
                 });
-                self.history.scroller.update(cx, |state, cx| match target {
-                    Some(ix) => {
-                        state.scroll_to_item(ix, cx);
-                    }
-                    None => state.scroll_to_end(cx),
+                self.history.scroller.update(cx, |state, cx| {
+                    match (open, saved_row, target) {
+                        (quill::state::ScrollOpen::Restore(saved), Some(ix), _) => {
+                            state.scroll_to_item_offset(ix, saved.offset, cx);
+                        }
+                        (_, _, Some(ix)) => {
+                            state.scroll_to_item(ix, cx);
+                        }
+                        _ => state.scroll_to_end(cx),
+                    };
                 });
             }
             // Chat-search jump: scroll the highlight into view once per new
@@ -471,6 +520,7 @@ impl QuillApp {
             let fresh = chrome_inputs.stale_rows(&self.history.rows);
             self.patch_row_chrome(fresh, session_revision, rows_started, cx);
         }
+        self.remember_scroll(history_key, cx);
         self.history.shared = HistoryShared { media_roots };
         // A new jump (search hit, reply, pinned message) restarts the
         // highlight fade, even onto the message highlighted before.

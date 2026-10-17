@@ -149,6 +149,32 @@ impl MessageScrollerState {
         true
     }
 
+    /// The row at the top of the viewport and how many pixels of it are
+    /// scrolled above the viewport. `None` while the list rests at its
+    /// tail, so callers keep a position only for a reader who moved away.
+    pub fn top_anchor(&self) -> Option<(usize, f32)> {
+        if !self.is_scrolled_up() {
+            return None;
+        }
+        let top = self.list_state.logical_scroll_top();
+        (top.item_ix < self.list_state.item_count())
+            .then(|| (top.item_ix, f32::from(top.offset_in_item)))
+    }
+
+    /// Scroll so row `index` starts `offset` pixels above the viewport top.
+    pub fn scroll_to_item_offset(&mut self, index: usize, offset: f32, cx: &mut Context<Self>) -> bool {
+        if index >= self.list_state.item_count() {
+            return false;
+        }
+
+        self.list_state.scroll_to(ListOffset {
+            item_ix: index,
+            offset_in_item: px(offset.max(0.)),
+        });
+        cx.notify();
+        true
+    }
+
     /// Resume tail following and scroll to the latest row.
     pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
         self.list_state.set_follow_mode(FollowMode::Tail);

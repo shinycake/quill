@@ -44,6 +44,11 @@ pub(crate) struct HistoryUi {
     /// The scroller must anchor once rows exist: the jump highlight, else
     /// the "Unread messages" divider, else the bottom.
     pub(super) anchor_pending: bool,
+    /// The chat was just opened: its remembered position (if any) is
+    /// read once its rows exist. Cleared by the first anchor.
+    pub(super) restore_scroll: bool,
+    /// Where each chat, topic or thread was left away from the tail.
+    pub(super) scroll_memory: quill::state::ScrollMemory,
     /// The window stopped short of the latest message at the last render:
     /// rows appended since are a newer page, not live messages.
     pub(super) had_newer: bool,
@@ -134,6 +139,8 @@ impl HistoryUi {
             ends: None,
             window_epoch: 0,
             anchor_pending: false,
+            restore_scroll: false,
+            scroll_memory: Default::default(),
             had_newer: false,
             rows_key: None,
             chrome_session_revision: None,

@@ -15,3 +15,8 @@ selected tab keeps the key and springs as before; a bounds-only change
 value immediately, so the indicator jumps. The indicator carries a
 `tab-indicator` debug selector under `test` / `test-support`. Background:
 `docs/decisions/folder-tabs-no-badge-spring.md`.
+
+`src/message_scroller.rs`: `MessageScrollerState::top_anchor` and
+`scroll_to_item_offset` expose the list's top row and its pixel offset, so
+Quill can remember where a chat was left and return to it
+(`docs/decisions/sweep-scroll-restore.md`). Re-apply both when re-vendoring.
