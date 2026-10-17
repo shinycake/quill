@@ -166,7 +166,10 @@ pub(super) struct VideoEditorDialog {
 /// there and can be replaced.
 fn is_editor_copy(path: &Path) -> bool {
     let folder = quill::scratch::temp_work_dir("quill-video-edits");
-    path.parent() == Some(folder.as_path())
+    // The folder name, not its full path: an attachment path may be
+    // canonicalized (`/private/var/...`, `\\?\...`) while the temp dir is not.
+    let name = path.parent().and_then(Path::file_name);
+    name.is_some() && name == folder.file_name()
 }
 
 /// A JPEG still as a GPUI picture, read off the UI thread.
@@ -682,5 +685,20 @@ mod tests {
         assert!(is_editor_copy(&dir.join("edit-1.mp4")));
         assert!(!is_editor_copy(Path::new("/home/me/clip.mp4")));
         assert!(!is_editor_copy(Path::new("clip.mp4")));
+    }
+
+    #[test]
+    fn a_canonicalized_editor_copy_is_still_recognised() {
+        let dir = quill::scratch::temp_work_dir("quill-video-edits");
+        let Some(name) = dir.file_name() else {
+            panic!("the editor folder has a name");
+        };
+        let moved = Path::new("/private/elsewhere")
+            .join(name)
+            .join("edit-1.mp4");
+        assert!(is_editor_copy(&moved));
+        assert!(!is_editor_copy(
+            &Path::new("/private/elsewhere").join("edit-1.mp4")
+        ));
     }
 }
