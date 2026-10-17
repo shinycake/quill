@@ -101,6 +101,8 @@ pub struct StoriesState {
     pub live_levels: Vec<crate::telegram::envelope::GroupCallMessageLevel>,
     /// `paid_group_call_message_star_count_max`, once known.
     pub live_max_stars: Option<i64>,
+    /// The bursts the live story Stars effect plays.
+    pub live_bursts: LiveBursts,
 }
 
 impl StoriesState {
@@ -133,6 +135,7 @@ impl StoriesState {
             live: None,
             live_levels: Vec::new(),
             live_max_stars: None,
+            live_bursts: LiveBursts::Unasked,
         }
     }
 }

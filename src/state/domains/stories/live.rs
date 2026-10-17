@@ -6,7 +6,7 @@ use crate::live_story::{CommentsTracker, PendingLiveReaction, normalize_levels, 
 use crate::state::*;
 use crate::telegram::envelope::{
     AvailableMessageSender, GroupCallMessageLevel, LiveStoryDonors, LiveStoryPayload,
-    ParsedGroupCallMessage, ParsedGroupCallParticipant,
+    ParsedGroupCallMessage, ParsedGroupCallParticipant, StickerItem,
 };
 
 /// In-flight live story requests; wrapped as [`StoriesPurpose::Live`].
@@ -32,6 +32,31 @@ pub enum LiveStoryPurpose {
     RemovePendingReactions { group_call_id: i32 },
     /// `deleteGroupCallMessages` / `deleteGroupCallMessagesBySender`.
     DeleteMessages { group_call_id: i32 },
+    /// `getCustomEmojiReactionAnimations`; answered with `stickers`.
+    GetBursts,
+}
+
+/// The server's generic reaction bursts (`getCustomEmojiReactionAnimations`,
+/// tdesktop's `inputStickerSetEmojiGenericAnimations`), which the Stars
+/// effect plays in place of tdesktop's bundled ones. Asked for once per
+/// session, when a live story is first joined; a failure asks again on the
+/// next join.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum LiveBursts {
+    #[default]
+    Unasked,
+    Requested,
+    Loaded(Vec<StickerItem>),
+}
+
+impl LiveBursts {
+    /// The bursts known so far.
+    pub fn stickers(&self) -> &[StickerItem] {
+        match self {
+            Self::Loaded(stickers) => stickers,
+            Self::Unasked | Self::Requested => &[],
+        }
+    }
 }
 
 /// Stars someone just added: the viewer flies a badge up from the Stars
@@ -350,9 +375,18 @@ impl Session {
         }
     }
 
+    /// The `stickers` answer to `getCustomEmojiReactionAnimations`.
+    pub(crate) fn set_live_bursts(&mut self, stickers: Vec<StickerItem>) {
+        self.stories.live_bursts = LiveBursts::Loaded(stickers);
+    }
+
     /// A live story request failed.
     pub(crate) fn apply_live_story_error(&mut self, purpose: LiveStoryPurpose, err: &TdError) {
         let group_call_id = match purpose {
+            LiveStoryPurpose::GetBursts => {
+                self.stories.live_bursts = LiveBursts::Unasked;
+                return;
+            }
             LiveStoryPurpose::GetStreamer { group_call_id }
             | LiveStoryPurpose::GetTopDonors { group_call_id }
             | LiveStoryPurpose::GetMessageSenders { group_call_id }
@@ -369,7 +403,8 @@ impl Session {
         let reason = error_reason(err);
         match purpose {
             // Nothing to show: the viewer keeps its defaults.
-            LiveStoryPurpose::GetStreamer { .. }
+            LiveStoryPurpose::GetBursts
+            | LiveStoryPurpose::GetStreamer { .. }
             | LiveStoryPurpose::GetTopDonors { .. }
             | LiveStoryPurpose::GetMessageSenders { .. } => {}
             LiveStoryPurpose::AddPendingReaction { stars, .. } => {

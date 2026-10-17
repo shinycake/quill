@@ -1,15 +1,16 @@
 //! Connect driver: the live story being watched. After the `joinLiveStory`
 //! answer it asks for the streamer, the top donors and who comments may be
-//! sent as; it sends comments and holds Star reactions for the Undo window
-//! (tdesktop `Messages::reactionsPaidAdd`, `kPaidAccumulatePeriod`).
+//! sent as, and once per session the Stars effect's bursts; it sends
+//! comments and holds Star reactions for the Undo window (tdesktop
+//! `Messages::reactionsPaidAdd`, `kPaidAccumulatePeriod`).
 //! Nothing here spends Stars unless the viewer asked for it.
 use super::*;
 use crate::calls::live_video::LiveKey;
 use crate::live_story::{PendingLiveReaction, comment_text};
 use crate::paid_reaction::Refusal;
-use crate::state::{LiveStoryPurpose, StoriesPurpose};
+use crate::state::{LiveBursts, LiveStoryPurpose, StoriesPurpose};
 use crate::telegram::requests::{
-    add_pending_live_story_reaction, commit_pending_live_story_reactions,
+    add_pending_live_story_reaction, get_custom_emoji_reaction_animations, commit_pending_live_story_reactions,
     delete_group_call_messages, delete_group_call_messages_by_sender,
     get_live_story_available_message_senders, get_live_story_streamer, get_live_story_top_donors,
     remove_pending_live_story_reactions, send_live_story_comment, set_live_story_message_sender,
@@ -74,6 +75,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             LiveStoryPurpose::GetMessageSenders { group_call_id },
             |extra| get_live_story_available_message_senders(extra, group_call_id),
         )?;
+        self.maybe_fetch_live_bursts()
+    }
+
+    /// The Stars effect's bursts, once per session (tdesktop asks for the
+    /// generic animations once too, `Reactions::requestGeneric`).
+    fn maybe_fetch_live_bursts(&mut self) -> Result<(), ConnectSendError> {
+        if self.session.stories.live_bursts != LiveBursts::Unasked {
+            return Ok(());
+        }
+        self.live_story_request(
+            LiveStoryPurpose::GetBursts,
+            get_custom_emoji_reaction_animations,
+        )?;
+        self.session.stories.live_bursts = LiveBursts::Requested;
         Ok(())
     }
 
