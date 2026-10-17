@@ -383,6 +383,10 @@ impl QuillApp {
         if live.driver.grams_tick(settings_open) {
             progressed = true;
         }
+        // Bots named by a group's command list that the app does not know.
+        if live.driver.group_bot_users_tick() {
+            progressed = true;
+        }
         // `parity:proxy-settings`: first `getProxies` + auto-switch.
         if live.driver.proxy_tick(quill::state::unix_ms_now()) {
             progressed = true;

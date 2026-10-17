@@ -3,6 +3,7 @@ use crate::composer::{
     CommandBot, CommandMenuItem, group_command_menu_items, merge_command_menu_items,
 };
 use crate::state::*;
+use crate::telegram::envelope::GroupBotCommands;
 
 impl Session {
     /// Phase 3.3: the `/` menu rows of a chat. A bot chat lists the bot's
@@ -34,6 +35,25 @@ impl Session {
             item.bot = bot.clone();
         }
         items
+    }
+
+    /// Keep a group's `bot_commands` and note the bots whose user is not
+    /// cached yet; the driver asks for them once each.
+    pub(crate) fn store_group_bot_commands(
+        &mut self,
+        key: GroupCommandsKey,
+        bot_commands: Vec<GroupBotCommands>,
+    ) {
+        for entry in &bot_commands {
+            let id = entry.bot_user_id;
+            if !self.users.contains_key(&id)
+                && !self.bots.asked_bot_users.contains(&id)
+                && !self.bots.bot_users_wanted.contains(&id)
+            {
+                self.bots.bot_users_wanted.push(id);
+            }
+        }
+        self.bots.group_bot_commands.insert(key, bot_commands);
     }
 
     /// Which `bot_commands` list a chat reads: basic groups and megagroups

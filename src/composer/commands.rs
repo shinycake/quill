@@ -11,8 +11,8 @@ pub struct TriggerToken<'a> {
     pub query: &'a str,
 }
 
-/// Longest `@name` query tdesktop offers mentions for.
-const MENTION_QUERY_MAX: usize = 32;
+/// Longest `@name` query tdesktop scans back over.
+const MENTION_QUERY_MAX: usize = 63;
 /// Longest command name and `@bot` suffix tdesktop matches.
 const COMMAND_NAME_MAX: usize = 64;
 const COMMAND_BOT_MAX: usize = 32;
@@ -39,9 +39,12 @@ pub fn mention_trigger(text: &str, caret: usize) -> Option<TriggerToken<'_>> {
                 .chars()
                 .next_back()
                 .is_none_or(|before| !is_name_char(before));
-            return starts_word.then(|| TriggerToken {
+            let query = head.get(at + 1..).unwrap_or_default();
+            // tdesktop wants a letter or digit first: `@_` is not a mention.
+            let valid_start = query.chars().next().is_none_or(char::is_alphanumeric);
+            return (starts_word && valid_start).then_some(TriggerToken {
                 range: at..caret,
-                query: head.get(at + 1..).unwrap_or_default(),
+                query,
             });
         }
         count += 1;
@@ -79,20 +82,15 @@ pub fn complete_mention(
 /// tdesktop `HistoryWidget::insertBotCommand`: the composer text after
 /// choosing a bot command from a panel. The command goes first, then a
 /// space, then what was typed. A command already leading the field is
-/// replaced instead of stacked. `bot_username` adds `@bot` to a command
-/// that has none; callers pass it only in groups that have bots.
-pub fn insert_bot_command_text(current: &str, command: &str, bot_username: Option<&str>) -> String {
+/// replaced instead of stacked. The panels are in a bot's own chat, which
+/// never adds `@bot`; a clicked command link in a group message adds it in
+/// `send_bot_command`.
+pub fn insert_bot_command_text(current: &str, command: &str) -> String {
     let mut insertion = if command.starts_with('/') {
         command.to_string()
     } else {
         format!("/{command}")
     };
-    if let Some(username) = bot_username.filter(|name| !name.is_empty())
-        && !insertion.contains('@')
-    {
-        insertion.push('@');
-        insertion.push_str(username);
-    }
     insertion.push(' ');
     insertion.push_str(strip_leading_command(current));
     insertion

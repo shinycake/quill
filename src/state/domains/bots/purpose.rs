@@ -6,6 +6,9 @@ use crate::state::*;
 /// [`RequestPurpose::Bots`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BotsPurpose {
+    /// `getUser` for a bot named in a group's `bot_commands` that the
+    /// session does not know yet; the answer fills the `/` menu.
+    GroupBotUser,
     StopPendingMessage {
         topic_id: i32,
         draft_id: i64,

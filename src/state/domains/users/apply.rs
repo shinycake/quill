@@ -77,11 +77,14 @@ impl Session {
                 self.accept_secret_chat(&secret_chat);
             }
             UsersPayload::Me { user_id, user } => {
-                if pending.map(|p| p.purpose)
-                    == Some(RequestPurpose::Payments(PaymentsPurpose::Grams(
-                        crate::premium_hub::ton::GramsPurpose::PeerUser,
-                    )))
-                {
+                if matches!(
+                    pending.map(|p| p.purpose),
+                    Some(
+                        RequestPurpose::Payments(PaymentsPurpose::Grams(
+                            crate::premium_hub::ton::GramsPurpose::PeerUser,
+                        )) | RequestPurpose::Bots(BotsPurpose::GroupBotUser)
+                    )
+                ) {
                     // Settings → My Grams asked for a user its history
                     // names; store it unless an update already did.
                     if let Some(user) = user

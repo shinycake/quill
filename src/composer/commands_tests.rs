@@ -18,6 +18,33 @@ fn mention_trigger_needs_a_word_start_and_name_chars() {
     assert_eq!(mention("hi @al-x"), None);
     assert_eq!(mention("no at"), None);
     assert_eq!(mention("(@al"), Some((1..4, "al".into())));
+    // A leading `_` is not a mention (tdesktop wants a letter or digit).
+    assert_eq!(mention("@_a"), None);
+    assert_eq!(mention("a_b @a_b"), Some((4..8, "a_b".into())));
+    // Up to 63 characters are scanned.
+    assert!(mention(&format!("@{}", "a".repeat(63))).is_some());
+    assert_eq!(mention(&format!("@{}", "a".repeat(64))), None);
+}
+
+#[test]
+fn triggers_work_after_multi_byte_text() {
+    let text = "日本 @ab";
+    assert_eq!(mention(text), Some((7..10, "ab".into())));
+    let token = mention_trigger(text, text.len() - 1).map(|t| (t.range, t.query));
+    assert_eq!(token, Some((7..9, "a")));
+    // Inside a CJK character: not a boundary.
+    assert_eq!(mention_trigger(text, 1), None);
+    assert_eq!(mention("é @a"), Some((3..5, "a".into())));
+    assert_eq!(mention("👨\u{200d}👩 @x"), Some((12..14, "x".into())));
+    assert_eq!(mention("日@ab"), None);
+    assert_eq!(command("/a日"), Some((0..5, "a日".into())));
+    assert_eq!(command("/日本@bot"), Some((0..11, "日本@bot".into())));
+    let done = complete_mention("日本 @ab 終", 10, 7, "abe", "Abe");
+    assert_eq!(done, Some(("日本 @abe  終".into(), 12)));
+    assert_eq!(
+        complete_command_at("/日 本", 0..4, "/start"),
+        Some(("/start".into(), 7))
+    );
 }
 
 #[test]
@@ -55,51 +82,32 @@ fn complete_mention_replaces_the_token_before_the_caret() {
 
 #[test]
 fn bot_command_insert_puts_the_command_first_and_replaces_a_leading_one() {
-    assert_eq!(insert_bot_command_text("", "start", None), "/start ");
-    assert_eq!(insert_bot_command_text("   ", "start", None), "/start    ");
-    assert_eq!(
-        insert_bot_command_text("hello", "start", None),
-        "/start hello"
-    );
+    assert_eq!(insert_bot_command_text("", "start"), "/start ");
+    assert_eq!(insert_bot_command_text("   ", "start"), "/start    ");
+    assert_eq!(insert_bot_command_text("hello", "start"), "/start hello");
     // An existing leading command is replaced, not stacked.
-    assert_eq!(insert_bot_command_text("/help", "start", None), "/start ");
+    assert_eq!(insert_bot_command_text("/help", "start"), "/start ");
+    assert_eq!(insert_bot_command_text("/help me", "start"), "/start me");
     assert_eq!(
-        insert_bot_command_text("/help me", "start", None),
-        "/start me"
-    );
-    assert_eq!(
-        insert_bot_command_text("/help@old_bot  me", "start", None),
+        insert_bot_command_text("/help@old_bot  me", "start"),
         "/start  me"
     );
     // Not a command token: kept.
     assert_eq!(
-        insert_bot_command_text("/help!me", "start", None),
+        insert_bot_command_text("/help!me", "start"),
         "/start /help!me"
     );
     assert_eq!(
-        insert_bot_command_text("hi /help", "start", None),
+        insert_bot_command_text("hi /help", "start"),
         "/start hi /help"
     );
-}
-
-#[test]
-fn bot_command_insert_adds_the_bot_name_only_when_it_has_none() {
-    assert_eq!(
-        insert_bot_command_text("", "start", Some("my_bot")),
-        "/start@my_bot "
-    );
-    assert_eq!(
-        insert_bot_command_text("", "/start@other", Some("my_bot")),
-        "/start@other "
-    );
-    assert_eq!(insert_bot_command_text("", "start", Some("")), "/start ");
 }
 
 #[test]
 fn overlong_leading_command_is_not_replaced() {
     let long = format!("/{}", "a".repeat(65));
     assert_eq!(
-        insert_bot_command_text(&long, "start", None),
+        insert_bot_command_text(&long, "start"),
         format!("/start {long}")
     );
 }

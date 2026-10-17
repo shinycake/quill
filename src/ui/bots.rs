@@ -845,8 +845,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let next =
-            quill::composer::insert_bot_command_text(&self.composer_markup(cx), command, None);
+        let next = quill::composer::insert_bot_command_text(&self.composer_markup(cx), command);
         self.set_composer_markup(&next, window, cx);
         self.composer.update(cx, |input, cx| {
             let end = input.value().len();

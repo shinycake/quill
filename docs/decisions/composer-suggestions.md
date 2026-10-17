@@ -19,8 +19,10 @@
   non-name character before it; `/` is a command only when it is the first
   character of the field (`/cmd@bot` is allowed while typing).
 - `history/history_widget.cpp:6531` (`insertBotCommand`): the command goes in
-  front of the text, `@bot` is added only if the group has bots and the command
-  has none, and a leading `/command[@bot]` is replaced.
+  front of the text and a leading `/command[@bot]` is replaced. `@bot` is added
+  only for a bot that is the private-chat peer or the sender of a hovered
+  command link, and only when the chat has bots; a private chat has none, so
+  panels never add it.
 
 ## What Quill did
 
@@ -37,8 +39,8 @@
   `BotsState::group_bot_commands`. A basic group's full info is requested when
   the chat opens (supergroups already fetch it for the header).
 - `Session::command_menu_items` lists every bot's commands in a basic group or
-  megagroup (not broadcast channels). Bots without a known user are left out,
-  since the `@username` is needed. Basic groups put the bots that wrote last
+  megagroup (not broadcast channels). Bots whose user is not known yet are left
+  out until it arrives, since the `@username` is needed. Basic groups put the bots that wrote last
   first, from the loaded history.
 - `CommandMenuItem` carries its bot; rows show the userpic and
   `/command@bot`, and the filter matches `command@bot`.
@@ -47,8 +49,15 @@
   to be the first character, as in tdesktop.
 - Tab replaces the token before the caret and keeps the rest of the text; a
   click sends the command and keeps the rest.
-- `insert_bot_command_text` follows `insertBotCommand`: prepends, replaces a
-  leading command, optional `@bot`.
+- `insert_bot_command_text` follows `insertBotCommand`: prepends and replaces a
+  leading command. Its panels are all in a bot's own chat, so it never adds
+  `@bot`; clicked command links in group messages already add it in
+  `send_bot_command` (`src/ui/entity_links.rs`).
+- Bots in a group's `bot_commands` whose user is not cached are requested with
+  `getUser` once each (`group_bot_users_tick`, driven from the poll loop, not
+  render), and the menu fills in when they arrive.
+- Mention queries follow tdesktop: up to 63 characters, first one a letter or
+  digit.
 
 ## Not done
 

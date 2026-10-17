@@ -37,6 +37,11 @@ pub struct BotsState {
     /// The commands of the bots in a group, from the group's full info
     /// (`bot_commands`); feeds the composer's `/` menu in groups.
     pub group_bot_commands: HashMap<GroupCommandsKey, Vec<GroupBotCommands>>,
+    /// Bots named in a group's `bot_commands` whose user is not cached;
+    /// the driver asks for them (`getUser`) and clears the list.
+    pub bot_users_wanted: Vec<i64>,
+    /// Bot users already asked for, so each is requested once.
+    pub asked_bot_users: HashSet<i64>,
     /// Slice B2: `getBotSimilarBots` results (schema 1.8.67, line 11640)
     /// for the similar-bots section of the bot profile, keyed by bot
     /// user id. The `users` ids resolve to names via `Session::users`.
@@ -92,6 +97,8 @@ impl BotsState {
             bot_games: HashMap::new(),
             bot_commands: HashMap::new(),
             group_bot_commands: HashMap::new(),
+            bot_users_wanted: Vec::new(),
+            asked_bot_users: HashSet::new(),
             similar_bots: HashMap::new(),
             game_scores: HashMap::new(),
             last_callback_answer: None,
