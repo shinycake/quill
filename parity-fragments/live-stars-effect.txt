@@ -1,0 +1,5 @@
+# Live story Stars effect: tdesktop's StarEffect motion (rise, fade, scale,
+# shift) with the badge, and a Lottie burst played once around it (the
+# server's generic reaction bursts tinted gold; tdesktop's own GPL files
+# are not bundled).
+parity:stories-live-stars-effect
