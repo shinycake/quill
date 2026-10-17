@@ -157,7 +157,9 @@ fn theme_picture(
         .relative()
         .flex_none()
         .w(px(THEME_SIZE.0))
-        .h(px(THEME_SIZE.1))
+        // A narrow bubble shrinks the picture, keeping its shape.
+        .max_w_full()
+        .aspect_ratio(THEME_SIZE.0 / THEME_SIZE.1)
         .rounded_md()
         .overflow_hidden()
         .bg(fill_muted())

@@ -31,6 +31,9 @@ pub(super) fn game_card(
     media_roots: &[PathBuf],
     revealed: &HashSet<(i64, u64, u64, bool)>,
     font: Pixels,
+    // The widest the card's photo may be: the bubble's room less the
+    // card's own padding and border.
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -57,6 +60,7 @@ pub(super) fn game_card(
             None,
             MediaCorners::small(),
             0,
+            width_max,
             cx,
         )));
     }

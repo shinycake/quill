@@ -255,9 +255,12 @@ impl ThumbFrame {
         match self {
             Self::Fixed(w, h) => (w, h),
             Self::Fill { min_width, ratio } => {
-                let widest = min_width.max(px(
-                    crate::ui::history::bubble_width::preview_inner_max() as f32,
-                ));
+                // Decoded for the widest card, so a wider history never
+                // shows it upscaled.
+                let widest =
+                    min_width.max(px(crate::ui::history::bubble_width::preview_inner_max(
+                        crate::ui::history::bubble_width::BubbleRoom::wide(false),
+                    ) as f32));
                 (widest, widest / ratio.max(0.01))
             }
         }

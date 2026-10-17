@@ -126,9 +126,9 @@ pub(in crate::ui) fn voice_note_row(
     files: &HashMap<i32, ParsedFile>,
     downloading: &quill::state::DownloadIntents,
     seek: &SeekBarView,
-    // The bubble look (plain bubbles have no padding to take off the
+    // The bubble's room (plain bubbles have no padding to take off the
     // row's width) and the time footer's width, 0 when hidden.
-    plain: bool,
+    room: crate::ui::history::bubble_width::BubbleRoom,
     info_width: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -187,7 +187,7 @@ pub(in crate::ui) fn voice_note_row(
         FontWeight::NORMAL,
         0,
     );
-    let width = crate::ui::history::bubble_width::voice_row_width(status_width, info_width, plain);
+    let width = crate::ui::history::bubble_width::voice_row_width(status_width, info_width, room);
     div()
         .id(("voice-note", row_key))
         .mt_1()
@@ -274,8 +274,8 @@ pub(in crate::ui) fn audio_row(
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     seek: &SeekBarView,
-    // The plain look: no bubble padding to leave out of the row's bounds.
-    plain: bool,
+    // The bubble's room: no bubble padding to leave out in the plain look.
+    room: crate::ui::history::bubble_width::BubbleRoom,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = audio.file_id;
@@ -374,7 +374,7 @@ pub(in crate::ui) fn audio_row(
         }
     };
     // `msgFileMinWidth` to `msgMaxWidth`; the title widens the row between.
-    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(plain);
+    let (min_width, max_width) = crate::ui::history::bubble_width::file_row_bounds(room);
     div()
         .id(("audio", row_key))
         .mt_1()

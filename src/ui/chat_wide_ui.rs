@@ -1,11 +1,12 @@
 //! "Adaptive layout for wide screens", the UI half (`quill::chat_wide`):
-//! the history's width class measured at paint, the wide column for
+//! the history's width and width class measured at paint, the wide column for
 //! service rows and dates, and the Appearance checkbox.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::*;
+use quill::bubble_layout::HistoryWidth;
 use quill::chat_wide::{ChatLayout, WIDE_CHAT_WIDTH, is_chat_wide};
 use quill::lang::{keys, tr};
 
@@ -42,22 +43,34 @@ impl QuillApp {
     }
 
     /// Notes the history's width at paint (`HistoryWidget::recountChatWidth`)
-    /// and renders again when it crosses `adaptiveChatWideWidth`.
-    pub(super) fn chat_layout_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// and renders again when it crosses `adaptiveChatWideWidth`, or when
+    /// it changes how wide the bubbles may be (`HistoryWidth`, which reads
+    /// the same for every wide history).
+    pub(super) fn history_width_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let layout = self.history.chat_layout.clone();
+        let history_width = self.history.width.clone();
         let app = cx.weak_entity();
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
-                let now = ChatLayout::for_width(f32::from(bounds.size.width));
-                if layout.replace(now) != now {
+                let width = f32::from(bounds.size.width);
+                let now = ChatLayout::for_width(width);
+                let layout_changed = layout.replace(now) != now;
+                let measured = HistoryWidth::new(width);
+                let width_changed = history_width.replace(measured) != measured;
+                if layout_changed || width_changed {
                     let app = app.clone();
                     window.defer(cx, move |window, cx| {
                         let _ = app.update(cx, |this, cx| {
                             // The history painted is this window's.
                             this.in_window_of(window, cx, |this, _, cx| {
-                                // Rows change height (photos join, dates move).
-                                this.history.rows_key = None;
+                                // Rows change height (photos join, dates
+                                // move). A new bubble width only changes
+                                // what the rows draw, not the rows: their
+                                // heights are measured again below.
+                                if layout_changed {
+                                    this.history.rows_key = None;
+                                }
                                 this.history
                                     .scroller
                                     .update(cx, |state, cx| state.remeasure(cx));

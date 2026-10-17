@@ -151,6 +151,11 @@ pub(in crate::ui) fn session_history_row(
                 .into_any_element(),
         ),
     };
+    // How wide the bubble may get in this history (`BubbleRoom`), and its
+    // picture: inside the border when it leads the bubble, inside the
+    // padding under a header.
+    let room = bubble_width::BubbleRoom::new(look.history, sender_avatar.is_some(), look.plain);
+    let media_max = room.media(header.is_none());
     let chat_id = message.chat_id;
     let message_id = message.id;
     let (more_btn, actions_span) =
@@ -301,7 +306,7 @@ pub(in crate::ui) fn session_history_row(
         )
     };
     let content = effective_content(&message.content, message.ephemeral.as_ref());
-    let (frame_w, frame_h) = single_media_frame(content, caption_w).unwrap_or_default();
+    let (frame_w, frame_h) = single_media_frame(content, caption_w, media_max).unwrap_or_default();
     let extra_media = match content {
         MessageContent::Photo(photo) if photo.has_spoiler && !media_revealed => {
             Some(spoiler_cover(
@@ -343,6 +348,7 @@ pub(in crate::ui) fn session_history_row(
                 Some((message.chat_id, message.id)),
                 corners,
                 caption_w,
+                media_max,
                 cx,
             ))
         }
@@ -361,7 +367,7 @@ pub(in crate::ui) fn session_history_row(
                 .filter(|s| s.media.downloads.is_user(doc.file_id.0))
                 .map(|s| s.media.downloads.is_paused(doc.file_id.0)),
             DocOrigin::Message(message.chat_id, message.id),
-            look.plain,
+            room,
             cx,
         )),
         MessageContent::Sticker(sticker) => Some(crate::ui::send_fly::wrap(
@@ -397,7 +403,7 @@ pub(in crate::ui) fn session_history_row(
                 files,
                 downloading,
                 seek_bar,
-                look.plain,
+                room,
                 f32::from(info_width).ceil() as i32,
                 cx,
             )
@@ -411,7 +417,7 @@ pub(in crate::ui) fn session_history_row(
                 downloading,
                 media_roots,
                 seek_bar,
-                look.plain,
+                room,
                 cx,
             )
         }),
@@ -428,6 +434,7 @@ pub(in crate::ui) fn session_history_row(
             Some((message.chat_id, message.id)),
             corners,
             caption_w,
+            media_max,
             cx,
         )),
         MessageContent::Video(video) => Some(video_attachment(
@@ -441,6 +448,7 @@ pub(in crate::ui) fn session_history_row(
             Some((message.chat_id, message.id)),
             corners,
             caption_w,
+            media_max,
             cx,
         )),
         MessageContent::VideoNote(note) => Some(video_note_attachment(
@@ -454,7 +462,7 @@ pub(in crate::ui) fn session_history_row(
             inline,
             cx,
         )),
-        MessageContent::Poll(poll) => Some(poll_row(message, poll, (files, media_roots, session), look, cx)),
+        MessageContent::Poll(poll) => Some(poll_row(message, poll, (files, media_roots, session), room, cx)),
         // B15: checklist card (tasks, done marks, completer names).
         MessageContent::Checklist(checklist) => Some(checklist_body(
             message.chat_id,
@@ -495,7 +503,7 @@ pub(in crate::ui) fn session_history_row(
             session
                 .and_then(|s| s.user_photo_path(contact.user_id))
                 .and_then(|path| sandboxed_display_path(path, media_roots)),
-            look.plain,
+            room,
             cx,
         )),
         MessageContent::Dice(dice) => Some(dice_row(
@@ -509,7 +517,7 @@ pub(in crate::ui) fn session_history_row(
             cx,
         )),
         // Locked paid media and forwarded stories are bubble cards.
-        MessageContent::Action(_) => action_card(message, session, files, downloading, media_roots, cx),
+        MessageContent::Action(_) => action_card(message, session, files, downloading, media_roots, media_max, cx),
         MessageContent::Text(_)
         | MessageContent::RichMessage(_)
         | MessageContent::Game(_)
@@ -633,6 +641,7 @@ pub(in crate::ui) fn session_history_row(
             look.font,
             session.is_none_or(|s| s.settings.media_prefs.big_emoji),
             reserve_footer.then(|| footer_meta.reserve(footer_reserve(message.is_outgoing))),
+            room,
             cx,
         )),
         // Slice bots-games: the game card is the message's primary
@@ -647,6 +656,8 @@ pub(in crate::ui) fn session_history_row(
             media_roots,
             revealed,
             look.font,
+            // The game card's padding and border.
+            room.media(false) - bubble_width::PADDED_CHROME,
             cx,
         )),
         // `HistoryView::Call`: a card in an ordinary bubble.
@@ -844,10 +855,11 @@ pub(in crate::ui) fn session_history_row(
             single_media_width(
                 effective_content(&message.content, message.ephemeral.as_ref()),
                 caption_w,
+                media_max,
             )
         })
         .flatten()
-        .map(|width| media_content_width(width, info_width));
+        .map(|width| media_content_width(width, info_width, media_max));
     let max_width = bubble_width::message_width_limit(cx, content, look.font, look.plain);
     let mut more_btn = Some(more_btn);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);

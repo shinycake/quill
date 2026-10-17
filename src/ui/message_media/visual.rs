@@ -18,6 +18,8 @@ pub(in crate::ui) fn photo_attachment(
     // The caption's longest line (0 without one): a wide caption widens
     // the picture, as in Telegram Desktop (`media_frame_for`).
     caption_width: i32,
+    // The widest the bubble lets the picture be (`BubbleRoom::media`).
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let open_id = photo.open_file_id().unwrap_or(FileId(0));
@@ -30,9 +32,10 @@ pub(in crate::ui) fn photo_attachment(
                 size.width,
                 size.height,
                 caption_width,
+                width_max,
             )
         })
-        .unwrap_or_else(|| media_frame_for(MediaFrameKind::Photo, 0, 0, caption_width));
+        .unwrap_or_else(|| media_frame_for(MediaFrameKind::Photo, 0, 0, caption_width, width_max));
     if !photo.is_secret
         && !photo.has_spoiler
         && let Some(path) = photo_display_path(photo, files, media_roots)
@@ -48,6 +51,7 @@ pub(in crate::ui) fn photo_attachment(
             crate::ui::image_budget::Fit::Cover,
         ))
         .id(("photo-img", row_id))
+        .debug_selector(move || format!("photo-{row_id}"))
         .w(frame_w)
         .h(frame_h)
         .aspect_ratio(frame_w / frame_h)
@@ -108,6 +112,7 @@ pub(in crate::ui) fn photo_attachment(
     let has_preview = preview.is_some();
     div()
         .id(("photo-ph", row_id))
+        .debug_selector(move || format!("photo-{row_id}"))
         .relative()
         .overflow_hidden()
         .w(frame_w)
@@ -191,6 +196,7 @@ pub(in crate::ui) fn animation_attachment(
     corners: MediaCorners,
     // The caption's longest line (0 without one); see `media_frame_for`.
     caption_width: i32,
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -221,6 +227,7 @@ pub(in crate::ui) fn animation_attachment(
                         animation.width,
                         animation.height,
                         caption_width,
+                        width_max,
                     ),
                     Some((animation.width, animation.height)),
                     crate::ui::image_budget::Fit::Cover,
@@ -235,6 +242,7 @@ pub(in crate::ui) fn animation_attachment(
         animation.width,
         animation.height,
         caption_width,
+        width_max,
     );
     let live = inline.is_some();
     let still = move |path| {
@@ -415,6 +423,7 @@ pub(in crate::ui) fn video_attachment(
     corners: MediaCorners,
     // The caption's longest line (0 without one); see `media_frame_for`.
     caption_width: i32,
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message_id.0 as u64;
@@ -444,6 +453,7 @@ pub(in crate::ui) fn video_attachment(
         video.width,
         video.height,
         caption_width,
+        width_max,
     );
     let live = inline.is_some();
     let total = video.duration;

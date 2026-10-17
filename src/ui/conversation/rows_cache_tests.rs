@@ -358,3 +358,88 @@ fn timer_ticks_redraw_only_the_slice_that_shows_them(cx: &mut TestAppContext) {
     assert!(!slow_mode.contains_key("conversation"), "{slow_mode:?}");
     assert!(!slow_mode.contains_key("sidebar"), "{slow_mode:?}");
 }
+
+/// Where message `id`'s row and bubble were painted: (row height, bubble width).
+fn painted(id: i64) -> (f32, f32) {
+    let Some((row, Some(bubble))) = crate::ui::vanish::painted(id) else {
+        panic!("message {id} is painted with a bubble");
+    };
+    (f32::from(row.size.height), f32::from(bubble.size.width))
+}
+
+fn photo_width(cx: &mut VisualTestContext, selector: &'static str) -> f32 {
+    let Some(bounds) = cx.debug_bounds(selector) else {
+        panic!("{selector} is painted");
+    };
+    f32::from(bounds.size.width)
+}
+
+fn resize(app: &Entity<QuillApp>, cx: &mut VisualTestContext, width: f32, height: f32) {
+    cx.simulate_resize(size(px(width), px(height)));
+    // The width is measured at paint and applied on the next frame.
+    frames(cx);
+    app.update(cx, |_, cx| cx.notify());
+    frames(cx);
+}
+
+#[gpui_kit::test]
+fn a_narrow_window_rewraps_the_bubbles_without_rebuilding_the_rows(cx: &mut TestAppContext) {
+    use quill::bubble_layout::HistoryWidth;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateNewMessage","message":{"id":204,"chat_id":31,"sender_id":{"@type":"messageSenderUser","user_id":21},"is_outgoing":false,"date":1790631900,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"The train is late again, so start without me and I will catch up with everyone at the station café once it finally pulls in.","entities":[]}}}}"#,
+            r#"{"@type":"updateNewMessage","message":{"id":205,"chat_id":31,"sender_id":{"@type":"messageSenderUser","user_id":22},"is_outgoing":false,"date":1790631960,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"minithumbnail":null,"sizes":[{"@type":"photoSize","type":"x","photo":{"@type":"file","id":905,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r5","unique_id":"u5","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":10}},"width":1200,"height":800,"progressive_sizes":[]}]},"caption":{"@type":"formattedText","text":"","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}"#,
+            // Already read, so no read mark lands mid-test and rebuilds rows.
+            r#"{"@type":"updateChatReadInbox","chat_id":31,"last_read_inbox_message_id":205,"unread_count":0}"#,
+        ],
+    );
+    let width = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.history.width.get())
+    };
+    assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
+    let (wide_row, wide_bubble) = painted(204);
+    let wide_photo = photo_width(vcx, "photo-205");
+    let built = counts(&app, vcx).0;
+
+    // Widening a wide history changes nothing (short of the wide layout,
+    // which rebuilds the rows on purpose).
+    resize(&app, vcx, 1150., 800.);
+    let layout = app.read_with(vcx, |app, _| app.history.chat_layout.get());
+    assert_eq!(layout, quill::chat_wide::ChatLayout::Normal);
+    assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
+    assert_eq!(painted(204), (wide_row, wide_bubble));
+    assert_eq!(counts(&app, vcx).0, built);
+
+    resize(&app, vcx, 700., 800.);
+    let narrow = width(&app, vcx);
+    assert!(narrow.get() < HistoryWidth::WIDE.get(), "{narrow:?}");
+    let (row, bubble) = painted(204);
+    assert!(
+        bubble < wide_bubble,
+        "bubble {bubble} not under {wide_bubble}"
+    );
+    assert!(
+        bubble <= narrow.bubble_room(true, false) as f32,
+        "bubble {bubble} past its room in {narrow:?}"
+    );
+    assert!(row > wide_row, "row {row} not taller than {wide_row}");
+    // The photo scales down to its room instead of running off the pane.
+    let photo = photo_width(vcx, "photo-205");
+    assert!(photo < wide_photo, "photo {photo} not under {wide_photo}");
+    assert!(
+        photo <= narrow.bubble_room(true, false) as f32,
+        "photo {photo} past its room in {narrow:?}"
+    );
+    assert_eq!(counts(&app, vcx).0, built, "resizing rebuilds no rows");
+
+    resize(&app, vcx, 1100., 800.);
+    assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
+    assert_eq!(painted(204), (wide_row, wide_bubble));
+    assert_eq!(photo_width(vcx, "photo-205"), wide_photo);
+    assert_eq!(counts(&app, vcx).0, built);
+}

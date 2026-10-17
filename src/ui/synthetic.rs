@@ -152,6 +152,9 @@ pub(crate) struct BubbleLook {
     /// "Adaptive layout for wide screens" is in effect (`chat_wide`):
     /// outgoing bubbles sit on the left like incoming ones.
     pub wide: bool,
+    /// The history's width at the last paint: a narrow history narrows
+    /// the bubbles (`bubble_width::BubbleRoom`).
+    pub history: quill::bubble_layout::HistoryWidth,
 }
 
 impl BubbleLook {
@@ -183,6 +186,7 @@ impl BubbleLook {
             joined_above: false,
             out_fill: None,
             wide: false,
+            history: quill::bubble_layout::HistoryWidth::WIDE,
         }
     }
 }
@@ -402,6 +406,8 @@ fn message_bubble_with_quote(
         max_width,
     } = chrome;
     let has_sender_status = sender_status.is_some();
+    let room =
+        super::history::bubble_width::BubbleRoom::new(look.history, avatar.is_some(), look.plain);
     let group: SharedString = format!("message-row-{}", row.id).into();
     // tdesktop `Element::hasRightLayout`: the wide layout keeps outgoing
     // messages on the left, tail and all; only their colors differ.
@@ -506,10 +512,10 @@ fn message_bubble_with_quote(
         })
         .when_some(extra, |this, el| this.child(el))
         .relative()
-        // Telegram Desktop `msgMaxWidth`: the widest a bubble gets; the
-        // bubble's own 80% cap still applies on narrow panes. A wide
-        // monospace block lifts it (`monospaceMaxWidth`).
-        .max_w(max_width.unwrap_or(px(quill::bubble_layout::MSG_MAX_WIDTH as f32)))
+        // Telegram Desktop `msgMaxWidth`: the widest a bubble gets, less in
+        // a narrow history (`BubbleRoom`). A wide monospace block lifts it
+        // (`monospaceMaxWidth`); the kit bubble's 80% share caps that one.
+        .max_w(max_width.unwrap_or(px(room.outer() as f32)))
         .line_height(relative(1.4))
         .when(media_led && !look.plain, |this| this.p_0())
         .when_some(media_width, |this, width| {

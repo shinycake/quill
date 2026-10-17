@@ -60,6 +60,13 @@ fn record(id: i64, update: impl FnOnce(&mut Painted)) {
     });
 }
 
+/// Where a message's row and bubble were last painted.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(super) fn painted(id: i64) -> Option<Painted> {
+    PAINTED.with(|painted| painted.borrow().get(&id).copied())
+}
+
 /// An invisible child that notes where a history row is painted.
 pub(super) fn row_tracker(id: i64) -> impl IntoElement {
     canvas(

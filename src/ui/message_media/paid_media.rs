@@ -29,9 +29,9 @@ pub(in crate::ui) fn paid_media_invoice(chat_id: ChatId, message_id: MessageId) 
 
 /// Card frame of a single paid-media preview of `width` x `height` pixels:
 /// the same box a photo gets (`Photo::countCurrentSize`), so the bubble keeps
-/// the photo width policy.
-pub(in crate::ui) fn paid_media_frame(width: i32, height: i32) -> (Pixels, Pixels) {
-    media_frame_for(MediaFrameKind::Photo, width, height, 0)
+/// the photo width policy, in a bubble that leaves it `width_max`.
+pub(in crate::ui) fn paid_media_frame(width: i32, height: i32, width_max: i32) -> (Pixels, Pixels) {
+    media_frame_for(MediaFrameKind::Photo, width, height, 0, width_max)
 }
 
 /// "★25", the price on the unlock button (`lng_paid_price`).
@@ -39,9 +39,14 @@ pub(in crate::ui) fn star_price(stars: i64) -> String {
     format!("\u{2605}{stars}")
 }
 
-/// Album layout of several previews or bought items, and its box.
-pub(in crate::ui) fn paid_album_layout(sizes: &[(i32, i32)]) -> (Vec<AlbumRect>, (i32, i32)) {
+/// Album layout of several previews or bought items, and its box, scaled
+/// down to a bubble that leaves it `width_max`.
+pub(in crate::ui) fn paid_album_layout(
+    sizes: &[(i32, i32)],
+    width_max: i32,
+) -> (Vec<AlbumRect>, (i32, i32)) {
     let layout = layout_media_group(sizes, ALBUM_MAX_WIDTH, ALBUM_MIN_WIDTH, ALBUM_SPACING);
+    let layout = quill::album::scale_layout(&layout, width_max, ALBUM_SPACING);
     let bounds = layout_bounds(&layout);
     (layout, bounds)
 }
@@ -111,6 +116,7 @@ pub(in crate::ui) fn paid_media_card(
     stars: i64,
     locked: &[PaidMediaPreview],
     caption: &str,
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = (message_id.0 as u64).wrapping_mul(64);
@@ -121,12 +127,14 @@ pub(in crate::ui) fn paid_media_card(
                 .iter()
                 .map(|&(w, h)| (w.max(1), h.max(1)))
                 .collect::<Vec<_>>(),
+            width_max,
         );
         (layout, (px(w as f32), px(h as f32)))
     } else {
         let (w, h) = paid_media_frame(
             sizes.first().map_or(0, |s| s.0),
             sizes.first().map_or(0, |s| s.1),
+            width_max,
         );
         (
             vec![AlbumRect {
@@ -200,10 +208,11 @@ pub(in crate::ui) fn paid_album_card(
     files: &HashMap<i32, ParsedFile>,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
+    width_max: i32,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let sizes: Vec<(i32, i32)> = unlocked.iter().map(album_pixel_size).collect();
-    let (layout, (box_w, box_h)) = paid_album_layout(&sizes);
+    let (layout, (box_w, box_h)) = paid_album_layout(&sizes, width_max);
     let mut mosaic = div()
         .id(("paid-album", message.id.0 as u64))
         .relative()
@@ -268,7 +277,7 @@ mod tests {
         use quill::bubble_layout::{MAX_MEDIA_SIZE, Size, photo_current};
         let context = crate::ui::history::bubble_width::media_context(0, 0);
         for (w, h) in [(800, 600), (600, 800), (300, 300), (0, 0)] {
-            let (fw, fh) = paid_media_frame(w, h);
+            let (fw, fh) = paid_media_frame(w, h, MAX_MEDIA_SIZE);
             let expected = photo_current(Size::new(w, h), context, MAX_MEDIA_SIZE);
             assert_eq!(f32::from(fw), expected.w as f32);
             assert_eq!(f32::from(fh), expected.h as f32);
@@ -278,7 +287,7 @@ mod tests {
     #[test]
     fn an_album_lays_out_every_item_inside_one_box() {
         let sizes = [(800, 600), (600, 800), (400, 400)];
-        let (layout, (w, h)) = paid_album_layout(&sizes);
+        let (layout, (w, h)) = paid_album_layout(&sizes, 430);
         assert_eq!(layout.len(), 3);
         assert!(w > 0 && h > 0);
         for part in &layout {
@@ -286,5 +295,16 @@ mod tests {
             assert!(part.x >= 0 && part.y >= 0);
             assert!(part.x + part.width <= w && part.y + part.height <= h);
         }
+    }
+
+    #[test]
+    fn a_narrow_bubble_scales_the_card_down() {
+        let sizes = [(800, 600), (600, 800), (400, 400)];
+        let (_, (wide_w, wide_h)) = paid_album_layout(&sizes, 430);
+        let (layout, (w, h)) = paid_album_layout(&sizes, 250);
+        assert!(w <= 250 && w < wide_w && h < wide_h, "{w}x{h}");
+        assert!(layout.iter().all(|part| part.x + part.width <= w));
+        let (fw, _) = paid_media_frame(800, 600, 250);
+        assert_eq!(f32::from(fw), 250.);
     }
 }
