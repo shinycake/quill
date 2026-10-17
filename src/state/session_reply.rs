@@ -578,8 +578,9 @@ impl Session {
     }
 
     /// Stories the open chat's rows reply to that are not cached yet, for
-    /// `getStory` (the strip's picture comes from them).
-    pub fn reply_story_candidates(&self) -> Vec<(ChatId, i32)> {
+    /// `getStory` (the strip's picture comes from them). One known to be
+    /// gone, or waiting out a failure at `now`, is left out.
+    pub fn reply_story_candidates(&self, now: std::time::Instant) -> Vec<(ChatId, i32)> {
         let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
             return Vec::new();
         };
@@ -595,6 +596,10 @@ impl Session {
             })
             .collect();
         wanted.extend(self.message_story_candidates());
+        wanted.retain(|(chat, story)| {
+            let key = (chat.0, *story);
+            !self.stories.missing.contains(&key) && !self.stories.story_fetch_waiting(key, now)
+        });
         wanted.sort_by_key(|(chat, story)| (chat.0, *story));
         wanted.dedup();
         wanted.truncate(REPLY_FETCH_BATCH);

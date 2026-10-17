@@ -32,7 +32,7 @@ const FIELD_TEXT: f32 = 14.;
 impl QuillApp {
     /// The comment row, or `None` while the viewer has not joined.
     pub(super) fn live_story_composer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.stories.live.watching?;
+        self.live_story_shown()?;
         let session = self.session()?;
         let live = session.stories.live.as_ref()?;
         let call = session

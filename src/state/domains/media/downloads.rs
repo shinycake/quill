@@ -21,6 +21,10 @@ pub enum DownloadOrigin {
     /// only a prefix of a video, at a priority below the current story's.
     /// A request for the whole file replaces it.
     Preload,
+    /// An automatic download that took over a story preload: the viewer
+    /// still asks for the whole file at its own priority when the story
+    /// becomes current.
+    AutoOverPreload,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -284,6 +288,18 @@ impl DownloadIntents {
     pub fn is_preload(&self, file_id: i32) -> bool {
         self.get(file_id)
             .is_some_and(|i| i.origin == DownloadOrigin::Preload)
+    }
+
+    /// The file's last request was a story preload, or an automatic
+    /// download that took one over, so the story viewer's request for the
+    /// whole file at its priority must still go out.
+    pub fn is_story_preloaded(&self, file_id: i32) -> bool {
+        self.get(file_id).is_some_and(|i| {
+            matches!(
+                i.origin,
+                DownloadOrigin::Preload | DownloadOrigin::AutoOverPreload
+            )
+        })
     }
 
     /// Preloads still running.

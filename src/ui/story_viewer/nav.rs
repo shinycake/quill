@@ -13,11 +13,12 @@ use quill::story_viewer::collect_found_story_items;
 impl QuillApp {
     /// The story the neighbour poster in direction `delta` (-1 or 1) opens
     /// on, whether or not it is cached yet. A poster whose story is known
-    /// to be gone, or cannot be shown, is passed over for the next one in
-    /// the walk.
+    /// to be gone, waits out a failed fetch, or cannot be shown, is passed
+    /// over for the next one in the walk.
     pub(in crate::ui) fn story_sibling_key(&self, delta: i32) -> Option<(ChatId, i32)> {
         let walk = self.stories.viewer.tray_walk()?;
         let session = self.session()?;
+        let now = Instant::now();
         walk.neighbours(delta)
             .into_iter()
             .filter_map(|(chat_id, shown)| {
@@ -25,7 +26,7 @@ impl QuillApp {
                 Some((ChatId(chat_id), shown_story(tray, shown)?))
             })
             .find(|(chat, id)| match session.story_card_state(chat.0, *id) {
-                StoryCardState::Loading => true,
+                StoryCardState::Loading => !session.stories.story_fetch_waiting((chat.0, *id), now),
                 StoryCardState::Ready => {
                     !collect_found_story_items(&[(chat.0, *id)], &session.stories.stories)
                         .is_empty()

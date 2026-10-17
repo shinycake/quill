@@ -196,7 +196,7 @@ impl QuillApp {
         };
         // A live story takes text comments only (tdesktop's video stream
         // field has no sticker or GIF sending).
-        if self.stories.live.watching.is_some() {
+        if self.live_story_shown().is_some() {
             return true;
         }
         if self.premium_sticker_blocked(file_id, cx) {
@@ -243,7 +243,7 @@ impl QuillApp {
         };
         // A live story takes text comments only (tdesktop's video stream
         // field has no sticker or GIF sending).
-        if self.stories.live.watching.is_some() {
+        if self.live_story_shown().is_some() {
             return true;
         }
         if self.slow_mode_blocked(chat_id, cx) {
@@ -288,7 +288,7 @@ impl QuillApp {
             .with_token(0..len, emoji_token(custom_emoji_id, &text))
             .unwrap_or_else(|_| InputContent::new(text));
         // A live story comment carries custom emoji too (its entities).
-        let field = if self.stories.live.watching.is_some() {
+        let field = if self.live_story_shown().is_some() {
             self.stories.live.input.clone()
         } else {
             self.stories.reply_input.clone()
@@ -324,7 +324,7 @@ impl QuillApp {
         if !self.story_reply_panel_active() {
             return false;
         }
-        let field = if self.stories.live.watching.is_some() {
+        let field = if self.live_story_shown().is_some() {
             self.stories.live.input.clone()
         } else {
             self.stories.reply_input.clone()

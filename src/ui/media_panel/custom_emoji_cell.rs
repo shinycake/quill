@@ -324,7 +324,7 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         // A live story comment takes emoji only (tdesktop's video stream
         // field has no sticker or GIF tabs).
-        let emoji_only = self.stories.live.watching.is_some() && self.story_reply_panel_active();
+        let emoji_only = self.live_story_shown().is_some() && self.story_reply_panel_active();
         let tabs = div().flex().items_center().gap_1().children(
             [
                 (PanelTab::Emoji, tr(keys::SWITCH_EMOJI)),

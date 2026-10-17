@@ -626,6 +626,42 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
     });
 }
 
+#[gpui_kit::test]
+fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story");
+    let vcx = &mut vcx;
+    assert!(find(vcx, "live-badge").is_some());
+    app.update_in(vcx, |app, window, cx| app.open_story_pip(window, cx));
+    frames(vcx);
+    app.update_in(vcx, |app, window, cx| app.demo_story_photo(window, cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.stories.live.watching.is_some(), "the PiP plays on");
+        assert_eq!(
+            app.stories.viewer.current().map(|item| item.story_id),
+            super::story_demo::STORIES.first().copied()
+        );
+        assert_eq!(app.live_story_viewers(), None);
+    });
+    assert!(find(vcx, "live-badge").is_none(), "no LIVE badge");
+    assert!(find(vcx, "story-header-age").is_some(), "the story's age");
+    // The reply panel feeds the photo story's reply field, not the hidden
+    // live comment field.
+    app.update(vcx, |app, cx| {
+        app.stories.reply_open = true;
+        app.toggle_story_reply_panel(crate::ui::media_panel::PanelTab::Emoji, cx);
+    });
+    frames(vcx);
+    let routed = app.update_in(vcx, |app, window, cx| {
+        app.route_story_reply_emoji("👍", window, cx)
+    });
+    assert!(routed, "the panel is the story reply's");
+    app.read_with(vcx, |app, cx| {
+        assert_eq!(app.stories.reply_input.read(cx).value().to_string(), "👍");
+        assert!(app.stories.live.input.read(cx).value().is_empty());
+    });
+}
+
 /// tdesktop `setupStarsEffectsCanvas`.
 #[gpui_kit::test]
 fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
