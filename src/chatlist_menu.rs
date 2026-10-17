@@ -48,6 +48,38 @@ pub fn profile_label(kind: &ChatKind, is_saved_messages: bool) -> Option<&'stati
     }
 }
 
+/// Whether the row menu offers the Mute submenu: not for Saved Messages
+/// and not for forums (`Filler::addToggleMuteSubmenu`).
+pub fn mute_offered(is_saved_messages: bool, is_forum: bool) -> bool {
+    !is_saved_messages && !is_forum
+}
+
+/// The entry that takes a chat out of the list, by chat kind
+/// (`Filler::addDeleteChat` and `addLeaveChat`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitEntry {
+    /// `lng_profile_delete_conversation`, for a user or secret chat.
+    DeleteChat,
+    /// `lng_profile_clear_and_exit`, for a basic group.
+    DeleteAndLeave,
+    /// `lng_profile_leave_group` / `lng_profile_leave_channel`, for a
+    /// supergroup or channel the user is still in.
+    Leave { channel: bool },
+}
+
+/// `still_in` is false once the user left or was banned from the
+/// supergroup or channel.
+pub fn exit_entry(kind: &ChatKind, still_in: bool) -> Option<ExitEntry> {
+    match kind {
+        ChatKind::Private { .. } | ChatKind::Secret { .. } => Some(ExitEntry::DeleteChat),
+        ChatKind::BasicGroup { .. } => Some(ExitEntry::DeleteAndLeave),
+        ChatKind::Supergroup { is_channel, .. } => still_in.then_some(ExitEntry::Leave {
+            channel: *is_channel,
+        }),
+        ChatKind::Unknown => None,
+    }
+}
+
 pub fn row_menu_extras(facts: RowMenuFacts<'_>) -> RowMenuExtras {
     let view_profile = profile_label(facts.kind, facts.is_saved_messages);
     RowMenuExtras {
@@ -136,5 +168,40 @@ mod tests {
         let mut offline = facts(&user);
         offline.live = false;
         assert!(!row_menu_extras(offline).export);
+    }
+
+    #[test]
+    fn exit_entry_follows_the_chat_kind() {
+        use super::{ExitEntry, exit_entry};
+        let user = ChatKind::Private { user_id: UserId(1) };
+        let group = ChatKind::BasicGroup { basic_group_id: 2 };
+        let channel = ChatKind::Supergroup {
+            supergroup_id: 3,
+            is_channel: true,
+        };
+        let mega = ChatKind::Supergroup {
+            supergroup_id: 4,
+            is_channel: false,
+        };
+        assert_eq!(exit_entry(&user, true), Some(ExitEntry::DeleteChat));
+        assert_eq!(exit_entry(&group, true), Some(ExitEntry::DeleteAndLeave));
+        assert_eq!(
+            exit_entry(&channel, true),
+            Some(ExitEntry::Leave { channel: true })
+        );
+        assert_eq!(
+            exit_entry(&mega, true),
+            Some(ExitEntry::Leave { channel: false })
+        );
+        assert_eq!(exit_entry(&mega, false), None);
+        assert_eq!(exit_entry(&ChatKind::Unknown, true), None);
+    }
+
+    #[test]
+    fn mute_is_not_offered_for_saved_messages_or_forums() {
+        use super::mute_offered;
+        assert!(mute_offered(false, false));
+        assert!(!mute_offered(true, false));
+        assert!(!mute_offered(false, true));
     }
 }

@@ -17,4 +17,24 @@ pub struct MessageMenuState {
 pub struct ChatMenuState {
     pub chat_id: ChatId,
     pub position: Point<Pixels>,
+    /// The submenu opened beside its row (tdesktop opens Mute and Add to
+    /// folder as submenus of the same popup).
+    pub submenu: Option<ChatMenuSubmenu>,
+}
+
+/// Which row of the chat menu has its submenu open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatMenuSubmenu {
+    Mute,
+    Folders,
+}
+
+impl ChatMenuState {
+    pub fn at(chat_id: ChatId, position: Point<Pixels>) -> Self {
+        Self {
+            chat_id,
+            position,
+            submenu: None,
+        }
+    }
 }

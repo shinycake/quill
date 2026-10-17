@@ -25,9 +25,7 @@ use quill::message_menu::order;
 use quill::poll::can_stop_poll;
 use quill::state::{RequestPurpose, effective_preview};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{
-    ChatKind, MUTE_FOREVER, MessageContent, PollType, effective_content,
-};
+use quill::telegram::envelope::{ChatKind, MessageContent, PollType, effective_content};
 use std::sync::Arc;
 use std::time::Instant;
 impl QuillApp {
@@ -130,6 +128,7 @@ fn confirm_hide_pinned(
     );
 }
 
+mod chat_menu_submenus;
 mod close_chat_preview;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

@@ -51,10 +51,33 @@ impl QuillApp {
         }
         self.chat_list.selected.insert(11);
         self.chat_list.selected.insert(12);
-        self.chat_list.menu = Some(ChatMenuState {
-            chat_id: ChatId(11),
-            position: Point::new(px(120.), px(770.)),
-        });
+        // `QUILL_DEMO_CHAT_MENU_SUBMENU=mute|folders` opens that submenu
+        // of the row menu; the demo account has two folders for it.
+        if let Some(session) = self.demo_session.as_mut() {
+            for (id, name) in [(7, "Work"), (8, "Family")] {
+                session
+                    .chat_list
+                    .chat_folders
+                    .push(quill::telegram::envelope::ChatFolderInfo {
+                        id,
+                        name: name.to_string(),
+                        icon_name: String::new(),
+                        color_id: -1,
+                        is_shareable: false,
+                        has_my_invite_links: false,
+                    });
+            }
+            if let Some(chat) = session.chats.get_mut(&11) {
+                chat.folder_positions.insert(7, 1);
+            }
+        }
+        let mut menu = ChatMenuState::at(ChatId(11), Point::new(px(120.), px(300.)));
+        menu.submenu = match std::env::var("QUILL_DEMO_CHAT_MENU_SUBMENU").as_deref() {
+            Ok("mute") => Some(crate::ui::menu_states::ChatMenuSubmenu::Mute),
+            Ok("folders") => Some(crate::ui::menu_states::ChatMenuSubmenu::Folders),
+            _ => None,
+        };
+        self.chat_list.menu = Some(menu);
         self.connection.set_note(StatusNote::silent(
             "screenshot demo — mentions · reactions · multi-select · report · block",
         ));
