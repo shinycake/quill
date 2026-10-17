@@ -86,3 +86,27 @@ fn a_group_description_shows_only_telegram_links(cx: &mut TestAppContext) {
         ])
     );
 }
+
+#[gpui_kit::test]
+fn a_users_bio_offers_translate_unless_the_button_is_off(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-info-user-bio");
+    let bio = "Bonjour à tous, je suis designer à Lyon et j'adore le café.";
+    let stored = app.read_with(&vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.user_full_info(74).map(|i| i.bio.clone()))
+    });
+    assert_eq!(stored.as_deref(), Some(bio));
+    let chat = quill::ids::ChatId(74);
+    let plan = app.read_with(&vcx, |app, _| app.about_menu_plan(chat, bio, None));
+    assert_eq!(
+        plan.copy,
+        Some(quill::translate::about_menu::AboutCopy::Text(bio.into()))
+    );
+    assert!(plan.translate.is_some_and(|t| !t.selected));
+    app.update(&mut vcx, |app, _| {
+        app.settings.translate.prefs.show_button = false;
+    });
+    let off = app.read_with(&vcx, |app, _| app.about_menu_plan(chat, bio, Some("Lyon")));
+    assert!(off.translate.is_none());
+    assert!(off.copy.is_some());
+}

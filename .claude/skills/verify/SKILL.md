@@ -69,6 +69,7 @@ order after the window is ready):
 | `x,y` | left click |
 | `m:x,y` | move the pointer (hover states, tooltips, scrubber bubbles) |
 | `mid:x,y` | middle click |
+| `r:x,y` | right click (context menus) |
 | `k:key` | one key press, GPUI key names (`escape`, `enter`, `space`, `cmd-f`) |
 | `w:x,y,dx,dy,s\|m\|e[,cmd]` | one phased trackpad scroll event (`cmd` holds Cmd, Ctrl off macOS) |
 | `z:x,y,delta` | one trackpad pinch centred on the point (positive `delta` zooms in) |

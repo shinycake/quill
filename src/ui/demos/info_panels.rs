@@ -7,7 +7,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
-use quill::state::{InfoPanelTarget, Session};
+use quill::state::{InfoPanelTarget, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,10 +27,19 @@ register_demos![
         "screenshot demo — group info panel, external links stripped"
     )
     .setup(QuillApp::demo_info_group),
+    // A user whose bio is in French, info panel open: right-click the bio
+    // for Copy Text and Translate.
+    DemoSpec::chats(
+        "ready-info-user-bio",
+        "screenshot demo — user info panel with a French bio"
+    )
+    .setup(QuillApp::demo_info_user_bio),
 ];
 
 const CHANNEL: i64 = 71;
 const GROUP: i64 = 72;
+const BIO_USER: i64 = 74;
+const BIO: &str = "Bonjour à tous, je suis designer à Lyon et j'adore le café.";
 const CHANNEL_ABOUT: &str = "Release notes and tips for Quill. Read the changelog at https://example.com/changelog or write to news@example.com.";
 const GROUP_ABOUT: &str =
     "Rules: https://example.com/rules. Join https://t.me/quillapp or ask @quill_app about #quill.";
@@ -133,6 +142,32 @@ impl QuillApp {
         self.open_info_panel_target(InfoPanelTarget::Supergroup(CHANNEL), window, cx);
         self.connection
             .set_note(StatusNote::silent("screenshot demo — channel info panel"));
+        cx.notify();
+    }
+
+    fn demo_info_user_bio(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+            let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, BIO_USER);
+            let jsons = [
+                format!(
+                    r#"{{"@type":"updateUser","user":{{"id":{BIO_USER},"first_name":"Camille","last_name":"Durand","type":{{"@type":"userTypeRegular"}}}}}}"#
+                ),
+                format!(
+                    r#"{{"@type":"userFullInfo","@extra":"{}","bio":{{"@type":"formattedText","text":"{BIO}","entities":[]}}}}"#,
+                    extra.0
+                ),
+            ];
+            for json in jsons {
+                if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
+                    session.apply(owned);
+                }
+            }
+        }
+        self.open_info_panel_target(InfoPanelTarget::User(BIO_USER), window, cx);
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — user bio"));
         cx.notify();
     }
 
