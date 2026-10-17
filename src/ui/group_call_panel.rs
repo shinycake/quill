@@ -19,6 +19,7 @@ use super::format_helpers::format_starts_in;
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -191,6 +192,9 @@ impl QuillApp {
         let invite_row = can_invite.then(|| {
             div()
                 .id("group-call-invite")
+                .role(Role::Button)
+                .aria_label(tr(keys::GROUP_CALL_INVITE))
+                .tab_index(0)
                 .h(px(48.))
                 .px(px(14.))
                 .flex()
@@ -690,6 +694,11 @@ impl QuillApp {
             call.title.clone()
         };
         let muted = call.is_muted_self;
+        let mute_label = if muted {
+            tr(keys::GROUP_CALL_UNMUTE)
+        } else {
+            tr(keys::CALL_MUTE_AUDIO)
+        };
         // A live stream's viewer has no microphone (tdesktop's top bar
         // hides the mute button for RTMP); a spacer keeps the title
         // centered.
@@ -724,6 +733,11 @@ impl QuillApp {
                     this.child(
                         div()
                             .id("group-call-bar-mute")
+                            .role(Role::Button)
+                            .aria_label(mute_label)
+                            .tab_index(0)
+                            .cursor_pointer()
+                            .tooltip(move |window, cx| Tooltip::new(mute_label).build(window, cx))
                             .w(px(41.))
                             .h_full()
                             .flex()
@@ -763,6 +777,13 @@ impl QuillApp {
                 .child(
                     div()
                         .id("group-call-bar-leave")
+                        .role(Role::Button)
+                        .aria_label(tr(keys::GROUP_CALL_LEAVE))
+                        .tab_index(0)
+                        .cursor_pointer()
+                        .tooltip(move |window, cx| {
+                            Tooltip::new(tr(keys::GROUP_CALL_LEAVE)).build(window, cx)
+                        })
                         .w(px(41.))
                         .h_full()
                         .flex()

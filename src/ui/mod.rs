@@ -444,6 +444,7 @@ mod story_more;
 mod story_ring;
 mod story_viewer;
 mod subsection_tabs;
+mod subsection_tabs_fit;
 mod suggested_posts_boxes;
 mod suggested_posts_decide;
 mod suggested_posts_demo;

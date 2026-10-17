@@ -523,6 +523,15 @@ impl QuillApp {
             _ => None,
         };
         let topic_empty = topic_history.is_none_or(|h| h.messages.is_empty());
+        let topic_key_ids = open.zip(open_topic);
+        let topic_loading = topic_empty
+            && topic_key_ids.is_some_and(|(id, topic)| {
+                session.is_some_and(|s| s.topic_history_loading(id, topic))
+            });
+        let topic_failed = topic_empty
+            && topic_key_ids.is_some_and(|(id, topic)| {
+                session.is_some_and(|s| s.topic_history_load_failed(id, topic))
+            });
         // Channel comments / group reply thread of the open chat.
         let thread_open = open
             .and_then(|id| session.and_then(|s| s.thread_for_chat(id)))
@@ -678,7 +687,11 @@ impl QuillApp {
                     // Phase 5.1: per-topic history — same history component,
                     // fed from the topic history store (`searchChatMessages`
                     // with `topic_id`).
-                    if topic_empty {
+                    if topic_failed {
+                        self.topic_load_failed_row(cx).into_any_element()
+                    } else if topic_loading {
+                        history_skeleton().into_any_element()
+                    } else if topic_empty {
                         pane_placeholder(
                             tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
                             tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
@@ -718,6 +731,7 @@ impl QuillApp {
                     if history_failed {
                         div()
                             .id("history-load-failed")
+                            .flex_1()
                             .flex()
                             .flex_row()
                             .items_center()

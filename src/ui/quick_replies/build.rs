@@ -253,6 +253,7 @@ impl QuillApp {
                         .icon(IconName::Pencil)
                         .ghost()
                         .small()
+                        .tooltip(tr(keys::Q_OPS_EDIT_MESSAGE))
                         .accessibility_label(tr(keys::Q_OPS_EDIT_MESSAGE))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.begin_quick_reply_edit(message_id, text.clone(), window, cx);
@@ -265,6 +266,7 @@ impl QuillApp {
                         .icon(IconName::Trash)
                         .ghost()
                         .small()
+                        .tooltip(tr(keys::Q_OPS_DELETE_MESSAGE))
                         .accessibility_label(tr(keys::Q_OPS_DELETE_MESSAGE))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.delete_quick_reply_message(shortcut_id, message_id, cx);

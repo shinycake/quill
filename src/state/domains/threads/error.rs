@@ -12,6 +12,11 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::GetTopicHistory) => {
+                if let Some(pending) = pending {
+                    self.mark_topic_load_failed(pending);
+                }
+            }
             // Saved Messages: a 404 from `loadSavedMessagesTopics` says all
             // sublists were loaded; it is not a failure.
             Some(RequestPurpose::LoadSavedMessagesTopics) => {
