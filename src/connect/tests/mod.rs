@@ -31,6 +31,7 @@ mod emoji_interaction;
 mod emoji_sets;
 mod find_in_history;
 mod flood_retry;
+mod flood_retry_lost;
 mod folder_followups;
 mod forum_saved;
 mod gift_export;

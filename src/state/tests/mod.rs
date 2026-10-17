@@ -26,6 +26,7 @@ mod groups_more;
 mod history_window_cap;
 mod history_window_cap_live;
 mod inline_members;
+mod lost_requests;
 mod main_profile_tab;
 mod masks;
 mod message_story;

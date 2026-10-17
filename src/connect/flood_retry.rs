@@ -89,7 +89,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     self.session.requests.touch(retry.extra, now);
                 } else {
                     self.flood_attempts.remove(&retry.extra.0);
-                    self.session.requests.take(retry.extra);
+                    if let Some(pending) = self.session.requests.take(retry.extra) {
+                        self.session.settle_lost_request(pending);
+                    }
                     changed = true;
                 }
             }
