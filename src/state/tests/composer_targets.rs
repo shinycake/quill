@@ -177,3 +177,78 @@ fn a_message_deleted_only_in_the_thread_or_topic_it_was_found_in_is_gone() {
     assert!(session.message_deleted(ChatId(7), MessageId(60)));
     assert!(!session.message_deleted(ChatId(9), MessageId(60)));
 }
+
+fn reject(session: &mut Session, code: i32) {
+    session.begin_composer_reply_fetch(ChatId(7), MessageId(999));
+    session.reject_composer_reply_target(ChatId(7), MessageId(999), &TdError::from_code(code));
+}
+
+#[test]
+fn only_a_definite_answer_marks_the_reply_target_gone() {
+    for code in [400, 403, 404] {
+        let (mut session, _sink, _seq) = seeded();
+        reject(&mut session, code);
+        assert!(session.message_deleted(ChatId(7), MessageId(999)), "{code}");
+    }
+    // A lost request (408), a flood wait and a server fault do not cancel
+    // the user's reply.
+    for code in [408, 429, 500] {
+        let (mut session, _sink, _seq) = seeded();
+        reject(&mut session, code);
+        assert!(
+            !session.message_deleted(ChatId(7), MessageId(999)),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn a_failed_reply_fetch_is_retried_when_online_with_a_wait_and_a_limit() {
+    use std::time::{Duration, Instant};
+    let (mut session, _sink, _seq) = seeded();
+    session.connection = ConnectionState::Ready;
+    let wanted = |session: &Session| session.composer_reply_fetch_wanted(ChatId(7), MessageId(999));
+    assert!(wanted(&session));
+    reject(&mut session, 408);
+    assert!(!wanted(&session), "no retry on the next frame");
+
+    let age = |session: &mut Session, secs: u64| {
+        if let Some(ComposerReplyFetch::Failed { at, .. }) =
+            session.messages.composer_reply_fetch.get_mut(&(7, 999))
+        {
+            *at = Instant::now()
+                .checked_sub(Duration::from_secs(secs))
+                .unwrap_or_else(Instant::now);
+        }
+    };
+    age(&mut session, 3600);
+    session.connection = ConnectionState::WaitingForNetwork;
+    assert!(!wanted(&session), "not while offline");
+    session.connection = ConnectionState::Ready;
+    assert!(wanted(&session), "back online after the wait");
+
+    // Three attempts in all, then it stays failed.
+    reject(&mut session, 408);
+    age(&mut session, 3600);
+    assert!(wanted(&session));
+    reject(&mut session, 408);
+    age(&mut session, 3600);
+    assert!(!wanted(&session), "bounded");
+}
+
+#[test]
+fn the_fetch_cap_keeps_the_in_flight_and_the_new_entry() {
+    let (mut session, _sink, _seq) = seeded();
+    session.begin_composer_reply_fetch(ChatId(7), MessageId(1));
+    for id in 2..=40 {
+        session.begin_composer_reply_fetch(ChatId(7), MessageId(id));
+        session.reject_composer_reply_target(ChatId(7), MessageId(id), &TdError::from_code(500));
+    }
+    let fetch = &session.messages.composer_reply_fetch;
+    assert!(fetch.len() <= 32);
+    assert!(matches!(
+        fetch.get(&(7, 1)),
+        Some(ComposerReplyFetch::Loading { .. })
+    ));
+    assert!(fetch.contains_key(&(7, 40)));
+}

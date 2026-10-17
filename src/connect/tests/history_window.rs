@@ -540,6 +540,63 @@ fn a_window_that_holds_the_saved_message_is_kept() {
     assert!(!around);
 }
 
+/// Chat 7 opened with 80 rows, then left for chat 8; the frame settles the
+/// release queue, so 7 keeps only its newest rows (`history_prune.rs`).
+fn left_and_trimmed() -> Harness {
+    let mut h = Harness::with_unread_chat();
+    h.ingest(&chat_json(8));
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    let page: Vec<i64> = (1..=80).collect();
+    h.answer(first, &page);
+    h.driver.select_chat(ChatId(8)).unwrap();
+    h.driver.session.set_history_holds([]);
+    assert_eq!(h.history().messages.len(), crate::state::CLOSED_TAIL_KEEP);
+    assert_eq!(h.history().oldest_id(), Some(MessageId(21)));
+    h
+}
+
+#[test]
+fn a_chat_trimmed_below_its_saved_row_reopens_around_it() {
+    let mut h = left_and_trimmed();
+    let epoch = h.history().window_epoch;
+    let extra = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(10)))
+        .unwrap()
+        .expect("loads around the saved row");
+    // The tail no longer holds the row: it is replaced, not shown first.
+    assert!(h.history().messages.is_empty());
+    assert_ne!(h.history().window_epoch, epoch);
+    assert!(h.driver.session.saved_open_pending(ChatId(7)));
+    let request = h.last_history_request();
+    assert_eq!(request["from_message_id"], 10);
+    assert_eq!(request["offset"], HISTORY_AROUND_OFFSET);
+
+    let before = history_requests(&h);
+    h.answer(extra, &[5, 10, 15]);
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(h.history().contains(MessageId(10)));
+    assert!(h.history().has_newer, "the latest rows are newer");
+    assert_eq!(history_requests(&h), before, "no fallback load");
+}
+
+#[test]
+fn a_trimmed_tail_that_still_holds_the_saved_row_is_kept() {
+    let mut h = left_and_trimmed();
+    let epoch = h.history().window_epoch;
+    let before = h.recorder.snapshot().len();
+    h.driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(50)))
+        .unwrap();
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert_eq!(h.history().window_epoch, epoch, "restored in place");
+    assert!(h.history().contains(MessageId(50)));
+    let around = h.recorder.snapshot().iter().skip(before).any(|j| {
+        j.contains("\"@type\":\"getChatHistory\"") && j.contains("\"from_message_id\":50")
+    });
+    assert!(!around);
+}
+
 #[test]
 fn an_explicit_target_opens_highlighted_whatever_was_saved() {
     let mut h = Harness::with_unread_chat();

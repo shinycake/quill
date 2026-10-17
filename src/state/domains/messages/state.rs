@@ -99,6 +99,9 @@ pub struct MessagesState {
     /// Replied-to messages outside the loaded window, keyed by the
     /// replying message `(chat_id, message_id)`.
     pub reply_targets: HashMap<(i64, i64), ReplyTarget>,
+    /// Messages the composer's reply bar points at that were not in memory,
+    /// fetched with `getMessage`, keyed by `(chat_id, message_id)`.
+    pub composer_reply_fetch: HashMap<(i64, i64), ComposerReplyFetch>,
     pub pending_bot_messages: HashMap<(i64, i32), PendingBotMessage>,
     pub pending_bot_period_secs: u64,
     /// `poll.id` → `(chat_id, message_id)` of rows loaded with that poll,
@@ -186,6 +189,7 @@ impl MessagesState {
             flood_notice: None,
             scheduled_messages: Vec::new(),
             reply_targets: HashMap::new(),
+            composer_reply_fetch: HashMap::new(),
             pending_bot_messages: HashMap::new(),
             pending_bot_period_secs: 30,
             poll_messages: HashMap::new(),

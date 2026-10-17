@@ -59,7 +59,11 @@ impl Session {
         if self.view_in_place() == Some(chat_id) {
             self.enter_view(None);
         }
-        self.window_chats.views.remove(&chat_id).is_some()
+        let was_window = self.window_chats.views.remove(&chat_id).is_some();
+        if was_window {
+            self.release_chat_history(chat_id);
+        }
+        was_window
     }
 
     /// The chat window whose view is in the session's place (`None`: the
@@ -182,6 +186,7 @@ impl Session {
             self.threads.thread = None;
         }
         self.view_generation.bump();
+        self.release_chat_history(prev);
         Some(prev)
     }
 }
@@ -234,6 +239,21 @@ impl WindowViews {
 
     pub fn is_empty(&self) -> bool {
         self.views.is_empty()
+    }
+
+    /// Whether a stored view (a window's, or the main window's while a
+    /// window's is in place) shows `chat_id`.
+    pub fn shows_chat(&self, chat_id: ChatId) -> bool {
+        self.views
+            .values()
+            .any(|view| view.open_chat == Some(chat_id))
+    }
+
+    /// Whether a stored view shows `topic` of `chat_id`.
+    pub fn shows_topic(&self, chat_id: ChatId, topic: i32) -> bool {
+        self.views
+            .values()
+            .any(|view| view.open_chat == Some(chat_id) && view.open_topic == Some(topic))
     }
 
     pub fn len(&self) -> usize {

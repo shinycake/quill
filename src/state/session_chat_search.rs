@@ -10,7 +10,7 @@ impl Session {
             return ChatSearchJumpNeed::Missing;
         };
         self.search.chat_search.select_message(message_id);
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         if history.is_tombstone(message_id) {
             self.search.chat_search.jump = ChatSearchJump::Missing { message_id };
             return ChatSearchJumpNeed::Missing;
@@ -103,7 +103,7 @@ impl Session {
         };
         let row = hit.into_history();
         self.index_poll(&row);
-        self.histories.entry(chat_id.0).or_default().upsert(row);
+        self.history_entry(chat_id).upsert(row);
     }
 
     /// Main-list chats whose title contains `query` (case-insensitive). Demo-only

@@ -132,6 +132,7 @@ mod dialogs;
 pub(crate) use dialogs::*;
 mod format_helpers;
 mod history_fx;
+mod history_holds;
 mod history_row;
 mod keybindings;
 mod menu_states;

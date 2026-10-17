@@ -5,7 +5,11 @@ impl Session {
     /// Phase 5.1: enter a forum topic's view. Returns the topic's cached
     /// info, if the chat's topic list is already loaded.
     pub fn select_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Option<ForumTopic> {
-        self.open_topic = Some(forum_topic_id);
+        let previous = self.open_topic.replace(forum_topic_id);
+        self.reclaim_topic_history(chat_id, forum_topic_id);
+        if let Some(previous) = previous.filter(|previous| *previous != forum_topic_id) {
+            self.release_topic_history(chat_id, previous);
+        }
         self.clear_topic_load_failed(chat_id, forum_topic_id);
         self.close_topic_thread_unless(Some(forum_topic_id));
         self.view_generation.bump();
@@ -49,7 +53,10 @@ impl Session {
 
     /// Phase 5.1: leave the topic view, back to the forum's topic list.
     pub fn deselect_topic(&mut self) {
-        self.open_topic = None;
+        let previous = self.open_topic.take();
+        if let (Some(chat_id), Some(previous)) = (self.open_chat, previous) {
+            self.release_topic_history(chat_id, previous);
+        }
         self.close_topic_thread_unless(None);
         self.view_generation.bump();
     }

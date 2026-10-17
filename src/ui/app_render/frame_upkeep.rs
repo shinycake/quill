@@ -17,6 +17,8 @@ impl QuillApp {
             live.driver.session.app_active = window.is_window_active();
         }
         self.flush_notifications(window, cx);
+        self.sync_history_holds();
+        self.fetch_missing_reply_target();
         // The inline results button's round trip back to its chat.
         self.flush_inline_return(window, cx);
         // A topic or thread switch without a window at hand asked for the

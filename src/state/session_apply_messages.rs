@@ -121,7 +121,7 @@ impl Session {
                 // would return again forever.
                 let from = pending.around_message_id.map_or(0, |id| id.0);
                 if !messages.iter().any(|m| from == 0 || m.id.0 < from) {
-                    self.histories.entry(chat_id.0).or_default().loaded_complete = true;
+                    self.history_entry(chat_id).loaded_complete = true;
                 }
                 for message in messages {
                     self.upsert_message(message, false);
@@ -250,11 +250,7 @@ impl Session {
                     self.index_poll(row);
                 }
                 self.clear_topic_load_failed(chat_id, forum_topic_id);
-                let entry = self
-                    .threads
-                    .topic_histories
-                    .entry((chat_id.0, forum_topic_id))
-                    .or_default();
+                let entry = self.topic_history_entry(chat_id, forum_topic_id);
                 for row in rows {
                     entry.messages.insert(row.id.0, row);
                 }

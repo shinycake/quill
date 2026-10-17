@@ -66,6 +66,7 @@ mod chat_types;
 mod composer_targets;
 mod domains;
 mod history_calendar;
+mod history_prune;
 mod history_trim;
 mod history_types;
 mod info_types;
@@ -159,8 +160,10 @@ pub use account_notices::*;
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
+pub use composer_targets::ComposerReplyFetch;
 pub use domains::*;
 pub use history_calendar::*;
+pub use history_prune::*;
 pub use history_trim::{
     HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, RowWindowShift, WindowEnd, row_window_shift,
 };
