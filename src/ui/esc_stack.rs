@@ -39,6 +39,11 @@ macro_rules! layer {
 /// popups above the panels they were opened from.
 pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
+        "first-run-intro",
+        |app| app.first_run.intro_skippable(std::time::Instant::now()),
+        |app, _, cx| app.skip_first_run_intro(cx)
+    ),
+    layer!(
         "instant-view",
         |app| app.live.as_ref().is_some_and(|live| live
             .driver

@@ -1,0 +1,13 @@
+// First-run onboarding: the experimental notice and the highlights
+// (src/ui/first_run_ui.rs).
+"lng_start_msgs" = "Start Messaging";
+"qll_first_run_notice_title" = "Quill is experimental";
+"qll_first_run_notice_early" = "Quill is in early development. Expect bugs, missing features and changes between versions.";
+"qll_first_run_notice_risk" = "It is provided as is, without warranty of any kind. You use it at your own risk, and its developers accept no responsibility for any loss or damage.";
+"qll_first_run_welcome" = "Welcome to Quill";
+"qll_first_run_open_title" = "Open source";
+"qll_first_run_open_body" = "All of Quill's code is public, under the MIT License.";
+"qll_first_run_native_title" = "Native on every desktop";
+"qll_first_run_native_body" = "Written in Rust and drawn on the GPU, for macOS, Windows and Linux.";
+"qll_first_run_telegram_title" = "Chats, calls and stories";
+"qll_first_run_telegram_body" = "Groups, channels, voice and video calls, stories, and several accounts side by side.";

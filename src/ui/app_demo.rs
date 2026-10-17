@@ -279,6 +279,7 @@ impl QuillApp {
             chat_list: super::chat_list_state::ChatListUi::new(window, cx),
             stories,
             premium_preview: Default::default(),
+            first_run: super::first_run_ui::initial_first_run(demo.is_some(), &credentials, cx),
             history: super::history_state::HistoryUi::new(cx),
             frame: super::frame_state::FrameUi::new(cx),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
