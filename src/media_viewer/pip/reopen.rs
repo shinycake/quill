@@ -44,6 +44,7 @@ mod tests {
 
     fn item(message: i64, file: i32) -> MediaViewerItem {
         MediaViewerItem {
+            group: None,
             chat_id: ChatId(1),
             message_id: MessageId(message),
             kind: MediaViewerKind::Video,

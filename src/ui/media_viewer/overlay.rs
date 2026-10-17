@@ -48,6 +48,7 @@ impl QuillApp {
             .current()
             .cloned()
             .unwrap_or_else(|| MediaViewerItem {
+                group: None,
                 file_name: None,
                 chat_id: ChatId(0),
                 message_id: MessageId(0),

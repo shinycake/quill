@@ -4,7 +4,7 @@
 //! idle timer (tdesktop `_fullScreenVideo`).
 #![deny(clippy::indexing_slicing)]
 
-use super::geometry::CAPTION_GAP;
+use super::geometry::{CAPTION_GAP, GROUP_STRIP_ROOM};
 use super::layer::ViewerGeometry;
 use super::*;
 use crate::ui::video_player::controls::hide_cursor;
@@ -118,7 +118,16 @@ impl QuillApp {
                 cx,
             )
         });
-        let viewport_h = f32::from(window.viewport_size().height);
+        let viewport = window.viewport_size();
+        let group_thumbs = self.viewer_group_thumbs(f32::from(viewport.width), cx);
+        // An expanded caption stops short of the top bar with the strip
+        // under it too.
+        let viewport_h = f32::from(viewport.height)
+            - if group_thumbs.is_some() {
+                GROUP_STRIP_ROOM
+            } else {
+                0.0
+            };
         let caption = caption.zip(geometry.caption).map(|(caption, layout)| {
             self.viewer_caption_plate(item, caption, layout, viewport_h, cx)
         });
@@ -474,7 +483,8 @@ impl QuillApp {
             .flex_col()
             .items_center()
             .gap(px(CAPTION_GAP))
-            .children(rows);
+            .children(rows)
+            .children(group_thumbs);
         if fullscreen {
             // Over the picture, a scrim keeps the controller readable.
             let scrim = div()

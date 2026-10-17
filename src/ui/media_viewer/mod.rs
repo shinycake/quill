@@ -49,6 +49,7 @@ mod fullscreen;
 #[cfg(feature = "demo-capture")]
 pub(in crate::ui) use fullscreen::VideoFullscreen;
 mod geometry;
+mod group_thumbs_ui;
 mod layer;
 mod navigation;
 mod overlay;

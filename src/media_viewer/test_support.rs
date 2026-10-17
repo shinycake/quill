@@ -4,6 +4,7 @@ use super::*;
 
 pub(super) fn item(kind: MediaViewerKind, message_id: i64) -> MediaViewerItem {
     MediaViewerItem {
+        group: None,
         file_name: None,
         chat_id: ChatId(7),
         message_id: MessageId(message_id),

@@ -23,6 +23,7 @@ use crate::voice::format_voice_duration;
 mod boost;
 mod controls;
 mod files;
+mod group_thumbs;
 mod items;
 pub mod pip;
 mod quality;
@@ -45,6 +46,10 @@ pub use controls::{
 pub use files::{
     PICTURE_FILE_AUTO_DOWNLOAD_MAX, READ_BYTES_LIMIT, collect_file_items, file_viewer_item,
     is_image_file, opens_as_picture, picture_format_label, shows_as_photo,
+};
+pub use group_thumbs::{
+    GROUP_STRIP_PADDING, GROUP_THUMB_HEIGHT, GROUP_THUMB_SLIDE_MS, GROUP_THUMB_WIDTH_MAX,
+    GroupStrip, GroupThumb, ThumbFrame, ViewerGroup, group_strip, strip_frames,
 };
 pub use items::{
     collect_media_items, poll_option_viewer_item, profile_photo_items, timed_viewer_item,
@@ -177,6 +182,8 @@ pub struct MediaViewerItem {
     pub quality_options: Vec<VideoQualityOption>,
     /// Files only: the document's name (the card and the save name).
     pub file_name: Option<String>,
+    /// The album the item belongs to, which shows as a thumbnail strip.
+    pub group: Option<ViewerGroup>,
 }
 
 /// Viewer state: the open chat's media list plus the current position.
@@ -189,6 +196,11 @@ pub struct MediaViewer {
     /// Shared Media only: the tab's total count, so the header can say
     /// "Photo 120 of 340" while only a prefix of the list is loaded.
     total: usize,
+    /// The item the last step (arrow, wheel, swipe or thumb) left, which
+    /// the album strip slides from.
+    arrived_from: Option<usize>,
+    /// Steps taken since opening, to key the strip's slide.
+    steps: u64,
 }
 
 impl MediaViewer {
@@ -238,10 +250,7 @@ impl MediaViewer {
     }
 
     pub fn close(&mut self) {
-        self.items.clear();
-        self.index = 0;
-        self.source = ViewerSource::Chat;
-        self.total = 0;
+        *self = Self::default();
     }
 
     /// Whether the previous / next arrow has an item to go to.
@@ -284,20 +293,46 @@ impl MediaViewer {
         if added > 0 {
             self.items.splice(0..0, older);
             self.index += added;
+            self.arrived_from = self.arrived_from.map(|from| from + added);
         }
         added
     }
 
     pub fn prev(&mut self) {
-        if self.is_open() && self.index > 0 {
-            self.index -= 1;
+        if let Some(index) = self.index.checked_sub(1) {
+            self.go_to(index);
         }
     }
 
     pub fn next(&mut self) {
-        if self.is_open() && self.index + 1 < self.items.len() {
-            self.index += 1;
+        self.go_to(self.index.saturating_add(1));
+    }
+
+    /// Step to the item at `index` (a thumb of the album strip, or a
+    /// neighbour); out of range or the current one does nothing.
+    pub fn go_to(&mut self, index: usize) {
+        if index < self.items.len() && index != self.index {
+            self.arrived_from = Some(self.index);
+            self.index = index;
+            self.steps = self.steps.wrapping_add(1);
         }
+    }
+
+    /// The current item's album strip laid out in `available` points
+    /// (`None` outside an album or for an item alone in it).
+    pub fn group_strip(&self, available: f32) -> Option<GroupStrip> {
+        group_strip(&self.items, self.index, available)
+    }
+
+    /// The strip as it stood on the item the last step left, which the
+    /// current strip slides from (`None` before any step).
+    pub fn group_strip_before(&self, available: f32) -> Option<GroupStrip> {
+        group_strip(&self.items, self.arrived_from?, available)
+    }
+
+    /// Changes with every step, to key the strip's slide.
+    pub fn steps(&self) -> u64 {
+        self.steps
     }
 
     pub fn current(&self) -> Option<&MediaViewerItem> {
@@ -363,6 +398,7 @@ impl MediaViewer {
         if self.items.len() == before {
             return false;
         }
+        self.arrived_from = None;
         if self.items.is_empty() {
             self.index = 0;
             return true;
