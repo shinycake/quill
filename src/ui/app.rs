@@ -232,11 +232,11 @@ impl QuillApp {
             .or(self.demo_session.as_ref())
     }
 
-    pub(super) fn media_display_roots(&self) -> Vec<PathBuf> {
+    pub(super) fn media_display_roots(&self) -> std::rc::Rc<[PathBuf]> {
         if let Some(roots) = self.frame.media_roots_frame.borrow().as_ref() {
             return roots.clone();
         }
-        let roots = self.compute_media_display_roots();
+        let roots: std::rc::Rc<[PathBuf]> = self.compute_media_display_roots().into();
         *self.frame.media_roots_frame.borrow_mut() = Some(roots.clone());
         roots
     }

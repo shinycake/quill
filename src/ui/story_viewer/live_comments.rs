@@ -180,7 +180,7 @@ impl QuillApp {
                     &message.text,
                     &message.entities,
                 );
-                let mut emoji = custom_emoji_paths(&entities, stickers, files, &roots);
+                let mut emoji = custom_emoji_paths(&entities, Some(stickers), files, &roots);
                 if let Some(crown) = place.and_then(crown_image) {
                     emoji.insert(crown_id(place.unwrap_or(0)), crown);
                 }

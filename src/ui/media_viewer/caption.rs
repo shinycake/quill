@@ -241,7 +241,7 @@ impl QuillApp {
             .map(|session| {
                 custom_emoji_paths(
                     &item.caption_entities,
-                    &session.stickers.emoji.custom_emoji_stickers,
+                    Some(&session.stickers.emoji.custom_emoji_stickers),
                     &session.media.files,
                     &roots,
                 )

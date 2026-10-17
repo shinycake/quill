@@ -117,6 +117,9 @@ impl QuillApp {
     /// laid out (`chat_list.items`), without listing the chats again for
     /// every row.
     pub(in crate::ui) fn rows_selecting(&self) -> bool {
+        if self.chat_list.selected.is_empty() {
+            return false;
+        }
         let rows = self.chat_list.items.iter().filter_map(|item| match item {
             ChatListItem::Chat { id, .. } => Some(*id),
             _ => None,

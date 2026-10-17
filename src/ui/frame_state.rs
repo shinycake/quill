@@ -27,7 +27,7 @@ pub(crate) struct FrameUi {
     pub(super) title_badge: std::cell::RefCell<quill::tray::badge_cache::BadgeCache>,
     /// `media_display_roots`, computed once per frame (rows ask for it
     /// one by one, and it touches the file system).
-    pub(super) media_roots_frame: std::cell::RefCell<Option<Vec<PathBuf>>>,
+    pub(super) media_roots_frame: std::cell::RefCell<Option<std::rc::Rc<[PathBuf]>>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
     /// History motion: new-message reveal and selection-mode fades.
     pub(super) motion: super::motion::MotionState,

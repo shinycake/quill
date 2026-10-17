@@ -49,7 +49,7 @@ use std::sync::atomic::AtomicU64;
 /// kit Phase 3: per-render shared inputs for message-history rows.
 #[derive(Default)]
 pub(super) struct HistoryShared {
-    pub(super) media_roots: Vec<PathBuf>,
+    pub(super) media_roots: std::rc::Rc<[PathBuf]>,
 }
 
 pub(super) fn apply_ready_albums(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {

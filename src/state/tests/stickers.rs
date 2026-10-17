@@ -221,7 +221,7 @@ fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
         premium_animation: None,
     };
     session.stickers.emoji.custom_emoji_stickers =
-        vec![sticker(1, 70), sticker(2, 70), sticker(3, 71)];
+        vec![sticker(1, 70), sticker(2, 70), sticker(3, 71)].into();
     let entity = |id: i64, at: usize| TextEntity {
         utf8_start: at,
         utf8_end: at + 1,

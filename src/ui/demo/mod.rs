@@ -61,11 +61,8 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
         &mut session,
         &demo_file_json(61, &demo_thumb_png_path(), true),
     );
-    session
-        .stickers
-        .emoji
-        .custom_emoji_stickers
-        .push(StickerItem {
+    session.stickers.emoji.custom_emoji_stickers.update(|list| {
+        list.push(StickerItem {
             custom_emoji_id: Some(4242),
             id: 4242,
             set_id: 0,
@@ -80,6 +77,7 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
             requires_premium: false,
             premium_animation: None,
         });
+    });
     session.open_chat(ChatId(11));
     session
 }
@@ -669,11 +667,8 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
         ) {
             session.apply(owned);
         }
-        session
-            .stickers
-            .emoji
-            .custom_emoji_stickers
-            .push(StickerItem {
+        session.stickers.emoji.custom_emoji_stickers.update(|list| {
+            list.push(StickerItem {
                 custom_emoji_id: Some(4343),
                 id: 4343,
                 set_id: 0,
@@ -688,6 +683,7 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
                 requires_premium: false,
                 premium_animation: None,
             });
+        });
     }
     match kind {
         DemoSeed::ReadyChats => {

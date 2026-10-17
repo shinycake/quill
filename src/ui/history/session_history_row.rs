@@ -633,8 +633,7 @@ pub(in crate::ui) fn session_history_row(
             media_roots,
             session
                 .as_ref()
-                .map(|s| s.stickers.emoji.custom_emoji_stickers.as_slice())
-                .unwrap_or(&[]),
+                .map(|s| &s.stickers.emoji.custom_emoji_stickers),
             &animated_emoji,
             revealed,
             // Settings → Appearance: message font size.
@@ -700,7 +699,7 @@ pub(in crate::ui) fn session_history_row(
                 look.font,
                 &super::super::message_text::custom_emoji_paths(
                     caption_entities,
-                    session.map_or(&[], |s| s.stickers.emoji.custom_emoji_stickers.as_slice()),
+                    session.map(|s| &s.stickers.emoji.custom_emoji_stickers),
                     files,
                     media_roots,
                 ),

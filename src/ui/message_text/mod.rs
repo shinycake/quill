@@ -20,7 +20,7 @@ use quill::local_path::sandboxed_display_path;
 use quill::rich::RichBlock;
 use quill::state::{OutboxReceipt, Session, message_time_hhmm};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{MessageContent, MessageInteractionInfo, ParsedFile, StickerItem};
+use quill::telegram::envelope::{MessageContent, MessageInteractionInfo, ParsedFile};
 use quill::text::{
     TextEntity, TextEntityKind, TextRun, collapsed_quote_len, quote_collapses, styled_runs,
     utf8_to_utf16_offset,
@@ -535,7 +535,7 @@ pub(super) const MONO_FONT: &str = "monospace";
 /// sticker are absent; the renderer falls back to the span text.
 pub(in crate::ui) fn custom_emoji_paths(
     entities: &[TextEntity],
-    stickers: &[StickerItem],
+    stickers: Option<&quill::emoji::CustomEmojiStickers>,
     files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> HashMap<i64, ImageSource> {
@@ -548,8 +548,7 @@ pub(in crate::ui) fn custom_emoji_paths(
             continue;
         }
         let path = stickers
-            .iter()
-            .find(|s| s.custom_emoji_id == Some(custom_emoji_id))
+            .and_then(|stickers| stickers.lookup(custom_emoji_id))
             .and_then(|s| s.display_file_id())
             .and_then(|id| files.get(&id.0))
             .and_then(|f| f.usable_path())

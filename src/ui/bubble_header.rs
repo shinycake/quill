@@ -310,8 +310,7 @@ impl QuillApp {
             .stickers
             .emoji
             .custom_emoji_stickers
-            .iter()
-            .find(|sticker| sticker.custom_emoji_id == Some(id))?
+            .lookup(id)?
             .display_file_id()?;
         files
             .get(&file.0)

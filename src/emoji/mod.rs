@@ -9,6 +9,9 @@ use crate::telegram::envelope_emoji::{EmojiCategory, EmojiKeyword, EmojiStatusIt
 use crate::text::TextEntityKind;
 use std::collections::{HashMap, HashSet};
 
+mod custom_stickers;
+pub use custom_stickers::CustomEmojiStickers;
+
 /// Most resolved custom emoji kept in `EmojiPanel::custom_emoji_stickers`.
 pub const CUSTOM_EMOJI_CACHE_CAP: usize = 4000;
 
@@ -77,7 +80,7 @@ pub struct EmojiPanel {
     /// request went out for; dedupes requests across keystrokes.
     pub animated_emoji_for: Option<String>,
     /// Slice S10: last `getCustomEmojiStickers` answer.
-    pub custom_emoji_stickers: Vec<StickerItem>,
+    pub custom_emoji_stickers: CustomEmojiStickers,
     /// Slice S10: `searchEmojis` results for the picker.
     pub keyword_results: Vec<EmojiKeyword>,
     /// B11: `getKeywordEmojis` answer for the panel's emoji search.
@@ -441,16 +444,18 @@ impl Session {
         for (ix, sticker) in stickers.iter().enumerate() {
             newest.insert(Self::custom_emoji_key(sticker), ix);
         }
-        emoji
-            .custom_emoji_stickers
-            .retain(|old| !newest.contains_key(&Self::custom_emoji_key(old)));
-        emoji.custom_emoji_stickers.extend(
-            stickers
-                .into_iter()
-                .enumerate()
-                .filter(|(ix, sticker)| newest.get(&Self::custom_emoji_key(sticker)) == Some(ix))
-                .map(|(_, sticker)| sticker),
-        );
+        emoji.custom_emoji_stickers.update(|list| {
+            list.retain(|old| !newest.contains_key(&Self::custom_emoji_key(old)));
+            list.extend(
+                stickers
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(ix, sticker)| {
+                        newest.get(&Self::custom_emoji_key(sticker)) == Some(ix)
+                    })
+                    .map(|(_, sticker)| sticker),
+            );
+        });
         let mut excess = self
             .stickers
             .emoji
@@ -465,16 +470,18 @@ impl Session {
         let wanted: HashSet<i64> = self.open_chat_custom_emoji_ids().into_iter().collect();
         let emoji = &mut self.stickers.emoji;
         let mut dropped_ids = Vec::new();
-        emoji.custom_emoji_stickers.retain(|sticker| {
-            let visible = sticker
-                .custom_emoji_id
-                .is_some_and(|id| wanted.contains(&id));
-            if excess == 0 || visible {
-                return true;
-            }
-            excess -= 1;
-            dropped_ids.extend(sticker.custom_emoji_id);
-            false
+        emoji.custom_emoji_stickers.update(|list| {
+            list.retain(|sticker| {
+                let visible = sticker
+                    .custom_emoji_id
+                    .is_some_and(|id| wanted.contains(&id));
+                if excess == 0 || visible {
+                    return true;
+                }
+                excess -= 1;
+                dropped_ids.extend(sticker.custom_emoji_id);
+                false
+            });
         });
         for id in dropped_ids {
             emoji.status_resolution_attempted.remove(&id);
