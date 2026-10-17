@@ -678,6 +678,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if view_after {
             self.maybe_view_open_messages()?;
         }
+        self.load_default_after_saved_open();
         // M2: full rich blocks replace the partial message's blocks in
         // history. Only `RichMessage` rows are touched — an unrelated
         // response can never clobber a different content kind.

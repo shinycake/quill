@@ -4,8 +4,10 @@
 //! every history: they are counted on each scroll, forgotten while the view
 //! sits at the bottom (`forgetScrollState`) and when an explicit target (a
 //! jump to a message) opens the chat, and read back when the chat is shown
-//! again at its default position. This is the same rule over message ids
-//! and pixel offsets, kept in memory for the running account.
+//! again at its default position: the chat then opens around that message,
+//! so the position is restored with the first rows. This is the same rule
+//! over message ids and pixel offsets, kept in memory for the running
+//! account.
 use super::*;
 use std::collections::{HashMap, VecDeque};
 
@@ -76,72 +78,86 @@ impl ScrollMemory {
     pub fn is_empty(&self) -> bool {
         self.saved.is_empty()
     }
-}
 
-/// A remembered position waiting for its message to load. Any move the
-/// reader makes ends the wait, so the position never pulls them back later.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct RestoreWait {
-    pending: bool,
-    seen: u64,
-}
-
-impl RestoreWait {
-    /// Start waiting; `interactions` is the scroller's reader-scroll count now.
-    pub fn arm(&mut self, interactions: u64) {
-        self.pending = true;
-        self.seen = interactions;
-    }
-
-    pub fn is_pending(&self) -> bool {
-        self.pending
-    }
-
-    /// The wait is over: restored, replaced by a jump, or abandoned.
-    pub fn finish(&mut self) {
-        self.pending = false;
-    }
-
-    /// End the wait when the reader scrolled (wheel, trackpad, keyboard, a
-    /// send or jump to latest counted by the scroller) or holds the scrollbar.
-    pub fn observe(&mut self, interactions: u64, scrollbar_dragging: bool) {
-        if self.pending && (interactions != self.seen || scrollbar_dragging) {
-            self.pending = false;
+    /// How the history `key` opens. An explicit target (a search hit, a
+    /// reply, a notification, a message link) wins and drops the saved
+    /// position, as tdesktop's `forgetScrollState` does when a chat is shown
+    /// at a message; otherwise a saved position opens the history around
+    /// its message.
+    pub fn open(&mut self, key: ScrollKey, explicit: Option<MessageId>) -> HistoryOpen {
+        match explicit {
+            Some(target) => {
+                self.forget(key);
+                HistoryOpen::Message(target)
+            }
+            None => self.get(key).map_or(HistoryOpen::Default, |saved| {
+                HistoryOpen::Saved(saved.anchor)
+            }),
         }
     }
 }
 
-/// What opening a history does with its remembered position.
+/// What the first history window of an opened chat is loaded around.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryOpen {
+    /// The read boundary when there are unread messages, else the latest.
+    Default,
+    /// An explicit target: loaded around and highlighted.
+    Message(MessageId),
+    /// The saved top row: loaded around it, not highlighted, so the first
+    /// rows already hold it and the position is restored with them
+    /// (tdesktop `showHistory` with `showAtMsgId = scrollTopItem`).
+    Saved(MessageId),
+}
+
+/// What the first rows of an opened history scroll to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollOpen {
-    /// Start at the remembered row.
-    Restore(SavedScroll),
-    /// A jump target is set: it wins and the old position is dropped.
+    /// The saved row is loaded: start there, `offset` pixels into it.
+    Restore { row: usize, offset: f32 },
+    /// A jump target is set: it wins and the saved position is dropped.
     Jump,
-    /// Nothing remembered (or its message is not in the window).
+    /// A saved position whose message is not in the window opened for it
+    /// (deleted, or gone from the topic's loaded history): the default
+    /// position, and the saved one is dropped.
+    Missing,
+    /// Nothing saved: the unread divider, else the bottom.
     Default,
 }
 
-/// Decide how a history starts. `row_of` finds the row holding a message in
-/// the loaded window.
+impl ScrollOpen {
+    /// Whether opening this way drops the saved position.
+    pub fn forgets(self) -> bool {
+        matches!(self, Self::Jump | Self::Missing)
+    }
+}
+
+/// Decide where the first rows of a history start. `row_of` finds the row
+/// holding a message in the loaded window.
 pub fn scroll_open(
     saved: Option<SavedScroll>,
     explicit_jump: bool,
     row_of: impl Fn(MessageId) -> Option<usize>,
-) -> (ScrollOpen, Option<usize>) {
+) -> ScrollOpen {
     if explicit_jump {
-        return (ScrollOpen::Jump, None);
+        return ScrollOpen::Jump;
     }
-    match saved.and_then(|scroll| row_of(scroll.anchor).map(|row| (scroll, row))) {
-        Some((scroll, row)) => (ScrollOpen::Restore(scroll), Some(row)),
-        None => (ScrollOpen::Default, None),
+    let Some(saved) = saved else {
+        return ScrollOpen::Default;
+    };
+    match row_of(saved.anchor) {
+        Some(row) => ScrollOpen::Restore {
+            row,
+            offset: saved.offset,
+        },
+        None => ScrollOpen::Missing,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        RestoreWait, SCROLL_MEMORY_CAP, SavedScroll, ScrollMemory, ScrollOpen, scroll_open,
+        HistoryOpen, SCROLL_MEMORY_CAP, SavedScroll, ScrollMemory, ScrollOpen, scroll_open,
     };
     use crate::ids::MessageId;
 
@@ -201,70 +217,56 @@ mod tests {
     }
 
     #[test]
-    fn opening_restores_when_the_anchor_is_loaded() {
-        let (open, row) = scroll_open(at(40, 12.), false, |id| (id == MessageId(40)).then_some(7));
-        assert!(matches!(
-            open,
-            ScrollOpen::Restore(SavedScroll {
-                anchor: MessageId(40),
-                ..
-            })
-        ));
-        assert_eq!(row, Some(7));
-    }
-
-    #[test]
-    fn an_explicit_jump_beats_the_remembered_position() {
-        let (open, row) = scroll_open(at(40, 12.), true, |_| Some(7));
-        assert_eq!((open, row), (ScrollOpen::Jump, None));
-    }
-
-    #[test]
-    fn an_anchor_outside_the_window_falls_back() {
-        let (open, row) = scroll_open(at(40, 12.), false, |_| None);
-        assert_eq!((open, row), (ScrollOpen::Default, None));
-        let (open, _) = scroll_open(None, false, |_| Some(1));
-        assert_eq!(open, ScrollOpen::Default);
-    }
-
-    #[test]
-    fn a_reader_move_ends_the_wait_for_a_late_page() {
-        let mut wait = RestoreWait::default();
-        wait.arm(4);
-        wait.observe(4, false);
-        assert!(wait.is_pending());
-        wait.observe(5, false);
-        assert!(!wait.is_pending());
-    }
-
-    #[test]
-    fn holding_the_scrollbar_ends_the_wait() {
-        let mut wait = RestoreWait::default();
-        wait.arm(0);
-        wait.observe(0, true);
-        assert!(!wait.is_pending());
-        // Once ended it stays ended, and recording resumes.
-        wait.observe(0, false);
-        assert!(!wait.is_pending());
-    }
-
-    #[test]
-    fn leaving_the_late_restore_unarmed_never_pends() {
-        let mut wait = RestoreWait::default();
-        wait.observe(9, true);
-        assert!(!wait.is_pending());
-    }
-
-    #[test]
-    fn sending_or_jumping_to_latest_forgets_the_position() {
+    fn a_saved_position_opens_around_its_message_without_a_highlight() {
         let mut memory = ScrollMemory::default();
-        let mut wait = RestoreWait::default();
         memory.record((1, None, 0), at(40, 12.));
-        wait.arm(0);
-        // The reader sends: the scroller counts it, the entry goes.
-        memory.forget((1, None, 0));
-        wait.observe(1, false);
+        assert_eq!(
+            memory.open((1, None, 0), None),
+            HistoryOpen::Saved(MessageId(40))
+        );
+        // Opening does not use the entry up: it is read again by the first rows.
+        assert_eq!(memory.get((1, None, 0)), at(40, 12.));
+        assert_eq!(memory.open((2, None, 0), None), HistoryOpen::Default);
+    }
+
+    #[test]
+    fn an_explicit_target_wins_and_drops_the_saved_position() {
+        let mut memory = ScrollMemory::default();
+        memory.record((1, None, 0), at(40, 12.));
+        assert_eq!(
+            memory.open((1, None, 0), Some(MessageId(90))),
+            HistoryOpen::Message(MessageId(90))
+        );
         assert_eq!(memory.get((1, None, 0)), None);
-        assert!(!wait.is_pending());
+    }
+
+    #[test]
+    fn the_first_rows_restore_when_the_anchor_is_loaded() {
+        let open = scroll_open(at(40, 12.), false, |id| (id == MessageId(40)).then_some(7));
+        assert_eq!(
+            open,
+            ScrollOpen::Restore {
+                row: 7,
+                offset: 12.
+            }
+        );
+        assert!(!open.forgets());
+    }
+
+    #[test]
+    fn a_jump_target_beats_the_saved_position() {
+        let open = scroll_open(at(40, 12.), true, |_| Some(7));
+        assert_eq!(open, ScrollOpen::Jump);
+        assert!(open.forgets());
+    }
+
+    #[test]
+    fn a_missing_anchor_falls_back_and_forgets() {
+        let open = scroll_open(at(40, 12.), false, |_| None);
+        assert_eq!(open, ScrollOpen::Missing);
+        assert!(open.forgets());
+        let open = scroll_open(None, false, |_| Some(1));
+        assert_eq!(open, ScrollOpen::Default);
+        assert!(!open.forgets());
     }
 }

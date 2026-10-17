@@ -12,57 +12,11 @@ struct ThreadWindow {
     unread_count: i32,
     has_newer: bool,
     window_epoch: u64,
+    /// The first page still loads around the saved scroll position.
+    saved_open: bool,
 }
 
 impl QuillApp {
-    /// A reader's own scroll ends the wait for a remembered position: they
-    /// moved on, so it must not pull them back when its window arrives.
-    fn end_restore_wait_on_scroll(&mut self, cx: &App) {
-        let scroller = self.history.scroller.read(cx);
-        self.history
-            .restore
-            .observe(scroller.user_scrolls(), scroller.is_scrollbar_dragging());
-    }
-
-    /// The reader sent a message or jumped to the latest: the view is theirs
-    /// again. The wait ends and the old position is forgotten.
-    pub(in crate::ui) fn forget_scroll_on_return_to_latest(&mut self, cx: &mut Context<Self>) {
-        self.history
-            .scroller
-            .update(cx, |state, _| state.note_user_scroll());
-        self.history.restore.finish();
-        if let Some(key) = self.history.key {
-            self.history.scroll_memory.forget(key);
-        }
-    }
-
-    /// Keep the top row and its offset for the open history while the
-    /// reader is away from the tail (tdesktop `countScrollState`); at the
-    /// tail the position is forgotten (`forgetScrollState`). Nothing is
-    /// recorded while a remembered position still waits for its window.
-    pub(in crate::ui) fn remember_scroll(&mut self, key: quill::state::ScrollKey, cx: &App) {
-        if self.history.key != Some(key) {
-            return;
-        }
-        self.end_restore_wait_on_scroll(cx);
-        if self.history.anchor_pending
-            || self.history.restore.is_pending()
-            || self.history.rows.is_empty()
-        {
-            return;
-        }
-        let saved = self
-            .history
-            .scroller
-            .read(cx)
-            .top_anchor()
-            .and_then(|(ix, offset)| {
-                let anchor = self.history.rows.get(ix)?.first_id()?;
-                Some(quill::state::SavedScroll { anchor, offset })
-            });
-        self.history.scroll_memory.record(key, saved);
-    }
-
     /// kit Phase 3: the shared history row list used by both chat history
     /// and per-topic history, virtualized through the kit `MessageScroller`
     /// — only visible rows build elements. `messages` are oldest-first.
@@ -102,6 +56,7 @@ impl QuillApp {
                 unread_count: thread.unread_count,
                 has_newer: thread.has_newer,
                 window_epoch: thread.window_epoch,
+                saved_open: thread.saved_anchor.is_some(),
             });
         let history_key = (
             viewed_chat.map(|chat| chat.0).unwrap_or(-1),
@@ -119,6 +74,16 @@ impl QuillApp {
                 .and_then(|s| viewed_chat.and_then(|chat| s.histories.get(&chat.0)))
                 .map(|h| (h.unread_anchor, h.has_newer, h.window_epoch))
                 .unwrap_or((None, false, 0)),
+        };
+        // A history opened at its saved position anchors once the window
+        // around that message is in, so the position comes with the first rows.
+        let saved_open_pending = match &thread_window {
+            Some(thread) => thread.saved_open,
+            None => {
+                viewed_topic.is_none()
+                    && viewed_chat
+                        .is_some_and(|chat| session.is_some_and(|s| s.saved_open_pending(chat)))
+            }
         };
         let unread_count = match &thread_window {
             Some(thread) => thread.unread_count,
@@ -320,13 +285,11 @@ impl QuillApp {
                 // The window of a chat already open was replaced (jump to
                 // the latest, a date jump): the position left behind is not
                 // where the reader goes back to.
-                if self.history.key == Some(history_key) && !self.history.restore.is_pending() {
+                if self.history.key == Some(history_key) {
                     self.history.scroll_memory.forget(history_key);
                 }
             }
             if self.history.key != Some(history_key) {
-                let seen = self.history.scroller.read(cx).user_scrolls();
-                self.history.restore.arm(seen);
                 // New chat/topic (or first render): reset; the anchor below
                 // picks the position.
                 self.history.key = Some(history_key);
@@ -477,84 +440,11 @@ impl QuillApp {
             self.history.row_stats.note_built(rows_started);
             self.history.had_newer = has_newer;
             self.history_a11y_rows_changed(cx);
-            // A new or replaced window: start at the jump target, else at the
-            // "Unread messages" divider, else at the bottom.
-            self.end_restore_wait_on_scroll(cx);
-            if self.history.anchor_pending && !self.history.rows.is_empty() {
+            // A new or replaced window: start at the saved position, else the
+            // jump target, else the "Unread messages" divider, else the bottom.
+            if self.history.anchor_pending && !self.history.rows.is_empty() && !saved_open_pending {
                 self.history.anchor_pending = false;
-                let highlighted = highlight_id.and_then(|target| {
-                    self.history
-                        .rows
-                        .iter()
-                        .position(|row| row.contains(target))
-                });
-                if highlighted.is_some() {
-                    self.history.last_highlight = highlight_id;
-                }
-                // tdesktop reads `scrollTopItem` back when the chat is shown
-                // at its default position; a jump target wins and drops it.
-                let saved = self
-                    .history
-                    .restore
-                    .is_pending()
-                    .then(|| self.history.scroll_memory.get(history_key))
-                    .flatten();
-                let rows = &self.history.rows;
-                let (open, saved_row) =
-                    quill::state::scroll_open(saved, highlight_id.is_some(), |id| {
-                        rows.iter().position(|row| row.contains(id))
-                    });
-                match open {
-                    quill::state::ScrollOpen::Jump => {
-                        self.history.scroll_memory.forget(history_key);
-                        self.history.restore.finish();
-                    }
-                    quill::state::ScrollOpen::Restore(_) => self.history.restore.finish(),
-                    // The remembered message is not loaded yet (a real
-                    // history loads after the chat opens): show the default
-                    // position, keep the entry and wait for its window.
-                    quill::state::ScrollOpen::Default if saved.is_some() => {}
-                    quill::state::ScrollOpen::Default => self.history.restore.finish(),
-                }
-                let target = highlighted.or_else(|| {
-                    self.history
-                        .rows
-                        .iter()
-                        .position(HistoryRow::unread_divider)
-                        // A little context above the divider.
-                        .map(|ix| ix.saturating_sub(1))
-                });
-                self.history.scroller.update(cx, |state, cx| {
-                    match (open, saved_row, target) {
-                        (quill::state::ScrollOpen::Restore(saved), Some(ix), _) => {
-                            state.scroll_to_item_offset(ix, saved.offset, cx);
-                        }
-                        (_, _, Some(ix)) => {
-                            state.scroll_to_item(ix, cx);
-                        }
-                        _ => state.scroll_to_end(cx),
-                    };
-                });
-            }
-            // The remembered message arrived in a page of the open window
-            // (no new epoch): return there unless the reader moved on
-            // (wheel, keyboard, scrollbar, a send or jump to latest all end
-            // the wait).
-            self.end_restore_wait_on_scroll(cx);
-            if self.history.restore.is_pending()
-                && !self.history.anchor_pending
-                && highlight_id.is_none()
-                && let Some(saved) = self.history.scroll_memory.get(history_key)
-                && let Some(ix) = self
-                    .history
-                    .rows
-                    .iter()
-                    .position(|row| row.contains(saved.anchor))
-            {
-                self.history.restore.finish();
-                self.history.scroller.update(cx, |state, cx| {
-                    state.scroll_to_item_offset(ix, saved.offset, cx);
-                });
+                self.anchor_opened_history(history_key, highlight_id, cx);
             }
             // Chat-search jump: scroll the highlight into view once per new
             // `highlight_id` (current code only outlined the message).

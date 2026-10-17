@@ -41,12 +41,10 @@ pub(crate) struct HistoryUi {
     /// `HistoryState::window_epoch` the scroller last anchored for: a
     /// change (window replaced) re-anchors like opening the chat.
     pub(super) window_epoch: u64,
-    /// The scroller must anchor once rows exist: the jump highlight, else
-    /// the "Unread messages" divider, else the bottom.
+    /// The scroller must anchor once rows exist: the saved position, else
+    /// the jump highlight, else the "Unread messages" divider, else the
+    /// bottom.
     pub(super) anchor_pending: bool,
-    /// The chat was just opened: its remembered position (if any) is
-    /// read once its rows exist. Cleared by the first anchor.
-    pub(super) restore: quill::state::RestoreWait,
     /// Where each chat, topic or thread was left away from the tail.
     pub(super) scroll_memory: quill::state::ScrollMemory,
     /// The window stopped short of the latest message at the last render:
@@ -139,7 +137,6 @@ impl HistoryUi {
             ends: None,
             window_epoch: 0,
             anchor_pending: false,
-            restore: Default::default(),
             scroll_memory: Default::default(),
             had_newer: false,
             rows_key: None,

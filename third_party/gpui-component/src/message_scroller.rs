@@ -25,7 +25,6 @@ const BOTTOM_FADE_TRANSITION: Duration = Duration::from_millis(200);
 /// [`MessageScroller::new`].
 pub struct MessageScrollerState {
     list_state: ListState,
-    user_scrolls: u64,
 }
 
 impl MessageScrollerState {
@@ -43,17 +42,11 @@ impl MessageScrollerState {
             let weak_state = weak_state.clone();
 
             cx.defer(move |cx| {
-                let _ = weak_state.update(cx, |state, cx| {
-                    state.user_scrolls = state.user_scrolls.wrapping_add(1);
-                    cx.notify();
-                });
+                let _ = weak_state.update(cx, |_, cx| cx.notify());
             });
         });
 
-        Self {
-            list_state,
-            user_scrolls: 0,
-        }
+        Self { list_state }
     }
 
     /// Return the current number of rows known by the virtual list.
@@ -154,23 +147,6 @@ impl MessageScrollerState {
         });
         cx.notify();
         true
-    }
-
-    /// How many wheel or trackpad scrolls the reader made on this list.
-    /// Programmatic jumps do not count.
-    pub fn user_scrolls(&self) -> u64 {
-        self.user_scrolls
-    }
-
-    /// Count a reader-initiated scroll the list's own handler never sees:
-    /// keyboard paging, sending a message, jump to latest.
-    pub fn note_user_scroll(&mut self) {
-        self.user_scrolls = self.user_scrolls.wrapping_add(1);
-    }
-
-    /// Whether the reader is dragging the scrollbar right now.
-    pub fn is_scrollbar_dragging(&self) -> bool {
-        self.list_state.is_scrollbar_dragging()
     }
 
     /// The row at the top of the viewport and how many pixels of it are
@@ -551,37 +527,6 @@ mod tests {
                 assert_eq!(state.top_anchor(), Some((2, 12.)));
                 state.scroll_to_end(cx);
                 assert_eq!(state.top_anchor(), None);
-                assert_eq!(state.user_scrolls(), 0);
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn keyboard_send_and_jump_scrolls_count_as_reader_scrolls(cx: &mut gpui::TestAppContext) {
-        let state = cx.new(|cx| MessageScrollerState::new(6, cx));
-        cx.update(|cx| {
-            state.update(cx, |state, cx| {
-                assert_eq!(state.user_scrolls(), 0);
-                // Programmatic jumps (the open anchor) do not count.
-                state.scroll_to_item(2, cx);
-                state.scroll_to_end(cx);
-                assert_eq!(state.user_scrolls(), 0);
-                state.note_user_scroll();
-                assert_eq!(state.user_scrolls(), 1);
-                assert!(!state.is_scrollbar_dragging());
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn a_scrollbar_drag_is_visible_to_the_scroller(cx: &mut gpui::TestAppContext) {
-        let state = cx.new(|cx| MessageScrollerState::new(6, cx));
-        cx.update(|cx| {
-            state.update(cx, |state, _| {
-                state.list_state.scrollbar_drag_started();
-                assert!(state.is_scrollbar_dragging());
-                state.list_state.scrollbar_drag_ended();
-                assert!(!state.is_scrollbar_dragging());
             });
         });
     }

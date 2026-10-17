@@ -276,10 +276,9 @@ impl QuillApp {
         }
         match key {
             HistoryKey::Top => {
-                self.history.scroller.update(cx, |state, cx| {
-                    state.note_user_scroll();
-                    state.scroll_to_item(0, cx)
-                });
+                self.history
+                    .scroller
+                    .update(cx, |state, cx| state.scroll_to_item(0, cx));
                 self.maybe_auto_load_older(cx);
             }
             HistoryKey::Bottom => self.jump_to_latest_messages(cx),
@@ -293,14 +292,11 @@ impl QuillApp {
                 } else {
                     page_down_target(first, last, count)
                 };
-                self.history.scroller.update(cx, |state, cx| {
-                    state.note_user_scroll();
-                    match target {
-                        PageTarget::Row(row) => {
-                            state.scroll_to_item(row, cx);
-                        }
-                        PageTarget::End => state.scroll_to_end(cx),
+                self.history.scroller.update(cx, |state, cx| match target {
+                    PageTarget::Row(row) => {
+                        state.scroll_to_item(row, cx);
                     }
+                    PageTarget::End => state.scroll_to_end(cx),
                 });
                 if key == HistoryKey::PageUp && first == 0 {
                     self.maybe_auto_load_older(cx);
@@ -428,7 +424,6 @@ impl QuillApp {
             .is_some_and(|(first, last)| first < index && index < last);
         if !on_screen {
             self.history.scroller.update(cx, |state, cx| {
-                state.note_user_scroll();
                 state.scroll_to_item(index, cx);
             });
         }

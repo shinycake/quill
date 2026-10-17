@@ -29,6 +29,7 @@ mod edit;
 mod export;
 mod media_options;
 mod media_send;
+mod saved_open;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).

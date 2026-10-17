@@ -16,7 +16,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
-use quill::state::{DeepLinkAction, DeepLinkState};
+use quill::state::{DeepLinkAction, DeepLinkState, HistoryOpen};
 use quill::telegram::envelope::AuthorizationState;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -159,29 +159,35 @@ impl QuillApp {
             return;
         }
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
+        // Jump to the linked message / post once the chat is open.
+        let jump_to = match action {
+            DeepLinkAction::OpenUsername {
+                post: Some(post), ..
+            } => Some(*post),
+            DeepLinkAction::OpenMessage { message_id, .. } => Some(*message_id),
+            DeepLinkAction::OpenChannelPost { post, .. } => Some(*post),
+            // Already a TDLib message id.
+            DeepLinkAction::OpenChatById { message_id, .. } if *message_id > 0 => {
+                Some(*message_id >> 20)
+            }
+            _ => None,
+        };
+        // A linked message wins over the chat's saved scroll position (and
+        // drops it); a plain chat link opens at the saved position.
+        let open = match self.chat_open_at(chat_id, jump_to.map(MessageId::from_server_id)) {
+            HistoryOpen::Message(_) => HistoryOpen::Default,
+            open => open,
+        };
         if let Some(live) = self.live.as_mut() {
             self.connection.set_note(
                 match live
                     .driver
-                    .select_search_chat(chat_id, &text, reply, now_ms)
+                    .select_search_chat_open(chat_id, open, &text, reply, now_ms)
                 {
                     Ok(_) => StatusNote::info(tr(keys::Q_MISC_OPENED_LINK)),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT)),
                 },
             );
-            // Jump to the linked message / post once the chat is open.
-            let jump_to = match action {
-                DeepLinkAction::OpenUsername {
-                    post: Some(post), ..
-                } => Some(*post),
-                DeepLinkAction::OpenMessage { message_id, .. } => Some(*message_id),
-                DeepLinkAction::OpenChannelPost { post, .. } => Some(*post),
-                // Already a TDLib message id.
-                DeepLinkAction::OpenChatById { message_id, .. } if *message_id > 0 => {
-                    Some(*message_id >> 20)
-                }
-                _ => None,
-            };
             if let Some(message_id) = jump_to
                 && live
                     .driver

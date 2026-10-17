@@ -431,3 +431,126 @@ fn reaction_button_uses_the_reaction_filter_and_read_all_sends_the_rpc() {
         .unwrap();
     assert_eq!(sent_json(&h, "readAllChatMentions").unwrap()["chat_id"], 7);
 }
+
+fn history_requests(h: &Harness) -> usize {
+    h.recorder
+        .snapshot()
+        .iter()
+        .filter(|j| j.contains("\"@type\":\"getChatHistory\""))
+        .count()
+}
+
+#[test]
+fn a_saved_position_opens_around_its_message_without_a_highlight() {
+    let mut h = Harness::with_unread_chat();
+    let extra = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)))
+        .unwrap()
+        .expect("first page");
+    // The saved position wins over the read boundary (tdesktop reads
+    // `scrollTopItem` back for a chat shown at its default position).
+    let request = h.last_history_request();
+    assert_eq!(request["from_message_id"], 45);
+    assert_eq!(request["offset"], HISTORY_AROUND_OFFSET);
+    assert!(h.driver.session.saved_open_pending(ChatId(7)));
+    assert_eq!(
+        h.driver.session.search.chat_search.jump,
+        crate::state::ChatSearchJump::None,
+        "no highlight"
+    );
+
+    h.answer(extra, &[40, 45, 50]);
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(h.history().contains(MessageId(45)));
+    assert!(h.history().has_newer, "60 is newer than the window");
+    assert_eq!(history_requests(&h), 1, "no fallback load");
+    assert_eq!(
+        h.driver.session.search.chat_search.jump,
+        crate::state::ChatSearchJump::None
+    );
+}
+
+#[test]
+fn a_saved_message_that_is_gone_falls_back_to_the_default_window() {
+    let mut h = Harness::with_unread_chat();
+    let extra = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)))
+        .unwrap()
+        .unwrap();
+    let epoch = h.history().window_epoch;
+    // 45 was deleted: the page around it comes back without it.
+    h.answer(extra, &[40, 50]);
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(h.history().messages.is_empty(), "the window is not kept");
+    assert_ne!(h.history().window_epoch, epoch);
+    // The default open follows: around the read boundary.
+    assert_eq!(history_requests(&h), 2);
+    let request = h.last_history_request();
+    assert_eq!(request["from_message_id"], 30);
+    let fallback = RequestId(request["@extra"].as_str().unwrap().parse().unwrap());
+    h.answer(fallback, &[20, 30, 40]);
+    assert!(h.history().contains(MessageId(30)));
+    assert_eq!(history_requests(&h), 2);
+}
+
+#[test]
+fn a_failed_saved_open_falls_back_to_the_default_window() {
+    let mut h = Harness::with_unread_chat();
+    let extra = h
+        .driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(45)))
+        .unwrap()
+        .unwrap();
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_ID_INVALID"}}"#,
+        extra.0
+    ));
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert!(!h.history().load_failed, "no retry row: the default loads");
+    assert_eq!(history_requests(&h), 2);
+    assert_eq!(h.last_history_request()["from_message_id"], 30);
+}
+
+#[test]
+fn a_window_that_holds_the_saved_message_is_kept() {
+    let mut h = Harness::with_unread_chat();
+    h.ingest(r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#);
+    let first = h.driver.select_chat(ChatId(7)).unwrap().unwrap();
+    h.answer(first, &[20, 30, 40]);
+    h.driver.select_chat(ChatId(8)).unwrap();
+    let epoch = h.history().window_epoch;
+    let before = h.recorder.snapshot().len();
+
+    h.driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Saved(MessageId(30)))
+        .unwrap();
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert_eq!(h.history().window_epoch, epoch, "restored in place");
+    assert!(h.history().contains(MessageId(30)));
+    // No load around the saved message: its rows are already there.
+    let around = h
+        .recorder
+        .snapshot()
+        .iter()
+        .skip(before)
+        .filter(|j| j.contains("\"@type\":\"getChatHistory\"") && j.contains("\"chat_id\":7"))
+        .any(|j| j.contains("\"from_message_id\":30"));
+    assert!(!around);
+}
+
+#[test]
+fn an_explicit_target_opens_highlighted_whatever_was_saved() {
+    let mut h = Harness::with_unread_chat();
+    h.driver
+        .select_chat_open(ChatId(7), crate::state::HistoryOpen::Message(MessageId(45)))
+        .unwrap();
+    assert!(!h.driver.session.saved_open_pending(ChatId(7)));
+    assert_eq!(
+        h.driver.session.search.chat_search.jump,
+        crate::state::ChatSearchJump::Loading {
+            message_id: MessageId(45)
+        }
+    );
+}

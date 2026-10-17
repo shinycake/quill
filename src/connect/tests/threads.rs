@@ -516,3 +516,99 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A thread with a saved scroll position: the first page loads around the
+/// saved reply instead of the read position; when that reply is gone the
+/// default first page follows.
+#[test]
+fn a_thread_opens_at_its_saved_reply_and_falls_back_when_it_is_gone() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":14,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":14,"is_channel":false},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(14)).unwrap();
+    let open = |driver: &mut ConnectDriver<Arc<RecordingSender>>| {
+        let _ = driver.close_thread();
+        let extra = driver
+            .open_thread(ChatId(14), MessageId(40))
+            .unwrap()
+            .unwrap();
+        ingest(
+            driver,
+            &format!(
+                r#"{{"@type":"messageThreadInfo","@extra":"{}","chat_id":14,"message_thread_id":40,"reply_info":{{"@type":"messageReplyInfo","reply_count":9,"recent_replier_ids":[],"last_read_inbox_message_id":44,"last_read_outbox_message_id":0,"last_message_id":49}},"unread_message_count":5,"messages":[{}]}}"#,
+                extra.0,
+                text_message(40, 14, 40, "root")
+            ),
+        );
+        driver.session.open_thread_at_saved(Some(MessageId(46)));
+        assert!(driver.session.thread_saved_open_pending(ChatId(14)));
+        driver
+            .start_thread_in_open_chat()
+            .unwrap()
+            .expect("first page")
+    };
+
+    // 1. The saved reply is there: the window is around it, ready.
+    let page = open(&mut driver);
+    let history = requests_of(&recorder, "getMessageThreadHistory");
+    assert_eq!(history.last().unwrap()["from_message_id"], 46);
+    assert_eq!(history.last().unwrap()["offset"], -25);
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":3,"messages":[{},{},{}]}}"#,
+            page.0,
+            text_message(47, 14, 40, "c"),
+            text_message(46, 14, 40, "b"),
+            text_message(45, 14, 40, "a"),
+        ),
+    );
+    {
+        let thread = driver.session.threads.thread.as_ref().unwrap();
+        assert_eq!(thread.status, ThreadStatus::Ready);
+        assert!(thread.history.messages.contains_key(&46));
+        assert!(thread.has_newer);
+    }
+    assert!(!driver.session.thread_saved_open_pending(ChatId(14)));
+    assert!(!driver.thread_needs_reload());
+
+    // 2. The saved reply was deleted: the window is replaced and the
+    //    default first page (around the read position) is requested.
+    let page = open(&mut driver);
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
+            page.0,
+            text_message(47, 14, 40, "c"),
+            text_message(45, 14, 40, "a"),
+        ),
+    );
+    {
+        let thread = driver.session.threads.thread.as_ref().unwrap();
+        assert_eq!(thread.status, ThreadStatus::LoadingHistory);
+        assert!(!thread.history.messages.contains_key(&47));
+    }
+    assert!(!driver.session.thread_saved_open_pending(ChatId(14)));
+    assert!(driver.thread_needs_reload());
+    driver
+        .fetch_thread_history()
+        .unwrap()
+        .expect("default page");
+    let history = requests_of(&recorder, "getMessageThreadHistory");
+    assert_eq!(history.last().unwrap()["from_message_id"], 44);
+    let _ = std::fs::remove_dir_all(&dir);
+}

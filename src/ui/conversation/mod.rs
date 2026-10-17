@@ -656,6 +656,7 @@ impl ConversationPart {
 
 mod conversation_part1;
 mod history_message_list;
+mod history_scroll_memory;
 mod render_history_row_body;
 mod row_chrome;
 mod rows_cache;

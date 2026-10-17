@@ -96,6 +96,9 @@ impl Session {
         }
         self.refresh_history_has_newer(chat_id);
         if let Some(message_id) = pending.around_message_id {
+            if self.settle_saved_open(chat_id, message_id) {
+                return;
+            }
             self.finish_history_around(Some(pending), message_id, false, seq);
         }
     }

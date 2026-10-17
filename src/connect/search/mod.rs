@@ -2,8 +2,8 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::search_filters::{SearchMediaKind, YearMonth};
-use crate::state::DateJumpMode;
 use crate::state::{ChatSearchJumpNeed, RequestPurpose, SearchStatus, SharedMediaTab};
+use crate::state::{DateJumpMode, HistoryOpen};
 use crate::state::{MediaPurpose, SearchPurpose};
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::envelope::MessageSender;
@@ -495,10 +495,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.select_search_chat_open(
+            chat_id,
+            HistoryOpen::Default,
+            leaving_text,
+            leaving_reply,
+            now_ms,
+        )
+    }
+
+    /// [`Self::select_search_chat`] opening the chat where `open` says (its
+    /// saved scroll position, see [`Self::select_chat_open`]).
+    pub fn select_search_chat_open(
+        &mut self,
+        chat_id: ChatId,
+        open: HistoryOpen,
+        leaving_text: &str,
+        leaving_reply: Option<SendReply>,
+        now_ms: u64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.flush_leaving_composer(chat_id, leaving_text, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
         self.session.close_search();
-        self.select_chat(chat_id)
+        self.select_chat_open(chat_id, open)
     }
 
     /// Jump to a found message: upsert it into history, then `select_chat`.

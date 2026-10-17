@@ -151,7 +151,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let (origin_chat, origin_message) = (thread.origin_chat_id, thread.origin_message_id);
         let first_page = !thread.has_reply_rows() && thread.history.next_from_message_id.0 == 0;
-        let (from, offset) = match thread.unread_anchor {
+        // A saved scroll position wins over the read position.
+        let (from, offset) = match thread.saved_anchor.or(thread.unread_anchor) {
             Some(anchor) if first_page => (anchor, -(THREAD_PAGE / 2)),
             _ => (thread.history.next_from_message_id, 0),
         };

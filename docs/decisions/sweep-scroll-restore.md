@@ -4,56 +4,76 @@
 `HistoryInner` counts `History::scrollTopItem` / `scrollTopOffset` on every scroll
 (`countScrollState`), forgets them while the view is at the bottom
 (`forgetScrollState`, history_inner_widget.cpp ~4585) and whenever the chat is shown at an
-explicit target (history_widget.cpp 2850, 3110, 3339). Showing a chat at its default
-position reads the saved item back, so leaving a chat mid-history and returning lands on the
-same message.
+explicit target (history_widget.cpp 2850, 3110, 3339). Showing a chat at its default position
+(`ShowAtUnreadMsgId`) with a saved item sets `_showAtMsgId = _history->showAtMsgId`
+(history_widget.cpp ~3338), so the first load is the window around that message, and
+`countInitialScrollTop` puts the saved item back at its offset when that window is shown.
+A notification opens at `ShowAtUnreadMsgId` too, unless it is for an own message or a mention
+(notifications_manager.cpp ~1343), so it restores like any default open.
 
-## What changed
+## What Quill does
 - `src/state/scroll_memory.rs`: `ScrollMemory`, an LRU (300) of `(chat, topic, thread)` to
-  `(anchor message id, pixel offset)`, plus `scroll_open`, the pure restore/jump/default rule.
-- `history_message_list.rs`: each render records the top row while the reader is away from the
-  tail and forgets it at the tail; when a chat is opened and its rows exist, the saved anchor is
-  used if its message is in the loaded window, otherwise the old highlight / unread divider /
-  bottom behavior. A jump highlight wins and drops the entry; replacing the window of the open
-  chat (jump to latest, date jump) forgets it. Switching accounts clears the memory.
-- Vendored `gpui-component` scroller gained `top_anchor` and `scroll_to_item_offset`
-  (listed in its QUILL-CHANGES.md; re-apply when re-vendoring).
-- Anchors are message ids plus an offset inside the row, so row height changes do not move them.
+  `(anchor message id, pixel offset)`. `ScrollMemory::open` is the open decision: an explicit
+  target wins and drops the entry (`HistoryOpen::Message`), else a saved entry opens around its
+  message with no highlight (`HistoryOpen::Saved`), else the default. `scroll_open` decides what
+  the first rows scroll to: the saved row, the jump target, or the default, and drops the entry
+  when its message is not in the window opened for it.
+- Opening a chat (chat list, search, a chat link) goes through `QuillApp::chat_open_at` and
+  `ConnectDriver::select_chat_open`. A saved position keeps a cached window that holds its
+  message; otherwise the window is replaced and the first page is `getChatHistory` around the
+  message, the same request a jump uses (`HistoryState::saved_open` marks it). The UI holds the
+  first anchoring until that page is in, so the position is applied once, with the first rows.
+- The saved message is missing from that page (deleted), or the page fails or is swept: the
+  window is emptied and the driver loads the default window (read boundary or latest), and the
+  first rows drop the entry (`ScrollOpen::Missing`).
+- Threads do the same with their first `getMessageThreadHistory` page
+  (`ThreadView::saved_anchor`, set by the UI before the page is requested). Forum topics have no
+  around-load: their histories stay cached across visits, so a saved row is restored when it is
+  still in that cache and dropped otherwise.
+- Recording: the top row is saved on every render and every scroll (the scroller observer)
+  while the reader is away from the tail, and forgotten at the tail. Sending a message and jump to
+  latest forget the entry; replacing the open chat's window forgets it; an account switch clears
+  the memory.
+- Explicit targets win: "Go To Message", a found message from search and a message link drop the
+  saved entry before the chat opens. Quill's notification clicks carry no message, so they open
+  at the default position and restore, as tdesktop does for most notifications.
+- Chats with no saved entry open exactly as before: around the read boundary with the unread
+  divider, else at the latest message.
+- Vendored `gpui-component` scroller: `top_anchor` and `scroll_to_item_offset` only (listed in
+  its QUILL-CHANGES.md; re-apply when re-vendoring).
+
+## Why the late restore was removed
+The first version restored the position whenever the saved message arrived, including after the
+chat was already on screen at its default position. Three review rounds each found another way
+the reader could move in that gap and then be pulled back by a page landing later: the scrollbar
+track click, search and reply-quote jumps, the screen-reader focus scroll, an idle wait that never
+ended. Each fix added another counter (`note_user_scroll`, `is_scrollbar_dragging`) to end the
+wait, and every input path the app gains later would need one too.
+
+The wait existed because the chat opened somewhere the saved message might not be. tdesktop never
+has that gap: it loads around the saved item before showing the chat. Quill now does the same, so
+there is no "later": the restore happens on the first rows or not at all. `RestoreWait`, the
+late-page restore branch in `history_message_list.rs`, the scroller's `user_scrolls` /
+`note_user_scroll` / `is_scrollbar_dragging` and their calls in `shortcut_pack.rs` are gone.
+
+The one hold left is the first anchoring waiting for the around page, a single request while the
+history shows its loading skeleton. A live message landing in the empty window during that request
+is shown, as it is today for a jump or an unread open, and the anchoring still waits for the page.
+
+## Tests
+- `state::scroll_memory`: saved entry opens around its message without a highlight, an explicit
+  target wins and forgets, a missing anchor falls back and forgets, LRU and key rules.
+- `connect::tests::history_window`: the saved open sends one `getChatHistory` around the message
+  and no highlight; a missing message or a failed load falls back to the default window; a cached
+  window holding the message is kept; an explicit target highlights.
+- `connect::tests::threads`: a thread's first page loads around its saved reply and falls back to
+  the read position when the reply is gone.
+- `ui::scroll_restore_tests` (real app, scroller and render loop): two round trips land on the same
+  row and offset; "Go To Message" wins over the saved row; a saved row that is gone opens the
+  default and is forgotten.
 
 ## Verified
-Demo `ready-chats` with `QUILL_DEMO_STRESS=3,300`: scroll to message 12-18, switch to Demo
-chat B, back to Demo chat A. The returned view is pixel-identical in layout to the one left.
-Not shown: real TDLib windows that reload on open (anchor outside the window falls back).
-
-## Review follow-ups
-- An anchor outside the loaded window no longer loses the entry. The chat shows its default
-  position, the saved position is neither recorded over nor forgotten, and it is restored when a
-  window or page containing the anchor arrives. The wait ends on the reader's own wheel or
-  trackpad scroll (`MessageScrollerState::user_scrolls`), an explicit jump, or leaving the chat.
-  Not done: requesting history around the anchor on open as tdesktop does; Quill relies on the
-  window loading the anchor by itself.
-- `top_anchor` gates on the list's follow state instead of the previous layout's extent, so the
-  restored position reads correctly on the restore frame (test in `message_scroller.rs`).
-- The position is also recorded from the scroller's observer, so it follows every scroll and
-  does not depend on a full app render.
-- Verified: scroll up in Demo chat A, Demo chat B, Demo chat A, and again B, A. The view after
-  one and two round trips shows messages 7 to 13 at the same offsets, light and dark.
-
-## Review follow-ups, round 3
-- Any reader move now ends the pending restore, in one place (`RestoreWait::observe`, fed by
-  `MessageScrollerState::user_scrolls` and `is_scrollbar_dragging`): wheel and trackpad (already
-  counted), keyboard paging / Home / End / selection focus scroll and a send or jump to latest
-  (`note_user_scroll`), and a scrollbar drag (read from the list state). Once it ends, recording
-  resumes normally, so moves made in that window are saved.
-- Sending a message and jump to latest forget the memory entry
-  (`forget_scroll_on_return_to_latest`).
-- Not done as asked: a "never restore while following the tail" guard. The default position of a
-  chat whose anchor has not loaded is the tail, so that guard would disable the late restore
-  entirely. Instead the wait ends on every reader move (including scrolling back to the tail),
-  which covers the yank cases.
-- Tests: `scroll_memory` (`RestoreWait` ends on a counted scroll or a held scrollbar; send or
-  jump forgets the entry) and `message_scroller` (keyboard counts, programmatic jumps do not,
-  scrollbar drag is visible; the vendored crate's tests do not run in the workspace).
-- Verified again: scroll up in Demo chat A, B, A, B, A. The view equals the one left (messages 0
-  to 6, same offsets), light.
-
+Demo `ready-chats` with `QUILL_DEMO_STRESS=3,300`: wheel up 300 in Demo chat A, Demo chat B, Demo
+chat A, twice. See the PR for the light and dark captures.
+Not shown: real TDLib round trips (the demo history is all in memory, so the restore there is the
+in-window case; the around-load is covered by the driver tests).
