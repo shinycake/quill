@@ -10,15 +10,18 @@
 //! by a timeout (`child_timeout`).
 #![deny(clippy::indexing_slicing)]
 
-use super::{AttachmentKind, ComposerAttachment, ComposerSnapshot, MediaSendOptions};
+use super::{
+    AttachmentKind, ComposerAttachment, ComposerSnapshot, MediaSendOptions, PhotoScaleTimedOut,
+};
 use crate::video::{VideoNoteProbe, VideoNoteThumbnail, VideoProbe};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// All the files of one send together may take this long to prepare, over
-/// each child's own limit. A stalled network share would otherwise hold a
-/// ten photo album for minutes.
+/// All the files of one send together (every snapshot of it) may take this
+/// long to prepare, over each child's own limit: no new file is started once
+/// it has passed. A stalled network share would otherwise hold a ten photo
+/// album for minutes.
 pub const PREP_BUDGET: Duration = Duration::from_secs(180);
 
 /// Why a send could not be prepared.
@@ -72,23 +75,36 @@ pub struct PreparedMedia {
 /// "High Quality" choice first (`photo_for_send`: blocks on ffmpeg), anything
 /// else goes as picked. `None` when the picked path is not one to send.
 pub fn send_path_for(attachment: &ComposerAttachment, media: MediaSendOptions) -> Option<String> {
-    let path = attachment.send_path_str()?;
+    send_path_scaled(attachment, media).ok().flatten()
+}
+
+/// [`send_path_for`] for the background prepare: a scale that ran out of
+/// time is an error (the user is told) instead of a silent fall back to the
+/// unscaled original. `Ok(None)`: the picked path is not one to send.
+fn send_path_scaled(
+    attachment: &ComposerAttachment,
+    media: MediaSendOptions,
+) -> Result<Option<String>, PrepareError> {
+    let Some(path) = attachment.send_path_str() else {
+        return Ok(None);
+    };
     if attachment.kind != AttachmentKind::Photo {
-        return Some(path);
+        return Ok(Some(path));
     }
-    let prepared = super::photo_for_send(&attachment.path, media.hd_photos);
+    let prepared = super::scaled_photo_for_send(&attachment.path, media.hd_photos)
+        .map_err(|PhotoScaleTimedOut| PrepareError::TimedOut)?;
     if prepared == attachment.path {
-        Some(path)
+        Ok(Some(path))
     } else {
-        Some(prepared.to_string_lossy().into_owned())
+        Ok(Some(prepared.to_string_lossy().into_owned()))
     }
 }
 
 impl PreparedMedia {
     /// Read the files of `snapshot`. Blocks (ffprobe, ffmpeg): run it off
-    /// the UI thread.
-    pub fn prepare(snapshot: &ComposerSnapshot) -> Result<Self, PrepareError> {
-        let started = Instant::now();
+    /// the UI thread. `started` is when the send's preparing began, shared
+    /// by all its snapshots: [`PREP_BUDGET`] counts from it.
+    pub fn prepare(snapshot: &ComposerSnapshot, started: Instant) -> Result<Self, PrepareError> {
         let alone = snapshot.album.is_empty();
         let mut files = HashMap::new();
         for attachment in snapshot.attachment.iter().chain(snapshot.album.iter()) {
@@ -125,7 +141,7 @@ fn prepare_file(
     match attachment.kind {
         AttachmentKind::Photo => {
             file.send_path =
-                Some(send_path_for(attachment, media).ok_or(PrepareError::Unreadable)?);
+                Some(send_path_scaled(attachment, media)?.ok_or(PrepareError::Unreadable)?);
         }
         AttachmentKind::Video if alone && attachment.extras.gif => {
             file.animation = Some(
@@ -223,7 +239,10 @@ mod tests {
     #[test]
     fn an_unreadable_video_fails_the_prepare_quickly() {
         let snap = snapshot(attachment("/no/such/dir/clip.mp4", AttachmentKind::Video));
-        assert_eq!(PreparedMedia::prepare(&snap), Err(PrepareError::Video));
+        assert_eq!(
+            PreparedMedia::prepare(&snap, Instant::now()),
+            Err(PrepareError::Video)
+        );
     }
 
     #[test]
@@ -232,13 +251,29 @@ mod tests {
             "/no/such/dir/note.mp4",
             AttachmentKind::VideoNote,
         ));
-        assert_eq!(PreparedMedia::prepare(&snap), Err(PrepareError::VideoNote));
+        assert_eq!(
+            PreparedMedia::prepare(&snap, Instant::now()),
+            Err(PrepareError::VideoNote)
+        );
+    }
+
+    #[test]
+    fn a_budget_spent_by_earlier_snapshots_ends_the_prepare() {
+        let snap = snapshot(attachment("/x/a.txt", AttachmentKind::Document));
+        // A clock younger than the budget cannot show a spent one.
+        let Some(started) = Instant::now().checked_sub(PREP_BUDGET + Duration::from_secs(1)) else {
+            return;
+        };
+        assert_eq!(
+            PreparedMedia::prepare(&snap, started),
+            Err(PrepareError::TimedOut)
+        );
     }
 
     #[test]
     fn documents_prepare_to_nothing() {
         let snap = snapshot(attachment("/x/a.txt", AttachmentKind::Document));
-        let prepared = PreparedMedia::prepare(&snap).unwrap();
+        let prepared = PreparedMedia::prepare(&snap, Instant::now()).unwrap();
         assert_eq!(
             prepared.file(Path::new("/x/a.txt")),
             Some(&PreparedFile::default())

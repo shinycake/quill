@@ -450,9 +450,9 @@ mod tests {
 
     /// This ffmpeg can encode VP9 (`-encoders` lists `libvpx-vp9`).
     fn has_vp9_encoder() -> bool {
-        crate::media_tools::quiet_command("ffmpeg")
-            .args(["-hide_banner", "-encoders"])
-            .output()
+        let mut command = crate::media_tools::quiet_command("ffmpeg");
+        command.args(["-hide_banner", "-encoders"]);
+        crate::child_timeout::output_within(&mut command, crate::child_timeout::PROBE_LIMIT)
             .is_ok_and(|out| {
                 out.status.success() && String::from_utf8_lossy(&out.stdout).contains("libvpx-vp9")
             })
@@ -483,7 +483,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("quill-sticker-video-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let clip = dir.join("source.mp4");
-        let made = crate::media_tools::command("ffmpeg")
+        let mut make_clip = crate::media_tools::command("ffmpeg");
+        make_clip
             .args([
                 "-y",
                 "-f",
@@ -495,9 +496,12 @@ mod tests {
                 "-pix_fmt",
                 "yuv420p",
             ])
-            .arg(&clip)
-            .output()
-            .is_ok_and(|out| out.status.success());
+            .arg(&clip);
+        let made = crate::child_timeout::output_within(
+            &mut make_clip,
+            crate::child_timeout::transcode_limit(4.0),
+        )
+        .is_ok_and(|out| out.status.success());
         let Some(probed) = made
             .then(|| crate::video_edit::probe_source(&clip))
             .flatten()

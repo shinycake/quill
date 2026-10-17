@@ -145,7 +145,8 @@ impl QuillApp {
                         return;
                     }
                     // Photos and videos of an earlier Send are still being
-                    // read: this one goes out after it, in order.
+                    // read: this Send is refused for now (it does not
+                    // queue), so the messages keep their order.
                     if self.tray_preparing() {
                         self.connection
                             .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));

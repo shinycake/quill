@@ -24,6 +24,9 @@ const READER_GRACE: Duration = Duration::from_millis(500);
 pub const PROBE_LIMIT: Duration = Duration::from_secs(10);
 /// Desktop services over D-Bus (`gdbus`, `xdg-mime`, `xdg-settings`).
 pub const DESKTOP_QUERY_LIMIT: Duration = Duration::from_secs(5);
+/// A notification helper that waits for a click (`notify-send --wait`): the
+/// user may take their time, but not for ever.
+pub const NOTIFICATION_WAIT_LIMIT: Duration = Duration::from_secs(5 * 60);
 
 /// Time an ffmpeg job on `media_seconds` of media may take: a fixed 30 s for
 /// start-up and slow disks, plus 4 s for each second of media (a slow
@@ -46,8 +49,23 @@ pub fn output_within(cmd: &mut Command, limit: Duration) -> io::Result<Output> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    let stdout = child.stdout.take().map(read_all_in_thread);
-    let stderr = child.stderr.take().map(read_all_in_thread);
+    let readers = child
+        .stdout
+        .take()
+        .map(read_all_in_thread)
+        .transpose()
+        .and_then(|stdout| {
+            let stderr = child.stderr.take().map(read_all_in_thread).transpose()?;
+            Ok((stdout, stderr))
+        });
+    let (stdout, stderr) = match readers {
+        Ok(readers) => readers,
+        Err(err) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(err);
+        }
+    };
     let status = match wait_within(&mut child, limit) {
         Ok(status) => status,
         Err(err) => {
@@ -58,8 +76,8 @@ pub fn output_within(cmd: &mut Command, limit: Duration) -> io::Result<Output> {
     };
     Ok(Output {
         status,
-        stdout: collect(stdout),
-        stderr: collect(stderr),
+        stdout: collect(stdout)?,
+        stderr: collect(stderr)?,
     })
 }
 
@@ -76,7 +94,10 @@ pub fn stdout_within(program: &str, args: &[&str], limit: Duration) -> Option<St
 }
 
 /// `cmd.status()` with a limit. Stdin is closed; stdout and stderr stay as
-/// the caller set them (a log file, `Stdio::null()`).
+/// the caller set them. Those must not be `Stdio::piped()`: nothing here
+/// drains a pipe, so a chatty child would block until the limit. Use
+/// `Stdio::null()` or a log file (as the callers do), or [`output_within`]
+/// to read what the child prints.
 pub fn status_within(cmd: &mut Command, limit: Duration) -> io::Result<ExitStatus> {
     let mut child = cmd.no_console().stdin(Stdio::null()).spawn()?;
     wait_within(&mut child, limit).inspect_err(|_| {
@@ -109,25 +130,35 @@ pub fn is_timeout(err: &io::Error) -> bool {
 }
 
 /// Read `pipe` to its end on a thread of its own, so a child that fills its
-/// pipe never stalls waiting for us to read.
-fn read_all_in_thread<R: Read + Send + 'static>(mut pipe: R) -> mpsc::Receiver<Vec<u8>> {
+/// pipe never stalls waiting for us to read. A thread that cannot start is an
+/// error: the output would be silently empty.
+fn read_all_in_thread<R: Read + Send + 'static>(
+    mut pipe: R,
+) -> io::Result<mpsc::Receiver<Vec<u8>>> {
     let (tx, rx) = mpsc::channel();
-    let spawned = std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("quill-child-output".into())
         .spawn(move || {
             let mut bytes = Vec::new();
             let _ = pipe.read_to_end(&mut bytes);
             let _ = tx.send(bytes);
-        });
-    // No thread: the sender is gone and the receiver reads as empty.
-    drop(spawned);
-    rx
+        })?;
+    Ok(rx)
 }
 
-fn collect(reader: Option<mpsc::Receiver<Vec<u8>>>) -> Vec<u8> {
-    reader
-        .and_then(|rx| rx.recv_timeout(READER_GRACE).ok())
-        .unwrap_or_default()
+/// What a reader read. A reader that has not finished within
+/// [`READER_GRACE`] of the child's exit (a grandchild kept the pipe open) is
+/// an error rather than a silently cut output.
+fn collect(reader: Option<mpsc::Receiver<Vec<u8>>>) -> io::Result<Vec<u8>> {
+    match reader {
+        None => Ok(Vec::new()),
+        Some(rx) => rx.recv_timeout(READER_GRACE).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the helper program's output did not end in time",
+            )
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +209,24 @@ mod tests {
         let err = status_within(&mut sh("sleep 30"), Duration::from_millis(200)).unwrap_err();
         assert!(is_timeout(&err));
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_chatty_child_with_its_output_sent_away_does_not_stall_status_within() {
+        let started = Instant::now();
+        let mut cmd = sh("head -c 1000000 /dev/zero; head -c 1000000 /dev/zero >&2");
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+        let status = status_within(&mut cmd, Duration::from_secs(10)).unwrap();
+        assert!(status.success());
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn output_cut_off_by_a_pipe_holding_grandchild_is_an_error() {
+        // The background sleep inherits stdout and keeps it open after the
+        // shell exits.
+        let err = output_within(&mut sh("echo hi; sleep 5 &"), Duration::from_secs(5)).unwrap_err();
+        assert!(is_timeout(&err));
     }
 
     #[test]

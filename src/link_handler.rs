@@ -25,10 +25,12 @@
 //! ownership rule) is pure so every platform tests it.
 #![deny(clippy::indexing_slicing)]
 
+use crate::lang::{keys, tr};
 use crate::locks::LockExt;
 #[cfg(any(test, target_os = "macos"))]
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Who handles `tg:` links right now.
@@ -43,6 +45,10 @@ pub enum LinkHandlerState {
     /// This build cannot manage the handler (unbundled dev run, missing
     /// `xdg-mime`, unsupported OS). The text says why.
     Unavailable(String),
+    /// The first read of the handler is still running (see [`state`]). Not a
+    /// failure: the page shows it as checking and draws again when the
+    /// answer lands.
+    Checking,
 }
 
 /// How the setting is presented.
@@ -70,6 +76,7 @@ pub fn status_text(state: &LinkHandlerState) -> String {
         LinkHandlerState::Other(name) => format!("Telegram links currently open in {name}."),
         LinkHandlerState::Unset => "No app is set for Telegram links.".into(),
         LinkHandlerState::Unavailable(why) => why.clone(),
+        LinkHandlerState::Checking => tr(keys::Q_PREFS_CHECKING_THE_DEFAULT_APP).into(),
     }
 }
 
@@ -366,7 +373,7 @@ fn run_xdg_mime(args: &[&str]) -> Result<String, String> {
     )
     .map_err(|e| {
         if crate::child_timeout::is_timeout(&e) {
-            "xdg-mime did not answer.".to_string()
+            tr(keys::Q_PREFS_DEFAULT_APP_NO_ANSWER).to_string()
         } else {
             format!("xdg-mime is not available: {e}")
         }
@@ -402,85 +409,89 @@ fn query_state() -> LinkHandlerState {
 }
 
 const CACHE_TTL: Duration = Duration::from_secs(2);
-static CACHE: Mutex<Option<(Instant, LinkHandlerState)>> = Mutex::new(None);
+
+/// The last answer, when it was read and which [`GENERATION`] it belongs to.
+struct Cached {
+    at: Instant,
+    state: LinkHandlerState,
+    generation: u64,
+}
+
+static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
+/// Bumped by [`invalidate`]: an answer from an earlier generation is stale,
+/// whatever its age (right after boot an `Instant` cannot even be moved back
+/// by the TTL).
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+static REFRESHING: AtomicBool = AtomicBool::new(false);
+
+/// The cached answer (if any) and whether it must be read again.
+fn lookup(cache: Option<&Cached>, generation: u64) -> (Option<LinkHandlerState>, bool) {
+    match cache {
+        Some(cached) => (
+            Some(cached.state.clone()),
+            cached.generation != generation || cached.at.elapsed() >= CACHE_TTL,
+        ),
+        None => (None, true),
+    }
+}
 
 /// The current handler, cached briefly so rendering never spawns a process
-/// per frame. Reflects external changes within a couple of seconds.
+/// or calls the OS per frame. Reflects external changes within a couple of
+/// seconds.
 ///
-/// Linux asks `xdg-mime`, which can hang on a wedged desktop, and this is
-/// called while the settings page draws: the last answer comes back at once
-/// and a stale one is refreshed on a thread of its own ([`refreshing`] says
-/// when the new answer is in). The first call has no answer yet.
-#[cfg(target_os = "linux")]
+/// This is called while the settings page draws, and asking the OS can
+/// stall: `xdg-mime` on a wedged desktop, LaunchServices on macOS, the
+/// registry on Windows. So no platform reads on the caller's thread: the
+/// last answer comes back at once and a stale one is read again on a thread
+/// of its own ([`refreshing`] says when the new answer is in). The first call
+/// has no answer yet and returns [`LinkHandlerState::Checking`].
 pub fn state() -> LinkHandlerState {
-    let (cached, stale) = {
-        let cache = CACHE.lock_or_recover();
-        match cache.as_ref() {
-            Some((at, state)) => (Some(state.clone()), at.elapsed() >= CACHE_TTL),
-            None => (None, true),
-        }
-    };
+    let generation = GENERATION.load(Ordering::Acquire);
+    let (cached, stale) = lookup(CACHE.lock_or_recover().as_ref(), generation);
     if stale {
         start_refresh();
     }
-    cached.unwrap_or_else(|| LinkHandlerState::Unavailable("Checking the default app…".into()))
+    cached.unwrap_or(LinkHandlerState::Checking)
 }
 
-/// A background read of the handler is running (Linux only).
+/// A background read of the handler is running.
 pub fn refreshing() -> bool {
-    REFRESHING.load(std::sync::atomic::Ordering::Acquire)
+    REFRESHING.load(Ordering::Acquire)
 }
-
-static REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Ends a refresh, also when the read panics.
-#[cfg(target_os = "linux")]
 struct RefreshDone;
 
-#[cfg(target_os = "linux")]
 impl Drop for RefreshDone {
     fn drop(&mut self) {
-        REFRESHING.store(false, std::sync::atomic::Ordering::Release);
+        REFRESHING.store(false, Ordering::Release);
     }
 }
 
-#[cfg(target_os = "linux")]
 fn start_refresh() {
-    use std::sync::atomic::Ordering;
     if REFRESHING.swap(true, Ordering::AcqRel) {
         return;
     }
     let spawned = crate::thread_guard::spawn_guarded("link-handler", || {
         let _done = RefreshDone;
+        // An `invalidate` while the OS is asked leaves this answer stale.
+        let generation = GENERATION.load(Ordering::Acquire);
         let fresh = query_state();
-        *CACHE.lock_or_recover() = Some((Instant::now(), fresh));
+        *CACHE.lock_or_recover() = Some(Cached {
+            at: Instant::now(),
+            state: fresh,
+            generation,
+        });
     });
     if spawned.is_err() {
         REFRESHING.store(false, Ordering::Release);
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-pub fn state() -> LinkHandlerState {
-    let mut cache = CACHE.lock_or_recover();
-    if let Some((at, state)) = cache.as_ref()
-        && at.elapsed() < CACHE_TTL
-    {
-        return state.clone();
-    }
-    let fresh = query_state();
-    *cache = Some((Instant::now(), fresh.clone()));
-    fresh
-}
-
-/// Drops the cache so the next [`state`] asks the OS again.
+/// Marks the cached answer stale so the next [`state`] asks the OS again.
+/// The old answer stays to show meanwhile.
 pub fn invalidate() {
-    let mut cache = CACHE.lock_or_recover();
-    // The old answer stays to show while the next one is read (Linux reads
-    // it on a thread); it is just no longer fresh.
-    if let Some((at, _)) = cache.as_mut() {
-        *at = at.checked_sub(CACHE_TTL).unwrap_or(*at);
-    }
+    GENERATION.fetch_add(1, Ordering::AcqRel);
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
@@ -534,12 +545,47 @@ pub fn release() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe, ensure_linux_desktop_entry,
-        is_quill_command, linux_application_dirs, linux_desktop_entry, linux_launch_target,
-        linux_query_args, linux_set_args, macos_state, parse_xdg_default, status_text,
-        windows_scheme_entries, windows_state,
+        Cached, LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe,
+        ensure_linux_desktop_entry, is_quill_command, linux_application_dirs, linux_desktop_entry,
+        linux_launch_target, linux_query_args, linux_set_args, lookup, macos_state,
+        parse_xdg_default, status_text, windows_scheme_entries, windows_state,
     };
     use std::path::Path;
+    use std::time::Instant;
+
+    #[test]
+    fn nothing_cached_is_stale_and_has_no_answer() {
+        assert_eq!(lookup(None, 0), (None, true));
+    }
+
+    #[test]
+    fn a_fresh_answer_is_kept_until_invalidated() {
+        let cached = Cached {
+            at: Instant::now(),
+            state: LinkHandlerState::Unset,
+            generation: 3,
+        };
+        assert_eq!(
+            lookup(Some(&cached), 3),
+            (Some(LinkHandlerState::Unset), false)
+        );
+        // `invalidate` bumps the generation: stale at once, even right after
+        // boot, and the old answer is still there to show.
+        assert_eq!(
+            lookup(Some(&cached), 4),
+            (Some(LinkHandlerState::Unset), true)
+        );
+    }
+
+    #[test]
+    fn the_first_read_is_checking_not_a_failure() {
+        let text = status_text(&LinkHandlerState::Checking);
+        assert!(!text.is_empty());
+        assert_ne!(
+            LinkHandlerState::Checking,
+            LinkHandlerState::Unavailable(text)
+        );
+    }
 
     #[test]
     fn xdg_output_maps_to_state() {

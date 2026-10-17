@@ -689,9 +689,12 @@ fn parse_notify_send_output(stdout: &str) -> Option<NotificationAction> {
 /// Run the command to completion. Spawning the process itself failing (e.g.
 /// no notification daemon) yields `clicked: false`; never panics.
 pub fn run_notification_command(command: &NotificationCommand) -> NotificationOutcome {
-    let output = std::process::Command::new(&command.program)
-        .args(&command.args)
-        .output();
+    let mut process = std::process::Command::new(&command.program);
+    process.args(&command.args);
+    let output = crate::child_timeout::output_within(
+        &mut process,
+        crate::child_timeout::NOTIFICATION_WAIT_LIMIT,
+    );
     let action = match output {
         Ok(output) if command.report_click => {
             parse_notify_send_output(&String::from_utf8_lossy(&output.stdout))

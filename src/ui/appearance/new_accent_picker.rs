@@ -342,7 +342,12 @@ impl QuillApp {
         let state = link_handler::state();
         self.repaint_when_link_handler_read(cx);
         let ours = state == LinkHandlerState::Ours;
-        let unavailable = matches!(state, LinkHandlerState::Unavailable(_));
+        // Nothing to turn on or off while the handler is unknown: it cannot be
+        // managed, or the first read has not landed yet (drawn as checking).
+        let unavailable = matches!(
+            state,
+            LinkHandlerState::Unavailable(_) | LinkHandlerState::Checking
+        );
         let hint = if unavailable {
             link_handler::status_text(&state)
         } else {

@@ -39,7 +39,12 @@ listings (already `stdout_within`/`stderr_within`) are unchanged.
   result; the driver (`connect/messages/media_options.rs`) uses it and only
   reads the file itself when a snapshot has none (tests, other callers). One
   prepare is bounded by `PREP_BUDGET` (three minutes) on top of each child's
-  limit.
+  limit; the budget starts when the send starts preparing and is shared by all
+  its snapshots (`prepare_snapshots` passes one start time), so a ten photo
+  album cannot take ten budgets. No new file starts once it has passed. A
+  photo whose ffmpeg scale times out now fails the prepare (the toast says
+  preparing took too long) instead of quietly sending the big original, and a
+  partial copy left in the temp folder by a failed scale is deleted.
 - `ui/send_prep.rs`: Send on a photo, video or round video no longer calls the
   driver on the UI thread. The snapshots go to `background_spawn`; the
   composer text, tray and reply stay as they are, and the tray shows
@@ -47,13 +52,20 @@ listings (already `stdout_within`/`stderr_within`) are unchanged.
   flag). The send goes out when the files are ready, through the account and to
   the chat Send was tapped in (`SendOrigin`), not to the chat open by then.
 - Order: a slot (account, chat, topic) has at most one send in flight. A second
-  Send in it while the files are being read is held back with the same
-  "Preparing the files…" note, so messages keep their order. Other chats are
-  not held.
+  Send in it while the files are being read is refused (it does not queue)
+  with the same "Preparing the files…" note, and the user taps Send again;
+  that keeps the messages in order. Other chats are not held.
 - Failure or timeout: nothing was taken from the composer, so the draft, tray
   and reply are still there; a plain toast says what failed
   (`PrepareError` implements `UserError`). The old re-probe on the UI thread
   after a failed send (`ui/composer/mod.rs`) is gone with it.
+- A send of several messages that fails part way (the driver accepts the first
+  k and refuses the next) clears exactly those k snapshots: their files leave
+  the tray, their text leaves the draft (a split long text keeps its unsent
+  parts, a caption goes with the first message), and the rest stays for
+  another try. The error toast says "Only k of n messages were sent. The rest
+  are still here…" (`qll_chat_partly_sent`). Before, nothing was cleared and a
+  resend duplicated the first k.
 - After a successful send only what Send took is cleared: text typed since is
   kept, files added since stay in the tray (`plan_cleanup`). For a chat that is
   no longer open the stored draft and tray are cleared the same way.
@@ -69,8 +81,21 @@ them set. The reduce-motion probe at startup (`defaults`, `gsettings`) moved
 from `main.rs` to `ui/reduce_motion_probe.rs` and runs on the background
 executor after the first window is up. The link handler setting
 (`link_handler::state`, called while the settings page draws) returns the last
-answer at once on Linux and refreshes on a thread; the page redraws when the
-read lands.
+answer at once on every platform (macOS LaunchServices, the Windows registry
+and `xdg-mime` can all stall, and none is proven cheap) and refreshes on a
+thread; the page redraws when the read lands. Until the first read lands the
+state is its own `Checking` value, drawn as "Checking the default app…" with
+the control disabled, not as an unavailable handler. `invalidate` bumps a
+generation counter, so the next `state()` re-reads even right after boot.
+
+Other children go through the helper too: `scutil --proxy`, `gsettings get`
+for the proxy, `reg query` for the privacy consent, the notification helpers
+(`notify-send --wait` waits for a click on a thread of its own, limit five
+minutes), and the test-only ffmpeg runs. An output reader that cannot start,
+or that is still open `READER_GRACE` after the child exits (a grandchild kept
+the pipe), now makes `output_within` fail instead of returning a cut output.
+`status_within` leaves stdout and stderr as the caller set them (a log file
+for the avatar encode) and says in its doc that they must not be piped.
 
 ## Not covered
 

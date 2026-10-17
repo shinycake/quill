@@ -404,10 +404,13 @@ mod tests {
             args.push(path.to_string_lossy().into_owned());
             let made =
                 crate::video_encoder::h264_job("The test clip", &args, 64 * 64).is_ok_and(|job| {
-                    crate::video_encoder::quiet_command_for(&job.program)
-                        .args(&job.args)
-                        .output()
-                        .is_ok_and(|out| out.status.success())
+                    let mut command = crate::video_encoder::quiet_command_for(&job.program);
+                    command.args(&job.args);
+                    crate::child_timeout::output_within(
+                        &mut command,
+                        crate::child_timeout::transcode_limit(1.0),
+                    )
+                    .is_ok_and(|out| out.status.success())
                 });
             made.then_some(path)
         };

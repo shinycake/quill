@@ -7,13 +7,17 @@
 //! stay where they are, marked as preparing (derived from
 //! [`SendPrepState`], never from a flag the screen keeps), and the send goes
 //! out when the files are ready, to the chat and account Send was tapped in,
-//! whichever chat is open by then. A slot has at most one send in flight, so
-//! a later Send in the same chat waits and the messages keep their order.
+//! whichever chat is open by then. A slot has at most one send in flight: a
+//! Send tapped in the same chat meanwhile is refused with the "Preparing the
+//! files" note (it does not queue), so the messages keep their order.
 //!
 //! A failed or timed out preparation changes nothing but the toast: the
 //! draft, the tray and the reply are still there for another try. After a
 //! successful send only what Send took is cleared: text typed or files
-//! added meanwhile stay.
+//! added meanwhile stay. When the driver refuses a later message after
+//! earlier ones went out, exactly the snapshots that went out are cleared
+//! (their files from the tray, their text from the draft), what is left stays
+//! for another try, and the toast says how many went.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -23,8 +27,9 @@ use super::user_error::user_error;
 use gpui_kit::*;
 use quill::composer::{ComposerSnapshot, PrepareError, PreparedMedia};
 use quill::ids::{AccountKey, ChatId};
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// The slots with a send being prepared.
 #[derive(Default)]
@@ -40,7 +45,8 @@ struct PrepJob {
 
 impl SendPrepState {
     /// Start a job for `slot`: its number, or `None` when the slot already
-    /// has one (the sends of one chat go out in the order they were made).
+    /// has one (the caller refuses that Send, so the sends of one chat go out
+    /// in the order they were made).
     pub(super) fn begin(&mut self, slot: SendSlot) -> Option<u64> {
         if self.is_preparing(&slot) {
             return None;
@@ -123,17 +129,37 @@ pub(super) fn plan_cleanup(
     }
 }
 
+/// What is left in the composer text after the first `sent` snapshots went
+/// out: a split long text keeps its unsent parts; a media caption rides the
+/// first snapshot, so once that one is out nothing of it is left.
+pub(super) fn unsent_text(snaps: &[ComposerSnapshot], sent: usize) -> String {
+    let rest = snaps.get(sent..).unwrap_or_default();
+    if rest
+        .iter()
+        .all(|snap| snap.attachment.is_none() && snap.album.is_empty())
+    {
+        rest.iter()
+            .map(|snap| snap.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    }
+}
+
 /// Read the files of every snapshot that needs it with `prepare` (off the UI
-/// thread). The first failure ends it.
+/// thread). `prepare` gets the moment the whole send started preparing, so
+/// one budget covers all the snapshots. The first failure ends it.
 pub(super) fn prepare_snapshots(
     snaps: Vec<ComposerSnapshot>,
-    prepare: impl Fn(&ComposerSnapshot) -> Result<PreparedMedia, PrepareError>,
+    prepare: impl Fn(&ComposerSnapshot, Instant) -> Result<PreparedMedia, PrepareError>,
 ) -> Result<Vec<ComposerSnapshot>, PrepareError> {
+    let started = Instant::now();
     snaps
         .into_iter()
         .map(|snap| {
             if snap.needs_media_prep() {
-                let prepared = prepare(&snap)?;
+                let prepared = prepare(&snap, started)?;
                 Ok(snap.with_prepared(prepared))
             } else {
                 Ok(snap)
@@ -215,42 +241,67 @@ impl QuillApp {
         let same_account = self
             .session()
             .is_some_and(|session| session.account == origin.slot.account);
-        let (true, Some(live), Some((first, rest))) =
-            (same_account, self.live.as_mut(), snaps.split_first())
+        let (true, Some(live), Some(first)) = (same_account, self.live.as_mut(), snaps.first())
         else {
             self.connection
                 .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
             cx.notify();
             return;
         };
-        let mut result = live.driver.send_snapshot(first);
-        for snap in rest {
-            if result.is_err() {
-                break;
-            }
-            result = live.driver.send_snapshot(snap);
-        }
         let scheduling = first.send_options.scheduling;
+        let mut sent = 0usize;
+        let mut failure = None;
+        for snap in &snaps {
+            match live.driver.send_snapshot(snap) {
+                Ok(_) => sent += 1,
+                Err(err) => {
+                    failure = Some(err);
+                    break;
+                }
+            }
+        }
+        let total = snaps.len();
         let is_open = self.send_slot().as_ref() == Some(&origin.slot);
-        match result {
-            Ok(_) => {
-                self.clear_after_send(&origin, is_open, window, cx);
+        if sent > 0 {
+            // Clear exactly what went out: the files of the sent snapshots
+            // and the text they took. A partial send keeps the rest.
+            let sent_snaps = snaps.get(..sent).unwrap_or_default();
+            let done = SendOrigin::new(
+                origin.slot.clone(),
+                origin.chat_id,
+                origin.markup.clone(),
+                sent_snaps,
+            );
+            let left = unsent_text(&snaps, sent);
+            self.clear_after_send(&done, is_open, &left, window, cx);
+        }
+        match failure {
+            None => {
                 self.connection
                     .set_note(self.send_started_note(scheduling, tr(keys::Q_CHAT_SENDING)));
             }
-            Err(quill::connect::ConnectSendError::CaptionTooLong { limit }) if is_open => {
+            Some(quill::connect::ConnectSendError::CaptionTooLong { limit })
+                if is_open && sent == 0 =>
+            {
                 // MED4: runtime `message_caption_length_max` refusal — the
                 // counter already warned; this names the limit.
                 // tdesktop `CaptionLimitBox`: the limit box says by how
-                // much, with Premium's 4096 as the way out.
-                let over = self.composer.read(cx).value().chars().count() as i64 - i64::from(limit);
+                // much, with Premium's 4096 as the way out. The count is
+                // the caption Send took, not what is typed since.
+                let over = origin.markup.chars().count() as i64 - i64::from(limit);
                 self.show_premium_limit(
                     quill::premium_limits::PremiumLimitKind::Caption,
                     over.max(0),
                     cx,
                 );
             }
-            Err(_) => {
+            Some(_) if sent > 0 => {
+                self.connection.set_note(StatusNote::error(tr_with(
+                    keys::Q_CHAT_PARTLY_SENT,
+                    &[("sent", &sent.to_string()), ("total", &total.to_string())],
+                )));
+            }
+            Some(_) => {
                 self.connection
                     .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_MESSAGE)));
             }
@@ -266,6 +317,7 @@ impl QuillApp {
         &mut self,
         origin: &SendOrigin,
         is_open: bool,
+        left: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -310,13 +362,42 @@ impl QuillApp {
         }
         self.composer_ui.clear_draft_on_success = Some(chat_id);
         if plan.clear_text {
-            if is_open {
+            // `left`: the unsent parts of a split text, else nothing.
+            if is_open && left.is_empty() {
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
-            } else {
+            } else if is_open {
+                self.set_composer_markup(left, window, cx);
+            } else if left.is_empty() {
                 self.forget_stored_draft(chat_id, topic);
+            } else {
+                self.keep_stored_draft_text(chat_id, topic, left);
             }
+        }
+    }
+
+    /// Cut the stored draft of a chat that is not on screen down to `text`.
+    fn keep_stored_draft_text(
+        &mut self,
+        chat_id: ChatId,
+        topic: quill::composer::DraftTopic,
+        text: &str,
+    ) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.cancel_pending_draft();
+            let draft = live
+                .driver
+                .session
+                .draft_for(chat_id, topic)
+                .cloned()
+                .map(|mut draft| {
+                    draft.text = text.to_string();
+                    draft
+                });
+            live.driver
+                .session
+                .store_composer_draft(chat_id, topic, draft);
         }
     }
 
@@ -335,7 +416,7 @@ impl QuillApp {
 mod tests {
     use super::{
         PrepareError, PreparedMedia, SendOrigin, SendPrepState, SentCleanup, plan_cleanup,
-        prepare_snapshots,
+        prepare_snapshots, unsent_text,
     };
     use crate::ui::composer_sends::SendSlot;
     use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, DraftTopic};
@@ -375,7 +456,7 @@ mod tests {
         assert!(prep.is_preparing(&slot("a", 11)));
         assert!(
             prep.begin(slot("a", 11)).is_none(),
-            "a second send in the chat waits, keeping the order"
+            "a second send in the chat is refused, keeping the order"
         );
         let other = prep.begin(slot("a", 12)).expect("another chat is free");
         assert_eq!(prep.finish(first), Some(slot("a", 11)));
@@ -413,7 +494,7 @@ mod tests {
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let snaps = vec![photo_snapshot(11, "/x/a.jpg")];
         let worker = std::thread::spawn(move || {
-            let result = prepare_snapshots(snaps, |_| {
+            let result = prepare_snapshots(snaps, |_, _| {
                 wait.recv().ok();
                 Ok(PreparedMedia::default())
             });
@@ -438,7 +519,7 @@ mod tests {
             photo_snapshot(11, "/x/b.jpg"),
         ];
         let calls = std::cell::RefCell::new(Vec::new());
-        let out = prepare_snapshots(snaps, |snap| {
+        let out = prepare_snapshots(snaps, |snap, _| {
             calls
                 .borrow_mut()
                 .push(snap.attachment.as_ref().map(|att| att.path.clone()));
@@ -463,7 +544,7 @@ mod tests {
             photo_snapshot(11, "/x/a.jpg"),
             photo_snapshot(11, "/x/b.jpg"),
         ];
-        let out = prepare_snapshots(snaps, |snap| {
+        let out = prepare_snapshots(snaps, |snap, _| {
             if snap
                 .attachment
                 .as_ref()
@@ -510,6 +591,49 @@ mod tests {
                 reset_slot: false
             }
         );
+    }
+
+    fn snapshots(paths: &[&str]) -> Vec<ComposerSnapshot> {
+        paths.iter().map(|path| photo_snapshot(11, path)).collect()
+    }
+
+    #[test]
+    fn a_partial_send_clears_only_the_sent_files_and_keeps_the_rest() {
+        let snaps = snapshots(&["/x/a.jpg", "/x/b.jpg", "/x/c.jpg"]);
+        let full = origin(&["/x/a.jpg", "/x/b.jpg", "/x/c.jpg"]);
+        // The driver took the first two and refused the third.
+        let sent = snaps.get(..2).unwrap_or_default();
+        let done = SendOrigin::new(full.slot.clone(), full.chat_id, full.markup.clone(), sent);
+        assert_eq!(
+            done.files,
+            [PathBuf::from("/x/a.jpg"), PathBuf::from("/x/b.jpg")]
+        );
+        let tray = [
+            PathBuf::from("/x/a.jpg"),
+            PathBuf::from("/x/b.jpg"),
+            PathBuf::from("/x/c.jpg"),
+        ];
+        // The tray still holds c.jpg, so the slot is not reset: only the
+        // sent files leave it. The caption rode the first message: it goes.
+        assert_eq!(
+            plan_cleanup(&done, Some("caption"), &tray),
+            SentCleanup {
+                clear_text: true,
+                reset_slot: false
+            }
+        );
+        assert_eq!(unsent_text(&snaps, 2), "", "a caption is not sent twice");
+    }
+
+    #[test]
+    fn a_partly_sent_long_text_keeps_its_unsent_parts() {
+        let parts: Vec<ComposerSnapshot> = ["one", "two", "three"]
+            .iter()
+            .map(|text| ComposerSnapshot::capture(ChatId(11), ViewGeneration(0), *text))
+            .collect();
+        assert_eq!(unsent_text(&parts, 1), "two\nthree");
+        assert_eq!(unsent_text(&parts, 3), "");
+        assert_eq!(unsent_text(&parts, 0), "one\ntwo\nthree");
     }
 
     #[test]

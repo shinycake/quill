@@ -227,10 +227,9 @@ pub fn windows_privacy_denied(camera: bool) -> bool {
         [base.clone(), format!(r"{base}\NonPackaged")]
             .iter()
             .any(|key| {
-                Command::new("reg")
-                    .args(["query", key, "/v", "Value"])
-                    .no_console()
-                    .output()
+                let mut command = Command::new("reg");
+                command.args(["query", key, "/v", "Value"]);
+                crate::child_timeout::output_within(&mut command, crate::child_timeout::PROBE_LIMIT)
                     .is_ok_and(|out| consent_denies(&String::from_utf8_lossy(&out.stdout)))
             })
     }

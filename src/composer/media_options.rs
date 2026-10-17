@@ -225,13 +225,29 @@ pub fn photo_size_of(path: &Path) -> Option<(u32, u32)> {
 /// scaled down to the limit. Falls back to the original when the copy can't
 /// be made, so a send never fails over this. Blocks on ffmpeg.
 pub fn photo_for_send(path: &Path, high_quality: bool) -> PathBuf {
+    scaled_photo_for_send(path, high_quality)
+        .unwrap_or_else(|PhotoScaleTimedOut| path.to_path_buf())
+}
+
+/// ffmpeg did not finish scaling a photo in [`PHOTO_SCALE_LIMIT`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhotoScaleTimedOut;
+
+/// [`photo_for_send`], but a scale that ran out of time is an error so the
+/// caller can tell the user instead of quietly sending the big original.
+/// Any other failure still falls back to the original. A partial copy left
+/// by a failed or timed out scale is deleted.
+pub fn scaled_photo_for_send(
+    path: &Path,
+    high_quality: bool,
+) -> Result<PathBuf, PhotoScaleTimedOut> {
     let limit = photo_side_limit(high_quality);
     let Some((width, height)) = photo_size_of(path) else {
-        return path.to_path_buf();
+        return Ok(path.to_path_buf());
     };
     let size = fitted_photo_size(width, height, limit);
     if size == (width, height) {
-        return path.to_path_buf();
+        return Ok(path.to_path_buf());
     }
     let png = path
         .extension()
@@ -249,13 +265,24 @@ pub fn photo_for_send(path: &Path, high_quality: bool) -> PathBuf {
         size,
         png,
     ));
-    let made = std::fs::create_dir_all(&dir).is_ok()
-        && crate::child_timeout::output_within(&mut command, PHOTO_SCALE_LIMIT)
-            .is_ok_and(|result| result.status.success());
-    if made {
-        pick_send_path(&output).unwrap_or_else(|| path.to_path_buf())
-    } else {
-        path.to_path_buf()
+    let scaled = std::fs::create_dir_all(&dir)
+        .map_err(|_| None)
+        .and_then(|()| {
+            crate::child_timeout::output_within(&mut command, PHOTO_SCALE_LIMIT)
+                .map_err(|err| crate::child_timeout::is_timeout(&err).then_some(PhotoScaleTimedOut))
+        });
+    match scaled {
+        Ok(result) if result.status.success() => {
+            Ok(pick_send_path(&output).unwrap_or_else(|| path.to_path_buf()))
+        }
+        Ok(_) | Err(None) => {
+            let _ = std::fs::remove_file(&output);
+            Ok(path.to_path_buf())
+        }
+        Err(Some(timed_out)) => {
+            let _ = std::fs::remove_file(&output);
+            Err(timed_out)
+        }
     }
 }
 
