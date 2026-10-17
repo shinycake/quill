@@ -20,3 +20,7 @@ value immediately, so the indicator jumps. The indicator carries a
 `scroll_to_item_offset` expose the list's top row and its pixel offset, so
 Quill can remember where a chat was left and return to it
 (`docs/decisions/sweep-scroll-restore.md`). Re-apply both when re-vendoring.
+`top_anchor` gates on the list's follow state, not on `is_scrolled_up`, so a
+position set by `scroll_to_item_offset` reads correctly before the next layout.
+`MessageScrollerState::user_scrolls` counts wheel and trackpad scrolls (the list's
+scroll handler), letting Quill tell a reader's scroll from a programmatic one.

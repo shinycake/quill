@@ -24,3 +24,17 @@ same message.
 Demo `ready-chats` with `QUILL_DEMO_STRESS=3,300`: scroll to message 12-18, switch to Demo
 chat B, back to Demo chat A. The returned view is pixel-identical in layout to the one left.
 Not shown: real TDLib windows that reload on open (anchor outside the window falls back).
+
+## Review follow-ups
+- An anchor outside the loaded window no longer loses the entry. The chat shows its default
+  position, the saved position is neither recorded over nor forgotten, and it is restored when a
+  window or page containing the anchor arrives. The wait ends on the reader's own wheel or
+  trackpad scroll (`MessageScrollerState::user_scrolls`), an explicit jump, or leaving the chat.
+  Not done: requesting history around the anchor on open as tdesktop does; Quill relies on the
+  window loading the anchor by itself.
+- `top_anchor` gates on the list's follow state instead of the previous layout's extent, so the
+  restored position reads correctly on the restore frame (test in `message_scroller.rs`).
+- The position is also recorded from the scroller's observer, so it follows every scroll and
+  does not depend on a full app render.
+- Verified: scroll up in Demo chat A, Demo chat B, Demo chat A, and again B, A. The view after
+  one and two round trips shows messages 7 to 13 at the same offsets, light and dark.

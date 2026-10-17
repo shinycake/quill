@@ -25,6 +25,7 @@ const BOTTOM_FADE_TRANSITION: Duration = Duration::from_millis(200);
 /// [`MessageScroller::new`].
 pub struct MessageScrollerState {
     list_state: ListState,
+    user_scrolls: u64,
 }
 
 impl MessageScrollerState {
@@ -42,11 +43,17 @@ impl MessageScrollerState {
             let weak_state = weak_state.clone();
 
             cx.defer(move |cx| {
-                let _ = weak_state.update(cx, |_, cx| cx.notify());
+                let _ = weak_state.update(cx, |state, cx| {
+                    state.user_scrolls = state.user_scrolls.wrapping_add(1);
+                    cx.notify();
+                });
             });
         });
 
-        Self { list_state }
+        Self {
+            list_state,
+            user_scrolls: 0,
+        }
     }
 
     /// Return the current number of rows known by the virtual list.
@@ -149,11 +156,21 @@ impl MessageScrollerState {
         true
     }
 
+    /// How many wheel or trackpad scrolls the reader made on this list.
+    /// Programmatic jumps do not count.
+    pub fn user_scrolls(&self) -> u64 {
+        self.user_scrolls
+    }
+
     /// The row at the top of the viewport and how many pixels of it are
-    /// scrolled above the viewport. `None` while the list rests at its
+    /// scrolled above the viewport. `None` while the list follows its
     /// tail, so callers keep a position only for a reader who moved away.
     pub fn top_anchor(&self) -> Option<(usize, f32)> {
-        if !self.is_scrolled_up() {
+        // Not `is_scrolled_up`: that reads the previous layout's extent, which
+        // right after a reset or a scroll_to still describes the old content.
+        // The follow state is set by the scroll itself and re-engaged by the
+        // layout when the list rests at its end.
+        if self.list_state.is_following_tail() {
             return None;
         }
         let top = self.list_state.logical_scroll_top();
@@ -487,6 +504,7 @@ mod tests {
             assert_eq!(state.read(cx).item_count(), 3);
             assert!(!state.read(cx).is_scrolled_up());
             assert!(state.read(cx).is_following_tail());
+            assert_eq!(state.read(cx).top_anchor(), None);
 
             state.update(cx, |state, cx| {
                 assert!(!state.scroll_to_item(3, cx));
@@ -505,6 +523,24 @@ mod tests {
                 state.reset(2, cx);
                 assert_eq!(state.item_count(), 2);
                 assert!(state.is_following_tail());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn top_anchor_reads_a_restored_position_before_any_layout(cx: &mut gpui::TestAppContext) {
+        let state = cx.new(|cx| MessageScrollerState::new(6, cx));
+        cx.update(|cx| {
+            state.update(cx, |state, cx| {
+                state.reset(6, cx);
+                assert!(state.scroll_to_item_offset(2, 12., cx));
+                // No layout ran: `is_scrolled_up` still reads the old extent,
+                // the restored position must not look like the tail.
+                assert!(!state.is_scrolled_up());
+                assert_eq!(state.top_anchor(), Some((2, 12.)));
+                state.scroll_to_end(cx);
+                assert_eq!(state.top_anchor(), None);
+                assert_eq!(state.user_scrolls(), 0);
             });
         });
     }

@@ -47,6 +47,9 @@ pub(crate) struct HistoryUi {
     /// The chat was just opened: its remembered position (if any) is
     /// read once its rows exist. Cleared by the first anchor.
     pub(super) restore_scroll: bool,
+    /// The scroller's reader-scroll count when the chat opened: any change
+    /// ends the wait for a remembered position.
+    pub(super) restore_scrolls_seen: u64,
     /// Where each chat, topic or thread was left away from the tail.
     pub(super) scroll_memory: quill::state::ScrollMemory,
     /// The window stopped short of the latest message at the last render:
@@ -140,6 +143,7 @@ impl HistoryUi {
             window_epoch: 0,
             anchor_pending: false,
             restore_scroll: false,
+            restore_scrolls_seen: 0,
             scroll_memory: Default::default(),
             had_newer: false,
             rows_key: None,
