@@ -114,11 +114,13 @@ struct Counted<S: Source> {
 }
 
 impl<S: Source> Counted<S> {
-    fn new(inner: S, probe: Arc<Probe>) -> Self {
+    /// `start_secs` is where `inner` already sits.
+    fn new(inner: S, probe: Arc<Probe>, start_secs: f64) -> Self {
+        let rate = inner.sample_rate().get();
+        probe.rate.store(rate, Ordering::Relaxed);
         probe
-            .rate
-            .store(inner.sample_rate().get(), Ordering::Relaxed);
-        probe.frames.store(0, Ordering::Relaxed);
+            .frames
+            .store((start_secs * f64::from(rate)) as u64, Ordering::Relaxed);
         let channels = u64::from(inner.channels().get());
         Self {
             inner,
@@ -423,13 +425,15 @@ fn build_player(
     hold: bool,
 ) -> Result<Built, AudioError> {
     let probe = Arc::new(Probe::default());
-    let decoded = open_decoded(path)?;
-    let mut source = Tempo::new(Counted::new(decoded, probe.clone()), speed.clone());
-    if offset > 0.05 {
-        // A source that can't seek starts from the top, and the probe
-        // says so.
-        let _ = source.try_seek(Duration::from_secs_f64(offset));
-    }
+    let mut decoded = open_decoded(path)?;
+    // Seeked below `Counted`, so its `try_seek` answers only the player's
+    // seeks. A source that can't seek starts from the top.
+    let start = if offset > 0.05 && decoded.try_seek(Duration::from_secs_f64(offset)).is_ok() {
+        offset
+    } else {
+        0.0
+    };
+    let source = Tempo::new(Counted::new(decoded, probe.clone(), start), speed.clone());
     let player = Player::connect_new(mixer);
     player.set_volume(volume);
     if hold {
