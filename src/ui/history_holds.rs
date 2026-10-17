@@ -3,6 +3,7 @@
 //! them whole: the source of a pending forward or selection, and the chat
 //! of the track in the player bar.
 use super::*;
+use quill::ids::ChatId;
 
 impl QuillApp {
     pub(super) fn sync_history_holds(&mut self) {
