@@ -17,7 +17,7 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
 use std::time::Duration;
 
-fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -75,14 +75,14 @@ fn add_captioned_photo(
     });
 }
 
-fn settle(vcx: &mut VisualTestContext) {
+pub(super) fn settle(vcx: &mut VisualTestContext) {
     for _ in 0..3 {
         vcx.update(|window, _| window.refresh());
         vcx.run_until_parked();
     }
 }
 
-fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64) {
+pub(super) fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64) {
     app.update_in(vcx, |app, _, cx| {
         app.privacy.open = false;
         app.open_media_viewer(ChatId(11), MessageId(id), cx);
@@ -90,7 +90,12 @@ fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64) {
     settle(vcx);
 }
 
-fn notch(vcx: &mut VisualTestContext, at: Point<Pixels>, lines: f32, modifiers: Modifiers) {
+pub(super) fn notch(
+    vcx: &mut VisualTestContext,
+    at: Point<Pixels>,
+    lines: f32,
+    modifiers: Modifiers,
+) {
     vcx.simulate_mouse_move(at, None, Modifiers::default());
     settle(vcx);
     vcx.simulate_event(ScrollWheelEvent {

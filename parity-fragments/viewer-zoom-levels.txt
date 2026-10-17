@@ -1,0 +1,2 @@
+# media viewer: zoom steps through tdesktop levels with a fit stop, Ctrl+0 reset
+parity:media-viewer-zoom-levels

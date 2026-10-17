@@ -192,9 +192,10 @@ impl QuillApp {
         let media = natural
             .map(|natural| quill::media_viewer::fit_within(natural, fit))
             .unwrap_or(fit);
-        if media != self.viewer.frame {
+        let levels = natural.and_then(|natural| ZoomLevels::new(natural, fit));
+        if media != self.viewer.frame || levels != self.viewer.zoom.levels {
             self.viewer.frame = media;
-            self.viewer.zoom.reset();
+            self.viewer.zoom = ViewerZoom::fitted(levels);
         }
         let zoom = self.viewer.zoom;
         ViewerGeometry {

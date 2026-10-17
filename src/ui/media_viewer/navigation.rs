@@ -531,3 +531,8 @@ fn viewer_anchor(position: Point<Pixels>, origin: (f32, f32)) -> (f32, f32) {
 #[cfg(feature = "demo-capture")]
 #[path = "wheel_ui_tests.rs"]
 mod wheel_ui_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "zoom_ui_tests.rs"]
+mod zoom_ui_tests;

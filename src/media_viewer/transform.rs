@@ -3,17 +3,102 @@
 
 /// Zoom/pan state for the viewer visual (pure, no GPUI). Zoom is a fit-scale
 /// factor (`1.0` = contain); pan is the visual's top-left offset in px at the
-/// current zoom, clamped so the image can never leave the frame entirely.
+/// current zoom, clamped so a magnified image always covers the frame and a
+/// smaller one sits in its middle.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewerZoom {
     pub zoom: f32,
     pub pan: (f32, f32),
+    /// The `+` / `-` ladder of the picture in this frame; `None` while its
+    /// natural size is unknown, and the steps then multiply by
+    /// [`VIEWER_ZOOM_STEP`].
+    pub levels: Option<ZoomLevels>,
 }
 
-/// Wheel-zoom step factor and zoom limits.
+/// Wheel-zoom step factor.
 pub const VIEWER_ZOOM_STEP: f32 = 1.15;
+/// Wheel and pinch zoom limits (fit-scale factors). The `+` / `-` ladder
+/// may step outside them; a wheel then only moves back toward them.
 pub const VIEWER_ZOOM_MIN: f32 = 1.0;
 pub const VIEWER_ZOOM_MAX: f32 = 8.0;
+/// tdesktop `kMaxZoomLevel`: the ladder runs from level -7 (an eighth of
+/// the natural size) to level 7 (eight times it).
+pub const VIEWER_MAX_ZOOM_LEVEL: i32 = 7;
+/// Two scales closer than this fraction are one stop of the ladder.
+const STOP_EPSILON: f32 = 1e-4;
+
+/// Scale of ladder level `level` against the natural size: `level + 1`
+/// from 0 up, `1 / (1 - level)` below (tdesktop `setZoomLevel`).
+pub fn zoom_level_scale(level: i32) -> f32 {
+    if level >= 0 {
+        level as f32 + 1.0
+    } else {
+        1.0 / (1.0 - level as f32)
+    }
+}
+
+fn same_stop(a: f32, b: f32) -> bool {
+    (a - b).abs() <= b.abs() * STOP_EPSILON
+}
+
+/// The `+` / `-` zoom ladder of one picture in one frame (tdesktop
+/// `zoomIn` / `zoomOut`): the integer levels, plus one snap on the way,
+/// fit (the whole picture in the area, tdesktop `_zoomToDefault`). Scales
+/// are against the natural size, one picture pixel per point.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZoomLevels {
+    natural: (f32, f32),
+    fit: f32,
+}
+
+impl ZoomLevels {
+    /// The ladder of a `natural`-sized picture in an `area`; `None` unless
+    /// both sizes are positive.
+    pub fn new(natural: (f32, f32), area: (f32, f32)) -> Option<Self> {
+        let (nw, nh) = natural;
+        let (aw, ah) = area;
+        if !(nw > 0.0 && nh > 0.0 && aw > 0.0 && ah > 0.0) {
+            return None;
+        }
+        let fit = (aw / nw).min(ah / nh);
+        (fit > 0.0 && fit.is_finite()).then_some(Self { natural, fit })
+    }
+
+    pub fn fit(&self) -> f32 {
+        self.fit
+    }
+
+    /// Every stop, unordered: the integer levels that leave the picture at
+    /// least a point on each side (tdesktop `zoomUpdate`), and fit.
+    fn stops(&self) -> impl Iterator<Item = f32> + '_ {
+        let side = self.natural.0.min(self.natural.1);
+        (-VIEWER_MAX_ZOOM_LEVEL..=VIEWER_MAX_ZOOM_LEVEL)
+            .map(zoom_level_scale)
+            .filter(move |scale| side * scale >= 1.0)
+            .chain([self.fit])
+    }
+
+    /// The nearest stop above (`zoom_in`) or below `scale`, or `scale`
+    /// itself at the end of the ladder.
+    pub fn step(&self, scale: f32, zoom_in: bool) -> f32 {
+        let next = if zoom_in {
+            self.stops()
+                .filter(|stop| *stop > scale * (1.0 + STOP_EPSILON))
+                .reduce(f32::min)
+        } else {
+            self.stops()
+                .filter(|stop| *stop < scale * (1.0 - STOP_EPSILON))
+                .reduce(f32::max)
+        };
+        next.unwrap_or(scale)
+    }
+
+    /// tdesktop `zoomReset`: natural size goes back to fit, any other
+    /// scale to natural size.
+    pub fn reset(&self, scale: f32) -> f32 {
+        if same_stop(scale, 1.0) { self.fit } else { 1.0 }
+    }
+}
 /// Scroll distance (px) that equals one `VIEWER_ZOOM_STEP`; a mouse-wheel
 /// line counts as one notch.
 pub const VIEWER_WHEEL_NOTCH_PX: f32 = 40.0;
@@ -129,10 +214,7 @@ pub fn orient_rgba(
 
 impl Default for ViewerZoom {
     fn default() -> Self {
-        Self {
-            zoom: VIEWER_ZOOM_MIN,
-            pan: (0.0, 0.0),
-        }
+        Self::fitted(None)
     }
 }
 
@@ -141,8 +223,24 @@ impl ViewerZoom {
         Self::default()
     }
 
+    /// At fit, stepping along `levels`.
+    pub fn fitted(levels: Option<ZoomLevels>) -> Self {
+        Self {
+            zoom: VIEWER_ZOOM_MIN,
+            pan: (0.0, 0.0),
+            levels,
+        }
+    }
+
+    /// Back to fit (the ladder stays).
     pub fn reset(&mut self) {
-        *self = Self::default();
+        *self = Self::fitted(self.levels);
+    }
+
+    /// The zoom as the label shows it: percent of the natural size, or of
+    /// the fit size while the natural size is unknown.
+    pub fn percent(&self) -> f32 {
+        self.zoom * self.levels.map_or(1.0, |levels| levels.fit()) * 100.0
     }
 
     /// `true` when the visual is magnified (pan is meaningful).
@@ -150,28 +248,56 @@ impl ViewerZoom {
         self.zoom > VIEWER_ZOOM_MIN
     }
 
-    /// Step the zoom in (`zoom_in = true`) or out, keeping the frame center
-    /// fixed. `frame` is the `(width, height)` of the visual container.
+    /// Step the zoom in (`zoom_in = true`) or out to the next stop of the
+    /// ladder, keeping the frame center fixed. `frame` is the
+    /// `(width, height)` of the visual container.
     pub fn step(&mut self, zoom_in: bool, frame: (f32, f32)) {
-        let factor = if zoom_in {
-            VIEWER_ZOOM_STEP
-        } else {
-            1.0 / VIEWER_ZOOM_STEP
+        let target = match self.levels {
+            Some(levels) => levels.step(self.zoom * levels.fit(), zoom_in) / levels.fit(),
+            None => {
+                let factor = if zoom_in {
+                    VIEWER_ZOOM_STEP
+                } else {
+                    1.0 / VIEWER_ZOOM_STEP
+                };
+                (self.zoom * factor).clamp(VIEWER_ZOOM_MIN, VIEWER_ZOOM_MAX)
+            }
         };
-        self.zoom_at(factor, (frame.0 / 2.0, frame.1 / 2.0), frame);
+        self.set_zoom(target, (frame.0 / 2.0, frame.1 / 2.0), frame);
+    }
+
+    /// `0` and Ctrl+0 (tdesktop `zoomReset`): natural size, or back to fit
+    /// from natural size, centered in the frame. Without a ladder it is
+    /// [`Self::reset`].
+    pub fn toggle_natural(&mut self, frame: (f32, f32)) {
+        let Some(levels) = self.levels else {
+            self.reset();
+            return;
+        };
+        self.zoom = levels.reset(self.zoom * levels.fit()) / levels.fit();
+        self.pan = (
+            (frame.0 - frame.0 * self.zoom) / 2.0,
+            (frame.1 - frame.1 * self.zoom) / 2.0,
+        );
+        self.clamp_pan(frame);
     }
 
     /// Multiply the zoom by `factor`, keeping the point `anchor` (relative
     /// to the visual container's top-left, e.g. the pointer) fixed on
-    /// screen. The result is clamped to the zoom limits and the pan to the
-    /// frame.
+    /// screen. The result stays inside the wheel limits, or moves toward
+    /// them from a ladder stop outside; the pan is clamped to the frame.
     pub fn zoom_at(&mut self, factor: f32, anchor: (f32, f32), frame: (f32, f32)) {
         if !factor.is_finite() || factor <= 0.0 {
             return;
         }
         let old = self.zoom;
-        let new = (old * factor).clamp(VIEWER_ZOOM_MIN, VIEWER_ZOOM_MAX);
-        if (new - old).abs() < f32::EPSILON {
+        let new = (old * factor).clamp(VIEWER_ZOOM_MIN.min(old), VIEWER_ZOOM_MAX.max(old));
+        self.set_zoom(new, anchor, frame);
+    }
+
+    fn set_zoom(&mut self, new: f32, anchor: (f32, f32), frame: (f32, f32)) {
+        let old = self.zoom;
+        if !new.is_finite() || new <= 0.0 || (new - old).abs() < f32::EPSILON {
             return;
         }
         let ratio = new / old;
@@ -194,12 +320,16 @@ impl ViewerZoom {
     }
 
     fn clamp_pan(&mut self, frame: (f32, f32)) {
-        if !self.is_zoomed() {
-            self.pan = (0.0, 0.0);
-            return;
-        }
-        let (min_x, min_y) = (frame.0 - frame.0 * self.zoom, frame.1 - frame.1 * self.zoom);
-        self.pan = (self.pan.0.clamp(min_x, 0.0), self.pan.1.clamp(min_y, 0.0));
+        let zoom = self.zoom;
+        let axis = |pan: f32, size: f32| {
+            let zoomed = size * zoom;
+            if zoomed > size {
+                pan.clamp(size - zoomed, 0.0)
+            } else {
+                (size - zoomed) / 2.0
+            }
+        };
+        self.pan = (axis(self.pan.0, frame.0), axis(self.pan.1, frame.1));
     }
 }
 
@@ -423,6 +553,153 @@ mod tests {
         zoom.reset();
         assert!(!zoom.is_zoomed());
         assert_eq!(zoom.pan, (0.0, 0.0));
+    }
+
+    fn ladder(levels: &ZoomLevels, from: f32, zoom_in: bool, steps: usize) -> Vec<f32> {
+        let mut scale = from;
+        (0..steps)
+            .map(|_| {
+                scale = levels.step(scale, zoom_in);
+                scale
+            })
+            .collect()
+    }
+
+    fn assert_scales(got: &[f32], want: &[f32]) {
+        assert_eq!(got.len(), want.len(), "{got:?} vs {want:?}");
+        for (g, w) in got.iter().zip(want) {
+            assert!((g - w).abs() < 1e-4, "{got:?} vs {want:?}");
+        }
+    }
+
+    #[test]
+    fn level_scales_follow_tdesktop() {
+        assert_eq!(zoom_level_scale(0), 1.0);
+        assert_eq!(zoom_level_scale(1), 2.0);
+        assert_eq!(zoom_level_scale(7), 8.0);
+        assert_eq!(zoom_level_scale(-1), 0.5);
+        assert_eq!(zoom_level_scale(-7), 0.125);
+    }
+
+    #[test]
+    fn ladder_needs_real_sizes() {
+        assert!(ZoomLevels::new((0.0, 100.0), (400.0, 300.0)).is_none());
+        assert!(ZoomLevels::new((100.0, 100.0), (400.0, 0.0)).is_none());
+        assert!(ZoomLevels::new((f32::NAN, 100.0), (400.0, 300.0)).is_none());
+        let levels = ZoomLevels::new((200.0, 100.0), (400.0, 300.0)).unwrap();
+        assert_eq!(levels.fit(), 2.0);
+    }
+
+    #[test]
+    fn fit_on_a_level_is_one_stop() {
+        let levels = ZoomLevels::new((200.0, 100.0), (400.0, 200.0)).unwrap();
+        assert_eq!(levels.fit(), zoom_level_scale(1));
+        assert_scales(&ladder(&levels, 2.0, true, 2), &[3.0, 4.0]);
+        assert_scales(&ladder(&levels, 2.0, false, 2), &[1.0, 0.5]);
+    }
+
+    #[test]
+    fn steps_from_fit_to_natural_and_back() {
+        let levels = ZoomLevels::new((1000.0, 500.0), (400.0, 400.0)).unwrap();
+        assert_scales(&[levels.fit()], &[0.4]);
+        assert_scales(&ladder(&levels, 0.4, true, 3), &[0.5, 1.0, 2.0]);
+        assert_scales(&ladder(&levels, 2.0, false, 4), &[1.0, 0.5, 0.4, 1.0 / 3.0]);
+    }
+
+    #[test]
+    fn steps_stop_at_the_level_limits() {
+        let levels = ZoomLevels::new((4000.0, 3000.0), (800.0, 600.0)).unwrap();
+        let down = ladder(&levels, levels.fit(), false, 6);
+        assert_scales(&down[3..], &[0.125, 0.125, 0.125]);
+        let up = ladder(&levels, 1.0, true, 9);
+        assert_scales(&up[6..], &[8.0, 8.0, 8.0]);
+    }
+
+    #[test]
+    fn snaps_past_the_limits_stay_reachable() {
+        // A tiny picture fits at 30x, past level 7.
+        let levels = ZoomLevels::new((10.0, 10.0), (400.0, 300.0)).unwrap();
+        assert_scales(&ladder(&levels, 8.0, true, 2), &[30.0, 30.0]);
+        assert_scales(&ladder(&levels, 30.0, false, 2), &[8.0, 7.0]);
+    }
+
+    #[test]
+    fn tiny_pictures_never_shrink_below_a_point() {
+        let levels = ZoomLevels::new((4.0, 2.0), (400.0, 300.0)).unwrap();
+        assert_scales(&ladder(&levels, 1.0, false, 3), &[0.5, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn viewer_zoom_steps_along_the_ladder_and_centers_below_fit() {
+        let frame = (400.0, 200.0);
+        let levels = ZoomLevels::new((1000.0, 500.0), (400.0, 400.0));
+        let mut zoom = ViewerZoom::fitted(levels);
+        assert!((zoom.percent() - 40.0).abs() < 1e-3);
+        zoom.step(true, frame);
+        assert!((zoom.zoom - 1.25).abs() < 1e-5);
+        assert!((zoom.percent() - 50.0).abs() < 1e-3);
+        zoom.step(false, frame);
+        assert_eq!(zoom.zoom, 1.0, "fit is an exact stop");
+        assert_eq!(zoom.pan, (0.0, 0.0));
+        zoom.step(false, frame);
+        assert!(!zoom.is_zoomed());
+        assert!((zoom.percent() - 100.0 / 3.0).abs() < 1e-3);
+        // Smaller than the frame: centered, and drag does not move it.
+        let centered = zoom.pan;
+        assert!((centered.0 - (400.0 - 400.0 * zoom.zoom) / 2.0).abs() < 1e-3);
+        assert!((centered.1 - (200.0 - 200.0 * zoom.zoom) / 2.0).abs() < 1e-3);
+        zoom.pan_by(30.0, 30.0, frame);
+        assert_eq!(zoom.pan, centered);
+        zoom.reset();
+        assert_eq!(zoom, ViewerZoom::fitted(levels));
+    }
+
+    #[test]
+    fn reset_toggles_natural_and_fit_like_tdesktop() {
+        let levels = ZoomLevels::new((1000.0, 500.0), (400.0, 400.0)).unwrap();
+        assert_eq!(levels.reset(levels.fit()), 1.0, "fit goes to natural");
+        assert_eq!(levels.reset(1.0), levels.fit(), "natural goes back to fit");
+        assert_eq!(levels.reset(3.0), 1.0, "anything else to natural");
+        let frame = (400.0, 200.0);
+        let mut zoom = ViewerZoom::fitted(Some(levels));
+        zoom.step(true, frame);
+        zoom.pan_by(-500.0, -500.0, frame);
+        zoom.toggle_natural(frame);
+        assert!((zoom.percent() - 100.0).abs() < 1e-3);
+        // Natural is 2.5x the fit box: centered, not where the pan was.
+        assert!((zoom.pan.0 - (400.0 - 1000.0) / 2.0).abs() < 1e-3);
+        assert!((zoom.pan.1 - (200.0 - 500.0) / 2.0).abs() < 1e-3);
+        zoom.toggle_natural(frame);
+        assert_eq!(zoom, ViewerZoom::fitted(Some(levels)));
+        let mut unknown = ViewerZoom::new();
+        unknown.step(true, frame);
+        unknown.toggle_natural(frame);
+        assert_eq!(unknown, ViewerZoom::new(), "no ladder: back to fit");
+    }
+
+    #[test]
+    fn a_wheel_below_fit_only_moves_back_toward_fit() {
+        let frame = (400.0, 200.0);
+        let mut zoom = ViewerZoom::fitted(ZoomLevels::new((1000.0, 500.0), (400.0, 400.0)));
+        zoom.step(false, frame);
+        let below = zoom.zoom;
+        assert!(below < 1.0);
+        zoom.zoom_at(
+            wheel_zoom_factor(-VIEWER_WHEEL_NOTCH_PX),
+            (10.0, 10.0),
+            frame,
+        );
+        assert_eq!(zoom.zoom, below, "no further out on the wheel");
+        zoom.zoom_at(
+            wheel_zoom_factor(VIEWER_WHEEL_NOTCH_PX),
+            (10.0, 10.0),
+            frame,
+        );
+        assert!((zoom.zoom - below * VIEWER_ZOOM_STEP).abs() < 1e-5);
+        for _ in 0..10 {
+            zoom.zoom_at(VIEWER_ZOOM_STEP, (10.0, 10.0), frame);
+        }
+        assert!(zoom.zoom > 1.0, "continuous on through fit");
     }
 
     /// 2×1 RGBA: red | green. 90° cw -> 1×2: green on top, red below.
