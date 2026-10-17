@@ -102,6 +102,18 @@ Captures live in `/Volumes/Idan1TB/quill-work/scratch/sweep-bubble-narrow-width/
   off now fit, and so do the media, album, link preview and voice demos in
   light and dark. The 640x700 showcase fits beside the chat list.
 
+## Review follow-ups
+
+- First frame: until a history has painted, `HistoryUi::width_probed` is
+  false and `seed_history_width` seeds the width from the conversation pane
+  (`shell_layout::chat_pane_width` for the main window, the viewport width
+  for a chat window), so the first paint no longer lays out at 640 and
+  shrinks a frame later. The paint probe stays the source of truth.
+- Resizing: the probe floors the pane width to 8 px steps
+  (`chat_wide_ui::history_pane_width`), so a drag between 380 and 640 px
+  re-lays the rows out every 8 px, and the content never exceeds the pane.
+- Re-captured the showcase at 380x600 dark: bubbles fit.
+
 ## Not verified
 
 - Real TDLib chats. Only demo data was captured.

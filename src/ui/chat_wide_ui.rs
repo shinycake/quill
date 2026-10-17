@@ -33,7 +33,30 @@ pub(super) fn wide_column(wide: bool, content: impl IntoElement) -> AnyElement {
         .into_any_element()
 }
 
+/// The width bubble layout sees for a history `width` wide: floored to
+/// whole [`WIDTH_STEP`]s, so dragging a window edge re-lays the rows out
+/// every few pixels instead of every pixel, and the bubbles never
+/// outgrow the pane.
+pub(super) fn history_pane_width(width: f32) -> f32 {
+    (width / WIDTH_STEP).floor() * WIDTH_STEP
+}
+
+/// Resize granularity of [`history_pane_width`], in logical pixels.
+const WIDTH_STEP: f32 = 8.;
+
 impl QuillApp {
+    /// Until the history has painted, lays its bubbles out for `pane`, the
+    /// width of the conversation pane it is about to fill, so the first
+    /// frame is not the wide layout shrinking a frame later. The paint
+    /// probe is the source of truth from then on.
+    pub(in crate::ui) fn seed_history_width(&self, pane: f32) {
+        if !self.history.width_probed.get() {
+            self.history
+                .width
+                .set(HistoryWidth::new(history_pane_width(pane)));
+        }
+    }
+
     /// `Adaptive::isChatWide` for the history being built.
     pub(super) fn chat_wide(&self) -> bool {
         is_chat_wide(
@@ -49,6 +72,7 @@ impl QuillApp {
     pub(super) fn history_width_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let layout = self.history.chat_layout.clone();
         let history_width = self.history.width.clone();
+        let probed = self.history.width_probed.clone();
         let app = cx.weak_entity();
         canvas(
             |_, _, _| {},
@@ -56,7 +80,8 @@ impl QuillApp {
                 let width = f32::from(bounds.size.width);
                 let now = ChatLayout::for_width(width);
                 let layout_changed = layout.replace(now) != now;
-                let measured = HistoryWidth::new(width);
+                let measured = HistoryWidth::new(history_pane_width(width));
+                probed.set(true);
                 let width_changed = history_width.replace(measured) != measured;
                 if layout_changed || width_changed {
                     let app = app.clone();
@@ -103,5 +128,41 @@ impl QuillApp {
                 }))
                 .into_any_element()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::history_pane_width;
+    use quill::bubble_layout::HistoryWidth;
+
+    #[test]
+    fn the_pane_width_steps_down_and_never_exceeds_the_pane() {
+        assert_eq!(history_pane_width(380.), 376.);
+        assert_eq!(history_pane_width(383.9), 376.);
+        assert_eq!(history_pane_width(384.), 384.);
+        assert_eq!(history_pane_width(640.), 640.);
+        let mut width = 0.;
+        while width < 1300. {
+            let stepped = history_pane_width(width);
+            assert!(stepped <= width && width - stepped < 8., "{width}");
+            width += 0.37;
+        }
+    }
+
+    #[test]
+    fn a_resize_drag_changes_the_width_once_per_step() {
+        let seen = (380..640)
+            .map(|px| HistoryWidth::new(history_pane_width(px as f32)))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(seen.len(), 33);
+        assert_eq!(
+            HistoryWidth::new(history_pane_width(f32::NAN)),
+            HistoryWidth::WIDE
+        );
+        assert_eq!(
+            HistoryWidth::new(history_pane_width(f32::INFINITY)),
+            HistoryWidth::WIDE
+        );
     }
 }

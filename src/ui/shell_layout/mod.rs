@@ -175,6 +175,25 @@ pub(crate) fn shell_layout(input: ShellInput) -> ShellLayout {
     }
 }
 
+/// The conversation pane's width in `layout`: the window less the chat
+/// list, topic column and side panels beside it, or the whole window in
+/// one column.
+pub(crate) fn chat_pane_width(input: ShellInput, layout: &ShellLayout) -> f32 {
+    if layout.one_column {
+        return input.width.max(0.);
+    }
+    let list = layout.list.map_or(0., |list| list + input.rail);
+    let forum = match layout.forum {
+        ForumPane::Column { .. } => FORUM_COLUMN_WIDTH,
+        ForumPane::Hidden | ForumPane::Fill => 0.,
+    };
+    let panels = match layout.panels {
+        PanelPane::Column(width) => width,
+        PanelPane::Hidden | PanelPane::Fill => 0.,
+    };
+    (input.width - list - forum - panels).max(0.)
+}
+
 fn list_width(input: ShellInput, forum_beside: bool) -> f32 {
     input
         .list_width

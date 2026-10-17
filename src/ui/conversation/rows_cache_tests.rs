@@ -443,3 +443,27 @@ fn a_narrow_window_rewraps_the_bubbles_without_rebuilding_the_rows(cx: &mut Test
     assert_eq!(photo_width(vcx, "photo-205"), wide_photo);
     assert_eq!(counts(&app, vcx).0, built);
 }
+
+#[gpui_kit::test]
+fn an_unpainted_history_is_seeded_from_its_pane_until_the_probe_measures(cx: &mut TestAppContext) {
+    use quill::bubble_layout::HistoryWidth;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let width = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.history.width.get())
+    };
+    app.read_with(vcx, |app, _| {
+        // The harness already painted once; start as a fresh history.
+        app.history.width_probed.set(false);
+        app.seed_history_width(403.);
+    });
+    assert_eq!(width(&app, vcx), HistoryWidth::new(400.));
+    app.read_with(vcx, |app, _| app.seed_history_width(1200.));
+    assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
+    // Once the history measured itself, a seed no longer overrides it.
+    app.read_with(vcx, |app, _| {
+        app.history.width_probed.set(true);
+        app.seed_history_width(380.);
+    });
+    assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
+}

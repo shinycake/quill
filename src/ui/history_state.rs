@@ -112,6 +112,10 @@ pub(crate) struct HistoryUi {
     /// The history's width at the last paint, as bubble layout reads it:
     /// a narrow history narrows the bubbles (`bubble_width::BubbleRoom`).
     pub(super) width: std::rc::Rc<std::cell::Cell<quill::bubble_layout::HistoryWidth>>,
+    /// Whether the history has painted and measured `width` itself; until
+    /// it has, `width` is seeded from the pane the history is laid out in
+    /// (`seed_history_width`).
+    pub(super) width_probed: std::rc::Rc<std::cell::Cell<bool>>,
     /// The pull to the next unread channel (`pull_next_ui`).
     pub(super) pull: super::pull_next_ui::PullUi,
 }
@@ -157,6 +161,7 @@ impl HistoryUi {
             thread_info_open: false,
             chat_layout: Default::default(),
             width: Default::default(),
+            width_probed: Default::default(),
             pull: Default::default(),
         }
     }
