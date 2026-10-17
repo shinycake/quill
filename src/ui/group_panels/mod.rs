@@ -541,11 +541,19 @@ impl QuillApp {
         let target = self.session()?.users_state.open_info_panel?;
         let (title, content) = match target {
             InfoPanelTarget::User(user_id) => (
-                tr(keys::Q_PEOPLE_CONTACT_INFO),
+                tr(if self.session()?.user(user_id).is_some_and(|u| u.is_bot) {
+                    keys::INFO_BOT_TITLE
+                } else {
+                    keys::INFO_USER_TITLE
+                }),
                 self.user_info_panel(user_id, cx),
             ),
             InfoPanelTarget::Supergroup(supergroup_id) => (
-                tr(keys::INFO_GROUP_TITLE),
+                tr(if self.session()?.supergroup_is_channel(supergroup_id) {
+                    keys::INFO_CHANNEL_TITLE
+                } else {
+                    keys::INFO_GROUP_TITLE
+                }),
                 self.supergroup_info_panel(supergroup_id, cx),
             ),
             // Slice G1: basic-group info panel (members, permissions,

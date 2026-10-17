@@ -10,6 +10,7 @@ mod composer;
 mod derived_state;
 mod group_call_bar;
 mod groups_admin;
+mod info_panels;
 mod media;
 mod messages;
 mod payments;

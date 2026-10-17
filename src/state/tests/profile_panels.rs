@@ -11,6 +11,26 @@ fn photo_json(id: i64, thumb: i32, full: i32) -> String {
 }
 
 #[test]
+fn supergroup_chat_tells_channels_from_groups() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for (chat, channel) in [(71, true), (72, false)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{chat},"title":"T","type":{{"@type":"chatTypeSupergroup","supergroup_id":{chat},"is_channel":{channel}}},"unread_count":0}}}}"#
+            ),
+        );
+    }
+    assert!(session.supergroup_is_channel(71));
+    assert!(!session.supergroup_is_channel(72));
+    assert!(!session.supergroup_is_channel(99));
+    assert!(session.supergroup_chat(72).is_some());
+}
+
+#[test]
 fn groups_in_common_answer_lands_by_pending_user() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

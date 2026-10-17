@@ -369,6 +369,28 @@ impl QuillApp {
         let verify_icon = session
             .and_then(|s| s.chats.get(&chat_id.0))
             .and_then(|chat| self.bot_verify_icon_path(chat));
+        // Verified check, emoji status or SCAM / FAKE chip after the title
+        // (`Info::Profile::Badge`).
+        let badges: Vec<AnyElement> = session
+            .and_then(|s| {
+                s.supergroup_chat(supergroup_id)
+                    .map(|chat| s.chat_header_badges(chat))
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|badge| {
+                let glyph = match badge {
+                    quill::peer_badge::TitleBadge::EmojiStatus(id) => self.status_glyph(
+                        crate::ui::status_emoji::StatusSurface::Profile,
+                        chat_id.0,
+                        id,
+                        cx,
+                    ),
+                    _ => None,
+                };
+                crate::ui::chat_row::title_badge_element(badge, glyph, cx)
+            })
+            .collect();
         let mut body = div()
             .flex()
             .flex_col()
@@ -398,7 +420,8 @@ impl QuillApp {
                                     .font_semibold()
                                     .truncate()
                                     .child(super::bidi_line::one_line_plain(title.clone())),
-                            ),
+                            )
+                            .children(badges),
                     )
                     .child(
                         div()
