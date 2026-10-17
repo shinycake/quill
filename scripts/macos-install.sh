@@ -36,17 +36,21 @@ else
   dest_dir="$HOME/Applications"
 fi
 mkdir -p "$dest_dir"
+# Resolved, so /var and /private/var name the same app when matching processes.
+dest_dir="$(cd "$dest_dir" && pwd -P)"
 app="$dest_dir/Quill.app"
 
 if [ -n "${QUILL_ZIP_URL:-}" ]; then
   zip_url="$QUILL_ZIP_URL"
-  sha_url=""
-elif [ -n "${QUILL_VERSION:-}" ]; then
-  zip_url="https://github.com/$REPO/releases/download/$QUILL_VERSION/$ASSET"
-  sha_url="$zip_url.sha256"
+  sums_url=""
 else
-  zip_url="https://github.com/$REPO/releases/latest/download/$ASSET"
-  sha_url="$zip_url.sha256"
+  if [ -n "${QUILL_VERSION:-}" ]; then
+    base="https://github.com/$REPO/releases/download/$QUILL_VERSION"
+  else
+    base="https://github.com/$REPO/releases/latest/download"
+  fi
+  zip_url="$base/$ASSET"
+  sums_url="$base/SHA256SUMS.txt"
 fi
 
 work="$(mktemp -d)"
@@ -56,8 +60,10 @@ say "Downloading $zip_url"
 curl -fL --progress-bar -o "$work/$ASSET" "$zip_url" || die "download failed"
 
 want="${QUILL_SHA256:-}"
-if [ -z "$want" ] && [ -n "$sha_url" ]; then
-  want="$(curl -fsSL "$sha_url" | awk '{print $1}')" || die "couldn't fetch the checksum"
+if [ -z "$want" ] && [ -n "$sums_url" ]; then
+  sums="$(curl -fsSL "$sums_url")" || die "couldn't fetch the release checksums"
+  want="$(printf '%s\n' "$sums" | awk -v f="$ASSET" '$2 == f {print $1}')"
+  [ -n "$want" ] || die "the release checksums don't list $ASSET"
 fi
 if [ -n "$want" ]; then
   got="$(shasum -a 256 "$work/$ASSET" | awk '{print $1}')"
@@ -72,11 +78,13 @@ codesign --verify --deep --strict "$new" || die "Quill.app's code signature is i
 xattr -dr com.apple.quarantine "$new" 2>/dev/null || true
 
 # Replace a running copy only after it has quit, so its files aren't swapped
-# out from under it.
-running() { pgrep -qf "$app/Contents/MacOS/quill"; }
+# out from under it. Only the copy being replaced: Quill runs one instance, so
+# when this one runs, `--quit` reaches it; any other copy is left alone.
+exe="$app/Contents/MacOS/quill"
+running() { pgrep -f "^$exe( |$)" >/dev/null; }
 if running; then
   say "Quitting Quill to update it"
-  osascript -e 'tell application id "org.shinycake.quill" to quit' >/dev/null 2>&1 || true
+  "$exe" --quit >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do running || break; sleep 0.5; done
   ! running || die "Quill is still running; quit it and run this again"
 fi

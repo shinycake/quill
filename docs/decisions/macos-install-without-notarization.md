@@ -23,8 +23,9 @@ way past it is System Settings > Privacy & Security > Open Anyway.
 `scripts/macos-install.sh`, run as
 `curl -fsSL https://raw.githubusercontent.com/shinycake/quill/main/scripts/macos-install.sh | bash`:
 downloads the latest release zip with curl, checks it against the release's
-`.sha256`, verifies the code signature, clears any quarantine attribute, quits a
-running Quill, and replaces `Quill.app` in `/Applications` (or
+`SHA256SUMS.txt`, verifies the code signature, clears any quarantine attribute, quits the
+Quill it replaces if that copy is running (with `quill --quit`, never by bundle
+id, so a dev build elsewhere keeps running), and replaces `Quill.app` in `/Applications` (or
 `~/Applications` when `/Applications` isn't writable). The README, the release
 notes and the site lead with it; the browser path keeps the `xattr` and Open
 Anyway instructions.
