@@ -959,6 +959,7 @@ impl Render for QuillApp {
 
 mod frame_upkeep;
 mod status_toast;
+#[cfg(target_os = "macos")]
 use crate::ui::status_note::StatusNote;
 #[allow(unused_imports)]
 use status_toast::*;
