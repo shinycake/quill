@@ -208,6 +208,7 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_REST_STORY_DELETED)));
         }
+        self.follow_story_tray();
         // Phase 4.6: push the playback clock into the seek slider entity so
         // the thumb follows elapsed time (the tick has no `&mut Window`).
         self.sync_seek_slider(window, cx);
