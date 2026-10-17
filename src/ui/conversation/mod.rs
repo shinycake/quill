@@ -2,7 +2,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp, pane_placeholder};
-use super::chat_row::compact_count;
 use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
 use super::history::{album_history_row, history_skeleton, session_history_row};
@@ -20,7 +19,7 @@ use gpui_kit::*;
 
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::poll::chat_allows_polls;
 use quill::state::{
@@ -173,23 +172,11 @@ impl QuillApp {
         let meta_line = extras.as_ref().and_then(|ex| {
             let mut meta: Vec<String> = Vec::new();
             if let Some(count) = ex.member_count.filter(|count| *count > 0) {
-                let noun = match (ex.is_channel, count) {
-                    (true, 1) => "subscriber",
-                    (true, _) => "subscribers",
-                    (false, 1) => "member",
-                    (false, _) => "members",
-                };
-                let mut line = format!("{} {noun}", compact_count(count));
-                // Groups: "N members, M online" (yourself alone isn't news).
-                if !ex.is_channel && ex.online_count > 1 {
-                    line.push_str(&tr_with(
-                        keys::Q_CHAT_ONLINE,
-                        &[(
-                            "online_count",
-                            &(compact_count(ex.online_count)).to_string(),
-                        )],
-                    ));
-                }
+                let line = quill::inline_members::member_status_line(
+                    count,
+                    ex.is_channel,
+                    ex.online_count,
+                );
                 meta.push(line);
             }
             if let Some(username) = &ex.username {
