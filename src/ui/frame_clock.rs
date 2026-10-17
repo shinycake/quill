@@ -347,7 +347,19 @@ pub(super) fn trace_ingested(update: &str) {
     }
 }
 
+/// `QUILL_TRACE_TICKS=1`: count history row rebuilds and chrome patches
+/// (`HistoryRow`), and the microseconds spent on them, per second.
+pub(super) fn trace_history_rows(what: &'static str, amount: usize) {
+    if trace_ticks() {
+        trace_count_by("history rows", what.to_string(), amount);
+    }
+}
+
 fn trace_count(what: &'static str, key: String) {
+    trace_count_by(what, key, 1);
+}
+
+fn trace_count_by(what: &'static str, key: String, amount: usize) {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::time::Instant;
@@ -361,7 +373,8 @@ fn trace_count(what: &'static str, key: String) {
         let (since, keys) = counts
             .entry(what)
             .or_insert_with(|| (Instant::now(), BTreeMap::new()));
-        *keys.entry(key).or_default() += 1;
+        let count = keys.entry(key).or_default();
+        *count = count.saturating_add(u32::try_from(amount).unwrap_or(u32::MAX));
         if since.elapsed() >= Duration::from_secs(1) {
             let secs = since.elapsed().as_secs_f32();
             for (key, count) in keys.iter() {

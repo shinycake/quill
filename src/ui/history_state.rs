@@ -14,7 +14,8 @@ pub(crate) struct HistoryUi {
     /// tail-following, owned by the app so prepend/append keep the anchor.
     pub(super) scroller: Entity<MessageScrollerState>,
     /// kit Phase 3: per-row render inputs for the visible history window.
-    /// Rebuilt each render; the `MessageScroller` renderer only builds
+    /// Rebuilt when `rows_key` changes and patched in place when only the
+    /// chrome changes; the `MessageScroller` renderer only builds
     /// elements for visible indices.
     pub(super) rows: Vec<HistoryRow>,
     /// Row indices the history list rendered in the last frame (the
@@ -46,8 +47,10 @@ pub(crate) struct HistoryUi {
     /// The window stopped short of the latest message at the last render:
     /// rows appended since are a newer page, not live messages.
     pub(super) had_newer: bool,
-    /// What `history_rows` were last built from (`None`: not cacheable).
+    /// What `history_rows` were last built from (`None`: not built yet).
     pub(super) rows_key: Option<super::conversation::HistoryRowsKey>,
+    pub(super) chrome_session_revision: Option<u64>,
+    pub(super) row_stats: RowCacheStats,
     /// (ready files, downloading files) at the last history render; a
     /// change remeasures the virtualized rows (media grew in place).
     pub(super) media_signature: (usize, usize),
@@ -126,6 +129,8 @@ impl HistoryUi {
             anchor_pending: false,
             had_newer: false,
             rows_key: None,
+            chrome_session_revision: None,
+            row_stats: RowCacheStats::default(),
             media_signature: (0, 0),
             last_highlight: None,
             highlight_fade: None,

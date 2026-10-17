@@ -76,6 +76,15 @@ impl QuillApp {
             Some(thread) => thread.unread_count,
             None => chat.map_or(0, |chat| chat.unread_count),
         };
+        let rows_started = std::time::Instant::now();
+        let session_revision = session.map(|s| s.revision);
+        let chrome_inputs = super::row_chrome::ChromeInputs {
+            session,
+            chat,
+            sender_name,
+            media_roots: &media_roots,
+            wide: self.chat_wide(),
+        };
         if let Some(mut messages) = messages {
             // Deleted messages dissolve in place before they go.
             self.merge_vanishing(&mut messages, cx);
@@ -94,20 +103,6 @@ impl QuillApp {
                 |message| quill::album::is_album_media(&message.content),
             );
             let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
-            // "Adaptive layout for wide screens": photos beside every
-            // message in private chats and groups (`chat_wide`).
-            let wide = self.chat_wide();
-            let chat_kind = chat.map(|summary| summary.kind.clone());
-            let is_group = matches!(
-                chat.map(|summary| &summary.kind),
-                Some(
-                    ChatKind::BasicGroup { .. }
-                        | ChatKind::Supergroup {
-                            is_channel: false,
-                            ..
-                        }
-                )
-            );
             // Sender of each row (first item for albums): a run is consecutive
             // rows from one sender. The name heads a run; the avatar sits
             // beside its last row, with a spacer keeping earlier rows aligned.
@@ -137,84 +132,17 @@ impl QuillApp {
             drop(groups);
             let mut owned = messages.into_iter();
             let mut previous = None;
-            let mut row_chrome = |message: &HistoryMessage, continues: bool| {
-                let identity = (message.is_outgoing, message.sender);
-                let service = matches!(
-                    message.content,
-                    MessageContent::ScreenshotTaken | MessageContent::ChatJoinFromCommunity { .. }
-                );
-                let show_sender = previous != Some(identity);
-                previous = Some(identity);
-                let accent = match message.sender {
-                    Some(MessageSender::User { user_id }) => session
-                        .and_then(|s| s.user(user_id))
-                        .map(|u| u.accent_color_id),
-                    // Chats carry no parsed name color: derive one from the id
-                    // the way Telegram assigns defaults.
-                    Some(MessageSender::Chat { chat_id }) => Some(chat_id.rem_euclid(7) as i32),
-                    None => None,
+            let mut spot_of =
+                |message: &HistoryMessage, next_same_sender: bool, with_headers: bool| {
+                    let identity = (message.is_outgoing, message.sender);
+                    let sender_changed = previous != Some(identity);
+                    previous = Some(identity);
+                    ChromeSpot {
+                        sender_changed,
+                        next_same_sender,
+                        with_headers,
+                    }
                 };
-                let name = match message.sender {
-                    Some(MessageSender::User { user_id }) => session
-                        .and_then(|s| s.user(user_id))
-                        .map(|u| u.display_name()),
-                    Some(MessageSender::Chat { chat_id }) => session
-                        .and_then(|s| s.chats.get(&chat_id))
-                        .map(|c| c.title.clone()),
-                    None => None,
-                }
-                .unwrap_or_else(|| {
-                    // Your own messages never take the chat's name (the
-                    // wide layout shows your photo beside them).
-                    if message.is_outgoing {
-                        session
-                            .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
-                            .map_or_else(|| tr(keys::FROM_YOU).into(), |u| u.display_name())
-                    } else if is_group {
-                        tr(keys::Q_CHAT_MEMBER).into()
-                    } else {
-                        sender_name.to_string()
-                    }
-                });
-                let sender =
-                    (!message.is_outgoing && (service || (is_group && show_sender))).then(|| {
-                        SenderLabel {
-                            name: name.clone(),
-                            accent: accent.filter(|_| is_group),
-                            status: session.and_then(|s| s.sender_status(message)),
-                        }
-                    });
-                let receipt = if message.is_outgoing {
-                    chat.map(|summary| summary.outbox_receipt(message))
-                        .unwrap_or(OutboxReceipt::Sent)
-                } else {
-                    OutboxReceipt::None
-                };
-                let photo = match message.sender {
-                    Some(MessageSender::User { user_id }) => {
-                        session.and_then(|s| s.user_photo_path(user_id))
-                    }
-                    Some(MessageSender::Chat { chat_id }) => {
-                        session.and_then(|s| s.chat_photo_path(ChatId(chat_id)))
-                    }
-                    None => None,
-                }
-                .and_then(|path| sandboxed_display_path(path, &media_roots));
-                let sender_avatar = chat_kind
-                    .as_ref()
-                    .is_some_and(|kind| {
-                        quill::chat_wide::shows_sender_photo(kind, message.is_outgoing, wide)
-                    })
-                    .then(|| {
-                        if continues {
-                            // Spacer: same column width, no avatar.
-                            (String::new(), None)
-                        } else {
-                            (name, photo)
-                        }
-                    });
-                (sender, receipt, sender_avatar, show_sender)
-            };
             let now = quill::local_time::civil_local(quill::local_time::now_unix());
             let mut previous_day: Option<i64> = None;
             let mut day_label = |date: i32| {
@@ -227,26 +155,26 @@ impl QuillApp {
                     .then(|| quill::local_time::day_label(&civil, &now))
             };
             for (index, (album, len)) in spans.into_iter().enumerate() {
-                let continues = identities
+                let next_same_sender = identities
                     .get(index + 1)
                     .is_some_and(|next| Some(next) == identities.get(index));
                 match album {
                     Some(album_id) => {
                         let album_messages: Vec<HistoryMessage> =
                             owned.by_ref().take(len).collect();
+                        let Some(first) = album_messages.first() else {
+                            continue;
+                        };
                         // Same chrome rule as single rows, from the first item.
-                        let (sender, receipt, sender_avatar, _) = album_messages
-                            .first()
-                            .map(|message| row_chrome(message, continues))
-                            .unwrap_or((None, OutboxReceipt::None, None, false));
-                        let day_label = album_messages.first().and_then(|m| day_label(m.date));
-                        let unread_divider = album_messages.first().is_some_and(&mut first_unread);
+                        let spot = spot_of(first, next_same_sender, false);
+                        let chrome = Box::new(chrome_inputs.chrome(first, spot));
+                        let day_label = day_label(first.date);
+                        let unread_divider = first_unread(first);
                         rows.push(HistoryRow::Album {
                             album_id,
                             messages: album_messages,
-                            sender,
-                            receipt,
-                            sender_avatar,
+                            chrome,
+                            spot,
                             day_label,
                             unread_divider,
                         })
@@ -255,37 +183,16 @@ impl QuillApp {
                         let Some(message) = owned.next() else {
                             break;
                         };
-                        let (sender, receipt, sender_avatar, run_start) =
-                            row_chrome(&message, continues);
-                        // Phase 4.6: audio/voice rows get a seek-bar view model.
-                        let seek_bar = match &message.content {
-                            MessageContent::VoiceNote(note) => Some(self.seek_bar_view(
-                                message.chat_id,
-                                message.id,
-                                f64::from(note.duration),
-                            )),
-                            MessageContent::Audio(audio) => Some(self.seek_bar_view(
-                                message.chat_id,
-                                message.id,
-                                f64::from(audio.duration),
-                            )),
-                            _ => None,
-                        };
-                        let animation_playing = self.playback.playing_animation == Some(message.id);
-                        // Drawn at its own cadence by the row (and its
-                        // animation layer) while the row renders.
-                        let animation = animation_playing
-                            .then(|| self.playback.gif_play())
-                            .flatten();
+                        let spot = spot_of(&message, next_same_sender, true);
+                        let chrome = chrome_inputs.chrome(&message, spot);
                         let row_day_label = day_label(message.date);
                         let row_unread_divider = first_unread(&message);
                         rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
-                            sender,
-                            receipt,
-                            sender_avatar,
+                            chrome,
+                            spot,
                             highlighted: highlight_id == Some(message.id),
-                            run_start: run_start && index > 0,
-                            joined_above: !run_start
+                            run_start: spot.sender_changed && index > 0,
+                            joined_above: !spot.sender_changed
                                 && row_day_label.is_none()
                                 && !row_unread_divider,
                             day_label: row_day_label,
@@ -294,15 +201,6 @@ impl QuillApp {
                                 .message_ui
                                 .fact_check_expanded
                                 .contains(&(message.chat_id.0, message.id.0)),
-                            // A counter-offer's reply header stays hidden.
-                            reply_header: session
-                                .and_then(|s| s.reply_header(&message))
-                                .filter(|_| message.extras.suggested_post.is_none()),
-                            forward_header: session.and_then(|s| s.forward_header(&message)),
-                            via_bot: session.and_then(|s| s.via_bot_label(&message)),
-                            seek_bar,
-                            animation_playing,
-                            animation,
                             is_secret,
                             vanishing: self.vanish_progress(message.id),
                             message,
@@ -313,23 +211,17 @@ impl QuillApp {
             // A bot's streaming reply (`updatePendingMessage`) is its next
             // incoming message, growing as it arrives (Telegram Desktop).
             if let Some(message) = self.streaming_bot_message(cx) {
-                let (sender, receipt, sender_avatar, run_start) = row_chrome(&message, true);
+                let spot = spot_of(&message, true, false);
+                let chrome = chrome_inputs.chrome(&message, spot);
                 rows.push(HistoryRow::Single(Box::new(HistoryRowInputs {
-                    sender,
-                    receipt,
-                    sender_avatar,
+                    chrome,
+                    spot,
                     highlighted: false,
-                    run_start,
-                    joined_above: !run_start,
+                    run_start: spot.sender_changed,
+                    joined_above: !spot.sender_changed,
                     day_label: None,
                     unread_divider: false,
                     fact_check_expanded: false,
-                    reply_header: None,
-                    forward_header: None,
-                    via_bot: None,
-                    seek_bar: None,
-                    animation_playing: false,
-                    animation: None,
                     is_secret: false,
                     vanishing: None,
                     message,
@@ -346,19 +238,7 @@ impl QuillApp {
             // message is edited, reactions arrive — and would then be clipped,
             // so remeasure rows whose inputs changed. File readiness affects
             // any media row, so a change there remeasures every row.
-            let media_signature = self
-                .session()
-                .map(|s| {
-                    (
-                        s.media
-                            .files
-                            .values()
-                            .filter(|file| file.usable_path().is_some())
-                            .count(),
-                        s.media.downloads.requested_count(),
-                    )
-                })
-                .unwrap_or_default();
+            let media_signature = self.history_media_signature();
             if self.history.key == Some(history_key)
                 && count == self.history.rows.len()
                 && count == self.history.scroller.read(cx).item_count()
@@ -537,6 +417,8 @@ impl QuillApp {
                 _ => None,
             };
             self.history.rows = rows;
+            self.history.chrome_session_revision = session_revision;
+            self.history.row_stats.note_built(rows_started);
             self.history.had_newer = has_newer;
             self.history_a11y_rows_changed(cx);
             // A new or replaced window: start at the jump target, else at the
@@ -583,6 +465,11 @@ impl QuillApp {
                     });
                 }
             }
+        } else if !self.chrome_follows_revision()
+            || self.history.chrome_session_revision != session_revision
+        {
+            let fresh = chrome_inputs.stale_rows(&self.history.rows);
+            self.patch_row_chrome(fresh, session_revision, rows_started, cx);
         }
         self.history.shared = HistoryShared { media_roots };
         // A new jump (search hit, reply, pinned message) restarts the

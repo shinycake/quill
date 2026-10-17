@@ -265,6 +265,45 @@ impl QuillApp {
         }
     }
 
+    /// Redraw what a timer advanced (a countdown) where it is shown: the
+    /// chat window whose state is in place, or else the main window's
+    /// `kind` slice, while everything else replays. The whole app redraws
+    /// while the conversation is not on screen as slices.
+    pub(super) fn notify_tick(&self, kind: SliceKind, cx: &mut Context<Self>) {
+        if let Some(chat) = self.windows.scope {
+            match self.windows.view_id_for(chat) {
+                Some(view) => {
+                    let app: &mut App = cx;
+                    app.notify(view);
+                }
+                None => cx.notify(),
+            }
+            return;
+        }
+        match kind {
+            _ if !self.slices.conversation_shown.get() => cx.notify(),
+            SliceKind::Conversation => self.notify_conversation(cx),
+            SliceKind::Composer => self.notify_composer(cx),
+            SliceKind::Sidebar | SliceKind::Viewer | SliceKind::ViewerChrome => cx.notify(),
+        }
+    }
+
+    /// Redraw the open chat in every window (a playing track's position):
+    /// the main window's conversation and composer slices and each chat
+    /// window.
+    pub(super) fn notify_conversations(&self, cx: &mut Context<Self>) {
+        if !self.slices.conversation_shown.get() {
+            cx.notify();
+            return;
+        }
+        self.notify_conversation(cx);
+        self.notify_composer(cx);
+        let app: &mut App = cx;
+        for view in self.windows.view_ids() {
+            app.notify(view);
+        }
+    }
+
     /// Keep a layer's content playing: a tick redraws the layer while its
     /// slice replays, or the slice itself for content something covers
     /// (drawn inline). The layer (`painter`) calls this after it painted.

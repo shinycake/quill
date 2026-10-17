@@ -81,8 +81,10 @@ impl QuillApp {
                     .update(cx, |this, cx| {
                         let still_open = this.session().and_then(|s| s.open_chat) == Some(chat_id);
                         let still_gated = this.slow_mode_wait_secs_for(chat_id).is_some();
+                        if still_open {
+                            this.notify_tick(super::app_slice::SliceKind::Composer, cx);
+                        }
                         if still_open && still_gated {
-                            cx.notify();
                             true
                         } else {
                             if this.composer_ui.slow_mode_tick_chat == Some(chat_id) {

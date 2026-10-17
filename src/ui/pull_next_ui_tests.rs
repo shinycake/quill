@@ -183,7 +183,7 @@ fn the_wide_layout_puts_every_message_on_the_left_with_photos(cx: &mut TestAppCo
     let outgoing_photo = |app: &QuillApp| {
         app.history.rows.iter().any(|row| match row {
             HistoryRow::Single(inputs) => {
-                inputs.message.is_outgoing && inputs.sender_avatar.is_some()
+                inputs.message.is_outgoing && inputs.chrome.sender_avatar.is_some()
             }
             _ => false,
         })

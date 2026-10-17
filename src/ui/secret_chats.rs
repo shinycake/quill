@@ -145,7 +145,8 @@ impl QuillApp {
                             session.open_chat_has_live_self_destruct(now_ms)
                         });
                         if still_open && still_live {
-                            cx.notify();
+                            // The badges are in the history rows.
+                            this.notify_tick(super::app_slice::SliceKind::Conversation, cx);
                             true
                         } else {
                             if this.history.self_destruct_tick_chat == Some(chat_id) {

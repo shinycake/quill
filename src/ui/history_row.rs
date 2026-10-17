@@ -1,26 +1,17 @@
 #![deny(clippy::indexing_slicing)]
-use super::*;
 use quill::ids::MessageId;
 use quill::state::{HistoryMessage, OutboxReceipt};
 use std::path::PathBuf;
 /// kit Phase 3: everything `session_history_row` needs for one message,
-/// snapshotted per render so the `MessageScroller` renderer can build
-/// visible rows without re-deriving per frame.
+/// snapshotted when the rows are built so the `MessageScroller` renderer
+/// can build visible rows without re-deriving them per frame. Playback
+/// (the seek bar, a looping GIF) is read when the row renders instead: it
+/// changes every frame and never changes the row's size.
 #[derive(Clone)]
 pub(crate) struct HistoryRowInputs {
     pub(crate) message: HistoryMessage,
-    /// kit Phase 4: incoming sender name for the kit `MessageHeader`;
-    /// `None` for outgoing rows and when the header collapses (same
-    /// direction as the previous row). Replaces the old `"You · sent"`
-    /// label — delivery state now lives in the in-bubble footer.
-    pub(crate) sender: Option<SenderLabel>,
-    /// kit Phase 4: outbox delivery state for the in-bubble footer
-    /// (`✓` sent, `✓✓` read, `…` while pending).
-    pub(crate) receipt: OutboxReceipt,
-    /// kit Phase 4: `(name, photo)` for the kit `Message` avatar slot.
-    /// `None` where the sender can't be identified (groups) or the row is
-    /// outgoing — never invented.
-    pub(crate) sender_avatar: Option<(String, Option<PathBuf>)>,
+    pub(crate) chrome: RowChrome,
+    pub(crate) spot: ChromeSpot,
     pub(crate) highlighted: bool,
     /// First row of a sender run (gets extra top spacing).
     pub(crate) run_start: bool,
@@ -36,21 +27,66 @@ pub(crate) struct HistoryRowInputs {
     /// The message's fact-check block is expanded (`message_ui`): the
     /// row's height depends on it.
     pub(crate) fact_check_expanded: bool,
-    pub(crate) reply_header: Option<quill::state::ReplyHeader>,
-    pub(crate) forward_header: Option<quill::state::ForwardHeader>,
-    pub(crate) via_bot: Option<String>,
-    pub(crate) seek_bar: Option<SeekBarView>,
-    pub(crate) animation_playing: bool,
-    /// The row's `image/gif` file while it loops (`gif_clip`).
-    pub(crate) animation: Option<crate::ui::gif_clip::GifPlay>,
     pub(crate) is_secret: bool,
     /// Delete animation progress (0..1) while the deleted message
     /// dissolves; `None` for live messages.
     pub(crate) vanishing: Option<f32>,
 }
 
-/// kit Phase 3: one virtualized history row — a single message or a media
-/// album group (albums render as one row, as before).
+/// The part of a row derived from the session rather than from its
+/// messages (`conversation::row_chrome`): after a session change only this
+/// is derived again.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RowChrome {
+    /// kit Phase 4: incoming sender name for the kit `MessageHeader`;
+    /// `None` for outgoing rows and when the header collapses (same
+    /// direction as the previous row).
+    pub(crate) sender: Option<SenderLabel>,
+    pub(crate) receipt: OutboxReceipt,
+    /// kit Phase 4: `(name, photo)` for the kit `Message` avatar slot.
+    /// `None` where the sender can't be identified (groups) or the row is
+    /// outgoing — never invented.
+    pub(crate) sender_avatar: Option<(String, Option<PathBuf>)>,
+    pub(crate) reply_header: Option<quill::state::ReplyHeader>,
+    pub(crate) forward_header: Option<quill::state::ForwardHeader>,
+    pub(crate) via_bot: Option<String>,
+}
+
+/// Where a row sits among its neighbours, decided by the messages alone:
+/// it is kept with the row so its chrome can be derived again without
+/// walking the list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChromeSpot {
+    pub(crate) sender_changed: bool,
+    pub(crate) next_same_sender: bool,
+    pub(crate) with_headers: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RowCacheStats {
+    pub(crate) rebuilds: u64,
+    pub(crate) rows_patched: u64,
+}
+
+impl RowCacheStats {
+    pub(crate) fn note_built(&mut self, started: std::time::Instant) {
+        self.rebuilds += 1;
+        super::frame_clock::trace_history_rows("rebuilds", 1);
+        super::frame_clock::trace_history_rows("rebuild us", micros(started));
+    }
+
+    pub(crate) fn note_patched(&mut self, rows: usize, started: std::time::Instant) {
+        self.rows_patched += rows as u64;
+        super::frame_clock::trace_history_rows("chrome passes", 1);
+        super::frame_clock::trace_history_rows("chrome us", micros(started));
+        super::frame_clock::trace_history_rows("rows patched", rows);
+    }
+}
+
+fn micros(started: std::time::Instant) -> usize {
+    usize::try_from(started.elapsed().as_micros()).unwrap_or(usize::MAX)
+}
+
 /// A message row's sender header: display name plus the sender's
 /// Telegram name color (`accent_color_id`), when known.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,18 +100,12 @@ pub(crate) struct SenderLabel {
 
 #[derive(Clone)]
 pub(crate) enum HistoryRow {
-    // Boxed: the per-row inputs are ~880 bytes; the album variant is
-    // small (clippy `large_enum_variant`).
     Single(Box<HistoryRowInputs>),
     Album {
         album_id: i64,
         messages: Vec<HistoryMessage>,
-        // kit Phase 4: precomputed per-row chrome (sender header /
-        // outbox receipt / avatar) — keeps the large `ChatSummary` out
-        // of the variant.
-        sender: Option<SenderLabel>,
-        receipt: OutboxReceipt,
-        sender_avatar: Option<(String, Option<PathBuf>)>,
+        chrome: Box<RowChrome>,
+        spot: ChromeSpot,
         day_label: Option<String>,
         unread_divider: bool,
     },
@@ -96,39 +126,61 @@ impl HistoryRow {
         }
     }
 
+    pub(crate) fn chrome(&self) -> &RowChrome {
+        match self {
+            HistoryRow::Single(inputs) => &inputs.chrome,
+            HistoryRow::Album { chrome, .. } => chrome,
+        }
+    }
+
+    pub(crate) fn set_chrome(&mut self, fresh: RowChrome) {
+        match self {
+            HistoryRow::Single(inputs) => inputs.chrome = fresh,
+            HistoryRow::Album { chrome, .. } => **chrome = fresh,
+        }
+    }
+
+    pub(crate) fn spot(&self) -> ChromeSpot {
+        match self {
+            HistoryRow::Single(inputs) => inputs.spot,
+            HistoryRow::Album { spot, .. } => *spot,
+        }
+    }
+
+    pub(crate) fn first_message(&self) -> Option<&HistoryMessage> {
+        match self {
+            HistoryRow::Single(inputs) => Some(&inputs.message),
+            HistoryRow::Album { messages, .. } => messages.first(),
+        }
+    }
+
     /// Same rendered inputs as `other` (height-relevant comparison for the
-    /// virtualized list). Playback frames are excluded: they never change
-    /// a row's size.
+    /// virtualized list).
     pub(crate) fn renders_like(&self, other: &HistoryRow) -> bool {
         match (self, other) {
             (HistoryRow::Single(a), HistoryRow::Single(b)) => {
                 a.message == b.message
-                    && a.sender == b.sender
-                    && a.receipt == b.receipt
-                    && a.reply_header == b.reply_header
-                    && a.forward_header == b.forward_header
-                    && a.via_bot == b.via_bot
+                    && a.chrome == b.chrome
                     && a.day_label == b.day_label
                     && a.unread_divider == b.unread_divider
                     && a.fact_check_expanded == b.fact_check_expanded
                     && a.run_start == b.run_start
                     && a.joined_above == b.joined_above
-                    && a.sender_avatar == b.sender_avatar
             }
             (
                 HistoryRow::Album {
                     messages: a,
-                    sender: sa,
+                    chrome: ca,
                     ..
                 },
                 HistoryRow::Album {
                     messages: b,
-                    sender: sb,
+                    chrome: cb,
                     ..
                 },
             ) => {
                 a == b
-                    && sa == sb
+                    && ca.sender == cb.sender
                     && self.day_label() == other.day_label()
                     && self.unread_divider() == other.unread_divider()
             }
@@ -137,10 +189,7 @@ impl HistoryRow {
     }
 
     pub(crate) fn first_id(&self) -> Option<MessageId> {
-        match self {
-            HistoryRow::Single(inputs) => Some(inputs.message.id),
-            HistoryRow::Album { messages, .. } => messages.first().map(|m| m.id),
-        }
+        self.first_message().map(|m| m.id)
     }
 
     pub(crate) fn last_id(&self) -> Option<MessageId> {
