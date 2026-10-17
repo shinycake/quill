@@ -191,6 +191,9 @@ impl QuillApp {
         if let Some(actions) = self.bot_profile_actions(user_id, cx) {
             body = body.child(actions);
         }
+        if let Some(rows) = self.bot_command_rows(user_id, cx) {
+            body = body.child(rows);
+        }
         // tdesktop's "Change colors" (`addThemeEdit`): the chat's theme and
         // wallpaper, for the private chat open right now.
         if !is_self
@@ -234,20 +237,26 @@ impl QuillApp {
         // Destructive, so they sit last as plain danger rows.
         if !is_self && user.is_some() {
             let blocked = info.as_ref().is_some_and(|i| i.blocked);
+            let is_bot = user.as_ref().is_some_and(|u| u.is_bot);
             let mut danger = div().flex().flex_col().w_full().gap_0p5();
             danger = danger.child(
                 action_row(
                     "info-panel-block-user",
                     Some(gpui_kit::assets::IconName::Ban),
-                    if blocked {
-                        tr(keys::PROFILE_UNBLOCK_USER)
-                    } else {
-                        tr(keys::PROFILE_BLOCK_USER)
+                    match (is_bot, blocked) {
+                        (true, true) => tr(keys::PROFILE_RESTART_BOT),
+                        (true, false) => tr(keys::PROFILE_BLOCK_BOT),
+                        (false, true) => tr(keys::PROFILE_UNBLOCK_USER),
+                        (false, false) => tr(keys::PROFILE_BLOCK_USER),
                     },
                     !blocked,
                     cx,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if is_bot {
+                        this.toggle_bot_block(user_id, blocked, window, cx);
+                        return;
+                    }
                     this.open_group_confirm(
                         ChatId(0),
                         GroupConfirmAction::BlockContact {
@@ -570,7 +579,16 @@ impl QuillApp {
         // Slice G1: group/channel management — members, permissions,
         // invite link, join requests, username, broadcast upgrade,
         // leave/delete. Every row is capability-gated inside.
+        // tdesktop's channel actions: Join Channel, Leave channel (in the
+        // management section), then Report for a channel the viewer does
+        // not own.
+        if is_channel {
+            body = body.children(self.channel_join_row(chat_id, cx));
+        }
         body = body.child(self.group_management_section(chat_id, is_channel, false, cx));
+        if is_channel {
+            body = body.children(self.channel_report_row(chat_id, cx));
+        }
         // Phase D3c: recent-actions admin log (administrators and the
         // creator only; the section no-ops otherwise).
         body = body.child(self.event_log_section(chat_id, cx));

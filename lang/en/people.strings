@@ -96,7 +96,12 @@
 "lng_profile_action_short_mute" = "Mute";
 "lng_profile_action_short_unmute" = "Unmute";
 "lng_profile_add_contact" = "Add Contact";
+"lng_profile_block_bot" = "Stop and block bot";
 "lng_profile_block_user" = "Block user";
+"lng_profile_bot_help" = "Bot Help";
+"lng_profile_bot_privacy" = "Bot Privacy Policy";
+"lng_profile_bot_privacy_url" = "https://telegram.org/privacy-tpa";
+"lng_profile_bot_settings" = "Bot Settings";
 "lng_profile_copy_phone" = "Copy Phone Number";
 "lng_profile_delete_channel" = "Delete channel";
 "lng_profile_delete_group" = "Delete group";
@@ -106,6 +111,8 @@
 "lng_profile_leave_group" = "Leave group";
 "lng_profile_loading" = "Loading…";
 "lng_profile_open_app_short" = "Open";
+"lng_profile_report" = "Report";
+"lng_profile_restart_bot" = "Restart bot";
 "lng_profile_set_photo_button" = "Set Photo";
 "lng_profile_unblock_user" = "Unblock user";
 "lng_report_button" = "Report";

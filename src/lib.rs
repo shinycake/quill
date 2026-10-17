@@ -14,6 +14,7 @@ pub mod autostart;
 pub mod battery_saving;
 pub mod boost_box;
 pub mod bot_invite;
+pub mod bot_profile;
 pub mod bot_verification;
 pub mod bubble_layout;
 pub mod business_bot_bar;
