@@ -99,6 +99,19 @@ pub(crate) fn text_link_message(id: i64, body: &str, label: &str, url: &str) -> 
     )
 }
 
+/// A photo message whose "m" size is the demo thumbnail.
+pub(crate) fn photo_message(id: i64, age_days: i64, caption: &str) -> Value {
+    message(
+        id,
+        age_days,
+        false,
+        json!({ "@type": "messagePhoto", "caption": text(caption, json!([])),
+            "photo": { "@type": "photo", "has_stickers": false, "sizes": [
+                { "@type": "photoSize", "type": "m", "width": 320, "height": 320,
+                  "photo": file_json(id + 1000, 24, &demo_thumb_png_path()) } ] } }),
+    )
+}
+
 fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
     let thumb = demo_thumb_png_path();
     let document = |id: i64, age: i64, name: &str, size: i64| {
@@ -136,17 +149,7 @@ fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
     let link = |id: i64, age: i64, body: &str, url: &str, title: &str, description: &str| {
         link_message(id, age, body, url, title, description)
     };
-    let photo = |id: i64, age: i64, caption: &str| {
-        message(
-            id,
-            age,
-            false,
-            json!({ "@type": "messagePhoto", "caption": text(caption, json!([])),
-                "photo": { "@type": "photo", "has_stickers": false, "sizes": [
-                    { "@type": "photoSize", "type": "m", "width": 320, "height": 320,
-                      "photo": file_json(id + 1000, 24, &thumb) } ] } }),
-        )
-    };
+    let photo = photo_message;
     let video = |id: i64, age: i64, secs: i64| {
         message(
             id,
@@ -162,7 +165,22 @@ fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
                     "video": file_json(id + 1000, 4_000_000, "") } }),
         )
     };
+    let gif = |id: i64, age: i64| {
+        message(
+            id,
+            age,
+            false,
+            json!({ "@type": "messageAnimation", "caption": text("", json!([])),
+                "animation": { "@type": "animation", "duration": 3, "width": 320, "height": 320,
+                    "file_name": "loop.gif", "mime_type": "image/gif",
+                    "thumbnail": { "@type": "thumbnail", "width": 320, "height": 320,
+                        "format": { "@type": "thumbnailFormatJpeg" },
+                        "file": file_json(id + 2000, 24, &thumb) },
+                    "animation": file_json(id + 1000, 400_000, "") } }),
+        )
+    };
     match tab {
+        SharedMediaTab::Gifs => vec![gif(260, 0), gif(261, 2), gif(262, 9)],
         SharedMediaTab::Files => vec![
             document(210, 0, "Quarterly report.pdf", 4_404_019),
             document(209, 3, "budget-2026.xlsx", 182_272),
@@ -202,6 +220,9 @@ fn tab_messages(tab: SharedMediaTab) -> Vec<Value> {
             video(251, 1, 83),
             photo(252, 2, ""),
             video(253, 8, 3725),
+            photo(254, 9, ""),
+            photo(255, 9, ""),
+            photo(256, 40, ""),
         ],
         SharedMediaTab::Videos => vec![video(251, 1, 83), video(253, 8, 3725)],
         _ => Vec::new(),

@@ -351,6 +351,8 @@ mod tests {
                 thumb_file_id: thumb.map(FileId),
                 thumb_width: 320,
                 thumb_height: 240,
+                minithumbnail: None,
+                thumb_still: true,
                 alternatives: Vec::new(),
             }),
         )
@@ -529,6 +531,8 @@ mod tests {
                 thumb_file_id: Some(FileId(file + 1)),
                 thumb_width: 160,
                 thumb_height: 120,
+                minithumbnail: None,
+                thumb_still: true,
             }),
         )
     }

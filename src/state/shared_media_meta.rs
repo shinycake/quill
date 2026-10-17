@@ -3,11 +3,13 @@
 //! page is parsed, turned into display lines by [`SharedMediaMeta::lines`].
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::FileId;
 use crate::lang::{Key, keys, tr, tr_with};
 use crate::local_time::{civil_local, hhmm};
 use crate::message_a11y::format_duration_text;
 use crate::telegram::envelope::{
-    MessageContent, MessageOrigin, MessageSender, ParsedMessage, TextContent, format_size_text,
+    MessageContent, MessageOrigin, MessageSender, MiniThumbnail, ParsedMessage, TextContent,
+    format_size_text,
 };
 use crate::text::{TextEntity, TextEntityKind, schemeless_url};
 
@@ -43,6 +45,29 @@ pub enum SharedMediaMeta {
         /// What a click on the row opens: the page, else the first link.
         main_url: String,
     },
+    /// A photo, video or GIF: the picture of a grid tile.
+    Tile(SharedMediaTile),
+}
+
+/// What a grid tile of the Media, Photos, Videos and GIFs tabs draws
+/// (tdesktop `Overview::Layout::{Photo, Video, Gif}`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SharedMediaTile {
+    /// Sizes to try, preferred first.
+    pub thumbs: Vec<FileId>,
+    pub width: i32,
+    pub height: i32,
+    /// The ~40 px blur shown until the thumbnail arrives.
+    pub mini: Option<MiniThumbnail>,
+    pub badge: TileBadge,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TileBadge {
+    #[default]
+    None,
+    /// A video's length in seconds.
+    Duration(i32),
 }
 
 /// One address listed in a Links row: the text the message shows for it and
@@ -75,6 +100,51 @@ impl SharedMediaMeta {
                 name: doc.file_name.clone(),
                 size: doc.size,
             },
+            MessageContent::Photo(photo) => {
+                let mut thumbs: Vec<FileId> = Vec::new();
+                for size in photo.thumb_size().into_iter().chain(photo.largest_size()) {
+                    if !thumbs.contains(&size.file_id) {
+                        thumbs.push(size.file_id);
+                    }
+                }
+                let size = photo.thumb_size().or_else(|| photo.largest_size());
+                let hidden = photo.is_secret || photo.has_spoiler;
+                SharedMediaMeta::Tile(SharedMediaTile {
+                    thumbs: if hidden { Vec::new() } else { thumbs },
+                    width: size.map_or(0, |size| size.width),
+                    height: size.map_or(0, |size| size.height),
+                    mini: photo.minithumbnail.clone().filter(|_| !hidden),
+                    badge: TileBadge::None,
+                })
+            }
+            MessageContent::Video(video) => {
+                let hidden = video.is_secret || video.has_spoiler;
+                SharedMediaMeta::Tile(SharedMediaTile {
+                    thumbs: video
+                        .thumb_file_id()
+                        .filter(|_| !hidden && video.thumb_still)
+                        .into_iter()
+                        .collect(),
+                    width: video.thumb_width,
+                    height: video.thumb_height,
+                    mini: video.minithumbnail.clone().filter(|_| !hidden),
+                    badge: TileBadge::Duration(video.duration),
+                })
+            }
+            MessageContent::Animation(gif) => {
+                let hidden = gif.is_secret || gif.has_spoiler;
+                SharedMediaMeta::Tile(SharedMediaTile {
+                    thumbs: gif
+                        .thumb_file_id()
+                        .filter(|_| !hidden && gif.thumb_still)
+                        .into_iter()
+                        .collect(),
+                    width: gif.thumb_width,
+                    height: gif.thumb_height,
+                    mini: gif.minithumbnail.clone().filter(|_| !hidden),
+                    badge: TileBadge::None,
+                })
+            }
             MessageContent::Audio(audio) => SharedMediaMeta::Music {
                 performer: audio.performer.clone(),
                 title: audio.title.clone(),
@@ -92,6 +162,14 @@ impl SharedMediaMeta {
             },
             MessageContent::Text(text) => link_meta(text),
             _ => SharedMediaMeta::None,
+        }
+    }
+
+    /// The grid tile of a photo, video or GIF.
+    pub fn tile(&self) -> Option<&SharedMediaTile> {
+        match self {
+            SharedMediaMeta::Tile(tile) => Some(tile),
+            _ => None,
         }
     }
 
@@ -115,7 +193,7 @@ impl SharedMediaMeta {
     ) -> Option<SharedMediaLines> {
         let when = || date_time(date, now);
         Some(match self {
-            SharedMediaMeta::None => return None,
+            SharedMediaMeta::None | SharedMediaMeta::Tile(_) => return None,
             SharedMediaMeta::File { name, size } => {
                 let (badge, tone) = file_tile(name);
                 SharedMediaLines {
@@ -434,6 +512,20 @@ fn domain_title(url: &str) -> String {
 fn display_url(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     rest.trim_end_matches('/').to_string()
+}
+
+impl crate::state::Session {
+    /// Ask for the thumbnails of a page of grid tiles; the connect layer
+    /// downloads them on the next ingest (`take_profile_thumbs`).
+    pub(crate) fn want_shared_media_thumbs(&mut self, items: &[super::SharedMediaItem]) {
+        let ids: Vec<FileId> = items
+            .iter()
+            .filter_map(|item| item.meta.tile())
+            .filter_map(|tile| tile.thumbs.first().copied())
+            .filter(|id| id.0 != 0)
+            .collect();
+        self.media.profile_thumbs_due.extend(ids);
+    }
 }
 
 #[cfg(test)]
