@@ -23,7 +23,8 @@
 //! [`LiveLayout::Bar`] is the stream window's bottom bar (the round
 //! full-screen button on a `groupCallBg` backdrop, with the host's own
 //! menu and Leave slotted in), [`LiveLayout::Header`] the story header's
-//! badge, viewers and sound toggle. The keys are [`live_key_action`]; the
+//! sound toggle and PiP. The story header draws the badge and viewers
+//! itself, under the poster's name ([`live_badge`]). The keys are [`live_key_action`]; the
 //! full-screen fade is [`super::ControlsFade`].
 #![deny(clippy::indexing_slicing)]
 
@@ -86,8 +87,6 @@ const VOLUME_TOGGLE_SIZE: f32 = 24.;
 
 /// What one draw of the live controller needs.
 pub(crate) struct LiveFacts {
-    /// Shown after the LIVE pill; 0 hides the count.
-    pub(crate) viewers: u32,
     /// The picture's sound is muted for you.
     pub(crate) muted: bool,
     /// The volume slider (0–100), only where the engine can set the
@@ -157,7 +156,8 @@ impl super::VideoController {
 }
 
 impl LiveController {
-    /// The story header's layout: badge, viewers and the sound toggle.
+    /// The story header's layout: the sound toggle and PiP (the header
+    /// puts the badge under the name).
     pub(crate) fn header(mut self) -> Self {
         self.layout = LiveLayout::Header;
         self
@@ -481,7 +481,6 @@ fn render_header(this: LiveController, cx: &mut App) -> AnyElement {
         .flex()
         .items_center()
         .gap(px(BADGE_GAP))
-        .child(live_badge(this.facts.viewers))
         .children(this.leading)
         .child(toggle)
         .children(pip)

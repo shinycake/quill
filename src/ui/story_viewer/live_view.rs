@@ -1,8 +1,8 @@
 //! The live story's frame in the story viewer: the stream picture fitted
 //! as tdesktop's `DecideFrameResize` fits it, with the comments over its
 //! lower half (`live_comments`), the pinned paid comments and the "Stars
-//! Sent!" toast; and the header's LIVE badge, viewer count and sound
-//! toggle (tdesktop `Header::setVideoStreamViewers`), the live
+//! Sent!" toast; and the header's LIVE badge and viewer count (tdesktop
+//! `Header::setVideoStreamViewers`) and its sound toggle, the live
 //! controller's header layout (`VideoController::live`). The live
 //! states (opening spinner, stall, paused, failed with Retry) go over the
 //! picture from the same overlay code as the stream window.
@@ -62,8 +62,16 @@ impl QuillApp {
         self.stream_volume_slider(VolumeHost::LiveStory, call_id, cx)
     }
 
-    /// The header's LIVE badge with " {count} viewers" and the sound
-    /// toggle (tdesktop's volume button): the live controller's header.
+    /// The viewer count of the stream being watched, which puts the LIVE
+    /// badge and " {count} viewers" in the header's second line in place
+    /// of the story's age (tdesktop `Header::setVideoStreamViewers`).
+    pub(super) fn live_story_viewers(&self) -> Option<u32> {
+        self.stories.live.watching?;
+        Some(self.session()?.calls.story_stream.as_ref()?.viewer_count)
+    }
+
+    /// The header's sound toggle (tdesktop's volume button) and PiP: the
+    /// live controller's header.
     pub(super) fn live_story_header(
         &self,
         volume: Option<Entity<SliderState>>,
@@ -96,7 +104,6 @@ impl QuillApp {
         });
         let now = cx.background_executor().now();
         let facts = LiveFacts {
-            viewers: call.viewer_count,
             muted,
             volume_focus: volume
                 .is_some()

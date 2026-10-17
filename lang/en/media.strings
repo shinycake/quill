@@ -44,6 +44,7 @@
 "lng_create_bot_username_taken" = "This username is already taken.";
 "lng_dlg_new_bot_name" = "Bot name";
 "lng_edit_bot_title" = "Edit bot";
+"lng_edited" = "edited";
 "lng_emoji_adapt_sticker" = "Adapt from a Sticker";
 "lng_emoji_add_existing" = "Add an Existing Emoji";
 "lng_emoji_already_in_set" = "This Emoji is already in the Set.";
@@ -63,6 +64,14 @@
 "lng_manage_peer_bot_verify" = "Verify Accounts";
 "lng_manage_peer_permissions" = "Permissions";
 "lng_media_type_groups" = "Groups";
+"lng_mediaview_date_time" = "{date} at {time}";
+"lng_mediaview_hours_ago#one" = "{count} hour ago";
+"lng_mediaview_hours_ago#other" = "{count} hours ago";
+"lng_mediaview_just_now" = "just now";
+"lng_mediaview_minutes_ago#one" = "{count} minute ago";
+"lng_mediaview_minutes_ago#other" = "{count} minutes ago";
+"lng_mediaview_today" = "today at {time}";
+"lng_mediaview_yesterday" = "yesterday at {time}";
 "lng_polls_add_option_error" = "Could not add the option. Please try again.";
 "lng_polls_create" = "Create poll";
 "lng_polls_create_allow_adding_options" = "Allow Adding Options";
@@ -96,7 +105,14 @@
 "lng_stickers_featured_tab" = "Trending";
 "lng_stickers_remove_pack_confirm" = "Remove";
 "lng_stickers_set_is_full" = "This Sticker Set is full.";
+"lng_stories_about_close_friends" = "You are seeing this story because {user} added you to their list of **Close Friends**.";
+"lng_stories_about_close_friends_my" = "Only people from your **Close Friends** list can view this story.";
+"lng_stories_about_contacts" = "Only {user}'s contacts can view this story.";
+"lng_stories_about_contacts_my" = "Only your contacts can view this story.";
+"lng_stories_about_selected_contacts" = "Only some users {user} selected can view this story.";
+"lng_stories_about_selected_contacts_my" = "Only some users you selected can view this story.";
 "lng_stories_link_invalid" = "This link is broken or has expired.";
+"lng_stories_my_name" = "My Story";
 "lng_switch_emoji" = "Emoji";
 "lng_todo_create_allow_add" = "Allow Others to Add Tasks";
 "lng_todo_create_allow_mark" = "Allow Others to Mark As Done";
@@ -498,7 +514,6 @@
 "qll_media_not_downloaded" = "Not downloaded";
 "qll_media_not_downloaded_2" = "{kind_label} — not downloaded";
 "qll_media_not_supported_in_this_slice" = "{kind_label} — not supported in this slice";
-"qll_media_of" = "{poster} · {kind_label} {position} of {total}";
 "qll_media_only_a_bot_can_open" = "Only a bot can open a mini app.";
 "qll_media_open" = "Open";
 "qll_media_open_a_pack_to_preview" = "Open a pack to preview its emoji.";
