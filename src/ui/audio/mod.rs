@@ -493,7 +493,7 @@ mod tests {
     }
 
     fn scratch(name: &str, bytes: &[u8]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-audio-test-{}", std::process::id()));
+        let dir = quill::scratch::process_dir("quill-audio-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
         std::fs::write(&path, bytes).unwrap();

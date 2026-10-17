@@ -911,7 +911,7 @@ pub(in crate::ui) mod test_support {
 
     /// A mono 8 kHz wav of `seconds` in the temp dir.
     pub(in crate::ui) fn track(name: &str, seconds: u32) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-engine-test-{}", std::process::id()));
+        let dir = quill::scratch::process_dir("quill-engine-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
         std::fs::write(&path, wav(seconds)).unwrap();

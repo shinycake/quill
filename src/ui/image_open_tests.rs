@@ -53,7 +53,7 @@ fn attach(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, path: PathBuf) {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("quill-image-open-{}", std::process::id()));
+    let dir = quill::scratch::process_dir("quill-image-open");
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir.join(Path::new(name))
 }

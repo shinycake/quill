@@ -26,7 +26,7 @@ fn new_app_on(
     cx: &mut TestAppContext,
     demo: &'static str,
 ) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
-    let root = std::env::temp_dir().join(format!("quill-advanced-ui-{}", std::process::id()));
+    let root = quill::scratch::process_dir("quill-advanced-ui");
     let _ = std::fs::create_dir_all(&root);
     quill::settings::use_isolated_app_root(root);
     quill::fast_buttons::set_persistence(false);
