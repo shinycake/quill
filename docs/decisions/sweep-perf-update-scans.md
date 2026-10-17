@@ -98,4 +98,4 @@ and emoji panels (see the PR).
   (`unresolved_custom_emoji_ids_in`).
 - Notification avatars: one decode per uncached photo. Later notifications
   for the same photo queue behind it and show in arrival order when it
-  lands. The unused `AppContext` import is removed.
+  lands. The `AppContext` import stays: `background_spawn` needs the trait in scope.

@@ -6,7 +6,7 @@
 //! notification still shows with the app icon.
 
 use super::QuillApp;
-use gpui_kit::Context;
+use gpui_kit::{AppContext, Context};
 use image::{ImageFormat, RgbaImage, imageops};
 use quill::ids::AccountKey;
 use quill::notify::avatar::{ICON_SIZE, apply_circle_mask, existing_icon, icon_cache_path};
