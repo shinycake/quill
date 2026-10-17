@@ -337,16 +337,20 @@ impl QuillApp {
                     this.step_media_viewer(step, cx);
                 }))
         };
-        let prev = self.viewer.state.has_prev().then(|| {
-            nav_arrow(
-                "media-viewer-prev",
-                gpui_kit::assets::IconName::ChevronLeft,
-                tr(keys::Q_AV_PREVIOUS),
-                -1,
-                cx,
-            )
-        });
-        let next = self.viewer.state.has_next().then(|| {
+        // A swipe pulling an arrow in from an edge replaces that edge's
+        // button, so the two chevrons never overlap.
+        let swiping = self.viewer.swipe.indicator().map(|shown| shown.dir);
+        let prev =
+            (self.viewer.state.has_prev() && swiping != Some(SwipeDir::Previous)).then(|| {
+                nav_arrow(
+                    "media-viewer-prev",
+                    gpui_kit::assets::IconName::ChevronLeft,
+                    tr(keys::Q_AV_PREVIOUS),
+                    -1,
+                    cx,
+                )
+            });
+        let next = (self.viewer.state.has_next() && swiping != Some(SwipeDir::Next)).then(|| {
             nav_arrow(
                 "media-viewer-next",
                 gpui_kit::assets::IconName::ChevronRight,
