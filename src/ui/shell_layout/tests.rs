@@ -261,7 +261,9 @@ fn the_chat_pane_is_what_the_other_columns_leave() {
     );
     // One column: the whole window.
     assert_eq!(pane(input(400.)), 400.);
-=======
+}
+
+#[test]
 fn a_toast_centres_over_the_conversation_pane() {
     let wide = shell_layout(ShellInput {
         panels: Some(INFO_PANEL_WIDTH),
@@ -277,7 +279,6 @@ fn a_toast_centres_over_the_conversation_pane() {
         ..input(500.)
     });
     assert_eq!(list_only.chat_insets(0.), (0., 0.));
->>>>>>> ee38d3fd (feat(toast): queue notes, pause on hover, centre over the conversation)
 }
 
 #[test]
