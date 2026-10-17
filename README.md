@@ -412,6 +412,11 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Unofficial-client warning on a profile <!-- parity:profile-unofficial-warning -->
 - [x] Fragment number note in the phone context menu <!-- parity:profile-fragment-note -->
 - [x] Topic and thread info panels <!-- parity:profile-topic-info -->
+- [x] Info panel title by peer type: User Info, Bot Info, Group Info, Channel Info or Saved Messages <!-- parity:profile-info-title -->
+- [x] Verified, Scam, Fake and emoji-status badges on the group and channel info header <!-- parity:profile-channel-badges -->
+- [x] Bot profile rows: Bot Help and Bot Settings (when the bot has those commands), Bot Privacy Policy, "Stop and block bot" / "Restart bot" <!-- parity:profile-bot-actions -->
+- [x] Report row on bots and on channels you don't own, and a Join Channel row on channels you haven't joined <!-- parity:profile-report-join -->
+- [x] Group and channel descriptions show links, mentions and hashtags (TDLib getTextEntities); groups keep only Telegram links; Copy Text and Translate menu <!-- parity:profile-about-links -->
 
 ### Media
 
@@ -467,8 +472,10 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Open an album item in the fullscreen viewer — album tiles open the shared viewer (the old note claiming they didn't was stale); viewer header shows Pin/Unpin album when the item is in an album <!-- parity:media-album-viewer -->
 - [x] Pin / unpin an album — one `pinChatMessage` per member when none are pinned, unpins pinned members when any are (TGX MessagePinAlbum semantics; no album-level constructor in TDLib 1.8.67), rights-gated on `ChatSummary::can_pin_messages` <!-- parity:media-album-pin -->
 - [x] "Remember media grouping" setting — composer Grouped/Ungrouped toggle for 2+ photos/videos + remember on/off; persisted in `media_prefs.json` (settings::MediaPrefs), ungrouped sends go as separate messages <!-- parity:media-album-grouping-setting -->
-- [x] Per-chat shared media gallery with Media / Files / Music / Links / Voice / GIFs tabs — gallery side panel ("Media" header button), each tab fetches one `searchChatMessages` page with its `searchMessagesFilter*` filter (schema 1.8.67:11864), tabs cache their first page; limits: no pagination yet, rows are glyph+label (no thumbnails) <!-- parity:media-shared-gallery -->
+- [x] Per-chat shared media gallery with Media / Files / Music / Links / Voice / GIFs tabs — gallery side panel ("Media" header button), each tab fetches one `searchChatMessages` page with its `searchMessagesFilter*` filter (schema 1.8.67:11864), tabs cache their first page; Load more pages older results <!-- parity:media-shared-gallery -->
 - [x] Empty states per shared-media tab — one shared renderer (glyph + TGX `No*ToShow` title + `No*ToShowInChat`/`InChannel` description, strings.xml:1601-1627), distinct Loading / Empty / Failed states per tab <!-- parity:media-shared-gallery-empty -->
+- [x] Shared media rows show their details: file name, size and date; link title, description and addresses (opened through the link safety check); voice sender, date and duration; music performer, title, duration and size <!-- parity:media-shared-row-meta -->
+- [x] Photos, Videos and GIFs tabs are a virtualized thumbnail grid with a blurred placeholder and a duration badge on videos <!-- parity:media-shared-grid -->
 - [x] Captions render on photos, videos, animations, audio, and documents <!-- parity:media-caption-render -->
 - [x] Edit a sent media caption via `editMessageCaption` (requests.rs:2123, connect.rs:4941) <!-- parity:media-caption-edit -->
 - [x] Caption position toggle: show above vs below media (composer toggle for photo/video, preserved on caption edits, rendered per `show_caption_above_media`) <!-- parity:media-caption-position -->
