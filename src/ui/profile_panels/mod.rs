@@ -23,7 +23,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{MediaViewer, profile_photo_items};
 use quill::profile_forms::{
@@ -653,30 +653,6 @@ impl QuillApp {
         }
     }
 
-    /// "N groups in common" with the group rows (tdesktop's common groups
-    /// section of the profile).
-    pub(super) fn groups_in_common_section(
-        &self,
-        user_id: i64,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let count = self
-            .session()?
-            .profile_chat_list(ProfileChatsKind::GroupsInCommon, user_id)
-            .len();
-        self.profile_chat_list_section(
-            ProfileChatsKind::GroupsInCommon,
-            user_id,
-            format!(
-                "{count} group{} in common",
-                if count == 1 { "" } else { "s" }
-            ),
-            "info-common-group",
-            "info-common-groups-retry",
-            cx,
-        )
-    }
-
     /// "Similar channels" on a channel profile.
     pub(super) fn similar_channels_section(
         &self,
@@ -981,9 +957,14 @@ pub(super) mod bot_rows;
 #[cfg(feature = "demo-capture")]
 mod bot_rows_tests;
 mod change_phone_dialog;
+pub(in crate::ui) mod common_groups;
 mod main_profile_tab_dialog;
 mod submit_personal_photo;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod about_text_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod common_groups_tests;

@@ -102,6 +102,8 @@
 "lng_profile_bot_privacy" = "Bot Privacy Policy";
 "lng_profile_bot_privacy_url" = "https://telegram.org/privacy-tpa";
 "lng_profile_bot_settings" = "Bot Settings";
+"lng_profile_common_groups#one" = "{count} group in common";
+"lng_profile_common_groups#other" = "{count} groups in common";
 "lng_profile_copy_phone" = "Copy Phone Number";
 "lng_profile_delete_channel" = "Delete channel";
 "lng_profile_delete_group" = "Delete group";

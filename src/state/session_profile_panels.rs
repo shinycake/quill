@@ -56,18 +56,54 @@ impl Session {
 
     /// A `chats` answer to one of our profile list fetches.
     pub(crate) fn apply_profile_chats(&mut self, chat_ids: &[ChatId], pending: &PendingRequest) {
-        if let Some(key) = Self::profile_chats_key(pending) {
-            self.users_state.profile_chat_lists.insert(
-                key,
-                ProfileChatsFetch::Loaded(chat_ids.iter().map(|id| id.0).collect()),
-            );
+        let Some(key) = Self::profile_chats_key(pending) else {
+            return;
+        };
+        let mut ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
+        if key.0 == ProfileChatsKind::GroupsInCommon {
+            let paging = self
+                .users_state
+                .common_groups_paging
+                .entry(key.1)
+                .or_default();
+            paging.exhausted = ids.len() < GROUPS_IN_COMMON_PAGE;
+            // A follow-up page extends the list; the first page replaces it.
+            if std::mem::take(&mut paging.loading_more)
+                && let Some(ProfileChatsFetch::Loaded(shown)) =
+                    self.users_state.profile_chat_lists.get(&key)
+            {
+                let mut all = shown.clone();
+                ids.retain(|id| !all.contains(id));
+                all.extend(ids);
+                ids = all;
+            }
         }
+        self.users_state
+            .profile_chat_lists
+            .insert(key, ProfileChatsFetch::Loaded(ids));
+    }
+
+    /// Whether more groups in common can be asked for, and whether that
+    /// page is on its way.
+    pub fn common_groups_paging(&self, user_id: i64) -> CommonGroupsPaging {
+        self.users_state
+            .common_groups_paging
+            .get(&user_id)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// A refused list or gallery fetch: keep the reason so the panel can
     /// show a Retry row instead of spinning forever.
     pub(crate) fn fail_profile_fetch(&mut self, pending: &PendingRequest, reason: String) {
         if let Some(key) = Self::profile_chats_key(pending) {
+            // A failed follow-up page keeps the groups already listed.
+            if key.0 == ProfileChatsKind::GroupsInCommon
+                && let Some(paging) = self.users_state.common_groups_paging.get_mut(&key.1)
+                && std::mem::take(&mut paging.loading_more)
+            {
+                return;
+            }
             self.users_state
                 .profile_chat_lists
                 .insert(key, ProfileChatsFetch::Failed(reason));
