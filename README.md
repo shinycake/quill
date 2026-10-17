@@ -416,7 +416,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 ### Media
 
 - [x] Fullscreen photo/video viewer overlay with prev/next navigation (arrow keys) and "N of M" counter (src/media_viewer.rs:74-124) <!-- parity:media-viewer -->
-- [x] Zoom viewer image via `=`/`-` keys and scroll, drag-pan when zoomed, `0` resets to fit (src/media_viewer.rs:172-250, ui/mod.rs:146-150) <!-- parity:media-viewer-zoom -->
+- [x] Zoom viewer image via `=`/`-` keys, Cmd/Ctrl+wheel and pinch at the cursor, drag-pan when zoomed, `0` resets to fit (src/media_viewer/transform.rs) <!-- parity:media-viewer-zoom -->
+- [ ] Media viewer: a plain wheel or trackpad scroll goes to the next or previous item, one item per notch or flick; Cmd/Ctrl+wheel and pinch zoom (tdesktop `handleWheelEvent`; horizontal swipe paging is still open) <!-- parity:media-viewer-wheel-nav -->
 - [x] Rotate photo in the viewer — Rotate button cycles 0/90/180/270, per-item, cached (media_viewer.rs `rotate_rgba_quarter_turns`) <!-- parity:media-viewer-rotate -->
 - [x] Picture-in-picture for video playback — tdesktop's PiP window on the shared player on macOS, Windows and Linux: snapping, aspect-locked resize, chrome fade, seek and volume lines, handoff to and from the viewer (`src/ui/video_player/controls/pip/`, `src/media_viewer/pip/`, docs/decisions/video-pip.md) <!-- parity:media-video-pip -->
 - [x] Viewer auto-downloads the current item when not local and resumes a parked play once `downloadFile` lands (ui/mod.rs:4926, 5179) <!-- parity:media-viewer-autodownload -->
@@ -736,7 +737,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [ ] Battery-low and microphone-off indicators for the other person (partial: microphone-off shipped; battery-low blocked: ntgcalls encrypts its own signaling, so the battery flag never reaches Quill) <!-- parity:calls-peer-indicators -->
 - [x] Speaker and listener invite links for live streams <!-- parity:calls-speaker-links -->
 - [x] Watch channel live streams (RTMP): ntgcalls stream mode fed by getGroupCallStreamSegment, wide stream window, fullscreen, no-stream and connecting states, settings with speakers, stream key and revoke (#814, #823, #837; not tried on a live stream) <!-- parity:calls-rtmp-viewing -->
-- [x] Live stream volume slider (ntgcalls has no playback volume API; only mute for me) <!-- parity:calls-rtmp-volume -->
+- [x] Live stream volume slider in the stream window bar and the live story's volume pill, 0–100 % with Up/Down steps, sharing the media viewer volume setting (stream audio plays through Quill's own output, docs/decisions/stream-volume.md; unverified on a real stream) <!-- parity:calls-rtmp-volume -->
 - [x] Live stream window: hide the cursor in fullscreen and draw the letter avatar when the channel has no photo <!-- parity:calls-rtmp-window-polish -->
 - [x] Picture-in-picture for live streams and live stories (LIVE badge with viewers, mute, enlarge back to the stream window or story, close; tdesktop has no live PiP, #883) <!-- parity:calls-live-pip -->
 - [x] Live PiP follows a feed change (a rejoin or presenter switch swaps the player in place; the PiP closes only when the source is gone or the automatic rejoins are spent, #892) <!-- parity:calls-live-pip-feed-follow -->
@@ -1088,7 +1089,7 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
 - [x] Warn before quitting with Cmd+Q <!-- parity:data-mac-quit-warning -->
 - [x] Use system window frame toggle on Linux and Windows <!-- parity:data-native-frame -->
-- [ ] Hardware decoding toggle (partial: tdesktop's toggle switches FFmpeg hardware decoding; macOS AVPlayer always decodes in hardware, and the toggle lands with hardware decode on Windows and Linux, a video player follow-up. tdesktop's renderer options don't apply to GPUI) <!-- parity:data-hw-decode -->
+- [ ] Hardware decoding toggle (Settings > Advanced > Performance; FFmpeg hardware decoding on Windows via D3D11VA/DXVA2 and on the macOS FFmpeg path via VideoToolbox, default on only on macOS like tdesktop; AVPlayer always decodes in hardware; Linux decodes in software until libva loads at run time. tdesktop's renderer options don't apply to GPUI) <!-- parity:data-hw-decode -->
 
 ### Platform & edge cases
 
