@@ -85,11 +85,10 @@ fn a_removed_account_waits_for_its_client_to_close_before_its_folder_goes(cx: &m
         // Its background client was handed to the closing set; it would
         // restart (closed for a call), but a removal cancels that.
         app.background.closing.push(account(1), fake.boxed(), true);
-        let started = Instant::now();
         app.remove_account_in(root.clone(), &account(1), cx);
         // A second click while it closes changes nothing.
         app.remove_account_in(root.clone(), &account(1), cx);
-        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(fake.longest_drain() < Duration::from_millis(500));
         assert!(app.account.accounts.error.is_none());
     });
     assert!(

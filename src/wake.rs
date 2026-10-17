@@ -20,11 +20,36 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll, Waker};
+use std::thread::ThreadId;
+
+thread_local! {
+    static ISOLATED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Test apps only: from now on this thread's waiters are woken only by
+/// pokes from this same thread, and its pokes wake only its own waiters.
+///
+/// The signals are process-wide statics shared by every app in a test
+/// process. A GPUI test scheduler allows activity only from the thread that
+/// owns it, so a poke from one test (a window activation) that woke
+/// another test's task panicked that test as "not deterministic". The app
+/// never calls this; its pokes from the TDLib thread, the tray and the
+/// single-instance listener wake everything as before.
+pub fn isolate_current_thread() {
+    let _ = ISOLATED.try_with(|isolated| isolated.set(true));
+}
+
+fn isolated_thread() -> Option<ThreadId> {
+    ISOLATED
+        .try_with(|isolated| isolated.get())
+        .unwrap_or(false)
+        .then(|| std::thread::current().id())
+}
 
 /// An epoch counter with a list of waiting tasks.
 pub struct Signal {
     epoch: AtomicU64,
-    wakers: Mutex<Vec<Waker>>,
+    wakers: Mutex<Vec<(Waker, Option<ThreadId>)>>,
 }
 
 impl Signal {
@@ -43,9 +68,18 @@ impl Signal {
     /// Wake every waiter. Cheap and safe from any thread.
     pub fn poke(&self) {
         self.epoch.fetch_add(1, Ordering::AcqRel);
-        let wakers = std::mem::take(&mut *lock_or_recover(&self.wakers));
-        for waker in wakers {
-            waker.wake();
+        let all = std::mem::take(&mut *lock_or_recover(&self.wakers));
+        let me = isolated_thread();
+        let mut kept = Vec::new();
+        for (waker, owner) in all {
+            if me.is_some() && owner != me {
+                kept.push((waker, owner));
+            } else {
+                waker.wake();
+            }
+        }
+        if !kept.is_empty() {
+            lock_or_recover(&self.wakers).extend(kept);
         }
     }
 
@@ -76,8 +110,8 @@ impl Future for WaitSince<'_> {
         }
         {
             let mut wakers = lock_or_recover(&self.signal.wakers);
-            if !wakers.iter().any(|w| w.will_wake(cx.waker())) {
-                wakers.push(cx.waker().clone());
+            if !wakers.iter().any(|(w, _)| w.will_wake(cx.waker())) {
+                wakers.push((cx.waker().clone(), isolated_thread()));
             }
         }
         // A poke between the check above and the registration would have
