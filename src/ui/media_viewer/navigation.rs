@@ -2,7 +2,6 @@
 //! files it shows.
 
 use super::*;
-use std::time::Instant;
 
 impl QuillApp {
     /// Phase 4.5: open the fullscreen media viewer on the clicked message.
@@ -296,7 +295,7 @@ impl QuillApp {
             primary: event.modifiers.secondary(),
             source,
             zoomed: self.viewer.zoom.is_zoomed(),
-            at: Instant::now(),
+            at: cx.background_executor().now(),
         });
         match action {
             WheelAction::None => {}
