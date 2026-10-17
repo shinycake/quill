@@ -47,13 +47,13 @@ pub struct VideoNoteThumbnail {
 pub fn probe_local_video_note(path: &Path) -> Result<VideoNoteProbe, String> {
     let probe = probe_local_video(path)?;
     if probe.width != probe.height {
-        return Err("video note must be square".into());
+        return Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_NOTE_NOT_SQUARE).to_string());
     }
     if !(1..=640).contains(&probe.width) {
-        return Err("video note length must be 1-640".into());
+        return Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_NOTE_BAD_SIZE).to_string());
     }
     if !(0..=60).contains(&probe.duration) {
-        return Err("video note duration must be 0-60".into());
+        return Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_NOTE_BAD_DURATION).to_string());
     }
     Ok(VideoNoteProbe {
         duration: probe.duration,
@@ -113,7 +113,7 @@ pub fn write_video_note_thumbnail(src: &Path) -> Option<VideoNoteThumbnail> {
 /// `format.duration`. MPEG-4 `mvhd` / `tkhd` boxes are only a last resort.
 pub fn probe_local_video(path: &Path) -> Result<VideoProbe, String> {
     if !is_playable_video("", path) {
-        return Err("unsupported video".into());
+        return Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_UNSUPPORTED).to_string());
     }
     let supports_streaming = mpeg4_has_moov(path);
     if let Some(probe) = probe_with_ffprobe(path, supports_streaming) {
@@ -122,7 +122,7 @@ pub fn probe_local_video(path: &Path) -> Result<VideoProbe, String> {
     if let Some(probe) = probe_mp4_boxes(path, supports_streaming) {
         return Ok(probe);
     }
-    Err("could not read video duration or size".into())
+    Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_COULD_NOT_READ).to_string())
 }
 
 pub(crate) fn probe_with_ffprobe(path: &Path, supports_streaming: bool) -> Option<VideoProbe> {
@@ -564,7 +564,10 @@ impl VideoNoteCapture {
                 Stdio::piped(),
                 Stdio::from(log_file),
             )
-            .map_err(|err| format!("Couldn't start ffmpeg ({err})."))
+            .map_err(|err| {
+                eprintln!("quill: could not start the round video recorder: {err}");
+                crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_RECORDER_START_FAILED).to_string()
+            })
         });
         let mut child = match started {
             Ok(child) => child,
@@ -650,12 +653,17 @@ impl VideoNoteCapture {
             Ok(probe) => probe,
             Err(err) => {
                 let _ = std::fs::remove_file(&self.path);
-                return Err(format!("recorded clip unreadable ({err})"));
+                eprintln!("quill: recorded round clip unreadable: {err}");
+                return Err(
+                    crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_CLIP_UNREADABLE).to_string(),
+                );
             }
         };
         if probe.width != probe.height || probe.width != self.size {
             let _ = std::fs::remove_file(&self.path);
-            return Err("recorded clip is not a square round video".into());
+            return Err(
+                crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_CLIP_NOT_SQUARE).to_string(),
+            );
         }
         Ok(VideoNoteDraft {
             path: std::mem::take(&mut self.path),

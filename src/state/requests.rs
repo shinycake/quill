@@ -50,19 +50,43 @@ impl PasswordOp {
     /// "Could not change the two-step password (error 400)".
     pub(crate) fn action_label(self) -> &'static str {
         match self {
-            PasswordOp::Fetch => "load two-step verification settings",
-            PasswordOp::SetPassword => "change the two-step password",
-            PasswordOp::DisablePassword => "turn off two-step verification",
-            PasswordOp::SetRecoveryEmail => "set the recovery email",
-            PasswordOp::ResendCode => "resend the confirmation code",
-            PasswordOp::AbortEmailSetup => "abort the email setup",
-            PasswordOp::CheckEmailCode => "confirm the recovery email",
-            PasswordOp::RequestRecoveryCode => "send the recovery code",
-            PasswordOp::RecoverPassword => "recover the password",
-            PasswordOp::ResetPassword => "reset the password",
-            PasswordOp::CancelPasswordReset => "cancel the password reset",
-            PasswordOp::SetLoginEmail => "change the login email",
-            PasswordOp::CheckLoginEmailCode => "confirm the login email",
+            PasswordOp::Fetch => crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_FETCH),
+            PasswordOp::SetPassword => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_SET_PASSWORD)
+            }
+            PasswordOp::DisablePassword => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_DISABLE_PASSWORD)
+            }
+            PasswordOp::SetRecoveryEmail => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_SET_RECOVERY_EMAIL)
+            }
+            PasswordOp::ResendCode => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_RESEND_CODE)
+            }
+            PasswordOp::AbortEmailSetup => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_ABORT_EMAIL_SETUP)
+            }
+            PasswordOp::CheckEmailCode => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_CHECK_EMAIL_CODE)
+            }
+            PasswordOp::RequestRecoveryCode => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_REQUEST_RECOVERY_CODE)
+            }
+            PasswordOp::RecoverPassword => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_RECOVER_PASSWORD)
+            }
+            PasswordOp::ResetPassword => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_RESET_PASSWORD)
+            }
+            PasswordOp::CancelPasswordReset => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_CANCEL_PASSWORD_RESET)
+            }
+            PasswordOp::SetLoginEmail => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_SET_LOGIN_EMAIL)
+            }
+            PasswordOp::CheckLoginEmailCode => {
+                crate::lang::tr(crate::lang::keys::Q_OPS_ERR_ACTION_CHECK_LOGIN_EMAIL_CODE)
+            }
         }
     }
 }

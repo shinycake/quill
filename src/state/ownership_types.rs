@@ -4,6 +4,7 @@
 //! `boxes/peers/channel_ownership_transfer.cpp`,
 //! `boxes/select_future_owner_box.cpp`.
 use super::*;
+use crate::lang::{keys, tr, tr_with, trn};
 
 /// Answer of `getChatOwnerAfterLeaving` for one chat.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,17 +53,16 @@ pub struct OwnershipState {
 pub fn transfer_block_reason(result: CanTransferOwnershipResult) -> Option<String> {
     match result {
         CanTransferOwnershipResult::Ok => None,
-        CanTransferOwnershipResult::PasswordNeeded => Some(
-            "Enable Two-Step Verification in Settings and wait 7 days before you transfer ownership."
-                .to_string(),
-        ),
-        CanTransferOwnershipResult::PasswordTooFresh { retry_after } => Some(format!(
-            "Two-Step Verification was enabled too recently. Please come back in {}.",
-            wait_text(retry_after)
+        CanTransferOwnershipResult::PasswordNeeded => {
+            Some(tr(keys::Q_OPS_ERR_TRANSFER_NEED_2FA).to_string())
+        }
+        CanTransferOwnershipResult::PasswordTooFresh { retry_after } => Some(tr_with(
+            keys::Q_OPS_ERR_TRANSFER_2FA_FRESH,
+            &[("wait", &wait_text(retry_after))],
         )),
-        CanTransferOwnershipResult::SessionTooFresh { retry_after } => Some(format!(
-            "You logged in on this device too recently. Please come back in {}.",
-            wait_text(retry_after)
+        CanTransferOwnershipResult::SessionTooFresh { retry_after } => Some(tr_with(
+            keys::Q_OPS_ERR_TRANSFER_SESSION_FRESH,
+            &[("wait", &wait_text(retry_after))],
         )),
     }
 }
@@ -70,16 +70,12 @@ pub fn transfer_block_reason(result: CanTransferOwnershipResult) -> Option<Strin
 fn wait_text(secs: i32) -> String {
     let secs = i64::from(secs.max(0));
     if secs >= 2 * 86_400 {
-        format!("{} days", (secs + 86_399) / 86_400)
+        trn(keys::DAYS, (secs + 86_399) / 86_400)
     } else if secs >= 3_600 {
         let hours = (secs + 3_599) / 3_600;
-        if hours == 1 {
-            "1 hour".to_string()
-        } else {
-            format!("{hours} hours")
-        }
+        trn(keys::HOURS, hours)
     } else {
-        "a little while".to_string()
+        tr(keys::Q_OPS_ERR_WAIT_LITTLE).to_string()
     }
 }
 
@@ -170,9 +166,9 @@ impl Session {
     pub(crate) fn fail_owner_lookup(&mut self, chat_id: i64, err: &TdError) {
         self.groups.ownership.owner_after_leaving.insert(
             chat_id,
-            OwnerLookup::Failed(format!(
-                "Could not find the next owner: {}",
-                error_reason(err)
+            OwnerLookup::Failed(tr_with(
+                keys::Q_OPS_ERR_OWNER_LOOKUP_FAILED,
+                &[("reason", &error_reason(err))],
             )),
         );
     }
@@ -183,12 +179,13 @@ impl Session {
 /// transferred" alike.
 pub(crate) fn ownership_error_line(err: &TdError) -> String {
     match err.class {
-        ErrorClass::Flood => err.flood_line("Too many attempts. Wait and try again."),
-        ErrorClass::Unauthorized => "This session is no longer authorized.".to_string(),
-        ErrorClass::Invalid => {
-            "Wrong password, or the ownership can't be transferred to this person.".to_string()
-        }
-        _ => format!("Could not transfer ownership (error {}).", err.code),
+        ErrorClass::Flood => err.flood_line(tr(keys::Q_OPS_ERR_TRANSFER_FLOOD)),
+        ErrorClass::Unauthorized => tr(keys::Q_OPS_ERR_TRANSFER_UNAUTHORIZED).to_string(),
+        ErrorClass::Invalid => tr(keys::Q_OPS_ERR_TRANSFER_INVALID).to_string(),
+        _ => tr_with(
+            keys::Q_OPS_ERR_TRANSFER_CODE,
+            &[("code", &err.code.to_string())],
+        ),
     }
 }
 

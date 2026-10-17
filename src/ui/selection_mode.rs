@@ -520,8 +520,11 @@ impl QuillApp {
                     let mut saved = 0usize;
                     for (path, name) in files {
                         let dest = unique_destination(&dir, &name, &mut used);
-                        if std::fs::copy(&path, dest).is_ok() {
+                        if std::fs::copy(&path, &dest).is_ok() {
                             saved += 1;
+                        } else {
+                            // Drop the empty file `unique_destination` claimed.
+                            let _ = std::fs::remove_file(&dest);
                         }
                     }
                     saved
@@ -948,7 +951,18 @@ fn unique_destination(
             (n, None) => format!("{stem} ({n})"),
         };
         let candidate = dir.join(file);
-        if !candidate.exists() && used.insert(candidate.clone()) {
+        // `create_new` claims the name atomically, so a file that appears
+        // between the check and the copy is never overwritten. When the
+        // claim fails for another reason, the copy reports that itself.
+        let free = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(_) => true,
+            Err(err) => err.kind() != std::io::ErrorKind::AlreadyExists,
+        };
+        if free && used.insert(candidate.clone()) {
             return candidate;
         }
         n += 1;

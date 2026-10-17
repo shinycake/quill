@@ -8,7 +8,7 @@ use super::*;
 pub(crate) struct ChatOrderSync {
     pub(crate) dirty: bool,
     pub(crate) deferred: bool,
-    /// Stored folder tab orders, dropped whenever the order is rebuilt.
+    /// Stored folder tab orders, dropped whenever a folder position changes.
     pub(crate) folder_orders: super::folder_order_cache::FolderOrderCache,
 }
 
@@ -121,7 +121,6 @@ impl Session {
 
     fn flush_chat_order(&mut self) {
         self.chat_order_sync.dirty = false;
-        self.invalidate_folder_orders();
         // Sort the `(order, chat_id)` keys TDLib orders by (descending,
         // schema 1.8.67 `chatPosition.order`), never clones of whole
         // summaries.

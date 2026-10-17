@@ -85,6 +85,6 @@ impl QuillApp {
                 "update-plan.json".into(),
             ),
         };
-        self.settings.appearance_open = true;
+        self.open_appearance();
     }
 }

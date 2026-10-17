@@ -176,7 +176,7 @@ impl QuillApp {
                 self.appearance.theme = ThemeChoice::Dark;
                 self.appearance.accent_rgb = 0x8b5cf6;
                 self.appearance.wallpaper_rgb = Some(0x1b1230);
-                self.settings.appearance_open = true;
+                self.open_appearance();
             }
             "accent" => {
                 self.appearance.accent_rgb = 0x8b5cf6;

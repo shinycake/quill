@@ -119,9 +119,8 @@ impl TdError {
             return None;
         }
         Some(match self.flood_wait_secs {
-            Some(1) => "Too many attempts. Try again in 1 second.".to_string(),
-            Some(secs) => format!("Too many attempts. Try again in {secs} seconds."),
-            None => "Too many attempts. Try again later.".to_string(),
+            Some(secs) => crate::lang::trn(crate::lang::keys::Q_OPS_ERR_FLOOD_SECONDS, secs),
+            None => crate::lang::tr(crate::lang::keys::Q_OPS_ERR_FLOOD_LATER).to_string(),
         })
     }
 
@@ -130,8 +129,7 @@ impl TdError {
     /// otherwise the honest generic line.
     pub fn flood_line(&self, generic: &str) -> String {
         match self.flood_wait_secs {
-            Some(1) => "try again in 1 second".to_string(),
-            Some(secs) => format!("try again in {secs} seconds"),
+            Some(secs) => crate::lang::trn(crate::lang::keys::Q_OPS_ERR_TRY_AGAIN_SECONDS, secs),
             None => generic.to_string(),
         }
     }
