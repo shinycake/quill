@@ -7,7 +7,8 @@
 //! verified and staged in the background and applied the next time Quill
 //! starts. Quill never restarts itself.
 
-use crate::updater::ReleaseInfo;
+use crate::lang::{Key, keys};
+use crate::updater::{ReleaseInfo, UpdateState};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -70,47 +71,95 @@ pub fn set_install_automatically(on: bool) {
 /// What to do with a release the update check just found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
-    /// Download and stage it now; it is applied on the next start.
+    /// Download and stage it now; it is applied at the next start.
     Stage,
     /// Only show the update card; the user clicks install.
     ShowCard,
 }
 
 /// Stage only when the user opted in, this installation can replace itself
-/// (`update_install::can_install_here`) and the release has a verified
-/// binary for this platform.
+/// (`update_install::self_update_available`) and the release passes the same
+/// check as the download (`update_install::valid_release`).
 pub fn decide(opted_in: bool, self_update_supported: bool, release: &ReleaseInfo) -> Decision {
-    if opted_in && self_update_supported && release.asset.is_some() {
+    if opted_in && self_update_supported && crate::update_install::valid_release(release) {
         Decision::Stage
     } else {
         Decision::ShowCard
     }
 }
 
+/// The release to stage after an update check, if any: the check found one
+/// (`Available`), "Check for updates on launch" is on (the switch is only
+/// shown then), and [`decide`] says stage.
+pub fn staging_candidate(
+    state: &UpdateState,
+    opted_in: bool,
+    launch_check_on: bool,
+    self_update_supported: bool,
+) -> Option<ReleaseInfo> {
+    let UpdateState::Available(release) = state else {
+        return None;
+    };
+    (launch_check_on && decide(opted_in, self_update_supported, release) == Decision::Stage)
+        .then(|| release.clone())
+}
+
+/// How the switch row looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowState {
+    pub checked: bool,
+    pub enabled: bool,
+    pub hint: Key,
+}
+
+/// The row for a stored choice on an install that can or cannot update
+/// itself. Where it cannot, the switch is off and disabled, and the hint says
+/// why (macOS: the app updates through the release package).
+pub fn row_state(stored: bool, self_update_supported: bool) -> RowState {
+    if self_update_supported {
+        RowState {
+            checked: stored,
+            enabled: true,
+            hint: keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_HINT,
+        }
+    } else {
+        RowState {
+            checked: false,
+            enabled: false,
+            hint: if cfg!(target_os = "macos") {
+                keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_MACOS
+            } else {
+                keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_UNAVAILABLE
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::updater::ReleaseAsset;
+    use crate::updater::{RELEASES_URL, ReleaseAsset, update_asset_name};
 
     fn release(with_asset: bool) -> ReleaseInfo {
         ReleaseInfo {
-            version: "9.9.9".into(),
+            version: "999.0.0".into(),
             notes: String::new(),
-            url: "https://github.com/shinycake/quill/releases/tag/v9.9.9".into(),
+            url: format!("{RELEASES_URL}/tag/v999.0.0"),
             asset: with_asset.then(|| ReleaseAsset {
-                url: "https://github.com/shinycake/quill/releases/download/v9.9.9/quill".into(),
-                sha256: "0".repeat(64),
-                size: 1,
+                url: format!("{RELEASES_URL}/download/v999.0.0/{}", update_asset_name()),
+                sha256: "a".repeat(64),
+                size: 100,
             }),
         }
     }
 
     #[test]
-    fn it_is_off_without_a_stored_file() {
-        let stored: Stored = serde_json::from_str("{}").unwrap();
-        assert!(!stored.install_automatically);
+    fn it_is_off_by_default() {
+        assert!(!Stored::default().install_automatically);
         let dir = std::env::temp_dir().join(format!("quill-auto-update-{}", std::process::id()));
         assert!(!load_from(&dir.join("missing.json")));
+        let stored: Stored = serde_json::from_str("{}").unwrap();
+        assert!(!stored.install_automatically);
     }
 
     #[test]
@@ -141,7 +190,41 @@ mod tests {
     }
 
     #[test]
-    fn a_release_without_a_binary_for_this_platform_never_stages() {
+    fn a_release_the_download_would_refuse_never_stages() {
         assert_eq!(decide(true, true, &release(false)), Decision::ShowCard);
+        let mut old = release(true);
+        old.version = "0.0.1".into();
+        old.url = format!("{RELEASES_URL}/tag/v0.0.1");
+        assert_eq!(decide(true, true, &old), Decision::ShowCard);
+    }
+
+    #[test]
+    fn a_check_result_is_staged_only_when_every_condition_holds() {
+        let found = UpdateState::Available(release(true));
+        assert_eq!(
+            staging_candidate(&found, true, true, true),
+            Some(release(true))
+        );
+        assert_eq!(staging_candidate(&found, false, true, true), None);
+        assert_eq!(staging_candidate(&found, true, false, true), None);
+        assert_eq!(staging_candidate(&found, true, true, false), None);
+        for other in [
+            UpdateState::UpToDate,
+            UpdateState::Checking,
+            UpdateState::Staged(release(true), "plan.json".into()),
+            UpdateState::Downloading(release(true)),
+            UpdateState::Failed("x"),
+        ] {
+            assert_eq!(staging_candidate(&other, true, true, true), None);
+        }
+    }
+
+    #[test]
+    fn the_row_is_disabled_and_off_where_the_install_cannot_update_itself() {
+        let row = row_state(true, false);
+        assert!(!row.enabled && !row.checked);
+        let row = row_state(true, true);
+        assert!(row.enabled && row.checked);
+        assert_ne!(row_state(false, true).hint, row_state(false, false).hint);
     }
 }

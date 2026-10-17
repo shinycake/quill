@@ -261,6 +261,21 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn a_staged_update_says_it_is_ready_and_waits_for_a_restart() {
+        let release = ReleaseInfo {
+            version: "9.9.9".into(),
+            notes: String::new(),
+            url: String::new(),
+            asset: None,
+        };
+        let label = UpdateState::Staged(release, "plan.json".into()).label();
+        assert!(
+            label.contains("9.9.9") && label.contains("Restart to apply"),
+            "{label}"
+        );
+    }
+
+    #[test]
     fn update_asset_is_the_package_on_linux_and_windows() {
         let name = binary_asset_name();
         let asset = update_asset_name();

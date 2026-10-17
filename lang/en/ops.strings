@@ -669,7 +669,9 @@
 "qll_ops_info_2" = "ℹ Info";
 "qll_ops_install_the_release_package_from" = "Install the release package from GitHub for this installation.";
 "qll_ops_install_updates_automatically" = "Install updates automatically";
-"qll_ops_install_updates_automatically_hint" = "Quill downloads new versions in the background and installs them the next time it starts.";
+"qll_ops_install_updates_automatically_macos" = "On macOS, Quill updates through the release package from GitHub for now.";
+"qll_ops_install_updates_automatically_unavailable" = "Not available for this installation: it cannot replace itself.";
+"qll_ops_install_updates_automatically_hint" ="Quill downloads new versions in the background and installs them the next time it starts.";
 "qll_ops_invite_links" = "{active} invite links";
 "qll_ops_invite_links_need_a_live" = "invite links need a live connection (demo)";
 "qll_ops_invites" = "Invites";

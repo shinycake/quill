@@ -13,7 +13,10 @@
 // Downloading (and so unpacking) is part of the UI build only.
 #![cfg_attr(not(feature = "ui"), allow(dead_code))]
 mod bundle;
+mod staged;
 mod swap;
+
+pub use staged::apply_on_start;
 
 use crate::updater::{ReleaseInfo, UpdateState};
 use serde::{Deserialize, Serialize};
@@ -33,15 +36,6 @@ pub struct InstallPlan {
     /// `staged` is an extracted package directory, not a single executable.
     #[serde(default)]
     bundle: bool,
-    /// Start the new version once it is installed. A background-staged
-    /// update ("Install updates automatically") leaves this off, so quitting
-    /// Quill never reopens it; [`arm_relaunch`] turns it on for "Restart".
-    #[serde(default = "relaunch_by_default")]
-    relaunch: bool,
-}
-
-fn relaunch_by_default() -> bool {
-    true
 }
 
 /// Linux and Windows install the whole package; other platforms swap the file.
@@ -182,7 +176,7 @@ fn digest_file(path: &Path) -> std::io::Result<String> {
         .collect())
 }
 
-fn valid_release(release: &ReleaseInfo) -> bool {
+pub(crate) fn valid_release(release: &ReleaseInfo) -> bool {
     let Some(tag) = release
         .url
         .strip_prefix(&format!("{}/tag/", crate::updater::RELEASES_URL))
@@ -245,16 +239,19 @@ fn probe_binary(path: &Path, version: &str) -> std::io::Result<()> {
 
 /// Whether the install at `exe` can be rewritten by Quill itself.
 fn installable(exe: &Path) -> bool {
-    if !BUNDLE_UPDATES {
-        // macOS: the bare executable only, never an app bundle.
-        return cfg!(unix)
-            && !exe
-                .components()
-                .any(|c| c.as_os_str().to_string_lossy().ends_with(".app"));
-    }
     let Some(install) = exe.parent() else {
         return false;
     };
+    if !BUNDLE_UPDATES {
+        // macOS: the bare executable only, never an app bundle, and never
+        // a package-manager or read-only location.
+        return cfg!(unix)
+            && !exe
+                .components()
+                .any(|c| c.as_os_str().to_string_lossy().ends_with(".app"))
+            && !swap::distro_managed(install)
+            && swap::dir_writable(install);
+    }
     if !packaged(exe) || swap::distro_managed(install) {
         return false;
     }
@@ -264,31 +261,39 @@ fn installable(exe: &Path) -> bool {
         && (cfg!(windows) || install.parent().is_some_and(swap::dir_writable))
 }
 
-/// Screenshot demos and UI tests pick the answer of [`can_install_here`].
-#[cfg(any(test, feature = "demo-capture"))]
-static CAN_INSTALL_OVERRIDE: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
-
-#[cfg(any(test, feature = "demo-capture"))]
-pub fn force_can_install_here(answer: Option<bool>) {
-    if let Ok(mut guard) = CAN_INSTALL_OVERRIDE.lock() {
-        *guard = answer;
-    }
-}
-
 /// Only an installation Quill can replace itself, without elevation, qualifies;
 /// anything else (app bundle, package manager, Program Files, AppImage, a plain
 /// cargo build) is pointed at the release download instead. Probed once.
 pub fn can_install_here() -> bool {
-    #[cfg(any(test, feature = "demo-capture"))]
-    if let Some(forced) = CAN_INSTALL_OVERRIDE.lock().ok().and_then(|guard| *guard) {
-        return forced;
-    }
     static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ANSWER.get_or_init(|| {
         std::env::current_exe()
             .and_then(fs::canonicalize)
             .is_ok_and(|exe| installable(&exe))
     })
+}
+
+/// Whether "Install updates automatically" can work here: the install can
+/// replace itself (`can_install_here`) and releases ship a package for it
+/// (Linux and Windows; the macOS release is an app bundle, which Quill does
+/// not replace yet).
+pub fn self_update_available() -> bool {
+    #[cfg(any(test, feature = "demo-capture"))]
+    if let Some(forced) = FORCED_AVAILABLE.lock().ok().and_then(|guard| *guard) {
+        return forced;
+    }
+    BUNDLE_UPDATES && can_install_here()
+}
+
+/// Screenshot demos and UI tests pick the answer of [`self_update_available`].
+#[cfg(any(test, feature = "demo-capture"))]
+static FORCED_AVAILABLE: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+
+#[cfg(any(test, feature = "demo-capture"))]
+pub fn force_self_update_available(answer: Option<bool>) {
+    if let Ok(mut guard) = FORCED_AVAILABLE.lock() {
+        *guard = answer;
+    }
 }
 
 fn archive_kind() -> bundle::ArchiveKind {
@@ -326,7 +331,7 @@ fn clear_interrupted_update(exe: &Path, install: &Path, stage_root: &Path) {
 }
 
 #[cfg(feature = "ui")]
-pub fn download_and_stage(release: &ReleaseInfo, relaunch: bool) -> Result<PathBuf, &'static str> {
+pub fn download_and_stage(release: &ReleaseInfo) -> Result<PathBuf, &'static str> {
     if !valid_release(release) {
         return Err(
             "The release has no valid newer binary for this platform. Retry the release check.",
@@ -352,6 +357,8 @@ pub fn download_and_stage(release: &ReleaseInfo, relaunch: bool) -> Result<PathB
     };
     if BUNDLE_UPDATES {
         clear_interrupted_update(&target, parent, &stage_root);
+    } else {
+        swap::clear_temp_entries(&stage_root);
     }
     let stamp = format!(
         "{}{}-{}-{}",
@@ -420,7 +427,6 @@ pub fn download_and_stage(release: &ReleaseInfo, relaunch: bool) -> Result<PathB
             parent: std::process::id(),
             release: release.clone(),
             bundle: BUNDLE_UPDATES,
-            relaunch,
         };
         write_private(
             &plan_path,
@@ -436,16 +442,6 @@ pub fn download_and_stage(release: &ReleaseInfo, relaunch: bool) -> Result<PathB
         let _ = fs::remove_file(&plan_path);
     }
     result
-}
-
-/// Makes the staged update at `plan` start the new version after it installs.
-pub fn arm_relaunch(plan: &Path) -> std::io::Result<()> {
-    let mut staged = read_plan(plan)?;
-    staged.relaunch = true;
-    let tmp = plan.with_extension("arming");
-    let _ = fs::remove_file(&tmp);
-    write_private(&tmp, &serde_json::to_vec(&staged)?)?;
-    fs::rename(&tmp, plan)
 }
 
 pub fn launch_helper(plan: &Path) -> std::io::Result<()> {
@@ -587,13 +583,7 @@ fn install_bundle(plan: &InstallPlan, target: &Path, plan_path: &Path) -> std::i
     probe_binary(&staged_exe, &plan.release.version)?;
     // The plan lives inside the install directory; drop it before the swap.
     let _ = fs::remove_file(plan_path);
-    let launch = || {
-        if plan.relaunch {
-            spawn_app(target)
-        } else {
-            Ok(())
-        }
-    };
+    let launch = || spawn_app(target);
     if cfg!(windows) {
         write_result(receipt_for(target), &plan.release, false)?;
         swap::swap_files(install, &plan.staged, launch)
@@ -662,13 +652,11 @@ fn apply_plan(plan_path: &Path, plan: InstallPlan, target: PathBuf) -> std::io::
         probe_binary(&plan.staged, &plan.release.version)?;
         // The new process may read this immediately after spawn.
         write_result(receipt_for(&target), &plan.release, false)?;
-        replace_and_launch(&target, &plan.staged, plan.relaunch)
+        replace_and_launch(&target, &plan.staged)
     })();
     if result.is_err() {
         let _ = write_result(receipt_for(&target), &plan.release, true);
-        if plan.relaunch {
-            let _ = spawn_app(&target);
-        }
+        let _ = spawn_app(&target);
         if plan.bundle {
             let _ = fs::remove_dir_all(&plan.staged);
         }
@@ -677,14 +665,20 @@ fn apply_plan(plan_path: &Path, plan: InstallPlan, target: PathBuf) -> std::io::
     result
 }
 
-fn replace_and_launch(target: &Path, staged: &Path, relaunch: bool) -> std::io::Result<()> {
+fn replace_and_launch(target: &Path, staged: &Path) -> std::io::Result<()> {
     let backup = target.with_extension("update-backup");
     if backup.exists() {
         return Err(std::io::Error::other("Previous update backup still exists"));
     }
     fs::rename(target, &backup)?;
-    let result =
-        fs::rename(staged, target).and_then(|_| if relaunch { spawn_app(target) } else { Ok(()) });
+    let result = fs::rename(staged, target).and_then(|_| {
+        Command::new(target)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+    });
     if result.is_err() {
         let _ = fs::remove_file(target);
         fs::rename(&backup, target)?;
@@ -746,32 +740,12 @@ mod tests {
         assert!(probe_binary(&staged, "0.3.0").is_err());
         assert_eq!(digest_file(&staged).unwrap().len(), 64);
         fs::set_permissions(&staged, fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(replace_and_launch(&target, &staged, true).is_err());
+        assert!(replace_and_launch(&target, &staged).is_err());
         assert_eq!(fs::read(&target).unwrap(), old);
         fs::write(&staged, b"#!/bin/sh\nexit 0\n").unwrap();
         fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).unwrap();
-        replace_and_launch(&target, &staged, true).unwrap();
+        replace_and_launch(&target, &staged).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"#!/bin/sh\nexit 0\n");
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn a_background_plan_does_not_relaunch_until_armed() {
-        let root = std::env::temp_dir().join(format!("quill-arm-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        let plan_path = root.join("plan.json");
-        let plan = InstallPlan {
-            target: root.join("quill"),
-            staged: root.join("quill.new"),
-            parent: 1,
-            release: release(),
-            bundle: false,
-            relaunch: false,
-        };
-        write_private(&plan_path, &serde_json::to_vec(&plan).unwrap()).unwrap();
-        assert!(!read_plan(&plan_path).unwrap().relaunch);
-        arm_relaunch(&plan_path).unwrap();
-        assert!(read_plan(&plan_path).unwrap().relaunch);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -850,7 +824,6 @@ mod tests {
             parent: exited_pid(),
             release: release(),
             bundle: true,
-            relaunch: true,
         };
         apply_plan(&plan_path, plan, target.clone()).unwrap();
         assert!(
@@ -887,7 +860,6 @@ mod tests {
             parent: exited_pid(),
             release: release(),
             bundle: true,
-            relaunch: true,
         };
         assert!(apply_plan(&plan_path, plan, target.clone()).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "#!/bin/sh\nexit 0\n");

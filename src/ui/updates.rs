@@ -48,30 +48,28 @@ impl QuillApp {
     }
 
     /// "Install updates automatically": a release the check just found is
-    /// downloaded and staged without a click (`auto_update::decide`).
+    /// downloaded and staged without a click (`auto_update::staging_candidate`).
     pub(super) fn stage_if_opted_in(&mut self, cx: &mut Context<Self>) {
-        let UpdateState::Available(release) = &self.settings.update_state else {
-            return;
-        };
-        let decision = quill::advanced::auto_update::decide(
+        let candidate = quill::advanced::auto_update::staging_candidate(
+            &self.settings.update_state,
             quill::advanced::auto_update::install_automatically(),
-            quill::update_install::can_install_here(),
-            release,
+            self.appearance.check_updates_on_launch,
+            quill::update_install::self_update_available(),
         );
-        if decision == quill::advanced::auto_update::Decision::Stage {
-            self.stage_update(release.clone(), cx);
+        if let Some(release) = candidate {
+            self.stage_update(release, cx);
         }
     }
 
     /// Downloads, verifies and stages `release` in the background. The update
-    /// is applied when Quill next quits (`apply_staged_update_on_quit`) or when
+    /// is applied at the next start (`update_install::apply_on_start`) or when
     /// the user presses "Restart to update"; Quill never restarts itself.
     fn stage_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
         self.settings.update_state = UpdateState::Downloading(release.clone());
         let download_release = release.clone();
-        let download = cx.background_executor().spawn(async move {
-            quill::update_install::download_and_stage(&download_release, false)
-        });
+        let download = cx
+            .background_executor()
+            .spawn(async move { quill::update_install::download_and_stage(&download_release) });
         cx.spawn(async move |this, cx| {
             let result = download.await;
             let _ = this.update(cx, |this, cx| {
@@ -86,18 +84,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// App quit: hand a staged update to the helper, which installs it once
-    /// this process is gone and does not reopen Quill. Skipped when the user
-    /// has turned the setting off since it was staged.
-    pub(super) fn apply_staged_update_on_quit(&mut self) {
-        if let UpdateState::Staged(release, plan) = &self.settings.update_state
-            && quill::advanced::auto_update::install_automatically()
-            && quill::update_install::launch_helper(plan).is_ok()
-        {
-            self.settings.update_state = UpdateState::Installing(release.clone());
-        }
-    }
-
     /// "Restart to update": install the staged update and start the new
     /// version.
     fn restart_to_update(&mut self, cx: &mut Context<Self>) {
@@ -105,9 +91,7 @@ impl QuillApp {
             return;
         };
         let release = release.clone();
-        let started = quill::update_install::arm_relaunch(plan)
-            .and_then(|()| quill::update_install::launch_helper(plan));
-        match started {
+        match quill::update_install::launch_helper(plan) {
             Ok(()) => {
                 self.settings.update_state = UpdateState::Installing(release);
                 cx.quit();
@@ -129,9 +113,9 @@ impl QuillApp {
         }
         self.settings.update_state = UpdateState::Downloading(release.clone());
         let download_release = release.clone();
-        let download = cx.background_executor().spawn(async move {
-            quill::update_install::download_and_stage(&download_release, true)
-        });
+        let download = cx
+            .background_executor()
+            .spawn(async move { quill::update_install::download_and_stage(&download_release) });
         cx.spawn(async move |this, cx| {
             let result = download.await;
             let _ = this.update(cx, |this, cx| {

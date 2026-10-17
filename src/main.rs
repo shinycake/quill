@@ -166,6 +166,11 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    // A staged update installs at the next start (tdesktop `checkReadyUpdate`).
+    if quill::update_install::apply_on_start() {
+        return;
+    }
+
     // Crash handlers go in before GPUI, AppKit and TDLib start (crash_log).
     quill::crash_log::begin_app_run();
 

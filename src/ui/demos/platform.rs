@@ -51,10 +51,10 @@ impl QuillApp {
             let supported = std::env::var("QUILL_DEMO_SELF_UPDATE")
                 .ok()
                 .is_none_or(|v| v != "0");
-            quill::update_install::force_can_install_here(Some(supported));
-            quill::advanced::auto_update::set_install_automatically(
-                std::env::var("QUILL_DEMO_AUTO_UPDATE").is_ok_and(|v| v == "1"),
-            );
+            quill::update_install::force_self_update_available(Some(supported));
+            if std::env::var("QUILL_DEMO_AUTO_UPDATE").is_ok_and(|v| v == "1") {
+                quill::advanced::auto_update::set_install_automatically(true);
+            }
         }
         let release = quill::updater::ReleaseInfo {
             version: "0.2.0".into(),
@@ -77,9 +77,13 @@ impl QuillApp {
                 "Download interrupted. Retry the update.",
             ),
             UpdateDemo::Install => quill::updater::UpdateState::Available(release),
-            UpdateDemo::Staged => {
-                quill::updater::UpdateState::Staged(release, "update-plan.json".into())
-            }
+            UpdateDemo::Staged => quill::updater::UpdateState::Staged(
+                quill::updater::ReleaseInfo {
+                    notes: "Improved navigation, video playback and accessibility.".into(),
+                    ..release
+                },
+                "update-plan.json".into(),
+            ),
         };
         self.settings.appearance_open = true;
     }

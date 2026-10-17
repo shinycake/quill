@@ -281,27 +281,20 @@ impl QuillApp {
     }
 
     /// "Install updates automatically" (tdesktop `cAutoUpdate`), off by
-    /// default. Where this installation cannot replace itself (package
-    /// manager, read-only folder, app bundle) the switch is disabled and says
-    /// where to get updates instead.
+    /// default. Where this installation cannot replace itself (macOS bundle,
+    /// package manager, read-only folder) the switch is off and disabled and
+    /// the hint says why. It stays visible while a download runs; turning it
+    /// off does not cancel one (a staged update still installs at the next
+    /// start, as in tdesktop).
     pub(super) fn auto_update_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.auto_update_row_for(quill::update_install::can_install_here(), cx)
-    }
-
-    pub(super) fn auto_update_row_for(
-        &self,
-        self_update_supported: bool,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if !self.update_options_visible() {
+        if !self.appearance.check_updates_on_launch {
             return None;
         }
+        let row = auto_update::row_state(
+            auto_update::install_automatically(),
+            quill::update_install::self_update_available(),
+        );
         let label = tr(keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY);
-        let hint = if self_update_supported {
-            tr(keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_HINT)
-        } else {
-            tr(keys::Q_OPS_INSTALL_THE_RELEASE_PACKAGE_FROM)
-        };
         Some(
             div()
                 .flex()
@@ -316,10 +309,8 @@ impl QuillApp {
                         .child(div().text_sm().child(label))
                         .child(
                             Switch::new("install-updates-automatically")
-                                .checked(
-                                    self_update_supported && auto_update::install_automatically(),
-                                )
-                                .disabled(!self_update_supported)
+                                .checked(row.checked)
+                                .disabled(!row.enabled)
                                 .accessibility_label(label)
                                 .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                     auto_update::set_install_automatically(on);
@@ -334,7 +325,7 @@ impl QuillApp {
                         .id("install-updates-automatically-hint")
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(hint),
+                        .child(tr(row.hint)),
                 )
                 .into_any_element(),
         )
