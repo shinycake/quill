@@ -1,2 +1,0 @@
-# The "Reposted from" line opens the original story, else its poster, else a
-# note that it expired. README has no line for it yet; nothing to flip.
