@@ -56,6 +56,10 @@ pub enum UpdateState {
     DownloadFailed(ReleaseInfo, &'static str),
     InstallFailed(ReleaseInfo, &'static str),
     Installed(ReleaseInfo),
+    /// Downloaded and verified in the background ("Install updates
+    /// automatically"); the path is the install plan, applied the next time
+    /// Quill starts or when the user presses "Restart to update".
+    Staged(ReleaseInfo, std::path::PathBuf),
     UpToDate,
     NoRelease,
     Failed(&'static str),
@@ -71,6 +75,10 @@ impl UpdateState {
             Self::Installing(_) => "Installing update and restarting…".into(),
             Self::DownloadFailed(_, message) | Self::InstallFailed(_, message) => (*message).into(),
             Self::Installed(release) => format!("Updated to Quill {}", release.version),
+            Self::Staged(release, _) => crate::lang::tr_with(
+                crate::lang::keys::Q_OPS_UPDATE_READY_RESTART,
+                &[("release_version", release.version.as_str())],
+            ),
             Self::UpToDate => "Quill is up to date.".into(),
             Self::NoRelease => "No published Quill release is available yet.".into(),
             Self::Failed(message) => (*message).into(),
@@ -251,6 +259,21 @@ pub fn check_release(beta: bool) -> UpdateState {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_staged_update_says_it_is_ready_and_waits_for_a_restart() {
+        let release = ReleaseInfo {
+            version: "9.9.9".into(),
+            notes: String::new(),
+            url: String::new(),
+            asset: None,
+        };
+        let label = UpdateState::Staged(release, "plan.json".into()).label();
+        assert!(
+            label.contains("9.9.9") && label.contains("Restart to apply"),
+            "{label}"
+        );
+    }
 
     #[test]
     fn update_asset_is_the_package_on_linux_and_windows() {

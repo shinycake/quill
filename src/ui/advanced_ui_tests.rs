@@ -331,3 +331,167 @@ fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestA
         assert_eq!(app.connection.status_note(), SWITCHED_TO_PRODUCTION);
     });
 }
+
+/// The auto-update switch and the self-update answer are process-wide; the
+/// tests that touch them take this lock.
+static AUTO_UPDATE_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Opens the update section with the answer of `self_update_available`
+/// forced, scrolled until the switch shows.
+fn update_section(
+    cx: &mut TestAppContext,
+    supported: bool,
+) -> (Entity<QuillApp>, VisualTestContext) {
+    let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-install");
+    quill::update_install::force_self_update_available(Some(supported));
+    app.update(&mut vcx, |_, cx| cx.notify());
+    let mut shown = false;
+    for _ in 0..40 {
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.render_frame(cx));
+        shown = vcx.update(|window, _| {
+            window
+                .try_find("install-updates-automatically")
+                .is_some_and(|row| row.visible())
+        });
+        if shown {
+            break;
+        }
+        vcx.simulate_event(gpui_kit::ScrollWheelEvent {
+            position: gpui_kit::point(px(550.), px(400.)),
+            delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-200.))),
+            modifiers: Modifiers::default(),
+            touch_phase: gpui_kit::TouchPhase::Moved,
+        });
+    }
+    assert!(shown, "the auto-update switch rendered on screen");
+    (app, vcx)
+}
+
+#[gpui_kit::test]
+fn the_auto_update_switch_flips_the_setting(cx: &mut TestAppContext) {
+    use quill::advanced::auto_update;
+    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    auto_update::set_install_automatically(false);
+    let (_app, mut vcx) = update_section(cx, true);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| window.click("install-updates-automatically", cx));
+    vcx.run_until_parked();
+    assert!(auto_update::install_automatically(), "on after one click");
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.update(|window, cx| window.click("install-updates-automatically", cx));
+    vcx.run_until_parked();
+    assert!(!auto_update::install_automatically(), "off again");
+    quill::update_install::force_self_update_available(None);
+}
+
+#[gpui_kit::test]
+fn the_auto_update_switch_is_off_and_disabled_where_the_install_cannot_update_itself(
+    cx: &mut TestAppContext,
+) {
+    use quill::advanced::auto_update;
+    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    auto_update::set_install_automatically(true);
+    let (_app, mut vcx) = update_section(cx, false);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| window.click("install-updates-automatically", cx));
+    vcx.run_until_parked();
+    assert!(
+        auto_update::install_automatically(),
+        "a disabled switch ignores the click (the stored choice is untouched)"
+    );
+    auto_update::set_install_automatically(false);
+    quill::update_install::force_self_update_available(None);
+}
+
+/// The call in `check_for_updates`: a release the check found is staged at
+/// once when the user opted in, and only shown otherwise.
+#[gpui_kit::test]
+fn a_release_the_check_finds_is_staged_only_when_opted_in(cx: &mut TestAppContext) {
+    use quill::advanced::auto_update;
+    use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
+    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    // Forced: the download in the background refuses at once, offline.
+    quill::update_install::force_self_update_available(Some(true));
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let release = ReleaseInfo {
+        version: "999.0.0".into(),
+        notes: String::new(),
+        url: format!("{RELEASES_URL}/tag/v999.0.0"),
+        asset: Some(ReleaseAsset {
+            url: format!(
+                "{RELEASES_URL}/download/v999.0.0/{}",
+                quill::updater::update_asset_name()
+            ),
+            size: 100,
+            sha256: "a".repeat(64),
+        }),
+    };
+    for opted_in in [false, true] {
+        auto_update::set_install_automatically(opted_in);
+        app.update_in(vcx, |app, _, cx| {
+            app.appearance.check_updates_on_launch = true;
+            app.settings.update_state = UpdateState::Idle;
+            app.apply_check_result(UpdateState::Available(release.clone()), cx);
+            let state = &app.settings.update_state;
+            if opted_in {
+                assert!(
+                    matches!(state, UpdateState::Downloading(r) if r.version == "999.0.0"),
+                    "opted in: the release is downloaded and staged"
+                );
+            } else {
+                assert!(
+                    matches!(state, UpdateState::Available(_)),
+                    "opted out: only the card"
+                );
+            }
+        });
+        vcx.run_until_parked();
+    }
+    app.update_in(vcx, |app, _, _| {
+        assert!(
+            matches!(app.settings.update_state, UpdateState::DownloadFailed(..)),
+            "the download finished (offline here) and its result is shown"
+        );
+    });
+    auto_update::set_install_automatically(false);
+    quill::update_install::force_self_update_available(None);
+}
+
+#[gpui_kit::test]
+fn the_auto_update_row_follows_the_update_check_switch(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.appearance.check_updates_on_launch = true;
+        assert!(app.auto_update_row(cx).is_some());
+        app.settings.update_state =
+            quill::updater::UpdateState::Downloading(quill::updater::ReleaseInfo {
+                version: "9.9.9".into(),
+                notes: String::new(),
+                url: String::new(),
+                asset: None,
+            });
+        assert!(
+            app.auto_update_row(cx).is_some(),
+            "stays while a download runs"
+        );
+        app.appearance.check_updates_on_launch = false;
+        assert!(app.auto_update_row(cx).is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn a_staged_update_shows_the_banner_and_asks_for_a_restart(cx: &mut TestAppContext) {
+    let (_app, _shell, mut vcx) = new_app_on(cx, "ready-update-staged");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    // Buttons are observed; the banner's own buttons prove it is on screen.
+    assert!(
+        vcx.update(|window, _| window.try_find("dismiss-update-banner").is_some()),
+        "the update banner shows for a staged update"
+    );
+    assert!(vcx.update(|window, _| window.try_find("show-release-notes").is_some()),);
+}

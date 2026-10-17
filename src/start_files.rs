@@ -173,6 +173,32 @@ pub fn forwarded_args(args: &[String], cwd: &Path) -> Vec<String> {
         .collect()
 }
 
+/// What a launch that installs a staged update passes on to the new version
+/// (tdesktop's updater relaunches with `-autostart` and `-startintray`):
+/// `--start-minimized`, then after `--` the links and the files, absolute, so
+/// [`parse_start_args`] and the deep-link check read them as this launch
+/// would have. Files whose path is not valid UTF-8 are dropped.
+pub fn relaunch_args(args: &[String], cwd: &Path) -> Vec<String> {
+    let parsed = parse_start_args(args, cwd);
+    let start_minimized = args.iter().any(|arg| arg == "--start-minimized");
+    let positional: Vec<String> = parsed
+        .links
+        .into_iter()
+        .chain(
+            parsed
+                .files
+                .iter()
+                .filter_map(|file| file.to_str().map(str::to_string)),
+        )
+        .collect();
+    start_minimized
+        .then(|| "--start-minimized".to_string())
+        .into_iter()
+        .chain((!positional.is_empty()).then(|| "--".to_string()))
+        .chain(positional)
+        .collect()
+}
+
 /// The files in a forwarded argument list and the arguments that are left
 /// for the link handler. Each file is checked again: the sender is another
 /// process, and the path must still be there.
@@ -260,7 +286,7 @@ pub fn take_files() -> Vec<PathBuf> {
 mod tests {
     use super::{
         FORWARD_PREFIX, MAX_ARG_BYTES, QUIT_FLAG, StartArgs, forwarded_args, parse_start_args,
-        quit_requested, split_forwarded,
+        quit_requested, relaunch_args, split_forwarded,
     };
     use std::path::PathBuf;
 
@@ -349,6 +375,43 @@ mod tests {
         let (files, rest) = split_forwarded(&sent);
         assert_eq!(files, vec![file]);
         assert_eq!(rest, vec!["tg://resolve?domain=a", "--start-minimized"]);
+    }
+
+    #[test]
+    fn an_update_relaunch_keeps_the_flags_links_and_files_of_the_launch() {
+        let dir = scratch("relaunch");
+        let file = dir.join("-dash.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let launch = args(&[
+            "--start-minimized",
+            "tg:resolve?domain=a",
+            "--",
+            "-dash.txt",
+        ]);
+        let relaunch = relaunch_args(&launch, &dir);
+        assert_eq!(
+            relaunch,
+            vec![
+                "--start-minimized".to_string(),
+                "--".to_string(),
+                "tg://resolve?domain=a".to_string(),
+                file.to_str().unwrap().to_string(),
+            ]
+        );
+        // The new version reads them as this launch did, from any directory.
+        let elsewhere = scratch("relaunch-cwd");
+        assert_eq!(
+            parse_start_args(&relaunch, &elsewhere),
+            parse_start_args(&launch, &dir)
+        );
+        let with_program: Vec<String> = std::iter::once("quill".to_string())
+            .chain(relaunch.iter().cloned())
+            .collect();
+        assert_eq!(
+            crate::connect::detect_deep_link_arg(&with_program).as_deref(),
+            Some("tg://resolve?domain=a")
+        );
+        assert!(relaunch_args(&args(&["--connect-smoke"]), &dir).is_empty());
     }
 
     #[test]

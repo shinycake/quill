@@ -1,4 +1,7 @@
-//! Release checks run off the UI thread and never install silently.
+//! Release checks run off the UI thread. Nothing installs without the user's
+//! click, unless they turned on "Install updates automatically": then a new
+//! release is downloaded and staged, and installs the next time Quill starts
+//! (`update_install::apply_on_start`). Quill never restarts itself.
 #![deny(clippy::indexing_slicing)]
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
@@ -13,7 +16,10 @@ impl QuillApp {
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.settings.update_state,
-            UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
+            UpdateState::Checking
+                | UpdateState::Downloading(_)
+                | UpdateState::Installing(_)
+                | UpdateState::Staged(..)
         ) {
             return;
         }
@@ -33,11 +39,75 @@ impl QuillApp {
                     this.check_for_updates(cx);
                     return;
                 }
-                this.settings.update_state = state;
+                this.apply_check_result(state, cx);
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The answer of a release check: shown, and staged when the user opted
+    /// in.
+    pub(super) fn apply_check_result(&mut self, state: UpdateState, cx: &mut Context<Self>) {
+        self.settings.update_state = state;
+        self.stage_if_opted_in(cx);
+        cx.notify();
+    }
+
+    /// "Install updates automatically": a release the check just found is
+    /// downloaded and staged without a click (`auto_update::staging_candidate`).
+    pub(super) fn stage_if_opted_in(&mut self, cx: &mut Context<Self>) {
+        let candidate = quill::advanced::auto_update::staging_candidate(
+            &self.settings.update_state,
+            quill::advanced::auto_update::install_automatically(),
+            self.appearance.check_updates_on_launch,
+            quill::update_install::self_update_available(),
+        );
+        if let Some(release) = candidate {
+            self.stage_update(release, cx);
+        }
+    }
+
+    /// Downloads, verifies and stages `release` in the background. The update
+    /// is applied at the next start (`update_install::apply_on_start`) or when
+    /// the user presses "Restart to update"; Quill never restarts itself.
+    fn stage_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
+        self.settings.update_state = UpdateState::Downloading(release.clone());
+        let download_release = release.clone();
+        let download = cx
+            .background_executor()
+            .spawn(async move { quill::update_install::download_and_stage(&download_release) });
+        cx.spawn(async move |this, cx| {
+            let result = download.await;
+            let _ = this.update(cx, |this, cx| {
+                this.settings.update_state = match result {
+                    Ok(plan) => UpdateState::Staged(release, plan),
+                    Err(message) => UpdateState::DownloadFailed(release, message),
+                };
                 cx.notify();
             });
         })
         .detach();
+        cx.notify();
+    }
+
+    /// "Restart to update": install the staged update and start the new
+    /// version.
+    fn restart_to_update(&mut self, cx: &mut Context<Self>) {
+        let UpdateState::Staged(release, plan) = &self.settings.update_state else {
+            return;
+        };
+        let release = release.clone();
+        match quill::update_install::hand_off(plan) {
+            Ok(()) => {
+                self.settings.update_state = UpdateState::Installing(release);
+                cx.quit();
+            }
+            Err(_) => {
+                self.settings.update_state =
+                    UpdateState::InstallFailed(release, tr(keys::Q_OPS_COULD_NOT_START_THE_UPDATE));
+            }
+        }
         cx.notify();
     }
 
@@ -57,7 +127,7 @@ impl QuillApp {
             let result = download.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(plan) => match quill::update_install::launch_helper(&plan) {
+                    Ok(plan) => match quill::update_install::hand_off(&plan) {
                         Ok(()) => {
                             this.settings.update_state = UpdateState::Installing(release);
                             cx.quit();
@@ -114,6 +184,7 @@ impl QuillApp {
                     .text_sm()
                     .child(self.settings.update_state.label()),
             )
+            .children(self.auto_update_row(cx))
             .children(self.install_beta_row(cx))
             .child(
                 Button::new("check-for-updates")
@@ -123,12 +194,14 @@ impl QuillApp {
                         UpdateState::Checking
                             | UpdateState::Downloading(_)
                             | UpdateState::Installing(_)
+                            | UpdateState::Staged(..)
                     ))
                     .on_click(cx.listener(|this, _, _, cx| this.check_for_updates(cx))),
             );
         if let UpdateState::Available(release)
         | UpdateState::DownloadFailed(release, _)
         | UpdateState::InstallFailed(release, _)
+        | UpdateState::Staged(release, _)
         | UpdateState::Installed(release) = &self.settings.update_state
         {
             let url = release.url.clone();
@@ -167,6 +240,12 @@ impl QuillApp {
                             }
                             cx.notify();
                         })),
+                );
+            } else if matches!(self.settings.update_state, UpdateState::Staged(..)) {
+                section = section.child(
+                    Button::new("restart-to-update")
+                        .label(tr(keys::Q_OPS_RESTART_TO_UPDATE))
+                        .on_click(cx.listener(|this, _, _, cx| this.restart_to_update(cx))),
                 );
             } else if release.asset.is_some() && quill::update_install::can_install_here() {
                 let release = release.clone();
@@ -241,7 +320,7 @@ impl QuillApp {
     pub(super) fn update_banner(&self, cx: &mut Context<Self>) -> AnyElement {
         if !matches!(
             self.settings.update_state,
-            UpdateState::Available(_) | UpdateState::Installed(_)
+            UpdateState::Available(_) | UpdateState::Staged(..) | UpdateState::Installed(_)
         ) {
             return div().into_any_element();
         }
