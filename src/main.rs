@@ -827,25 +827,6 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 .await;
                             continue;
                         }
-                        // `z:x,y,delta` sends one trackpad pinch
-                        // (`ui::screenshot_demo_input::pinch_step`).
-                        if let Some(pinch) = point.strip_prefix("z:") {
-                            if let Some(event) = ui::screenshot_demo_input::pinch_step(pinch) {
-                                let _ = AnyWindowHandle::from(demo_window).update(
-                                    cx,
-                                    |_, window, cx| {
-                                        window.dispatch_event(
-                                            gpui_kit::gpui::PlatformInput::Pinch(event),
-                                            cx,
-                                        );
-                                    },
-                                );
-                            }
-                            cx.background_executor()
-                                .timer(Duration::from_millis(40))
-                                .await;
-                            continue;
-                        }
                         // `s:x,y,dy` scrolls by `dy` px at the point instead.
                         if let Some(scroll) = point.strip_prefix("s:") {
                             let parts: Vec<f32> = scroll

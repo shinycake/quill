@@ -71,7 +71,6 @@ order after the window is ready):
 | `mid:x,y` | middle click |
 | `k:key` | one key press, GPUI key names (`escape`, `enter`, `space`, `cmd-f`) |
 | `w:x,y,dx,dy,s\|m\|e[,cmd]` | one phased trackpad scroll event (`cmd` holds Cmd, Ctrl off macOS) |
-| `z:x,y,delta` | one trackpad pinch centred on the point (positive `delta` zooms in) |
 | `p:ms` | pause |
 
 Other switches: `QUILL_DEMO_THEME=dark|high-contrast`,
