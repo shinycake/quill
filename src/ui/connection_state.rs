@@ -166,7 +166,7 @@ mod tests {
     fn a_finished_toast_frees_the_note() {
         let mut c = connection();
         c.set_note(StatusNote::error("Couldn't send"));
-        c.advance_toasts(Instant::now() + std::time::Duration::from_secs(7));
+        c.advance_toasts(std::time::Instant::now() + std::time::Duration::from_secs(7));
         assert!(c.note().is_empty());
         c.set_note(StatusNote::silent("sending…"));
         assert_eq!(c.status_note(), "sending…");
