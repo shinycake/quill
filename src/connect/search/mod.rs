@@ -20,6 +20,7 @@ use crate::telegram::requests::{
 
 mod chat_search;
 mod shared_media_calendar;
+mod shared_media_search;
 mod sponsored;
 mod tabs;
 

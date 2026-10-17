@@ -99,6 +99,7 @@ impl QuillApp {
         self.frame.main_width = window.viewport_size().width;
         // Also records the peek and whether the topics are on screen.
         self.forum_column_layout(window);
+        self.keep_shared_media_search_field(window, cx);
         let input = self.shell_input();
         let layout = shell_layout(input);
         self.seed_history_width(chat_pane_width(input, &layout));
