@@ -43,6 +43,7 @@ fn panicking_player(after: usize, audio: bool) -> Player {
         want_audio: audio,
         video_frames: 4,
         output: PixelOutput::Bgra,
+        hardware: false,
     };
     Player::with_demuxer(Box::new(demuxer), options).expect("spawn the decode thread")
 }

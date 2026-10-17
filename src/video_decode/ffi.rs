@@ -11,12 +11,26 @@ use super::nv12::{PixelOutput, Pixels, YuvColor, YuvMatrix, pack_nv12, plane_spa
 use super::{AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, VideoFrame, rotate_bgra};
 
 /// `QV_ABI_VERSION` in `quillvideo.h`.
-const ABI_VERSION: i32 = 2;
+const ABI_VERSION: i32 = 3;
 const ITEM_VIDEO: i32 = 1;
 const ITEM_AUDIO: i32 = 2;
 /// `QV_PIXEL_*` in `quillvideo.h`.
 const PIXEL_BGRA: i32 = 0;
 const PIXEL_NV12: i32 = 1;
+/// `QV_HW_*` in `quillvideo.h`.
+const HW_OFF: i32 = 0;
+const HW_ALLOWED: i32 = 1;
+#[cfg(test)]
+const HW_FAIL_THIRD_PICTURE: i32 = 2;
+#[cfg(test)]
+const HW_FAIL_THIRD_PICTURE_AND_REOPEN: i32 = 3;
+
+/// The shim's stand-in hardware decoders (`QV_HW_FAIL_*`).
+#[cfg(test)]
+pub(super) enum StandIn {
+    FailThirdPicture,
+    FailThirdPictureAndReopen,
+}
 
 #[repr(C)]
 struct QvOptions {
@@ -24,6 +38,7 @@ struct QvOptions {
     max_height: i32,
     threads: i32,
     want_audio: i32,
+    hw: i32,
 }
 
 #[repr(C)]
@@ -39,6 +54,26 @@ struct QvInfo {
     channels: i32,
     video_codec: [u8; 24],
     audio_codec: [u8; 24],
+    hw: i32,
+}
+
+impl QvInfo {
+    fn empty() -> Self {
+        Self {
+            duration: 0.0,
+            frame_rate: 0.0,
+            width: 0,
+            height: 0,
+            rotation: 0,
+            has_video: 0,
+            has_audio: 0,
+            sample_rate: 0,
+            channels: 0,
+            video_codec: [0; 24],
+            audio_codec: [0; 24],
+            hw: 0,
+        }
+    }
 }
 
 #[repr(C)]
@@ -303,6 +338,24 @@ fn codec_name(raw: &[u8; 24]) -> String {
 
 impl FfiDemuxer {
     pub(super) fn open(path: &Path, options: &OpenOptions) -> Result<Self, String> {
+        let hw = if options.hardware { HW_ALLOWED } else { HW_OFF };
+        Self::open_with(path, options, hw)
+    }
+
+    #[cfg(test)]
+    pub(super) fn open_stand_in(
+        path: &Path,
+        options: &OpenOptions,
+        stand_in: StandIn,
+    ) -> Result<Self, String> {
+        let hw = match stand_in {
+            StandIn::FailThirdPicture => HW_FAIL_THIRD_PICTURE,
+            StandIn::FailThirdPictureAndReopen => HW_FAIL_THIRD_PICTURE_AND_REOPEN,
+        };
+        Self::open_with(path, options, hw)
+    }
+
+    fn open_with(path: &Path, options: &OpenOptions, hw: i32) -> Result<Self, String> {
         let api = api().map_err(str::to_string)?;
         let utf8 = path.to_str().ok_or("video path is not valid UTF-8")?;
         let c_path = CString::new(utf8).map_err(|_| "invalid video path")?;
@@ -311,6 +364,7 @@ impl FfiDemuxer {
             max_height: i32::try_from(options.max_height).unwrap_or(i32::MAX),
             threads: i32::try_from(options.threads).unwrap_or(0),
             want_audio: i32::from(options.want_audio),
+            hw,
         };
         let mut err = [0u8; 256];
         // SAFETY: valid NUL-terminated path, options struct and error buffer
@@ -332,19 +386,7 @@ impl FfiDemuxer {
                 message
             });
         }
-        let mut raw = QvInfo {
-            duration: 0.0,
-            frame_rate: 0.0,
-            width: 0,
-            height: 0,
-            rotation: 0,
-            has_video: 0,
-            has_audio: 0,
-            sample_rate: 0,
-            channels: 0,
-            video_codec: [0; 24],
-            audio_codec: [0; 24],
-        };
+        let mut raw = QvInfo::empty();
         // SAFETY: `ctx` is a live context; `raw` is a valid out pointer.
         unsafe { (api.info)(ctx, &mut raw) };
         let rotation = match raw.rotation {
@@ -368,8 +410,35 @@ impl FfiDemuxer {
             channels: raw.channels.clamp(0, 2) as u16,
             video_codec: codec_name(&raw.video_codec),
             audio_codec: codec_name(&raw.audio_codec),
+            hardware: raw.hw != 0,
         };
+        trace_decoder(&info, "opened");
         Ok(Self { api, ctx, info })
+    }
+
+    fn refresh_hardware_flag(&mut self) {
+        if !self.info.hardware {
+            return;
+        }
+        let mut raw = QvInfo::empty();
+        // SAFETY: `ctx` is a live context; `raw` is a valid out pointer.
+        unsafe { (self.api.info)(self.ctx, &mut raw) };
+        if raw.hw == 0 {
+            self.info.hardware = false;
+            trace_decoder(&self.info, "fell back");
+        }
+    }
+}
+
+fn trace_decoder(info: &MediaInfo, event: &str) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_VIDEO").is_some()) && info.has_video {
+        let decoder = if info.hardware {
+            "hardware"
+        } else {
+            "software"
+        };
+        eprintln!("VD,{event},{},{decoder}", info.video_codec);
     }
 }
 
@@ -386,13 +455,16 @@ impl Demuxer for FfiDemuxer {
             return Ok(None);
         }
         if r < 0 {
+            self.refresh_hardware_flag();
             return Err(format!("decoding failed ({r})"));
         }
         let pts = if item.pts.is_finite() { item.pts } else { 0.0 };
         match item.kind {
-            ITEM_VIDEO => self
-                .picture(&item, pts)
-                .map(|frame| Some(Item::Video(frame))),
+            ITEM_VIDEO => {
+                let frame = self.picture(&item, pts);
+                self.refresh_hardware_flag();
+                frame.map(|frame| Some(Item::Video(frame)))
+            }
             ITEM_AUDIO => {
                 let channels = usize::from(self.info.channels.max(1));
                 if item.samples <= 0 || item.data.is_null() {

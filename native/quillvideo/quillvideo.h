@@ -22,7 +22,7 @@
 #endif
 
 /* Bumped whenever a struct or signature below changes. */
-#define QV_ABI_VERSION 2
+#define QV_ABI_VERSION 3
 
 typedef struct QvOptions {
   /* Scale video down (never up) to fit within this box, keeping the aspect
@@ -33,7 +33,20 @@ typedef struct QvOptions {
   int32_t threads;
   /* Decode the soundtrack too (otherwise audio packets are skipped). */
   int32_t want_audio;
+  /* ABI 3: QV_HW_*. With QV_HW_ALLOWED the video decodes on the GPU when
+   * the platform and codec allow it, and in software otherwise. */
+  int32_t hw;
 } QvOptions;
+
+#define QV_HW_OFF 0
+#define QV_HW_ALLOWED 1
+/* Tests: as QV_HW_ALLOWED, with a stand-in hardware decoder whose third
+ * picture fails like a GPU transfer does, so the software fallback runs on
+ * machines without a GPU. */
+#define QV_HW_FAIL_THIRD_PICTURE 2
+/* Tests: as QV_HW_FAIL_THIRD_PICTURE, and the software decoder then fails to
+ * open, so the hardware decoder has to stay in charge. */
+#define QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN 3
 
 typedef struct QvInfo {
   /* Seconds; <= 0 when unknown. */
@@ -53,6 +66,10 @@ typedef struct QvInfo {
   /* NUL-terminated short codec names, e.g. "h264", "aac". */
   char video_codec[24];
   char audio_codec[24];
+  /* ABI 3: 1 while the video decodes in hardware. It drops to 0, and stays
+   * there, when the decoder hands out software pictures or the hardware
+   * fails (the shim then reopens the decoder in software and carries on). */
+  int32_t hw;
 } QvInfo;
 
 #define QV_ITEM_VIDEO 1

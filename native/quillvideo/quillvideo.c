@@ -3,7 +3,9 @@
  * decodes its best video and audio streams with libavcodec, converts
  * pictures to BGRA (libswscale, scaled into the caller's box) or, when asked
  * and the picture allows, hands them over as NV12 without a colour
- * conversion, and sound to interleaved f32 (libswresample). Quill runs one
+ * conversion, and sound to interleaved f32 (libswresample). With QV_HW_ALLOWED
+ * the video decodes on the GPU where it can (tdesktop's platform order) and
+ * pictures are copied back to memory. Quill runs one
  * context per player on a background thread and does all queueing, timing
  * and A/V sync itself.
  */
@@ -13,8 +15,10 @@
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/display.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/time.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
@@ -32,6 +36,11 @@ typedef struct Ctx {
   int aidx;
   AVPacket *pkt;
   AVFrame *frame;
+  int threads;
+  enum AVPixelFormat hw_fmt;
+  AVFrame *sw_frame;
+  int stand_in_pictures_left;
+  int stand_in_reopen_fails;
   /* File start time (seconds): pts are reported relative to it. */
   double start;
   int max_w;
@@ -98,7 +107,63 @@ static int stream_rotation(const AVStream *st) {
   return quarter * 90;
 }
 
-static AVCodecContext *open_decoder(AVStream *st, int threads, int *code) {
+/* tdesktop's order (ffmpeg_utility.cpp GetHwFormat). */
+static const enum AVHWDeviceType HW_ORDER[] = {
+#if defined(_WIN32)
+    AV_HWDEVICE_TYPE_D3D11VA,
+    AV_HWDEVICE_TYPE_DXVA2,
+#elif defined(__APPLE__)
+    AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+#else
+    AV_HWDEVICE_TYPE_VAAPI,
+    AV_HWDEVICE_TYPE_VDPAU,
+#endif
+};
+
+static enum AVPixelFormat hw_format(const AVCodec *codec,
+                                    enum AVHWDeviceType type) {
+  for (int i = 0;; i++) {
+    const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+    if (!config)
+      return AV_PIX_FMT_NONE;
+    if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+        config->device_type == type)
+      return config->pix_fmt;
+  }
+}
+
+static enum AVPixelFormat pick_format(AVCodecContext *dec,
+                                      const enum AVPixelFormat *formats) {
+  const Ctx *c = dec->opaque;
+  enum AVPixelFormat software = AV_PIX_FMT_NONE;
+  for (const enum AVPixelFormat *p = formats; *p != AV_PIX_FMT_NONE; p++) {
+    if (*p == c->hw_fmt)
+      return *p;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(*p);
+    if (desc && !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL))
+      software = *p;
+  }
+  return software;
+}
+
+static void attach_hw(Ctx *c, AVCodecContext *dec, const AVCodec *codec) {
+  for (size_t i = 0; i < sizeof HW_ORDER / sizeof HW_ORDER[0]; i++) {
+    enum AVPixelFormat format = hw_format(codec, HW_ORDER[i]);
+    if (format == AV_PIX_FMT_NONE)
+      continue;
+    AVBufferRef *device = NULL;
+    if (av_hwdevice_ctx_create(&device, HW_ORDER[i], NULL, NULL, 0) < 0)
+      continue;
+    dec->hw_device_ctx = device;
+    dec->opaque = c;
+    dec->get_format = pick_format;
+    c->hw_fmt = format;
+    return;
+  }
+}
+
+static AVCodecContext *open_decoder(Ctx *c, AVStream *st, int threads, int hw,
+                                    int *code) {
   const AVCodec *codec = NULL;
   /* VP8/VP9 with an alpha plane: only libvpx decodes it (when built in). */
   if (st->codecpar->codec_id == AV_CODEC_ID_VP9 &&
@@ -123,6 +188,8 @@ static AVCodecContext *open_decoder(AVStream *st, int threads, int *code) {
   dec->pkt_timebase = st->time_base;
   dec->thread_count = threads > 0 ? threads : 0;
   dec->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+  if (hw)
+    attach_hw(c, dec, codec);
   *code = avcodec_open2(dec, codec, NULL);
   if (*code < 0) {
     avcodec_free_context(&dec);
@@ -175,6 +242,8 @@ void *qv_open(const char *path, const QvOptions *options, char *err,
   c->nsws_fmt = -1;
   c->swr_fmt = -1;
   c->out_fmt = QV_PIXEL_BGRA;
+  c->threads = options->threads;
+  c->hw_fmt = AV_PIX_FMT_NONE;
 
   /* Local files only: no network or other protocols, ever. */
   AVDictionary *opts = NULL;
@@ -212,7 +281,12 @@ void *qv_open(const char *path, const QvOptions *options, char *err,
   int code = 0;
   if (c->vidx >= 0) {
     AVStream *st = c->fmt->streams[c->vidx];
-    c->vdec = open_decoder(st, options->threads, &code);
+    int hw = options->hw != QV_HW_OFF;
+    c->vdec = open_decoder(c, st, options->threads, hw, &code);
+    if (!c->vdec && hw) {
+      c->hw_fmt = AV_PIX_FMT_NONE;
+      c->vdec = open_decoder(c, st, options->threads, 0, &code);
+    }
     if (!c->vdec) {
       set_err(err, err_len, "can't decode the video", code);
       qv_close(c);
@@ -227,12 +301,20 @@ void *qv_open(const char *path, const QvOptions *options, char *err,
     AVRational rate = av_guess_frame_rate(c->fmt, st, NULL);
     c->info.frame_rate = rate.num > 0 && rate.den > 0 ? av_q2d(rate) : 0.0;
     c->info.has_video = 1;
+    c->info.hw = c->vdec->hw_device_ctx != NULL;
+    if (options->hw == QV_HW_FAIL_THIRD_PICTURE ||
+        options->hw == QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN) {
+      c->stand_in_pictures_left = 3;
+      c->stand_in_reopen_fails =
+          options->hw == QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN;
+      c->info.hw = 1;
+    }
     snprintf(c->info.video_codec, sizeof c->info.video_codec, "%s",
              avcodec_get_name(st->codecpar->codec_id));
   }
   if (c->aidx >= 0) {
     AVStream *st = c->fmt->streams[c->aidx];
-    c->adec = open_decoder(st, 1, &code);
+    c->adec = open_decoder(c, st, 1, 0, &code);
     if (c->adec) {
       int channels = st->codecpar->ch_layout.nb_channels;
       c->out_channels = channels == 1 ? 1 : 2;
@@ -435,8 +517,7 @@ static int emit_nv12(Ctx *c, const AVFrame *f, int ow, int oh, int cs,
 }
 
 /* Convert the decoded picture; 0 when it is skipped (seeking past it). */
-static int emit_video(Ctx *c, QvItem *out) {
-  AVFrame *f = c->frame;
+static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
   AVStream *st = c->fmt->streams[c->vidx];
   double dur = frame_duration(c, st, f);
   double pts = frame_pts(c, st, f, c->vnext);
@@ -594,12 +675,80 @@ static int emit_audio(Ctx *c, QvItem *out) {
   return 1;
 }
 
+static int restart(Ctx *c, double target, double vskip, double askip) {
+  int64_t ts = (int64_t)((target + c->start) * AV_TIME_BASE);
+  int r = av_seek_frame(c->fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
+  if (r < 0)
+    r = av_seek_frame(c->fmt, -1, ts, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
+  if (r < 0)
+    return r;
+  if (c->vdec)
+    avcodec_flush_buffers(c->vdec);
+  if (c->adec)
+    avcodec_flush_buffers(c->adec);
+  if (c->swr) {
+    /* Drop any samples the resampler held from before the seek. */
+    swr_free(&c->swr);
+  }
+  c->eof_sent = 0;
+  c->vdone = 0;
+  c->adone = 0;
+  c->vskip = c->vdec ? vskip : -1.0;
+  c->askip = c->adec ? askip : -1.0;
+  c->vnext = vskip;
+  c->anext = askip;
+  return 0;
+}
+
+static int fall_back_to_software(Ctx *c) {
+  int code = AVERROR_DECODER_NOT_FOUND;
+  AVCodecContext *dec =
+      c->stand_in_reopen_fails
+          ? NULL
+          : open_decoder(c, c->fmt->streams[c->vidx], c->threads, 0, &code);
+  if (!dec)
+    return code;
+  avcodec_free_context(&c->vdec);
+  c->vdec = dec;
+  c->hw_fmt = AV_PIX_FMT_NONE;
+  c->stand_in_pictures_left = 0;
+  c->info.hw = 0;
+  double after_picture = c->vskip > c->vnext ? c->vskip : c->vnext;
+  double after_sound = c->askip > c->anext ? c->askip : c->anext;
+  double target =
+      c->adec && after_sound < after_picture ? after_sound : after_picture;
+  /* If this seek fails the software decoder stays: the error ends playback,
+   * and the next qv_seek restarts it from a clean state. */
+  return restart(c, target, after_picture, after_sound);
+}
+
+static int picture_in_memory(Ctx *c, const AVFrame **pic) {
+  *pic = c->frame;
+  if (c->stand_in_pictures_left > 0 && --c->stand_in_pictures_left == 0)
+    return AVERROR_EXTERNAL;
+  if (!c->frame->hw_frames_ctx) {
+    if (c->stand_in_pictures_left == 0)
+      c->info.hw = 0;
+    return 0;
+  }
+  if (!c->sw_frame && !(c->sw_frame = av_frame_alloc()))
+    return AVERROR(ENOMEM);
+  av_frame_unref(c->sw_frame);
+  int r = av_hwframe_transfer_data(c->sw_frame, c->frame, 0);
+  if (r >= 0)
+    r = av_frame_copy_props(c->sw_frame, c->frame);
+  if (r < 0)
+    return r;
+  *pic = c->sw_frame;
+  return 0;
+}
+
 /* Pull one frame from a decoder: 1 emitted, 0 none ready (or skipped), < 0
  * error. Marks the decoder done once it is drained after the end. */
-static int drain(Ctx *c, AVCodecContext *dec, int *done, int video,
-                 QvItem *out) {
+static int drain(Ctx *c, int video, QvItem *out) {
+  int *done = video ? &c->vdone : &c->adone;
   for (;;) {
-    int r = avcodec_receive_frame(dec, c->frame);
+    int r = avcodec_receive_frame(video ? c->vdec : c->adec, c->frame);
     if (r == AVERROR(EAGAIN)) {
       if (c->eof_sent)
         *done = 1;
@@ -610,9 +759,23 @@ static int drain(Ctx *c, AVCodecContext *dec, int *done, int video,
       return 0;
     }
     if (r < 0)
-      return r;
-    int k = video ? emit_video(c, out) : emit_audio(c, out);
+      return video && c->info.hw ? fall_back_to_software(c) : r;
+    if (!video) {
+      int k = emit_audio(c, out);
+      av_frame_unref(c->frame);
+      if (k != 0)
+        return k;
+      continue;
+    }
+    const AVFrame *pic = NULL;
+    int k = picture_in_memory(c, &pic);
+    if (k < 0) {
+      av_frame_unref(c->frame);
+      return c->info.hw ? fall_back_to_software(c) : k;
+    }
+    k = emit_video(c, pic, out);
     av_frame_unref(c->frame);
+    av_frame_unref(c->sw_frame);
     if (k != 0)
       return k;
   }
@@ -624,12 +787,12 @@ int32_t qv_next(void *ctx, QvItem *out) {
     return AVERROR(EINVAL);
   for (;;) {
     if (c->vdec && !c->vdone) {
-      int r = drain(c, c->vdec, &c->vdone, 1, out);
+      int r = drain(c, 1, out);
       if (r != 0)
         return r;
     }
     if (c->adec && !c->adone) {
-      int r = drain(c, c->adec, &c->adone, 0, out);
+      int r = drain(c, 0, out);
       if (r != 0)
         return r;
     }
@@ -651,9 +814,16 @@ int32_t qv_next(void *ctx, QvItem *out) {
       continue;
     }
     /* A corrupt packet is dropped; decoding carries on with the next. */
-    if (c->pkt->stream_index == c->vidx && c->vdec)
-      avcodec_send_packet(c->vdec, c->pkt);
-    else if (c->pkt->stream_index == c->aidx && c->adec)
+    if (c->pkt->stream_index == c->vidx && c->vdec) {
+      int sent = avcodec_send_packet(c->vdec, c->pkt);
+      if (sent < 0 && sent != AVERROR(EAGAIN) && c->info.hw) {
+        av_packet_unref(c->pkt);
+        int k = fall_back_to_software(c);
+        if (k < 0)
+          return k;
+        continue;
+      }
+    } else if (c->pkt->stream_index == c->aidx && c->adec)
       avcodec_send_packet(c->adec, c->pkt);
     av_packet_unref(c->pkt);
   }
@@ -665,28 +835,7 @@ int32_t qv_seek(void *ctx, double seconds) {
     return AVERROR(EINVAL);
   if (seconds < 0)
     seconds = 0;
-  int64_t ts = (int64_t)((seconds + c->start) * AV_TIME_BASE);
-  int r = av_seek_frame(c->fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
-  if (r < 0)
-    r = av_seek_frame(c->fmt, -1, ts, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
-  if (r < 0)
-    return r;
-  if (c->vdec)
-    avcodec_flush_buffers(c->vdec);
-  if (c->adec)
-    avcodec_flush_buffers(c->adec);
-  if (c->swr) {
-    /* Drop any samples the resampler held from before the seek. */
-    swr_free(&c->swr);
-  }
-  c->eof_sent = 0;
-  c->vdone = 0;
-  c->adone = 0;
-  c->vskip = c->vdec ? seconds : -1.0;
-  c->askip = c->adec ? seconds : -1.0;
-  c->vnext = seconds;
-  c->anext = seconds;
-  return 0;
+  return restart(c, seconds, seconds, seconds);
 }
 
 void qv_close(void *ctx) {
@@ -698,6 +847,7 @@ void qv_close(void *ctx) {
   avformat_close_input(&c->fmt);
   av_packet_free(&c->pkt);
   av_frame_free(&c->frame);
+  av_frame_free(&c->sw_frame);
   sws_freeContext(c->sws);
   swr_free(&c->swr);
   av_free(c->rgb);

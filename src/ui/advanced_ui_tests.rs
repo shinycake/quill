@@ -232,6 +232,27 @@ fn the_experimental_page_changes_restores_exports_and_imports(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+fn the_hardware_video_switch_on_the_advanced_page_flips_the_setting(cx: &mut TestAppContext) {
+    use quill::advanced::hardware_video;
+    let (app, _shell, mut vcx) = new_app_on(cx, "ready-settings-advanced");
+    let vcx = &mut vcx;
+    hardware_video::set_enabled(true);
+    app.update(vcx, |_, cx| cx.notify());
+    for _ in 0..3 {
+        vcx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        vcx.update(|window, cx| window.render_frame(cx));
+    }
+    vcx.update(|window, cx| window.click("advanced-hardware-video", cx));
+    vcx.run_until_parked();
+    assert!(!hardware_video::enabled(), "off after one click");
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.update(|window, cx| window.click("advanced-hardware-video", cx));
+    vcx.run_until_parked();
+    assert!(hardware_video::enabled(), "on again");
+}
+
+#[gpui_kit::test]
 fn the_install_beta_switch_follows_the_update_switch(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;

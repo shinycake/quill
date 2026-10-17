@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 mod decode_panic;
+mod hardware;
 mod nv12;
 
 fn frame(pts: f64) -> VideoFrame {
@@ -236,6 +237,7 @@ fn scripted_player(frames: Option<usize>, audio: bool, queue: usize) -> (Player,
         want_audio: audio,
         video_frames: queue,
         output: PixelOutput::Bgra,
+        hardware: false,
     };
     (
         Player::with_demuxer(Box::new(demuxer), options).expect("spawn the decode thread"),
