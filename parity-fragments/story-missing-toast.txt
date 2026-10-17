@@ -1,0 +1,4 @@
+# A deleted or expired story shows tdesktop's "This link is broken or has
+# expired." toast instead of a click that does nothing.
+# README wording after the tick: Opening a deleted or expired story shows the broken-link toast
+parity:stories-viewer-missing-toast

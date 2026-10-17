@@ -106,20 +106,10 @@ impl QuillApp {
         // MED4b: debounced `getLinkPreview` prefetch for the
         // detected-URL chip (spawns at most one timer per new URL).
         self.maybe_prefetch_link_preview(cx);
-        // Phase 9.1: resolve a tapped story whose `story` response landed
-        // since the click (`getStory` prefetch finished).
         // Parity slice: prefill the folder editor once its `getChatFolder`
         // spec arrives.
         self.maybe_prefill_folder_editor(window, cx);
-        if let Some((chat_id, story_id)) = self.chat_list.pending_story_open {
-            let ready = self
-                .session()
-                .is_some_and(|s| s.stories.stories.contains_key(&(chat_id, story_id)));
-            if ready {
-                self.chat_list.pending_story_open = None;
-                self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
-            }
-        }
+        self.resolve_pending_story_open(cx);
         // `parity:platform-deep-links`: open the chat the deep link
         // resolved to (take-once; render owns the `Window`).
         if let Some((chat_id, action)) = self.links.pending_deep_link_open.take() {

@@ -28,124 +28,6 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 impl QuillApp {
-    /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`.
-    /// Missing story details for the chat's active stories are fetched with
-    /// `getStory` first; the clicked story opens once its `story` response
-    /// lands in the cache (`pending_story_open`, resolved on the next
-    /// render). `openStory` marks the current story as viewed.
-    pub(super) fn open_story_viewer(
-        &mut self,
-        chat_id: ChatId,
-        story_id: i32,
-        cx: &mut Context<Self>,
-    ) {
-        let missing: Vec<i32> = self
-            .session()
-            .and_then(|session| session.stories.tray.get(&chat_id.0))
-            .map(|tray| {
-                tray.stories
-                    .iter()
-                    .map(|info| info.story_id)
-                    .filter(|id| {
-                        !self
-                            .session()
-                            .is_some_and(|s| s.stories.stories.contains_key(&(chat_id.0, *id)))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        // A story opened from a message (forward or mention) may not be in
-        // the poster's tray at all; fetch it too when it is not cached.
-        let mut missing = missing;
-        let cached = self
-            .session()
-            .is_some_and(|s| s.stories.stories.contains_key(&(chat_id.0, story_id)));
-        if !cached && !missing.contains(&story_id) {
-            missing.push(story_id);
-        }
-        if let Some(live) = self.live.as_mut() {
-            for id in missing {
-                let _ = live.driver.get_story(chat_id, id);
-            }
-        } else if !missing.is_empty() {
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
-            )));
-        }
-        if !self.rebuild_story_viewer(chat_id, story_id, cx) {
-            self.chat_list.pending_story_open = Some((chat_id.0, story_id));
-        }
-        cx.notify();
-    }
-
-    /// Build the viewer items for `chat_id`'s cached stories and open on
-    /// `story_id`. Returns `false` when the clicked story is not cached yet.
-    pub(super) fn rebuild_story_viewer(
-        &mut self,
-        chat_id: ChatId,
-        story_id: i32,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let items: Vec<StoryViewerItem> = self
-            .session()
-            .and_then(|session| {
-                session
-                    .stories
-                    .tray
-                    .get(&chat_id.0)
-                    .map(|tray| collect_story_items(chat_id, tray, &session.stories.stories))
-            })
-            .unwrap_or_default();
-        // A story that is not in the poster's tray opens alone.
-        let items = if items.iter().any(|item| item.story_id == story_id) {
-            items
-        } else {
-            self.session()
-                .map(|s| {
-                    quill::story_viewer::collect_found_story_items(
-                        &[(chat_id.0, story_id)],
-                        &s.stories.stories,
-                    )
-                })
-                .unwrap_or_default()
-        };
-        let Some(index) = items.iter().position(|item| item.story_id == story_id) else {
-            return false;
-        };
-        self.begin_story_viewer(items, index, cx);
-        true
-    }
-
-    /// Open the viewer on `items[index]` and start playback.
-    pub(super) fn begin_story_viewer(
-        &mut self,
-        items: Vec<StoryViewerItem>,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        let current = items.get(index).map(|item| (item.chat_id, item.story_id));
-        self.stories.viewer = StoryViewer::open(items, index);
-        // Phase 9.5: viewers list and report flow are per-story.
-        self.stories.viewers_open = false;
-        self.stories.report_open = false;
-        self.stories.stats_open = false;
-        if let (Some(live), Some((chat_id, story_id))) = (self.live.as_mut(), current) {
-            let _ = live.driver.open_story(chat_id, story_id);
-        }
-        // Phase 9.6: (re)start the playback clock + tick whenever the
-        // viewer (re)opens — also covers the deferred `pending_story_open`
-        // path, which funnels through here.
-        self.stories.playback.start(Instant::now());
-        self.stories.pause.reset();
-        self.stories.native_failed = None;
-        self.stories.video_wait_since = Some(Instant::now());
-        self.sync_story_video(cx);
-        self.ensure_story_tick(cx);
-        self.ensure_story_download(cx);
-        self.ensure_story_custom_emoji_downloads();
-        self.sync_live_story(cx);
-    }
-
     /// Phase 9.2: the viewer story's freshest `ParsedStory` (reaction
     /// state and interaction counts arrive via `updateStory` without the
     /// viewer items being rebuilt).
@@ -973,6 +855,8 @@ impl QuillApp {
 }
 
 pub(in crate::ui) mod chrome;
+#[cfg(feature = "demo-capture")]
+mod demo;
 mod ensure_story_download;
 mod live_comments;
 mod live_composer;
@@ -986,6 +870,7 @@ mod live_story;
 #[cfg(feature = "demo-capture")]
 mod live_tests;
 mod live_view;
+mod open;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod open_tests;
