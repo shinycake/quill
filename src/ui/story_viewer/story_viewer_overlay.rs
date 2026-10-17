@@ -368,10 +368,9 @@ impl QuillApp {
                                 .child(counts),
                         )
                     })
-                    // Phase 9.5: the "Reposted from …" line ("edited" is in the header).
-                    .when_some(self.story_viewer_meta_line(), |this, meta| {
-                        this.child(div().text_xs().text_color(chrome::secondary()).child(meta))
-                    })
+                    // Phase 9.5: "Reposted from ...", a link to the origin
+                    // ("edited" is in the header).
+                    .children(self.story_meta_row(cx))
                     .when(!live_watch, |this| {
                         this.child(self.story_more_row(cx))
                             .child(self.story_action_row(cx))
@@ -542,6 +541,29 @@ impl QuillApp {
     ) {
         self.close_story_viewer(cx);
         self.open_avatar_profile(sender, window, cx);
+    }
+
+    /// The line under the caption: the repost label, which opens its
+    /// origin.
+    fn story_meta_row(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let label = self.story_repost_line()?;
+        Some(
+            div()
+                .id("story-viewer-repost")
+                .role(gpui_kit::Role::Button)
+                .aria_label(label.clone())
+                .tab_index(0)
+                .cursor_pointer()
+                .pressable(cx.theme())
+                .rounded_sm()
+                .px_1()
+                .text_xs()
+                .text_color(chrome::fg())
+                .child(label)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.press_story_repost(window, cx);
+                })),
+        )
     }
 
     /// Phase 9.6: segmented progress bar — one segment per story in the

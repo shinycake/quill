@@ -135,22 +135,70 @@ impl QuillApp {
         Some(parts.join(" · "))
     }
 
-    /// Phase 9.5: "Reposted from …" line under the caption
-    /// (`story.repost_info`, `td_api.tl:6742`). "edited" is in the header.
-    pub(in crate::ui) fn story_viewer_meta_line(&self) -> Option<String> {
+    /// Phase 9.5: the "Reposted from ..." label under the caption
+    /// (`story.repost_info`, `td_api.tl:6742`), with the origin it opens.
+    /// A chat that is not loaded gets no name: tdesktop's `RepostView`
+    /// always has the peer, so it has no placeholder to copy.
+    pub(in crate::ui) fn story_repost_line(&self) -> Option<String> {
         let story = self.current_story()?;
         let repost = story.repost_info.as_ref()?;
         let origin = match &repost.origin {
             StoryOriginView::PublicStory { chat_id, .. } => self
                 .session()
                 .and_then(|s| s.chats.get(chat_id))
-                .map(|chat| chat.title.clone())
-                .unwrap_or_else(|| {
-                    tr_with(keys::Q_MEDIA_CHAT_2, &[("chat_id", &chat_id.to_string())])
-                }),
-            StoryOriginView::HiddenUser { poster_name } => poster_name.clone(),
+                .map(|chat| chat.title.clone()),
+            StoryOriginView::HiddenUser { poster_name } => Some(poster_name.clone()),
         };
-        Some(tr_with(keys::Q_MEDIA_REPOSTED_FROM, &[("origin", &origin)]))
+        Some(match origin {
+            Some(origin) => tr_with(keys::Q_MEDIA_REPOSTED_FROM, &[("origin", &origin)]),
+            None => tr(keys::Q_MEDIA_REPOSTED_STORY).to_string(),
+        })
+    }
+
+    /// A press on the repost label, like tdesktop's `RepostView`: the
+    /// original story if it is loaded, else its poster's profile, else a
+    /// note that the story expired.
+    pub(in crate::ui) fn press_story_repost(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(origin) = self
+            .current_story()
+            .and_then(|story| story.repost_info)
+            .map(|repost| repost.origin)
+        else {
+            return;
+        };
+        let action = match self.session() {
+            Some(session) => quill::story_repost::press(&origin, |chat, story| {
+                session.story_card_state(chat, story)
+            }),
+            None => return,
+        };
+        match action {
+            quill::story_repost::RepostPress::OpenStory { chat_id, story_id } => {
+                self.open_story_viewer(ChatId(chat_id), story_id, cx);
+            }
+            quill::story_repost::RepostPress::OpenPeer { chat_id } => {
+                let sender = MessageSender::Chat { chat_id };
+                if self
+                    .session()
+                    .and_then(|s| s.avatar_profile_target(sender))
+                    .is_some()
+                {
+                    self.close_story_viewer(cx);
+                    self.open_avatar_profile(sender, window, cx);
+                } else {
+                    self.stories.notice = Some(tr(keys::FORWARDED_STORY_EXPIRED).into());
+                    cx.notify();
+                }
+            }
+            quill::story_repost::RepostPress::Expired => {
+                self.stories.notice = Some(tr(keys::FORWARDED_STORY_EXPIRED).into());
+                cx.notify();
+            }
+        }
     }
 
     /// Phase 9.2+: the reaction picker popover fed by

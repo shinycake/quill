@@ -196,6 +196,7 @@ pub mod story_extras;
 pub mod story_header;
 pub mod story_page;
 pub mod story_preload;
+pub mod story_repost;
 pub mod story_restriction;
 pub mod story_ring;
 pub mod story_sibling_layout;
