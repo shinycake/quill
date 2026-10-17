@@ -209,7 +209,7 @@ impl QuillApp {
             PrivacyTarget::Command(command) => {
                 self.send_profile_bot_command(user_id, &command, window, cx)
             }
-            PrivacyTarget::Default => self.open_message_url(&tr(keys::PROFILE_BOT_PRIVACY_URL), cx),
+            PrivacyTarget::Default => self.open_message_url(tr(keys::PROFILE_BOT_PRIVACY_URL), cx),
         }
     }
 
@@ -223,12 +223,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !blocked {
-            if let Some(live) = self.live.as_mut() {
-                if live.driver.set_user_blocked(user_id, true).is_err() {
-                    self.connection.set_note(StatusNote::error(tr(
-                        keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-                    )));
-                }
+            if let Some(live) = self.live.as_mut()
+                && live.driver.set_user_blocked(user_id, true).is_err()
+            {
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
             }
             cx.notify();
             return;
