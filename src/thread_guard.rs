@@ -12,6 +12,8 @@
 use std::cell::Cell;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::{Builder, JoinHandle};
 
 thread_local! {
@@ -61,9 +63,63 @@ pub fn ffi_boundary<R>(default: R, body: impl FnOnce() -> R) -> R {
     guarded(body).unwrap_or(default)
 }
 
+/// One of at most `max` places in a counted pool of worker threads (OS
+/// notification helpers that wait for a click). The place is given back when
+/// the guard drops: on return, on a panic that unwinds through the thread,
+/// and when the thread never started and its closure is dropped.
+pub struct InflightSlot(Arc<AtomicUsize>);
+
+impl InflightSlot {
+    /// Take a place, or `None` when `max` are in use.
+    pub fn acquire(counter: &Arc<AtomicUsize>, max: usize) -> Option<Self> {
+        if counter.fetch_add(1, Ordering::SeqCst) >= max {
+            counter.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(Self(Arc::clone(counter)))
+    }
+}
+
+impl Drop for InflightSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ffi_boundary, panic_will_be_caught, spawn_guarded};
+    use super::{InflightSlot, ffi_boundary, panic_will_be_caught, spawn_guarded};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn slots_are_capped_and_returned_on_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let a = InflightSlot::acquire(&counter, 2);
+        let b = InflightSlot::acquire(&counter, 2);
+        assert!(a.is_some() && b.is_some());
+        assert!(InflightSlot::acquire(&counter, 2).is_none());
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            2,
+            "a refusal gives back its count"
+        );
+        drop(a);
+        assert!(InflightSlot::acquire(&counter, 2).is_some());
+    }
+
+    #[test]
+    fn a_panicking_thread_gives_its_slot_back() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let slot = InflightSlot::acquire(&counter, 1);
+        let handle = spawn_guarded("quill-test-slot-panic", move || {
+            let _slot = slot;
+            panic!("boom");
+        })
+        .unwrap();
+        assert_eq!(handle.join().unwrap(), None::<()>);
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
 
     #[test]
     fn returns_the_value_and_the_name() {

@@ -14,8 +14,9 @@ pub fn kill_and_reap(child: Child) {
 }
 
 /// Give `child` up to `grace` to exit by itself, then kill it, all on a
-/// detached thread. If no thread can be started the child is killed here
-/// (a non-blocking call) and left to the OS to reap.
+/// detached thread. If no thread can be started the child is killed and
+/// waited for here: a killed process is reaped promptly, and leaving it
+/// would keep a zombie for the life of the process.
 pub fn reap_after(child: Child, grace: Duration) {
     let slot = Arc::new(Mutex::new(Some(child)));
     let worker = slot.clone();
@@ -31,6 +32,7 @@ pub fn reap_after(child: Child, grace: Duration) {
         let child = slot.lock().ok().and_then(|mut slot| slot.take());
         if let Some(mut child) = child {
             let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }

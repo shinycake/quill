@@ -217,6 +217,9 @@ pub(crate) fn lock_shared_media_cache() -> std::sync::MutexGuard<'static, ()> {
 pub fn sweep_media_caches() {
     // Cached directory and canonicalization facts no longer hold.
     ENSURED_DIRS.lock_or_recover().clear();
+    // Old working files (edited photos, sticker clips) go with the startup
+    // sweep; the call returns at once and does its work on another thread.
+    crate::scratch::sweep_work_dirs_in_background();
     CANONICAL_ROOTS.lock_or_recover().clear();
     VERDICTS.lock_or_recover().clear();
     let temp = cache_temp_dir();

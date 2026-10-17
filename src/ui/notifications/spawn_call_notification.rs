@@ -44,17 +44,17 @@ impl QuillApp {
         let Some(command) = quill::notify_call::build_call_command(&notification) else {
             return;
         };
-        if self.notify.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS
-        {
-            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+        let Some(slot) = quill::thread_guard::InflightSlot::acquire(
+            &self.notify.notify_inflight,
+            MAX_OS_NOTIFICATION_THREADS,
+        ) else {
             return;
-        }
+        };
         let clicks = self.calls.notify_clicks.clone();
-        let inflight = self.notify.notify_inflight.clone();
         let call_id = notification.call_id;
         let spawn = quill::thread_guard::spawn_guarded("quill-call-notify", move || {
             let action = quill::notify_call::run_call_command(&command);
-            inflight.fetch_sub(1, Ordering::SeqCst);
+            drop(slot);
             if let Some(action) = action
                 && let Ok(mut guard) = clicks.lock()
             {
@@ -63,9 +63,8 @@ impl QuillApp {
                 quill::wake::UPDATES.poke();
             }
         });
-        if spawn.is_err() {
-            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
-        }
+        // A thread that never started drops `slot` with its closure.
+        drop(spawn);
     }
 
     /// A notification was clicked or one of its buttons pressed. "Mark as
@@ -290,15 +289,15 @@ impl QuillApp {
         else {
             return;
         };
-        if self.notify.notify_inflight.fetch_add(1, Ordering::SeqCst) >= MAX_OS_NOTIFICATION_THREADS
-        {
-            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
+        let Some(slot) = quill::thread_guard::InflightSlot::acquire(
+            &self.notify.notify_inflight,
+            MAX_OS_NOTIFICATION_THREADS,
+        ) else {
             return;
-        }
+        };
         let clicks = self.notify.notify_clicks.clone();
         let account_clicks = self.background.clicks.clone();
         let account = account.cloned();
-        let inflight = self.notify.notify_inflight.clone();
         let spawn = quill::thread_guard::spawn_guarded("quill-notify", move || {
             // D-Bus first: `Notify` returns at once and the listener
             // thread reports the click. Without a session bus,
@@ -315,11 +314,10 @@ impl QuillApp {
                 ) {
                     eprintln!("failed to show the desktop notification: {error}");
                 }
-                inflight.fetch_sub(1, Ordering::SeqCst);
                 return;
             }
             let outcome = quill::notify::run_notification_command(&command);
-            inflight.fetch_sub(1, Ordering::SeqCst);
+            drop(slot);
             let Some(action) = outcome.action else {
                 return;
             };
@@ -337,9 +335,8 @@ impl QuillApp {
             }
             quill::wake::UPDATES.poke();
         });
-        if spawn.is_err() {
-            self.notify.notify_inflight.fetch_sub(1, Ordering::SeqCst);
-        }
+        // A thread that never started drops `slot` with its closure.
+        drop(spawn);
     }
 
     pub(in crate::ui) fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
