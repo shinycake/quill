@@ -17,6 +17,10 @@ pub enum DownloadOrigin {
     /// A history row, the viewer or the downloads manager. Listed in the
     /// downloads manager and pausable.
     User,
+    /// The story viewer warming a story next to the current one: often
+    /// only a prefix of a video, at a priority below the current story's.
+    /// A request for the whole file replaces it.
+    Preload,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +68,8 @@ pub struct DownloadIntents {
     user: HashSet<i32>,
     /// User downloads that ended without completing.
     failed: HashSet<i32>,
+    /// Requested preloads.
+    preloads: HashSet<i32>,
 }
 
 impl DownloadIntents {
@@ -99,11 +105,15 @@ impl DownloadIntents {
             }
             self.user.remove(&file_id);
             self.failed.remove(&file_id);
+            self.preloads.remove(&file_id);
         }
         if let Some(new) = intent {
             match (new.phase, new.origin) {
                 (Phase::Requested, DownloadOrigin::User) => {
                     self.user.insert(file_id);
+                }
+                (Phase::Requested, DownloadOrigin::Preload) => {
+                    self.preloads.insert(file_id);
                 }
                 (Phase::Ended, DownloadOrigin::User) => {
                     self.failed.insert(file_id);
@@ -226,6 +236,7 @@ impl DownloadIntents {
         self.entries.clear();
         self.user.clear();
         self.failed.clear();
+        self.preloads.clear();
         self.requested = 0;
         self.finished.clear();
     }
@@ -261,10 +272,23 @@ impl DownloadIntents {
             .is_some_and(|i| i.phase == Phase::Ended && i.origin == DownloadOrigin::User)
     }
 
-    /// An automatic download that ended; the automatic path skips it.
+    /// An automatic download or a preload that ended (a preloaded prefix
+    /// ends there); the automatic path skips it.
     pub fn is_stalled_auto(&self, file_id: i32) -> bool {
         self.get(file_id)
-            .is_some_and(|i| i.phase == Phase::Ended && i.origin == DownloadOrigin::Auto)
+            .is_some_and(|i| i.phase == Phase::Ended && i.origin != DownloadOrigin::User)
+    }
+
+    /// The file's last request was a preload, running or ended, so a
+    /// request for the whole file must still go out.
+    pub fn is_preload(&self, file_id: i32) -> bool {
+        self.get(file_id)
+            .is_some_and(|i| i.origin == DownloadOrigin::Preload)
+    }
+
+    /// Preloads still running.
+    pub fn preload_ids(&self) -> impl Iterator<Item = i32> + '_ {
+        self.preloads.iter().copied()
     }
 
     pub fn requested_count(&self) -> usize {

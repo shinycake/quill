@@ -320,6 +320,17 @@ fn download_file_shape_matches_1_8_67() {
 }
 
 #[test]
+fn download_file_range_limits_the_prefix() {
+    let json = download_file_range(RequestId(12), FileId(44), 5, 4_194_304);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["@type"], "downloadFile");
+    assert_eq!(v["priority"], 5);
+    assert_eq!(v["offset"], 0);
+    assert_eq!(v["limit"], 4_194_304);
+    assert_eq!(v["synchronous"], false);
+}
+
+#[test]
 fn cancel_download_file_shape_matches_1_8_67() {
     // `cancelDownloadFile file_id:int32 only_if_pending:Bool = Ok;`
     // (schema 1.8.67, line 13991).

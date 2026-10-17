@@ -1,10 +1,12 @@
 //! Connect driver: media downloads.
 use super::*;
 use crate::ids::{ChatId, FileId, MessageId, RequestId};
-use crate::state::RequestPurpose;
+use crate::state::{DownloadOrigin, RequestPurpose};
+use crate::story_preload::PreloadRequest;
 use crate::telegram::requests::{
     add_file_to_downloads as add_file_to_downloads_request,
     cancel_download_file as cancel_download_file_request, download_file as download_file_request,
+    download_file_range as download_file_range_request,
     remove_file_from_downloads as remove_file_from_downloads_request,
     toggle_download_is_paused as toggle_download_is_paused_request,
 };
@@ -138,6 +140,53 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_id: FileId,
         priority: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_auto_download(file_id, priority, 0, DownloadOrigin::Auto)
+    }
+
+    /// The story viewer's preloads around the current story (tdesktop
+    /// `preloadNext`): cancels the running preloads the plan dropped,
+    /// except the files in `keep` (the current story's), as tdesktop's
+    /// `StoryPreload` cancels when it is replaced or the viewer closes,
+    /// then sends the plan. An empty plan and `keep` cancel them all.
+    pub fn sync_story_preloads(
+        &mut self,
+        plan: &[PreloadRequest],
+        keep: &[FileId],
+    ) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let stale: Vec<FileId> = self
+            .session
+            .media
+            .downloads
+            .preload_ids()
+            .map(FileId)
+            .filter(|id| !keep.contains(id) && !plan.iter().any(|r| r.file_id == *id))
+            .collect();
+        for file_id in stale {
+            self.cancel_download(file_id)?;
+        }
+        for request in plan {
+            self.send_auto_download(
+                request.file_id,
+                request.priority,
+                request.limit,
+                DownloadOrigin::Preload,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// `downloadFile` of the first `limit` bytes (0 = the whole file) for
+    /// an automatic path. No-op if already local, in flight or stalled.
+    fn send_auto_download(
+        &mut self,
+        file_id: FileId,
+        priority: i32,
+        limit: i64,
+        origin: DownloadOrigin,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -147,11 +196,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request_download(file_id);
-        self.session.begin_download(file_id);
-        match self
-            .sender
-            .send_json(&download_file_request(extra, file_id, priority))
-        {
+        self.session.media.downloads.begin(file_id.0, origin);
+        match self.sender.send_json(&download_file_range_request(
+            extra, file_id, priority, limit,
+        )) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
@@ -175,7 +223,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.should_download(file_id) {
+        // A preload asked for a prefix at a low priority; TDLib replaces the
+        // limit and priority of a running download with the new request's,
+        // so the whole file is asked for again.
+        let preloaded = self.session.media.downloads.is_preload(file_id.0)
+            && self
+                .session
+                .media
+                .files
+                .get(&file_id.0)
+                .is_none_or(|file| file.needs_download());
+        if !preloaded && !self.session.should_download(file_id) {
             return Ok(None);
         }
         let origin = origin

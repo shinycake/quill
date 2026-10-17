@@ -44,6 +44,34 @@ impl QuillApp {
                 self.request_media_download(video_id, None, cx);
             }
         }
+        self.preload_adjacent_stories();
+    }
+
+    /// tdesktop `preloadNext`: warm the next stories and the previous one
+    /// below the current story's priority, and cancel the preloads of
+    /// stories that are no longer next to it. The current story's files
+    /// were asked for in full just before, so they are kept.
+    fn preload_adjacent_stories(&mut self) {
+        let plan = match self.session() {
+            Some(session) => quill::story_preload::plan(session, &self.stories.viewer),
+            None => return,
+        };
+        let keep: Vec<FileId> = self
+            .stories
+            .viewer
+            .current()
+            .map(|item| {
+                item.display_file_ids
+                    .iter()
+                    .copied()
+                    .chain([item.download_file_id])
+                    .chain(item.video_file_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.sync_story_preloads(&plan, &keep);
+        }
     }
 
     /// Phase 9.2+: warm `downloadFile` for custom-emoji reaction sticker

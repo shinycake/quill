@@ -45,6 +45,10 @@ pub const AUTO_MEDIA_DOWNLOAD_PRIORITY: i32 = 4;
 /// the open chat's thumbnails and auto-downloads, below a download the
 /// user asked for.
 pub const INLINE_RESULTS_DOWNLOAD_PRIORITY: i32 = 16;
+/// Story viewer preload (tdesktop `preloadNext`): the next story gets the
+/// highest of these, then the one after, then the previous one. All sit
+/// above thumbs and chat auto-downloads and below the current story.
+pub const STORY_PRELOAD_PRIORITIES: [i32; 3] = [7, 6, 5];
 /// `downloadFile.priority` when the user opens media.
 pub const USER_DOWNLOAD_PRIORITY: i32 = 32;
 /// `searchChats.limit` / `searchMessages.limit` (Unigram messages page is 20).

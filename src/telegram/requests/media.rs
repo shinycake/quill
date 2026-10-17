@@ -41,13 +41,20 @@ pub fn get_map_thumbnail_file(
 }
 
 pub fn download_file(extra: RequestId, file_id: FileId, priority: i32) -> String {
+    download_file_range(extra, file_id, priority, 0)
+}
+
+/// `downloadFile` of the first `limit` bytes (`limit` 0 = the whole file;
+/// schema: "downloaded ... before the download will automatically be
+/// canceled"). Used to preload a video prefix.
+pub fn download_file_range(extra: RequestId, file_id: FileId, priority: i32, limit: i64) -> String {
     json!({
         "@type": "downloadFile",
         "@extra": extra.as_extra(),
         "file_id": file_id.0,
         "priority": priority,
         "offset": 0,
-        "limit": 0,
+        "limit": limit,
         "synchronous": false,
     })
     .to_string()

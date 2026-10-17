@@ -599,6 +599,7 @@ fn get_story_video_parses_thumb_and_duration() {
                     thumb_height,
                     duration_secs,
                     file_id,
+                    ..
                 } => {
                     assert_eq!(thumb_file_id, Some(FileId(71)));
                     assert_eq!(thumb_width, 320);
