@@ -14,6 +14,7 @@
 "lng_boosts_list_title#one" = "{count} boost";
 "lng_boosts_list_title#other" = "{count} boosts";
 "lng_boosts_list_unclaimed" = "Unclaimed";
+"lng_bot_groups_not_found" = "No groups found";
 "lng_box_done" = "Done";
 "lng_box_remove" = "Remove";
 "lng_cancel" = "Cancel";

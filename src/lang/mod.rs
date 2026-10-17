@@ -43,6 +43,13 @@ pub fn trn<C: TryInto<i64>>(key: PluralKey, count: C) -> String {
     trn_with(key, count, &[])
 }
 
+/// [`trn`] with the number written with thousands separators, as
+/// tdesktop's `lt_count_decimal` fills `{count}` (`12,345`).
+pub fn trn_decimal(key: PluralKey, count: i64) -> String {
+    let grouped = format::group_digits(count);
+    trn_with(key, count, &[("count", grouped.as_str())])
+}
+
 /// [`trn`] with more `{tag}` placeholders.
 pub fn trn_with<C: TryInto<i64>>(key: PluralKey, count: C, tags: &[(&str, &str)]) -> String {
     let count = count.try_into().unwrap_or(i64::MAX);

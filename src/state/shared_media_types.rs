@@ -322,6 +322,10 @@ pub struct SharedMediaTabState {
     pub has_more: bool,
     /// The search query the tab's items answer; empty for the plain list.
     pub query: String,
+    /// The stamp of the request this tab waits on. An answer carrying any
+    /// other stamp is late and dropped; another tab's fetches never change
+    /// it.
+    pub generation: u64,
 }
 
 impl SharedMediaTabState {
@@ -346,8 +350,9 @@ impl SharedMediaTabState {
     }
 }
 
-/// Slice media-shared-gallery: the gallery panel state. Switching chats or
-/// closing bumps `generation`, so late `foundChatMessages` answers drop.
+/// Slice media-shared-gallery: the gallery panel state. Opening for another
+/// chat or closing gives every tab a fresh stamp, so late
+/// `foundChatMessages` answers drop; a new fetch restamps only its own tab.
 #[derive(Debug, Clone, Default)]
 pub struct SharedMediaState {
     pub open: bool,
@@ -360,6 +365,7 @@ pub struct SharedMediaState {
     /// Show Photos and Videos as two tabs instead of Media (tdesktop's
     /// "Expand" / "Collapse" action on the media tab).
     pub media_split: bool,
+    /// The last stamp handed out; stamps only grow, so none repeats.
     pub generation: u64,
     /// The ticked rows and tiles, in the order they were ticked.
     pub selection: Vec<SelectedMedia>,
@@ -399,12 +405,29 @@ impl SharedMediaState {
             SharedMediaTab::Media if self.media_split => SharedMediaTab::Photos,
             other => other,
         };
-        self.generation = self.generation.saturating_add(1);
         self.selection.clear();
+        self.restamp_all_tabs();
+        self.active_tab
+    }
+
+    /// Clear every tab and give each a stamp no request in flight carries.
+    fn restamp_all_tabs(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+        let stamp = self.generation;
         for tab in self.tabs.iter_mut() {
             tab.clear();
+            tab.generation = stamp;
         }
-        self.active_tab
+    }
+
+    /// Whether `generation` is the stamp `tab` waits on in the gallery open
+    /// for `chat_id`.
+    fn accepts(&self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) -> bool {
+        self.open
+            && self.chat_id == Some(chat_id)
+            && self
+                .tab_at(tab)
+                .is_some_and(|state| state.generation == generation)
     }
 
     pub fn close(&mut self) {
@@ -412,10 +435,7 @@ impl SharedMediaState {
         self.open = false;
         self.chat_id = None;
         self.selection.clear();
-        self.generation = self.generation.saturating_add(1);
-        for tab in self.tabs.iter_mut() {
-            tab.clear();
-        }
+        self.restamp_all_tabs();
     }
 
     /// Select a tab; returns `true` when it was never fetched and the caller
@@ -428,14 +448,19 @@ impl SharedMediaState {
             .is_some_and(|t| t.status == SharedMediaTabStatus::Idle)
     }
 
-    /// Mark the tab loading and bump the generation; the caller stamps the
-    /// returned generation on the request purpose so late answers drop.
+    /// Mark the tab loading and restamp it; the caller stamps the returned
+    /// generation on the request purpose so late answers drop. A page of
+    /// this tab still on its way is superseded and stops counting as in
+    /// flight. Other tabs keep their stamps.
     pub fn begin_fetch(&mut self, tab: SharedMediaTab) -> u64 {
         self.generation = self.generation.saturating_add(1);
+        let stamp = self.generation;
         let state = self.tab_state(tab);
         state.status = SharedMediaTabStatus::Loading;
         state.anchor_day = None;
-        self.generation
+        state.loading_more = false;
+        state.generation = stamp;
+        stamp
     }
 
     /// A `foundChatMessages` answer: applied only when the chat, tab, and
@@ -449,7 +474,7 @@ impl SharedMediaState {
         total_count: i32,
         next_from: MessageId,
     ) {
-        if !self.open || self.chat_id != Some(chat_id) || self.generation != generation {
+        if !self.accepts(chat_id, tab, generation) {
             return;
         }
         let state = self.tab_state(tab);
@@ -471,11 +496,11 @@ impl SharedMediaState {
 
     /// Start fetching the next older page of `tab`: returns the generation
     /// to stamp and the `from_message_id` to send, or `None` when there is
-    /// nothing more to load or a page is already in flight. The generation
-    /// is not bumped, so the first-page answers of other tabs stay valid.
+    /// nothing more to load or a page is already in flight. The tab keeps
+    /// its stamp, so its own first page and other tabs' answers stay valid.
     pub fn begin_fetch_more(&mut self, tab: SharedMediaTab) -> Option<(u64, MessageId)> {
-        let generation = self.generation;
         let state = self.tab_state(tab);
+        let generation = state.generation;
         if !state.can_load_more() {
             return None;
         }
@@ -494,7 +519,7 @@ impl SharedMediaState {
         total_count: i32,
         next_from: MessageId,
     ) {
-        if !self.open || self.chat_id != Some(chat_id) || self.generation != generation {
+        if !self.accepts(chat_id, tab, generation) {
             return;
         }
         let state = self.tab_state(tab);
@@ -517,20 +542,21 @@ impl SharedMediaState {
 
     /// An older page failed: allow a retry on the next request.
     pub fn fail_more(&mut self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) {
-        if !self.open || self.chat_id != Some(chat_id) || self.generation != generation {
+        if !self.accepts(chat_id, tab, generation) {
             return;
         }
         self.tab_state(tab).loading_more = false;
     }
 
     pub fn fail(&mut self, chat_id: ChatId, tab: SharedMediaTab, generation: u64, error: String) {
-        if !self.open || self.chat_id != Some(chat_id) || self.generation != generation {
+        if !self.accepts(chat_id, tab, generation) {
             return;
         }
         let state = self.tab_state(tab);
         state.items.clear();
         state.total_count = 0;
         state.error = error;
+        state.loading_more = false;
         state.status = SharedMediaTabStatus::Failed;
     }
 }

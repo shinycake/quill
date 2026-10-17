@@ -544,3 +544,126 @@ fn an_mpeg4_thumbnail_keeps_the_blur_and_load_more_appends_tiles() {
     assert_eq!(ids, vec![402, 401, 300]);
     assert_eq!(session.take_profile_thumbs(), vec![FileId(93)]);
 }
+
+/// Give `tab` a Ready first page of two files.
+fn ready_tab(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    seq: &AtomicU64,
+    chat: ChatId,
+    tab: SharedMediaTab,
+) {
+    let generation = session.media.shared_media.begin_fetch(tab);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia { tab, generation },
+        Some(chat),
+    );
+    apply_json(
+        session,
+        seq,
+        sink,
+        &found_documents(extra, 9, 150, &[200, 150]),
+    );
+}
+
+#[test]
+fn another_tabs_fetch_does_not_drop_a_tabs_older_page() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    let (files, music) = (SharedMediaTab::Files, SharedMediaTab::Music);
+    session.media.shared_media.open_for_tab(chat, files);
+    ready_tab(&mut session, &sink, &seq, chat, files);
+    let (g, _) = session.media.shared_media.begin_fetch_more(files).unwrap();
+    let more = session.request(
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore {
+            tab: files,
+            generation: g,
+        }),
+        Some(chat),
+    );
+    // The user searches Music while the Files page is on its way.
+    session.media.shared_media.select_tab(music);
+    session.media.shared_media.begin_search(music, "song");
+    session.media.shared_media.begin_fetch(music);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &found_documents(more, 9, 0, &[120]),
+    );
+    let state = &session.media.shared_media.tabs[files.index()];
+    assert_eq!(state.items.len(), 3, "the page still lands");
+    assert!(!state.loading_more);
+}
+
+#[test]
+fn a_new_first_page_supersedes_the_tabs_own_older_page() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    let files = SharedMediaTab::Files;
+    session.media.shared_media.open_for_tab(chat, files);
+    ready_tab(&mut session, &sink, &seq, chat, files);
+    let (g, _) = session.media.shared_media.begin_fetch_more(files).unwrap();
+    let more = session.request(
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore {
+            tab: files,
+            generation: g,
+        }),
+        Some(chat),
+    );
+    session.media.shared_media.begin_search(files, "report");
+    let generation = session.media.shared_media.begin_fetch(files);
+    assert!(
+        !session.media.shared_media.tabs[files.index()].loading_more,
+        "nothing waits on the superseded page"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &found_documents(more, 9, 0, &[120]),
+    );
+    assert_eq!(
+        session.media.shared_media.tabs[files.index()].items.len(),
+        2,
+        "the stale page is dropped"
+    );
+    // A failing search does not leave the tab paging.
+    session
+        .media
+        .shared_media
+        .fail(chat, files, generation, "x".into());
+    let state = &session.media.shared_media.tabs[files.index()];
+    assert_eq!(state.status, SharedMediaTabStatus::Failed);
+    assert!(!state.loading_more);
+}
+
+#[test]
+fn dropping_a_search_leaves_other_tabs_requests_alone() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    let (files, links) = (SharedMediaTab::Files, SharedMediaTab::Links);
+    session.media.shared_media.open_for_tab(chat, files);
+    session.media.shared_media.begin_search(files, "report");
+    let links_gen = session.media.shared_media.begin_fetch(links);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia {
+            tab: links,
+            generation: links_gen,
+        },
+        Some(chat),
+    );
+    session.media.shared_media.select_tab_dropping_search(links);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &found_documents(extra, 2, 0, &[200, 150]),
+    );
+    let state = &session.media.shared_media.tabs[links.index()];
+    assert_eq!(state.status, SharedMediaTabStatus::Ready);
+    assert_eq!(state.items.len(), 2);
+}

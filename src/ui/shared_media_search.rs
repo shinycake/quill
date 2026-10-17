@@ -150,8 +150,22 @@ impl QuillApp {
             return;
         }
         self.media_search.keystroke = self.media_search.keystroke.wrapping_add(1);
+        // The user was typing in the old field: carry the cursor to the new
+        // one, so a tab change from elsewhere does not strand the keyboard
+        // on an input that is no longer drawn.
+        let was_typing = self
+            .media_search
+            .input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
         self.media_search.input = SharedMediaSearchUi::fresh_input(window, cx);
         self.media_search.key = key;
+        if was_typing && key.is_some() {
+            self.media_search
+                .input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
     }
 }
 

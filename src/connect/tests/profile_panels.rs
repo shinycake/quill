@@ -159,3 +159,40 @@ fn opening_a_similar_channel_tells_tdlib_which_strip_it_came_from() {
     assert!(request.contains(r#""opened_chat_id":101"#));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_follow_up_page_that_fails_ends_the_groups_in_common_list() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.users_state.profile_chat_lists.insert(
+        (ProfileChatsKind::GroupsInCommon, 31),
+        ProfileChatsFetch::Loaded(vec![-5, -6]),
+    );
+    let extra = driver
+        .fetch_more_groups_in_common(31)
+        .unwrap()
+        .expect("the next page is asked for");
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"Wrong offset_chat_id"}}"#,
+            extra.0
+        ),
+        &seq,
+        &sink,
+    );
+    // The listed groups stay and Load more cannot repeat the failure.
+    assert!(matches!(
+        driver
+            .session
+            .users_state
+            .profile_chat_lists
+            .get(&(ProfileChatsKind::GroupsInCommon, 31)),
+        Some(ProfileChatsFetch::Loaded(ids)) if ids.len() == 2
+    ));
+    assert!(driver.fetch_more_groups_in_common(31).unwrap().is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}

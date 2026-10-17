@@ -44,7 +44,7 @@ impl SharedMediaState {
     /// Select `tab`. A search on the tab being left is dropped with its
     /// results (tdesktop keeps the query per section; Quill starts every
     /// visit with the plain list), and answers still on their way for it
-    /// are discarded.
+    /// are discarded. Other tabs' requests are untouched.
     pub fn select_tab_dropping_search(&mut self, tab: SharedMediaTab) -> bool {
         let leaving = self.active_tab;
         if leaving != tab {
@@ -60,17 +60,12 @@ impl SharedMediaState {
     }
 
     fn discard_search(&mut self, tab: SharedMediaTab) {
-        self.tab_state(tab).clear();
-        // The generation is shared by the tabs, so a late answer for the
-        // dropped search can only be told apart by bumping it. The message
-        // tabs still waiting for their own first page ask again.
+        // A late answer for the dropped search is told apart by a fresh stamp.
         self.generation = self.generation.saturating_add(1);
-        for (other, state) in SharedMediaTab::ALL.iter().zip(self.tabs.iter_mut()) {
-            if other.lists_messages() && state.status == SharedMediaTabStatus::Loading {
-                state.status = SharedMediaTabStatus::Idle;
-                state.loading_more = false;
-            }
-        }
+        let stamp = self.generation;
+        let state = self.tab_state(tab);
+        state.clear();
+        state.generation = stamp;
     }
 }
 

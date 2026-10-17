@@ -97,13 +97,16 @@ pub fn member_badge(status: ChannelMemberStatus, tag: &str) -> Option<MemberBadg
     })
 }
 
-/// "1 member", "12 members" (tdesktop `lng_chat_status_members`).
-pub fn members_title(count: i32) -> String {
-    if count == 1 {
-        "1 member".to_string()
+/// "1 member", "12,345 members" for a group and "1 subscriber",
+/// "12,345 subscribers" for a channel (tdesktop `lng_chat_status_members` /
+/// `lng_chat_status_subscribers` with `lt_count_decimal`).
+pub fn members_title(count: i32, is_channel: bool) -> String {
+    let key = if is_channel {
+        crate::lang::keys::CHAT_STATUS_SUBSCRIBERS
     } else {
-        format!("{count} members")
-    }
+        crate::lang::keys::CHAT_STATUS_MEMBERS
+    };
+    crate::lang::trn_decimal(key, i64::from(count))
 }
 
 /// Whether the header offers search.
@@ -252,9 +255,12 @@ mod tests {
 
     #[test]
     fn title_and_search_threshold() {
-        assert_eq!(members_title(1), "1 member");
-        assert_eq!(members_title(0), "0 members");
-        assert_eq!(members_title(12), "12 members");
+        assert_eq!(members_title(1, false), "1 member");
+        assert_eq!(members_title(0, false), "0 members");
+        assert_eq!(members_title(12, false), "12 members");
+        assert_eq!(members_title(12345, false), "12,345 members");
+        assert_eq!(members_title(1, true), "1 subscriber");
+        assert_eq!(members_title(12345, true), "12,345 subscribers");
         assert!(!search_available(19));
         assert!(search_available(20));
     }

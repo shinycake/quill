@@ -43,7 +43,12 @@ impl SharedMediaSearchUi {
             &input,
             window,
             |this, state, event: &InputEvent, _window, cx| {
-                if matches!(event, InputEvent::Change) {
+                // A field since replaced can no longer be typed into, but its
+                // last edit may still be on its way: only the current one
+                // speaks for the gallery.
+                if matches!(event, InputEvent::Change)
+                    && state.entity_id() == this.media_search.input.entity_id()
+                {
                     let text = state.read(cx).value().to_string();
                     // The gallery is drawn in the main window only.
                     this.in_window_scope(None, cx, |this, cx| {
