@@ -1,4 +1,4 @@
-//! Screenshot demos: the info panel of a channel, a group and a bot.
+//! Screenshot demos: the info panel of a verified channel.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;

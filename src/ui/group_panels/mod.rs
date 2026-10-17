@@ -20,7 +20,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
-use quill::state::ProfileChatsKind;
+use quill::state::{ProfileChatsKind, Session};
 use quill::state::{ContactRow, InfoPanelTarget, SupergroupMembersFetch};
 use quill::telegram::envelope::ChatKind;
 use std::path::PathBuf;
@@ -541,19 +541,11 @@ impl QuillApp {
         let target = self.session()?.users_state.open_info_panel?;
         let (title, content) = match target {
             InfoPanelTarget::User(user_id) => (
-                tr(if self.session()?.user(user_id).is_some_and(|u| u.is_bot) {
-                    keys::INFO_BOT_TITLE
-                } else {
-                    keys::INFO_USER_TITLE
-                }),
+                tr(person_info_title(self.session()?, user_id)),
                 self.user_info_panel(user_id, cx),
             ),
             InfoPanelTarget::Supergroup(supergroup_id) => (
-                tr(if self.session()?.supergroup_is_channel(supergroup_id) {
-                    keys::INFO_CHANNEL_TITLE
-                } else {
-                    keys::INFO_GROUP_TITLE
-                }),
+                tr(supergroup_info_title(self.session()?, supergroup_id)),
                 self.supergroup_info_panel(supergroup_id, cx),
             ),
             // Slice G1: basic-group info panel (members, permissions,
@@ -691,6 +683,30 @@ mod slow_mode;
 #[cfg(feature = "demo-capture")]
 mod slow_mode_tests;
 mod user_info_panel;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod info_title_tests;
+
+/// The info panel title of a person (`Info::Profile::Widget::title`):
+/// Saved Messages for the viewer, Bot Info for a bot, else User Info.
+pub(super) fn person_info_title(session: &Session, user_id: i64) -> &'static str {
+    if session.my_user_id == Some(user_id) {
+        keys::SAVED_MESSAGES
+    } else if session.user(user_id).is_some_and(|u| u.is_bot) {
+        keys::INFO_BOT_TITLE
+    } else {
+        keys::INFO_USER_TITLE
+    }
+}
+
+/// Group Info for a supergroup, Channel Info for a broadcast channel.
+pub(super) fn supergroup_info_title(session: &Session, supergroup_id: i64) -> &'static str {
+    if session.supergroup_is_channel(supergroup_id) {
+        keys::INFO_CHANNEL_TITLE
+    } else {
+        keys::INFO_GROUP_TITLE
+    }
+}
 
 #[cfg(test)]
 mod tests {

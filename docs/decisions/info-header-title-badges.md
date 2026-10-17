@@ -11,7 +11,14 @@ supergroup, and the supergroup panel drew only the bot-verification icon.
 Now: the title follows the peer type (new lang keys `lng_info_user_title`,
 `lng_info_bot_title`, `lng_info_channel_title`), and the group/channel header
 draws `Session::chat_header_badges` through the same `title_badge_element` the
-user panel and chat header use. Saved Messages and topic panels are not
-routed through this panel.
+user panel and chat header use. The viewer's own profile (Saved Messages)
+reads "Saved Messages", as in tdesktop, which checks it before the user
+branch. Topic panels are not routed through this panel.
 
-Verified with the `ready-info-channel` demo in light and dark.
+Known differences: Quill has no support-account flag, so a support bot reads
+"Bot Info" where tdesktop reads "User Info"; direct-messages (monoforum)
+supergroups read "Group Info" where tdesktop reads "Direct messages".
+
+Verified with the `ready-info-channel` demo in light and dark, and by the UI
+test `info_title_tests` (titles for a channel, group, bot, user and the viewer,
+and the verified badge on the channel).

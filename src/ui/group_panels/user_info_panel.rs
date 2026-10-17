@@ -5,6 +5,31 @@ use super::*;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
+    /// The elements of a profile header's badges (`Info::Profile::Badge`);
+    /// an emoji status plays through `status_glyph` for `owner`.
+    fn info_header_badges(
+        &self,
+        badges: Vec<quill::peer_badge::TitleBadge>,
+        owner: i64,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        badges
+            .into_iter()
+            .map(|badge| {
+                let glyph = match badge {
+                    quill::peer_badge::TitleBadge::EmojiStatus(id) => self.status_glyph(
+                        crate::ui::status_emoji::StatusSurface::Profile,
+                        owner,
+                        id,
+                        cx,
+                    ),
+                    _ => None,
+                };
+                crate::ui::chat_row::title_badge_element(badge, glyph, cx)
+            })
+            .collect()
+    }
+
     /// User profile panel: photo (downloaded `userFullInfo.photo` size, or
     /// an initials avatar), name, status, username/phone rows, bio, and an
     /// Add contact affordance for known non-contacts.
@@ -75,7 +100,7 @@ impl QuillApp {
         let verify_icon = self.user_bot_verify_icon_path(user_id);
         // Verified check, Premium star or animated status after the name
         // (`Info::Profile::Badge`).
-        let badges: Vec<AnyElement> = user
+        let badges = user
             .as_ref()
             .map(|u| {
                 quill::peer_badge::header_badges(
@@ -84,21 +109,8 @@ impl QuillApp {
                     u.emoji_status_id,
                 )
             })
-            .unwrap_or_default()
-            .into_iter()
-            .map(|badge| {
-                let glyph = match badge {
-                    quill::peer_badge::TitleBadge::EmojiStatus(id) => self.status_glyph(
-                        crate::ui::status_emoji::StatusSurface::Profile,
-                        user_id,
-                        id,
-                        cx,
-                    ),
-                    _ => None,
-                };
-                crate::ui::chat_row::title_badge_element(badge, glyph, cx)
-            })
-            .collect();
+            .unwrap_or_default();
+        let badges = self.info_header_badges(badges, user_id, cx);
         let mut body = div()
             .flex()
             .flex_col()
@@ -328,14 +340,12 @@ impl QuillApp {
     ) -> AnyElement {
         let session = self.session();
         let (title, chat_id, is_channel) = session
-            .and_then(|s| {
-                s.chats.values().find_map(|chat| match chat.kind {
-                    ChatKind::Supergroup {
-                        supergroup_id: id,
-                        is_channel,
-                    } if id == supergroup_id => Some((chat.title.clone(), chat.id, is_channel)),
-                    _ => None,
-                })
+            .and_then(|s| s.supergroup_chat(supergroup_id))
+            .and_then(|chat| match chat.kind {
+                ChatKind::Supergroup { is_channel, .. } => {
+                    Some((chat.title.clone(), chat.id, is_channel))
+                }
+                _ => None,
             })
             .unwrap_or_else(|| {
                 (
@@ -371,26 +381,10 @@ impl QuillApp {
             .and_then(|chat| self.bot_verify_icon_path(chat));
         // Verified check, emoji status or SCAM / FAKE chip after the title
         // (`Info::Profile::Badge`).
-        let badges: Vec<AnyElement> = session
-            .and_then(|s| {
-                s.supergroup_chat(supergroup_id)
-                    .map(|chat| s.chat_header_badges(chat))
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .map(|badge| {
-                let glyph = match badge {
-                    quill::peer_badge::TitleBadge::EmojiStatus(id) => self.status_glyph(
-                        crate::ui::status_emoji::StatusSurface::Profile,
-                        chat_id.0,
-                        id,
-                        cx,
-                    ),
-                    _ => None,
-                };
-                crate::ui::chat_row::title_badge_element(badge, glyph, cx)
-            })
-            .collect();
+        let badges = session
+            .and_then(|s| s.chats.get(&chat_id.0).map(|chat| s.chat_header_badges(chat)))
+            .unwrap_or_default();
+        let badges = self.info_header_badges(badges, chat_id.0, cx);
         let mut body = div()
             .flex()
             .flex_col()
