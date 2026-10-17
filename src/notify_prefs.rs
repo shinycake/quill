@@ -116,6 +116,33 @@ pub fn set_volume(percent: u8) {
     update(|prefs| prefs.volume = percent.min(MAX_VOLUME));
 }
 
+/// Change the volume in memory only (slider drags); [`persist`] saves it.
+pub fn set_volume_memory(percent: u8) {
+    let mut prefs = current();
+    prefs.volume = percent.min(MAX_VOLUME);
+    if let Ok(mut guard) = PREFS.write() {
+        *guard = Some(prefs);
+    }
+}
+
+/// Save the in-memory preferences on a worker thread (the write syncs the
+/// disk).
+pub fn persist() {
+    if !PERSIST.load(Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("quill-notify-prefs".into())
+        .spawn(|| {
+            static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let _guard = WRITE_LOCK.lock();
+            if let Some(path) = prefs_path() {
+                let _ = crate::settings::write_json_atomic(&path, &current());
+            }
+        });
+    drop(spawned);
+}
+
 /// Change some preferences and save them.
 pub fn update(change: impl FnOnce(&mut NotifyPrefs)) {
     let mut prefs = current();

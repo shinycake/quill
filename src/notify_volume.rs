@@ -130,6 +130,8 @@ struct VolumeFile {
 
 static VOLUMES: RwLock<Option<VolumeFile>> = RwLock::new(None);
 static PERSIST: AtomicBool = AtomicBool::new(true);
+static PERSIST_REQUESTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Turn disk writes off (tests must never touch the real file).
 pub fn set_persistence(enabled: bool) {
@@ -141,51 +143,82 @@ fn volumes_path() -> Option<PathBuf> {
 }
 
 fn load_from_disk() -> VolumeFile {
-    volumes_path()
-        .and_then(|path| std::fs::read(path).ok())
-        .and_then(|bytes| serde_json::from_slice::<VolumeFile>(&bytes).ok())
-        .unwrap_or_default()
+    let Some(path) = volumes_path() else {
+        return VolumeFile::default();
+    };
+    let Ok(bytes) = std::fs::read(&path) else {
+        return VolumeFile::default();
+    };
+    serde_json::from_slice::<VolumeFile>(&bytes).unwrap_or_else(|err| {
+        eprintln!(
+            "quill: {} is unreadable ({err}); notification volumes were reset",
+            path.display()
+        );
+        VolumeFile::default()
+    })
 }
 
-fn current_file() -> VolumeFile {
+/// Run `read` on the cached file (read from disk once, on first use).
+fn with_file<R>(read: impl FnOnce(&VolumeFile) -> R) -> R {
     if let Ok(guard) = VOLUMES.read()
         && let Some(file) = guard.as_ref()
     {
-        return file.clone();
+        return read(file);
     }
     let loaded = load_from_disk();
     match VOLUMES.write() {
-        Ok(mut guard) => guard.get_or_insert(loaded).clone(),
-        Err(_) => loaded,
+        Ok(mut guard) => read(guard.get_or_insert(loaded)),
+        Err(_) => read(&loaded),
     }
 }
 
-/// An account's saved volumes (loaded from disk on first use).
+/// An account's saved volumes.
 pub fn account(account: &str) -> AccountVolumes {
-    current_file()
-        .accounts
-        .get(account)
-        .cloned()
-        .unwrap_or_default()
+    with_file(|file| file.accounts.get(account).cloned().unwrap_or_default())
 }
 
-/// Change an account's volumes and save them. A failed write keeps the
-/// in-memory value for this run.
-pub fn update(account: &str, change: impl FnOnce(&mut AccountVolumes)) {
-    let mut file = current_file();
+/// Change an account's volumes in memory only (slider drags); call
+/// [`persist`] when the change is final.
+pub fn update_memory(account: &str, change: impl FnOnce(&mut AccountVolumes)) {
+    with_file(|_| ());
+    let Ok(mut guard) = VOLUMES.write() else {
+        return;
+    };
+    let file = guard.get_or_insert_with(VolumeFile::default);
     let mut volumes = file.accounts.remove(account).unwrap_or_default();
     change(&mut volumes);
     if volumes != AccountVolumes::default() {
         file.accounts.insert(account.to_string(), volumes);
     }
-    if PERSIST.load(Ordering::SeqCst)
-        && let Some(path) = volumes_path()
-    {
-        let _ = crate::settings::write_json_atomic(&path, &file);
+}
+
+/// Save the in-memory volumes on a worker thread (the write syncs the
+/// disk). A failed write keeps the in-memory value for this run.
+pub fn persist() {
+    PERSIST_REQUESTS.fetch_add(1, Ordering::SeqCst);
+    if !PERSIST.load(Ordering::SeqCst) {
+        return;
     }
-    if let Ok(mut guard) = VOLUMES.write() {
-        *guard = Some(file);
-    }
+    let spawned = std::thread::Builder::new()
+        .name("quill-notify-volumes".into())
+        .spawn(|| {
+            let _guard = WRITE_LOCK.lock();
+            let Some(path) = volumes_path() else { return };
+            let file = with_file(Clone::clone);
+            let _ = crate::settings::write_json_atomic(&path, &file);
+        });
+    drop(spawned);
+}
+
+/// How many times a save was requested (tests check that drags don't).
+pub fn persist_requests() -> usize {
+    PERSIST_REQUESTS.load(Ordering::SeqCst)
+}
+
+/// Change an account's volumes and save them.
+pub fn update(account: &str, change: impl FnOnce(&mut AccountVolumes)) {
+    update_memory(account, change);
+    persist();
 }
 
 /// The override for one chat's notification sound, from the saved values.
@@ -194,7 +227,11 @@ pub fn override_percent(
     chat: ChatId,
     scope: NotificationSettingsScope,
 ) -> Option<u8> {
-    account(account_key).override_percent(chat, scope)
+    with_file(|file| {
+        file.accounts
+            .get(account_key)
+            .and_then(|volumes| volumes.override_percent(chat, scope))
+    })
 }
 
 #[cfg(test)]

@@ -50,75 +50,80 @@ impl QuillApp {
             .unwrap_or_default()
     }
 
-    /// Create the three scope sliders on first use, seeded from the saved
-    /// volumes.
+    /// Create the account's three scope sliders when missing, seeded from
+    /// the saved volumes. Sliders are keyed by account, so switching
+    /// accounts picks up that account's own sliders.
     pub(in crate::ui) fn ensure_scope_volume_sliders(&mut self, cx: &mut Context<Self>) {
-        if !self.notify.scope_volume_sliders.is_empty() {
+        let Some(account) = self.volume_account() else {
             return;
-        }
+        };
         let volumes = self.account_volumes();
         for scope in NotificationSettingsScope::ALL {
+            let key = (account.clone(), scope);
+            if self.notify.scope_volume_sliders.contains_key(&key) {
+                continue;
+            }
             let slider = new_slider(volumes.scope_slider_percent(scope), cx);
-            self.subscribe_volume_slider(&slider, VolumeTarget::Scope(scope), cx);
-            self.notify.scope_volume_sliders.push((scope, slider));
+            self.subscribe_volume_slider(&slider, &account, VolumeTarget::Scope(scope), cx);
+            self.notify.scope_volume_sliders.insert(key, slider);
         }
     }
 
-    /// Keep the chat slider for the chat the notification panel shows,
-    /// re-seeded from the saved volume whenever the chat changes.
-    pub(in crate::ui) fn ensure_chat_volume_slider(&mut self, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+    /// Create the slider for `chat_id` of the account on screen when
+    /// missing. Called when the notification panel opens, never from render.
+    pub(in crate::ui) fn ensure_chat_volume_slider(
+        &mut self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(account) = self.volume_account() else {
             return;
         };
-        if self
-            .notify
-            .chat_volume_slider
-            .as_ref()
-            .is_some_and(|(chat, _)| *chat == chat_id)
-        {
+        let key = (account.clone(), chat_id);
+        if self.notify.chat_volume_sliders.contains_key(&key) {
             return;
         }
         let slider = new_slider(self.account_volumes().chat_slider_percent(chat_id), cx);
-        self.subscribe_volume_slider(&slider, VolumeTarget::Chat(chat_id), cx);
-        self.notify.chat_volume_slider = Some((chat_id, slider));
+        self.subscribe_volume_slider(&slider, &account, VolumeTarget::Chat(chat_id), cx);
+        self.notify.chat_volume_sliders.insert(key, slider);
     }
 
     fn subscribe_volume_slider(
         &mut self,
         slider: &Entity<SliderState>,
+        account: &str,
         target: VolumeTarget,
         cx: &mut Context<Self>,
     ) {
+        let account = account.to_string();
         cx.subscribe(slider, move |this, _, event: &SliderEvent, cx| {
-            this.on_volume_slider_event(target, event, cx);
+            this.on_volume_slider_event(&account, target, event, cx);
         })
         .detach();
     }
 
+    /// A drag only updates the in-memory value; letting go saves it (on a
+    /// worker thread) and plays the sample.
     fn on_volume_slider_event(
         &mut self,
+        account: &str,
         target: VolumeTarget,
         event: &SliderEvent,
         cx: &mut Context<Self>,
     ) {
         let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
         let percent = percent_from_slider(value.end());
-        self.save_volume(target, percent);
-        if matches!(event, SliderEvent::Release(_)) {
-            self.play_volume_sample(target, percent);
-        }
-        cx.notify();
-    }
-
-    /// Save a scope or chat volume for the account on screen.
-    pub(in crate::ui) fn save_volume(&mut self, target: VolumeTarget, percent: u8) {
-        let Some(account) = self.volume_account() else {
-            return;
-        };
-        quill::notify_volume::update(&account, |volumes| match target {
+        quill::notify_volume::update_memory(account, |volumes| match target {
             VolumeTarget::Scope(scope) => volumes.set_scope(scope, percent),
             VolumeTarget::Chat(chat) => volumes.set_chat(chat, percent),
         });
+        if matches!(event, SliderEvent::Release(_)) {
+            quill::notify_volume::persist();
+            if self.volume_account().as_deref() == Some(account) {
+                self.play_volume_sample(target, percent);
+            }
+        }
+        cx.notify();
     }
 
     /// tdesktop plays the chosen sound at the new volume when the slider is
@@ -176,9 +181,7 @@ impl QuillApp {
         let slider = self
             .notify
             .scope_volume_sliders
-            .iter()
-            .find(|(candidate, _)| *candidate == scope)
-            .map(|(_, slider)| slider)?;
+            .get(&(self.volume_account()?, scope))?;
         let title = match scope {
             NotificationSettingsScope::PrivateChats => tr(keys::NOTIFICATION_VOLUME_PRIVATE_CHATS),
             NotificationSettingsScope::GroupChats => tr(keys::NOTIFICATION_VOLUME_GROUPS),
@@ -205,10 +208,10 @@ impl QuillApp {
         if sound_disabled {
             return None;
         }
-        let (slider_chat, slider) = self.notify.chat_volume_slider.as_ref()?;
-        if *slider_chat != chat_id {
-            return None;
-        }
+        let slider = self
+            .notify
+            .chat_volume_sliders
+            .get(&(self.volume_account()?, chat_id))?;
         let percent = self.account_volumes().chat_slider_percent(chat_id);
         Some(volume_row(
             "chat-volume".to_string(),

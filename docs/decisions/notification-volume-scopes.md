@@ -19,3 +19,9 @@
 
 ## Verified
 Unit tests for the resolution, a GPUI UI test for the sliders, and light and dark demo captures.
+
+## Review follow-ups
+- A slider drag only updates the in-memory value; releasing it saves on a worker thread (`notify_volume::persist`, `notify_prefs::persist`), so no fsync runs per mouse move. The global volume slider got the same change.
+- Sliders are keyed by (account, scope) and (account, chat), created when the panel or dialog opens, never in render. An account switch finds its own sliders; two windows on different chats keep separate ones.
+- Reads look up under the cached file; a corrupt `notify_volumes.json` logs and resets.
+- Not done: volumes of a removed account stay in the file, and volumes are per chat, not per topic (tdesktop also keys by topic).

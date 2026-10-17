@@ -107,7 +107,7 @@ impl QuillApp {
         ));
     }
 
-    fn demo_ready_mute_archive(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn demo_ready_mute_archive(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_mute_archive(session, &self.demo_ui.sink, &self.demo_ui.seq);
@@ -119,7 +119,7 @@ impl QuillApp {
                     .or_default();
             }
         }
-        self.notify.mute_menu_open = true;
+        self.open_mute_menu(cx);
         self.connection.set_note(StatusNote::silent(
             "screenshot demo — mute presets · muted icon · archive",
         ));
