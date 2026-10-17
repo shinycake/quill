@@ -487,6 +487,21 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
     Some(item)
 }
 
+/// What TDLib hears when the story on screen changes from `previous` to
+/// `current`: `closeStory` for the one it replaces, then `openStory` for
+/// the new one, and nothing while it stays the same, so every open gets
+/// exactly one close.
+pub fn story_open_switch<K: PartialEq>(
+    previous: Option<K>,
+    current: Option<K>,
+) -> (Option<K>, Option<K>) {
+    if previous == current {
+        (None, None)
+    } else {
+        (previous, current)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -888,5 +903,27 @@ mod tests {
             Duration::ZERO
         );
         assert!(!playback.finished(&item, t0 + Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn a_story_switch_closes_the_old_story_before_opening_the_new_one() {
+        // A repost's origin replacing the repost.
+        assert_eq!(
+            story_open_switch(Some((13, 72)), Some((13, 71))),
+            (Some((13, 72)), Some((13, 71)))
+        );
+        assert_eq!(
+            story_open_switch(None, Some((13, 71))),
+            (None, Some((13, 71)))
+        );
+        assert_eq!(
+            story_open_switch(Some((13, 71)), None),
+            (Some((13, 71)), None)
+        );
+        assert_eq!(
+            story_open_switch(Some((13, 71)), Some((13, 71))),
+            (None, None),
+            "the same story stays open once"
+        );
     }
 }

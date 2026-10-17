@@ -6,8 +6,9 @@
 
 use super::*;
 use quill::state::StoryCardState;
+use quill::story_repost::RepostGone;
 use quill::story_tray_walk::TrayWalk;
-use quill::story_viewer::{StoryOpenScope, collect_found_story_items};
+use quill::story_viewer::{StoryOpenScope, collect_found_story_items, story_open_switch};
 
 /// A story open waiting for its `getStory` answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +16,9 @@ pub(in crate::ui) struct PendingStoryOpen {
     pub chat_id: i64,
     pub story_id: i32,
     pub scope: StoryOpenScope,
+    /// A repost's press: what to show when the original turns out gone
+    /// (tdesktop's `lookupHandler` failure branch).
+    pub if_gone: Option<RepostGone>,
 }
 
 impl QuillApp {
@@ -31,6 +35,18 @@ impl QuillApp {
         scope: StoryOpenScope,
         cx: &mut Context<Self>,
     ) {
+        let open = PendingStoryOpen {
+            chat_id: chat_id.0,
+            story_id,
+            scope,
+            if_gone: None,
+        };
+        self.open_story(open, cx);
+    }
+
+    /// [`Self::open_story_viewer`] for a prepared `open`.
+    pub(super) fn open_story(&mut self, open: PendingStoryOpen, cx: &mut Context<Self>) {
+        let (chat_id, story_id, scope) = (ChatId(open.chat_id), open.story_id, open.scope);
         let mut wanted: Vec<i32> = match scope {
             StoryOpenScope::Tray => self
                 .session()
@@ -73,11 +89,6 @@ impl QuillApp {
                 )));
             }
         }
-        let open = PendingStoryOpen {
-            chat_id: chat_id.0,
-            story_id,
-            scope,
-        };
         if !self.rebuild_story_viewer(open, cx) {
             self.chat_list.pending_story_open = Some(open);
         }
@@ -94,8 +105,13 @@ impl QuillApp {
     /// open cleared the story's retry clock, so a clock now means it
     /// failed) drops the open too: a link gets the same toast, as tdesktop
     /// runs the same callback on any failure, and any other open says the
-    /// story could not be loaded.
-    pub(in crate::ui) fn resolve_pending_story_open(&mut self, cx: &mut Context<Self>) {
+    /// story could not be loaded. A repost's press shows its `if_gone` in
+    /// both cases instead.
+    pub(in crate::ui) fn resolve_pending_story_open(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(open) = self.chat_list.pending_story_open else {
             return;
         };
@@ -106,7 +122,17 @@ impl QuillApp {
             .stories
             .story_retry
             .contains_key(&(open.chat_id, open.story_id));
-        match session.story_card_state(open.chat_id, open.story_id) {
+        let state = session.story_card_state(open.chat_id, open.story_id);
+        if let Some(gone) = open.if_gone
+            && matches!(
+                (state, failed),
+                (StoryCardState::Expired, _) | (StoryCardState::Loading, true)
+            )
+        {
+            self.chat_list.pending_story_open = None;
+            return self.show_story_repost_gone(gone, window, cx);
+        }
+        match state {
             StoryCardState::Ready => {
                 self.chat_list.pending_story_open = None;
                 self.rebuild_story_viewer(open, cx);
@@ -195,16 +221,14 @@ impl QuillApp {
         previous: Option<(ChatId, i32)>,
         current: Option<(ChatId, i32)>,
     ) {
-        if previous == current {
-            return;
-        }
+        let (close, open) = story_open_switch(previous, current);
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        if let Some((chat_id, story_id)) = previous {
+        if let Some((chat_id, story_id)) = close {
             let _ = live.driver.close_story(chat_id, story_id);
         }
-        if let Some((chat_id, story_id)) = current {
+        if let Some((chat_id, story_id)) = open {
             let _ = live.driver.open_story(chat_id, story_id);
         }
     }
@@ -228,6 +252,7 @@ impl QuillApp {
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
+        self.fetch_story_repost_origin();
         self.ensure_story_custom_emoji_downloads();
         self.sync_live_story(cx);
     }

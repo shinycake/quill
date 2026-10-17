@@ -21,20 +21,30 @@ falling back to "Chat 123" for a chat that is not loaded.
 
 ## What changed
 
-- `quill::story_repost::press` picks the action from the origin and the
-  story's cache state (`story_card_state`):
-  - cached or still loading: open the story. `open_story_viewer` sends
-    `getStory` for an uncached story and opens the viewer on it when the
-    answer arrives (`pending_story_open`), which stands in for tdesktop's
-    resolve on show;
-  - gone (`getStory` said so): the poster's profile, after the viewer
-    closes, like the "Stories" button. A poster with no profile target
-    gets nothing;
+- While a repost is the current story, the viewer sends `getStory` for its
+  origin when it is not cached (`fetch_story_repost_origin`), as
+  `recountDimensions` resolves it on show. A press then usually knows the
+  answer already.
+- `quill::story_repost::press` picks the action from the origin, the
+  story's cache state (`story_card_state`) and whether the poster has a
+  profile:
+  - cached or still loading: open the story alone (`StoryOpenScope::Single`,
+    tdesktop's `StoriesContextSingle`). A story still loading opens when the
+    `getStory` answer arrives (`pending_story_open`). The pending open
+    carries `if_gone`, so if the answer says the story is gone, or the ask
+    fails, the first press opens the poster's profile; with no profile it
+    shows the expired note. Playback holds while the open waits, so the
+    repost cannot end under it;
+  - known to be gone: the poster's profile, after the viewer closes, like
+    the "Stories" button;
   - no poster or no story id: the viewer note "This story has expired."
     (`lng_forwarded_story_expired`), the only case tdesktop toasts.
+- A press that would do nothing (the story is gone and the poster has no
+  profile) leaves the label plain text, without the button role or pointer.
 - Opening another story from the viewer sends `closeStory` for the story it
-  replaces before `openStory`, as stepping does, so TDLib's calls stay paired.
-- The label is a button (`story-viewer-repost`). "edited" is in the header
-  (PR #947), not here.
+  replaces before `openStory`, as stepping does, so TDLib's calls stay
+  paired (`quill::story_viewer::story_open_switch`).
+- The label is `story-viewer-repost`, in `story_viewer/repost.rs`.
+  "edited" is in the header (PR #947), not here.
 - Unloaded chat: the "Chat 123" fallback is gone. tdesktop has no
   placeholder to copy, so the label reads "Reposted story" without a name.

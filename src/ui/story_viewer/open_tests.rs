@@ -61,6 +61,7 @@ fn a_linked_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut 
             chat_id: POSTER,
             story_id: 99,
             scope: StoryOpenScope::Link,
+            if_gone: None,
         }),
         "the open waits for getStory"
     );
@@ -231,6 +232,7 @@ fn opening_a_story_again_after_a_failure_waits_for_the_new_answer(cx: &mut TestA
                 chat_id: POSTER,
                 story_id: 92,
                 scope: StoryOpenScope::Single,
+                if_gone: None,
             }),
             "the earlier failure does not drop the new open"
         );

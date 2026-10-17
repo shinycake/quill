@@ -533,7 +533,7 @@ impl QuillApp {
 
     /// Pressing the header: the poster's profile, after the viewer closes
     /// (the same hand-off as the "Stories" button).
-    fn open_story_poster_profile(
+    pub(super) fn open_story_poster_profile(
         &mut self,
         sender: MessageSender,
         window: &mut Window,
@@ -543,29 +543,32 @@ impl QuillApp {
         self.open_avatar_profile(sender, window, cx);
     }
 
-    /// The line under the caption: the repost label, which opens its
-    /// origin.
+    /// The line under the caption: the repost label, a button that opens
+    /// its origin unless a press would do nothing.
     fn story_meta_row(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let label = self.story_repost_line()?;
+        let pressable = self.story_repost_press().is_some();
         Some(
             div()
                 .id("story-viewer-repost")
                 .debug_selector(|| "story-viewer-repost".into())
-                .role(gpui_kit::Role::Button)
-                .aria_label(label.clone())
-                .tab_index(0)
-                .cursor_pointer()
-                .pressable(cx.theme())
                 .rounded_sm()
                 .px_1()
                 .text_xs()
                 .text_color(chrome::fg())
-                .child(label)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    // The backdrop under the panel closes the viewer.
-                    cx.stop_propagation();
-                    this.press_story_repost(window, cx);
-                })),
+                .child(label.clone())
+                .when(pressable, |row| {
+                    row.role(gpui_kit::Role::Button)
+                        .aria_label(label)
+                        .tab_index(0)
+                        .cursor_pointer()
+                        .pressable(cx.theme())
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            // The backdrop under the panel closes the viewer.
+                            cx.stop_propagation();
+                            this.press_story_repost(window, cx);
+                        }))
+                }),
         )
     }
 

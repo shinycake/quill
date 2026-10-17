@@ -127,6 +127,7 @@ impl QuillApp {
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
+        self.fetch_story_repost_origin();
         self.ensure_story_custom_emoji_downloads();
         self.sync_live_story(cx);
         cx.notify();

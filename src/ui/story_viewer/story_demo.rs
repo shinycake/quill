@@ -2,7 +2,8 @@
 //! Telegram): the demo channel's first of three photo stories, posted two
 //! hours ago, edited, and shown to contacts only, so the header carries the
 //! age, "edited", the position and the privacy badge. The second story
-//! reposts the first, so it shows the "Reposted from" link.
+//! reposts the first, so it shows the "Reposted from" link; the third
+//! reposts a story the demo never caches.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -18,6 +19,8 @@ use std::sync::atomic::Ordering;
 
 pub(super) const CHANNEL: i64 = 13;
 const ORIGIN: i32 = 71;
+/// The third story reposts one the demo never caches.
+pub(super) const GONE_ORIGIN: i32 = 70;
 pub(super) const STORIES: [i32; 3] = [ORIGIN, 72, 73];
 const PHOTO_FILE: i32 = 4471;
 
@@ -53,13 +56,12 @@ impl QuillApp {
             } else {
                 "null"
             };
-            // The second story reposts the first, for the "Reposted from" link.
-            let repost = if index == 1 {
-                format!(
-                    r#"{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":{CHANNEL},"story_id":{ORIGIN}}},"is_content_modified":false}}"#
-                )
-            } else {
-                "null".to_string()
+            // The second story reposts the first, for the "Reposted from"
+            // link; the third reposts one that is not cached.
+            let repost = match index {
+                1 => repost_info(ORIGIN),
+                2 => repost_info(GONE_ORIGIN),
+                _ => "null".to_string(),
             };
             ingest(format!(
                 r#"{{"@type":"story","id":{id},"poster_chat_id":{CHANNEL},"date":{posted},"is_edited":{edited},"privacy_settings":{privacy},"repost_info":{repost},"content":{{"@type":"storyContentPhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1080,"height":1920,"progressive_sizes":[]}}]}}}},"caption":{{"@type":"formattedText","text":"Harbour at dusk","entities":[]}}}}"#,
@@ -71,4 +73,10 @@ impl QuillApp {
         self.begin_story_viewer(items, 0, cx);
         cx.notify();
     }
+}
+
+fn repost_info(origin: i32) -> String {
+    format!(
+        r#"{{"@type":"storyRepostInfo","origin":{{"@type":"storyOriginPublicStory","chat_id":{CHANNEL},"story_id":{origin}}},"is_content_modified":false}}"#
+    )
 }

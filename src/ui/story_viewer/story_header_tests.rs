@@ -1,7 +1,8 @@
 //! The story header over the demo's photo story and live story: the
 //! position follows the name as its own label, the age and "edited" sit
 //! under the name, and a watched stream puts the LIVE badge there instead;
-//! and the "Reposted from" link opens the original story.
+//! and the "Reposted from" link opens the original story alone, or its
+//! poster's profile once the original turns out gone.
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -11,6 +12,8 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AppContext, Bounds, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, px, size,
 };
+use quill::story_repost::RepostGone;
+use quill::story_viewer::StoryOpenScope;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -97,4 +100,50 @@ fn the_repost_link_opens_the_original_story(cx: &mut TestAppContext) {
     vcx.simulate_click(link.center(), Modifiers::default());
     frames(vcx);
     assert_eq!(current(vcx), super::story_demo::STORIES.first().copied());
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.stories.viewer.len(), 1, "the origin opens alone");
+        assert!(app.stories.viewer.tray_walk().is_none(), "a single open");
+    });
+}
+
+#[gpui_kit::test]
+fn a_repost_whose_origin_turns_out_gone_opens_the_poster_on_the_first_press(
+    cx: &mut TestAppContext,
+) {
+    use super::story_demo::{CHANNEL, GONE_ORIGIN};
+    let (app, mut vcx) = open(cx, "ready-story-photo");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.step_story_viewer(1, cx);
+        app.step_story_viewer(1, cx);
+    });
+    frames(vcx);
+    let link = find(vcx, "story-viewer-repost").expect("the repost link");
+    vcx.simulate_click(link.center(), Modifiers::default());
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(
+            app.chat_list.pending_story_open,
+            Some(super::PendingStoryOpen {
+                chat_id: CHANNEL,
+                story_id: GONE_ORIGIN,
+                scope: StoryOpenScope::Single,
+                if_gone: Some(RepostGone::OpenPeer { chat_id: CHANNEL }),
+            }),
+            "the press waits for the origin"
+        );
+        assert!(app.story_playback_paused(), "the repost holds meanwhile");
+    });
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.missing.insert((CHANNEL, GONE_ORIGIN));
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.chat_list.pending_story_open, None);
+        assert!(!app.stories.viewer.is_open(), "the viewer closed");
+        assert!(app.dialogs.profile_modal.is_some(), "the poster's profile");
+    });
 }

@@ -738,6 +738,8 @@ impl QuillApp {
         self.stories.reaction_picker_open
             || self.stories.reply_open
             || self.stories.pause.is_paused()
+            // A press inside the viewer waits for its story.
+            || self.chat_list.pending_story_open.is_some()
             || self.stories.share_open
             || self.stories.close_friends_edit.is_some()
     }
@@ -832,6 +834,7 @@ mod open;
 #[cfg(feature = "demo-capture")]
 mod open_tests;
 mod reply_media;
+mod repost;
 mod siblings;
 #[cfg(feature = "demo-capture")]
 mod story_demo;
