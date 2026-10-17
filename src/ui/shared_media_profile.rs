@@ -262,7 +262,11 @@ impl QuillApp {
         }
     }
 
-    fn shared_media_load_more(&self, tab: SharedMediaTab, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn shared_media_load_more(
+        &self,
+        tab: SharedMediaTab,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .justify_center()

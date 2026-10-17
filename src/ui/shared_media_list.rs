@@ -152,7 +152,7 @@ impl QuillApp {
 
     /// The strip above a list that was reloaded from a picked date, with a
     /// way back to the newest media.
-    fn shared_media_date_bar(
+    pub(super) fn shared_media_date_bar(
         &self,
         tab: SharedMediaTab,
         cx: &mut Context<Self>,

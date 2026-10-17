@@ -362,3 +362,53 @@ fn a_date_jump_page_starts_at_the_picked_day() {
     assert_eq!(ids, vec![20, 10]);
     assert_eq!(tab.anchor_day, Some(day));
 }
+
+#[test]
+fn photo_and_video_pages_become_tiles_and_queue_their_thumbnails() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    session.media.shared_media.open_for(chat);
+    let generation = session
+        .media
+        .shared_media
+        .begin_fetch(SharedMediaTab::Media);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia {
+            tab: SharedMediaTab::Media,
+            generation,
+        },
+        Some(chat),
+    );
+    let file = |id: i32| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":10,"expected_size":10,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false}},"remote":{{"@type":"remoteFile","id":"r{id}","unique_id":"u{id}"}}}}"#
+        )
+    };
+    let photo = format!(
+        r#"{{"id":301,"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messagePhoto","caption":{{"@type":"formattedText","text":"","entities":[]}},"photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{},"width":320,"height":240,"progressive_sizes":[]}}]}}}}}}"#,
+        file(71)
+    );
+    let video = format!(
+        r#"{{"id":302,"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageVideo","caption":{{"@type":"formattedText","text":"","entities":[]}},"video":{{"@type":"video","duration":83,"width":640,"height":480,"file_name":"a.mp4","mime_type":"video/mp4","supports_streaming":true,"thumbnail":{{"@type":"thumbnail","width":320,"height":240,"format":{{"@type":"thumbnailFormatJpeg"}},"file":{}}},"video":{}}}}}}}"#,
+        file(72),
+        file(73)
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":0,"messages":[{photo},{video}]}}"#,
+            extra.0
+        ),
+    );
+    let items = &session.media.shared_media.tabs[SharedMediaTab::Media.index()].items;
+    let first = items[0].meta.tile().expect("photo tile");
+    assert_eq!(first.thumbs, vec![FileId(71)]);
+    assert_eq!((first.width, first.height), (320, 240));
+    let second = items[1].meta.tile().expect("video tile");
+    assert_eq!(second.thumbs, vec![FileId(72)]);
+    assert_eq!(second.badge, TileBadge::Duration(83));
+    assert_eq!(session.take_profile_thumbs(), vec![FileId(71), FileId(72)]);
+}

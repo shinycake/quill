@@ -322,10 +322,11 @@ impl Session {
             for message in &messages {
                 self.remember_files(&message.files);
             }
-            let items = messages
+            let items: Vec<SharedMediaItem> = messages
                 .iter()
                 .map(|message| SharedMediaItem::from_parsed(tab, message))
                 .collect();
+            self.want_shared_media_thumbs(&items);
             self.media.shared_media.accept(
                 chat_id,
                 tab,
@@ -342,10 +343,11 @@ impl Session {
             for message in &messages {
                 self.remember_files(&message.files);
             }
-            let items = messages
+            let items: Vec<SharedMediaItem> = messages
                 .iter()
                 .map(|message| SharedMediaItem::from_parsed(tab, message))
                 .collect();
+            self.want_shared_media_thumbs(&items);
             self.media.shared_media.accept_more(
                 chat_id,
                 tab,

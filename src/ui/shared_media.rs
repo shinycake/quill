@@ -210,6 +210,17 @@ impl QuillApp {
             {
                 self.shared_media_grid(active_tab, cx)
             }
+            SharedMediaTabStatus::Ready
+                if matches!(
+                    active_tab,
+                    SharedMediaTab::Media
+                        | SharedMediaTab::Photos
+                        | SharedMediaTab::Videos
+                        | SharedMediaTab::Gifs
+                ) =>
+            {
+                self.shared_media_tile_grid(active_tab, cx)
+            }
             SharedMediaTabStatus::Ready => self.shared_media_ready_list(active_tab, cx),
         };
         panel = panel.child(content);
