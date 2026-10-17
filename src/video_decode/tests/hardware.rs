@@ -97,8 +97,7 @@ fn a_failing_hardware_decoder_hands_over_to_software_without_losing_a_picture() 
         PixelOutput::Bgra,
     );
     let failing = decode(
-        FfiDemuxer::open_stand_in(&clip, &options(true), StandIn::FailThirdPicture)
-            .expect("open"),
+        FfiDemuxer::open_stand_in(&clip, &options(true), StandIn::FailThirdPicture).expect("open"),
         PixelOutput::Bgra,
     );
     assert!(failing.opened.hardware, "the stand-in reports hardware");
