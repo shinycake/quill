@@ -91,6 +91,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// The commands of a group's bots come with the group's full info
+    /// (`bot_commands`). A supergroup's is already fetched for the header;
+    /// a basic group's is fetched here, once, when the chat opens.
+    pub(crate) fn maybe_fetch_group_bot_commands(&mut self) -> Result<(), ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat else {
+            return Ok(());
+        };
+        if !matches!(
+            self.session.group_commands_key(chat_id),
+            Some(crate::state::GroupCommandsKey::BasicGroup(_))
+        ) {
+            return Ok(());
+        }
+        self.fetch_basic_group_members(chat_id).map(|_| ())
+    }
+
     /// Slice B2: `sendBotStartMessage` (schema 1.8.67, line 12216) — what
     /// the START button and "Restart bot" send. `parameter` is the
     /// `internalLinkTypeBotStart.start_parameter` (line 9399); empty for

@@ -22,6 +22,7 @@ mod folder_followups;
 mod forum_column;
 mod forum_saved;
 mod group_admin;
+mod group_bot_commands;
 mod groups;
 mod groups_more;
 mod history_messages;

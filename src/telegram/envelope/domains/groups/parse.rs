@@ -279,6 +279,7 @@ pub(crate) fn parse_groups_payload(
             custom_emoji_sticker_set_id: int64(value.get("custom_emoji_sticker_set_id"))
                 .unwrap_or(0),
             admin: parse_supergroup_full_admin(Some(value)),
+            bot_commands: parse_group_bot_commands(value.get("bot_commands")),
         })),
         // Parity slice: `updateSupergroupFullInfo` (schema 1.8.67, line
         // 10750) — same fields as the `supergroupFullInfo` response, with
@@ -373,6 +374,21 @@ pub(crate) fn parse_groups_payload(
                 )
                 .unwrap_or(0),
                 admin: parse_supergroup_full_admin(value.get("supergroup_full_info")),
+                bot_commands: parse_group_bot_commands(
+                    value
+                        .get("supergroup_full_info")
+                        .and_then(|info| info.get("bot_commands")),
+                ),
+            },
+        )),
+        "updateBasicGroupFullInfo" => Ok(EnvelopePayload::Groups(
+            GroupsPayload::UpdateBasicGroupFullInfo {
+                basic_group_id: int53(value.get("basic_group_id"))?,
+                bot_commands: parse_group_bot_commands(
+                    value
+                        .get("basic_group_full_info")
+                        .and_then(|info| info.get("bot_commands")),
+                ),
             },
         )),
         // Slice (communities backend core): `updateCommunity` (schema
@@ -637,6 +653,7 @@ pub(crate) fn parse_groups_payload(
                         .collect()
                 })
                 .unwrap_or_default(),
+            bot_commands: parse_group_bot_commands(value.get("bot_commands")),
         })),
         "updateNewChatJoinRequest" => Ok(EnvelopePayload::Groups(
             GroupsPayload::UpdateNewChatJoinRequest {

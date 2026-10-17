@@ -229,7 +229,8 @@ fn type_slash(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
             session.chats.get_mut(&chat.0).unwrap().kind =
                 quill::telegram::envelope::ChatKind::Private { user_id };
             app.composer.update(cx, |input, cx| {
-                input.set_value(text.to_string(), window, cx)
+                input.set_value(text.to_string(), window, cx);
+                input.set_selected_range(text.len()..text.len(), cx);
             });
             app.sync_command_menu(cx);
         });

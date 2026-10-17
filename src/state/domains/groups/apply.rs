@@ -29,6 +29,7 @@ impl Session {
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
                 admin,
+                bot_commands,
             } => {
                 let full_info_group = pending
                     .filter(|p| p.purpose == RequestPurpose::GetSupergroupFullInfo)
@@ -52,6 +53,9 @@ impl Session {
                     seq,
                 );
                 if let Some(supergroup_id) = full_info_group {
+                    self.bots
+                        .group_bot_commands
+                        .insert(GroupCommandsKey::Supergroup(supergroup_id), bot_commands);
                     self.set_direct_messages_chat(supergroup_id, direct_messages_chat_id);
                     self.merge_full_admin(supergroup_id, admin);
                 }
@@ -76,7 +80,11 @@ impl Session {
                 sticker_set_id,
                 custom_emoji_sticker_set_id,
                 admin,
+                bot_commands,
             } => {
+                self.bots
+                    .group_bot_commands
+                    .insert(GroupCommandsKey::Supergroup(supergroup_id), bot_commands);
                 self.apply_update_supergroup_full_info(
                     supergroup_id,
                     description,
@@ -507,10 +515,20 @@ impl Session {
             // the add-members dialog.
             // Slice G1: `getBasicGroupFullInfo` answer — replaces the
             // cached basic-group member list.
-            GroupsPayload::BasicGroupFullInfo { members } => {
+            GroupsPayload::BasicGroupFullInfo {
+                members,
+                bot_commands,
+            } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBasicGroupFullInfo)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
+                    if let Some(chat) = self.chats.get(&chat_id.0)
+                        && let ChatKind::BasicGroup { basic_group_id } = chat.kind
+                    {
+                        self.bots
+                            .group_bot_commands
+                            .insert(GroupCommandsKey::BasicGroup(basic_group_id), bot_commands);
+                    }
                     let total_count = members.len() as i32;
                     self.groups.basic_group_members.insert(
                         chat_id.0,
@@ -520,6 +538,14 @@ impl Session {
                         },
                     );
                 }
+            }
+            GroupsPayload::UpdateBasicGroupFullInfo {
+                basic_group_id,
+                bot_commands,
+            } => {
+                self.bots
+                    .group_bot_commands
+                    .insert(GroupCommandsKey::BasicGroup(basic_group_id), bot_commands);
             }
             GroupsPayload::FailedToAddMembers { failed_count } => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {

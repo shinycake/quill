@@ -372,13 +372,11 @@ impl QuillApp {
         };
         let edit = shortcut_id == qr::EDIT_ROW;
         // The `/token` leaves the composer, other text stays (tdesktop).
-        let current = self.composer_markup(cx);
-        let rest = quill::composer::strip_command_menu_trigger(&current)
-            .unwrap_or(current.as_str())
-            .trim_end()
-            .to_string();
+        let token = self.command_trigger(cx);
         self.close_command_menu(cx);
-        self.set_composer_markup(&rest, window, cx);
+        if let Some((range, _)) = token {
+            self.replace_composer_text(range, "", window, cx);
+        }
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         if edit {

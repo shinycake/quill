@@ -43,6 +43,7 @@ mod giveaways;
 mod grams;
 mod grams_withdraw;
 mod group_admin;
+mod group_bot_commands;
 mod group_calls;
 mod groups;
 mod history_window;

@@ -21,7 +21,6 @@ use quill::composer::{
     ComposerScheduling, ComposerSnapshot, FormatAction, SendOptions, apply_format_markup,
     begin_edit_keeping_reply, cancel_edit_draft, cancel_edit_keeping_reply, cancel_reply_draft,
     clear_format_markup, command_menu_trigger, filter_command_menu_items,
-    strip_command_menu_trigger,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -820,7 +819,7 @@ impl QuillApp {
     /// group members matching the `@query` being typed.
     pub(super) fn mention_menu_items(&self, cx: &Context<Self>) -> Vec<(i64, String, String)> {
         let text = self.composer.read(cx).value().to_string();
-        if quill::composer::mention_trigger(&text).is_none() {
+        if self.mention_trigger(cx).is_none() {
             return Vec::new();
         }
         let Some(session) = self.session() else {
@@ -855,11 +854,27 @@ impl QuillApp {
         items
     }
 
-    /// Track the `@query` at the composer's end: search the open group's
+    /// The `@name` token before the caret: its byte range and the name
+    /// typed after the `@`. Not over a selection.
+    pub(in crate::ui) fn mention_trigger(
+        &self,
+        cx: &App,
+    ) -> Option<(std::ops::Range<usize>, String)> {
+        let input = self.composer.read(cx);
+        let caret = input.selected_range();
+        if !caret.is_empty() {
+            return None;
+        }
+        let text = input.value().to_string();
+        let token = quill::composer::mention_trigger(&text, caret.start)?;
+        Some((token.range, token.query.to_string()))
+    }
+
+    /// Track the `@query` before the caret: search the open group's
     /// members for it, or drop the suggestions when there is none.
     pub(super) fn sync_mention_menu(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
-        let query = quill::composer::mention_trigger(&text).map(str::to_string);
+        let query = self.mention_trigger(cx).map(|(_, query)| query);
         let Some(live) = self.live.as_mut() else {
             return;
         };

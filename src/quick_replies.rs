@@ -49,6 +49,7 @@ pub fn with_edit_row(mut rows: Vec<CommandMenuItem>) -> Vec<CommandMenuItem> {
                 global: false,
                 is_ephemeral: false,
                 quick_reply: Some(EDIT_ROW),
+                bot: None,
             },
         );
     }
@@ -405,6 +406,7 @@ mod tests {
             global: false,
             is_ephemeral: false,
             quick_reply: Some(4),
+            bot: None,
         };
         let rows = with_edit_row(vec![shortcut.clone()]);
         assert_eq!(rows.len(), 2);

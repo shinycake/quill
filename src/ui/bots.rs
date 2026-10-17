@@ -830,6 +830,7 @@ impl QuillApp {
                         this.composer.update(cx, |input, cx| {
                             input.set_value("/", window, cx);
                             input.focus(window, cx);
+                            input.set_selected_range(1..1, cx);
                         });
                         this.sync_command_menu(cx);
                     }
@@ -844,8 +845,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let next = quill::composer::insert_bot_command_text(&self.composer_markup(cx), command);
+        let next =
+            quill::composer::insert_bot_command_text(&self.composer_markup(cx), command, None);
         self.set_composer_markup(&next, window, cx);
+        self.composer.update(cx, |input, cx| {
+            let end = input.value().len();
+            input.set_selected_range(end..end, cx);
+        });
         self.sync_command_menu(cx);
     }
 }

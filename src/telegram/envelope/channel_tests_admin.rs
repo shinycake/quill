@@ -762,7 +762,7 @@ fn g1_basic_group_full_info_parses() {
         )
         .unwrap();
     match env.payload {
-        EnvelopePayload::Groups(GroupsPayload::BasicGroupFullInfo { members }) => {
+        EnvelopePayload::Groups(GroupsPayload::BasicGroupFullInfo { members, .. }) => {
             assert_eq!(members.len(), 2);
         }
         other => panic!("unexpected {other:?}"),

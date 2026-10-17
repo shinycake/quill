@@ -115,7 +115,7 @@ impl QuillApp {
     pub(super) fn sync_suggest_menu(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value().to_string();
         let range = self.composer.read(cx).selected_range();
-        let mention = quill::composer::mention_trigger(&text).is_some();
+        let mention = self.mention_trigger(cx).is_some();
         let query = (range.is_empty() && !mention && self.composer_ui.pending_edit.is_none())
             .then(|| detect(&text, range.start, self.chat_prefs.suggest_emoji))
             .flatten()
