@@ -647,9 +647,9 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Opening a deleted or expired story shows the broken-link toast <!-- parity:stories-viewer-missing-toast -->
 - [x] Stories that finish loading after the viewer opens join its list <!-- parity:stories-viewer-late-stories -->
 - [x] The story viewer moves on to the next poster, with neighbour previews beside the story <!-- parity:stories-viewer-next-poster -->
-- [ ] The story viewer preloads the next stories and the previous one <!-- parity:stories-viewer-preload -->
-- [ ] "Reposted from" opens the original story, or the poster's profile when it is gone <!-- parity:stories-repost-origin-link -->
-- [ ] Story header shows the posting time, "edited", a privacy badge, and opens the poster's profile <!-- parity:stories-viewer-header-meta -->
+- [x] The story viewer preloads the next stories and the previous one <!-- parity:stories-viewer-preload -->
+- [x] "Reposted from" opens the original story, or the poster's profile when it is gone <!-- parity:stories-repost-origin-link -->
+- [x] Story header shows the posting time, "edited", a privacy badge, and opens the poster's profile <!-- parity:stories-viewer-header-meta -->
 
 #### Post stories
 - [x] Story composer: photo picker (path entry — native file picker deferred; `postStory` via td_api.tl:13715) <!-- parity:stories-post-photo-composer -->
@@ -1102,8 +1102,8 @@ Telegram's built-in self-custodial Gram wallet (TDLib 1.8.68). Read-only display
 - [x] Try IPv6 option <!-- parity:data-ipv6 -->
 - [x] Export Telegram data box: types, media sizes, date range, HTML and JSON <!-- parity:data-export-full -->
 - [x] Chat export as HTML with media, date range and senders <!-- parity:data-chat-export-html -->
-- [x] Install beta versions (deferred: low impact) <!-- parity:data-install-beta -->
-- [x] Experimental settings page (deferred: low impact) <!-- parity:data-experimental -->
+- [x] Install beta versions <!-- parity:data-install-beta -->
+- [x] Experimental settings page <!-- parity:data-experimental -->
 - [x] Tray icon and taskbar icon toggles, monochrome tray icon <!-- parity:data-tray-toggles -->
 - [x] Explicit "when window is closed: run in background or quit" choice <!-- parity:data-window-close -->
 - [x] Warn before quitting with Cmd+Q (dropped: Cmd+Q quits at once, like other Mac apps) <!-- parity:data-mac-quit-warning -->
