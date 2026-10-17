@@ -2,7 +2,10 @@
 //! (`ui/first_run_state.rs`): the intro clip edge to edge, crossfading
 //! into a notice that Quill is experimental, then three highlights, then
 //! the sign-in screen. It shows once per install, never to someone who was
-//! already signed in (`quill::settings::first_run_pending`).
+//! already signed in (`quill::settings::first_run_pending`), unless it is
+//! replayed from Settings › Advanced, where it plays over the signed-in
+//! app. A build made with `QUILL_ONBOARDING_EVERY_LAUNCH` set shows it on
+//! every launch (for trying it out).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -57,10 +60,12 @@ pub(super) fn initial_first_run(
     credentials: &Option<quill::credentials::TelegramCredentials>,
     cx: &mut Context<QuillApp>,
 ) -> FirstRun {
+    let every_launch = option_env!("QUILL_ONBOARDING_EVERY_LAUNCH").is_some();
     let pending = !demo
         && credentials.is_some()
-        && quill::settings::safe_app_root()
-            .is_some_and(|root| quill::settings::first_run_pending(&root));
+        && (every_launch
+            || quill::settings::safe_app_root()
+                .is_some_and(|root| quill::settings::first_run_pending(&root)));
     if !pending {
         return FirstRun::Done;
     }
@@ -260,6 +265,18 @@ impl QuillApp {
         if self.first_run.animating(now) {
             self.request_animation_tick(60, cx);
         }
+    }
+
+    /// Play the onboarding again from the start (Settings › Advanced): the
+    /// settings dialog closes so nothing sits over it, and Esc reaches the
+    /// intro through the focus its cover holds.
+    pub(super) fn replay_first_run(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.open = false;
+        self.settings.page = None;
+        window.close_dialog(cx);
+        self.first_run = FirstRun::welcome(open_intro(cx), Instant::now());
+        window.focus(&self.focus_sidebar, cx);
+        cx.notify();
     }
 
     pub(super) fn skip_first_run_intro(&mut self, cx: &mut Context<Self>) {

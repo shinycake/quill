@@ -647,15 +647,20 @@ impl Render for QuillApp {
             .when(
                 self.pane_mode() != super::app::PaneMode::Connecting,
                 |this| {
-                    this.child(self.shell_columns(
-                        &auth,
-                        show_phone,
-                        show_code,
-                        show_password,
-                        show_qr,
-                        window,
-                        cx,
-                    ))
+                    // The onboarding replayed from Settings takes the
+                    // signed-in layout's place until it is finished.
+                    match self.first_run_view(cx) {
+                        Some(first_run) => this.child(div().flex_1().min_h_0().child(first_run)),
+                        None => this.child(self.shell_columns(
+                            &auth,
+                            show_phone,
+                            show_code,
+                            show_password,
+                            show_qr,
+                            window,
+                            cx,
+                        )),
+                    }
                 },
             )
             // Screenshot demos keep their caption as a fixed footer line
