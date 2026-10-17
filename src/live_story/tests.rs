@@ -143,3 +143,45 @@ fn taps_add_up_and_restart_the_timer() {
     assert!((second.elapsed_fraction(3_000)).abs() < f32::EPSILON);
     assert!((second.elapsed_fraction(9_000) - 1.0).abs() < f32::EPSILON);
 }
+
+fn close(a: f32, b: f32) -> bool {
+    (a - b).abs() < 1e-4
+}
+
+#[test]
+fn a_star_effect_fades_in_rises_and_fades_out() {
+    let start = star_effect_frame(0.0, 0.5);
+    assert!(close(start.opacity, 0.0));
+    assert!(close(start.scale, 0.3));
+    assert!(close(start.top, 192.), "starts at the canvas bottom");
+    let fading_in = star_effect_frame(0.0625, 0.5);
+    assert!(close(fading_in.opacity, 0.5));
+    assert!(close(fading_in.scale, 0.5));
+    let middle = star_effect_frame(0.5, 0.5);
+    assert!(close(middle.opacity, 1.0));
+    assert!(close(middle.scale, 0.7));
+    assert!(close(middle.top, 96.));
+    let late = star_effect_frame(0.95, 0.5);
+    assert!(close(late.opacity, 0.4));
+    assert!(close(late.scale, 0.46));
+    assert!(late.top < middle.top, "it keeps rising");
+    let end = star_effect_frame(1.0, 0.5);
+    assert!(close(end.top, 0.0));
+    assert!(close(end.opacity, 0.0));
+}
+
+#[test]
+fn the_shift_spreads_effects_across_the_canvas() {
+    assert!(close(star_effect_frame(0.5, 0.0).left, 0.0));
+    assert!(close(star_effect_frame(0.5, 1.0).left, 64.));
+    assert!(close(star_effect_frame(0.5, 0.25).left, 16.));
+    assert!(close(star_effect_shift(360), 0.0));
+    assert!(close(star_effect_shift(359), 359. / 360.));
+}
+
+#[test]
+fn bursts_are_tried_from_the_seeds_pick_round() {
+    assert_eq!(burst_order(4, 3).collect::<Vec<_>>(), vec![1, 2, 0]);
+    assert_eq!(burst_order(u64::MAX, 2).collect::<Vec<_>>(), vec![1, 0]);
+    assert_eq!(burst_order(7, 0).count(), 0);
+}

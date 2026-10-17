@@ -12,6 +12,7 @@
 //! - The comments toggle state (`CommentsHas` / `CommentsState`).
 //! - The pending Star reaction: taps add up for 5.5 seconds after the last
 //!   one (`kPaidAccumulatePeriod`), then they are committed.
+//! - The Stars effect's flight (`StarEffect`, `setupStarsEffectsCanvas`).
 #![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
@@ -328,6 +329,64 @@ impl PendingLiveReaction {
         let left = self.commit_at_ms.saturating_sub(now_ms) as f32;
         (1.0 - left / crate::paid_reaction::ACCUMULATE_MS as f32).clamp(0.0, 1.0)
     }
+}
+
+/// tdesktop `kStarEffectDuration`: a Stars effect rises for 2 s.
+pub const STAR_EFFECT_MS: u64 = 2000;
+/// tdesktop `effectSize` (`reactionInlineImage * 2`): the burst's box.
+pub const STAR_EFFECT_SIZE: f32 = 64.;
+/// tdesktop `reactionInlineImage`: the box the badge is centred in.
+pub const STAR_EFFECT_TARGET: f32 = 32.;
+/// The effects canvas: two bursts wide, four tall, centred on the Stars
+/// button with its bottom on the button's bottom.
+pub const STAR_EFFECT_CANVAS_W: f32 = STAR_EFFECT_SIZE * 2.;
+pub const STAR_EFFECT_CANVAS_H: f32 = STAR_EFFECT_SIZE * 4.;
+/// tdesktop `kStarEffectScaleMin` / `kStarEffectScaleMax`.
+const STAR_EFFECT_SCALE_MIN: f32 = 0.3;
+const STAR_EFFECT_SCALE_MAX: f32 = 0.7;
+/// The share of the flight spent fading in, and fading out.
+const STAR_EFFECT_FADE: f32 = 0.125;
+
+/// Where one Stars effect is at a moment of its flight, in the canvas.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StarEffectFrame {
+    /// The burst's 64 px box; the badge's 32 px target is centred in it.
+    pub left: f32,
+    pub top: f32,
+    pub opacity: f32,
+    /// The badge's scale.
+    pub scale: f32,
+}
+
+/// tdesktop `setupStarsEffectsCanvas` paint: the effect at `progress`
+/// (0 to 1) that started at `shift` (0 to 1) across the canvas.
+pub fn star_effect_frame(progress: f32, shift: f32) -> StarEffectFrame {
+    let progress = progress.clamp(0.0, 1.0);
+    let opacity = if progress < STAR_EFFECT_FADE {
+        progress / STAR_EFFECT_FADE
+    } else if progress > 1.0 - STAR_EFFECT_FADE {
+        (1.0 - progress) / STAR_EFFECT_FADE
+    } else {
+        1.0
+    };
+    StarEffectFrame {
+        left: shift.clamp(0.0, 1.0) * (STAR_EFFECT_CANVAS_W - STAR_EFFECT_SIZE),
+        top: (1.0 - progress) * (STAR_EFFECT_CANVAS_H - STAR_EFFECT_SIZE),
+        opacity,
+        scale: STAR_EFFECT_SCALE_MIN + (STAR_EFFECT_SCALE_MAX - STAR_EFFECT_SCALE_MIN) * opacity,
+    }
+}
+
+/// tdesktop `RandomIndex(360) / 360.` from any random number.
+pub fn star_effect_shift(random: u32) -> f32 {
+    (random % 360) as f32 / 360.
+}
+
+/// The order an effect tries the `count` bursts in (tdesktop
+/// `randomLoadedFrom` shuffles them): from the one `seed` picks, round.
+pub fn burst_order(seed: u64, count: usize) -> impl Iterator<Item = usize> {
+    let start = usize::try_from(seed % u64::try_from(count.max(1)).unwrap_or(1)).unwrap_or(0);
+    (0..count).map(move |step| (start + step) % count)
 }
 
 #[cfg(test)]
