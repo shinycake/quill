@@ -654,3 +654,45 @@ fn driver_send_recorded_video_note_sends_input_message_video_note() {
     assert_eq!(value["@extra"], extra.0.to_string());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A recording goes to the chat it was sent from, also when the user
+/// opened another chat while the file was finished.
+#[test]
+fn driver_send_recorded_video_note_to_ignores_the_open_chat() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    for json in [
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":11,"title":"A","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+        r#"{"@type":"updateNewChat","chat":{"id":12,"title":"B","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let clip = dir.join("clip.mp4");
+    std::fs::write(&clip, b"not a real video").unwrap();
+    let draft = crate::video::VideoNoteDraft {
+        path: clip,
+        duration_secs: 5,
+        length: 280,
+    };
+    // Recorded in chat 11, finished after chat 12 was opened.
+    driver.session.open_chat = Some(ChatId(12));
+    let extra = driver
+        .send_recorded_video_note_to(ChatId(11), &draft, None)
+        .expect("sends");
+    let last = recorder.snapshot().into_iter().last().unwrap();
+    let value: Value = serde_json::from_str(&last).unwrap();
+    assert_eq!(value["@type"], "sendMessage");
+    assert_eq!(value["chat_id"], 11);
+    assert_eq!(value["@extra"], extra.0.to_string());
+    assert_eq!(driver.session.open_chat, Some(ChatId(12)));
+    let _ = std::fs::remove_dir_all(&dir);
+}

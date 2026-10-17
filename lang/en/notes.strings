@@ -19,10 +19,13 @@
 "qll_notes_password_submitted" = "Password submitted. Waiting for Telegram.";
 "qll_notes_phone_submitted" = "Phone number submitted. Waiting for Telegram.";
 "qll_notes_qr_login_requested" = "QR login requested. Scan the code with a signed-in Telegram app.";
+"qll_notes_recording_not_sent_chat_changed" = "Recording not sent: the chat changed before it was ready.";
+"qll_notes_recording_not_sent_no_account" = "Recording not sent: no account is connected.";
 "qll_notes_server_error" = "Telegram had a problem. Try again in a moment.";
 "qll_notes_something_went_wrong" = "Something went wrong. Try again.";
 "qll_notes_text_too_long" = "The message is too long (max {limit} characters).";
 "qll_notes_value_copied" = "{label} copied";
+"qll_notes_voice_note_not_sent_window_closed" = "Voice message not sent: its chat window closed.";
 "qll_notes_no_story_can_be_added" = "None of these stories can be added to an album.";
 "qll_notes_stories_skipped#one" = "Skipped {count} story that can't be added to albums.";
 "qll_notes_stories_skipped#other" = "Skipped {count} stories that can't be added to albums.";

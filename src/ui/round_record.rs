@@ -4,8 +4,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::video::ROUND_PREVIEW_SIDE;
 use smallvec::SmallVec;
 use std::sync::Arc;
@@ -25,10 +27,45 @@ pub(super) struct RoundPreview {
     stale: Vec<Arc<RenderImage>>,
 }
 
+/// The circle while the camera is being started (`recording.starting`):
+/// the same frame the preview fills, so tapping record answers at once.
+fn starting_camera_circle(cx: &mut Context<QuillApp>) -> AnyElement {
+    let theme = cx.theme();
+    div()
+        .id("round-record-starting")
+        .size(px(CIRCLE + 2. * EXTENT))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .size(px(CIRCLE))
+                .rounded_full()
+                .bg(theme.muted)
+                .shadow_md()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .child(Spinner::new().small())
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(keys::Q_AV_STARTING_CAMERA)),
+                ),
+        )
+        .into_any_element()
+}
+
 impl QuillApp {
     /// The recording circle, while a video message records.
     pub(super) fn round_record_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let capture = self.recording.video()?;
+        let Some(capture) = self.recording.video() else {
+            return self.recording.starting.then(|| starting_camera_circle(cx));
+        };
         self.request_animation_tick(30, cx);
         let progress = capture.progress();
         let frames = capture.preview();

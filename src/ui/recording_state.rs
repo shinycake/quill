@@ -40,6 +40,10 @@ pub(crate) struct RecordingUi {
     /// The voice or round video message being recorded, with the window it
     /// belongs to. One at a time, for the whole app.
     capture: Option<Capture>,
+    /// A round video capture is being started off the UI thread. It is
+    /// not a recording yet (no bar, nothing to send or cancel), but no
+    /// other one may start meanwhile.
+    pub(super) starting: bool,
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
     pub(super) locked: bool,
@@ -61,6 +65,7 @@ impl RecordingUi {
     pub(super) fn new() -> Self {
         Self {
             capture: None,
+            starting: false,
             locked: false,
             lock_next: false,
             discard_confirm: false,
@@ -75,6 +80,11 @@ impl RecordingUi {
 impl RecordingUi {
     pub(super) fn active(&self) -> bool {
         self.capture.is_some()
+    }
+
+    /// A recording runs or is about to: another one must not start.
+    pub(super) fn busy(&self) -> bool {
+        self.capture.is_some() || self.starting
     }
 
     /// The window the recording belongs to (`Some(None)`: the main

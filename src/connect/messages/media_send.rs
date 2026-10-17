@@ -185,9 +185,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// `sendMessage` + `inputMessageVoiceNote` for a finished local capture.
+    /// `sendMessage` + `inputMessageVoiceNote` for a finished local capture,
+    /// to the open chat.
     pub fn send_voice_note(
         &mut self,
+        draft: &VoiceDraft,
+        caption: &str,
+        reply_to: Option<SendReply>,
+        play_once: bool,
+    ) -> Result<RequestId, ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        self.send_voice_note_to(chat_id, draft, caption, reply_to, play_once)
+    }
+
+    /// [`Self::send_voice_note`] to `chat_id`, which is not necessarily the
+    /// open chat: a recording goes to the chat it was sent from, even when
+    /// the user opened another while the file was finished.
+    pub fn send_voice_note_to(
+        &mut self,
+        chat_id: ChatId,
         draft: &VoiceDraft,
         caption: &str,
         reply_to: Option<SendReply>,
@@ -196,9 +214,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
-            return Err(ConnectSendError::InvalidRequest);
-        };
         let supported = self
             .session
             .chats
@@ -257,12 +272,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         draft: &crate::video::VideoNoteDraft,
         reply_to: Option<SendReply>,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         let Some(chat_id) = self.session.open_chat else {
             return Err(ConnectSendError::InvalidRequest);
         };
+        self.send_recorded_video_note_to(chat_id, draft, reply_to)
+    }
+
+    /// [`Self::send_recorded_video_note`] to `chat_id`, which is not
+    /// necessarily the open chat (see [`Self::send_voice_note_to`]).
+    pub fn send_recorded_video_note_to(
+        &mut self,
+        chat_id: ChatId,
+        draft: &crate::video::VideoNoteDraft,
+        reply_to: Option<SendReply>,
+    ) -> Result<RequestId, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let supported = self
             .session
             .chats

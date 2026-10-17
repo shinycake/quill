@@ -421,7 +421,7 @@ impl VoiceCapture {
                 && live.samples.load(Ordering::Relaxed) == 0;
             idle.then(|| crate::media_tools::no_audio_message(false))
         })?;
-        self.stop_live(false);
+        self.stop_live();
         Some(reason)
     }
 
@@ -431,16 +431,98 @@ impl VoiceCapture {
     }
 
     pub fn discard(mut self) {
-        self.stop_live(false);
+        self.stop_live();
         if !self.keep_file {
             let _ = fs::remove_file(&self.path);
         }
     }
 
-    /// Stop the encoder and keep the file when it holds audio.
-    pub fn finish(mut self) -> Result<VoiceDraft, String> {
+    /// Stop the encoder and keep the file when it holds audio. Joins the
+    /// encoder here; the UI uses [`Self::close_microphone`] and finishes the
+    /// rest off the UI thread.
+    pub fn finish(self) -> Result<VoiceDraft, String> {
+        self.close_microphone().complete()
+    }
+
+    /// Release the microphone now (quick, and the stream may not leave this
+    /// thread) and hand back what is left: joining the encoder can wait on
+    /// the disk, so [`VoiceFinish::complete`] runs off the UI thread.
+    pub fn close_microphone(mut self) -> VoiceFinish {
         let wall = self.clock.elapsed_at(Instant::now());
-        let samples = self.stop_live(true);
+        let worker = self.stop_mic();
+        VoiceFinish {
+            path: std::mem::take(&mut self.path),
+            keep_file: self.keep_file,
+            fixed_seconds: self.fixed_seconds,
+            levels: self.levels.clone(),
+            bars: std::mem::take(&mut self.bars),
+            wall,
+            worker,
+        }
+    }
+
+    /// Close the microphone; the encoder ends once the stream's sender
+    /// drops.
+    #[cfg(feature = "ui")]
+    fn stop_mic(&mut self) -> Option<Worker> {
+        let live = self.live.take()?;
+        drop(live.mic);
+        Some(live.worker)
+    }
+
+    #[cfg(not(feature = "ui"))]
+    fn stop_mic(&mut self) -> Option<Worker> {
+        self.live = None;
+        None
+    }
+
+    /// Close the microphone and join the encoder, dropping the result.
+    fn stop_live(&mut self) {
+        let _ = join_worker(self.stop_mic());
+    }
+}
+
+/// The encoder thread of a finished capture.
+#[cfg(feature = "ui")]
+type Worker = std::thread::JoinHandle<Option<Result<u64, String>>>;
+#[cfg(not(feature = "ui"))]
+type Worker = ();
+
+/// What the encoder reports: samples encoded, or why it failed.
+#[cfg(feature = "ui")]
+fn join_worker(worker: Option<Worker>) -> Option<Result<u64, String>> {
+    let worker = worker?;
+    Some(
+        worker
+            .join()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| Err("The voice encoder crashed.".into())),
+    )
+}
+
+#[cfg(not(feature = "ui"))]
+fn join_worker(_worker: Option<Worker>) -> Option<Result<u64, String>> {
+    None
+}
+
+/// A voice capture whose microphone is closed: everything needed to end
+/// the file, and `Send`, so [`Self::complete`] can run on a background
+/// thread.
+pub struct VoiceFinish {
+    path: PathBuf,
+    keep_file: bool,
+    fixed_seconds: Option<i32>,
+    levels: Arc<Mutex<Vec<u8>>>,
+    bars: Vec<u8>,
+    wall: Duration,
+    worker: Option<Worker>,
+}
+
+impl VoiceFinish {
+    /// Join the encoder and keep the file when it holds audio.
+    pub fn complete(mut self) -> Result<VoiceDraft, String> {
+        let samples = join_worker(self.worker.take());
         let len = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
         let encoded = match samples {
             Some(Err(ref reason)) => Err(reason.clone()),
@@ -462,7 +544,7 @@ impl VoiceCapture {
         let duration_secs = match (self.fixed_seconds, samples) {
             (Some(fixed), _) => fixed,
             (None, Some(Ok(total))) => (total as f64 / 48_000.0).round() as i32,
-            _ => wall.as_secs_f64().round() as i32,
+            _ => self.wall.as_secs_f64().round() as i32,
         }
         .max(1);
         let levels = self.levels.lock_or_recover().clone();
@@ -479,33 +561,12 @@ impl VoiceCapture {
             bars,
         })
     }
-
-    /// Close the microphone and join the encoder. `Some(result)` only when
-    /// `graceful`; otherwise everything is just dropped.
-    #[cfg(feature = "ui")]
-    fn stop_live(&mut self, graceful: bool) -> Option<Result<u64, String>> {
-        let live = self.live.take()?;
-        drop(live.mic); // the stream's sender drops and the worker finishes
-        let result = live
-            .worker
-            .join()
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| Err("The voice encoder crashed.".into()));
-        graceful.then_some(result)
-    }
-
-    #[cfg(not(feature = "ui"))]
-    fn stop_live(&mut self, _graceful: bool) -> Option<Result<u64, String>> {
-        self.live = None;
-        None
-    }
 }
 
 impl Drop for VoiceCapture {
     fn drop(&mut self) {
         if self.live.is_some() {
-            self.stop_live(false);
+            self.stop_live();
         }
     }
 }

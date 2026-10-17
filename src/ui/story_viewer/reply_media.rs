@@ -18,7 +18,6 @@ use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr, tr_with};
 use quill::telegram::requests::{AnimationSend, StickerSend};
-use quill::video::VideoNoteCapture;
 use quill::voice::VoiceCapture;
 
 /// The story the reply row is open on: `(poster chat, story id)`.
@@ -368,7 +367,7 @@ impl QuillApp {
     /// composer's current record mode (Telegram Desktop's story reply field
     /// records both).
     pub(in crate::ui) fn start_story_reply_recording(&mut self, cx: &mut Context<Self>) {
-        if self.recording_active() || self.story_reply_target().is_none() {
+        if self.recording_busy() || self.story_reply_target().is_none() {
             return;
         }
         if self.story_reply_panel_active() {
@@ -386,24 +385,7 @@ impl QuillApp {
     }
 
     fn begin_story_video_capture(&mut self, cx: &mut Context<Self>) {
-        if self.recording_active() {
-            return;
-        }
-        let hq = self
-            .session()
-            .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
-        match VideoNoteCapture::start(hq, &self.capture_choice()) {
-            Ok(capture) => {
-                self.hold_capture(CaptureMedia::Video(capture), CaptureFor::StoryReply);
-                self.spawn_voice_tick(cx);
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MEDIA_RECORDING_VIDEO_REPLY)));
-            }
-            Err(err) => {
-                self.connection.set_note(StatusNote::error(err));
-            }
-        }
-        cx.notify();
+        self.start_video_capture(CaptureFor::StoryReply, false, cx);
     }
 
     /// The recording bar's Send for a round video started from the reply
@@ -432,13 +414,20 @@ impl QuillApp {
         let finished = cx.background_spawn(async move { capture.finish() });
         Self::spawn_main_in(window, cx, async move |this, cx| {
             let result = finished.await;
-            let _ = this.update_in(cx, |this, _window, cx| {
+            let path = result.as_ref().ok().map(|draft| draft.path.clone());
+            let updated = this.update_in(cx, |this, _window, cx| {
                 let sent = match result {
-                    Ok(draft) => this.live.as_mut().map(|live| {
-                        live.driver
-                            .send_story_reply_video_note(chat_id, story_id, &draft)
-                            .is_ok()
-                    }),
+                    Ok(draft) => {
+                        let sent = this.live.as_mut().map(|live| {
+                            live.driver
+                                .send_story_reply_video_note(chat_id, story_id, &draft)
+                                .is_ok()
+                        });
+                        if sent != Some(true) {
+                            let _ = std::fs::remove_file(&draft.path);
+                        }
+                        sent
+                    }
                     Err(err) => {
                         this.connection.set_note(StatusNote::error(err));
                         cx.notify();
@@ -447,13 +436,18 @@ impl QuillApp {
                 };
                 this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VIDEO_MESSAGE), cx);
             });
+            if updated.is_err()
+                && let Some(path) = path
+            {
+                let _ = std::fs::remove_file(path);
+            }
         })
         .detach();
         true
     }
 
     fn begin_story_voice_capture(&mut self, cx: &mut Context<Self>) {
-        if self.recording_active() {
+        if self.recording_busy() {
             return;
         }
         match VoiceCapture::start() {
@@ -491,24 +485,43 @@ impl QuillApp {
         self.recording.locked = false;
         self.recording.discard_confirm = false;
         self.stop_record_preview();
-        let draft = match capture.finish() {
-            Ok(draft) => draft,
-            Err(err) => {
-                self.connection.set_note(StatusNote::error(err));
-                cx.notify();
-                return true;
+        let finish = capture.close_microphone();
+        cx.notify();
+        // The encoder is joined off the UI thread.
+        let finished = cx.background_spawn(async move { finish.complete() });
+        Self::spawn_main(cx, async move |this, cx| {
+            let result = finished.await;
+            let path = result.as_ref().ok().map(|draft| draft.path.clone());
+            let updated = this.update(cx, |this, cx| {
+                let draft = match result {
+                    Ok(draft) => draft,
+                    Err(err) => {
+                        this.connection.set_note(StatusNote::error(err));
+                        cx.notify();
+                        return;
+                    }
+                };
+                let sent = this
+                    .live
+                    .as_mut()
+                    .map(|live| {
+                        live.driver
+                            .send_story_reply_voice(chat_id, story_id, &draft)
+                            .is_ok()
+                    })
+                    .or_else(|| this.demo_session.is_none().then_some(false));
+                if sent != Some(true) {
+                    let _ = std::fs::remove_file(&draft.path);
+                }
+                this.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VOICE_MESSAGE), cx);
+            });
+            if updated.is_err()
+                && let Some(path) = path
+            {
+                let _ = std::fs::remove_file(path);
             }
-        };
-        let sent = self
-            .live
-            .as_mut()
-            .map(|live| {
-                live.driver
-                    .send_story_reply_voice(chat_id, story_id, &draft)
-                    .is_ok()
-            })
-            .or_else(|| self.demo_session.is_none().then_some(false));
-        self.finish_story_reply_media(sent, tr(keys::Q_MEDIA_VOICE_MESSAGE), cx);
+        })
+        .detach();
         true
     }
 }

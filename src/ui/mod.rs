@@ -94,6 +94,7 @@ mod presence;
 mod privacy;
 mod privacy_extra;
 mod privacy_state;
+mod recording_send;
 mod recording_state;
 mod screen_share_state;
 mod search_fields;

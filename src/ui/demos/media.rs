@@ -103,6 +103,13 @@ register_demos![
         "screenshot demo — playing voice note with the waveform scrubber"
     )
     .setup(QuillApp::demo_ready_voice_playing),
+    // Record tapped, camera not up yet: the circle answers with
+    // "Starting camera…" (`recording.starting`).
+    DemoSpec::chats(
+        "ready-starting-camera",
+        "screenshot demo — round video circle while the camera starts"
+    )
+    .setup(QuillApp::demo_starting_camera),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -263,6 +270,11 @@ impl QuillApp {
         self.connection.set_note(StatusNote::silent(
             "screenshot demo — inline video autoplay",
         ));
+    }
+
+    fn demo_starting_camera(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.recording.starting = true;
+        cx.notify();
     }
 
     fn demo_ready_voice(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

@@ -11,14 +11,13 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::composer::{AttachmentKind, ComposerAttachment, ComposerReplyTo};
+use quill::composer::ComposerReplyTo;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::playback::PlaybackClock;
 use quill::send_rights::SendKind;
 use quill::telegram::client::copy_and_parse;
-use quill::video::VideoNoteCapture;
 use quill::voice::{
     RecordBarFacts, RecordControl, VoiceCapture, format_voice_duration, record_controls,
 };
@@ -64,6 +63,11 @@ impl QuillApp {
         self.recording.active()
     }
 
+    /// A recording runs or its camera is being started: no other starts.
+    pub(super) fn recording_busy(&self) -> bool {
+        self.recording.busy()
+    }
+
     /// MED2: right-click on the record button flips audio/video mode
     /// (TGX tap-to-switch, desktop-mapped). Ignored while recording.
     pub(super) fn toggle_record_mode(&mut self, cx: &mut Context<Self>) {
@@ -97,7 +101,7 @@ impl QuillApp {
     }
 
     pub(super) fn start_voice_recording(&mut self, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() || self.recording_active() {
+        if self.composer_ui.pending_edit.is_some() || self.recording_busy() {
             return;
         }
         if self.gif_panel_open() {
@@ -113,7 +117,7 @@ impl QuillApp {
     }
 
     fn begin_voice_capture(&mut self, cx: &mut Context<Self>) {
-        if self.recording_active() {
+        if self.recording_busy() {
             return;
         }
         match VoiceCapture::start() {
@@ -135,7 +139,7 @@ impl QuillApp {
     /// at finish; HQ size from media prefs). Needs a camera, honest error
     /// otherwise.
     pub(super) fn start_video_note_recording(&mut self, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() || self.recording_active() {
+        if self.composer_ui.pending_edit.is_some() || self.recording_busy() {
             return;
         }
         // Phase S1: round video notes need secret-chat layer ≥ 66 (TGX
@@ -164,26 +168,7 @@ impl QuillApp {
 
     fn begin_video_note_capture(&mut self, cx: &mut Context<Self>) {
         let lock = std::mem::take(&mut self.recording.lock_next);
-        if self.recording_active() {
-            return;
-        }
-        let hq = self
-            .session()
-            .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
-        match VideoNoteCapture::start(hq, &self.capture_choice()) {
-            Ok(capture) => {
-                self.hold_capture(CaptureMedia::Video(capture), CaptureFor::Message);
-                self.recording.locked = lock;
-                self.sync_voice_action();
-                self.spawn_voice_tick(cx);
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VIDEO_NOTE)));
-            }
-            Err(err) => {
-                self.connection.set_note(StatusNote::error(err));
-            }
-        }
-        cx.notify();
+        self.start_video_capture(CaptureFor::Message, lock, cx);
     }
 
     /// A capture that stopped by itself: a video message that reached the
@@ -373,215 +358,6 @@ impl QuillApp {
         } else {
             StatusNote::silent(tr(keys::Q_MISC_VOICE_RECORDING_CANCELLED))
         });
-        cx.notify();
-    }
-
-    pub(super) fn send_voice_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.send_story_reply_voice_recording(cx) {
-            return;
-        }
-        // Phase A1: slow-mode gate applies to voice notes too — checked
-        // before consuming the capture so a blocked recording survives
-        // until the timer expires.
-        if self
-            .open_chat_id()
-            .is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx))
-        {
-            return;
-        }
-        let Some(capture) = self.recording.take_voice() else {
-            return;
-        };
-        // MED2 fix-up: the send consumes the recording — locked state must
-        // not leak into the next recording.
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
-        self.stop_record_preview();
-        let play_once = std::mem::take(&mut self.recording.once);
-        let caption = self.composer_markup(cx);
-        let draft = match capture.finish() {
-            Ok(draft) => draft,
-            Err(err) => {
-                self.sync_voice_action();
-                self.connection.set_note(StatusNote::error(err));
-                cx.notify();
-                return;
-            }
-        };
-        let reply = self.reply_for_send(cx);
-        let reply_to = self.recording_send_reply(reply.as_ref());
-        if let Some(live) = self.live.as_mut() {
-            let result = live
-                .driver
-                .send_voice_note(&draft, caption.trim(), reply_to, play_once);
-            let ok = result.is_ok();
-            self.connection.set_note(if ok {
-                StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE))
-            } else {
-                StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VOICE_NOTE))
-            });
-            if ok {
-                self.composer_ui.set_reply(None);
-                self.composer_ui.clear_draft_on_success = Some(
-                    self.live
-                        .as_ref()
-                        .and_then(|live| live.driver.session.open_chat)
-                        .unwrap_or(ChatId(0)),
-                );
-                self.composer
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                if let Some(open) = self.open_chat_id() {
-                    self.forget_local_draft(open);
-                }
-            }
-        } else if self.demo_session.is_some() {
-            self.apply_demo_voice(&draft, caption.trim(), reply.as_ref());
-            self.composer_ui.set_reply(None);
-            self.composer
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
-                self.forget_local_draft(open);
-            }
-            self.connection.set_note(StatusNote::silent(tr(
-                keys::Q_MISC_DEMO_VOICE_NOTE_APPLIED_LOCALLY,
-            )));
-        }
-        self.sync_voice_action();
-        cx.notify();
-    }
-
-    /// Reply target for a recording send: the pending reply when it belongs
-    /// to the open chat.
-    pub(super) fn recording_send_reply(
-        &self,
-        reply: Option<&quill::composer::ComposerReplyTo>,
-    ) -> Option<quill::telegram::SendReply> {
-        let reply = reply?;
-        let open = self.live.as_ref()?.driver.session.open_chat?;
-        reply.send_target(open)
-    }
-
-    /// MED2: send the finished recording, whichever mode is active, from
-    /// the window whose state is in place (`send_recording` puts the
-    /// recording's own window in place first).
-    pub(super) fn send_recording_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.recording.video().is_some() {
-            self.send_video_note_recording(window, cx);
-        } else {
-            self.send_voice_recording(window, cx);
-        }
-    }
-
-    /// MED2: finish the round video-note capture and send it
-    /// (`inputMessageVideoNote`). Same lifecycle as `send_voice_recording`:
-    /// slow-mode gate first, the capture is only consumed when the send
-    /// goes ahead, demo mode routes locally.
-    pub(super) fn send_video_note_recording(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.story_reply_video_recording(window, cx) {
-            return;
-        }
-        if self
-            .open_chat_id()
-            .is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx))
-        {
-            return;
-        }
-        let Some(capture) = self.recording.take_video() else {
-            return;
-        };
-        self.recording.once = false;
-        // MED2 fix-up: the send consumes the recording — locked state must
-        // not leak into the next recording.
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
-        self.sync_voice_action();
-        cx.notify();
-        // ffmpeg finishes the file after the stop signal: off the main thread.
-        let finished = cx.background_spawn(async move { capture.finish() });
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
-            let result = finished.await;
-            let path = result.as_ref().ok().map(|draft| draft.path.clone());
-            let sent = this.update_in(cx, |this, window, cx| {
-                this.send_finished_video_note(result, window, cx);
-            });
-            if sent.is_err() {
-                // Its window closed while the file was finished: say so,
-                // rather than send it to whichever chat is open now.
-                if let Some(path) = path {
-                    let _ = std::fs::remove_file(path);
-                }
-                let _ = this.main().update(cx, |this, cx| {
-                    this.connection.set_note(StatusNote::silent(tr(
-                        keys::Q_MISC_VIDEO_NOTE_NOT_SENT_ITS_WINDOW_CLOSED,
-                    )));
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
-    }
-
-    fn send_finished_video_note(
-        &mut self,
-        result: Result<quill::video::VideoNoteDraft, String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let draft = match result {
-            Ok(draft) => draft,
-            Err(err) => {
-                self.connection.set_note(StatusNote::error(err));
-                cx.notify();
-                return;
-            }
-        };
-        let reply = self.reply_for_send(cx);
-        let reply_to = self.recording_send_reply(reply.as_ref());
-        if let Some(live) = self.live.as_mut() {
-            let result = live.driver.send_recorded_video_note(&draft, reply_to);
-            let ok = result.is_ok();
-            self.connection.set_note(if ok {
-                StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE))
-            } else {
-                StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VIDEO_NOTE))
-            });
-            if ok {
-                self.composer_ui.set_reply(None);
-                self.composer_ui.clear_draft_on_success = Some(
-                    self.live
-                        .as_ref()
-                        .and_then(|live| live.driver.session.open_chat)
-                        .unwrap_or(ChatId(0)),
-                );
-                self.composer
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                if let Some(open) = self.open_chat_id() {
-                    self.forget_local_draft(open);
-                }
-            }
-        } else if self.demo_session.is_some() {
-            if let Some(att) = ComposerAttachment::pick(&draft.path, AttachmentKind::VideoNote) {
-                self.apply_demo_outgoing("", Some(&att), reply.as_ref());
-                self.composer_ui.set_reply(None);
-                self.composer
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
-                    self.forget_local_draft(open);
-                }
-                self.connection.set_note(StatusNote::silent(tr(
-                    keys::Q_MISC_DEMO_VIDEO_NOTE_APPLIED_LOCALLY,
-                )));
-            } else {
-                self.connection.set_note(StatusNote::silent(tr(
-                    keys::Q_MISC_DEMO_RECORDED_CLIP_IS_OUTSIDE,
-                )));
-            }
-        }
-        self.sync_voice_action();
         cx.notify();
     }
 
