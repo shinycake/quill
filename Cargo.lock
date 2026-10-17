@@ -7079,6 +7079,7 @@ dependencies = [
  "pbkdf2 0.13.0",
  "pretty_assertions",
  "qrcode",
+ "quill",
  "quill-webview-protocol",
  "rand 0.8.8",
  "raw-window-handle",

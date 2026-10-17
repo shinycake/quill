@@ -36,7 +36,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, Vi
 }
 
 fn a_file() -> PathBuf {
-    let path = std::env::temp_dir().join(format!("quill-start-ui-{}.txt", std::process::id()));
+    let path = quill::scratch::process_dir("quill-start-ui").join("file.txt");
     std::fs::write(&path, b"hello").unwrap();
     path
 }

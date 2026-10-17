@@ -438,7 +438,7 @@ pub fn frame_args(input: &str, at_ms: i64, output: &str, turns: u8, flipped: boo
 }
 
 fn work_dir() -> PathBuf {
-    std::env::temp_dir().join("quill-video-edits")
+    crate::scratch::temp_work_dir("quill-video-edits")
 }
 
 fn stamp() -> u128 {

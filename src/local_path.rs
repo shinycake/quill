@@ -188,11 +188,11 @@ pub fn media_cache_base() -> PathBuf {
 
 // Unit-test sweeps must not remove media owned by a live app or UI demo.
 pub(crate) fn cache_temp_dir() -> PathBuf {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
-        std::env::temp_dir().join(format!("quill-test-cache-{}", std::process::id()))
+        crate::scratch::process_dir("quill-test-cache")
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         // Render paths resolve cache roots every frame; read `TMPDIR` once.
         static TEMP: OnceLock<PathBuf> = OnceLock::new();
@@ -548,7 +548,7 @@ mod tests {
         let _guard = lock_shared_media_cache();
         // `temp/quill-media-cache/../evil` strips to an under-temp path, but
         // `..` must never reach symlink_metadata's resolution.
-        let traversal = std::env::temp_dir()
+        let traversal = cache_temp_dir()
             .join("quill-media-cache")
             .join("..")
             .join("quill-evil-traversal");
@@ -557,7 +557,7 @@ mod tests {
             "parent traversal must fail closed"
         );
         assert!(
-            !std::env::temp_dir().join("quill-evil-traversal").exists(),
+            !cache_temp_dir().join("quill-evil-traversal").exists(),
             "traversal must not create anything outside the cache tree"
         );
     }

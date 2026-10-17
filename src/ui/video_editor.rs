@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn only_files_in_the_editor_folder_are_replaced() {
-        let dir = std::env::temp_dir().join("quill-video-edits");
+        let dir = quill::scratch::temp_work_dir("quill-video-edits");
         assert!(is_editor_copy(&dir.join("edit-1.mp4")));
         assert!(!is_editor_copy(Path::new("/home/me/clip.mp4")));
         assert!(!is_editor_copy(Path::new("clip.mp4")));

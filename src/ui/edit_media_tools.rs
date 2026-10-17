@@ -28,7 +28,7 @@ enum MenuAction {
 /// Render the edited photo at full size into a new PNG in the temp
 /// folder; shared by the attachment editor and the message editor.
 pub(super) fn write_edited_png(edited: &image::RgbaImage) -> Option<PathBuf> {
-    let dir = std::env::temp_dir().join("quill-edits");
+    let dir = quill::scratch::temp_work_dir("quill-edits");
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_nanos());

@@ -302,8 +302,7 @@ mod tests {
 
     #[test]
     fn cover_must_be_an_existing_image() {
-        let dir = std::env::temp_dir().join(format!("quill-cover-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::scratch::process_dir("quill-cover");
         let png = dir.join("c.png");
         let mp4 = dir.join("c.mp4");
         std::fs::write(&png, [1u8]).unwrap();

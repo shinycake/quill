@@ -228,7 +228,7 @@ pub struct EncodedSticker {
 }
 
 fn work_dir() -> PathBuf {
-    std::env::temp_dir().join("quill-sticker-video")
+    crate::scratch::temp_work_dir("quill-sticker-video")
 }
 
 fn stamp() -> u128 {

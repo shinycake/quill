@@ -432,8 +432,7 @@ mod tests {
     }
 
     fn temp_file(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("quill-edit-media-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::scratch::process_dir("quill-edit-media");
         let path = dir.join(name);
         std::fs::write(&path, [1u8]).unwrap();
         path

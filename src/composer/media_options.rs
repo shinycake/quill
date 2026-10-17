@@ -235,7 +235,7 @@ pub fn photo_for_send(path: &Path, high_quality: bool) -> PathBuf {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_nanos());
-    let dir = std::env::temp_dir().join("quill-send-photos");
+    let dir = crate::scratch::temp_work_dir("quill-send-photos");
     let output = dir.join(format!("photo-{stamp}.{}", if png { "png" } else { "jpg" }));
     let made = std::fs::create_dir_all(&dir).is_ok()
         && crate::media_tools::command("ffmpeg")
