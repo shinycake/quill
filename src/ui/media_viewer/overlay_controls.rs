@@ -12,7 +12,7 @@ impl QuillApp {
         row_id: u64,
         cx: &mut Context<Self>,
     ) -> Div {
-        let zoom_pct = format!("{}%", (zoom.zoom * 100.0).round() as i32);
+        let zoom_pct = format!("{}%", zoom.percent().round() as i32);
         div()
             .flex()
             .items_center()

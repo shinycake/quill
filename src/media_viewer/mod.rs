@@ -58,9 +58,10 @@ pub use swipe::{
     SwipeAction, SwipeDir, SwipeIndicator, SwipeInput, SwipeNav, VIEWER_SWIPE_THRESHOLD_PX,
 };
 pub use transform::{
-    VIEWER_WHEEL_MAX_NOTCHES, VIEWER_WHEEL_NOTCH_PX, VIEWER_ZOOM_MAX, VIEWER_ZOOM_MIN,
-    VIEWER_ZOOM_STEP, ViewerOrientation, ViewerZoom, fit_within, flip_rgba, orient_rgba,
-    pinch_zoom_factor, rotate_rgba_quarter_turns, wheel_zoom_factor,
+    VIEWER_MAX_ZOOM_LEVEL, VIEWER_WHEEL_MAX_NOTCHES, VIEWER_WHEEL_NOTCH_PX, VIEWER_ZOOM_MAX,
+    VIEWER_ZOOM_MIN, VIEWER_ZOOM_STEP, ViewerOrientation, ViewerZoom, ZoomLevels, fit_within,
+    flip_rgba, orient_rgba, pinch_zoom_factor, rotate_rgba_quarter_turns, wheel_zoom_factor,
+    zoom_level_scale,
 };
 pub use ttl::{ViewerTtl, disappearing_label, seconds_tiny, viewer_ttl};
 pub use wheel::{
