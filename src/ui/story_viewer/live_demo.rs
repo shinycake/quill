@@ -2,27 +2,30 @@
 //! Telegram, no call, no Stars): the demo channel's live story playing a
 //! picture sent at 30 fps with the LIVE badge, three top donors, four comments (one
 //! paid and pinned) and a paid comment price; the same with your Stars
-//! waiting under the Undo toast and their effect rising; the Stars box for
+//! waiting under the Undo toast and three Stars effects rising on a stopped
+//! clock over a burst fixture; the Stars box for
 //! a comment; a portrait stream that fills the frame (the landscape one is
 //! shown whole over its blurred copy); the live story playing beside a
 //! 1:1 call; and one that gave way to the call, showing Failed with Retry.
 #![deny(clippy::indexing_slicing)]
 
-use super::live_state::StarsBoxMode;
+use super::live_state::{EFFECT_DURATION, FlyingStars, StarsBoxMode};
 use crate::ui::app::QuillApp;
 use crate::ui::calls::demo_feed::{DemoFeed, demo_feed};
-use crate::ui::demo::demo_media_allowlist;
+use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::calls::engine::{GroupCallMode, StreamState};
 use quill::diagnostics::DiagnosticSink;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, FileId};
 use quill::live_story::PendingLiveReaction;
 use quill::paid_reaction::PaidReactor;
-use quill::state::{ActiveGroupCall, Session, unix_ms_now};
+use quill::state::{ActiveGroupCall, LiveBursts, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{LiveStoryDonors, MessageSender, ParsedGroupCallMessage};
+use quill::telegram::envelope::{
+    LiveStoryDonors, MessageSender, ParsedGroupCallMessage, StickerFormat, StickerItem,
+};
 use quill::text::{TextEntity, TextEntityKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,6 +34,7 @@ use std::time::Instant;
 const CHANNEL: i64 = 13;
 const STORY: i32 = 61;
 const CALL: i32 = 4411;
+const BURST_FILE: i32 = 4412;
 const VIEWERS: [(i64, &str, &str); 4] = [
     (801, "Maya", "Cohen"),
     (802, "Daniel", "Weiss"),
@@ -85,8 +89,27 @@ impl QuillApp {
         {
             live.pending_reaction = Some(PendingLiveReaction::add(None, 5, unix_ms_now()));
         }
-        let me = MessageSender::User { user_id: 801 };
-        self.stories.live.fly(me, 5, Instant::now());
+        if let Some(session) = self.demo_session.as_mut() {
+            let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
+            seed_star_burst(session, &sink, &self.demo_ui.seq);
+        }
+        // Three effects caught mid-flight, on a stopped clock.
+        let now = Instant::now();
+        self.stories.live.pinned_now = Some(now);
+        for (user_id, stars, progress, shift) in [
+            (801, 5, 0.1, 0.5),
+            (802, 50, 0.3, 0.1),
+            (804, 250, 0.7, 0.9),
+        ] {
+            let age = EFFECT_DURATION.mul_f32(progress);
+            self.stories.live.push_flying(FlyingStars {
+                sender: MessageSender::User { user_id },
+                stars,
+                started: now.checked_sub(age).unwrap_or(now),
+                shift,
+                seed: 0,
+            });
+        }
         cx.notify();
     }
 
@@ -238,6 +261,34 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
         live.comments.on_messages(&messages, me);
         live.extras_requested = true;
     }
+}
+
+/// The burst the Stars effects play: the server's generic reaction bursts
+/// stand-in, an original fixture (`scripts/make-star-burst-fixture.py`).
+fn seed_star_burst(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &AtomicU64) {
+    let path = demo_media_allowlist().join("demo-star-burst.tgs");
+    if let Some(owned) = copy_and_parse(
+        &demo_file_json(BURST_FILE, &path.to_string_lossy(), true),
+        seq,
+        sink,
+    ) {
+        session.apply(owned);
+    }
+    session.stories.live_bursts = LiveBursts::Loaded(vec![StickerItem {
+        custom_emoji_id: None,
+        id: i64::from(BURST_FILE),
+        set_id: 0,
+        emoji: "\u{2728}".into(),
+        width: 512,
+        height: 512,
+        format: StickerFormat::Tgs,
+        file_id: FileId(BURST_FILE),
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        requires_premium: false,
+        premium_animation: None,
+    }]);
 }
 
 /// A still picture for the stream: a showcase photo as a frame, or its
