@@ -32,9 +32,11 @@ thread_local! {
 /// The signals are process-wide statics shared by every app in a test
 /// process. A GPUI test scheduler allows activity only from the thread that
 /// owns it, so a poke from one test (a window activation) that woke
-/// another test's task panicked that test as "not deterministic". The app
-/// never calls this; its pokes from the TDLib thread, the tray and the
-/// single-instance listener wake everything as before.
+/// another test's task panicked that test as "not deterministic". Pokes
+/// from threads that were never marked (helper threads) still wake every
+/// waiter, marked or not. The app never calls this; its pokes from the
+/// TDLib thread, the tray and the single-instance listener wake everything
+/// as before.
 pub fn isolate_current_thread() {
     let _ = ISOLATED.try_with(|isolated| isolated.set(true));
 }
@@ -68,18 +70,24 @@ impl Signal {
     /// Wake every waiter. Cheap and safe from any thread.
     pub fn poke(&self) {
         self.epoch.fetch_add(1, Ordering::AcqRel);
-        let all = std::mem::take(&mut *lock_or_recover(&self.wakers));
         let me = isolated_thread();
-        let mut kept = Vec::new();
-        for (waker, owner) in all {
-            if me.is_some() && owner != me {
-                kept.push((waker, owner));
-            } else {
-                waker.wake();
+        let woken = {
+            let mut wakers = lock_or_recover(&self.wakers);
+            match me {
+                // Production: nothing is marked, so everything wakes.
+                None => std::mem::take(&mut *wakers),
+                // Partition under one lock so no waiter is ever absent.
+                Some(_) => {
+                    let (mine, others): (Vec<_>, Vec<_>) = std::mem::take(&mut *wakers)
+                        .into_iter()
+                        .partition(|(_, owner)| *owner == me);
+                    *wakers = others;
+                    mine
+                }
             }
-        }
-        if !kept.is_empty() {
-            lock_or_recover(&self.wakers).extend(kept);
+        };
+        for (waker, _) in woken {
+            waker.wake();
         }
     }
 
@@ -204,5 +212,62 @@ mod tests {
         assert!(UPDATES.epoch() != updates);
         assert!(PASSCODE.epoch() != passcode);
         assert!(CHROME.epoch() != chrome);
+    }
+
+    struct Flag(std::sync::atomic::AtomicBool);
+    impl Wake for Flag {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Register a waiter on the current thread; returns its wake flag.
+    fn park_waiter(signal: &Signal) -> Arc<Flag> {
+        let flag = Arc::new(Flag(std::sync::atomic::AtomicBool::new(false)));
+        let waker = Waker::from(flag.clone());
+        let mut cx = Context::from_waker(&waker);
+        let mut wait = Box::pin(signal.wait_since(signal.epoch()));
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
+        flag
+    }
+
+    fn woken(flag: &Flag) -> bool {
+        flag.0.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn a_marked_threads_poke_leaves_another_threads_waiter_pending() {
+        static SIGNAL: Signal = Signal::new();
+        let other = std::thread::spawn(|| park_waiter(&SIGNAL));
+        let Ok(other_flag) = other.join() else { return };
+        let marked = std::thread::spawn(|| {
+            isolate_current_thread();
+            let mine = park_waiter(&SIGNAL);
+            SIGNAL.poke();
+            woken(&mine)
+        });
+        assert_eq!(marked.join().ok(), Some(true), "its own waiter wakes");
+        assert!(
+            !woken(&other_flag),
+            "the other thread's waiter stays asleep"
+        );
+        SIGNAL.poke();
+        assert!(woken(&other_flag), "an unmarked poke still reaches it");
+    }
+
+    #[test]
+    fn an_unmarked_poke_wakes_marked_and_unmarked_waiters() {
+        static SIGNAL: Signal = Signal::new();
+        let marked = std::thread::spawn(|| {
+            isolate_current_thread();
+            park_waiter(&SIGNAL)
+        });
+        let Ok(marked_flag) = marked.join() else {
+            return;
+        };
+        let plain = park_waiter(&SIGNAL);
+        SIGNAL.poke();
+        assert!(woken(&marked_flag));
+        assert!(woken(&plain));
     }
 }

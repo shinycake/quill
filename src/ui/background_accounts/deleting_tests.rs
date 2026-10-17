@@ -88,7 +88,6 @@ fn a_removed_account_waits_for_its_client_to_close_before_its_folder_goes(cx: &m
         app.remove_account_in(root.clone(), &account(1), cx);
         // A second click while it closes changes nothing.
         app.remove_account_in(root.clone(), &account(1), cx);
-        assert!(fake.longest_drain() < Duration::from_millis(500));
         assert!(app.account.accounts.error.is_none());
     });
     assert!(
@@ -97,6 +96,8 @@ fn a_removed_account_waits_for_its_client_to_close_before_its_folder_goes(cx: &m
     );
     assert_eq!(pending_deletes(&root), vec![account(1)]);
     run_for(&mut vcx, 400);
+    assert!(fake.was_drained(), "the background poll drained the fake");
+    assert!(fake.longest_drain() < Duration::from_millis(500));
     assert!(folder(&root, &account(1)), "TDLib may still be writing");
     assert!(store.get(&account(1)).unwrap().is_some());
     fake.close();
