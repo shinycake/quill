@@ -15,6 +15,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, FileId};
+use crate::story_tray_walk::{StoryStep, TrayWalk, plan_step};
 use crate::telegram::envelope::{
     ChatActiveStoriesView, ParsedStory, StoryAreaView, StoryContentView,
 };
@@ -199,9 +200,10 @@ enum ListSource {
     /// story.
     #[default]
     Fixed,
-    /// One poster's active stories, rebuilt from the tray and the story
-    /// cache as stories arrive.
-    Poster(ChatId),
+    /// The current poster's active stories, rebuilt from the tray and the
+    /// story cache as stories arrive, inside the walk across the tray's
+    /// posters.
+    Tray(TrayWalk),
 }
 
 /// Viewer state: the open chat's story list plus the current position.
@@ -232,20 +234,57 @@ impl StoryViewer {
         }
     }
 
-    /// Open on `index` of `poster`'s active stories. The list then follows
-    /// the poster's tray through [`StoryViewer::refresh`].
-    pub fn open_poster(poster: ChatId, items: Vec<StoryViewerItem>, index: usize) -> Self {
+    /// Open on `index` of the walk's current poster's active stories. The
+    /// list then follows that poster's tray through
+    /// [`StoryViewer::refresh`], and steps past either end move along the
+    /// walk.
+    pub fn open_tray(walk: TrayWalk, items: Vec<StoryViewerItem>, index: usize) -> Self {
         Self {
-            source: ListSource::Poster(poster),
+            source: ListSource::Tray(walk),
             ..Self::open(items, index)
         }
     }
 
     /// The poster whose active stories the list follows.
     pub fn followed_poster(&self) -> Option<ChatId> {
-        match self.source {
-            ListSource::Poster(poster) if self.is_open() => Some(poster),
+        self.tray_walk()?.current().map(ChatId)
+    }
+
+    /// The walk across the tray's posters, for a viewer opened from it.
+    pub fn tray_walk(&self) -> Option<&TrayWalk> {
+        match &self.source {
+            ListSource::Tray(walk) if self.is_open() => Some(walk),
             _ => None,
+        }
+    }
+
+    pub fn tray_walk_mut(&mut self) -> Option<&mut TrayWalk> {
+        let open = self.is_open();
+        match &mut self.source {
+            ListSource::Tray(walk) if open => Some(walk),
+            _ => None,
+        }
+    }
+
+    /// Where a step of `delta` stories goes from the current one.
+    /// `left` / `right` say whether the neighbour posters have a story to
+    /// open.
+    pub fn plan_step(&self, delta: i32, left: bool, right: bool) -> StoryStep {
+        plan_step(self.index, self.items.len(), delta, left, right)
+    }
+
+    /// Move to `index` within the current list.
+    pub fn step_to(&mut self, index: usize) {
+        if index < self.items.len() {
+            self.index = index;
+        }
+    }
+
+    /// Replace the list with another poster's stories, on `index`.
+    pub fn switch_poster(&mut self, items: Vec<StoryViewerItem>, index: usize) {
+        if index < items.len() {
+            self.items = items;
+            self.index = index;
         }
     }
 
@@ -268,18 +307,6 @@ impl StoryViewer {
 
     pub fn close(&mut self) {
         *self = Self::closed();
-    }
-
-    pub fn prev(&mut self) {
-        if self.is_open() && self.index > 0 {
-            self.index -= 1;
-        }
-    }
-
-    pub fn next(&mut self) {
-        if self.is_open() && self.index + 1 < self.items.len() {
-            self.index += 1;
-        }
     }
 
     pub fn current(&self) -> Option<&StoryViewerItem> {
@@ -446,6 +473,7 @@ pub fn story_to_open(view: &ChatActiveStoriesView) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::story_tray_walk::TraySource;
     use crate::telegram::envelope::{PhotoSizeView, StoryInfoView};
 
     fn active(max_read: i32, ids: &[i32]) -> ChatActiveStoriesView {
@@ -643,23 +671,23 @@ mod tests {
     }
 
     #[test]
-    fn prev_next_walk_and_clamp_at_ends() {
+    fn steps_walk_the_list_and_stop_at_its_ends() {
         let items = vec![
             item(StoryViewerKind::Photo, 5),
             item(StoryViewerKind::Photo, 6),
             item(StoryViewerKind::Photo, 7),
         ];
         let mut viewer = StoryViewer::open(items, 1);
-        viewer.prev();
+        assert_eq!(viewer.plan_step(-1, false, false), StoryStep::Within(0));
+        viewer.step_to(0);
         assert_eq!(viewer.current().unwrap().story_id, 5);
         assert_eq!(viewer.position(), Some((1, 3)));
-        viewer.prev();
-        assert_eq!(viewer.current().unwrap().story_id, 5);
-        viewer.next();
-        viewer.next();
+        assert_eq!(viewer.plan_step(-1, false, false), StoryStep::Restart);
+        viewer.step_to(2);
         assert_eq!(viewer.current().unwrap().story_id, 7);
-        viewer.next();
-        assert_eq!(viewer.current().unwrap().story_id, 7);
+        assert_eq!(viewer.plan_step(1, false, false), StoryStep::End);
+        viewer.step_to(3);
+        assert_eq!(viewer.current().unwrap().story_id, 7, "out of range");
     }
 
     #[test]
@@ -668,15 +696,18 @@ mod tests {
         viewer.close();
         assert!(!viewer.is_open());
         assert_eq!(viewer.current(), None);
-        viewer.prev();
-        viewer.next();
+        viewer.step_to(0);
         assert!(!viewer.is_open());
     }
 
     #[test]
     fn a_followed_list_takes_late_stories_and_keeps_the_current_one() {
-        let mut viewer =
-            StoryViewer::open_poster(ChatId(7), vec![item(StoryViewerKind::Photo, 6)], 0);
+        let sources = [TraySource {
+            chat_id: 7,
+            unread: true,
+        }];
+        let walk = TrayWalk::open(&sources, 7, 6, false).expect("in the tray");
+        let mut viewer = StoryViewer::open_tray(walk, vec![item(StoryViewerKind::Photo, 6)], 0);
         assert_eq!(viewer.followed_poster(), Some(ChatId(7)));
         viewer.refresh(vec![
             item(StoryViewerKind::Photo, 5),

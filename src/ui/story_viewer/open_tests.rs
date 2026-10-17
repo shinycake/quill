@@ -15,14 +15,17 @@ use quill::story_viewer::StoryViewerItem;
 
 const POSTER: i64 = 13;
 
-fn frames(vcx: &mut VisualTestContext) {
+pub(super) fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
     for _ in 0..2 {
         vcx.update(|window, cx| window.render_frame(cx));
     }
 }
 
-fn open_app(cx: &mut TestAppContext, kind: &'static str) -> (Entity<QuillApp>, VisualTestContext) {
+pub(super) fn open_app(
+    cx: &mut TestAppContext,
+    kind: &'static str,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));

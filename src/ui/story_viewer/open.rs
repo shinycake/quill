@@ -5,6 +5,7 @@
 
 use super::*;
 use quill::state::StoryCardState;
+use quill::story_tray_walk::{TraySource, TrayWalk};
 
 impl QuillApp {
     /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`.
@@ -98,10 +99,23 @@ impl QuillApp {
             })
             .unwrap_or_default();
         // A story in the poster's tray opens on the tray's list, which then
-        // follows the tray; one that is not in it opens alone.
-        let viewer = match items.iter().position(|item| item.story_id == story_id) {
-            Some(index) => StoryViewer::open_poster(chat_id, items, index),
-            None => StoryViewer::open(
+        // follows the tray, inside the walk across the tray's posters
+        // (tdesktop's sources-list context); one that is not in it opens
+        // alone.
+        let walk = self.session().and_then(|s| {
+            let sources: Vec<TraySource> = s
+                .ordered_story_tray()
+                .into_iter()
+                .map(TraySource::of)
+                .collect();
+            let unread = s.story_is_unread(chat_id.0, story_id);
+            TrayWalk::open(&sources, chat_id.0, story_id, unread)
+        });
+        let index = items.iter().position(|item| item.story_id == story_id);
+        let viewer = match (index, walk) {
+            (Some(index), Some(walk)) => StoryViewer::open_tray(walk, items, index),
+            (Some(index), None) => StoryViewer::open(items, index),
+            (None, _) => StoryViewer::open(
                 self.session()
                     .map(|s| {
                         quill::story_viewer::collect_found_story_items(

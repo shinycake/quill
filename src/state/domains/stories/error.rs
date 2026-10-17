@@ -57,6 +57,12 @@ impl Session {
                     );
                 }
             }
+            // 404 means the whole tray is loaded; any other failure stops
+            // paging too, so the viewer's per-frame load cannot retry it
+            // every round trip.
+            Some(RequestPurpose::LoadActiveStories) => {
+                self.stories.stories_active_exhausted = true;
+            }
             Some(RequestPurpose::GetStory) => {
                 if let Some((chat, story)) = pending.and_then(|p| Some((p.chat_id?, p.story_id?))) {
                     self.stories.missing.insert((chat.0, story));

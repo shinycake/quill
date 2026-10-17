@@ -87,6 +87,9 @@ pub struct StoriesState {
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
+    /// `loadActiveStories` failed, usually with 404 once the whole main
+    /// tray is loaded: no more pages are asked for.
+    pub stories_active_exhausted: bool,
     /// Stories replied to that `getStory` was already asked for, so a
     /// deleted one is not requested again on every refresh.
     pub reply_attempted: HashSet<(i64, i32)>,
@@ -130,6 +133,7 @@ impl StoriesState {
             close_friends: None,
             close_friends_pending: None,
             stories_active_loaded: false,
+            stories_active_exhausted: false,
             reply_attempted: HashSet::new(),
             missing: HashSet::new(),
             live: None,
@@ -137,5 +141,17 @@ impl StoriesState {
             live_max_stars: None,
             live_bursts: LiveBursts::Unasked,
         }
+    }
+}
+
+impl StoriesState {
+    /// Allow one more `loadActiveStories` page, which the driver otherwise
+    /// sends once per Ready. `false` once the main tray is fully loaded.
+    pub fn rearm_active_stories_load(&mut self) -> bool {
+        if self.stories_active_exhausted {
+            return false;
+        }
+        self.stories_active_loaded = false;
+        true
     }
 }

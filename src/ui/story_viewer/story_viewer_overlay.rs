@@ -299,6 +299,7 @@ impl QuillApp {
                         this.close_story_viewer(cx);
                     })),
             )
+            .children(self.story_sibling_layer(cx))
             .child(
                 div()
                     .id("story-viewer-panel")
@@ -370,7 +371,7 @@ impl QuillApp {
                                 Button::new("story-viewer-prev")
                                     .label(tr(keys::Q_MEDIA_PREV))
                                     .custom(chrome::ghost(cx))
-                                    .disabled(position <= 1)
+                                    .disabled(!self.story_step_available(-1))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(-1, cx);
                                     })),
@@ -379,7 +380,7 @@ impl QuillApp {
                                 Button::new("story-viewer-next")
                                     .label(tr(keys::Q_MEDIA_NEXT))
                                     .custom(chrome::ghost(cx))
-                                    .disabled(position >= total)
+                                    .disabled(!self.story_step_available(1))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.step_story_viewer(1, cx);
                                     })),

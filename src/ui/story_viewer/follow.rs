@@ -2,17 +2,25 @@
 //! poster's active stories, rebuilt every frame from the tray and the story
 //! cache, so stories still loading when the viewer opened join as their
 //! `getStory` answers land (tdesktop rebuilds on `Stories::sourceChanged`,
-//! `media_stories_controller.cpp:868-874`).
+//! `media_stories_controller.cpp:868-874`). The walk across the tray's
+//! posters merges the tray's order the same way, the neighbour posters'
+//! stories are fetched ahead of a jump, and more of the tray loads when
+//! fewer than three posters remain (`kPreloadPeersCount`, :773).
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
 use quill::state::StoryCardState;
+use quill::story_tray_walk::{TraySource, wants_more_tray};
 
 impl QuillApp {
-    pub(in crate::ui) fn follow_story_tray(&mut self) {
-        let Some(poster) = self.stories.viewer.followed_poster() else {
+    pub(in crate::ui) fn follow_story_tray(&mut self, cx: &mut Context<Self>) {
+        let Some((poster, story_id)) = self.stories.viewer.current().map(StoryViewerItem::key)
+        else {
             return;
         };
+        if self.stories.viewer.followed_poster() != Some(poster) {
+            return;
+        }
         let Some(session) = self.session() else {
             return;
         };
@@ -20,16 +28,44 @@ impl QuillApp {
             return;
         };
         let items = collect_story_items(poster, tray, &session.stories.stories);
-        let fetch: Vec<i32> = tray
+        let mut fetch: Vec<(ChatId, i32)> = tray
             .stories
             .iter()
-            .map(|info| info.story_id)
-            .filter(|id| session.story_card_state(poster.0, *id) == StoryCardState::Loading)
+            .map(|info| (poster, info.story_id))
+            .collect();
+        let sources: Vec<TraySource> = session
+            .ordered_story_tray()
+            .into_iter()
+            .map(TraySource::of)
             .collect();
         self.stories.viewer.refresh(items);
+        if let Some(walk) = self.stories.viewer.tray_walk_mut() {
+            walk.show(&sources, poster.0, story_id);
+        }
+        fetch.extend(
+            [-1, 1]
+                .into_iter()
+                .filter_map(|d| self.story_sibling_key(d)),
+        );
+        let Some(session) = self.session() else {
+            return;
+        };
+        fetch.retain(|(chat, id)| session.story_card_state(chat.0, *id) == StoryCardState::Loading);
+        let pictures: Vec<FileId> = [-1, 1]
+            .into_iter()
+            .filter_map(|d| self.story_sibling_picture_to_download(d))
+            .collect();
+        for file_id in pictures {
+            self.request_media_download(file_id, None, cx);
+        }
         if let Some(live) = self.live.as_mut() {
-            for id in fetch {
-                let _ = live.driver.get_story(poster, id);
+            for (chat, id) in fetch {
+                let _ = live.driver.get_story(chat, id);
+            }
+            if wants_more_tray(&sources, poster.0)
+                && live.driver.session.stories.rearm_active_stories_load()
+            {
+                let _ = live.driver.maybe_load_active_stories();
             }
         }
     }
