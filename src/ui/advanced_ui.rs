@@ -10,7 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::advanced::experimental::{self, Category, Imported, OptionSpec, Values};
-use quill::advanced::update_channel;
+use quill::advanced::{hardware_video, update_channel};
 use quill::lang::{keys, tr};
 use quill::updater::UpdateState;
 
@@ -24,14 +24,15 @@ pub(super) fn parent_page(page: &'static str) -> Option<&'static str> {
 }
 
 impl QuillApp {
-    /// The Advanced page. tdesktop's holds the update switches, the export
-    /// and the Experimental settings entry; Quill's update switches live in
-    /// the update section.
+    /// The Advanced page. tdesktop's holds the update switches, Performance,
+    /// the export and the Experimental settings entry; Quill's update
+    /// switches live in the update section.
     pub(super) fn advanced_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_4()
+            .child(self.performance_section(cx))
             .child(super::nav_row::nav_row(
                 "settings-experimental",
                 EXPERIMENTAL_PAGE,
@@ -41,6 +42,44 @@ impl QuillApp {
                     cx.notify();
                 },
             ))
+            .into_any_element()
+    }
+
+    fn performance_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let label = tr(keys::SETTINGS_ENABLE_HWACCEL);
+        // The nav rows below are kit buttons; this inset is their padding,
+        // so labels and trailing controls share one edge.
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .px_2p5()
+            .child(
+                div()
+                    .id("advanced-performance")
+                    .role(Role::Heading)
+                    .aria_label(tr(keys::SETTINGS_PERFORMANCE))
+                    .text_sm()
+                    .font_semibold()
+                    .child(tr(keys::SETTINGS_PERFORMANCE)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(div().flex_1().min_w_0().text_sm().child(label))
+                    .child(
+                        Switch::new("advanced-hardware-video")
+                            .checked(hardware_video::enabled())
+                            .accessibility_label(label)
+                            .on_click(cx.listener(|_, &on: &bool, _, cx| {
+                                hardware_video::set_enabled(on);
+                                cx.notify();
+                            })),
+                    ),
+            )
             .into_any_element()
     }
 

@@ -49,11 +49,17 @@ pub(super) fn preferred_on_macos() -> bool {
 }
 
 fn options(purpose: Purpose) -> OpenOptions {
+    // tdesktop decodes in hardware only in the media viewer and its picture
+    // in picture, and reads the setting when a clip opens.
+    let viewer = || OpenOptions {
+        hardware: quill::advanced::hardware_video::enabled(),
+        ..OpenOptions::viewer()
+    };
     let options = match purpose {
-        Purpose::Viewer => OpenOptions::viewer(),
+        Purpose::Viewer => viewer(),
         Purpose::ViewerLoop => OpenOptions {
             want_audio: false,
-            ..OpenOptions::viewer()
+            ..viewer()
         },
         Purpose::Inline { max_edge } => OpenOptions::inline(max_edge.max(16)),
         // Live players never open files.
