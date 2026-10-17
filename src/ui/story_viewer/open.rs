@@ -97,23 +97,26 @@ impl QuillApp {
                     .map(|tray| collect_story_items(chat_id, tray, &session.stories.stories))
             })
             .unwrap_or_default();
-        // A story that is not in the poster's tray opens alone.
-        let items = if items.iter().any(|item| item.story_id == story_id) {
-            items
-        } else {
-            self.session()
-                .map(|s| {
-                    quill::story_viewer::collect_found_story_items(
-                        &[(chat_id.0, story_id)],
-                        &s.stories.stories,
-                    )
-                })
-                .unwrap_or_default()
+        // A story in the poster's tray opens on the tray's list, which then
+        // follows the tray; one that is not in it opens alone.
+        let viewer = match items.iter().position(|item| item.story_id == story_id) {
+            Some(index) => StoryViewer::open_poster(chat_id, items, index),
+            None => StoryViewer::open(
+                self.session()
+                    .map(|s| {
+                        quill::story_viewer::collect_found_story_items(
+                            &[(chat_id.0, story_id)],
+                            &s.stories.stories,
+                        )
+                    })
+                    .unwrap_or_default(),
+                0,
+            ),
         };
-        let Some(index) = items.iter().position(|item| item.story_id == story_id) else {
+        if !viewer.is_open() {
             return false;
-        };
-        self.begin_story_viewer(items, index, cx);
+        }
+        self.start_story_viewer(viewer, cx);
         true
     }
 
@@ -124,8 +127,12 @@ impl QuillApp {
         index: usize,
         cx: &mut Context<Self>,
     ) {
-        let current = items.get(index).map(|item| (item.chat_id, item.story_id));
-        self.stories.viewer = StoryViewer::open(items, index);
+        self.start_story_viewer(StoryViewer::open(items, index), cx);
+    }
+
+    fn start_story_viewer(&mut self, viewer: StoryViewer, cx: &mut Context<Self>) {
+        let current = viewer.current().map(StoryViewerItem::key);
+        self.stories.viewer = viewer;
         // Phase 9.5: viewers list and report flow are per-story.
         self.stories.viewers_open = false;
         self.stories.report_open = false;

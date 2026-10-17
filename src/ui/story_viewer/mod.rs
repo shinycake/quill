@@ -858,6 +858,7 @@ pub(in crate::ui) mod chrome;
 #[cfg(feature = "demo-capture")]
 mod demo;
 mod ensure_story_download;
+mod follow;
 mod live_comments;
 mod live_composer;
 #[cfg(feature = "demo-capture")]

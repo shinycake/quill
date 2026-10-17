@@ -185,12 +185,32 @@ pub struct StoryViewerItem {
     pub areas: Vec<StoryAreaView>,
 }
 
+impl StoryViewerItem {
+    /// `(poster, story id)`, the story cache key.
+    pub fn key(&self) -> (ChatId, i32) {
+        (self.chat_id, self.story_id)
+    }
+}
+
+/// What the viewer's story list follows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum ListSource {
+    /// Fixed when the viewer opened: albums, profile, search hits, one
+    /// story.
+    #[default]
+    Fixed,
+    /// One poster's active stories, rebuilt from the tray and the story
+    /// cache as stories arrive.
+    Poster(ChatId),
+}
+
 /// Viewer state: the open chat's story list plus the current position.
 /// Empty items = closed.
 #[derive(Debug, Clone, Default)]
 pub struct StoryViewer {
     items: Vec<StoryViewerItem>,
     index: usize,
+    source: ListSource,
 }
 
 impl StoryViewer {
@@ -205,12 +225,49 @@ impl StoryViewer {
     /// Open on `index`, clamped into range. An empty list stays closed.
     pub fn open(items: Vec<StoryViewerItem>, index: usize) -> Self {
         let index = index.min(items.len().saturating_sub(1));
-        Self { items, index }
+        Self {
+            items,
+            index,
+            source: ListSource::Fixed,
+        }
+    }
+
+    /// Open on `index` of `poster`'s active stories. The list then follows
+    /// the poster's tray through [`StoryViewer::refresh`].
+    pub fn open_poster(poster: ChatId, items: Vec<StoryViewerItem>, index: usize) -> Self {
+        Self {
+            source: ListSource::Poster(poster),
+            ..Self::open(items, index)
+        }
+    }
+
+    /// The poster whose active stories the list follows.
+    pub fn followed_poster(&self) -> Option<ChatId> {
+        match self.source {
+            ListSource::Poster(poster) if self.is_open() => Some(poster),
+            _ => None,
+        }
+    }
+
+    /// Swap in a fresh build of the followed poster's stories, keeping the
+    /// current story current. A build without the current story is ignored:
+    /// a deleted story closes the viewer elsewhere, and one that only left
+    /// the tray stays on screen until the user moves on.
+    pub fn refresh(&mut self, items: Vec<StoryViewerItem>) {
+        let Some(key) = self.current().map(StoryViewerItem::key) else {
+            return;
+        };
+        if items == self.items {
+            return;
+        }
+        if let Some(index) = items.iter().position(|item| item.key() == key) {
+            self.items = items;
+            self.index = index;
+        }
     }
 
     pub fn close(&mut self) {
-        self.items.clear();
-        self.index = 0;
+        *self = Self::closed();
     }
 
     pub fn prev(&mut self) {
@@ -605,6 +662,27 @@ mod tests {
         viewer.prev();
         viewer.next();
         assert!(!viewer.is_open());
+    }
+
+    #[test]
+    fn a_followed_list_takes_late_stories_and_keeps_the_current_one() {
+        let mut viewer =
+            StoryViewer::open_poster(ChatId(7), vec![item(StoryViewerKind::Photo, 6)], 0);
+        assert_eq!(viewer.followed_poster(), Some(ChatId(7)));
+        viewer.refresh(vec![
+            item(StoryViewerKind::Photo, 5),
+            item(StoryViewerKind::Photo, 6),
+            item(StoryViewerKind::Photo, 7),
+        ]);
+        assert_eq!(viewer.current().unwrap().story_id, 6);
+        assert_eq!(viewer.position(), Some((2, 3)));
+        // A build that lost the current story leaves the list alone.
+        viewer.refresh(vec![item(StoryViewerKind::Photo, 7)]);
+        assert_eq!(viewer.position(), Some((2, 3)));
+        viewer.close();
+        assert_eq!(viewer.followed_poster(), None);
+        let fixed = StoryViewer::open(vec![item(StoryViewerKind::Photo, 5)], 0);
+        assert_eq!(fixed.followed_poster(), None);
     }
 
     #[test]
