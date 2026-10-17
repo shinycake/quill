@@ -466,7 +466,7 @@ pub fn edited_label(date: &CivilTime, now: &CivilTime) -> String {
 /// a bare id-like name.
 pub fn suggested_save_name(target: &MediaTarget, local_name: &str) -> String {
     if !target.file_name.is_empty() {
-        return target.file_name.clone();
+        return crate::export::names::safe_file_name(&target.file_name);
     }
     let extension = std::path::Path::new(local_name)
         .extension()

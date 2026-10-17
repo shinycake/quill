@@ -105,6 +105,20 @@ pub fn sanitize(name: &str) -> String {
     out
 }
 
+/// A single, safe file-name component from a sender-controlled name: only
+/// the part after the last `/` or `\` survives (so `../../x`, `/etc/passwd`
+/// and `..\\x` cannot leave the target folder on any OS), then [`sanitize`]
+/// applies. `"file"` when nothing usable is left (empty, `..`).
+pub fn safe_file_name(name: &str) -> String {
+    let last = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let clean = sanitize(last);
+    if clean.is_empty() {
+        "file".to_string()
+    } else {
+        clean
+    }
+}
+
 fn mime_extension(mime: &str) -> Option<&'static str> {
     Some(match mime.to_ascii_lowercase().as_str() {
         "image/jpeg" => ".jpg",
@@ -216,6 +230,19 @@ impl Namer {
 mod tests {
     #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
+
+    #[test]
+    fn safe_file_name_keeps_one_component() {
+        assert_eq!(safe_file_name("../../x"), "x");
+        assert_eq!(safe_file_name("/etc/passwd"), "passwd");
+        assert_eq!(safe_file_name("..\\..\\x"), "x");
+        assert_eq!(safe_file_name("C:\\Windows\\evil.exe"), "evil.exe");
+        assert_eq!(safe_file_name(""), "file");
+        assert_eq!(safe_file_name(".."), "file");
+        assert_eq!(safe_file_name("a/"), "file");
+        assert_eq!(safe_file_name("NUL.txt"), "_NUL.txt");
+        assert_eq!(safe_file_name("report.pdf"), "report.pdf");
+    }
 
     fn media(kind: MediaKind, name: &str, mime: &str) -> MediaRef {
         MediaRef {

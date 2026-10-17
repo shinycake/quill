@@ -917,6 +917,8 @@ fn unique_destination(
     name: &str,
     used: &mut std::collections::HashSet<std::path::PathBuf>,
 ) -> std::path::PathBuf {
+    let safe = quill::export::names::safe_file_name(name);
+    let name = safe.as_str();
     let path = std::path::Path::new(name);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
     let ext = path.extension().and_then(|e| e.to_str());
@@ -932,5 +934,22 @@ fn unique_destination(
             return candidate;
         }
         n += 1;
+    }
+}
+
+#[cfg(test)]
+mod save_destination_tests {
+    use super::unique_destination;
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    #[test]
+    fn hostile_names_stay_inside_the_folder() {
+        let dir = Path::new("/picked/dir");
+        let mut used = HashSet::new();
+        for name in ["../../x", "/etc/passwd", "..\\..\\x", "", ".."] {
+            let dest = unique_destination(dir, name, &mut used);
+            assert_eq!(dest.parent(), Some(dir), "{name:?} -> {dest:?}");
+        }
     }
 }

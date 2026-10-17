@@ -14,6 +14,7 @@ mod chat_windows;
 mod first_run;
 mod media;
 mod video_pip;
+mod window_save;
 pub use accounts::*;
 pub use appearance::*;
 pub use badge::*;
@@ -22,6 +23,7 @@ pub use chat_windows::*;
 pub use first_run::*;
 pub use media::*;
 pub use video_pip::*;
+pub use window_save::*;
 
 pub const APP_DIR_NAME: &str = "Quill";
 pub const PREFS_VERSION: u32 = 1;
