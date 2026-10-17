@@ -40,6 +40,10 @@ pub enum ChatsPurpose {
     /// getOption("my_id") and open the chat"). The `chat` answer opens
     /// the chat.
     CreatePrivateChat,
+    /// `createPrivateChat` for a bot whose profile is open, so its commands
+    /// and Report work on the first tap. The chat joins the session but is
+    /// not opened.
+    EnsurePrivateChat,
     /// `getInstalledBackgrounds`. Response is `backgrounds`
     /// (`Session::installed_backgrounds`).
     GetInstalledBackgrounds,
@@ -84,6 +88,7 @@ flat_purposes!(Chats(ChatsPurpose) {
     ToggleBusinessBotPaused,
     RemoveBusinessBotFromChat,
     CreatePrivateChat,
+    EnsurePrivateChat,
     GetInstalledBackgrounds,
     SetDefaultBackground,
     DeleteDefaultBackground,

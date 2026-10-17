@@ -132,7 +132,12 @@ impl QuillApp {
 
     /// Unblock without a confirmation, as Telegram Desktop does; a bot is
     /// restarted right after.
-    fn unblock_peer(&mut self, chat_id: ChatId, restart: bool, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn unblock_peer(
+        &mut self,
+        chat_id: ChatId,
+        restart: bool,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.set_chat_user_blocked(chat_id, false) {
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER)),

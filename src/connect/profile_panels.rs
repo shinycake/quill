@@ -7,10 +7,11 @@ use crate::state::{
     ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose, UsersPurpose,
 };
 use crate::telegram::requests::{
-    get_chat_similar_chats, get_groups_in_common, get_suitable_discussion_chats,
-    get_suitable_personal_chats, get_user_profile_photos, open_chat_similar_chat,
-    report_chat_photo, send_contact, set_birthdate, set_personal_chat, set_profile_photo_previous,
-    set_user_note, set_user_personal_profile_photo, suggest_user_profile_photo,
+    create_private_chat, get_chat_similar_chats, get_groups_in_common,
+    get_suitable_discussion_chats, get_suitable_personal_chats, get_user_profile_photos,
+    open_chat_similar_chat, report_chat_photo, send_contact, set_birthdate, set_personal_chat,
+    set_profile_photo_previous, set_user_note, set_user_personal_profile_photo,
+    suggest_user_profile_photo,
 };
 
 /// Groups in common are listed in one page (tdesktop pages by 50 as you
@@ -67,6 +68,35 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// `createPrivateChat` for a bot whose profile opened without a chat
+    /// (a bot met in a group), so Help, Settings, Report and Restart work
+    /// on the first tap. The chat is added to the session, not opened.
+    pub fn ensure_private_chat(
+        &mut self,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let is_bot = self.session.user(user_id).is_some_and(|user| user.is_bot);
+        let listed = self.session.chats.values().any(|chat| {
+            matches!(&chat.kind, crate::telegram::envelope::ChatKind::Private { user_id: peer } if peer.0 == user_id)
+        });
+        let purpose = RequestPurpose::EnsurePrivateChat;
+        if !is_bot || listed || self.session.requests.has_purpose_for_user(purpose, user_id) {
+            return Ok(None);
+        }
+        let extra = self.session.request_for_user(purpose, user_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&create_private_chat(extra, user_id, false))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        Ok(Some(extra))
     }
 
     /// `getGroupsInCommon` for a user's profile (schema 1.8.67, line

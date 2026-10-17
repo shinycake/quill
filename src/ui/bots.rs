@@ -16,7 +16,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{RequestPurpose, Session, SimilarBotsFetch};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{BotInfo, CallbackQueryAnswer, ChatKind};
+use quill::telegram::envelope::{BotInfo, CallbackQueryAnswer};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -297,17 +297,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let listed = self.live.as_ref().and_then(|live| {
-            live.driver
-                .session
-                .chats
-                .values()
-                .filter(|chat| chat.supported())
-                .find(|chat| {
-                    matches!(&chat.kind, ChatKind::Private { user_id: peer } if peer.0 == user_id)
-                })
-                .map(|chat| chat.id)
-        });
+        let listed = self.listed_private_chat(user_id);
         if let Some(chat_id) = listed {
             self.select_listed_chat(chat_id, window, cx);
             return;
