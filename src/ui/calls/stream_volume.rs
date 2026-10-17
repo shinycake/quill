@@ -148,15 +148,20 @@ impl QuillApp {
                 .default_value(percent)
                 .label(tr(keys::Q_AV_VOLUME_2))
         });
+        // The slider belongs to the window that built it: its events act
+        // on that window's viewer player.
+        let scope = self.windows.scope;
         cx.subscribe(&slider, move |this, _, event: &SliderEvent, cx| {
             let (value, dragging) = match event {
                 SliderEvent::Change(value) => (value.end(), true),
                 SliderEvent::Release(value) => (value.end(), false),
             };
-            if host == VolumeHost::LiveStory {
-                this.stories.live.volume_pill.drag(dragging);
-            }
-            this.set_playback_volume(value / 100.0, cx);
+            this.in_window_scope(scope, cx, |this, cx| {
+                if host == VolumeHost::LiveStory {
+                    this.stories.live.volume_pill.drag(dragging);
+                }
+                this.set_playback_volume(value / 100.0, cx);
+            });
         })
         .detach();
         *self.volume_slot(host) = Some(slider.clone());
