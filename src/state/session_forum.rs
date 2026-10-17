@@ -6,6 +6,7 @@ impl Session {
     /// info, if the chat's topic list is already loaded.
     pub fn select_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Option<ForumTopic> {
         self.open_topic = Some(forum_topic_id);
+        self.clear_topic_load_failed(chat_id, forum_topic_id);
         self.close_topic_thread_unless(Some(forum_topic_id));
         self.view_generation.bump();
         // Subsection tabs: rows seen in "All" were read as chat history;

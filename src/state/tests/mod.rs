@@ -55,6 +55,7 @@ mod stories_more;
 mod story_insights;
 mod subsection_tabs;
 mod threads;
+mod topic_load;
 mod unread_totals;
 mod updates_sync;
 mod users;

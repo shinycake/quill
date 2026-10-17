@@ -22,6 +22,7 @@ use super::nested_click::SwallowPress;
 use super::video_player::controls::{LiveInput, LiveOverlayParts, PictureOverlay, PictureState};
 use super::video_player::{Purpose, VideoPlayer, video_frame};
 use gpui_kit::assets::IconName;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -387,6 +388,11 @@ fn tile_view(tile: Tile, large: bool, cx: &mut Context<QuillApp>) -> AnyElement 
                     .text_color(white())
                     .role(Role::Button)
                     .aria_label(tr(keys::Q_AV_FULL_SCREEN))
+                    .tab_index(0)
+                    .cursor_pointer()
+                    .tooltip(|window, cx| {
+                        Tooltip::new(tr(keys::Q_AV_FULL_SCREEN)).build(window, cx)
+                    })
                     .swallow_press()
                     .on_click(
                         cx.listener(|this, _, window, cx| this.enter_group_call_stage(window, cx)),
@@ -439,6 +445,8 @@ fn stage_button(
         .text_color(white())
         .role(Role::Button)
         .aria_label(label)
+        .tab_index(0)
+        .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
         .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx)))
         .child(Icon::new(icon).with_size(px(18.)))
 }

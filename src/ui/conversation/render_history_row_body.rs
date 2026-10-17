@@ -393,6 +393,44 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "Couldn't load messages · Retry" centred in the topic pane.
+    pub(in crate::ui) fn topic_load_failed_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("topic-load-failed")
+            .flex_1()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .p_6()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_CHAT_COULDN_T_LOAD_MESSAGES)),
+            )
+            .child(
+                Button::new("topic-retry")
+                    .label(tr(keys::Q_CHAT_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.retry_topic_load(cx);
+                    })),
+            )
+    }
+
+    /// The topic pane's Retry row: ask for the topic's first page again.
+    pub(in crate::ui) fn retry_topic_load(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.retry_topic_history().is_err()
+        {
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
+        }
+        cx.notify();
+    }
+
     pub(in crate::ui) fn maybe_auto_load_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             // Phase 5.1: a topic view pages its own history.

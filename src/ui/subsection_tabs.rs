@@ -16,7 +16,9 @@
 use super::GroupConfirmAction;
 use super::app::QuillApp;
 use super::chat_theme::{accent, accent_strong, text_on_fill};
+use super::folder_tabs_fit::{RevealKey, needs_reveal};
 use super::pressable::PressableDiv;
+use super::subsection_tabs_fit::{LABEL_MAX_WIDTH, label_may_be_cut, selected_child};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -98,6 +100,23 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let tabs = self.subsection_tabs_snapshot().filter(|t| t.mode == at)?;
         let bottom = at == SubsectionTabsMode::Bottom;
+        // A selected topic (keyboard, link or the topic list) is scrolled
+        // into view once per change; the user's own scrolling stays put.
+        // A vertical wheel already scrolls this horizontal strip: GPUI maps
+        // it to x on a div that only scrolls along x.
+        let scroll = self.folders.topic_tabs_scroll.clone();
+        let topic_ids: Vec<i32> = tabs.topics.iter().map(|t| t.forum_topic_id).collect();
+        if let Some(selected) = selected_child(tabs.active, &topic_ids) {
+            let key = RevealKey {
+                selected,
+                tab_count: topic_ids.len(),
+                strip_width: f32::from(scroll.bounds().size.width) as i32,
+            };
+            if needs_reveal(self.folders.topic_tabs_revealed.get(), key) {
+                self.folders.topic_tabs_revealed.set(Some(key));
+                scroll.scroll_to_item(selected);
+            }
+        }
         let mut row = div()
             .id("subsection-tabs-scroll")
             .flex()
@@ -106,6 +125,7 @@ impl QuillApp {
             .h_full()
             .items_center()
             .overflow_x_scroll()
+            .track_scroll(&scroll)
             .child(self.horizontal_tab(&tabs, Tab::All, cx));
         for topic in &tabs.topics {
             row = row.child(self.horizontal_tab(&tabs, Tab::Topic(topic.forum_topic_id), cx));
@@ -247,7 +267,21 @@ impl QuillApp {
             .font_semibold()
             .text_color(text)
             .on_click(cx.listener(move |this, _, _, cx| this.select_subsection_tab(tab, cx)))
-            .child(div().whitespace_nowrap().child(label))
+            .child({
+                let tip = label_may_be_cut(&label).then(|| SharedString::from(label.clone()));
+                div()
+                    .id(tab_element_id("subsection-tab-label", tab))
+                    .max_w(px(LABEL_MAX_WIDTH))
+                    .whitespace_nowrap()
+                    .truncate()
+                    .child(label)
+                    .when_some(tip, |this, tip| {
+                        this.tooltip(move |window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(tip.clone())
+                                .build(window, cx)
+                        })
+                    })
+            })
             .when(unread != TopicBadge::None, |this| {
                 this.child(badge_pill(unread, muted, cx))
             })

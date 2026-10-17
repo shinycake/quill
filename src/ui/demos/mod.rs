@@ -8,6 +8,7 @@ mod bots_profile;
 mod chat_list;
 mod composer;
 mod derived_state;
+mod group_call_bar;
 mod groups_admin;
 mod media;
 mod messages;
@@ -18,6 +19,7 @@ mod security;
 mod signin;
 mod status_toasts;
 mod stories;
+mod topic_states;
 pub(in crate::ui) mod video_fixtures;
 
 use quill::composer::{AttachmentKind, ComposerAttachment};

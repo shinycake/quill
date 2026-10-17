@@ -158,6 +158,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
+        // A failed first page waits for the Retry row
+        // (`retry_topic_history`) instead of re-sending on every render.
+        if self
+            .session
+            .topic_history_load_failed(chat_id, forum_topic_id)
+        {
+            return Ok(None);
+        }
         if self
             .session
             .requests
@@ -196,6 +204,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// The topic pane's "Couldn't load messages · Retry": clear the failure
+    /// and request the first page again.
+    pub fn retry_topic_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let (Some(chat_id), Some(forum_topic_id)) =
+            (self.session.open_chat, self.session.open_topic)
+        {
+            self.session
+                .clear_topic_load_failed(chat_id, forum_topic_id);
+        }
+        self.fetch_topic_history()
     }
 
     /// Slice G2: supergroup id for a non-channel supergroup chat —

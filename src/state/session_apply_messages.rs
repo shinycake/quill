@@ -249,6 +249,7 @@ impl Session {
                 for row in &rows {
                     self.index_poll(row);
                 }
+                self.clear_topic_load_failed(chat_id, forum_topic_id);
                 let entry = self
                     .threads
                     .topic_histories

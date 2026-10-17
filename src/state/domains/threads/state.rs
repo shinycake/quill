@@ -8,6 +8,11 @@ pub struct ThreadsState {
     pub forum_topics: HashMap<i64, Vec<ForumTopic>>,
     /// Phase 5.1: per-topic histories keyed by `(chat_id, forum_topic_id)`.
     pub topic_histories: HashMap<(i64, i32), TopicHistory>,
+    /// Topics whose first history page failed or timed out (error answer
+    /// or the pending-request sweep): the pane shows "Couldn't load
+    /// messages · Retry". Cleared by a landed page, a retry or re-selecting
+    /// the topic.
+    pub topic_load_failed: HashSet<(i64, i32)>,
     /// `chat.view_as_topics` / `updateChatViewAsTopics`, by chat id: a
     /// forum shown as topics, Saved Messages shown as chats.
     pub chat_view_as_topics: HashMap<i64, bool>,
@@ -28,6 +33,7 @@ impl ThreadsState {
         Self {
             forum_topics: HashMap::new(),
             topic_histories: HashMap::new(),
+            topic_load_failed: HashSet::new(),
             chat_view_as_topics: HashMap::new(),
             forum_topic_icons: Vec::new(),
             saved: SavedMessagesState::default(),

@@ -267,7 +267,8 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .disabled(busy)
-                    .accessibility_label(format!("{title} options"))
+                    .tooltip(tr(keys::Q_MEDIA_OPTIONS))
+                    .accessibility_label(format!("{title}, {}", tr(keys::Q_MEDIA_OPTIONS)))
                     .dropdown_menu(move |menu, _, _| {
                         let owner = owner.clone();
                         let id = id.clone();
