@@ -76,8 +76,10 @@ Unit tests: the kind drives visibility and duration for a German note;
 `user_error` maps flood wait, 404, 401, 5xx and the send errors; no mapped
 text contains a Debug dump. `ConnectionUi` tests check that a German failure
 still toasts and that a silent note cannot wipe it. The toast needs a live
-TDLib connection, so the captures use two demos
-(`ready-status-toast-info`, `ready-status-toast-error`) with
+TDLib connection, so the captures use these demos
+(`ready-status-toast-info`, `ready-status-toast-error`,
+`ready-status-toast-long-error`, `ready-status-toast-queued`,
+`ready-status-toast-viewer`) with
 `QUILL_DEMO_SHOW_TOAST=1`, light and dark. `scripts/check-lang.py` also
 fails on a Debug dump in a status note.
 
