@@ -15,8 +15,7 @@ use quill::ids::MessageId;
 use quill::lang::{keys, tr};
 use quill::service_text::{ServiceLink, ServiceText};
 use quill::state::{HistoryMessage, Session};
-use quill::telegram::envelope::{MessageContent, ParsedFile, PhotoContent, ServiceAction};
-use std::collections::HashMap;
+use quill::telegram::envelope::{MessageContent, PhotoContent, ServiceAction};
 use std::path::PathBuf;
 
 /// Side of the round photo shown under a photo-change row.
@@ -105,7 +104,7 @@ fn photo_tile(
     chat_id: quill::ids::ChatId,
     message_id: MessageId,
     photo: &PhotoContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -215,7 +214,7 @@ fn birthday_card(
 pub(super) fn service_message_row(
     message: &HistoryMessage,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {

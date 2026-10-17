@@ -51,7 +51,7 @@ pub(in crate::ui) fn wallpaper_box(wallpaper: &PreviewWallpaper) -> (f32, f32) {
 /// while a photo is still downloading.
 pub(in crate::ui) fn card_wallpaper(
     wallpaper: &PreviewWallpaper,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> Option<Wallpaper> {
     let background = &wallpaper.background;
@@ -117,7 +117,7 @@ fn empty_picture() -> AnyElement {
 fn wallpaper_picture(
     row_id: u64,
     wallpaper: &PreviewWallpaper,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> AnyElement {
     let (width, height) = wallpaper_box(wallpaper);
@@ -149,7 +149,7 @@ fn wallpaper_picture(
 fn theme_picture(
     row_id: u64,
     theme: &PreviewTheme,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> AnyElement {
     let frame = div()
@@ -197,7 +197,7 @@ fn theme_picture(
 pub(in crate::ui) fn picture(
     row_id: u64,
     preview: &LinkPreview,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> Option<AnyElement> {
     match &preview.kind {

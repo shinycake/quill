@@ -227,7 +227,7 @@ pub(super) fn inline_paragraph(
 pub(in crate::ui) fn message_text_block(
     msg_key: (i64, u64),
     text: &quill::telegram::envelope::TextContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Resolved custom emoji stickers for inline rendering (EmojiPanel cache).
@@ -331,7 +331,7 @@ pub(in crate::ui) fn message_text_block(
 pub(in crate::ui) fn link_preview_card(
     row_id: u64,
     preview: &quill::telegram::envelope::LinkPreview,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Settings → Appearance: message font size.

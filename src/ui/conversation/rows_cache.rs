@@ -3,14 +3,17 @@
 use super::*;
 use std::hash::{Hash, Hasher};
 
-pub(in crate::ui) struct RowsSource {
+pub(in crate::ui) struct RowsSource<'a> {
     pub(in crate::ui) list: &'static str,
     pub(in crate::ui) chat: Option<ChatId>,
     pub(in crate::ui) scope: i64,
-    pub(in crate::ui) messages_revision: u64,
+    /// The messages the rows show, when the list has them.
+    pub(in crate::ui) messages: Option<&'a quill::state::HistoryMessages>,
     pub(in crate::ui) extra: u64,
     pub(in crate::ui) window_epoch: u64,
     pub(in crate::ui) unread_anchor: Option<MessageId>,
+    /// The chat whose translations the rows show in place.
+    pub(in crate::ui) translated: Option<ChatId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -19,6 +22,7 @@ pub(in crate::ui) struct HistoryRowsKey {
     chat: Option<i64>,
     scope: i64,
     messages_revision: u64,
+    ids_revision: u64,
     extra: u64,
     window_epoch: u64,
     unread_anchor: Option<MessageId>,
@@ -28,27 +32,65 @@ pub(in crate::ui) struct HistoryRowsKey {
     today: i64,
 }
 
+impl HistoryRowsKey {
+    /// Same rows as `other` except for messages changed in place.
+    fn differs_only_in_place(&self, other: &Self) -> bool {
+        self.messages_revision != other.messages_revision
+            && *self
+                == Self {
+                    messages_revision: self.messages_revision,
+                    ..other.clone()
+                }
+    }
+}
+
+/// What the history list does with its rows this render.
+pub(in crate::ui) enum RowsInput {
+    /// Nothing feeding the rows changed.
+    Keep,
+    /// These messages changed in place: `(row, new message)`, each row's
+    /// place among its neighbours the same.
+    Patch(Vec<(usize, HistoryMessage)>),
+    /// Build every row from these messages (oldest first).
+    Build(Vec<HistoryMessage>),
+}
+
+/// Changed messages past which the rows are built again instead.
+const PATCH_MAX: usize = 32;
+
 fn hash_of(value: impl Hash) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     value.hash(&mut hasher);
     hasher.finish()
 }
 
+/// Whether `new` keeps the place `old` had among its neighbours: the same
+/// sender run, day and album grouping (`history_message_list`).
+fn same_place(old: &HistoryMessage, new: &HistoryMessage) -> bool {
+    old.sender == new.sender
+        && old.is_outgoing == new.is_outgoing
+        && old.date == new.date
+        && old.media_album_id == new.media_album_id
+        && quill::album::is_album_media(&old.content) == quill::album::is_album_media(&new.content)
+}
+
 impl QuillApp {
-    /// The key for the rows of `source` and, when the rows built last
-    /// cannot be reused, the messages to build them from.
+    /// The key for the rows of `source` and what to do with the rows built
+    /// last: keep them, patch the messages changed in place, or build them
+    /// again from `messages`.
     pub(in crate::ui) fn history_rows_input(
         &self,
         source: RowsSource,
         highlight: Option<MessageId>,
         messages: impl FnOnce() -> Vec<HistoryMessage>,
-    ) -> (HistoryRowsKey, Option<Vec<HistoryMessage>>) {
+    ) -> (HistoryRowsKey, RowsInput) {
         let today = quill::local_time::civil_local(quill::local_time::now_unix()).day_number();
         let key = HistoryRowsKey {
             list: source.list,
             chat: source.chat.map(|chat| chat.0),
             scope: source.scope,
-            messages_revision: source.messages_revision,
+            messages_revision: source.messages.map_or(0, |m| m.revision()),
+            ids_revision: source.messages.map_or(0, |m| m.ids_revision()),
             extra: source.extra,
             window_epoch: source.window_epoch,
             unread_anchor: source.unread_anchor,
@@ -57,8 +99,46 @@ impl QuillApp {
             translate: self.translate_revision(),
             today,
         };
-        let reuse = self.history.rows_key.as_ref() == Some(&key);
-        (key, (!reuse).then(messages))
+        let input = match self.history.rows_key.as_ref() {
+            Some(old) if *old == key => RowsInput::Keep,
+            Some(old) if key.differs_only_in_place(old) => source
+                .messages
+                .and_then(|list| {
+                    self.in_place_changes(list, old.messages_revision, source.translated)
+                })
+                .map_or_else(|| RowsInput::Build(messages()), RowsInput::Patch),
+            _ => RowsInput::Build(messages()),
+        };
+        (key, input)
+    }
+
+    /// The messages of `list` changed after `since`, each with the row that
+    /// shows it, when every one keeps its place; `None` when the rows must
+    /// be built again.
+    fn in_place_changes(
+        &self,
+        list: &quill::state::HistoryMessages,
+        since: u64,
+        translated: Option<ChatId>,
+    ) -> Option<Vec<(usize, HistoryMessage)>> {
+        let ids = list.changed_since(since);
+        if ids.len() > PATCH_MAX {
+            return None;
+        }
+        let mut changed: Vec<HistoryMessage> =
+            ids.iter().filter_map(|id| list.get(id).cloned()).collect();
+        if let Some(chat_id) = translated {
+            self.apply_chat_translation(chat_id, &mut changed);
+        }
+        let rows = &self.history.rows;
+        changed
+            .into_iter()
+            .map(|message| {
+                let ix = rows.iter().position(|row| row.contains(message.id))?;
+                let old = rows.get(ix)?.message(message.id)?;
+                same_place(old, &message).then_some((ix, message))
+            })
+            .collect()
     }
 
     /// The open chat's own history, with the translations shown in place
@@ -69,7 +149,7 @@ impl QuillApp {
         topic: Option<i32>,
         history: Option<&quill::state::HistoryState>,
         highlight: Option<MessageId>,
-    ) -> (HistoryRowsKey, Option<Vec<HistoryMessage>>) {
+    ) -> (HistoryRowsKey, RowsInput) {
         let session = self.session();
         let joined = chat.and_then(|chat| {
             let strip = session?.similar_strip(chat)?;
@@ -79,10 +159,11 @@ impl QuillApp {
             list: "session-history",
             chat,
             scope: topic.map_or(0, i64::from),
-            messages_revision: history.map_or(0, |h| h.messages.revision()),
+            messages: history.map(|h| &h.messages),
             extra: hash_of(joined),
             window_epoch: history.map_or(0, |h| h.window_epoch),
             unread_anchor: history.and_then(|h| h.unread_anchor),
+            translated: chat,
         };
         self.history_rows_input(source, highlight, || {
             let mut messages: Vec<HistoryMessage> = history
@@ -104,15 +185,16 @@ impl QuillApp {
         topic: Option<i32>,
         history: Option<&quill::state::TopicHistory>,
         highlight: Option<MessageId>,
-    ) -> (HistoryRowsKey, Option<Vec<HistoryMessage>>) {
+    ) -> (HistoryRowsKey, RowsInput) {
         let source = RowsSource {
             list: "topic-history",
             chat,
             scope: topic.map_or(0, i64::from),
-            messages_revision: history.map_or(0, |h| h.messages.revision()),
+            messages: history.map(|h| &h.messages),
             extra: 0,
             window_epoch: 0,
             unread_anchor: None,
+            translated: None,
         };
         self.history_rows_input(source, highlight, || {
             history
@@ -127,15 +209,16 @@ impl QuillApp {
         &self,
         thread: &quill::state::ThreadView,
         highlight: Option<MessageId>,
-    ) -> (HistoryRowsKey, Option<Vec<HistoryMessage>>) {
+    ) -> (HistoryRowsKey, RowsInput) {
         let source = RowsSource {
             list: "thread-history",
             chat: Some(thread.chat_id),
             scope: thread.thread_id,
-            messages_revision: thread.history.messages.revision(),
+            messages: Some(&thread.history.messages),
             extra: hash_of(&thread.root_ids),
             window_epoch: thread.window_epoch,
             unread_anchor: thread.unread_anchor,
+            translated: None,
         };
         self.history_rows_input(source, highlight, || thread.rows())
     }
@@ -143,16 +226,17 @@ impl QuillApp {
     pub(in crate::ui) fn saved_rows_input(
         &self,
         highlight: Option<MessageId>,
-    ) -> Option<(HistoryRowsKey, Option<Vec<HistoryMessage>>)> {
+    ) -> Option<(HistoryRowsKey, RowsInput)> {
         let (scope, history) = self.saved_history()?;
         let source = RowsSource {
             list: "saved-history",
             chat: self.session().and_then(|s| s.open_chat),
             scope,
-            messages_revision: history.messages.revision(),
+            messages: Some(&history.messages),
             extra: 0,
             window_epoch: 0,
             unread_anchor: None,
+            translated: None,
         };
         Some(self.history_rows_input(source, highlight, || {
             history.ordered().into_iter().cloned().collect()
@@ -179,6 +263,10 @@ impl QuillApp {
     }
 
     pub(super) fn chrome_follows_revision(&self) -> bool {
+        #[cfg(test)]
+        if self.history.follow_revision_in_tests {
+            return true;
+        }
         self.live.is_some() || super::demo::demo_stress_size().is_some()
     }
 }

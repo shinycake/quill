@@ -65,9 +65,22 @@ impl QuillApp {
                 natural_size: None,
                 quality_options: Vec::new(),
             });
-        let files: HashMap<i32, ParsedFile> = self
+        // A copy: the rendering below needs `self` mutably. Reading the
+        // item's files first marks them used, so they stay in the
+        // session's bounded map while shown.
+        let files: quill::state::FileMap = self
             .session()
-            .map(|s| s.media.files.clone())
+            .map(|s| {
+                for id in item
+                    .display_file_ids
+                    .iter()
+                    .chain(std::iter::once(&item.download_file_id))
+                    .chain(item.play_file_id.as_ref())
+                {
+                    let _ = s.media.files.get(&id.0);
+                }
+                s.media.files.clone()
+            })
             .unwrap_or_default();
         let downloading: quill::state::DownloadIntents = self
             .session()

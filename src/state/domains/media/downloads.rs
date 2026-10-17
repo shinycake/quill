@@ -5,7 +5,7 @@
 //! ended. Status is computed from both, never stored.
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::telegram::envelope::ParsedFile;
+use super::FileMap;
 
 const RECENT_CAP: usize = 50;
 
@@ -320,10 +320,7 @@ impl DownloadIntents {
     }
 
     /// Failed user downloads whose file is not transferring again.
-    pub fn failed_ids<'a>(
-        &'a self,
-        files: &'a HashMap<i32, ParsedFile>,
-    ) -> impl Iterator<Item = i32> + 'a {
+    pub fn failed_ids<'a>(&'a self, files: &'a FileMap) -> impl Iterator<Item = i32> + 'a {
         self.failed
             .iter()
             .copied()
@@ -332,10 +329,7 @@ impl DownloadIntents {
 
     /// Finished user downloads, oldest first, minus the ones TDLib now
     /// reports as no longer on disk (cache cleared).
-    pub fn recent<'a>(
-        &'a self,
-        files: &'a HashMap<i32, ParsedFile>,
-    ) -> impl Iterator<Item = i32> + 'a {
+    pub fn recent<'a>(&'a self, files: &'a FileMap) -> impl Iterator<Item = i32> + 'a {
         self.finished.iter().copied().filter(|id| {
             files
                 .get(id)
@@ -346,7 +340,7 @@ impl DownloadIntents {
     /// The status a row shows. TDLib's file state wins: a finished file is
     /// Done whatever was asked, and a transfer TDLib reports active is
     /// Downloading unless the user cancelled it.
-    pub fn status(&self, file_id: i32, files: &HashMap<i32, ParsedFile>) -> DownloadStatus {
+    pub fn status(&self, file_id: i32, files: &FileMap) -> DownloadStatus {
         let local = files.get(&file_id).map(|f| &f.local);
         if local.is_some_and(|l| l.is_downloading_completed) {
             return DownloadStatus::Done;
@@ -378,7 +372,7 @@ impl DownloadIntents {
 
     /// A transfer is under way (paused ones count: the row keeps its
     /// progress).
-    pub fn is_downloading(&self, file_id: i32, files: &HashMap<i32, ParsedFile>) -> bool {
+    pub fn is_downloading(&self, file_id: i32, files: &FileMap) -> bool {
         matches!(
             self.status(file_id, files),
             DownloadStatus::Downloading | DownloadStatus::Paused

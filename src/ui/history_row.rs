@@ -11,6 +11,8 @@ use std::path::PathBuf;
 pub(crate) struct HistoryRowInputs {
     pub(crate) message: HistoryMessage,
     pub(crate) chrome: RowChrome,
+    /// `HistoryUi::chrome_epoch` when `chrome` was derived.
+    pub(crate) chrome_stamp: u64,
     pub(crate) spot: ChromeSpot,
     pub(crate) highlighted: bool,
     /// First row of a sender run (gets extra top spacing).
@@ -64,8 +66,12 @@ pub(crate) struct ChromeSpot {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RowCacheStats {
+    /// Whole row lists built.
     pub(crate) rebuilds: u64,
+    /// Rows replaced in place: a message changed, or its chrome did.
     pub(crate) rows_patched: u64,
+    /// Messages copied out of the session to build or patch rows.
+    pub(crate) messages_cloned: u64,
 }
 
 impl RowCacheStats {
@@ -105,6 +111,7 @@ pub(crate) enum HistoryRow {
         album_id: i64,
         messages: Vec<HistoryMessage>,
         chrome: Box<RowChrome>,
+        chrome_stamp: u64,
         spot: ChromeSpot,
         day_label: Option<String>,
         unread_divider: bool,
@@ -137,6 +144,36 @@ impl HistoryRow {
         match self {
             HistoryRow::Single(inputs) => inputs.chrome = fresh,
             HistoryRow::Album { chrome, .. } => **chrome = fresh,
+        }
+    }
+
+    /// The `HistoryUi::chrome_epoch` the chrome was last derived at.
+    pub(crate) fn chrome_stamp(&self) -> u64 {
+        match self {
+            HistoryRow::Single(inputs) => inputs.chrome_stamp,
+            HistoryRow::Album { chrome_stamp, .. } => *chrome_stamp,
+        }
+    }
+
+    pub(crate) fn set_chrome_stamp(&mut self, stamp: u64) {
+        match self {
+            HistoryRow::Single(inputs) => inputs.chrome_stamp = stamp,
+            HistoryRow::Album { chrome_stamp, .. } => *chrome_stamp = stamp,
+        }
+    }
+
+    /// The row's copy of message `id`.
+    pub(crate) fn message(&self, id: MessageId) -> Option<&HistoryMessage> {
+        match self {
+            HistoryRow::Single(inputs) => Some(&inputs.message).filter(|m| m.id == id),
+            HistoryRow::Album { messages, .. } => messages.iter().find(|m| m.id == id),
+        }
+    }
+
+    pub(crate) fn message_mut(&mut self, id: MessageId) -> Option<&mut HistoryMessage> {
+        match self {
+            HistoryRow::Single(inputs) => Some(&mut inputs.message).filter(|m| m.id == id),
+            HistoryRow::Album { messages, .. } => messages.iter_mut().find(|m| m.id == id),
         }
     }
 

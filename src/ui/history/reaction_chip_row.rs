@@ -12,7 +12,7 @@ pub(super) fn reaction_chip_row(
     can_list_reactors: bool,
     in_channel: bool,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
     footer_meta: &super::super::message_text::FooterMeta,
     cx: &mut Context<QuillApp>,

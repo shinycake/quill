@@ -19,7 +19,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{RequestPurpose, Session, SponsoredReportFlight};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{MessageContent, ParsedFile, SponsoredMessage};
+use quill::telegram::envelope::{MessageContent, SponsoredMessage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -67,7 +67,7 @@ pub(super) fn apply_ready_sponsored(
 pub(super) fn sponsored_message_row(
     chat_id: ChatId,
     message: &SponsoredMessage,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,

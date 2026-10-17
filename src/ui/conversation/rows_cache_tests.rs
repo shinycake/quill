@@ -13,6 +13,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 fn new_app(cx: &mut TestAppContext, demo: &str) -> (Entity<QuillApp>, VisualTestContext) {
+    // Default settings, not the saved window state (sidebar width) of the
+    // app installed on this machine.
+    quill::settings::use_isolated_app_root(quill::scratch::process_dir("quill-rows-cache-ui"));
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -155,11 +158,11 @@ fn a_read_receipt_patches_the_outgoing_row(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn an_edit_rebuilds_the_rows_with_the_new_text(cx: &mut TestAppContext) {
+fn an_edit_patches_only_its_row(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     open_group(&app, vcx);
-    let (built, _) = counts(&app, vcx);
+    let (built, patched) = counts(&app, vcx);
     apply(
         &app,
         vcx,
@@ -171,15 +174,19 @@ fn an_edit_rebuilds_the_rows_with_the_new_text(cx: &mut TestAppContext) {
         single(app, 202).map(|row| quill::state::effective_preview(&row.message))
     });
     assert_eq!(text.as_deref(), Some("Hi everyone."));
-    assert_eq!(counts(&app, vcx).0, built + 1);
+    assert_eq!(
+        counts(&app, vcx),
+        (built, patched + 1),
+        "one row patched, none rebuilt"
+    );
 }
 
 #[gpui_kit::test]
-fn a_reaction_rebuilds_the_rows_with_it(cx: &mut TestAppContext) {
+fn a_reaction_patches_only_its_row(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     open_group(&app, vcx);
-    let (built, _) = counts(&app, vcx);
+    let (built, patched) = counts(&app, vcx);
     apply(
         &app,
         vcx,
@@ -196,7 +203,7 @@ fn a_reaction_rebuilds_the_rows_with_it(cx: &mut TestAppContext) {
         })
     });
     assert!(reacted);
-    assert_eq!(counts(&app, vcx).0, built + 1);
+    assert_eq!(counts(&app, vcx), (built, patched + 1));
 }
 
 #[gpui_kit::test]
@@ -467,3 +474,6 @@ fn an_unpainted_history_is_seeded_from_its_pane_until_the_probe_measures(cx: &mu
     });
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
 }
+
+#[path = "rows_cache_long_tests.rs"]
+mod long;

@@ -39,7 +39,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
-use quill::telegram::envelope::{MessageContent, ParsedFile, effective_content};
+use quill::telegram::envelope::{MessageContent, effective_content};
 use quill::text::TextEntity;
 use quill::voice::format_voice_duration;
 use std::collections::HashMap;
@@ -176,7 +176,7 @@ fn avatar_link(
 pub(super) fn album_history_row(
     album_id: i64,
     messages: &[&HistoryMessage],
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // kit Phase 4: per-row chrome (sender header / outbox receipt /
@@ -447,7 +447,7 @@ pub(super) fn album_tile(
     part: &quill::album::AlbumRect,
     mosaic: (i32, i32),
     mosaic_corners: MediaCorners,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Which item of the message the tile is (a bought paid-media album
@@ -652,7 +652,7 @@ pub(super) fn service_pill(
 pub(in crate::ui) fn map_tile_path(
     session: Option<&Session>,
     location: &quill::telegram::envelope::GeoLocation,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> Option<PathBuf> {
     let file_id = session?.media.map_thumbs.file_id(location)?;

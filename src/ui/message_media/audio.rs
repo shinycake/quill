@@ -123,7 +123,7 @@ pub(in crate::ui) fn voice_note_row(
     message_id: MessageId,
     outgoing: bool,
     note: &quill::telegram::envelope::VoiceNoteContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     seek: &SeekBarView,
     // The bubble's room (plain bubbles have no padding to take off the
@@ -270,7 +270,7 @@ pub(in crate::ui) fn audio_row(
     message_id: MessageId,
     outgoing: bool,
     audio: &quill::telegram::envelope::AudioContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     seek: &SeekBarView,

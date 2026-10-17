@@ -17,7 +17,6 @@ use quill::state::Session;
 use quill::story_viewer::StoryViewerItem;
 use quill::telegram::envelope::{ParsedFile, SpeechRecognition};
 use quill::voice::{self, format_voice_duration};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -68,7 +67,7 @@ use surfaces::{
 
 pub(super) fn photo_display_path(
     photo: &quill::telegram::envelope::PhotoContent,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     roots: &[PathBuf],
 ) -> Option<PathBuf> {
     // Sharpest downloaded size first: the bubble frame is up to 360pt
@@ -102,7 +101,7 @@ pub(super) fn photo_display_path(
 /// history rows (`sandboxed_display_path`).
 pub(super) fn viewer_display_path(
     item: &MediaViewerItem,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     roots: &[PathBuf],
 ) -> Option<PathBuf> {
     item.display_file_ids.iter().find_map(|id| {
@@ -115,7 +114,7 @@ pub(super) fn viewer_display_path(
 
 pub(super) fn story_viewer_display_path(
     item: &StoryViewerItem,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     roots: &[PathBuf],
 ) -> Option<PathBuf> {
     item.display_file_ids.iter().find_map(|id| {
@@ -128,7 +127,7 @@ pub(super) fn story_viewer_display_path(
 
 pub(super) fn file_is_downloading(
     file_id: FileId,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloads: &quill::state::DownloadIntents,
 ) -> bool {
     downloads.is_downloading(file_id.0, files)

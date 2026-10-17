@@ -22,7 +22,7 @@ pub(in crate::ui) fn thumbed_document_chip(
     row_id: u64,
     doc: &quill::telegram::envelope::DocumentContent,
     outgoing: bool,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     origin: DocOrigin,

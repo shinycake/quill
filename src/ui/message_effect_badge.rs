@@ -20,7 +20,6 @@ use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::message_effects::MessageEffect;
 use quill::state::{HistoryMessage, Session};
-use quill::telegram::envelope::ParsedFile;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -75,7 +74,7 @@ fn unwatched(outgoing: bool, pending: bool, id: i64, last_read_inbox: i64) -> bo
 /// downloaded, its emoji when it has no icon (tdesktop `generateImage`).
 pub(super) fn effect_icon(
     effect: &MessageEffect,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> BadgeIcon {
     match effect.icon_file() {
@@ -95,7 +94,7 @@ pub(super) fn effect_icon(
 pub(super) fn footer_effect(
     message: &HistoryMessage,
     session: Option<&Session>,
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> Option<FooterEffect> {
     let effect_id = message.extras.effect_id;

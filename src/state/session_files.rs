@@ -62,7 +62,44 @@ impl Session {
             }
         }
         self.note_avatar_file_changed(file.id.0);
-        self.media.files.insert(file.id.0, file);
+        self.media.files.insert(file);
+        self.evict_unused_files();
+    }
+
+    /// `revision` minus the `updateFile`s that moved no usable path: what a
+    /// view showing names, avatars and headers (not transfer progress)
+    /// depends on.
+    pub fn revision_without_file_progress(&self) -> u64 {
+        self.revision.wrapping_sub(self.media.files.quiet_updates())
+    }
+
+    /// Bound `media.files` ([`FileMap::evict`]). Kept whatever they were
+    /// last used for: a file transferring, asked for or paused, an avatar
+    /// the chat list shows, the open chat's automatic downloads and the
+    /// notification sounds. A file a row shows is read on every render,
+    /// so it is among the most recently used.
+    fn evict_unused_files(&mut self) {
+        if self.media.files.len() <= FILES_MAX {
+            return;
+        }
+        let media = &mut self.media;
+        let downloads = &media.downloads;
+        let avatars = &media.avatar_file_refs;
+        let open_chat = &media.open_chat_media_downloads;
+        let extras: HashSet<i32> = media.download_extras.values().copied().collect();
+        let sounds = &self.settings.sound_file_ids;
+        media.files.evict(|file| {
+            let id = file.id.0;
+            file.local.is_downloading_active
+                || file.uploading
+                || downloads.is_requested(id)
+                || downloads.is_paused(id)
+                || downloads.is_user(id)
+                || avatars.contains_key(&id)
+                || open_chat.contains(&id)
+                || extras.contains(&id)
+                || sounds.contains_key(&id)
+        });
     }
 
     /// Stop tracking the in-flight request for `file_id`; an end already

@@ -536,7 +536,7 @@ pub(super) const MONO_FONT: &str = "monospace";
 pub(in crate::ui) fn custom_emoji_paths(
     entities: &[TextEntity],
     stickers: &[StickerItem],
-    files: &HashMap<i32, ParsedFile>,
+    files: &quill::state::FileMap,
     media_roots: &[PathBuf],
 ) -> HashMap<i64, ImageSource> {
     let mut out = HashMap::new();

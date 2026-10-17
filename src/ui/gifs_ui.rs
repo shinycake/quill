@@ -60,7 +60,7 @@ impl QuillApp {
             .session()
             .map(|session| session.stickers.gifs.clone())
             .unwrap_or_default();
-        let no_files = std::collections::HashMap::new();
+        let no_files = quill::state::FileMap::default();
         let files = self
             .session()
             .map_or(&no_files, |session| &session.media.files);

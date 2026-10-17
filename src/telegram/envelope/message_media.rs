@@ -133,6 +133,8 @@ pub struct ParsedFile {
     pub id: FileId,
     pub size: i64,
     pub expected_size: i64,
+    /// `remoteFile.is_uploading_active`: the file is being sent.
+    pub uploading: bool,
     pub local: LocalFileState,
 }
 
@@ -366,6 +368,11 @@ pub(crate) fn parse_file(value: Option<&Value>) -> Result<ParsedFile, ParseError
         id: FileId(id),
         size: int53_or_zero(value.get("size")),
         expected_size: int53_or_zero(value.get("expected_size")),
+        uploading: value
+            .get("remote")
+            .and_then(|remote| remote.get("is_uploading_active"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         local: LocalFileState {
             path: local
                 .and_then(|l| l.get("path"))
