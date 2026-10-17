@@ -260,6 +260,22 @@ mod tests {
     }
 
     #[test]
+    fn a_new_trackpad_gesture_drops_the_last_gestures_leftover() {
+        let now = Instant::now();
+        let mut nav = WheelNav::default();
+        assert_eq!(nav.feed(trackpad(-60.0, true, now)), WheelAction::None);
+        assert_eq!(
+            nav.feed(trackpad(-40.0, false, ms(now, 16))),
+            WheelAction::None
+        );
+        assert_eq!(
+            nav.feed(trackpad(-50.0, true, ms(now, 32))),
+            WheelAction::None,
+            "100 px left over from the last gesture does not count"
+        );
+    }
+
+    #[test]
     fn a_trackpad_gesture_that_zoomed_does_not_move() {
         let now = Instant::now();
         let mut nav = WheelNav::default();
