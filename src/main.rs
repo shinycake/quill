@@ -808,46 +808,15 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 .await;
                             continue;
                         }
-                        // `w:x,y,dx,dy,s|m|e[,cmd]` sends one phased trackpad
-                        // scroll event (started / moved / ended), to script a
-                        // swipe; `cmd` holds Cmd (Ctrl off macOS).
+                        // `w:` sends one phased trackpad scroll event
+                        // (`ui::screenshot_demo_input::wheel_step`).
                         if let Some(wheel) = point.strip_prefix("w:") {
-                            let mut parts: Vec<&str> = wheel.split(',').map(str::trim).collect();
-                            let primary = parts.last() == Some(&"cmd");
-                            if primary {
-                                parts.pop();
-                            }
-                            if let [x, y, dx, dy, phase] = parts[..]
-                                && let (Ok(x), Ok(y), Ok(dx), Ok(dy)) = (
-                                    x.parse::<f32>(),
-                                    y.parse::<f32>(),
-                                    dx.parse::<f32>(),
-                                    dy.parse::<f32>(),
-                                )
-                            {
+                            if let Some(event) = ui::screenshot_demo_input::wheel_step(wheel) {
                                 let _ = AnyWindowHandle::from(demo_window).update(
                                     cx,
                                     |_, window, cx| {
-                                        use gpui_kit::gpui::{
-                                            Modifiers, PlatformInput, ScrollDelta,
-                                            ScrollWheelEvent, TouchPhase, point, px,
-                                        };
-                                        let touch_phase = match phase {
-                                            "s" => TouchPhase::Started,
-                                            "e" => TouchPhase::Ended,
-                                            _ => TouchPhase::Moved,
-                                        };
                                         window.dispatch_event(
-                                            PlatformInput::ScrollWheel(ScrollWheelEvent {
-                                                position: point(px(x), px(y)),
-                                                delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
-                                                modifiers: if primary {
-                                                    Modifiers::secondary_key()
-                                                } else {
-                                                    Modifiers::default()
-                                                },
-                                                touch_phase,
-                                            }),
+                                            gpui_kit::gpui::PlatformInput::ScrollWheel(event),
                                             cx,
                                         );
                                     },

@@ -393,6 +393,7 @@ mod scheduled;
 mod screen_chooser;
 mod screen_chooser_demo;
 mod screenshot_demo;
+pub(crate) mod screenshot_demo_input;
 mod search_ui;
 mod secret_chats;
 mod security;
