@@ -621,9 +621,7 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
     });
 }
 
-/// tdesktop `setupStarsEffectsCanvas`: the effects rise through a 128 by
-/// 256 canvas centred on the Stars button, its bottom on the button's
-/// bottom, and are gone once their 2 s are up.
+/// tdesktop `setupStarsEffectsCanvas`.
 #[gpui_kit::test]
 fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
@@ -637,7 +635,7 @@ fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
     assert!(find(vcx, "live-story-effect-badge").is_some());
     app.update(vcx, |app, cx| {
         let live = &mut app.stories.live;
-        live.pinned_now = live.pinned_now.map(|now| now + EFFECT_DURATION);
+        live.demo_clock = live.demo_clock.map(|now| now + EFFECT_DURATION);
         cx.notify();
     });
     frames(vcx);

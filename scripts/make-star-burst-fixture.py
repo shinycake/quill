@@ -2,9 +2,7 @@
 """Writes docs/screenshots/fixtures/demo-star-burst.tgs, the screenshot
 demo's stand-in for the server's reaction burst (live story Stars effect).
 
-An original test fixture: a ring and twelve four-point sparkles flying out
-from the centre and fading, 512 px, 60 fps, 1.2 s. Run from the checkout
-root: python3 scripts/make-star-burst-fixture.py
+Run from the checkout root: python3 scripts/make-star-burst-fixture.py
 """
 import gzip
 import json
@@ -24,8 +22,8 @@ def static(value):
 
 
 def keys(*frames, spatial=False):
-    """Animated property: (time, value) pairs, eased out. The last key
-    only holds the end value."""
+    """Animated property from (time, value) pairs. The last key only holds
+    the end value."""
     out = []
     for index, (time, value) in enumerate(frames):
         key = {"t": time, "s": value}
@@ -87,7 +85,6 @@ def layer(index, name, ks, shapes):
 
 
 def sparkle(radius):
-    """A four-point star: outer points on the axes, a narrow waist."""
     vertices = []
     for step in range(8):
         angle = step * math.pi / 4 - math.pi / 2

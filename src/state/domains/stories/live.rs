@@ -38,9 +38,7 @@ pub enum LiveStoryPurpose {
 
 /// The server's generic reaction bursts (`getCustomEmojiReactionAnimations`,
 /// tdesktop's `inputStickerSetEmojiGenericAnimations`), which the Stars
-/// effect plays in place of tdesktop's bundled ones. Asked for once per
-/// session, when a live story is first joined; a failure asks again on the
-/// next join.
+/// effect plays in place of tdesktop's bundled ones.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum LiveBursts {
     #[default]
@@ -50,7 +48,6 @@ pub enum LiveBursts {
 }
 
 impl LiveBursts {
-    /// The bursts known so far.
     pub fn stickers(&self) -> &[StickerItem] {
         match self {
             Self::Loaded(stickers) => stickers,
@@ -375,7 +372,6 @@ impl Session {
         }
     }
 
-    /// The `stickers` answer to `getCustomEmojiReactionAnimations`.
     pub(crate) fn set_live_bursts(&mut self, stickers: Vec<StickerItem>) {
         self.stories.live_bursts = LiveBursts::Loaded(stickers);
     }

@@ -337,24 +337,24 @@ pub const STAR_EFFECT_MS: u64 = 2000;
 pub const STAR_EFFECT_SIZE: f32 = 64.;
 /// tdesktop `reactionInlineImage`: the box the badge is centred in.
 pub const STAR_EFFECT_TARGET: f32 = 32.;
-/// The effects canvas: two bursts wide, four tall, centred on the Stars
-/// button with its bottom on the button's bottom.
+/// tdesktop `setupStarsEffectsCanvas`: two bursts wide, four tall.
 pub const STAR_EFFECT_CANVAS_W: f32 = STAR_EFFECT_SIZE * 2.;
 pub const STAR_EFFECT_CANVAS_H: f32 = STAR_EFFECT_SIZE * 4.;
 /// tdesktop `kStarEffectScaleMin` / `kStarEffectScaleMax`.
 const STAR_EFFECT_SCALE_MIN: f32 = 0.3;
 const STAR_EFFECT_SCALE_MAX: f32 = 0.7;
-/// The share of the flight spent fading in, and fading out.
+/// tdesktop's 0.125 of the flight spent fading in, and fading out.
 const STAR_EFFECT_FADE: f32 = 0.125;
 
-/// Where one Stars effect is at a moment of its flight, in the canvas.
+/// Where one Stars effect is at a moment of its flight: the top left of
+/// its `STAR_EFFECT_SIZE` box in the canvas (the badge's
+/// `STAR_EFFECT_TARGET` box is centred in it), and the badge's opacity and
+/// scale.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarEffectFrame {
-    /// The burst's 64 px box; the badge's 32 px target is centred in it.
     pub left: f32,
     pub top: f32,
     pub opacity: f32,
-    /// The badge's scale.
     pub scale: f32,
 }
 

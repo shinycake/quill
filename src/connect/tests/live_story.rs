@@ -634,8 +634,13 @@ fn joined_answer(h: &mut Harness) {
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
 }
 
-/// The Stars effect's bursts are asked for once per session, on the first
-/// join, and land in the session.
+fn rejoin(h: &mut Harness) {
+    if let Some(live) = h.driver.session.stories.live.as_mut() {
+        live.extras_requested = false;
+    }
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+}
+
 #[test]
 fn the_first_join_asks_for_the_star_bursts_once() {
     let mut h = watching();
@@ -651,17 +656,15 @@ fn the_first_join_asks_for_the_star_bursts_once() {
         r#"{"@type":"stickers","stickers":[{"@type":"sticker","id":"77","set_id":"5","width":512,"height":512,"emoji":"✨","format":{"@type":"stickerFormatTgs"},"full_type":{"@type":"stickerFullTypeRegular","premium_animation":null},"thumbnail":null,"sticker":{"@type":"file","id":901,"size":2000,"expected_size":2000,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":2000}}}]}"#,
     );
     let bursts = h.driver.session.stories.live_bursts.stickers();
-    assert_eq!(bursts.iter().map(|s| s.file_id.0).collect::<Vec<_>>(), vec![901]);
-    // Another join in the same session does not ask again.
-    if let Some(live) = h.driver.session.stories.live.as_mut() {
-        live.extras_requested = false;
-    }
-    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(
+        bursts.iter().map(|s| s.file_id.0).collect::<Vec<_>>(),
+        vec![901]
+    );
+    rejoin(&mut h);
     assert_eq!(h.sent("getLiveStoryTopDonors"), 2);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
 }
 
-/// A failed request is asked again on the next join.
 #[test]
 fn a_failed_burst_request_is_asked_again_on_the_next_join() {
     let mut h = watching();
@@ -674,9 +677,6 @@ fn a_failed_burst_request_is_asked_again_on_the_next_join() {
         h.driver.session.stories.live_bursts,
         crate::state::LiveBursts::Unasked
     );
-    if let Some(live) = h.driver.session.stories.live.as_mut() {
-        live.extras_requested = false;
-    }
-    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    rejoin(&mut h);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 2);
 }

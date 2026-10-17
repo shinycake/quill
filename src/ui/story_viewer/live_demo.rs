@@ -95,7 +95,7 @@ impl QuillApp {
         }
         // Three effects caught mid-flight, on a stopped clock.
         let now = Instant::now();
-        self.stories.live.pinned_now = Some(now);
+        self.stories.live.demo_clock = Some(now);
         for (user_id, stars, progress, shift) in [
             (801, 5, 0.1, 0.5),
             (802, 50, 0.3, 0.1),
@@ -263,8 +263,8 @@ fn seed_live_story(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &
     }
 }
 
-/// The burst the Stars effects play: the server's generic reaction bursts
-/// stand-in, an original fixture (`scripts/make-star-burst-fixture.py`).
+/// A burst in place of the server's, made by
+/// `scripts/make-star-burst-fixture.py`.
 fn seed_star_burst(session: &mut Session, sink: &Arc<dyn DiagnosticSink>, seq: &AtomicU64) {
     let path = demo_media_allowlist().join("demo-star-burst.tgs");
     if let Some(owned) = copy_and_parse(

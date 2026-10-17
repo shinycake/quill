@@ -105,7 +105,7 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(in crate::ui) volume_focus: FocusHandle,
     _volume_focus: [Subscription; 2],
     /// The screenshot demo's stopped clock for the Stars effects.
-    pub(super) pinned_now: Option<Instant>,
+    pub(super) demo_clock: Option<Instant>,
 }
 
 impl LiveStoryUi {
@@ -161,7 +161,7 @@ impl LiveStoryUi {
                 }),
             ],
             volume_focus,
-            pinned_now: None,
+            demo_clock: None,
         }
     }
 
@@ -176,16 +176,15 @@ impl LiveStoryUi {
         self.flying.clear();
         self.last_comment = None;
         self.overlay = Default::default();
-        self.pinned_now = None;
+        self.demo_clock = None;
         super::live_effects::release_tinted_bursts();
     }
 
     /// The Stars effects' clock: the time, or the demo's stopped one.
     pub(super) fn now(&self) -> Instant {
-        self.pinned_now.unwrap_or_else(Instant::now)
+        self.demo_clock.unwrap_or_else(Instant::now)
     }
 
-    /// Queue an effect at a random place, with a random burst.
     pub(super) fn fly(&mut self, sender: MessageSender, stars: i64, now: Instant) {
         self.push_flying(FlyingStars {
             sender,

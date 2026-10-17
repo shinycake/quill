@@ -2,7 +2,6 @@
 //! `ComposeControls::setupStarsEffectsCanvas`): each rises through a
 //! 128 by 256 canvas centred on the button, a badge with the sender and
 //! the count fading in and out, and a burst playing once around it.
-//! `docs/decisions/live-stars-effect.md` has the details.
 #![deny(clippy::indexing_slicing)]
 
 use super::live_state::{FlyingStars, effect_progress, level_color};
@@ -26,18 +25,24 @@ const BADGE_FONT: f32 = 12.;
 const BADGE_LINE: f32 = 16.;
 /// tdesktop `starIconEmojiSmall` (`chat/mini_stars`).
 const BADGE_STAR: f32 = 12.;
-/// The bursts' clips tinted, kept for the effects in flight.
+/// tdesktop `groupCallEffectPadding`: the pill's right, top and bottom.
+const BADGE_PAD_RIGHT: f32 = 3.;
+const BADGE_PAD_Y: f32 = 1.;
+/// tdesktop `groupCallEffectUserpicPadding`: left of and after the userpic.
+const USERPIC_PAD_LEFT: f32 = 1.;
+const USERPIC_PAD_RIGHT: f32 = 3.;
+/// One tinted clip per effect in flight.
 const TINTED_KEPT: usize = 4;
+/// Rec. 709 luma weights, in the frames' BGR order.
+const LUMA: [f32; 3] = [0.0722, 0.7152, 0.2126];
 
-/// What the Stars effect's burst plays, and its tint.
 pub(super) struct StarBurst<'a> {
     candidates: &'a [StickerItem],
     tint: Option<Hsla>,
 }
 
-/// The only place that names the burst's source. tdesktop plays its own
-/// star bursts, which are GPL and not bundled; Quill plays the server's
-/// generic reaction bursts, tinted Stars gold.
+/// The swap point for the burst's source: the server's generic reaction
+/// bursts tinted gold, in place of tdesktop's bundled star bursts.
 fn star_burst(session: &Session) -> StarBurst<'_> {
     StarBurst {
         candidates: session.stories.live_bursts.stickers(),
@@ -46,12 +51,11 @@ fn star_burst(session: &Session) -> StarBurst<'_> {
 }
 
 impl QuillApp {
-    /// The effects in flight, for the Stars button `button` px wide; `None`
-    /// when there are none.
+    /// The effects in flight over a Stars button `button_width` wide.
     pub(super) fn live_effects_layer(
         &self,
         session: &Session,
-        button: f32,
+        button_width: f32,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let live = &self.stories.live;
@@ -81,7 +85,7 @@ impl QuillApp {
         if effects.is_empty() {
             return None;
         }
-        if live.pinned_now.is_none() {
+        if live.demo_clock.is_none() {
             self.request_animation_tick(60, cx);
         }
         Some(
@@ -89,7 +93,7 @@ impl QuillApp {
                 .debug_selector(|| "live-story-effects".into())
                 .absolute()
                 .bottom_0()
-                .left(px((button - STAR_EFFECT_CANVAS_W) / 2.))
+                .left(px((button_width - STAR_EFFECT_CANVAS_W) / 2.))
                 .w(px(STAR_EFFECT_CANVAS_W))
                 .h(px(STAR_EFFECT_CANVAS_H))
                 .children(effects)
@@ -107,8 +111,8 @@ impl QuillApp {
         effect: &FlyingStars,
         cx: &mut Context<Self>,
     ) -> Option<LayeredClip> {
-        let mut order =
-            burst_order(effect.seed, burst.candidates.len()).filter_map(|i| burst.candidates.get(i));
+        let mut order = burst_order(effect.seed, burst.candidates.len())
+            .filter_map(|i| burst.candidates.get(i));
         let own = order.next()?;
         let ready = std::iter::once(own).chain(order).find_map(|sticker| {
             self.decoded_clip(sticker.file_id, PlaybackSize::Sticker, false)
@@ -135,8 +139,8 @@ fn burst_frame(clip: &LayeredClip, age: std::time::Duration) -> Option<Arc<Rende
     Some(frame)
 }
 
-/// One effect: the badge centred in its box, the burst over it at full
-/// opacity (tdesktop draws it after restoring the badge's transform).
+/// The burst is drawn at full opacity: tdesktop draws it after restoring
+/// the badge's transform.
 fn effect_element(
     frame: StarEffectFrame,
     badge: Div,
@@ -181,11 +185,9 @@ fn badge(session: &Session, effect: &FlyingStars, color: u32, scale: f32) -> Div
         .flex_none()
         .flex()
         .items_center()
-        // tdesktop `groupCallEffectPadding` and
-        // `groupCallEffectUserpicPadding`.
-        .pl(at(1.))
-        .pr(at(3.))
-        .py(at(1.))
+        .pl(at(USERPIC_PAD_LEFT))
+        .pr(at(BADGE_PAD_RIGHT))
+        .py(at(BADGE_PAD_Y))
         .rounded_full()
         .bg(level_color(color, 1.0))
         .text_color(chrome::fg())
@@ -194,7 +196,7 @@ fn badge(session: &Session, effect: &FlyingStars, color: u32, scale: f32) -> Div
         .child(
             div()
                 .flex_none()
-                .mr(at(3.))
+                .mr(at(USERPIC_PAD_RIGHT))
                 .child(sender_avatar(session, effect.sender, BADGE_LINE * scale)),
         )
         .child(
@@ -206,18 +208,15 @@ fn badge(session: &Session, effect: &FlyingStars, color: u32, scale: f32) -> Div
 }
 
 thread_local! {
-    /// Tinted clips by sticker file and tint.
     static TINTED: RefCell<Vec<((i32, u32), Arc<[Arc<RenderImage>]>)>> =
         const { RefCell::new(Vec::new()) };
 }
 
-/// Drops the tinted clips: the live story was left.
 pub(super) fn release_tinted_bursts() {
     let old = TINTED.with(|cache| std::mem::take(&mut *cache.borrow_mut()));
     crate::ui::image_budget::retire_all(old.into_iter().flat_map(|(_, frames)| frames.to_vec()));
 }
 
-/// The frames of `file` tinted `tint`, made once and kept.
 fn tinted_frames(
     file: i32,
     tint: Hsla,
@@ -246,9 +245,7 @@ fn tinted_frames(
     tinted
 }
 
-/// Every frame with each pixel's color replaced by `bgr` (0 to 1, in the
-/// frames' BGRA order) times the pixel's luminance; alpha is kept. A
-/// frame that cannot be read stays as it is.
+/// Each pixel becomes `bgr` times its luminance, keeping its alpha.
 fn tint_frames(frames: &[Arc<RenderImage>], bgr: [f32; 3]) -> Arc<[Arc<RenderImage>]> {
     frames
         .iter()
@@ -269,12 +266,12 @@ fn tint_frames(frames: &[Arc<RenderImage>], bgr: [f32; 3]) -> Arc<[Arc<RenderIma
         .into()
 }
 
-/// `bytes` of BGRA pixels tinted: see `tint_frames`.
 fn tint_pixels(bytes: &[u8], bgr: [f32; 3]) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len());
     for &[b, g, r, a] in bytes.as_chunks::<4>().0 {
+        let [luma_b, luma_g, luma_r] = LUMA;
         let luminance =
-            (0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b)) / 255.;
+            (luma_r * f32::from(r) + luma_g * f32::from(g) + luma_b * f32::from(b)) / 255.;
         for channel in bgr {
             out.push((channel * luminance * 255.).round().clamp(0., 255.) as u8);
         }
@@ -287,16 +284,25 @@ fn tint_pixels(bytes: &[u8], bgr: [f32; 3]) -> Vec<u8> {
 mod tests {
     use super::tint_pixels;
 
+    const GOLD: [f32; 3] = [0.0, 0.72, 1.0];
+
     #[test]
-    fn the_tint_keeps_alpha_and_follows_luminance() {
-        let gold = [0.0, 0.72, 1.0];
-        // White, half-transparent: the full tint.
-        assert_eq!(tint_pixels(&[255, 255, 255, 128], gold), vec![0, 184, 255, 128]);
-        // Black stays black, its alpha kept.
-        assert_eq!(tint_pixels(&[0, 0, 0, 200], gold), vec![0, 0, 0, 200]);
-        // Pure green is brighter than pure blue.
-        let green = tint_pixels(&[0, 255, 0, 255], gold);
-        let blue = tint_pixels(&[255, 0, 0, 255], gold);
+    fn white_takes_the_full_tint_and_keeps_its_alpha() {
+        assert_eq!(
+            tint_pixels(&[255, 255, 255, 128], GOLD),
+            vec![0, 184, 255, 128]
+        );
+    }
+
+    #[test]
+    fn black_stays_black() {
+        assert_eq!(tint_pixels(&[0, 0, 0, 200], GOLD), vec![0, 0, 0, 200]);
+    }
+
+    #[test]
+    fn green_tints_brighter_than_blue() {
+        let green = tint_pixels(&[0, 255, 0, 255], GOLD);
+        let blue = tint_pixels(&[255, 0, 0, 255], GOLD);
         assert!(green.get(2) > blue.get(2));
     }
 }

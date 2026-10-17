@@ -112,7 +112,7 @@ assets; the motion, the pick, the layer and the badge stay.
 ## Demo
 
 `ready-live-story-stars` pins the effects clock and shows three effects
-at progress 0.06, 0.45 and 0.8 with different shifts, over a burst
+at progress 0.1, 0.3 and 0.7 with different shifts, over a burst
 fixture (`docs/screenshots/fixtures/demo-star-burst.tgs`, an original
 test-only Lottie made by `scripts/make-star-burst-fixture.py`). The real
 asset comes from the server.
