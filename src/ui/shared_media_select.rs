@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::*;
@@ -50,13 +51,11 @@ impl QuillApp {
     /// they are used. The answer lands in the session a moment later.
     fn shared_media_hover(&mut self, message_id: MessageId, hovered: bool, cx: &mut Context<Self>) {
         // The row just left was answered by now: its tick learns the answer.
-        let known = self
+        let answer = self
             .session()
-            .and_then(|session| session.messages.message_menu_actions)
-            .map(|(_, id, actions)| SelectedMedia::from_actions(id, Some(&actions)));
-        if let Some(entry) = known
-            && let Some(state) = self.shared_media_gallery_mut()
-            && state.replace_selected(entry)
+            .and_then(|session| session.messages.message_menu_actions);
+        if let Some(state) = self.shared_media_gallery_mut()
+            && state.refresh_from_answer(answer)
         {
             cx.notify();
         }
@@ -70,7 +69,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_message_menu_actions(chat, message_id);
+            let _ = live.driver.refresh_message_menu_actions(chat, message_id);
         }
     }
 
@@ -169,14 +168,29 @@ impl QuillApp {
             .get(&item.file.0)
             .is_some_and(|file| file.usable_path().is_some());
         let protected = chat.is_some_and(|chat| session.chat_has_protected_content(chat));
+        let gallery = &session.media.shared_media;
+        let can_forward = actions.is_some_and(|a| a.can_be_forwarded);
+        let can_delete = actions
+            .is_some_and(|a| a.can_be_deleted_only_for_self || a.can_be_deleted_for_all_users);
+        // Show in folder is for documents, not for photos and videos in the cache.
+        let document_tab = !matches!(
+            gallery.active_tab,
+            SharedMediaTab::Media
+                | SharedMediaTab::Photos
+                | SharedMediaTab::Videos
+                | SharedMediaTab::Gifs
+        );
         MediaMenuFacts {
             is_message: item.action == SharedMediaAction::Message,
             downloading,
-            local: on_disk && !protected && actions.is_none_or(|a| a.can_be_saved),
-            can_forward: actions.is_some_and(|a| a.can_be_forwarded),
-            can_delete: actions
-                .is_some_and(|a| a.can_be_deleted_only_for_self || a.can_be_deleted_for_all_users),
+            local: document_tab && on_disk && !protected && actions.is_none_or(|a| a.can_be_saved),
+            can_forward,
+            can_delete,
             selected: session.media.shared_media.is_selected(item.message_id),
+            // tdesktop `hasSelectRestriction`: nothing to forward or delete.
+            can_select: actions.is_none_or(|_| can_forward || can_delete),
+            group_can_forward: gallery.can_forward_selection(),
+            group_can_delete: gallery.can_delete_selection(),
         }
     }
 
@@ -240,9 +254,10 @@ impl QuillApp {
                     );
                 }
             }
-            MediaMenuItem::Select | MediaMenuItem::Deselect => {
-                self.toggle_shared_media_selection(message_id, cx);
-            }
+            MediaMenuItem::Select => self.toggle_shared_media_selection(message_id, cx),
+            MediaMenuItem::ForwardSelected => self.forward_shared_media_selection(window, cx),
+            MediaMenuItem::DeleteSelected => self.delete_shared_media_selection(window, cx),
+            MediaMenuItem::ClearSelection => self.clear_shared_media_selection(cx),
         }
     }
 
@@ -325,6 +340,14 @@ impl QuillApp {
         let (Some(chat_id), true) = (state.chat_id, state.can_forward_selection()) else {
             return;
         };
+        // The chat's own selection stays: its draft is not replaced.
+        if self.share.pending_forward.is_some() && !self.share.forward_picker_open {
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_FINISH_THE_CHAT_SELECTION_FIRST,
+            )));
+            cx.notify();
+            return;
+        }
         let draft = ForwardDraft {
             from_chat_id: chat_id,
             message_ids: state.selected_ids(),
@@ -357,7 +380,9 @@ fn menu_label(kind: MediaMenuItem) -> String {
         MediaMenuItem::Forward => tr(keys::CONTEXT_FORWARD_MSG),
         MediaMenuItem::Delete => tr(keys::BOX_DELETE),
         MediaMenuItem::Select => tr(keys::CONTEXT_SELECT_MSG),
-        MediaMenuItem::Deselect => tr(keys::CONTEXT_DESELECT_MSG),
+        MediaMenuItem::ForwardSelected => tr(keys::CONTEXT_FORWARD_SELECTED),
+        MediaMenuItem::DeleteSelected => tr(keys::CONTEXT_DELETE_SELECTED),
+        MediaMenuItem::ClearSelection => tr(keys::CONTEXT_CLEAR_SELECTION),
     }
     .to_string()
 }

@@ -1095,7 +1095,10 @@
 "lng_month11_small" = "Nov";
 "lng_month12_small" = "Dec";
 "lng_context_select_msg" = "Select";
-"lng_context_deselect_msg" = "Deselect";
+"lng_context_forward_selected" = "Forward Selected";
+"lng_context_delete_selected" = "Delete Selected";
+"lng_context_clear_selection" = "Clear Selection";
+"qll_ops_finish_the_chat_selection_first" = "Finish or clear the selection in the chat first";
 "lng_media_selected_media#one" = "{count} Media";
 "lng_media_selected_media#other" = "{count} Media";
 "lng_media_selected_photo#one" = "{count} Photo";

@@ -45,3 +45,23 @@ Forward or Delete, so the header never offers a guess.
 - Captures of the selection header in light and dark. The right-click
   popup itself is covered by the planner tests; a live capture of it needs a
   real session.
+
+## Details and limits
+
+- Over a ticked row the menu acts on the group (Forward Selected, Delete
+  Selected, Clear Selection), as in tdesktop's `OverSelectedItems`.
+- At most 100 rows can be ticked (`MaxSelectedItems`, also TDLib's
+  `forwardMessages` limit); further ticks do nothing.
+- Select is hidden when the message can be neither forwarded nor deleted
+  (`hasSelectRestriction`), so a protected chat never ends in a header of
+  disabled buttons. Show in folder is offered for document tabs only.
+- Hovering asks TDLib with `refresh_message_menu_actions`, which leaves the
+  chat menu's shared answer slot alone. An answer refreshes a ticked row only
+  when its chat is the gallery's chat (the slot is shared and message ids
+  repeat across chats).
+- Forward from the gallery does not replace a selection the chat itself is
+  holding; it asks to finish that one first.
+- As in tdesktop, the selection survives a search query change and a first
+  page reload (date jump, Show latest). Ticked rows hidden by the search are
+  still counted and still acted on by the header. Switching tab, changing
+  chat or closing the gallery clears it.

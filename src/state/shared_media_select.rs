@@ -42,8 +42,15 @@ pub enum MediaMenuItem {
     Forward,
     Delete,
     Select,
-    Deselect,
+    /// Over a ticked row while rows are ticked: act on the whole group.
+    ForwardSelected,
+    DeleteSelected,
+    ClearSelection,
 }
+
+/// Most rows that can be ticked (tdesktop `MaxSelectedItems`; TDLib's
+/// `forwardMessages` takes at most this many).
+pub const MAX_SELECTED_MEDIA: usize = 100;
 
 /// What decides which entries a row's menu offers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -57,14 +64,31 @@ pub struct MediaMenuFacts {
     pub can_forward: bool,
     pub can_delete: bool,
     pub selected: bool,
+    /// Ticking is allowed (tdesktop `hasSelectRestriction` is false).
+    pub can_select: bool,
+    /// What the whole ticked group may do.
+    pub group_can_forward: bool,
+    pub group_can_delete: bool,
 }
 
 /// The menu of a gallery row in Telegram Desktop's order
 /// (`Info::Media::ListWidget::showContextMenu`): Go to message, Cancel
-/// download or Show in folder, Forward, Delete, Select.
+/// download or Show in folder, Forward, Delete, Select; over a ticked row
+/// it is Forward selected, Delete selected, Clear selection.
 pub fn media_menu_items(facts: &MediaMenuFacts) -> Vec<MediaMenuItem> {
     let mut items = Vec::new();
     if !facts.is_message {
+        return items;
+    }
+    if facts.selected {
+        // tdesktop `OverSelectedItems`: the menu acts on the group.
+        if facts.group_can_forward {
+            items.push(MediaMenuItem::ForwardSelected);
+        }
+        if facts.group_can_delete {
+            items.push(MediaMenuItem::DeleteSelected);
+        }
+        items.push(MediaMenuItem::ClearSelection);
         return items;
     }
     items.push(MediaMenuItem::GoToMessage);
@@ -79,11 +103,9 @@ pub fn media_menu_items(facts: &MediaMenuFacts) -> Vec<MediaMenuItem> {
     if facts.can_delete {
         items.push(MediaMenuItem::Delete);
     }
-    items.push(if facts.selected {
-        MediaMenuItem::Deselect
-    } else {
-        MediaMenuItem::Select
-    });
+    if facts.can_select {
+        items.push(MediaMenuItem::Select);
+    }
     items
 }
 
@@ -108,8 +130,9 @@ impl SharedMediaState {
         self.selection.iter().any(|s| s.message_id == message_id)
     }
 
-    /// Tick or untick a message.
-    pub fn toggle_selected(&mut self, entry: SelectedMedia) {
+    /// Tick or untick a message. Ticking past [`MAX_SELECTED_MEDIA`] does
+    /// nothing; false then.
+    pub fn toggle_selected(&mut self, entry: SelectedMedia) -> bool {
         match self
             .selection
             .iter()
@@ -118,7 +141,24 @@ impl SharedMediaState {
             Some(at) => {
                 self.selection.remove(at);
             }
+            None if self.selection.len() >= MAX_SELECTED_MEDIA => return false,
             None => self.selection.push(entry),
+        }
+        true
+    }
+
+    /// A `getMessageProperties` answer from the shared slot: refresh the
+    /// ticked row it describes. The slot is shared with other callers, so an
+    /// answer for another chat's message with the same id is ignored.
+    pub fn refresh_from_answer(
+        &mut self,
+        answer: Option<(crate::ids::ChatId, MessageId, MessageActions)>,
+    ) -> bool {
+        match answer {
+            Some((chat, id, actions)) if self.chat_id == Some(chat) => {
+                self.replace_selected(SelectedMedia::from_actions(id, Some(&actions)))
+            }
+            _ => false,
         }
     }
 
@@ -245,6 +285,7 @@ mod tests {
     fn facts() -> MediaMenuFacts {
         MediaMenuFacts {
             is_message: true,
+            can_select: true,
             can_forward: true,
             can_delete: true,
             ..MediaMenuFacts::default()
@@ -265,13 +306,78 @@ mod tests {
         let busy = MediaMenuFacts {
             downloading: true,
             local: true,
-            selected: true,
             ..facts()
         };
         assert_eq!(
             media_menu_items(&busy),
-            [GoToMessage, CancelDownload, Forward, Delete, Deselect]
+            [GoToMessage, CancelDownload, Forward, Delete, Select]
         );
+    }
+
+    #[test]
+    fn over_a_ticked_row_the_menu_acts_on_the_group() {
+        use MediaMenuItem::*;
+        let ticked = MediaMenuFacts {
+            selected: true,
+            group_can_forward: true,
+            group_can_delete: true,
+            ..facts()
+        };
+        assert_eq!(
+            media_menu_items(&ticked),
+            [ForwardSelected, DeleteSelected, ClearSelection]
+        );
+        let mixed = MediaMenuFacts {
+            group_can_forward: false,
+            ..ticked
+        };
+        assert_eq!(media_menu_items(&mixed), [DeleteSelected, ClearSelection]);
+    }
+
+    #[test]
+    fn select_is_hidden_when_nothing_can_be_ticked() {
+        use MediaMenuItem::*;
+        let restricted = MediaMenuFacts {
+            can_select: false,
+            ..facts()
+        };
+        assert_eq!(
+            media_menu_items(&restricted),
+            [GoToMessage, Forward, Delete]
+        );
+    }
+
+    #[test]
+    fn at_most_a_hundred_rows_can_be_ticked() {
+        let mut state = SharedMediaState::default();
+        for id in 1..=MAX_SELECTED_MEDIA as i64 {
+            assert!(state.toggle_selected(entry(id, true, true)));
+        }
+        assert!(!state.toggle_selected(entry(500, true, true)));
+        assert_eq!(state.selection.len(), MAX_SELECTED_MEDIA);
+        assert!(
+            state.toggle_selected(entry(1, true, true)),
+            "unticking works"
+        );
+        assert!(state.toggle_selected(entry(500, true, true)));
+    }
+
+    #[test]
+    fn an_answer_for_another_chats_message_is_ignored() {
+        use crate::ids::ChatId;
+        let mut state = SharedMediaState::default();
+        state.open_for(ChatId(4));
+        state.toggle_selected(SelectedMedia::from_actions(MessageId(7), None));
+        let allowed = MessageActions {
+            can_be_forwarded: true,
+            can_be_deleted_for_all_users: true,
+            ..MessageActions::default()
+        };
+        assert!(!state.refresh_from_answer(Some((ChatId(9), MessageId(7), allowed))));
+        assert!(!state.can_delete_selection(), "same id, other chat");
+        assert!(state.refresh_from_answer(Some((ChatId(4), MessageId(7), allowed))));
+        assert!(state.can_delete_selection() && state.can_revoke_selection());
+        assert!(!state.refresh_from_answer(None));
     }
 
     #[test]
