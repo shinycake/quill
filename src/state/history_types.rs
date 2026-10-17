@@ -264,6 +264,14 @@ impl HistoryMessage {
     }
 }
 
+/// The next value for a revision counter. Values are unique across the
+/// process, so a history that replaced another never repeats
+/// a revision a view cached for the old one.
+pub fn next_revision() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A chat's loaded messages keyed by id. Reads go through `Deref`; every
 /// mutation goes through these methods and bumps `revision`, so views can
 /// cache what they derived from the messages and know exactly when to
@@ -281,7 +289,7 @@ impl HistoryMessages {
     }
 
     fn touch(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = next_revision();
     }
 
     pub fn insert(&mut self, id: i64, message: HistoryMessage) -> Option<HistoryMessage> {

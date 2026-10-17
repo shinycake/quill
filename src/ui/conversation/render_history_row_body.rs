@@ -5,6 +5,18 @@ use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
+    pub(in crate::ui) fn history_row_seek_bar(
+        &self,
+        message: &HistoryMessage,
+    ) -> Option<crate::ui::playback::SeekBarView> {
+        let duration = match &message.content {
+            MessageContent::VoiceNote(note) => note.duration,
+            MessageContent::Audio(audio) => audio.duration,
+            _ => return None,
+        };
+        Some(self.seek_bar_view(message.chat_id, message.id, f64::from(duration)))
+    }
+
     pub(super) fn render_history_row_body(
         &self,
         row: &HistoryRow,
@@ -24,25 +36,23 @@ impl QuillApp {
             HistoryRow::Album {
                 album_id,
                 messages,
-                sender,
-                receipt,
-                sender_avatar,
+                chrome,
                 ..
             } => {
                 let refs: Vec<&HistoryMessage> = messages.iter().collect();
-                let sender_status = refs
-                    .first()
-                    .and_then(|first| self.sender_status_element(sender.as_ref(), first.id.0, cx));
+                let sender_status = refs.first().and_then(|first| {
+                    self.sender_status_element(chrome.sender.as_ref(), first.id.0, cx)
+                });
                 album_history_row(
                     *album_id,
                     &refs,
                     files,
                     downloading,
                     &shared.media_roots,
-                    sender.clone(),
+                    chrome.sender.clone(),
                     sender_status,
-                    *receipt,
-                    sender_avatar.clone(),
+                    chrome.receipt,
+                    chrome.sender_avatar.clone(),
                     // Settings → Appearance: font size + bubble/plain style.
                     look,
                     cx,
@@ -50,10 +60,15 @@ impl QuillApp {
             }
             HistoryRow::Single(inputs) => {
                 let message = &inputs.message;
+                let chrome = &inputs.chrome;
                 let inline = self.inline_frame(message, cx);
+                let animation_playing = self.playback.playing_animation == Some(message.id);
+                let animation = animation_playing
+                    .then(|| self.playback.gif_play())
+                    .flatten();
                 // A looping GIF outside an animation layer is redrawn with
                 // the history, at the GIF's own cadence.
-                if let Some(gif) = inputs.animation.as_ref()
+                if let Some(gif) = animation.as_ref()
                     && super::anim_layer::current().is_none()
                     && gif.fps() > 0
                 {
@@ -83,22 +98,22 @@ impl QuillApp {
                     self.request_animation_tick(30, cx);
                 }
                 let sender_status =
-                    self.sender_status_element(inputs.sender.as_ref(), message.id.0, cx);
+                    self.sender_status_element(chrome.sender.as_ref(), message.id.0, cx);
                 let row = session_history_row(
                     message,
                     files,
                     downloading,
                     &shared.media_roots,
-                    inputs.sender.clone(),
+                    chrome.sender.clone(),
                     sender_status,
-                    inputs.receipt,
-                    inputs.sender_avatar.clone(),
-                    inputs.reply_header.clone(),
-                    inputs.forward_header.clone(),
-                    inputs.via_bot.clone(),
-                    inputs.seek_bar.clone(),
-                    inputs.animation_playing,
-                    inputs.animation.clone(),
+                    chrome.receipt,
+                    chrome.sender_avatar.clone(),
+                    chrome.reply_header.clone(),
+                    chrome.forward_header.clone(),
+                    chrome.via_bot.clone(),
+                    self.history_row_seek_bar(message),
+                    animation_playing,
+                    animation,
                     match &message.content {
                         MessageContent::Sticker(sticker) => {
                             self.history_sticker(sticker.file_id, sticker.format, cx)

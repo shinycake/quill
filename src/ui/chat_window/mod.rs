@@ -46,8 +46,6 @@ use quill::lang::{keys, tr};
 use quill::state::ChatSummary;
 pub(in crate::ui) use scoped::ScopedApp;
 pub(in crate::ui) use slot::scope_probe;
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
 use view::ChatWindowView;
 pub(in crate::ui) use view::WindowScope;
 
@@ -82,8 +80,6 @@ pub(crate) struct ChatWindows {
 struct OpenChatWindow {
     chat_id: ChatId,
     handle: AnyWindowHandle,
-    #[cfg(test)]
-    #[cfg(feature = "demo-capture")]
     view: WeakEntity<ChatWindowView>,
     slot: slot::SharedSlot,
 }
@@ -157,6 +153,14 @@ impl ChatWindows {
     pub(super) fn view_for(&self, chat_id: ChatId) -> Option<Entity<ChatWindowView>> {
         self.window_for(chat_id)
             .and_then(|open| open.view.upgrade())
+    }
+
+    pub(super) fn view_ids(&self) -> Vec<EntityId> {
+        self.open.iter().map(|open| open.view.entity_id()).collect()
+    }
+
+    pub(super) fn view_id_for(&self, chat_id: ChatId) -> Option<EntityId> {
+        self.window_for(chat_id).map(|open| open.view.entity_id())
     }
 
     /// Whether a chat window's state is in place.
@@ -344,13 +348,9 @@ impl QuillApp {
                 }
             };
             owner.update(cx, |app, cx| {
-                #[cfg(not(all(test, feature = "demo-capture")))]
-                let _ = view;
                 app.windows.open.push(OpenChatWindow {
                     chat_id,
                     handle,
-                    #[cfg(test)]
-                    #[cfg(feature = "demo-capture")]
                     view,
                     slot,
                 });

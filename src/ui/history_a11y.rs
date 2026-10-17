@@ -340,11 +340,9 @@ impl QuillApp {
     /// The row's accessible name (tdesktop `MessageAccessibilityName`). An
     /// album reads as its first item, the one carrying the caption.
     pub(super) fn history_row_a11y_name(&self, row: &HistoryRow) -> String {
-        let (message, receipt, inputs) = match row {
-            HistoryRow::Single(inputs) => (&inputs.message, inputs.receipt, Some(inputs.as_ref())),
-            HistoryRow::Album {
-                messages, receipt, ..
-            } => {
+        let message = match row {
+            HistoryRow::Single(inputs) => &inputs.message,
+            HistoryRow::Album { messages, .. } => {
                 let Some(message) = messages
                     .iter()
                     .find(|message| has_caption(&message.content))
@@ -352,24 +350,27 @@ impl QuillApp {
                 else {
                     return String::new();
                 };
-                (message, *receipt, None)
+                message
             }
         };
+        let chrome = row.chrome();
         let session = self.session();
         let sender_name = (!message.is_outgoing)
             .then(|| session.and_then(|s| s.sender_name_and_accent(message.sender).0))
             .flatten();
-        let reply = inputs
-            .and_then(|inputs| inputs.reply_header.as_ref())
+        let reply = chrome
+            .reply_header
+            .as_ref()
             .filter(|header| header.state == ReplyState::Ready)
             .map(|header| (header.name.clone(), header.text.clone()));
         let context = MessageA11yContext {
             sender_name,
-            receipt: Some(receipt),
-            via_bot: inputs.and_then(|inputs| inputs.via_bot.clone()),
+            receipt: Some(chrome.receipt),
+            via_bot: chrome.via_bot.clone(),
             reply,
-            forwarded_from: inputs
-                .and_then(|inputs| inputs.forward_header.as_ref())
+            forwarded_from: chrome
+                .forward_header
+                .as_ref()
                 .map(|header| header.name.clone()),
             time: message_time_hhmm(message.date),
         };

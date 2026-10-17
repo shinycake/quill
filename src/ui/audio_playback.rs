@@ -335,7 +335,11 @@ impl QuillApp {
                             }
                         }
                         this.publish_now_playing();
-                        cx.notify();
+                        if finished {
+                            cx.notify();
+                        } else {
+                            this.notify_playback_position(cx);
+                        }
                         true
                     })
                     .unwrap_or(false);
@@ -348,6 +352,14 @@ impl QuillApp {
             });
         })
         .detach();
+    }
+
+    /// The position moved: redraw the seek bars, the player bar and the
+    /// Touch Bar scrubber, not the whole app.
+    fn notify_playback_position(&self, cx: &mut Context<Self>) {
+        self.notify_conversations(cx);
+        #[cfg(target_os = "macos")]
+        super::touch_bar::request_sync(cx);
     }
 
     /// Push the sound's position into the seek slider entity so the thumb

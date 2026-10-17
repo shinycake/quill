@@ -527,28 +527,10 @@ impl QuillApp {
         let thread_open = open
             .and_then(|id| session.and_then(|s| s.thread_for_chat(id)))
             .filter(|thread| !matches!(thread.status, quill::state::ThreadStatus::Failed(_)));
-        // The rows carry tdesktop's "Discussion started" divider after the
-        // root (`ThreadView::rows`).
-        let thread_messages: Option<Vec<HistoryMessage>> =
-            thread_open.map(quill::state::ThreadView::rows);
         let thread_pending = session.is_some_and(Session::thread_unavailable);
         // Saved Messages: the sublist list, one sublist or a tag filter.
         let saved_mode = self.saved_mode();
-        let saved_rows = self.saved_rows();
-        let (main_key, main_messages) = self.history_rows_input(
-            "session-history",
-            open,
-            open_topic,
-            main_history,
-            highlight_id,
-        );
-        // Topic views page their own history type; they always rebuild.
-        let topic_key: Option<HistoryRowsKey> = None;
-        let topic_messages = Some(
-            topic_history
-                .map(|h| h.ordered().into_iter().cloned().collect())
-                .unwrap_or_default(),
-        );
+        let saved_rows = self.saved_rows_input(highlight_id);
         div()
             .id("conversation-history")
             .flex()
@@ -616,34 +598,32 @@ impl QuillApp {
                     .into_any_element()
                 } else if saved_mode == Some(super::saved_sublists::SavedMode::Sublists) {
                     self.saved_sublists_pane(cx)
-                } else if let Some(rows) = saved_rows {
+                } else if let Some((key, rows)) = saved_rows {
                     let list = self.history_message_list(
                         "saved-history",
-                        Some(rows),
+                        rows,
                         chat.as_ref(),
                         &sender_name,
                         highlight_id,
                         media_roots,
                         cx,
                     );
-                    // Saved sublist and tag views rebuild their rows every
-                    // frame, like topics and threads.
-                    self.history.rows_key = None;
+                    self.history.rows_key = Some(key);
                     list
                 } else if thread_pending {
                     self.thread_status_pane(cx)
-                } else if let Some(rows) = thread_messages {
+                } else if let Some(thread) = thread_open {
+                    let (key, rows) = self.thread_rows_input(thread, highlight_id);
                     let list = self.history_message_list(
                         "thread-history",
-                        Some(rows),
+                        rows,
                         chat.as_ref(),
                         &sender_name,
                         highlight_id,
                         media_roots,
                         cx,
                     );
-                    // Thread views rebuild their rows every frame, like topics.
-                    self.history.rows_key = None;
+                    self.history.rows_key = Some(key);
                     div()
                         .flex()
                         .flex_col()
@@ -686,16 +666,18 @@ impl QuillApp {
                         )
                         .into_any_element()
                     } else {
+                        let (key, rows) =
+                            self.topic_rows_input(open, open_topic, topic_history, highlight_id);
                         let list = self.history_message_list(
                             "topic-history",
-                            topic_messages,
+                            rows,
                             chat.as_ref(),
                             &sender_name,
                             highlight_id,
                             media_roots,
                             cx,
                         );
-                        self.history.rows_key = topic_key;
+                        self.history.rows_key = Some(key);
                         list
                     }
                 } else if main_empty {
@@ -753,16 +735,18 @@ impl QuillApp {
                         div().id("empty-chat").flex_1().into_any_element()
                     }
                 } else {
+                    let (key, rows) =
+                        self.main_rows_input(open, open_topic, main_history, highlight_id);
                     let list = self.history_message_list(
                         "session-history",
-                        main_messages,
+                        rows,
                         chat.as_ref(),
                         &sender_name,
                         highlight_id,
                         media_roots,
                         cx,
                     );
-                    self.history.rows_key = main_key;
+                    self.history.rows_key = Some(key);
                     // Channels end with their sponsored message (Telegram API
                     // terms: clients must show it), but only while the
                     // history is scrolled to the bottom.
@@ -782,102 +766,5 @@ impl QuillApp {
                     }
                 },
             ))
-    }
-
-    /// What the history rows of `chat` are built from: the key that says
-    /// whether the last build can be reused (`None`: not cacheable) and,
-    /// when it cannot, the messages to build them from (translations and
-    /// the joined-channel notice applied).
-    pub(in crate::ui) fn history_rows_input(
-        &self,
-        list: &'static str,
-        chat: Option<ChatId>,
-        topic: Option<i32>,
-        history: Option<&quill::state::HistoryState>,
-        highlight_id: Option<MessageId>,
-    ) -> (Option<HistoryRowsKey>, Option<Vec<HistoryMessage>>) {
-        // Rebuild the history rows only when something that feeds them
-        // changed; otherwise skip snapshotting the messages altogether.
-        let session = self.session();
-        let ui_hash = self.history_rows_ui_hash();
-        let today = quill::local_time::civil_local(quill::local_time::now_unix()).day_number();
-        let key = ui_hash.map(|ui| HistoryRowsKey {
-            list,
-            chat: chat.map(|chat| chat.0),
-            topic,
-            messages_revision: history.map_or(0, |h| h.messages.revision()),
-            session_revision: session.map_or(0, |s| s.revision),
-            window_epoch: history.map_or(0, |h| h.window_epoch),
-            unread_anchor: history.and_then(|h| h.unread_anchor),
-            highlight: highlight_id,
-            ui,
-            translate: self.translate_revision(),
-            today,
-        });
-        let reuse = key.is_some() && key == self.history.rows_key;
-        let messages = (!reuse).then(|| {
-            let mut messages: Vec<HistoryMessage> = history
-                .map(|h| h.ordered().into_iter().cloned().collect())
-                .unwrap_or_default();
-            // A translated chat shows the translations in place.
-            if let Some(chat_id) = chat {
-                self.apply_chat_translation(chat_id, &mut messages);
-                // A channel joined in this session ends with "You joined
-                // this channel" and the similar-channels strip (tdesktop
-                // `insertJoinedMessage`).
-                if let Some(notice) = session.and_then(|s| s.joined_notice_row(chat_id)) {
-                    messages.push(notice);
-                }
-            }
-            messages
-        });
-        (key, messages)
-    }
-
-    /// The part of the history row inputs that lives in the app rather than
-    /// the session (forward selection, paused playback positions, playback
-    /// settings), hashed for `HistoryRowsKey`. `None` while something plays
-    /// — rows then carry per-frame state and rebuild every render.
-    pub(super) fn history_rows_ui_hash(&self) -> Option<u64> {
-        use std::hash::{Hash, Hasher};
-        // Demo fixtures mutate chats and users without `Session::apply`
-        // (no revision bump): they always rebuild, except the stress
-        // fixture used for profiling.
-        if self.live.is_none() && super::demo::demo_stress_size().is_none() {
-            return None;
-        }
-        if self.active_playback_id().is_some() || self.playback.playing_animation.is_some() {
-            return None;
-        }
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.forward_draft()
-            .map(|draft| (draft.from_chat_id.0, draft.message_ids))
-            .hash(&mut hasher);
-        let mut positions: Vec<(i64, u64)> = self
-            .playback
-            .positions
-            .iter()
-            .map(|(id, secs)| (id.0, secs.to_bits()))
-            .collect();
-        positions.sort_unstable();
-        positions.hash(&mut hasher);
-        self.playback.speed.to_bits().hash(&mut hasher);
-        self.playback.volume.to_bits().hash(&mut hasher);
-        self.playback.error.hash(&mut hasher);
-        // A bot's streaming reply grows the last row every frame.
-        self.stream_rows_hash().hash(&mut hasher);
-        // Expanding a fact check changes that row's height.
-        let mut fact_checks: Vec<(i64, i64)> = self
-            .message_ui
-            .fact_check_expanded
-            .iter()
-            .copied()
-            .collect();
-        fact_checks.sort_unstable();
-        fact_checks.hash(&mut hasher);
-        self.vanish_rows_hash().hash(&mut hasher);
-        // The wide layout gives every row a photo.
-        self.chat_wide().hash(&mut hasher);
-        Some(hasher.finish())
     }
 }

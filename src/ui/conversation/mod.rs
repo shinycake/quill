@@ -34,28 +34,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-/// Everything the history rows are derived from, compared across renders
-/// so unchanged rows aren't rebuilt (typing in the composer or a scroll
-/// re-render used to snapshot and rebuild every loaded message).
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct HistoryRowsKey {
-    list: &'static str,
-    chat: Option<i64>,
-    topic: Option<i32>,
-    /// Any change to the loaded messages (`HistoryMessages::revision`).
-    messages_revision: u64,
-    /// Any applied TDLib update (chat read state, users, quoted messages).
-    session_revision: u64,
-    window_epoch: u64,
-    unread_anchor: Option<MessageId>,
-    highlight: Option<MessageId>,
-    ui: u64,
-    /// Translations received or switched (`Session::translate.revision`).
-    translate: u64,
-    /// Local day: "Today"/"Yesterday" labels roll over at midnight.
-    today: i64,
-}
-
 /// Rows before the end of a window that stops short of the latest
 /// message at which the next newer page is requested.
 const NEWER_PREFETCH_ROWS: usize = 8;
@@ -673,3 +651,6 @@ impl ConversationPart {
 mod conversation_part1;
 mod history_message_list;
 mod render_history_row_body;
+mod row_chrome;
+mod rows_cache;
+pub(super) use rows_cache::HistoryRowsKey;

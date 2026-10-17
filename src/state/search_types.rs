@@ -461,7 +461,7 @@ pub enum ChatSearchJumpNeed {
 /// `next_from_message_id` 0 (or an empty page).
 #[derive(Debug)]
 pub struct TopicHistory {
-    pub messages: BTreeMap<i64, HistoryMessage>,
+    pub messages: HistoryMessages,
     pub next_from_message_id: MessageId,
     pub loaded_complete: bool,
     /// Subsection tabs: `foundChatMessages.total_count` of the latest
@@ -476,7 +476,7 @@ pub struct TopicHistory {
 impl Default for TopicHistory {
     fn default() -> Self {
         Self {
-            messages: BTreeMap::new(),
+            messages: HistoryMessages::default(),
             next_from_message_id: MessageId(0),
             loaded_complete: false,
             total_count: 0,
