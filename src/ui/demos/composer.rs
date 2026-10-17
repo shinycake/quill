@@ -49,6 +49,14 @@ register_demos![
         "screenshot demo — the / menu in a group with bots (injected, no live Telegram)"
     )
     .setup(QuillApp::demo_group_commands),
+    // The reply and edit bars, the "Cancel editing?" box and the field's
+    // placeholders. `QUILL_DEMO_BARS` is `reply`, `edit`, `confirm`,
+    // `stars`, `broadcast` or `silent`.
+    DemoSpec::chats(
+        "ready-composer-bars",
+        "screenshot demo — reply and edit bars, placeholders (injected, no live Telegram)"
+    )
+    .setup(QuillApp::demo_composer_bars),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -99,6 +107,49 @@ impl QuillApp {
             input.set_selected_range(end..end, cx);
         });
         self.sync_command_menu(cx);
+    }
+
+    fn demo_composer_bars(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use std::sync::atomic::Ordering;
+        let mode = std::env::var("QUILL_DEMO_BARS").unwrap_or_else(|_| "reply".into());
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_composer_bars(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            let chat = match mode.as_str() {
+                "stars" => ChatId(51),
+                "broadcast" | "silent" => ChatId(-1002000000001),
+                _ => ChatId(-2002),
+            };
+            session.open_chat(chat);
+        }
+        match mode.as_str() {
+            "reply" => {
+                self.composer_ui
+                    .set_reply(Some(quill::composer::ComposerReplyTo {
+                        chat_id: ChatId(-2002),
+                        message_id: quill::ids::MessageId(10),
+                        quote: None,
+                        target_chat: None,
+                    }));
+            }
+            "edit" | "confirm" => {
+                let edit = self
+                    .session()
+                    .and_then(|session| session.last_editable_message(ChatId(-2002)));
+                if let Some(edit) = edit {
+                    self.begin_edit(edit, window, cx);
+                }
+                if mode == "confirm" {
+                    self.composer.update(cx, |input, cx| {
+                        input.set_value("Saturday works, let's meet at 8", window, cx);
+                    });
+                    self.request_cancel_edit(window, cx);
+                }
+            }
+            "silent" => self.toggle_composer_silent(),
+            _ => {}
+        }
+        cx.notify();
     }
 
     fn demo_ready_send_media(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -195,4 +246,52 @@ fn apply_group_commands(
             session.apply(owned);
         }
     }
+}
+
+/// Three chats for the composer bars demo: a group with an incoming and an
+/// own message, a private chat whose user charges 25 Stars per message and
+/// a channel the account owns.
+fn apply_composer_bars(
+    session: &mut quill::state::Session,
+    sink: &std::sync::Arc<quill::diagnostics::MemorySink>,
+    seq: &std::sync::atomic::AtomicU64,
+) {
+    use quill::diagnostics::DiagnosticSink;
+    use quill::telegram::client::copy_and_parse;
+    let dyn_sink: std::sync::Arc<dyn DiagnosticSink> = sink.clone();
+    let message = |id: i64, chat: i64, sender: i64, outgoing: bool, text: &str| {
+        format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat},"sender_id":{{"@type":"messageSenderUser","user_id":{sender}}},"is_outgoing":{outgoing},"date":1700000{id},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}}}"#
+        )
+    };
+    let jsons = [
+        r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOnline","expires":1}}}"#.to_string(),
+        r#"{"@type":"updateUser","user":{"id":51,"first_name":"Mira","last_name":"Stone","type":{"@type":"userTypeRegular"},"status":{"@type":"userStatusOffline","was_online":1}}}"#.to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":-2002,"title":"Weekend plans","type":{"@type":"chatTypeBasicGroup","basic_group_id":2002},"unread_count":0}}"#.to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":-2002,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"60","is_pinned":false}}"#.to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":51,"title":"Mira Stone","type":{"@type":"chatTypePrivate","user_id":51},"unread_count":0}}"#.to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":51,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"55","is_pinned":false}}"#.to_string(),
+        r#"{"@type":"updateNewChat","chat":{"id":-1002000000001,"title":"Quill news","type":{"@type":"chatTypeSupergroup","supergroup_id":2000000001,"is_channel":true},"unread_count":0}}"#.to_string(),
+        r#"{"@type":"updateChatPosition","chat_id":-1002000000001,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"52","is_pinned":false}}"#.to_string(),
+        message(10, -2002, 31, false, "Where should we go on Saturday?"),
+        message(11, -2002, 1, true, "Saturday works, let's meet at 7"),
+        message(12, 51, 51, false, "Hi! Quick question about the schedule"),
+        message(13, -1002000000001, 1, true, "Release notes are up"),
+    ];
+    for json in jsons {
+        if let Some(owned) = copy_and_parse(&json, seq, &dyn_sink) {
+            session.apply(owned);
+        }
+    }
+    if let Some(chat) = session.chats.get_mut(&-1002000000001) {
+        chat.set_member_status(
+            quill::telegram::envelope::ChannelMemberStatus::Creator,
+            None,
+        );
+    }
+    session.payments.paid_messages.record_answer(
+        51,
+        quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },
+        1,
+    );
 }

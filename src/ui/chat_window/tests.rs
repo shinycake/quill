@@ -856,3 +856,35 @@ fn a_sent_recording_leaves_no_window_behind_for_the_next_one(cx: &mut TestAppCon
     assert!(here, "and belongs to the main window");
     assert_eq!(note, note_before, "no \"discarded\" note");
 }
+
+#[gpui_kit::test]
+fn a_chat_window_shows_the_placeholder_of_its_own_chat(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    // The user of chat B charges 25 Stars per message.
+    h.app.update(cx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.paid_messages.record_answer(
+                OTHER.0,
+                quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },
+                1,
+            );
+        }
+    });
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    let composer = h.window_composer(OTHER, cx);
+    let window_text = composer.read_with(cx, |input, _| {
+        input.presentation().placeholder().to_string()
+    });
+    assert_eq!(window_text, "Message for 25 Stars");
+    // The main window shows chat A, which is free.
+    let main_text = h.app.read_with(cx, |app, cx| {
+        app.composer
+            .read(cx)
+            .presentation()
+            .placeholder()
+            .to_string()
+    });
+    assert_eq!(main_text, "Write a message…");
+}

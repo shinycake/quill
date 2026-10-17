@@ -72,7 +72,7 @@ fn section_label(text: &'static str, cx: &App) -> Div {
 
 impl QuillApp {
     /// The text of the message a reply points at, if it is loaded.
-    fn reply_message_text(&self, reply: &ComposerReplyTo) -> Option<String> {
+    pub(in crate::ui) fn reply_message_text(&self, reply: &ComposerReplyTo) -> Option<String> {
         let message = self
             .session()?
             .histories

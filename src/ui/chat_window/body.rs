@@ -26,6 +26,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.sync_composer_placeholder(window, cx);
         if self.account.passcode.locked {
             // Telegram Desktop's passcode lock covers every window
             // (`Application::lockByPasscode` → `setupPasscodeLock` on each):

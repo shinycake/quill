@@ -924,6 +924,9 @@ impl QuillApp {
 }
 
 mod attach_picker;
+mod bar_clicks;
+mod cancel_edit_confirm;
 mod command_menu;
 mod copy_inline_text;
+mod field_placeholder;
 mod toggle_composer_silent;
