@@ -129,6 +129,11 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.clear_edit(window, cx);
                 })),
+            Some(self.bar_clicks(
+                quill::composer::BarKind::Edit,
+                (!edit.scheduled).then_some(edit.message_id),
+                cx,
+            )),
             cx,
         )
     }
@@ -848,6 +853,11 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.clear_reply(cx);
                 })),
+            Some(self.bar_clicks(
+                self.reply_bar_kind(reply),
+                (self.open_chat_id() == Some(reply.chat_id)).then_some(reply.message_id),
+                cx,
+            )),
             cx,
         )
     }

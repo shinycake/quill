@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 mod actions;
 mod attachments;
+mod bar_click;
 mod commands;
 mod deferred_caption;
 mod draft_topic;
@@ -18,6 +19,7 @@ mod edit_media_tools;
 mod markup;
 mod media_options;
 mod media_prep;
+mod placeholder;
 mod reply;
 mod send;
 mod shortcuts;
@@ -27,6 +29,7 @@ pub use attachments::{
     AttachmentKind, ComposerAttachment, clipboard_image_attachment, media_kind_for,
     without_sound_track,
 };
+pub use bar_click::{BarAction, BarClick, BarKind, bar_click_action};
 pub use commands::{
     CommandBot, CommandMenuItem, TriggerToken, command_menu_trigger, commands_with_username,
     complete_command_at, complete_mention, filter_command_menu_items, group_command_menu_items,
@@ -60,6 +63,7 @@ pub use media_prep::{
     AnimationSize, PREP_BUDGET, PrepareError, PreparedFile, PreparedMedia, PreparedNote,
     send_path_for,
 };
+pub use placeholder::{ComposerPlaceholder, PlaceholderFacts, edit_text_changed};
 pub use reply::{ComposerReplyTo, QuoteSelection, cancel_reply_draft, quote_position};
 pub use send::{
     ComposerScheduling, EnterEvent, PreviewMediaSize, SendKeyMode, SendOptions,

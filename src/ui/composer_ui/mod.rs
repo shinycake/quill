@@ -298,8 +298,16 @@ fn composer_context_bar(
         None,
         trailing,
         close,
+        None,
         cx,
     )
+}
+
+/// What the body of a context bar does when clicked
+/// (`quill::composer::bar_click_action`).
+pub(super) struct BarClicks {
+    pub(super) kind: quill::composer::BarKind,
+    pub(super) run: std::rc::Rc<dyn Fn(quill::composer::BarAction, &mut Window, &mut App)>,
 }
 
 /// [`composer_context_bar`] with a rendered preview (custom emoji, quotes)
@@ -315,8 +323,68 @@ fn composer_context_bar_rich(
     thumb: Option<AnyElement>,
     trailing: Option<AnyElement>,
     close: Button,
+    clicks: Option<BarClicks>,
     cx: &App,
 ) -> impl IntoElement {
+    use quill::composer::{BarClick, bar_click_action};
+    let body = div()
+        .flex()
+        .items_center()
+        // `st::msgReplyBarSkip`.
+        .gap(px(10.))
+        .flex_1()
+        .min_w_0()
+        .pl_2()
+        .border_l_2()
+        .border_color(color)
+        .children(thumb)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(color)
+                        .truncate()
+                        .child(super::bidi_line::one_line_plain(title.into())),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(preview),
+                ),
+        );
+    // The icon and text are one target; the trailing buttons are not.
+    let target = div()
+        .id((id, 1usize))
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .items_center()
+        .gap_3()
+        .child(Icon::new(icon).size(px(18.)).text_color(color))
+        .child(body)
+        .when_some(clicks, |this, clicks| {
+            let (kind, run) = (clicks.kind, clicks.run);
+            let on_right = run.clone();
+            this.cursor_pointer()
+                .on_click(move |event, window, cx| {
+                    let click = if event.modifiers().secondary() {
+                        BarClick::LeftModified
+                    } else {
+                        BarClick::Left
+                    };
+                    run(bar_click_action(kind, click), window, cx);
+                })
+                .on_mouse_down(MouseButton::Right, move |_, window, cx| {
+                    on_right(bar_click_action(kind, BarClick::Right), window, cx);
+                })
+        });
     div()
         .id(id)
         .flex()
@@ -324,41 +392,7 @@ fn composer_context_bar_rich(
         .gap_3()
         .px_2()
         .py_1()
-        .child(Icon::new(icon).size(px(18.)).text_color(color))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                // `st::msgReplyBarSkip`.
-                .gap(px(10.))
-                .flex_1()
-                .min_w_0()
-                .pl_2()
-                .border_l_2()
-                .border_color(color)
-                .children(thumb)
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_w_0()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_semibold()
-                                .text_color(color)
-                                .truncate()
-                                .child(super::bidi_line::one_line_plain(title.into())),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(preview),
-                        ),
-                ),
-        )
+        .child(target)
         .when_some(trailing, |this, trailing| this.child(trailing))
         .child(close)
 }

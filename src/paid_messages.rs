@@ -572,6 +572,22 @@ impl crate::state::Session {
             .map_or(0, |info| info.admin.outgoing_paid_message_star_count)
     }
 
+    /// Stars one message to `chat_id` costs the account: a user who
+    /// charges (never a bot or yourself) or a supergroup with a price;
+    /// 0 when free or unknown (`PeerData::starsPerMessageChecked`).
+    pub fn paid_send_price(&self, chat_id: crate::ids::ChatId) -> i64 {
+        match self.private_chat_user_id(chat_id) {
+            Some(user) if self.is_bot_user(user) || Some(user) == self.my_user_id => 0,
+            Some(user) => self
+                .payments
+                .paid_messages
+                .charging_users()
+                .find_map(|(charging, stars)| (charging == user).then_some(stars))
+                .unwrap_or(0),
+            None => self.supergroup_send_price(chat_id),
+        }
+    }
+
     /// Every chat the account pays to write in, with the price per
     /// message: what the send guard screens against.
     pub fn paid_send_prices(&self) -> HashMap<i64, i64> {

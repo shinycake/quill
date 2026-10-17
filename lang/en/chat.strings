@@ -2,7 +2,12 @@
 "lng_blocked_list_confirm_text" = "Do you want to block {name} from messaging and calling you on Telegram?";
 "lng_box_delete" = "Delete";
 "lng_box_remove" = "Remove";
+"lng_broadcast_ph" = "Broadcast a message…";
+"lng_broadcast_silent_ph" = "Silent broadcast…";
 "lng_cancel" = "Cancel";
+"lng_cancel_edit_post_no" = "No";
+"lng_cancel_edit_post_sure" = "Cancel editing?";
+"lng_cancel_edit_post_yes" = "Yes";
 "lng_chat_theme_wallpaper" = "Set Wallpaper";
 "lng_close" = "Close";
 "lng_context_copy_selected_items" = "Copy Selected as Text";
@@ -21,6 +26,7 @@
 "lng_delete_all_from_user" = "Delete all from {user}";
 "lng_dlg_search_from" = "From: {user}";
 "lng_edit_error" = "You can't edit this message.";
+"lng_edit_message_text" = "New message…";
 "lng_error_nocopy_channel" = "Sorry, copying from this channel is disabled by admins.";
 "lng_error_nocopy_group" = "Sorry, copying from this group is disabled by admins.";
 "lng_error_nocopy_user" = "Sorry, copying from this chat is restricted.";
@@ -44,6 +50,8 @@
 "lng_menu_formatting_spoiler" = "Spoiler";
 "lng_menu_insert_unicode" = "Insert Unicode control character";
 "lng_message_ph" = "Write a message…";
+"lng_message_stars_ph#one" = "Message for {count} Star";
+"lng_message_stars_ph#other" = "Message for {count} Stars";
 "lng_new_contact_add_name" = "Add {user} to contacts";
 "lng_new_contact_share" = "Share my phone number";
 "lng_new_contact_share_sure" = "Do you want to share your phone number {phone} with {user}?";
@@ -104,6 +112,7 @@
 "qll_chat_attach" = "Attach";
 "qll_chat_attached_files_send_to_upload#one" = "Attached {count} file. Send to upload.";
 "qll_chat_attached_files_send_to_upload#other" = "Attached {count} files. Send to upload.";
+"qll_chat_attached_name" = "Attached {name}.";
 "qll_chat_attachment_cleared" = "attachment cleared";
 "qll_chat_auto_detect" = "Auto-Detect";
 "qll_chat_back" = "Back";
@@ -545,5 +554,4 @@
 "qll_chat_your_account_is_frozen_and" = "Your account is frozen and can't send messages.";
 "qll_chat_your_account_is_frozen_and_2" = "Your account is frozen and read-only. Open the banner at the top for details.";
 "qll_chat_your_number" = "your number";
-"qll_chat_attached_name" = "Attached {name}.";
 "qll_chat_partly_sent" = "Only {sent} of {total} messages were sent. The rest are still here, so you can send them again.";
