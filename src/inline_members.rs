@@ -109,6 +109,20 @@ pub fn members_title(count: i32, is_channel: bool) -> String {
     crate::lang::trn_decimal(key, i64::from(count))
 }
 
+/// The chat header's member line: the full count, then ", N online" for a
+/// group with someone besides you online (`lng_chat_status_members_online`,
+/// whose online part is `lng_chat_status_online` with the plain `lt_count`).
+pub fn member_status_line(count: i32, is_channel: bool, online: i32) -> String {
+    let mut line = members_title(count, is_channel);
+    if !is_channel && online > 1 {
+        line.push_str(&crate::lang::tr_with(
+            crate::lang::keys::Q_CHAT_ONLINE,
+            &[("online_count", online.to_string().as_str())],
+        ));
+    }
+    line
+}
+
 /// Whether the header offers search.
 pub fn search_available(member_count: i32) -> bool {
     member_count >= SEARCH_AFTER_COUNT
@@ -166,8 +180,9 @@ pub fn merge_page<T, K: PartialEq>(
 #[cfg(test)]
 mod tests {
     use super::{
-        ChannelMemberStatus, MoreAction, UserStatusKind, member_badge, members_title, merge_page,
-        next_more, online_sort_value, search_available, sort_online_first, sorts_by_online,
+        ChannelMemberStatus, MoreAction, UserStatusKind, member_badge, member_status_line,
+        members_title, merge_page, next_more, online_sort_value, search_available,
+        sort_online_first, sorts_by_online,
     };
 
     const NOW: i64 = 1_700_000_000;
@@ -261,6 +276,22 @@ mod tests {
         assert_eq!(members_title(12345, false), "12,345 members");
         assert_eq!(members_title(1, true), "1 subscriber");
         assert_eq!(members_title(12345, true), "12,345 subscribers");
+    }
+
+    #[test]
+    fn header_line_shows_the_full_count() {
+        assert_eq!(member_status_line(1, true, 0), "1 subscriber");
+        assert_eq!(
+            member_status_line(1_234_567, true, 900),
+            "1,234,567 subscribers"
+        );
+        assert_eq!(member_status_line(1, false, 0), "1 member");
+        assert_eq!(member_status_line(12_345, false, 0), "12,345 members");
+        assert_eq!(member_status_line(12_345, false, 1), "12,345 members");
+        assert_eq!(
+            member_status_line(12_345, false, 1_234),
+            "12,345 members, 1234 online"
+        );
         assert!(!search_available(19));
         assert!(search_available(20));
     }

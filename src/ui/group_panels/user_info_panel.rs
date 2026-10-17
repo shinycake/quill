@@ -387,7 +387,6 @@ impl QuillApp {
         let photo = session
             .and_then(|s| s.chat_photo_path(chat_id))
             .and_then(|path| sandboxed_display_path(path, &roots));
-        let noun = if is_channel { "subscribers" } else { "members" };
         let verify_icon = session
             .and_then(|s| s.chats.get(&chat_id.0))
             .and_then(|chat| self.bot_verify_icon_path(chat));
@@ -438,7 +437,9 @@ impl QuillApp {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .when(members > 0, |this| {
-                                this.child(format!("{} {noun}", compact_count(members)))
+                                this.child(quill::inline_members::members_title(
+                                    members, is_channel,
+                                ))
                             }),
                     )
                     .when_some(username, |this, name| {
@@ -672,7 +673,7 @@ impl QuillApp {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .when_some(member_count, |this, count| {
-                                this.child(format!("{count} members"))
+                                this.child(quill::inline_members::members_title(count, false))
                             }),
                     ),
             );
