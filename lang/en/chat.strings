@@ -375,6 +375,7 @@
 "qll_chat_quote_reply" = "Quote & Reply";
 "qll_chat_reacted" = "{reacted}/{seen} Reacted";
 "qll_chat_reaction_deletion_needs_a_live" = "reaction deletion needs a live connection (demo)";
+"qll_chat_reactors_and_more" = "{names} and {count} more";
 "qll_chat_read_all_reactions" = "Read all reactions";
 "qll_chat_received_gifts" = "Received gifts";
 "qll_chat_recent" = "Recent";

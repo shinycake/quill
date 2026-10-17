@@ -74,8 +74,16 @@ pub fn toggle_task_request(list: &Checklist, task_id: i32) -> Option<(Vec<i32>, 
 
 /// Ids for tasks appended to `list`: unique, after the highest existing id.
 pub fn next_task_ids(list: &Checklist, count: usize) -> Vec<i32> {
-    let start = list.tasks.iter().map(|task| task.id).max().unwrap_or(0) + 1;
-    (0..count as i32).map(|offset| start + offset).collect()
+    let start = list
+        .tasks
+        .iter()
+        .map(|task| task.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    (0..i32::try_from(count).unwrap_or(i32::MAX))
+        .map(|offset| start.saturating_add(offset))
+        .collect()
 }
 
 /// How many more tasks `list` can take (`lng_todo_create_limit`).
@@ -228,6 +236,16 @@ mod tests {
         let checklist = list(vec![task(3, false), task(7, true)]);
         assert_eq!(next_task_ids(&checklist, 2), vec![8, 9]);
         assert_eq!(next_task_ids(&list(vec![]), 1), vec![1]);
+    }
+
+    #[test]
+    fn new_task_ids_do_not_overflow() {
+        let checklist = list(vec![task(i32::MAX - 1, false)]);
+        assert_eq!(next_task_ids(&checklist, 3), vec![i32::MAX; 3]);
+        assert_eq!(
+            next_task_ids(&list(vec![task(i32::MAX, false)]), 1).len(),
+            1
+        );
     }
 
     #[test]

@@ -390,9 +390,11 @@ fn last_reason(text: &str) -> Option<String> {
 pub fn stop_capture(child: &mut std::process::Child, graceful: bool) {
     if graceful {
         #[cfg(unix)]
-        let _ = Command::new("kill")
-            .args(["-INT", &child.id().to_string()])
-            .status();
+        if let Ok(pid) = i32::try_from(child.id()) {
+            // SAFETY: plain syscall on the id of our own live child; it
+            // dereferences nothing. A failure falls through to the deadline.
+            unsafe { libc::kill(pid, libc::SIGINT) };
+        }
         // Windows has no SIGINT: ffmpeg stops and finalizes the file on `q`
         // from stdin ([`spawn_capture`] pipes it).
         #[cfg(not(unix))]
@@ -418,6 +420,15 @@ pub fn stop_capture(child: &mut std::process::Child, graceful: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn graceful_stop_interrupts_the_child_without_a_kill_binary() {
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let started = std::time::Instant::now();
+        stop_capture(&mut child, true);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
 
     #[cfg(unix)]
     #[test]

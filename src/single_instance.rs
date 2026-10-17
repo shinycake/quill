@@ -60,9 +60,14 @@ pub struct Endpoint {
     pipe: String,
 }
 
+#[cfg(any(unix, test))]
 fn root_digest(root: &Path) -> String {
+    digest_of(&root.to_string_lossy())
+}
+
+fn digest_of(text: &str) -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(root.to_string_lossy().as_bytes());
+    let digest = Sha256::digest(text.as_bytes());
     digest
         .get(..8)
         .unwrap_or_default()
@@ -87,8 +92,12 @@ impl Endpoint {
 
     #[cfg(windows)]
     pub fn for_root(root: &Path) -> Self {
+        let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         Self {
-            pipe: format!("quill-{}.ipc", root_digest(root)),
+            pipe: format!(
+                "quill-{}.ipc",
+                digest_of(&windows_root_key(&canonical.to_string_lossy()))
+            ),
         }
     }
 
@@ -119,6 +128,8 @@ pub enum Acquired {
 struct AcquireLock {
     #[cfg(unix)]
     _file: std::fs::File,
+    #[cfg(windows)]
+    mutex: windows_sys::Win32::Foundation::HANDLE,
 }
 
 impl AcquireLock {
@@ -140,10 +151,53 @@ impl AcquireLock {
     }
 
     #[cfg(windows)]
-    fn take(_endpoint: &Endpoint) -> io::Result<Self> {
-        // Named pipes: the first listener instance is created exclusively.
-        Ok(Self {})
+    fn take(endpoint: &Endpoint) -> io::Result<Self> {
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0};
+        use windows_sys::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
+        let name: Vec<u16> = format!("Local\\{}.lock", endpoint.pipe)
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // SAFETY: `name` is a NUL-terminated UTF-16 string alive for the call;
+        // a null security descriptor selects the default.
+        let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if mutex.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `mutex` is the valid handle created above.
+        let status = unsafe { WaitForSingleObject(mutex, 10_000) };
+        if status == WAIT_OBJECT_0 || status == WAIT_ABANDONED {
+            return Ok(Self { mutex });
+        }
+        // SAFETY: closes the handle created above, once; not owned by us.
+        unsafe { CloseHandle(mutex) };
+        Err(io::Error::other("single-instance lock timed out"))
     }
+}
+
+#[cfg(windows)]
+impl Drop for AcquireLock {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::ReleaseMutex;
+        // SAFETY: `mutex` was acquired on this thread in `take` (the lock is
+        // taken and dropped within `acquire`) and is closed exactly once.
+        unsafe {
+            ReleaseMutex(self.mutex);
+            CloseHandle(self.mutex);
+        }
+    }
+}
+
+/// The text a root path is hashed from on Windows: paths compare
+/// case-insensitively, take either slash, and canonicalization may add the
+/// verbatim `\\?\` prefix, so all of that is folded away first.
+#[cfg(any(windows, test))]
+fn windows_root_key(path: &str) -> String {
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    path.replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
 }
 
 enum Forward {
@@ -335,6 +389,15 @@ pub fn acquire(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn windows_root_keys_ignore_case_slashes_and_verbatim_prefix() {
+        let a = super::windows_root_key(r"C:\Users\Me\AppData\Quill");
+        assert_eq!(a, super::windows_root_key(r"c:\users\me\appdata\quill\"));
+        assert_eq!(a, super::windows_root_key("c:/users/me/appdata/quill"));
+        assert_eq!(a, super::windows_root_key(r"\\?\C:\Users\Me\AppData\Quill"));
+        assert_ne!(a, super::windows_root_key(r"C:\Users\Me\AppData\Other"));
+    }
+
     use super::{Acquired, ClientSlots, Endpoint, acquire, root_digest};
     use std::sync::mpsc;
     use std::time::Duration;

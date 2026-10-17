@@ -31,9 +31,12 @@ pub fn tooltip_text(names: &[String], total: i32) -> String {
         return count_label(total);
     }
     let joined = known.join(", ");
-    let rest = total - known.len() as i32;
+    let rest = i32::try_from(known.len()).map_or(0, |len| total.saturating_sub(len));
     if rest > 0 {
-        format!("{joined} and {rest} more")
+        crate::lang::tr_with(
+            crate::lang::keys::Q_CHAT_REACTORS_AND_MORE,
+            &[("names", &joined), ("count", &rest.to_string())],
+        )
     } else {
         joined
     }
@@ -56,6 +59,15 @@ mod tests {
     #[test]
     fn known_reactors_are_listed() {
         assert_eq!(tooltip_text(&names(&["Ann", "Ben"]), 2), "Ann, Ben");
+    }
+
+    #[test]
+    fn inconsistent_totals_do_not_overflow() {
+        assert_eq!(tooltip_text(&names(&["Ann"]), i32::MIN + 1), "");
+        assert_eq!(
+            tooltip_text(&names(&["Ann"]), i32::MAX),
+            format!("Ann and {} more", i32::MAX - 1)
+        );
     }
 
     #[test]
