@@ -62,6 +62,14 @@ opens; a zoom change while the window is open does not update the
 platform's minimum (GPUI has no setter). The layout itself follows the zoom
 live, since it works in interface pixels.
 
+Forum topics: while the topic column replaces the list (`Replacing`, below
+1100) it counts as a column, so the window is one column below
+`FORUM_COLUMN_WIDTH + CHAT_MIN_WIDTH` (660) and the chat never gets under
+380. In one column, Escape and the header's back button share
+`QuillApp::step_back`: the topic list first, then the chat list. Both and
+the layout read one `ShellInput` (`QuillApp::shell_input`, forum peek
+included).
+
 ## Not covered
 
 - History bubbles do not shrink to the pane. Their widths come from
@@ -72,3 +80,6 @@ live, since it works in interface pixels.
   policy change of its own (`history/bubble_width.rs`, `quill::bubble_layout`).
 - No screenshot demo opens a forum, so the forum paths are covered by the
   `shell_layout` unit tests only.
+- Tracked follow-up: the bubble clipping above shows at 640 and 380 px in the
+  showcase captures (outgoing bubbles lose their left edge). It needs the
+  bubble width policy change, to be done in its own PR.

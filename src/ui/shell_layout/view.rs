@@ -18,9 +18,14 @@ use quill::state::ForumColumn;
 impl QuillApp {
     /// The main window's columns this frame.
     pub(in crate::ui) fn shell_layout(&self) -> ShellLayout {
+        shell_layout(self.shell_input())
+    }
+
+    /// The one input every column decision reads, forum peek included.
+    fn shell_input(&self) -> ShellInput {
         let width = f32::from(self.frame.main_width);
         let session = self.session();
-        shell_layout(ShellInput {
+        ShellInput {
             width,
             rail: self.folder_rail_width(),
             list_width: f32::from(self.frame.sidebar_width),
@@ -30,7 +35,17 @@ impl QuillApp {
             }),
             topic_open: session.is_some_and(|s| s.open_topic.is_some()),
             panels: self.side_panels_width(),
-        })
+        }
+    }
+
+    /// Back from the conversation (Escape, the header's back button): the
+    /// topic list first in a one-column forum, else the chat list.
+    pub(in crate::ui) fn step_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shell_input().back_to_topics() {
+            self.deselect_topic_ui(cx);
+        } else {
+            self.back_to_chat_list(window, cx);
+        }
     }
 
     /// The chat list's width as laid out (the dragged width, narrowed so
@@ -43,15 +58,9 @@ impl QuillApp {
 
     /// The widest the chat list may be dragged in this window.
     pub(in crate::ui) fn max_list_width(&self) -> Pixels {
-        let width = f32::from(self.frame.main_width);
-        let forum_beside = self.session().is_some_and(|s| {
-            s.forum_column(width, self.chat_list.forum_chats_peek) == ForumColumn::Beside
-        });
-        px(max_list_width(
-            width,
-            self.folder_rail_width(),
-            forum_beside,
-        ))
+        let input = self.shell_input();
+        let forum_beside = input.forum == ForumColumn::Beside;
+        px(max_list_width(input.width, input.rail, forum_beside))
     }
 
     /// Summed preferred width of the open side panels.
@@ -163,16 +172,7 @@ impl QuillApp {
                 .tooltip(tr(keys::Q_CHAT_BACK))
                 .accessibility_label(tr(keys::Q_CHAT_BACK))
                 .on_click(cx.listener(|this, _, window, cx| {
-                    let width = f32::from(this.frame.main_width);
-                    let topics = this.session().is_some_and(|s| {
-                        s.open_topic.is_some()
-                            && s.forum_column(width, false) != ForumColumn::Hidden
-                    });
-                    if topics {
-                        this.deselect_topic_ui(cx);
-                    } else {
-                        this.back_to_chat_list(window, cx);
-                    }
+                    this.step_back(window, cx);
                 })),
         )
     }

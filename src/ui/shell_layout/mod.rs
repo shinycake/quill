@@ -116,8 +116,32 @@ pub(crate) fn max_list_width(width: f32, rail: f32, forum_beside: bool) -> f32 {
     (width - rail - forum - CHAT_MIN_WIDTH).max(MIN_SIDEBAR_WIDTH)
 }
 
+/// The width below which this input shows one column: the list beside the
+/// chat, or, while the topic column replaces the list, the topics beside
+/// the chat, each leaving the conversation [`CHAT_MIN_WIDTH`].
+pub(crate) fn input_one_column_below(input: ShellInput) -> f32 {
+    let base = one_column_below(input.rail);
+    if input.forum == ForumColumn::Replacing {
+        base.max(FORUM_COLUMN_WIDTH + CHAT_MIN_WIDTH)
+    } else {
+        base
+    }
+}
+
+impl ShellInput {
+    /// Back from the conversation steps to the open forum's topic list
+    /// first when the topics are a page of their own (one column), and
+    /// only then to the chat list. Escape and the header's back button
+    /// both follow this.
+    pub(crate) fn back_to_topics(&self) -> bool {
+        self.width < input_one_column_below(*self)
+            && self.topic_open
+            && self.forum != ForumColumn::Hidden
+    }
+}
+
 pub(crate) fn shell_layout(input: ShellInput) -> ShellLayout {
-    if input.width < one_column_below(input.rail) {
+    if input.width < input_one_column_below(input) {
         return one_column(input);
     }
     let (list, forum, forum_width) = match input.forum {

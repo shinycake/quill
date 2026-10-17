@@ -502,8 +502,9 @@ impl QuillApp {
         let open = self.session().and_then(|s| s.open_chat);
         if !self.focus_sidebar.contains_focused(window, cx) {
             // `HistoryWidget::escape` → `handleHistoryBack`: close the chat
-            // (`clearSectionStack`) and give the list the keyboard.
-            self.back_to_chat_list(window, cx);
+            // (`clearSectionStack`) and give the list the keyboard; in a
+            // one-column forum the topic list comes first.
+            self.step_back(window, cx);
             return;
         }
         // `Widget::escape`: leave the opened folder (Quill's archive view)

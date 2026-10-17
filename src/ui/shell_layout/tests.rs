@@ -144,3 +144,96 @@ fn forum_column_beside_leaves_the_chat_its_minimum() {
         Some(1100. - FORUM_COLUMN_WIDTH - CHAT_MIN_WIDTH)
     );
 }
+
+#[test]
+fn replacing_forum_never_leaves_the_chat_below_its_minimum() {
+    for width in 620..660 {
+        let layout = shell_layout(ShellInput {
+            forum: ForumColumn::Replacing,
+            topic_open: true,
+            ..input(width as f32)
+        });
+        assert!(layout.one_column, "{width}");
+        assert!(layout.chat && layout.chat_back(), "{width}");
+    }
+    let width = FORUM_COLUMN_WIDTH + CHAT_MIN_WIDTH;
+    let layout = shell_layout(ShellInput {
+        forum: ForumColumn::Replacing,
+        topic_open: true,
+        ..input(width)
+    });
+    assert!(!layout.one_column);
+    assert_eq!(layout.forum, ForumPane::Column { chats_button: true });
+    assert!(layout.chat);
+}
+
+#[test]
+fn one_column_boundary_is_exact() {
+    for rail in [0., 68.] {
+        let below = one_column_below(rail);
+        let at = shell_layout(ShellInput {
+            rail,
+            ..input(below)
+        });
+        assert!(!at.one_column, "rail {rail}");
+        assert_eq!(at.list, Some(MIN_SIDEBAR_WIDTH));
+        let under = shell_layout(ShellInput {
+            rail,
+            ..input(below - 0.5)
+        });
+        assert!(under.one_column, "rail {rail}");
+    }
+}
+
+#[test]
+fn panel_boundary_is_exact() {
+    for rail in [0., 68.] {
+        let list = 300.;
+        let width = rail + list + CHAT_MIN_WIDTH + PANEL_MIN_WIDTH;
+        let panel = ShellInput {
+            rail,
+            panels: Some(INFO_PANEL_WIDTH),
+            ..input(width)
+        };
+        let at = shell_layout(panel);
+        assert_eq!(at.panels, PanelPane::Column(PANEL_MIN_WIDTH), "rail {rail}");
+        assert!(at.chat);
+        let under = shell_layout(ShellInput {
+            width: width - 0.5,
+            ..panel
+        });
+        assert_eq!(under.panels, PanelPane::Fill, "rail {rail}");
+        assert!(!under.chat);
+    }
+}
+
+#[test]
+fn back_steps_to_topics_only_in_a_one_column_forum() {
+    let forum = ShellInput {
+        forum: ForumColumn::Replacing,
+        topic_open: true,
+        ..input(500.)
+    };
+    assert!(forum.back_to_topics());
+    assert!(
+        !ShellInput {
+            topic_open: false,
+            ..forum
+        }
+        .back_to_topics()
+    );
+    assert!(
+        !ShellInput {
+            forum: ForumColumn::Hidden,
+            ..forum
+        }
+        .back_to_topics()
+    );
+    assert!(
+        !ShellInput {
+            width: 900.,
+            ..forum
+        }
+        .back_to_topics()
+    );
+}
