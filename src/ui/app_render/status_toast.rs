@@ -13,6 +13,24 @@ const TOAST_MAX_LINES: usize = 3;
 /// Clear space between the toast and the composer's top border.
 const TOAST_GAP: f32 = 16.;
 
+/// Space the toast keeps from the window's left, right and bottom edges.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ToastInsets {
+    pub(super) left: Pixels,
+    pub(super) right: Pixels,
+    pub(super) bottom: Pixels,
+}
+
+/// With the media viewer open: no side insets, [`TOAST_GAP`] above its
+/// bottom bar (`bar` tall).
+pub(super) fn viewer_toast_insets(bar: Pixels) -> ToastInsets {
+    ToastInsets {
+        left: px(0.),
+        right: px(0.),
+        bottom: bar + px(TOAST_GAP),
+    }
+}
+
 impl QuillApp {
     /// The toast on screen this frame, if any. Advances the queue's timers
     /// and schedules the re-render for the next deadline; a paused (hovered)
@@ -76,17 +94,36 @@ impl QuillApp {
         composer + px(TOAST_GAP)
     }
 
+    /// The toast's insets this frame: over the conversation pane above the
+    /// composer, or, with the media viewer open (it covers the whole
+    /// window), centred on the window above the viewer's bottom bar.
+    pub(super) fn toast_insets(&mut self, window: &mut Window, cx: &App) -> ToastInsets {
+        if self.viewer.state.is_open() {
+            let bar = self.viewer_bottom_chrome(window, cx);
+            return viewer_toast_insets(bar);
+        }
+        let (left, right) = self.chat_insets();
+        ToastInsets {
+            left,
+            right,
+            bottom: self.toast_bottom(),
+        }
+    }
+
     /// The toast, centred over the conversation pane (`left` and `right`
     /// are the space the other columns take). Hovering pauses its timer, a
     /// click dismisses it; failures are announced as alerts.
     pub(super) fn status_toast_layer(
         &self,
         note: &StatusNote,
-        left: Pixels,
-        right: Pixels,
-        bottom: Pixels,
+        insets: ToastInsets,
         cx: &mut Context<Self>,
     ) -> Div {
+        let ToastInsets {
+            left,
+            right,
+            bottom,
+        } = insets;
         let error = note.kind() == NoteKind::Error;
         let role = if error { Role::Alert } else { Role::Status };
         div()
@@ -157,5 +194,31 @@ impl QuillApp {
     #[cfg(not(feature = "demo-capture"))]
     pub(super) fn demo_pins_toast(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TOAST_GAP, ToastInsets, viewer_toast_insets};
+    use gpui::px;
+
+    #[test]
+    fn with_the_viewer_open_the_toast_centres_on_the_window_above_its_bar() {
+        let insets = viewer_toast_insets(px(96.));
+        assert_eq!(
+            insets,
+            ToastInsets {
+                left: px(0.),
+                right: px(0.),
+                bottom: px(96. + TOAST_GAP),
+            }
+        );
+    }
+
+    #[test]
+    fn a_caption_lifts_the_toast_with_the_bar() {
+        let plain = viewer_toast_insets(px(96.));
+        let captioned = viewer_toast_insets(px(96. + 40. + 8.));
+        assert_eq!(captioned.bottom - plain.bottom, px(48.));
     }
 }

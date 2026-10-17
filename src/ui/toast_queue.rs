@@ -112,10 +112,10 @@ impl ToastQueue {
     /// Pointer over the toast stops its timer; leaving restarts it with the
     /// time that was left.
     pub(crate) fn set_hovered(&mut self, hovered: bool, now: Instant) {
+        self.hovered = hovered;
         let Some(showing) = self.showing.as_mut() else {
             return;
         };
-        self.hovered = hovered;
         match (hovered, showing.running_since) {
             (true, Some(_)) => {
                 showing.remaining = showing.left(now);
@@ -231,6 +231,17 @@ mod tests {
         assert_eq!(queue.deadline(secs(t0, 60)), Some(secs(t0, 61)));
         queue.tick(secs(t0, 61));
         assert_eq!(text(&queue), None);
+    }
+
+    #[test]
+    fn a_hover_in_the_frame_a_toast_appears_pauses_it() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.set_hovered(true, t0);
+        queue.push(StatusNote::info("Copied"), t0);
+        assert_eq!(queue.deadline(secs(t0, 1)), None);
+        queue.set_hovered(false, secs(t0, 60));
+        assert_eq!(queue.deadline(secs(t0, 60)), Some(secs(t0, 61)));
     }
 
     #[test]

@@ -54,29 +54,40 @@ pub(super) fn fit_area(frame: ViewerFrame) -> FitArea {
             size: (width.max(0.0), height.max(0.0)),
         };
     }
+    FitArea {
+        origin: (VIEWER_SIDE_LANE, VIEWER_TOP_BAR),
+        size: (
+            lane_width(width),
+            (height - VIEWER_TOP_BAR - bottom_chrome(frame)).max(200.0),
+        ),
+    }
+}
+
+/// The height the bottom bar takes from the window's bottom edge: the
+/// controls plus the caption plate above them (video full screen hides the
+/// caption and floats the controls over the picture, so they still count).
+pub(super) fn bottom_chrome(frame: ViewerFrame) -> f32 {
     let controls = if frame.video {
         VIDEO_CONTROLS
     } else {
         ZOOM_CONTROLS
     };
-    let caption = if frame.caption > 0.0 {
+    let caption = if frame.caption > 0.0 && !frame.fullscreen {
         frame.caption + CAPTION_GAP
     } else {
         0.0
     };
-    let strip = if frame.strip { GROUP_STRIP_ROOM } else { 0.0 };
-    FitArea {
-        origin: (VIEWER_SIDE_LANE, VIEWER_TOP_BAR),
-        size: (
-            lane_width(width),
-            (height - VIEWER_TOP_BAR - controls - caption - strip).max(200.0),
-        ),
-    }
+    let strip = if frame.strip && !frame.fullscreen {
+        GROUP_STRIP_ROOM
+    } else {
+        0.0
+    };
+    controls + caption + strip
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CAPTION_GAP, FitArea, GROUP_STRIP_ROOM, VIDEO_CONTROLS, ViewerFrame, fit_area};
+    use super::{CAPTION_GAP, FitArea, GROUP_STRIP_ROOM, VIDEO_CONTROLS, ViewerFrame, bottom_chrome, fit_area};
     use crate::ui::media_viewer::{VIEWER_SIDE_LANE, VIEWER_TOP_BAR};
 
     fn frame(caption: f32, fullscreen: bool) -> ViewerFrame {
@@ -129,5 +140,15 @@ mod tests {
         };
         assert_eq!(fit_area(frame(60.0, true)), full);
         assert_eq!(fit_area(frame(0.0, true)), full);
+    }
+
+    #[test]
+    fn the_bottom_chrome_is_the_controls_plus_the_caption_plate() {
+        assert_eq!(bottom_chrome(frame(0.0, false)), VIDEO_CONTROLS);
+        assert_eq!(
+            bottom_chrome(frame(40.0, false)),
+            VIDEO_CONTROLS + 40.0 + CAPTION_GAP
+        );
+        assert_eq!(bottom_chrome(frame(40.0, true)), VIDEO_CONTROLS);
     }
 }
