@@ -202,6 +202,9 @@ pub struct SharedMediaItem {
     pub visual: SharedMediaVisual,
     /// The facts a Files, Music, Voice or Links row prints.
     pub meta: SharedMediaMeta,
+    /// The message's own file (`0` for none): what Cancel Download and
+    /// Show in Folder act on.
+    pub file: FileId,
 }
 
 impl SharedMediaItem {
@@ -265,8 +268,24 @@ impl SharedMediaItem {
             action: SharedMediaAction::Message,
             visual: SharedMediaVisual::None,
             meta: SharedMediaMeta::from_parsed(message),
+            file: primary_file(&message.content),
         }
     }
+}
+
+/// The file a row's actions (cancel, show in folder) work on.
+fn primary_file(content: &MessageContent) -> FileId {
+    let id = match content {
+        MessageContent::Photo(c) => c.open_file_id(),
+        MessageContent::Video(c) => c.play_file_id(),
+        MessageContent::Document(c) => Some(c.file_id),
+        MessageContent::Audio(c) => c.play_file_id(),
+        MessageContent::VoiceNote(c) => Some(c.file_id),
+        MessageContent::Animation(c) => c.play_file_id(),
+        MessageContent::VideoNote(c) => c.play_file_id(),
+        _ => None,
+    };
+    id.filter(|id| id.0 != 0).unwrap_or(FileId(0))
 }
 
 pub(crate) fn non_empty_or<'a>(value: &'a str, fallback: &'a str) -> &'a str {
@@ -342,6 +361,8 @@ pub struct SharedMediaState {
     /// "Expand" / "Collapse" action on the media tab).
     pub media_split: bool,
     pub generation: u64,
+    /// The ticked rows and tiles, in the order they were ticked.
+    pub selection: Vec<SelectedMedia>,
 }
 
 impl SharedMediaState {
@@ -379,6 +400,7 @@ impl SharedMediaState {
             other => other,
         };
         self.generation = self.generation.saturating_add(1);
+        self.selection.clear();
         for tab in self.tabs.iter_mut() {
             tab.clear();
         }
@@ -389,6 +411,7 @@ impl SharedMediaState {
         self.playlist_user = None;
         self.open = false;
         self.chat_id = None;
+        self.selection.clear();
         self.generation = self.generation.saturating_add(1);
         for tab in self.tabs.iter_mut() {
             tab.clear();
@@ -399,6 +422,7 @@ impl SharedMediaState {
     /// must send `searchChatMessages`.
     pub fn select_tab(&mut self, tab: SharedMediaTab) -> bool {
         self.active_tab = tab;
+        self.selection.clear();
         self.tabs
             .get(tab.index())
             .is_some_and(|t| t.status == SharedMediaTabStatus::Idle)

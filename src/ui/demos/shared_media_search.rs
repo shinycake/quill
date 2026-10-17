@@ -4,7 +4,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
-use quill::ids::MessageId;
+use quill::ids::{FileId, MessageId};
 use quill::state::{
     SharedMediaAction, SharedMediaItem, SharedMediaTab, SharedMediaTabStatus, SharedMediaVisual,
 };
@@ -67,6 +67,7 @@ impl QuillApp {
                 action: SharedMediaAction::Message,
                 visual: SharedMediaVisual::None,
                 meta: Default::default(),
+                file: FileId(0),
             })
             .collect();
         if let Some(state) = gallery.tabs.get_mut(SharedMediaTab::Files.index()) {

@@ -639,20 +639,38 @@ impl QuillApp {
                     .is_some_and(|message| message.is_outgoing)
             })
         });
-        let revoke_label = (all_outgoing && !session.is_saved_messages(chat_id)).then(|| {
-            match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
-                Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
-                    .user(user_id.0)
-                    .map(|user| {
-                        tr_with(
-                            keys::Q_CHAT_ALSO_DELETE_FOR,
-                            &[("first_name", &user.first_name.to_string())],
-                        )
-                    })
-                    .unwrap_or_else(|| tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into()),
-                _ => tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into(),
-            }
-        });
+        let offer_revoke = all_outgoing && !session.is_saved_messages(chat_id);
+        self.confirm_delete_ids(chat_id, ids, offer_revoke, window, cx);
+    }
+
+    /// The delete box for `ids`; `offer_revoke` adds the checked-by-default
+    /// "delete for everyone" box.
+    pub(super) fn confirm_delete_ids(
+        &mut self,
+        chat_id: ChatId,
+        ids: Vec<MessageId>,
+        offer_revoke: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.session() else {
+            return;
+        };
+        let revoke_label =
+            offer_revoke.then(
+                || match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
+                    Some(quill::telegram::envelope::ChatKind::Private { user_id }) => session
+                        .user(user_id.0)
+                        .map(|user| {
+                            tr_with(
+                                keys::Q_CHAT_ALSO_DELETE_FOR,
+                                &[("first_name", &user.first_name.to_string())],
+                            )
+                        })
+                        .unwrap_or_else(|| tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into()),
+                    _ => tr(keys::Q_CHAT_DELETE_FOR_EVERYONE).into(),
+                },
+            );
         let question = if ids.len() == 1 {
             tr(keys::SELECTED_DELETE_SURE_THIS).to_string()
         } else {

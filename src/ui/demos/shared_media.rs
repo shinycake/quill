@@ -11,7 +11,7 @@ use crate::ui::demo::demo_thumb_png_path;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
-use quill::state::{RequestPurpose, Session, SharedMediaTab};
+use quill::state::{RequestPurpose, SelectedMedia, Session, SharedMediaTab};
 use quill::telegram::client::copy_and_parse;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -287,6 +287,35 @@ impl QuillApp {
             session.open_chat(ChatId(CHAT));
             session.media.shared_media.open_for_tab(ChatId(CHAT), tab);
             fill_tab(session, &sink, &seq, tab, tab_messages(tab));
+            // QUILL_DEMO_SHARED_MEDIA_SELECT=2 ticks the first two rows.
+            let ticked: usize = std::env::var("QUILL_DEMO_SHARED_MEDIA_SELECT")
+                .ok()
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0);
+            let ids: Vec<_> = session
+                .media
+                .shared_media
+                .tab_at(tab)
+                .map(|state| {
+                    state
+                        .items
+                        .iter()
+                        .map(|i| i.message_id)
+                        .take(ticked)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let allowed = quill::telegram::envelope::MessageActions {
+                can_be_forwarded: true,
+                can_be_deleted_only_for_self: true,
+                ..Default::default()
+            };
+            for id in ids {
+                session
+                    .media
+                    .shared_media
+                    .toggle_selected(SelectedMedia::from_actions(id, Some(&allowed)));
+            }
             self.demo_ui
                 .seq
                 .store(seq.load(Ordering::SeqCst), Ordering::SeqCst);

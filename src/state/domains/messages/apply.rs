@@ -410,6 +410,9 @@ impl Session {
                 }
                 self.thread_remove(chat_id, &message_ids);
                 self.saved_remove_messages(chat_id, &message_ids);
+                self.media
+                    .shared_media
+                    .remove_messages(chat_id, &message_ids);
             }
             MessagesPayload::Messages(messages) => {
                 self.apply_messages(messages, pending, extra, seq)

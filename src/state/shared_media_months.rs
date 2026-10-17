@@ -142,6 +142,7 @@ mod tests {
             action: SharedMediaAction::Message,
             visual: SharedMediaVisual::None,
             meta: SharedMediaMeta::None,
+            file: FileId(0),
         }
     }
 

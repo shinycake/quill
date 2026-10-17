@@ -9,17 +9,16 @@
 use super::app::QuillApp;
 use super::mini_image::mini_image;
 use super::shared_media_grid_state::PageKey;
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::*;
 use gpui_kit::gpui::Size as ItemSize;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::message_a11y::format_duration_text;
 use quill::state::{
-    GRID_GAP, GRID_PAD, GridLayout, GridRow, SharedMediaItem, SharedMediaTab, SharedMediaTile,
-    TileBadge, grid_rows, month_sections,
+    GRID_GAP, GRID_PAD, GridLayout, GridRow, SharedMediaAction, SharedMediaItem, SharedMediaTab,
+    SharedMediaTile, TileBadge, grid_rows, month_sections,
 };
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -147,6 +146,9 @@ impl QuillApp {
         let message_id = item.message_id;
         let action = item.action;
         let tile = item.meta.tile();
+        let is_message = action == SharedMediaAction::Message;
+        let selected = self.shared_media_is_selected(message_id);
+        let selecting = self.shared_media_selecting();
         let files = self.session().map(|session| &session.media.files);
         let path = tile.and_then(|tile| {
             tile.thumbs.iter().find_map(|id| {
@@ -194,7 +196,8 @@ impl QuillApp {
             .into_any_element()
         });
         let badge = tile.and_then(|tile| badge_text(tile.badge));
-        base.children(blur)
+        let tile_view = base
+            .children(blur)
             .children(picture)
             .when_some(badge, |this, text| {
                 this.child(
@@ -211,22 +214,35 @@ impl QuillApp {
                 )
             })
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.activate_shared_media_item(action, message_id, cx);
-            }))
-            .context_menu({
-                let owner = cx.entity().downgrade();
-                move |menu, _, _| {
-                    let owner = owner.clone();
-                    menu.item(PopupMenuItem::new(tr(keys::Q_OPS_GO_TO_MESSAGE)).on_click(
-                        move |_, _, cx| {
-                            let _ = owner.update(cx, |this, cx| {
-                                this.jump_to_shared_media_item_ui(message_id, cx);
-                            });
-                        },
-                    ))
+                if this.shared_media_selecting() && is_message {
+                    this.toggle_shared_media_selection(message_id, cx);
+                } else {
+                    this.activate_shared_media_item(action, message_id, cx);
                 }
-            })
-            .into_any_element()
+            }))
+            .when(is_message, |this| {
+                this.on_hover(self.shared_media_hover_listener(message_id, cx))
+                    .when(selected, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .border_2()
+                                .border_color(cx.theme().primary)
+                                .bg(cx.theme().primary.opacity(0.18)),
+                        )
+                    })
+                    .when(selecting, |this| {
+                        this.child(self.shared_media_check(selected, cx))
+                    })
+            });
+        if is_message {
+            tile_view
+                .context_menu(self.shared_media_context_menu(item, cx))
+                .into_any_element()
+        } else {
+            tile_view.into_any_element()
+        }
     }
 }
 
