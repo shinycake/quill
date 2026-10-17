@@ -1,2 +1,0 @@
-# Hardware decoding toggle: FFmpeg hardware decoding on Windows and the macOS FFmpeg path
-parity:data-hw-decode
