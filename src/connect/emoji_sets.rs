@@ -212,7 +212,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let resolved = self.session.resolved_custom_emoji_ids();
         let mut ids = self
             .session
-            .unresolved_custom_emoji_ids(open_chat_ids.to_vec());
+            .unresolved_custom_emoji_ids_in(open_chat_ids.to_vec(), &resolved);
         ids.extend(
             self.session
                 .settings

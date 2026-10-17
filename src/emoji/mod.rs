@@ -430,7 +430,8 @@ impl Session {
     /// Slice S10: store a `getCustomEmojiStickers` answer in the emoji panel.
     ///
     /// A re-sent sticker replaces the old entry and moves to the end. Past
-    /// [`CUSTOM_EMOJI_CACHE_CAP`] entries the oldest are dropped; a dropped
+    /// [`CUSTOM_EMOJI_CACHE_CAP`] entries the oldest are dropped, except ids
+    /// [`Self::open_chat_custom_emoji_ids`] says are on screen; a dropped
     /// id is resolved again the next time it shows (its attempt mark is
     /// cleared so the request goes out).
     pub fn accept_custom_emoji_stickers(&mut self, stickers: Vec<StickerItem>) {
@@ -450,16 +451,33 @@ impl Session {
                 .filter(|(ix, sticker)| newest.get(&Self::custom_emoji_key(sticker)) == Some(ix))
                 .map(|(_, sticker)| sticker),
         );
-        let excess = emoji
+        let mut excess = self
+            .stickers
+            .emoji
             .custom_emoji_stickers
             .len()
             .saturating_sub(CUSTOM_EMOJI_CACHE_CAP);
-        if excess > 0 {
-            for dropped in emoji.custom_emoji_stickers.drain(..excess) {
-                if let Some(id) = dropped.custom_emoji_id {
-                    emoji.status_resolution_attempted.remove(&id);
-                }
+        if excess == 0 {
+            return;
+        }
+        // What the screen shows right now is never evicted; derived from
+        // state each time, so there is no second list to keep in sync.
+        let wanted: HashSet<i64> = self.open_chat_custom_emoji_ids().into_iter().collect();
+        let emoji = &mut self.stickers.emoji;
+        let mut dropped_ids = Vec::new();
+        emoji.custom_emoji_stickers.retain(|sticker| {
+            let visible = sticker
+                .custom_emoji_id
+                .is_some_and(|id| wanted.contains(&id));
+            if excess == 0 || visible {
+                return true;
             }
+            excess -= 1;
+            dropped_ids.extend(sticker.custom_emoji_id);
+            false
+        });
+        for id in dropped_ids {
+            emoji.status_resolution_attempted.remove(&id);
         }
     }
 
@@ -580,8 +598,17 @@ impl Session {
     }
 
     /// `ids` minus the resolved and already attempted ones, capped at 200.
-    pub fn unresolved_custom_emoji_ids(&self, mut ids: Vec<i64>) -> Vec<i64> {
-        let resolved = self.resolved_custom_emoji_ids();
+    pub fn unresolved_custom_emoji_ids(&self, ids: Vec<i64>) -> Vec<i64> {
+        self.unresolved_custom_emoji_ids_in(ids, &self.resolved_custom_emoji_ids())
+    }
+
+    /// [`Self::unresolved_custom_emoji_ids`] with the resolved set already
+    /// built by the caller.
+    pub fn unresolved_custom_emoji_ids_in(
+        &self,
+        mut ids: Vec<i64>,
+        resolved: &HashSet<i64>,
+    ) -> Vec<i64> {
         ids.retain(|id| {
             !self.stickers.emoji.status_resolution_attempted.contains(id) && !resolved.contains(id)
         });

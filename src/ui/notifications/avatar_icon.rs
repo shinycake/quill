@@ -6,10 +6,12 @@
 //! notification still shows with the app icon.
 
 use super::QuillApp;
-use gpui_kit::{AppContext, Context};
+use gpui_kit::Context;
 use image::{ImageFormat, RgbaImage, imageops};
 use quill::ids::AccountKey;
 use quill::notify::avatar::{ICON_SIZE, apply_circle_mask, existing_icon, icon_cache_path};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -57,6 +59,20 @@ fn cached_icon_for(source: &Path) -> Option<PathBuf> {
     existing_icon(Some(target))
 }
 
+/// A notification held back until its avatar finishes decoding.
+struct Waiting {
+    account: Option<AccountKey>,
+    notification: quill::notify::OsNotification,
+    locked: bool,
+}
+
+thread_local! {
+    /// Decodes in flight on the main thread, by photo path, with the
+    /// notifications waiting on each in arrival order. One decode serves
+    /// every notification for that avatar.
+    static DECODING: RefCell<HashMap<PathBuf, Vec<Waiting>>> = RefCell::new(HashMap::new());
+}
+
 impl QuillApp {
     /// Show a notification with the circular avatar made from `photo`. A
     /// cached icon shows at once; otherwise the photo decodes, scales and
@@ -79,11 +95,49 @@ impl QuillApp {
             self.show_notification_as(account.as_ref(), notification, Some(icon), locked, cx);
             return;
         }
+        let waiting = Waiting {
+            account,
+            notification,
+            locked,
+        };
+        // A decode for this avatar is already running: queue behind it.
+        let queued = DECODING.with(|map| {
+            let mut map = map.try_borrow_mut().ok()?;
+            match map.get_mut(&photo) {
+                Some(list) => {
+                    list.push(waiting);
+                    None
+                }
+                None => {
+                    map.insert(photo.clone(), Vec::new());
+                    Some(waiting)
+                }
+            }
+        });
+        let Some(first) = queued else {
+            return;
+        };
+        let key = photo.clone();
         let job = cx.background_spawn(async move { circular_icon_for(&photo) });
         Self::spawn_main(cx, async move |this, cx| {
             let icon = job.await;
+            let rest = DECODING
+                .with(|map| {
+                    map.try_borrow_mut()
+                        .ok()
+                        .and_then(|mut map| map.remove(&key))
+                })
+                .unwrap_or_default();
             let _ = this.update(cx, |app, cx| {
-                app.show_notification_as(account.as_ref(), notification, icon, locked, cx);
+                for item in std::iter::once(first).chain(rest) {
+                    app.show_notification_as(
+                        item.account.as_ref(),
+                        item.notification,
+                        icon.clone(),
+                        item.locked,
+                        cx,
+                    );
+                }
             });
         })
         .detach();

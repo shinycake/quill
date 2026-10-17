@@ -85,6 +85,40 @@ fn custom_emoji_cache_is_bounded() {
     assert!(attempted.contains(&total));
 }
 
+/// An id the screen shows survives a merge that overflows the cap; the
+/// oldest others go instead.
+#[test]
+fn visible_custom_emoji_survives_overflow() {
+    use crate::state::{MessageReactionOptions, ReactionChoice};
+    let mut session = session();
+    session.accept_custom_emoji_stickers(vec![resolved_emoji(Some(1), 1)]);
+    session.stickers.message_reaction_options = Some(MessageReactionOptions {
+        chat_id: crate::ids::ChatId(1),
+        message_id: crate::ids::MessageId(1),
+        top: vec![ReactionChoice::CustomEmoji(1)],
+        recent: Vec::new(),
+        popular: Vec::new(),
+        allow_custom_emoji: true,
+    });
+    let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .reserve(total as usize);
+    session.accept_custom_emoji_stickers(
+        (2..=total)
+            .map(|id| resolved_emoji(Some(id), id as i32))
+            .collect(),
+    );
+    let held = &session.stickers.emoji.custom_emoji_stickers;
+    assert_eq!(held.len(), CUSTOM_EMOJI_CACHE_CAP);
+    let ids = session.resolved_custom_emoji_ids();
+    assert!(ids.contains(&1));
+    assert!(!ids.contains(&2));
+    assert!(ids.contains(&total));
+}
+
 /// The ids still to resolve skip resolved and already attempted ones.
 #[test]
 fn unresolved_custom_emoji_ids_skip_resolved_and_attempted() {

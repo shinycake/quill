@@ -85,3 +85,17 @@ the PNG encode would move).
 
 Unit and driver tests above, the gate, and a demo-capture of the chat list
 and emoji panels (see the PR).
+
+## Review follow-ups
+
+- Eviction rule. The custom emoji cache still drops the oldest entries past
+  `CUSTOM_EMOJI_CACHE_CAP`, but skips every id `open_chat_custom_emoji_ids`
+  reports (open chat text and reactions, chat list previews and badges,
+  statuses, shared media captions, the open reaction picker). The protected
+  set is derived from state at each overflow, so nothing is kept in sync by
+  hand. If more than the cap is visible at once the cache holds them all.
+- The resolved-id set is built once per resolve call and passed down
+  (`unresolved_custom_emoji_ids_in`).
+- Notification avatars: one decode per uncached photo. Later notifications
+  for the same photo queue behind it and show in arrival order when it
+  lands. The unused `AppContext` import is removed.
