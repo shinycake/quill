@@ -2,7 +2,8 @@
 
 tdesktop has "Hardware accelerated video decoding" in Settings > Advanced >
 Performance (`settings_advanced.cpp` `BuildPerformanceSection`,
-`Core::Settings::hardwareAcceleratedVideo`, on by default). The media viewer
+`Core::Settings::hardwareAcceleratedVideo`, on by default on macOS and off
+elsewhere, `core_settings.h`). The media viewer
 and its picture in picture pass it as `hwAllowed` when a clip opens
 (`media_view_overlay_widget.cpp`, `media_view_pip.cpp`); inline loops,
 stickers and stories always decode in software. `MakeCodecPointer` then sets
@@ -24,17 +25,26 @@ their decoder.
   the codec supports, and a `get_format` that picks it when offered and the
   last software format otherwise. Hardware pictures are copied back (NV12
   for 8-bit), so the rest of the pipeline is unchanged.
+- tdesktop's `GetHwFormat` also tries CUDA on Windows and Linux. Quill
+  leaves it out because the FFmpeg build is LGPL with `--disable-autodetect`
+  and has no CUDA SDK to build against.
 - Failure handling: if a device can't be created or the codec has no
   hardware path, the decoder is software from the start. If a hardware
   decoder later fails (receive error, a refused packet, a failed transfer),
   the shim reopens the decoder in software once, seeks back, and drops what
   it already returned, so no picture is lost or repeated. `QvInfo.hw` drops
   to 0 then, and also when the decoder hands out software pictures on its
-  own. `QUILL_TRACE_VIDEO=1` prints `VD,opened,<codec>,hardware|software`
-  and `VD,fell back,...`.
+  own. If the software decoder won't open, the hardware one stays installed
+  with `QvInfo.hw` still 1 and the error ends the clip. `QUILL_TRACE_VIDEO=1`
+  prints `VD,opened,<codec>,hardware|software` and `VD,fell back,...`.
+- The one-time software fallback goes beyond tdesktop, which fails the video
+  when a hardware picture can't be copied back
+  (`media_streaming_video_track.cpp:512-523`, `fail(Error::InvalidData)`).
 - `quill::advanced::hardware_video` stores the choice in
   `hardware_video.json` under the app root, like `update_channel`. It is on
-  by default. `backend_ffmpeg.rs` reads it for `Purpose::Viewer` and
+  by default on macOS, off elsewhere, like tdesktop; Windows D3D11VA/DXVA2 is
+  unverified on a real GPU, so it stays opt-in until it is.
+  `backend_ffmpeg.rs` reads it for `Purpose::Viewer` and
   `ViewerLoop` only (tdesktop's scope), when a clip opens.
 - The Advanced page shows a Performance heading with the switch, above the
   Experimental settings entry (tdesktop order). The strings are tdesktop's
@@ -70,7 +80,11 @@ On this Mac, against `scripts/build-ffmpeg.sh` output with VideoToolbox:
   picture comes out as NV12. A stand-in hardware decoder whose third
   picture fails (`QV_HW_FAIL_THIRD_PICTURE`) hands over to software with the
   same pictures; a mutant that resumes from the start fails that test with
-  repeated pictures.
+  repeated pictures. A second stand-in whose software reopen also fails
+  (`QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN`) keeps the hardware decoder and its
+  flag, and a seek then plays the whole clip on it. Both stand-ins ship in
+  the shim, but the app can't reach them, since outside tests the Rust side
+  only sends `QV_HW_OFF` or `QV_HW_ALLOWED`.
 - The app on the `ready-video-controls` demo with
   `QUILL_DEMO_REAL_PLAYER=1 QUILL_VIDEO_BACKEND=ffmpeg QUILL_TRACE_VIDEO=1`
   plays the 12 s demo clip and logs `VD,opened,h264,hardware`; with
