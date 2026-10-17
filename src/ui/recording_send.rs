@@ -9,6 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer_state::DraftClear;
 use super::recording_state::{CaptureFor, CaptureMedia};
 use super::status_note::StatusNote;
 use gpui_kit::*;
@@ -207,7 +208,8 @@ impl QuillApp {
             if sent.is_ok() {
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
-                self.composer_ui.clear_draft_on_success = Some(target.chat_id);
+                self.composer_ui.clear_draft_on_success =
+                    Some(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -318,7 +320,8 @@ impl QuillApp {
             if sent.is_ok() {
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
-                self.composer_ui.clear_draft_on_success = Some(target.chat_id);
+                self.composer_ui.clear_draft_on_success =
+                    Some(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);

@@ -22,6 +22,7 @@
 
 use super::app::QuillApp;
 use super::composer_sends::SendSlot;
+use super::composer_state::DraftClear;
 use super::status_note::StatusNote;
 use super::user_error::user_error;
 use gpui_kit::*;
@@ -404,9 +405,9 @@ impl QuillApp {
             self.composer_ui.set_reply(None);
             self.clear_suggest_bar_after_send(chat_id);
         }
-        if plan.clears_draft_on_ack(left) {
-            self.composer_ui.clear_draft_on_success = Some(chat_id);
-        }
+        self.composer_ui.clear_draft_on_success = plan
+            .clears_draft_on_ack(left)
+            .then(|| DraftClear::of_text(chat_id, &origin.markup));
         if plan.clear_text {
             // `left`: the unsent parts of a split text, else nothing.
             if is_open && left.is_empty() {
@@ -461,8 +462,8 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        PrepareError, PreparedMedia, SendOrigin, SendPrepState, SentCleanup, plan_cleanup,
-        prepare_snapshots, unsent_text,
+        DraftClear, PrepareError, PreparedMedia, SendOrigin, SendPrepState, SentCleanup,
+        plan_cleanup, prepare_snapshots, unsent_text,
     };
     use crate::ui::composer_sends::SendSlot;
     use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, DraftTopic};
@@ -725,6 +726,39 @@ mod tests {
         let typed = plan_cleanup(&sent, Some("caption and more"), &[]);
         assert!(!typed.clears_draft_on_ack(""));
         assert!(!plan_cleanup(&sent, None, &[]).clears_draft_on_ack(""));
+    }
+
+    /// What `clear_after_send` stores for the ack.
+    fn flag_after(sent: &SendOrigin, text_now: &str, left: &str) -> Option<DraftClear> {
+        let plan = plan_cleanup(sent, Some(text_now), &[]);
+        plan.clears_draft_on_ack(left)
+            .then(|| DraftClear::of_text(sent.chat_id, &sent.markup))
+    }
+
+    #[test]
+    fn a_later_partial_send_cancels_the_flag_of_an_earlier_full_one() {
+        let chat = ChatId(11);
+        // Send 1 went in full and is not acknowledged yet.
+        let mut flag = flag_after(&origin(&[]), "caption", "");
+        assert_eq!(flag, Some(DraftClear::of_text(chat, "caption")));
+        // Send 2 in the same chat is partial: its leftover stays as the draft.
+        let mut second = origin(&[]);
+        second.markup = "aaaa bbbb".into();
+        flag = flag_after(&second, "aaaa bbbb", "bbbb");
+        assert_eq!(flag, None, "the earlier flag is reset");
+        // The user switched chats; ack 1 finds no flag and the leftover stays.
+        assert!(flag.is_none_or(|flag| !flag.matches(chat, Some("bbbb"))));
+    }
+
+    #[test]
+    fn the_flag_clears_only_a_draft_still_equal_to_what_was_sent() {
+        let chat = ChatId(11);
+        let flag = DraftClear::of_text(chat, "caption");
+        assert!(flag.matches(chat, Some("caption")));
+        assert!(flag.matches(chat, None));
+        assert!(!flag.matches(chat, Some("caption and more")));
+        assert!(!flag.matches(ChatId(12), Some("caption")));
+        assert!(DraftClear::whole_composer(chat).matches(chat, Some("anything")));
     }
 
     #[test]

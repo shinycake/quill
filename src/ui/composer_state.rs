@@ -8,6 +8,41 @@ use quill::composer::ComposerReplyTo;
 use quill::ids::ChatId;
 use quill::ids::MessageId;
 
+/// A draft to clear once a send is acknowledged. `sent` is the composer
+/// markup that send took: when set, the stored draft goes only while it
+/// still equals it, so text kept or typed since survives a late ack.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DraftClear {
+    pub(super) chat_id: ChatId,
+    pub(super) sent: Option<String>,
+}
+
+impl DraftClear {
+    pub(super) fn whole_composer(chat_id: ChatId) -> Self {
+        Self {
+            chat_id,
+            sent: None,
+        }
+    }
+
+    pub(super) fn of_text(chat_id: ChatId, sent: &str) -> Self {
+        Self {
+            chat_id,
+            sent: Some(sent.to_string()),
+        }
+    }
+
+    /// Whether the ack for `chat_id` may clear its draft, given the
+    /// draft text stored now.
+    pub(super) fn matches(&self, chat_id: ChatId, stored: Option<&str>) -> bool {
+        self.chat_id == chat_id
+            && self
+                .sent
+                .as_deref()
+                .is_none_or(|sent| stored.is_none_or(|stored| stored == sent))
+    }
+}
+
 pub(crate) struct ComposerUi {
     /// Phase 3.3: `/` command menu state. Open while the composer text
     /// ends with a `/`-led token and the open bot chat has commands;
@@ -75,8 +110,8 @@ pub(crate) struct ComposerUi {
     /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.
     pending_reply: Option<ComposerReplyTo>,
     /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
-    /// if the composer is still empty.
-    pub(super) clear_draft_on_success: Option<ChatId>,
+    /// if the composer is still empty, and the text that send took.
+    pub(super) clear_draft_on_success: Option<DraftClear>,
     /// A topic or thread switch asked for the new slot's draft to be put
     /// in the composer on the next frame (`restore_draft_if_pending`).
     pub(super) draft_restore_pending: bool,

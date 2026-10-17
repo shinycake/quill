@@ -25,7 +25,7 @@
 //! ownership rule) is pure so every platform tests it.
 #![deny(clippy::indexing_slicing)]
 
-use crate::lang::{keys, tr};
+use crate::lang::{keys, tr, tr_with};
 use crate::locks::LockExt;
 #[cfg(any(test, target_os = "macos"))]
 use std::path::{Path, PathBuf};
@@ -72,22 +72,24 @@ pub const fn control_kind() -> ControlKind {
 /// Status line under the control.
 pub fn status_text(state: &LinkHandlerState) -> String {
     match state {
-        LinkHandlerState::Ours => "Quill is the default app for Telegram links.".into(),
-        LinkHandlerState::Other(name) => format!("Telegram links currently open in {name}."),
-        LinkHandlerState::Unset => "No app is set for Telegram links.".into(),
+        LinkHandlerState::Ours => tr(keys::Q_PREFS_DEFAULT_APP_OURS).into(),
+        LinkHandlerState::Other(name) => {
+            tr_with(keys::Q_PREFS_DEFAULT_APP_OTHER, &[("name", name)])
+        }
+        LinkHandlerState::Unset => tr(keys::Q_PREFS_DEFAULT_APP_UNSET).into(),
         LinkHandlerState::Unavailable(why) => why.clone(),
         LinkHandlerState::Checking => tr(keys::Q_PREFS_CHECKING_THE_DEFAULT_APP).into(),
     }
 }
 
 /// What turning the setting off can and cannot do on this OS.
-pub const fn turn_off_note() -> &'static str {
+pub fn turn_off_note() -> &'static str {
     if cfg!(target_os = "macos") {
-        "To use another app, make it the default from that app."
+        tr(keys::Q_PREFS_DEFAULT_APP_TURN_OFF_MACOS)
     } else if cfg!(windows) {
-        "Turning this off removes Quill's registration."
+        tr(keys::Q_PREFS_DEFAULT_APP_TURN_OFF_WINDOWS)
     } else {
-        "Turning this off does not pick another app; choose one in your desktop settings."
+        tr(keys::Q_PREFS_DEFAULT_APP_TURN_OFF_OTHER)
     }
 }
 
@@ -268,15 +270,13 @@ pub fn app_bundle_of_exe(exe: &Path) -> Option<PathBuf> {
 #[cfg(any(test, target_os = "macos"))]
 pub fn macos_state(handler: Option<&Path>, ours: Option<&Path>) -> LinkHandlerState {
     let Some(ours) = ours else {
-        return LinkHandlerState::Unavailable(
-            "Only the installed Quill.app can be made the default.".into(),
-        );
+        return LinkHandlerState::Unavailable(tr(keys::Q_PREFS_DEFAULT_APP_INSTALLED_ONLY).into());
     };
     match handler {
         None => LinkHandlerState::Unset,
         Some(h) if h == ours => LinkHandlerState::Ours,
         Some(h) => LinkHandlerState::Other(h.file_stem().map_or_else(
-            || "another app".into(),
+            || tr(keys::Q_PREFS_DEFAULT_APP_ANOTHER_APP).into(),
             |s| s.to_string_lossy().into_owned(),
         )),
     }
@@ -308,8 +308,9 @@ mod macos_impl {
     }
 
     pub fn make_default() -> Result<(), String> {
-        let bundle = our_bundle()
-            .ok_or_else(|| "Only the installed Quill.app can be made the default.".to_string())?;
+        let bundle = our_bundle().ok_or_else(|| {
+            crate::lang::tr(crate::lang::keys::Q_PREFS_DEFAULT_APP_INSTALLED_ONLY).to_string()
+        })?;
         let app_url = NSURL::fileURLWithPath(&NSString::from_str(&bundle.to_string_lossy()));
         // The system shows its own confirmation; the result is read back by
         // `state()` afterwards, so the handler only logs a failure.
@@ -375,13 +376,18 @@ fn run_xdg_mime(args: &[&str]) -> Result<String, String> {
         if crate::child_timeout::is_timeout(&e) {
             tr(keys::Q_PREFS_DEFAULT_APP_NO_ANSWER).to_string()
         } else {
-            format!("xdg-mime is not available: {e}")
+            eprintln!("quill: xdg-mime is not available: {e}");
+            tr(keys::Q_PREFS_DEFAULT_APP_XDG_MISSING).to_string()
         }
     })?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        eprintln!(
+            "quill: xdg-mime failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        Err(tr(keys::Q_PREFS_DEFAULT_APP_TOOL_FAILED).to_string())
     }
 }
 
@@ -405,7 +411,7 @@ fn query_state() -> LinkHandlerState {
 
 #[cfg(not(any(all(target_os = "macos", feature = "ui"), windows, target_os = "linux")))]
 fn query_state() -> LinkHandlerState {
-    LinkHandlerState::Unavailable("Not available on this platform.".into())
+    LinkHandlerState::Unavailable(tr(keys::Q_PREFS_DEFAULT_APP_NOT_AVAILABLE).into())
 }
 
 const CACHE_TTL: Duration = Duration::from_secs(2);
@@ -441,37 +447,47 @@ fn lookup(cache: Option<&Cached>, generation: u64) -> (Option<LinkHandlerState>,
 const READ_ON_CALLER: bool = cfg!(target_os = "macos");
 
 /// The current handler, cached briefly so rendering never spawns a process
-/// or calls the OS per frame. Reflects external changes within a couple of
-/// seconds.
+/// or calls the OS per frame.
 ///
 /// This is called while the settings page draws (on the UI thread), and
 /// asking the OS can stall: `xdg-mime` on a wedged desktop, the registry on
 /// Windows. So there the last answer comes back at once and a stale one is
 /// read again on a thread of its own ([`refreshing`] says when the new answer
 /// is in); the first call has no answer yet and returns
-/// [`LinkHandlerState::Checking`]. macOS reads on the calling thread, at most
-/// once per [`CACHE_TTL`] (see [`READ_ON_CALLER`]): a LaunchServices lookup
-/// is a local database read, and the cache keeps it off the per-frame path.
+/// [`LinkHandlerState::Checking`]. On macOS this only reads the cache: the
+/// LaunchServices lookup runs in [`read_now`], when the dialog opens.
 pub fn state() -> LinkHandlerState {
     if let Some(pinned) = lock_demo_pin().clone() {
         return pinned;
     }
     let generation = GENERATION.load(Ordering::Acquire);
     let (cached, stale) = lookup(CACHE.lock_or_recover().as_ref(), generation);
-    if !stale {
-        return cached.unwrap_or(LinkHandlerState::Checking);
+    if stale && !READ_ON_CALLER {
+        start_refresh();
+    }
+    cached.unwrap_or(LinkHandlerState::Checking)
+}
+
+/// Asks the OS now and caches the answer. macOS reads on the calling thread
+/// (see [`READ_ON_CALLER`]), so this is for moments the user caused: the
+/// Appearance dialog opening, or a re-read after "Make default"; [`state`]
+/// itself never queries there. Elsewhere it starts a background read.
+pub fn read_now() {
+    if lock_demo_pin().is_some() {
+        return;
     }
     if READ_ON_CALLER {
+        let generation = GENERATION.load(Ordering::Acquire);
         let fresh = query_state();
         *CACHE.lock_or_recover() = Some(Cached {
             at: Instant::now(),
-            state: fresh.clone(),
+            state: fresh,
             generation,
         });
-        return fresh;
+    } else {
+        invalidate();
+        start_refresh();
     }
-    start_refresh();
-    cached.unwrap_or(LinkHandlerState::Checking)
 }
 
 /// Screenshot demos: show this state instead of reading the OS (`None` goes
@@ -521,7 +537,8 @@ fn start_refresh() {
     }
 }
 
-/// Marks the cached answer stale so the next [`state`] asks the OS again.
+/// Marks the cached answer stale so the next [`state`] asks the OS again
+/// (macOS: [`state`] never asks; [`read_now`] replaces the answer).
 /// The old answer stays to show meanwhile.
 pub fn invalidate() {
     GENERATION.fetch_add(1, Ordering::AcqRel);
@@ -534,7 +551,10 @@ fn platform_make_default() -> Result<(), String> {
 
 #[cfg(windows)]
 fn platform_make_default() -> Result<(), String> {
-    windows_impl::make_default().map_err(|e| format!("could not register Quill: {e}"))
+    windows_impl::make_default().map_err(|e| {
+        eprintln!("quill: could not register the tg: handler: {e}");
+        tr(keys::Q_PREFS_DEFAULT_APP_COULD_NOT_REGISTER).to_string()
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -545,16 +565,21 @@ fn platform_make_default() -> Result<(), String> {
         env("HOME").as_deref(),
         env("XDG_DATA_DIRS").as_deref(),
     );
-    let exe = std::env::current_exe().map_err(|e| format!("could not find Quill: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| {
+        eprintln!("quill: could not find the executable: {e}");
+        tr(keys::Q_PREFS_DEFAULT_APP_COULD_NOT_FIND_QUILL).to_string()
+    })?;
     let target = linux_launch_target(&exe, env("APPIMAGE").as_deref());
-    ensure_linux_desktop_entry(&dirs, &target)
-        .map_err(|e| format!("could not write the desktop entry: {e}"))?;
+    ensure_linux_desktop_entry(&dirs, &target).map_err(|e| {
+        eprintln!("quill: could not write the desktop entry: {e}");
+        tr(keys::Q_PREFS_DEFAULT_APP_COULD_NOT_WRITE_ENTRY).to_string()
+    })?;
     run_xdg_mime(&linux_set_args()).map(|_| ())
 }
 
 #[cfg(not(any(all(target_os = "macos", feature = "ui"), windows, target_os = "linux")))]
 fn platform_make_default() -> Result<(), String> {
-    Err("Not available on this platform.".into())
+    Err(tr(keys::Q_PREFS_DEFAULT_APP_NOT_AVAILABLE).to_string())
 }
 
 /// Makes Quill the default `tg:` handler (user-initiated only).
@@ -568,7 +593,10 @@ pub fn make_default() -> Result<(), String> {
 /// no-op elsewhere because there is no previous handler to restore.
 pub fn release() -> Result<(), String> {
     #[cfg(windows)]
-    let result = windows_impl::release().map_err(|e| format!("could not remove registration: {e}"));
+    let result = windows_impl::release().map_err(|e| {
+        eprintln!("quill: could not remove the registration: {e}");
+        tr(keys::Q_PREFS_DEFAULT_APP_COULD_NOT_REMOVE).to_string()
+    });
     #[cfg(not(windows))]
     let result = Ok(());
     invalidate();

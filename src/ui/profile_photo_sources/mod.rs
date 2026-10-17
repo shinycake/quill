@@ -62,7 +62,10 @@ fn run_ffmpeg(args: &[String], log: &Path) -> Result<(), String> {
         args,
         side.saturating_mul(side),
     )?;
-    let log_file = std::fs::File::create(log).map_err(|e| e.to_string())?;
+    let log_file = std::fs::File::create(log).map_err(|e| {
+        eprintln!("quill: could not create the ffmpeg log: {e}");
+        quill::lang::tr(quill::lang::keys::Q_OPS_VIDEO_COULD_NOT_PROCESS).to_string()
+    })?;
     let mut command = quill::video_encoder::quiet_command_for(&job.program);
     command
         .args(["-hide_banner", "-loglevel", "error"])
@@ -74,7 +77,8 @@ fn run_ffmpeg(args: &[String], log: &Path) -> Result<(), String> {
         if quill::child_timeout::is_timeout(&e) {
             quill::lang::tr(quill::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string()
         } else {
-            e.to_string()
+            eprintln!("quill: could not run ffmpeg: {e}");
+            quill::lang::tr(quill::lang::keys::Q_OPS_VIDEO_TOOL_MISSING).to_string()
         }
     })?;
     if status.success() {

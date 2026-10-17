@@ -11,6 +11,7 @@ use super::message_text::rich_block_element;
 use super::nested_click::SwallowPress;
 use super::scheduled::ScheduleTarget;
 use super::*;
+use crate::ui::composer_state::DraftClear;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -531,7 +532,7 @@ impl QuillApp {
                 self.composer_ui.set_reply(None);
                 self.composer_ui.rich_editor_open = false;
                 self.clear_suggest_bar_after_send(chat_id);
-                self.composer_ui.clear_draft_on_success = Some(chat_id);
+                self.composer_ui.clear_draft_on_success = Some(DraftClear::whole_composer(chat_id));
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);

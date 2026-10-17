@@ -481,11 +481,17 @@ fn run_program(
     command.args(args);
     match crate::child_timeout::output_within(&mut command, limit) {
         Ok(output) if output.status.success() => Ok(()),
-        Ok(_) => Err("ffmpeg could not process this video".into()),
+        Ok(output) => {
+            eprintln!(
+                "quill: ffmpeg failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_COULD_NOT_PROCESS).to_string())
+        }
         Err(err) if crate::child_timeout::is_timeout(&err) => {
             Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_TOOL_TOOK_TOO_LONG).to_string())
         }
-        Err(_) => Err("ffmpeg isn't available".to_string()),
+        Err(_) => Err(crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_TOOL_MISSING).to_string()),
     }
 }
 

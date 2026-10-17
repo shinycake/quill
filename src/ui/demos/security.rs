@@ -119,7 +119,7 @@ impl QuillApp {
         quill::link_handler::demo_pin(
             checking.then_some(quill::link_handler::LinkHandlerState::Checking),
         );
-        self.settings.appearance_open = true;
+        self.open_appearance();
         self.connection
             .set_note(StatusNote::silent("screenshot demo — default app row"));
     }

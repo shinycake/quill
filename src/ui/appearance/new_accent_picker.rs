@@ -376,7 +376,7 @@ impl QuillApp {
                             cx.background_executor()
                                 .timer(std::time::Duration::from_secs(secs))
                                 .await;
-                            link_handler::invalidate();
+                            link_handler::read_now();
                             let _ = this.update(cx, |_, cx| cx.notify());
                         })
                         .detach();

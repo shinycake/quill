@@ -244,7 +244,7 @@ impl QuillApp {
                 cx.notify();
             }
             NavigationAction::Appearance => {
-                self.settings.appearance_open = true;
+                self.open_appearance();
                 cx.notify();
             }
             NavigationAction::Privacy => {
