@@ -441,7 +441,7 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, _: &ViewerZoomReset, _, cx| {
                 if this.viewer.state.is_open() {
-                    this.viewer_reset_zoom(cx);
+                    this.viewer_toggle_natural_zoom(cx);
                 } else {
                     cx.propagate();
                 }

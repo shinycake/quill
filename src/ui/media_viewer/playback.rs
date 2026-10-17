@@ -101,6 +101,7 @@ impl QuillApp {
             ViewerKeyAction::SeekBy(secs) => self.seek_viewer_by(secs, cx),
             ViewerKeyAction::SeekToFraction(fraction) => self.seek_viewer_to_fraction(fraction, cx),
             ViewerKeyAction::ToggleFullscreen => self.viewer_toggle_fullscreen(window, cx),
+            ViewerKeyAction::ResetZoom => self.viewer_toggle_natural_zoom(cx),
         }
         true
     }
@@ -598,7 +599,18 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Parity slice 5: reset zoom/pan to fit (double-click / `0`).
+    /// `0` and Ctrl+0 (tdesktop `zoomReset`): natural size, or back to fit
+    /// from it. Video full screen keeps its zoom, as in tdesktop.
+    pub(in crate::ui) fn viewer_toggle_natural_zoom(&mut self, cx: &mut Context<Self>) {
+        if self.viewer.extra.video_fullscreen.is_on() {
+            return;
+        }
+        self.viewer.zoom.toggle_natural(self.viewer.frame);
+        self.viewer.drag = None;
+        cx.notify();
+    }
+
+    /// Parity slice 5: reset zoom/pan to fit (double-click, Reset button).
     pub(in crate::ui) fn viewer_reset_zoom(&mut self, cx: &mut Context<Self>) {
         self.viewer.zoom.reset();
         self.viewer.drag = None;

@@ -1,7 +1,7 @@
 //! The viewer's `+` / `-` keys step through tdesktop's zoom levels with a
-//! fit stop on the way, and Cmd (Ctrl) + wheel still zooms
-//! continuously (needs the `demo-capture` feature for gpui-kit's test
-//! support).
+//! fit stop on the way, `0` and Ctrl+0 toggle natural size, and Cmd
+//! (Ctrl) + wheel still zooms continuously (needs the `demo-capture`
+//! feature for gpui-kit's test support).
 use super::wheel_ui_tests::{new_app, notch, settle};
 use crate::ui::app::QuillApp;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
@@ -128,4 +128,44 @@ fn cmd_wheel_still_zooms_continuously(cx: &mut TestAppContext) {
         close(scale(&app, vcx), next),
         "+ from between stops goes to the next one"
     );
+}
+
+/// Cmd+0 on macOS, Ctrl+0 elsewhere.
+fn primary_zero() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-0"
+    } else {
+        "ctrl-0"
+    }
+}
+
+fn at_fit(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| app.viewer.zoom.zoom == 1.0)
+}
+
+#[gpui_kit::test]
+fn zero_and_primary_zero_toggle_fit_and_natural_size(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8911, WIDE);
+    open(&app, vcx, 8911);
+
+    press(vcx, "0");
+    assert!(close(scale(&app, vcx), 1.0), "fit to natural size");
+    assert_eq!(label(&app, vcx), 100);
+    press(vcx, "0");
+    assert!(at_fit(&app, vcx), "natural size back to fit");
+
+    press(vcx, primary_zero());
+    assert!(close(scale(&app, vcx), 1.0), "Ctrl+0 too");
+    press(vcx, primary_zero());
+    assert!(at_fit(&app, vcx));
+    assert!(
+        app.read_with(vcx, |app, _| app.viewer.state.is_open()),
+        "the viewer kept the chord from Saved Messages"
+    );
+
+    press(vcx, "= =");
+    press(vcx, "0");
+    assert!(close(scale(&app, vcx), 1.0), "from 2x to natural size");
 }

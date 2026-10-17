@@ -116,6 +116,11 @@ pub enum ViewerKeyAction {
     SeekToFraction(f64),
     /// Alt/Ctrl(Cmd) + Enter.
     ToggleFullscreen,
+    /// Ctrl+0 (Cmd+0 on macOS), on any item: natural size, or back to fit
+    /// from it (tdesktop `filterApplicationEvent` calls `zoomReset`). It
+    /// is handled here, before the app's bindings, because the same chord
+    /// opens Saved Messages when the viewer is closed.
+    ResetZoom,
 }
 
 /// Modifier keys of a viewer keystroke; `primary` is Cmd on macOS and
@@ -134,7 +139,8 @@ impl ViewerKeyMods {
 }
 
 /// Map a keystroke (`key` as GPUI names it: "space", "enter", "k", "left",
-/// "5") to the clip action it triggers, for a viewer showing `kind`.
+/// "5") to the viewer action it triggers, for a viewer showing `kind`.
+/// Ctrl+0 works on every item; the rest are clip keys.
 /// `video_fullscreen` is the viewer's video full-screen mode. `None` when
 /// the key is not a playback key (it then reaches the normal bindings).
 /// `paused` is whether the clip is paused (frame step works only then).
@@ -145,6 +151,9 @@ pub fn viewer_key_action(
     video_fullscreen: bool,
     paused: bool,
 ) -> Option<ViewerKeyAction> {
+    if key == "0" && mods.primary && !mods.alt && !mods.shift {
+        return Some(ViewerKeyAction::ResetZoom);
+    }
     if !kind.is_playable() {
         return None;
     }
@@ -353,6 +362,33 @@ mod tests {
             viewer_key_action("k", ctrl, MediaViewerKind::Video, false, false),
             None
         );
+    }
+
+    #[test]
+    fn primary_zero_resets_zoom_on_every_item() {
+        use MediaViewerKind::{Photo, Video};
+        let primary = ViewerKeyMods {
+            primary: true,
+            ..Default::default()
+        };
+        for (kind, fullscreen) in [(Photo, false), (Video, false), (Video, true)] {
+            assert_eq!(
+                viewer_key_action("0", primary, kind, fullscreen, false),
+                Some(ViewerKeyAction::ResetZoom)
+            );
+        }
+        // Plain 0 is the rebindable zoom reset on a photo and a seek in
+        // full screen; Ctrl+Shift+0 is not the reset.
+        assert_eq!(keys("0", Photo, false), None);
+        assert_eq!(
+            keys("0", Video, true),
+            Some(ViewerKeyAction::SeekToFraction(0.0))
+        );
+        let shifted = ViewerKeyMods {
+            shift: true,
+            ..primary
+        };
+        assert_eq!(viewer_key_action("0", shifted, Photo, false, false), None);
     }
 
     #[test]

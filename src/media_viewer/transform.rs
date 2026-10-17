@@ -266,6 +266,22 @@ impl ViewerZoom {
         self.set_zoom(target, (frame.0 / 2.0, frame.1 / 2.0), frame);
     }
 
+    /// `0` and Ctrl+0 (tdesktop `zoomReset`): natural size, or back to fit
+    /// from natural size, centered in the frame. Without a ladder it is
+    /// [`Self::reset`].
+    pub fn toggle_natural(&mut self, frame: (f32, f32)) {
+        let Some(levels) = self.levels else {
+            self.reset();
+            return;
+        };
+        self.zoom = levels.reset(self.zoom * levels.fit()) / levels.fit();
+        self.pan = (
+            (frame.0 - frame.0 * self.zoom) / 2.0,
+            (frame.1 - frame.1 * self.zoom) / 2.0,
+        );
+        self.clamp_pan(frame);
+    }
+
     /// Multiply the zoom by `factor`, keeping the point `anchor` (relative
     /// to the visual container's top-left, e.g. the pointer) fixed on
     /// screen. The result stays inside the wheel limits, or moves toward
@@ -636,6 +652,29 @@ mod tests {
         assert_eq!(zoom.pan, centered);
         zoom.reset();
         assert_eq!(zoom, ViewerZoom::fitted(levels));
+    }
+
+    #[test]
+    fn reset_toggles_natural_and_fit_like_tdesktop() {
+        let levels = ZoomLevels::new((1000.0, 500.0), (400.0, 400.0)).unwrap();
+        assert_eq!(levels.reset(levels.fit()), 1.0, "fit goes to natural");
+        assert_eq!(levels.reset(1.0), levels.fit(), "natural goes back to fit");
+        assert_eq!(levels.reset(3.0), 1.0, "anything else to natural");
+        let frame = (400.0, 200.0);
+        let mut zoom = ViewerZoom::fitted(Some(levels));
+        zoom.step(true, frame);
+        zoom.pan_by(-500.0, -500.0, frame);
+        zoom.toggle_natural(frame);
+        assert!((zoom.percent() - 100.0).abs() < 1e-3);
+        // Natural is 2.5x the fit box: centered, not where the pan was.
+        assert!((zoom.pan.0 - (400.0 - 1000.0) / 2.0).abs() < 1e-3);
+        assert!((zoom.pan.1 - (200.0 - 500.0) / 2.0).abs() < 1e-3);
+        zoom.toggle_natural(frame);
+        assert_eq!(zoom, ViewerZoom::fitted(Some(levels)));
+        let mut unknown = ViewerZoom::new();
+        unknown.step(true, frame);
+        unknown.toggle_natural(frame);
+        assert_eq!(unknown, ViewerZoom::new(), "no ladder: back to fit");
     }
 
     #[test]
