@@ -701,9 +701,6 @@ static int restart(Ctx *c, double target, double vskip, double askip) {
 }
 
 static int fall_back_to_software(Ctx *c) {
-  c->hw_fmt = AV_PIX_FMT_NONE;
-  c->stand_in_pictures_left = 0;
-  c->info.hw = 0;
   int code = AVERROR_DECODER_NOT_FOUND;
   AVCodecContext *dec =
       c->stand_in_reopen_fails
@@ -713,10 +710,15 @@ static int fall_back_to_software(Ctx *c) {
     return code;
   avcodec_free_context(&c->vdec);
   c->vdec = dec;
+  c->hw_fmt = AV_PIX_FMT_NONE;
+  c->stand_in_pictures_left = 0;
+  c->info.hw = 0;
   double after_picture = c->vskip > c->vnext ? c->vskip : c->vnext;
   double after_sound = c->askip > c->anext ? c->askip : c->anext;
   double target =
       c->adec && after_sound < after_picture ? after_sound : after_picture;
+  /* If this seek fails the software decoder stays: the error ends playback,
+   * and the next qv_seek restarts it from a clean state. */
   return restart(c, target, after_picture, after_sound);
 }
 
