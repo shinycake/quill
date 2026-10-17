@@ -1,3 +1,0 @@
-# Stories still loading when the viewer opens join its list as they arrive.
-# README wording after the tick: Stories that finish loading after the viewer opens join its list
-parity:stories-viewer-late-stories
