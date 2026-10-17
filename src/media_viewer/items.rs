@@ -10,6 +10,7 @@ pub fn profile_photo_items(photos: &[crate::state::ProfilePhoto]) -> Vec<MediaVi
     photos
         .iter()
         .map(|photo| MediaViewerItem {
+            group: None,
             file_name: None,
             chat_id: ChatId(0),
             message_id: MessageId(photo.id),
@@ -41,7 +42,10 @@ pub fn collect_media_items(messages: &[HistoryMessage]) -> Vec<MediaViewerItem> 
                 .filter_map(|content| {
                     let mut part = message.clone();
                     part.content = content.clone();
-                    media_viewer_item(&part)
+                    media_viewer_item(&part).map(|item| MediaViewerItem {
+                        group: Some(ViewerGroup::PaidMedia(message.id)),
+                        ..item
+                    })
                 })
                 .collect::<Vec<_>>(),
             None => media_viewer_item(message).into_iter().collect(),
@@ -84,6 +88,7 @@ fn photo_item(
         }
     }
     Some(MediaViewerItem {
+        group: None,
         file_name: None,
         chat_id,
         message_id,
@@ -145,6 +150,7 @@ pub fn poll_option_viewer_item(
                 return None;
             }
             Some(MediaViewerItem {
+                group: None,
                 file_name: None,
                 chat_id,
                 message_id,
@@ -170,6 +176,7 @@ pub fn poll_option_viewer_item(
                 return None;
             }
             Some(MediaViewerItem {
+                group: None,
                 file_name: None,
                 chat_id,
                 message_id,
@@ -196,7 +203,15 @@ pub fn poll_option_viewer_item(
 }
 
 fn media_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
-    viewer_item_for(message, false)
+    viewer_item_for(message, false).map(|item| MediaViewerItem {
+        group: album_group(message),
+        ..item
+    })
+}
+
+/// The album a message is part of (`media_album_id`, 0 for none).
+pub(super) fn album_group(message: &HistoryMessage) -> Option<ViewerGroup> {
+    (message.media_album_id != 0).then_some(ViewerGroup::Album(message.media_album_id))
 }
 
 fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<MediaViewerItem> {
@@ -223,6 +238,7 @@ fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<Media
                 return None;
             }
             Some(MediaViewerItem {
+                group: None,
                 file_name: None,
                 chat_id: message.chat_id,
                 message_id: message.id,
@@ -254,6 +270,7 @@ fn viewer_item_for(message: &HistoryMessage, allow_secret: bool) -> Option<Media
                 return None;
             }
             Some(MediaViewerItem {
+                group: None,
                 file_name: None,
                 chat_id: message.chat_id,
                 message_id: message.id,
@@ -540,6 +557,25 @@ mod tests {
         assert_eq!(
             decide_viewer_video_start(gif, true),
             ViewerVideoStart::PlayNow
+        );
+    }
+
+    #[test]
+    fn album_items_carry_their_album_and_loose_ones_none() {
+        let mut first = photo_message(7, 1, vec![(60, 800, 600)], "");
+        let mut second = video_message(7, 2, 50, Some(51));
+        first.media_album_id = 77;
+        second.media_album_id = 77;
+        let loose = photo_message(7, 3, vec![(62, 800, 600)], "");
+        let items = collect_media_items(&[first, second, loose]);
+        let groups: Vec<_> = items.iter().map(|item| item.group).collect();
+        assert_eq!(
+            groups,
+            vec![
+                Some(ViewerGroup::Album(77)),
+                Some(ViewerGroup::Album(77)),
+                None
+            ]
         );
     }
 }

@@ -118,6 +118,7 @@ pub fn file_viewer_item(message: &HistoryMessage) -> Option<MediaViewerItem> {
         display_file_ids.extend(thumb.map(|thumb| thumb.file_id));
     }
     Some(MediaViewerItem {
+        group: super::items::album_group(message),
         chat_id: message.chat_id,
         message_id: message.id,
         kind: if picture {
