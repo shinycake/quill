@@ -1,4 +1,5 @@
 use super::*;
+use crate::ids::{ChatId, MessageId};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::Value;
 
@@ -201,5 +202,48 @@ fn deep_link_info_parses_text_and_tg_entities() {
             );
         }
         other => panic!("{other:?}"),
+    }
+}
+
+fn forward_info_json(source: &str) -> Value {
+    serde_json::from_str(&format!(
+        r#"{{"@type":"messageForwardInfo","date":5,
+            "origin":{{"@type":"messageOriginUser","sender_user_id":9}}{source}}}"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn forward_source_is_parsed_when_present() {
+    let json = forward_info_json(r#","source":{"chat_id":-100,"message_id":4096}"#);
+    let info = message::parse_forward_info(Some(&json)).unwrap();
+    assert_eq!(info.source, Some((ChatId(-100), MessageId(4096))));
+}
+
+#[test]
+fn forward_source_is_none_when_missing_or_null() {
+    let missing = forward_info_json("");
+    assert_eq!(
+        message::parse_forward_info(Some(&missing)).unwrap().source,
+        None
+    );
+    let null = forward_info_json(r#","source":null"#);
+    assert_eq!(
+        message::parse_forward_info(Some(&null)).unwrap().source,
+        None
+    );
+}
+
+#[test]
+fn forward_source_with_zero_ids_is_none() {
+    for source in [
+        r#","source":{"chat_id":0,"message_id":4096}"#,
+        r#","source":{"chat_id":-100,"message_id":0}"#,
+        r#","source":{"chat_id":0,"message_id":0}"#,
+        r#","source":{}"#,
+    ] {
+        let json = forward_info_json(source);
+        let info = message::parse_forward_info(Some(&json)).unwrap();
+        assert_eq!(info.source, None, "{source}");
     }
 }

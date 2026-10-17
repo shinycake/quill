@@ -45,14 +45,22 @@ pub struct FastShareFacts {
     /// The server has the message (not still sending).
     pub sent: bool,
     pub outgoing: bool,
-    /// Forwarding is allowed: not protected content, not a secret chat.
+    /// Forwarding is allowed: not protected content, not a secret chat, not
+    /// an anchored ephemeral message, and `messageProperties.can_be_forwarded`
+    /// when TDLib's answer for the message is cached.
     pub forwardable: bool,
-    /// The message is a forward whose original sender is a broadcast channel.
+    /// The message is a forward whose original sender is a broadcast channel
+    /// and which does not show the forwarder (tdesktop
+    /// `showForwardsFromSender`: Saved Messages, Replies, verification codes).
     pub forwarded_from_channel: bool,
+    /// The row sits in a reply thread (comments); tdesktop `Context::Replies`
+    /// never shows the go-to-original button there.
+    pub reply_thread: bool,
     /// Where a forward was made from (tdesktop `savedFromPeer` and
     /// `savedFromMsgId`), set for forwards in Saved Messages.
     pub forward_source: Option<(ChatId, MessageId)>,
-    /// The content is media that a bot sent (tdesktop `allowsFastShare`).
+    /// The content is one a bot sent that `allowsFastShare`: files, photos,
+    /// GIFs and videos, games, albums and link previews.
     pub media: bool,
 }
 
@@ -73,7 +81,9 @@ pub fn fast_share(facts: FastShareFacts) -> Option<FastShare> {
     if !facts.sent {
         return None;
     }
-    if let Some((chat_id, message_id)) = facts.forward_source {
+    if let Some((chat_id, message_id)) = facts.forward_source
+        && !facts.reply_thread
+    {
         return Some(FastShare::GoToOriginal(chat_id, message_id));
     }
     if !facts.forwardable {
@@ -101,6 +111,7 @@ mod tests {
             outgoing: false,
             forwardable: true,
             forwarded_from_channel: false,
+            reply_thread: false,
             forward_source: None,
             media: false,
         }
@@ -156,6 +167,16 @@ mod tests {
             Some(FastShare::GoToOriginal(ChatId(7), MessageId(9)))
         );
         f.sent = false;
+        assert_eq!(fast_share(f), None);
+    }
+
+    #[test]
+    fn reply_threads_never_go_to_the_original() {
+        let mut f = facts(FastShareChat::Channel);
+        f.forward_source = Some((ChatId(7), MessageId(9)));
+        f.reply_thread = true;
+        assert_eq!(fast_share(f), Some(FastShare::Share));
+        f.chat = FastShareChat::Other;
         assert_eq!(fast_share(f), None);
     }
 
