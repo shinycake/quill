@@ -193,7 +193,7 @@ impl Session {
                 self.remember_files(&message.files);
                 let row = history_message(message, false);
                 self.index_poll(&row);
-                let history = self.histories.entry(chat_id.0).or_default();
+                let history = self.history_entry(chat_id);
                 history.replace_id(old_message_id, row.clone());
                 // Parity slice 4: the pending row in the topic's history
                 // resolves the same way (the succeeded message carries its
@@ -245,7 +245,7 @@ impl Session {
                 let mut row = history_message(message, true);
                 row.failed = true;
                 self.index_poll(&row);
-                let history = self.histories.entry(chat_id.0).or_default();
+                let history = self.history_entry(chat_id);
                 history.replace_id(old_message_id, row.clone());
                 // Parity slice 4: the failed pending row shows in the topic
                 // view too.
@@ -381,11 +381,13 @@ impl Session {
                 if let Some(list) = self.messages.pinned_messages.get_mut(&chat_id.0) {
                     list.retain(|message| !message_ids.contains(&message.id));
                 }
-                let history = self.histories.entry(chat_id.0).or_default();
+                self.history_entry(chat_id);
                 for id in message_ids.iter().copied() {
                     // Permanent or "became inaccessible": either way the
                     // row must not come back from a stale page.
-                    history.remove(id, true);
+                    if let Some(history) = self.histories.get_mut(&chat_id.0) {
+                        history.remove(id, true);
+                    }
                     if is_permanent
                         && matches!(
                             self.search.chat_search.jump,
@@ -440,6 +442,14 @@ impl Session {
                 }) = pending.map(|p| p.purpose)
                 {
                     self.accept_replied_message(chat_id, message_id, message);
+                    return;
+                }
+                if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+                    chat_id,
+                    message_id,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.accept_composer_reply_target(chat_id, message_id, message);
                     return;
                 }
                 // M1 fix-up: editing a scheduled send returns the edited

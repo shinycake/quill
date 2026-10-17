@@ -34,6 +34,23 @@ fn live(chat: i64, id: i64) -> ParsedMessage {
     }
 }
 
+/// The frame settles the release queue once the UI's claims are in
+/// (`Session::set_history_holds`); a test without claims does the same.
+fn settle(session: &mut Session) {
+    let holds: Vec<ChatId> = session.history_pruning.held_chats().collect();
+    session.set_history_holds(holds);
+}
+
+fn switch(session: &mut Session, chat: i64) {
+    session.open_chat(ChatId(chat));
+    settle(session);
+}
+
+fn leave(session: &mut Session) {
+    session.leave_open_chat();
+    settle(session);
+}
+
 fn feed(session: &mut Session, chat: i64, count: i64) {
     for id in 1..=count {
         session.upsert_message(live(chat, id), false);
@@ -69,17 +86,17 @@ fn is_closed_tail(session: &Session, chat: i64) -> bool {
 #[test]
 fn closing_a_chat_trims_it_to_a_tail_and_reopening_keeps_it() {
     let (mut session, _sink) = session();
-    session.open_chat(ChatId(7));
+    switch(&mut session, 7);
     feed(&mut session, 7, 200);
     assert_eq!(len(&session, 7), 200, "an open chat keeps every row");
-    session.open_chat(ChatId(8));
+    switch(&mut session, 8);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
     let history = &session.histories[&7];
     assert_eq!(history.newest_id(), Some(MessageId(200)));
     assert_eq!(history.oldest_id(), Some(MessageId(141)));
     assert!(!history.loaded_complete, "older rows page back in");
     assert!(is_closed_tail(&session, 7));
-    session.open_chat(ChatId(7));
+    switch(&mut session, 7);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP, "shown from the tail");
     assert!(!session.history_loading(ChatId(7)));
     assert!(
@@ -91,9 +108,9 @@ fn closing_a_chat_trims_it_to_a_tail_and_reopening_keeps_it() {
 #[test]
 fn a_short_history_is_untouched_by_closing() {
     let (mut session, _sink) = session();
-    session.open_chat(ChatId(7));
+    switch(&mut session, 7);
     feed(&mut session, 7, 10);
-    session.leave_open_chat();
+    leave(&mut session);
     assert_eq!(len(&session, 7), 10);
 }
 
@@ -107,12 +124,12 @@ fn leaving_a_chat_drops_its_history_once_nothing_shows_it() {
         &sink,
         r#"{"@type":"updateNewChat","chat":{"id":-100500,"title":"Gone","type":{"@type":"chatTypeSupergroup","supergroup_id":500,"is_channel":true},"unread_count":0}}"#,
     );
-    session.open_chat(ChatId(-100500));
+    switch(&mut session, -100500);
     feed(&mut session, -100500, 30);
     if let Some(chat) = session.chats.get_mut(&-100500) {
         chat.set_member_status(ChannelMemberStatus::Left, None);
     }
-    session.open_chat(ChatId(8));
+    switch(&mut session, 8);
     assert!(!session.histories.contains_key(&-100500));
     assert!(!is_closed_tail(&session, -100500));
 }
@@ -130,18 +147,19 @@ fn a_deleted_chat_drops_history_and_topics() {
 #[test]
 fn views_that_show_a_chat_keep_it_whole() {
     let (mut session, _sink) = session();
-    session.open_chat(ChatId(7));
+    switch(&mut session, 7);
     feed(&mut session, 7, 200);
     // The chat also shows in a window of its own: leaving the main window
     // keeps every row.
     assert!(session.open_window_chat(ChatId(7)));
-    session.open_chat(ChatId(8));
+    switch(&mut session, 8);
     assert_eq!(len(&session, 7), 200);
     // Closing the window is what releases it.
     assert!(session.close_window_chat(ChatId(7)));
+    settle(&mut session);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
     // Live rows into a shown chat are never tail-trimmed.
-    session.open_chat(ChatId(9));
+    switch(&mut session, 9);
     feed(&mut session, 9, 300);
     assert_eq!(len(&session, 9), 300);
 }
@@ -149,19 +167,19 @@ fn views_that_show_a_chat_keep_it_whole() {
 #[test]
 fn a_held_chat_is_never_pruned() {
     let (mut session, _sink) = session();
-    session.open_chat(ChatId(7));
+    switch(&mut session, 7);
     feed(&mut session, 7, 200);
     session.set_history_holds([ChatId(7)]);
-    session.open_chat(ChatId(8));
+    switch(&mut session, 8);
     assert_eq!(len(&session, 7), 200);
     // Live rows keep the page cap, not the closed tail.
     feed(&mut session, 7, 300);
     assert_eq!(len(&session, 7), 300);
-    // Letting go makes it prunable at the next close, never before.
+    // Letting go releases the chat that closed while held, and puts it in
+    // the LRU.
     session.set_history_holds([]);
-    session.open_chat(ChatId(7));
-    session.open_chat(ChatId(8));
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
+    assert!(is_closed_tail(&session, 7));
 }
 
 #[test]
@@ -178,10 +196,10 @@ fn the_least_recently_used_closed_chat_is_dropped_past_the_bound() {
     let (mut session, _sink) = session();
     let total = CLOSED_CHATS_MAX as i64 + 4;
     for chat in 1..=total {
-        session.open_chat(ChatId(chat));
+        switch(&mut session, chat);
         feed(&mut session, chat, 80);
     }
-    session.leave_open_chat();
+    leave(&mut session);
     let kept: Vec<ChatId> = session.history_pruning.closed_chats().collect();
     assert_eq!(kept.len(), CLOSED_CHATS_MAX);
     assert_eq!(kept.first(), Some(&ChatId(total)), "most recent first");
@@ -200,13 +218,13 @@ fn the_least_recently_used_closed_chat_is_dropped_past_the_bound() {
 #[test]
 fn a_closed_chat_with_an_unsent_message_is_never_dropped_whole() {
     let (mut session, _sink) = session();
-    session.open_chat(ChatId(1));
+    switch(&mut session, 1);
     session.upsert_message(live(1, -5), true);
     for chat in 2..=(CLOSED_CHATS_MAX as i64 + 6) {
-        session.open_chat(ChatId(chat));
+        switch(&mut session, chat);
         feed(&mut session, chat, 80);
     }
-    session.leave_open_chat();
+    leave(&mut session);
     assert!(session.histories.contains_key(&1));
     assert!(session.histories[&1].messages.contains_key(&-5));
 }
@@ -215,16 +233,16 @@ fn a_closed_chat_with_an_unsent_message_is_never_dropped_whole() {
 fn recent_live_activity_keeps_a_chat_in_the_lru() {
     let (mut session, _sink) = session();
     for chat in 1..=CLOSED_CHATS_MAX as i64 {
-        session.open_chat(ChatId(chat));
+        switch(&mut session, chat);
         feed(&mut session, chat, 80);
     }
-    session.leave_open_chat();
+    leave(&mut session);
     // Chat 1 is the oldest; a live message makes it the newest.
     session.upsert_message(live(1, 81), false);
     let extra = CLOSED_CHATS_MAX as i64 + 1;
-    session.open_chat(ChatId(extra));
+    switch(&mut session, extra);
     feed(&mut session, extra, 80);
-    session.leave_open_chat();
+    leave(&mut session);
     assert!(session.histories.contains_key(&1));
     assert!(
         !session.histories.contains_key(&2),
@@ -235,18 +253,20 @@ fn recent_live_activity_keeps_a_chat_in_the_lru() {
 #[test]
 fn leaving_a_topic_trims_it_and_the_open_topic_stays_whole() {
     let (mut session, _sink) = session();
-    session.open_chat(ChatId(7));
+    switch(&mut session, 7);
     topic_with(&mut session, 7, 1, 200);
     topic_with(&mut session, 7, 2, 200);
     session.select_topic(ChatId(7), 1);
     assert_eq!(session.threads.topic_histories[&(7, 1)].messages.len(), 200);
     session.select_topic(ChatId(7), 2);
+    settle(&mut session);
     let left = &session.threads.topic_histories[&(7, 1)];
     assert_eq!(left.messages.len(), CLOSED_TAIL_KEEP);
     assert!(!left.loaded_complete);
     assert_eq!(left.next_from_message_id, MessageId(141), "paging resumes");
     assert_eq!(session.threads.topic_histories[&(7, 2)].messages.len(), 200);
     session.deselect_topic();
+    settle(&mut session);
     assert_eq!(
         session.threads.topic_histories[&(7, 2)].messages.len(),
         CLOSED_TAIL_KEEP
@@ -264,12 +284,12 @@ fn leaving_a_topic_trims_it_and_the_open_topic_stays_whole() {
 #[test]
 fn closing_a_chat_shrinks_its_topics_and_the_topic_lru_is_bounded() {
     let (mut session, _sink) = session();
-    session.open_chat(ChatId(7));
+    switch(&mut session, 7);
     let topics = CLOSED_TOPICS_MAX as i32 + 3;
     for topic in 1..=topics {
         topic_with(&mut session, 7, topic, 100);
     }
-    session.open_chat(ChatId(8));
+    switch(&mut session, 8);
     assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX);
     assert!(
         session
@@ -277,5 +297,104 @@ fn closing_a_chat_shrinks_its_topics_and_the_topic_lru_is_bounded() {
             .topic_histories
             .values()
             .all(|history| history.messages.len() == CLOSED_TAIL_KEEP)
+    );
+}
+
+#[test]
+fn a_hold_set_in_the_same_event_survives_an_immediate_chat_switch() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    feed(&mut session, 7, 200);
+    // Claim and switch before the frame syncs the holds: nothing trims yet.
+    session.open_chat(ChatId(8));
+    assert_eq!(len(&session, 7), 200, "the trim waits for the claims");
+    // A live message meanwhile keeps the page cap, not the closed tail.
+    feed(&mut session, 7, 300);
+    assert_eq!(len(&session, 7), 300);
+    assert!(session.history_pruning.release_pending(ChatId(7)));
+    // The frame brings the claim in: the chat stays whole.
+    session.set_history_holds([ChatId(7)]);
+    assert_eq!(len(&session, 7), 300);
+    assert!(!is_closed_tail(&session, 7));
+    // The claim lifts: the release goes through.
+    session.set_history_holds([]);
+    assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
+    assert!(is_closed_tail(&session, 7));
+}
+
+#[test]
+fn a_reply_to_another_chat_holds_its_source_through_the_switch() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    feed(&mut session, 7, 200);
+    // "Reply in Another Chat": the reply bar names chat 7 while chat 8 is
+    // the one shown.
+    session.open_chat(ChatId(8));
+    session.set_history_holds([ChatId(7)]);
+    assert_eq!(len(&session, 7), 200);
+    assert!(session.reply_target(ChatId(7), MessageId(3)).is_some());
+}
+
+#[test]
+fn releasing_several_topics_is_deterministic() {
+    let order = |seed: &[i32]| {
+        let (mut session, _sink) = session();
+        switch(&mut session, 7);
+        for topic in seed {
+            topic_with(&mut session, 7, *topic, 100);
+        }
+        switch(&mut session, 8);
+        session
+            .history_pruning
+            .closed_topics()
+            .collect::<Vec<(ChatId, i32)>>()
+    };
+    let forward = order(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    let backward = order(&[8, 7, 6, 5, 4, 3, 2, 1]);
+    assert_eq!(forward, backward, "insertion order does not matter");
+    let topics: Vec<i32> = forward.iter().map(|(_, topic)| *topic).collect();
+    assert_eq!(topics, vec![8, 7, 6, 5, 4, 3, 2, 1], "touched in id order");
+}
+
+#[test]
+fn entries_made_outside_the_lru_join_it_and_stay_bounded() {
+    let (mut session, _sink) = session();
+    for chat in 1..=(CLOSED_CHATS_MAX as i64 + 10) {
+        session.history_entry(ChatId(chat)).loaded_complete = true;
+    }
+    assert_eq!(session.histories.len(), CLOSED_CHATS_MAX);
+    // The shown chat's entry is not part of the LRU.
+    session.open_chat(ChatId(900));
+    session.history_entry(ChatId(900));
+    assert!(!is_closed_tail(&session, 900));
+}
+
+#[test]
+fn deleted_ids_survive_dropping_the_entry() {
+    let (mut session, _sink) = session();
+    session.history_entry(ChatId(7)).tombstones.insert(42);
+    session.history_entry(ChatId(7)).latest_seen = 99;
+    for chat in 100..(100 + CLOSED_CHATS_MAX as i64 + 2) {
+        session.history_entry(ChatId(chat));
+    }
+    assert!(!session.histories.contains_key(&7), "evicted");
+    assert!(session.message_deleted(ChatId(7), MessageId(42)));
+    assert!(!session.message_deleted(ChatId(7), MessageId(41)));
+    // The entry made again picks them up.
+    session.open_chat(ChatId(7));
+    assert!(session.histories[&7].tombstones.contains(&42));
+    assert_eq!(session.histories[&7].latest_seen, 99);
+}
+
+#[test]
+fn reopening_the_same_chat_releases_its_open_topic() {
+    let (mut session, _sink) = session();
+    switch(&mut session, 7);
+    topic_with(&mut session, 7, 1, 200);
+    session.select_topic(ChatId(7), 1);
+    switch(&mut session, 7);
+    assert_eq!(
+        session.threads.topic_histories[&(7, 1)].messages.len(),
+        CLOSED_TAIL_KEEP
     );
 }

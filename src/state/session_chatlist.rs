@@ -153,20 +153,29 @@ impl Session {
             self.media.shared_media.close();
         }
         let previous = self.open_chat.replace(chat_id);
-        // Phase 5.1: switching chats leaves the topic view.
-        self.open_topic = None;
+        // Phase 5.1: switching chats leaves the topic view (re-selecting the
+        // chat leaves it too, so the topic's history is released here).
+        if let (Some(previous), Some(topic)) = (previous, self.open_topic.take())
+            && previous == chat_id
+        {
+            self.release_topic_history(chat_id, topic);
+        }
         // ... and the Saved Messages sublist / tag filter.
         self.threads.saved.close_views();
         // ... and any comment thread that lives elsewhere.
-        if self
+        let left_thread_chat = self
             .threads
             .thread
             .as_ref()
-            .is_some_and(|thread| thread.chat_id != chat_id)
-        {
+            .map(|thread| thread.chat_id)
+            .filter(|thread_chat| *thread_chat != chat_id);
+        if left_thread_chat.is_some() {
             self.threads.thread = None;
         }
         self.view_generation.bump();
+        if let Some(thread_chat) = left_thread_chat {
+            self.release_chat_history(thread_chat);
+        }
         if let Some(previous) = previous.filter(|previous| *previous != chat_id) {
             self.release_chat_history(previous);
         }
@@ -187,7 +196,7 @@ impl Session {
             .map_or(0, |chat| chat.unread_count);
         self.reclaim_chat_history(chat_id);
         let view_generation = self.view_generation;
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         history.view_generation = view_generation;
         history.viewed.clear();
         history.viewing.clear();
@@ -248,7 +257,7 @@ impl Session {
         if !self.chat_is_shown(chat_id) {
             return false;
         }
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         history.visible_reported = true;
         for id in ids {
             if id.0 > 0 && !history.viewed.contains(&id.0) && !history.viewing.contains(&id.0) {
@@ -261,7 +270,7 @@ impl Session {
     }
 
     pub fn mark_viewed(&mut self, chat_id: ChatId, ids: &[MessageId]) {
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         for id in ids {
             history.viewing.remove(&id.0);
             history.visible.remove(&id.0);
@@ -271,7 +280,7 @@ impl Session {
 
     /// After a successful `viewMessages` send, hold ids until TDLib ok/error.
     pub fn begin_viewing(&mut self, chat_id: ChatId, ids: &[MessageId]) {
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         for id in ids {
             history.visible.remove(&id.0);
             history.viewing.insert(id.0);
@@ -279,7 +288,7 @@ impl Session {
     }
 
     pub(crate) fn commit_viewed(&mut self, chat_id: ChatId) {
-        let history = self.histories.entry(chat_id.0).or_default();
+        let history = self.history_entry(chat_id);
         history.viewed.extend(history.viewing.drain());
     }
 

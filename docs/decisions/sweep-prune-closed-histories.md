@@ -27,6 +27,13 @@ reducer:
   local send always stays. Its forum topics shrink the same way, and the
   topic paging cursor moves to the oldest kept message. Leaving a topic
   (`select_topic` for another, `deselect_topic`) trims that topic.
+- A chat or topic that stops being shown is not trimmed in the same
+  event. It joins a release queue that `Session::set_history_holds` settles
+  once per frame, after the UI's claims are in, so a claim and a chat
+  switch in one event cannot trim the source. A release that finds the chat
+  held stays queued and goes through when the hold lifts (also for a chat
+  that closed while held). Until it is settled a live message keeps the
+  page cap, not the closed tail.
 - The closed chats and topics that keep a tail are an LRU
   (`CLOSED_CHATS_MAX` = 16, `CLOSED_TOPICS_MAX` = 16). A live message in a
   closed chat counts as use and keeps the tail within `CLOSED_TAIL_CAP`
@@ -37,8 +44,38 @@ reducer:
 - A history is never pruned while the main window, a chat window, a topic
   view or a comment thread shows it, or while the UI holds it
   (`Session::set_history_holds`, synced once a frame from
-  `ui/history_holds.rs`): the source chat of a pending forward or selection
-  and the chat of the track in the player bar.
+  `ui/history_holds.rs`): the source chat of a pending forward, the chat the
+  composer's reply bar points at ("Reply in Another Chat" replies to a
+  message of a chat that is no longer shown) and the chat of the track in
+  the player bar. The reducer cannot see those UI fields, so it learns of
+  them through the sync; the queue above is what makes the sync early
+  enough.
+- Every history entry, however it is created (`Session::history_entry`:
+  send answers, deletes, read markers, late pages, search), joins the LRU
+  unless a view, the release queue or a hold covers it, so
+  `CLOSED_CHATS_MAX` really bounds the kept histories. Only the entries of
+  shown chats sit outside it.
+- Dropping an entry whole keeps its deleted-message ids (newest 256 per
+  chat) and `latest_seen` in a side table for the last 64 dropped chats;
+  `message_deleted` reads it and a recreated entry takes it back. Without it
+  a reply or forward draft aimed at a message deleted earlier would pass
+  the "is it gone" check and fail at send time.
+- Releasing a chat touches its topics in id order, so the LRU order and
+  the eviction victim do not depend on hash map iteration. Re-selecting the
+  open chat releases the topic it left, and closing a comment thread by
+  opening another chat releases the thread's chat.
+- The reply bar and the history: when the replied-to message is not in
+  memory (older than the kept tail, or a draft restored on reopen), the UI
+  asks for it with `getMessage` once (`ConnectDriver::fetch_composer_reply_target`).
+  The answer is kept in `MessagesState::composer_reply_fetch`, next to the
+  history, never inside the window, which has to stay one contiguous run.
+  `Session::reply_target` falls back to it; a 4xx answer marks the target
+  deleted (the reply cancels like any deleted target), other errors leave
+  the bar as it is and are not retried. tdesktop's `FieldHeader` requests
+  the replied-to item when it is missing the same way.
+- Chat-list "Mark as read" views the newest loaded message, or the chat
+  summary's last message when the history was dropped (TGX views
+  `chat.lastMessage`).
 - Reopening a closed chat goes through the same path as before
   (`open_chat`, `prepare_history_window`, `fetch_history`): the tail shows at
   once, a window that does not reach the unread boundary is replaced, and
@@ -57,20 +94,36 @@ chat, except these:
 - `download_display_name`, `sticker_requires_premium`: scan whatever is
   loaded; a dropped history only means a name falls back to the existing
   default.
-- `message_deleted`: tombstones are kept when trimming, and "not loaded" is
-  not "deleted" there, so a dropped entry never reads as deleted.
+- `message_deleted`: tombstones are kept when trimming and, past dropping
+  an entry, in the side table; "not loaded" is not "deleted" there.
 - Pinned messages (`messages.pinned_messages`), unread counters, the chat
   list preview and notifications read their own state (`ChatSummary`, the
   notification payload), not `histories`.
-- Scroll restore (#949) loads around a saved message, so a shorter window is
-  fine.
+- Scroll restore (#949): a left chat keeps only the newest 60 rows, so a
+  saved reading position older than that is not in memory on reopen. #949 is
+  being reworked to load history around the saved anchor on open; this
+  change does not touch scroll restore and depends on that rework for
+  positions outside the kept tail (until it lands, such a chat opens at the
+  unread divider or the bottom).
+- Chat-list "Mark as read": falls back to `ChatSummary.last_message`, see
+  above.
+
+## Notes
+
+- `viewed` ids: `trim_to_tail` drops them with the rows, `trim_window_end`
+  (a shown chat's page cap) keeps them. A reopen clears `viewed` anyway
+  (`prepare_history_view`), so a closed chat never re-sends
+  `viewMessages` for rows it already reported; an open chat keeps them so a
+  trimmed-then-repaged row is not viewed twice.
+- The release queue is settled from the frame's holds sync. A frame that
+  never renders (a minimised window) leaves closed chats whole until it
+  does; live messages in them keep the page cap meanwhile.
 
 ## Not covered
 
 `messages.pinned_messages` and other per-chat side tables are not pruned
-here. A reply target in a draft of a closed chat that is older than the kept
-tail is not in memory after the chat reopens until it is loaded; this change
-adds no fetch for it.
+here. The media viewer's prev/next and the unread mention/reaction jump
+buttons read the shown chat only.
 
 ## How verified
 
@@ -78,4 +131,11 @@ Unit tests at `Session` level in `src/state/tests/history_prune.rs`:
 closing trims to the tail, reopening keeps it, leaving drops the chat, open
 and window views and held chats are never pruned, live rows stay bounded,
 the chat and topic LRUs respect their bounds, and an unsent message keeps
-its entry. The existing history-window tests still pass.
+its entry. Added: a hold set in the same event survives an immediate chat
+switch and a lifted hold releases the chat, a reply to another chat holds
+its source, topic release order is deterministic, entries made outside the
+LRU stay bounded, deleted ids survive dropping an entry, and re-selecting the
+open chat releases its topic. Driver tests (`connect/tests/chat_state/list_ops.rs`):
+the reply bar sends `getMessage` once for a target that left memory and shows
+the answer without putting it in the window, and "Mark as read" works after
+the history was dropped. The existing history-window tests still pass.

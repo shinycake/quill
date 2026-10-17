@@ -111,6 +111,13 @@ pub enum MessagesPurpose {
         chat_id: ChatId,
         message_id: MessageId,
     },
+    /// `getMessage` for the composer's reply bar when the replied-to
+    /// message is not in memory; the answer lands in
+    /// `MessagesState::composer_reply_fetch`, never in the history window.
+    GetComposerReplyTarget {
+        chat_id: ChatId,
+        message_id: MessageId,
+    },
     /// `getMessageProperties` for the open message context menu; the
     /// answer lands in `Session::message_menu_actions`.
     GetMessageMenuActions {

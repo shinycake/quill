@@ -564,3 +564,102 @@ fn cl1_remove_chat_from_list_sends_delete_history() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn mark_chat_as_read_works_after_the_history_was_dropped() {
+    // A closed chat's history can be dropped (`state::history_prune`): the
+    // chat summary's last message is what the read marker views then.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    if let Some(chat) = driver.session.chats.get_mut(&7) {
+        chat.last_message = Some(crate::state::ChatLastMessage {
+            id: MessageId(11),
+            date: 0,
+            is_outgoing: false,
+            sender: None,
+            send_state: Default::default(),
+        });
+    }
+    driver.session.histories.remove(&7);
+
+    let sent = driver.mark_chat_as_read(ChatId(7)).expect("send");
+    assert!(sent.is_some(), "the unread chat is marked read");
+    let view = recorder
+        .snapshot()
+        .into_iter()
+        .find(|j| j.contains("\"viewMessages\""))
+        .expect("viewMessages sent");
+    let view_value: Value = serde_json::from_str(&view).unwrap();
+    assert_eq!(view_value["message_ids"], serde_json::json!([11]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_reply_bar_fetches_a_target_that_left_memory() {
+    // A reply aimed at a message older than the kept tail of a closed chat
+    // (or restored with a draft): `getMessage` is sent once, and the answer
+    // is kept beside the history so the bar shows the real message.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    assert!(driver.session.reply_target(ChatId(7), MessageId(5)).is_none());
+
+    assert!(
+        driver
+            .fetch_composer_reply_target(ChatId(7), MessageId(5))
+            .expect("send")
+    );
+    assert!(
+        !driver
+            .fetch_composer_reply_target(ChatId(7), MessageId(5))
+            .expect("no second send"),
+        "asked once"
+    );
+    let request = recorder
+        .snapshot()
+        .into_iter()
+        .find(|j| j.contains("\"getMessage\""))
+        .expect("getMessage sent");
+    let request: Value = serde_json::from_str(&request).unwrap();
+    assert_eq!(request["chat_id"], 7);
+    assert_eq!(request["message_id"], 5);
+    let extra = request["@extra"].as_str().unwrap().to_string();
+
+    let answer = format!(
+        r#"{{"@type":"message","@extra":"{extra}","id":5,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"the old one","entities":[]}}}}}}"#
+    );
+    driver
+        .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let found = driver
+        .session
+        .reply_target(ChatId(7), MessageId(5))
+        .expect("the fetched message backs the bar");
+    assert_eq!(
+        crate::state::effective_preview(found),
+        "the old one",
+        "the bar reads the real text"
+    );
+    assert!(
+        !driver
+            .session
+            .histories
+            .get(&7)
+            .is_some_and(|history| history.messages.contains_key(&5)),
+        "a lone old row never enters the contiguous window"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

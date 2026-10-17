@@ -121,7 +121,7 @@ impl Session {
                 // would return again forever.
                 let from = pending.around_message_id.map_or(0, |id| id.0);
                 if !messages.iter().any(|m| from == 0 || m.id.0 < from) {
-                    self.histories.entry(chat_id.0).or_default().loaded_complete = true;
+                    self.history_entry(chat_id).loaded_complete = true;
                 }
                 for message in messages {
                     self.upsert_message(message, false);

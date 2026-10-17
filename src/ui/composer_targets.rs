@@ -54,6 +54,25 @@ impl QuillApp {
             .and_then(|reply| reply.send_target(chat_id))
     }
 
+    /// The reply bar points at a message that is not in memory (a chat
+    /// closed since keeps only its newest rows, a restored draft points
+    /// anywhere): ask TDLib for it so the bar shows the real sender and
+    /// text instead of "Loading...".
+    pub(super) fn fetch_missing_reply_target(&mut self) {
+        let Some((chat_id, message_id)) = self
+            .composer_ui
+            .reply()
+            .map(|reply| (reply.chat_id, reply.message_id))
+        else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            let _ = live
+                .driver
+                .fetch_composer_reply_target(chat_id, message_id);
+        }
+    }
+
     fn cancel_gone_reply(&mut self, cx: &mut Context<Self>) {
         let reply_gone =
             self.composer_ui

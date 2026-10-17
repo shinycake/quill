@@ -18,6 +18,13 @@ impl Session {
         {
             self.reject_replied_message(chat_id, message_id);
         }
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+            chat_id,
+            message_id,
+        })) = pending.map(|p| p.purpose)
+        {
+            self.reject_composer_reply_target(chat_id, message_id, err);
+        }
         // A caption over the limit opens its box (tdesktop `CaptionLimitBox`).
         if matches!(
             pending.map(|p| p.purpose),
@@ -77,7 +84,7 @@ impl Session {
                 {
                     // R5: the empty window shows "Couldn't load messages ·
                     // Retry" instead of a skeleton that never settles.
-                    self.histories.entry(chat_id.0).or_default().load_failed = true;
+                    self.history_entry(chat_id).load_failed = true;
                 }
             }
             // B15: a failed `getPollVoteStatistics` lands in the fetch

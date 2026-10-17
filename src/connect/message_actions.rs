@@ -52,6 +52,43 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// Ask TDLib for the message the composer's reply bar points at when it
+    /// is not in memory (`getMessage`; tdesktop `FieldHeader` requests the
+    /// replied-to item the same way). The answer lands in
+    /// `MessagesState::composer_reply_fetch`. Returns whether a request was
+    /// sent.
+    pub fn fetch_composer_reply_target(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) -> Result<bool, ConnectSendError> {
+        if !self.chats_path_active()
+            || !self
+                .session
+                .composer_reply_fetch_wanted(chat_id, message_id)
+        {
+            return Ok(false);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+                chat_id,
+                message_id,
+            }),
+            Some(chat_id),
+        );
+        if let Err(err) = self
+            .sender
+            .send_json(&crate::telegram::requests::get_message(
+                extra, chat_id, message_id,
+            ))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.begin_composer_reply_fetch(chat_id, message_id);
+        Ok(true)
+    }
+
     /// Add an emoji reaction (tdesktop InlineList / Unigram ReactionButton).
     /// `is_big: false`, `update_recent_reactions: true` — official picker click.
     pub fn add_message_reaction(
