@@ -1,6 +1,7 @@
 //! Methods moved out of `groups_forum.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -316,10 +317,10 @@ impl QuillApp {
         self.flush_leaving_draft(cx);
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.select_topic(forum_topic_id);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_PEOPLE_TOPIC_SELECTED).into(),
-                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_SELECTED)),
+                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)),
+            });
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(chat_id) = session.open_chat
         {
@@ -338,7 +339,8 @@ impl QuillApp {
             session.deselect_topic();
         }
         self.request_draft_restore();
-        self.connection.status_note = tr(keys::Q_PEOPLE_BACK_TO_TOPICS).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_BACK_TO_TOPICS)));
         cx.notify();
     }
 }

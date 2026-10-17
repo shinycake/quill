@@ -7,6 +7,7 @@
 
 use super::super::{DialogKind, QuillShell};
 use super::{QuillApp, file_palette};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::StyledExt;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
@@ -125,7 +126,7 @@ impl QuillApp {
             EditorSource::Custom(name) => match store::load(&Self::themes_dir(), &name) {
                 Ok(file) => (file, Some(name)),
                 Err(err) => {
-                    self.connection.status_note = err.note();
+                    self.connection.set_note(StatusNote::error(err.note()));
                     cx.notify();
                     return;
                 }
@@ -246,7 +247,7 @@ impl QuillApp {
                 true
             }
             Err(err) => {
-                self.connection.status_note = err.note();
+                self.connection.set_note(StatusNote::error(err.note()));
                 cx.notify();
                 false
             }
@@ -274,13 +275,13 @@ impl QuillApp {
                 .spawn(async move { std::fs::write(&dest, file.to_zip()) })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.status_note = match written {
-                    Ok(()) => tr(keys::Q_MISC_THEME_EXPORTED).into(),
-                    Err(err) => tr_with(
+                this.connection.set_note(match written {
+                    Ok(()) => StatusNote::info(tr(keys::Q_MISC_THEME_EXPORTED)),
+                    Err(err) => StatusNote::error(tr_with(
                         keys::Q_MISC_COULDNT_EXPORT_THE_THEME,
                         &[("err", &err.to_string())],
-                    ),
-                };
+                    )),
+                });
                 cx.notify();
             });
         })

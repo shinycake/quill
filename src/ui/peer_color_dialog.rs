@@ -11,6 +11,7 @@ use super::app::QuillApp;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -65,7 +66,8 @@ impl QuillApp {
 
     pub(super) fn open_peer_color_dialog(&mut self, tab: PeerColorTab, cx: &mut Context<Self>) {
         let Some(draft) = self.my_peer_colors() else {
-            self.connection.status_note = tr(keys::Q_MISC_COLORS_NEED_A_SIGNED_IN).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_MISC_COLORS_NEED_A_SIGNED_IN)));
             cx.notify();
             return;
         };
@@ -117,7 +119,8 @@ impl QuillApp {
             ApplyOutcome::Unchanged => self.close_peer_color_dialog(cx),
             ApplyOutcome::Send { name, profile } => {
                 let Some(live) = self.live.as_mut() else {
-                    self.connection.status_note = tr(keys::Q_MISC_DEMO_MODE_COLORS_NEED_A).into();
+                    self.connection
+                        .set_note(StatusNote::info(tr(keys::Q_MISC_DEMO_MODE_COLORS_NEED_A)));
                     cx.notify();
                     return;
                 };
@@ -138,11 +141,11 @@ impl QuillApp {
                         .set_profile_colors(draft.profile_color_id, draft.profile_emoji_id)
                         .is_err();
                 }
-                self.connection.status_note = if failed {
-                    tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS).into()
+                self.connection.set_note(if failed {
+                    StatusNote::error(tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS))
                 } else {
-                    tr(keys::Q_MISC_STYLE_UPDATE_REQUESTED).into()
-                };
+                    StatusNote::silent(tr(keys::Q_MISC_STYLE_UPDATE_REQUESTED))
+                });
                 if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut() {
                     dialog.sent = !failed;
                 }

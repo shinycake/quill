@@ -8,6 +8,7 @@ use crate::ui::drafts::apply_ready_drafts;
 use crate::ui::history::apply_ready_albums;
 use crate::ui::message_text::{apply_ready_link_preview, apply_ready_text_entities};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use crate::ui::*;
 use gpui_kit::*;
 use quill::composer::AttachmentKind;
@@ -90,7 +91,9 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value("album caption", window, cx);
         });
-        self.connection.status_note = "screenshot demo — received album · own album".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — received album · own album",
+        ));
     }
 
     fn demo_ready_drafts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -99,7 +102,8 @@ impl QuillApp {
             apply_ready_drafts(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.restore_open_draft(window, cx);
-        self.connection.status_note = "screenshot demo — draft restored".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — draft restored"));
     }
 
     fn demo_ready_link_preview(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -107,7 +111,8 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_link_preview(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — link preview".into();
+        self.connection
+            .set_note(StatusNote::info("screenshot demo — link preview"));
     }
 
     fn demo_ready_showcase(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -179,7 +184,7 @@ impl QuillApp {
             _ => {}
         }
         // The README captures carry no debug caption.
-        self.connection.status_note = String::new();
+        self.connection.clear_note();
     }
 
     fn demo_ready_text_entities(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -187,7 +192,8 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_text_entities(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — text entities".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — text entities"));
     }
 
     fn demo_ready_unsupported_message(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -214,7 +220,9 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_note_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — video note attach · own round note".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — video note attach · own round note",
+        ));
     }
 
     fn demo_ready_video_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -225,7 +233,9 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_video_send(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — attach video · own clip playing".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — attach video · own clip playing",
+        ));
     }
 
     fn demo_privacy(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -236,7 +246,8 @@ impl QuillApp {
             apply_ready_privacy(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.privacy.open = true;
-        self.connection.status_note =
-            "screenshot demo — privacy settings (injected, no live Telegram)".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — privacy settings (injected, no live Telegram)",
+        ));
     }
 }

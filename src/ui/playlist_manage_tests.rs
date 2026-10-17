@@ -115,7 +115,7 @@ fn the_track_menu_opens_and_delete_asks_before_removing(cx: &mut TestAppContext)
     vcx.run_until_parked();
     assert_eq!(order(&app, vcx), [1, 3]);
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.connection.status_note, REMOVED_TOAST);
+        assert_eq!(app.connection.status_note(), REMOVED_TOAST);
         assert_eq!(
             app.session().expect("session").media.playlists[&ME].total_count,
             2

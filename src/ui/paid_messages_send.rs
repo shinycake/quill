@@ -12,6 +12,7 @@ use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
 use super::paid_messages_state::{ComposerPaidConfirm, RemoveFeeBox};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -123,8 +124,9 @@ impl QuillApp {
                 && live.driver.held_paid_send().is_some()
                 && live.driver.release_paid_send(remember).is_err()
             {
-                self.connection.status_note =
-                    tr(keys::Q_MONEY_COULDNT_SEND_THE_PAID_MESSAGE).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MONEY_COULDNT_SEND_THE_PAID_MESSAGE,
+                )));
             }
             cx.notify();
             return;
@@ -267,7 +269,9 @@ impl QuillApp {
                 .allow_unpaid_messages(boxed.user_id, refund)
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_MONEY_COULDNT_REMOVE_THE_FEE_TRY).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MONEY_COULDNT_REMOVE_THE_FEE_TRY,
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.finish_unpaid_exception(boxed.user_id);

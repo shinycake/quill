@@ -4,6 +4,7 @@
 
 use super::app::QuillApp;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -47,12 +48,16 @@ impl QuillApp {
                     .live
                     .as_mut()
                     .map(|live| live.driver.set_chat_active_stories_list(id, hide));
-                self.connection.status_note = match sent {
-                    Some(Ok(_)) if hide => tr(keys::Q_MEDIA_HIDING_STORIES).into(),
-                    Some(Ok(_)) => tr(keys::Q_MEDIA_SHOWING_STORIES).into(),
-                    Some(Err(_)) => tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STORIES).into(),
-                    None => tr(keys::Q_MEDIA_DEMO_SETCHATACTIVESTORIESLIST_RUNS_WITH_LIVE).into(),
-                };
+                self.connection.set_note(match sent {
+                    Some(Ok(_)) if hide => StatusNote::silent(tr(keys::Q_MEDIA_HIDING_STORIES)),
+                    Some(Ok(_)) => StatusNote::silent(tr(keys::Q_MEDIA_SHOWING_STORIES)),
+                    Some(Err(_)) => {
+                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STORIES))
+                    }
+                    None => StatusNote::silent(tr(
+                        keys::Q_MEDIA_DEMO_SETCHATACTIVESTORIESLIST_RUNS_WITH_LIVE,
+                    )),
+                });
             }
             StoryMenuAction::ToggleMute => {
                 let mute = !self.story_tile_muted(chat_id);

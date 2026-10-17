@@ -1,6 +1,7 @@
 //! Release checks run off the UI thread and never install silently.
 #![deny(clippy::indexing_slicing)]
 use super::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -160,10 +161,9 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| {
                             match quill::update_install::acknowledge_changelog() {
                                 Ok(()) => this.settings.update_state = UpdateState::UpToDate,
-                                Err(_) => {
-                                    this.connection.status_note =
-                                        tr(keys::Q_OPS_COULD_NOT_SAVE_CHANGELOG_DISMISSAL).into()
-                                }
+                                Err(_) => this.connection.set_note(StatusNote::error(tr(
+                                    keys::Q_OPS_COULD_NOT_SAVE_CHANGELOG_DISMISSAL,
+                                ))),
                             }
                             cx.notify();
                         })),

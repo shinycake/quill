@@ -5,6 +5,7 @@ use super::dialogs::GroupConfirmAction;
 use super::pressable::PressableDiv;
 use super::*;
 use super::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -23,13 +24,14 @@ use std::rc::Rc;
 impl QuillApp {
     fn batch_install_sticker_sets(&mut self, ids: &[i64], cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.manage_sticker_sets(ids, true) {
-                Ok(sent) => tr_with(
-                    keys::Q_MEDIA_INSTALLING_STICKER_SETS,
-                    &[("sent", &sent.to_string())],
-                ),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_START_STICKER_BATCH).into(),
-            };
+            self.connection
+                .set_note(match live.driver.manage_sticker_sets(ids, true) {
+                    Ok(sent) => StatusNote::silent(tr_with(
+                        keys::Q_MEDIA_INSTALLING_STICKER_SETS,
+                        &[("sent", &sent.to_string())],
+                    )),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_START_STICKER_BATCH)),
+                });
         }
         cx.notify();
     }
@@ -38,8 +40,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.update_sticker_suggestions(text).is_err()
         {
-            self.connection.status_note =
-                tr(keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_SUGGESTIONS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_SUGGESTIONS,
+            )));
             cx.notify();
         }
         // The suggestions row is part of the composer.
@@ -50,7 +53,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.update_animated_emoji_suggestion(text).is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_ANIMATED_EMOJI).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_LOAD_ANIMATED_EMOJI,
+            )));
             cx.notify();
         }
         self.notify_composer(cx);
@@ -332,32 +337,36 @@ impl QuillApp {
 
     fn more_archived_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.fetch_archived_stickers(true) {
-                Ok(_) => tr(keys::Q_MEDIA_LOADING_ARCHIVED_STICKERS).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_LOAD_ARCHIVED_STICKERS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.fetch_archived_stickers(true) {
+                    Ok(_) => StatusNote::info(tr(keys::Q_MEDIA_LOADING_ARCHIVED_STICKERS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_ARCHIVED_STICKERS)),
+                });
         }
         cx.notify();
     }
 
     fn archive_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.manage_sticker_set(set_id, false, true)
-            {
-                Ok(Some(_)) => tr(keys::Q_MEDIA_ARCHIVING_STICKER_SET).into(),
-                Ok(None) => tr(keys::Q_MEDIA_STICKER_SET_UPDATE_ALREADY_PENDING).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_STICKER_SET).into(),
-            };
+            self.connection
+                .set_note(match live.driver.manage_sticker_set(set_id, false, true) {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_ARCHIVING_STICKER_SET)),
+                    Ok(None) => {
+                        StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_UPDATE_ALREADY_PENDING))
+                    }
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_STICKER_SET)),
+                });
         }
         cx.notify();
     }
 
     fn select_sticker_tab(&mut self, tab: StickerTab, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.select_sticker_tab(tab) {
-                Ok(_) => "stickers".into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_TAB).into(),
-            };
+            self.connection
+                .set_note(match live.driver.select_sticker_tab(tab) {
+                    Ok(_) => StatusNote::silent("stickers"),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_TAB)),
+                });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.tab = tab;
         }
@@ -366,30 +375,35 @@ impl QuillApp {
 
     fn more_trending_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.fetch_trending_stickers(true) {
-                Ok(_) => tr(keys::Q_MEDIA_LOADING_MORE_TRENDING_STICKERS).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_TRENDING).into(),
-            };
+            self.connection
+                .set_note(match live.driver.fetch_trending_stickers(true) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_LOADING_MORE_TRENDING_STICKERS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_TRENDING)),
+                });
         }
         cx.notify();
     }
 
     fn favorite_sticker(&mut self, id: FileId, favorite: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.set_favorite_sticker(id, favorite) {
-                Ok(_) => tr(keys::Q_MEDIA_UPDATING_FAVORITE_STICKERS).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_UPDATE_FAVORITE_STICKER).into(),
-            };
+            self.connection
+                .set_note(match live.driver.set_favorite_sticker(id, favorite) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_UPDATING_FAVORITE_STICKERS)),
+                    Err(_) => {
+                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_FAVORITE_STICKER))
+                    }
+                });
         }
         cx.notify();
     }
 
     fn clear_recent_stickers(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.clear_recent_stickers() {
-                Ok(_) => tr(keys::Q_MEDIA_CLEARING_RECENT_STICKERS).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_CLEAR_RECENT_STICKERS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.clear_recent_stickers() {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_CLEARING_RECENT_STICKERS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_CLEAR_RECENT_STICKERS)),
+                });
         }
         cx.notify();
     }
@@ -402,43 +416,48 @@ impl QuillApp {
             .value()
             .to_string();
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.search_sticker_picker(&query) {
-                Ok(_) => tr(keys::Q_MEDIA_SEARCHING_STICKERS).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_SEARCH_STICKERS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.search_sticker_picker(&query) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_SEARCHING_STICKERS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEARCH_STICKERS)),
+                });
         }
         cx.notify();
     }
 
     fn more_sticker_search_results(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.more_sticker_search_results() {
-                Ok(_) => tr(keys::Q_MEDIA_LOADING_MORE_STICKERS).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_STICKERS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.more_sticker_search_results() {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_LOADING_MORE_STICKERS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MORE_STICKERS)),
+                });
         }
         cx.notify();
     }
 
     fn install_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.manage_sticker_set(set_id, true, false)
-            {
-                Ok(Some(_)) => tr(keys::Q_MEDIA_INSTALLING_STICKER_SET).into(),
-                Ok(None) => tr(keys::Q_MEDIA_STICKER_SET_UPDATE_ALREADY_IN).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_INSTALL_STICKER_SET).into(),
-            };
+            self.connection
+                .set_note(match live.driver.manage_sticker_set(set_id, true, false) {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_INSTALLING_STICKER_SET)),
+                    Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_UPDATE_ALREADY_IN)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_INSTALL_STICKER_SET)),
+                });
         }
         cx.notify();
     }
 
     fn reorder_sticker_set(&mut self, source: i64, target: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.reorder_sticker_set(source, target) {
-                Ok(Some(_)) => tr(keys::Q_MEDIA_SAVING_STICKER_SET_ORDER).into(),
-                Ok(None) => tr(keys::Q_MEDIA_STICKER_ORDER_UNCHANGED_OR_UPDATE).into(),
-                Err(_) => tr(keys::Q_MEDIA_COULD_NOT_REORDER_STICKER_SETS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.reorder_sticker_set(source, target) {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_SAVING_STICKER_SET_ORDER)),
+                    Ok(None) => {
+                        StatusNote::silent(tr(keys::Q_MEDIA_STICKER_ORDER_UNCHANGED_OR_UPDATE))
+                    }
+                    Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_REORDER_STICKER_SETS)),
+                });
         }
         cx.notify();
     }

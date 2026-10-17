@@ -8,6 +8,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputContentType, InputState};
@@ -130,7 +131,9 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => Some(f(&mut live.driver)),
             None => {
-                self.connection.status_note = tr(keys::Q_PREFS_DEMO_PROXY_SETTINGS_ARE_NOT).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_PREFS_DEMO_PROXY_SETTINGS_ARE_NOT,
+                )));
                 None
             }
         }

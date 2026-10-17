@@ -22,6 +22,7 @@ use std::time::Duration;
 use super::actions::{SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn};
 use super::app::QuillApp;
 use super::chat_theme::danger;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
@@ -223,10 +224,10 @@ impl QuillApp {
         if let Err(err) =
             quill::settings::save_spellcheck_languages(&Self::appearance_paths(), &prefs)
         {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_MISC_COULDNT_SAVE_SPELLING_LANGUAGES,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
         self.spell.info.chosen = chosen.clone();
         self.start_spell_engine(chosen, cx);
@@ -413,10 +414,10 @@ impl QuillApp {
         };
         if let Err(err) = quill::settings::save_spellcheck_words(&Self::appearance_paths(), &prefs)
         {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_MISC_COULDNT_SAVE_DICTIONARY,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
     }
 

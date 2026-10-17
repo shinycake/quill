@@ -18,6 +18,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -334,7 +335,8 @@ impl QuillApp {
             CeremonyEvent::UseKey => self.set_ceremony_sheet(CeremonySheet::Key),
             CeremonyEvent::NoKey => {
                 // tdesktop `ShowCableToast`; the QR stays.
-                self.connection.status_note = tr(keys::PASSKEY_ERROR_NO_DEVICE).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::PASSKEY_ERROR_NO_DEVICE)));
             }
             CeremonyEvent::Registered(registration) => {
                 // The dialog closes; the server gets the result.
@@ -371,13 +373,13 @@ impl QuillApp {
                     return;
                 };
                 quill::webauthn::log(&format!("{:?} failed: {error:?}", ui.mode));
-                self.connection.status_note = tr(match (ui.sheet, ui.mode) {
-                    (CeremonySheet::Probing, CeremonyMode::Register) => register_error(&error),
-                    (CeremonySheet::Probing, CeremonyMode::Login) => login_error(&error),
-                    (_, CeremonyMode::Register) => keys::PASSKEY_ERROR_REGISTER,
-                    (_, CeremonyMode::Login) => keys::PASSKEY_ERROR_LOGIN,
-                })
-                .into();
+                self.connection
+                    .set_note(StatusNote::error(tr(match (ui.sheet, ui.mode) {
+                        (CeremonySheet::Probing, CeremonyMode::Register) => register_error(&error),
+                        (CeremonySheet::Probing, CeremonyMode::Login) => login_error(&error),
+                        (_, CeremonyMode::Register) => keys::PASSKEY_ERROR_REGISTER,
+                        (_, CeremonyMode::Login) => keys::PASSKEY_ERROR_LOGIN,
+                    })));
             }
             CeremonyEvent::Failed(error) => {
                 if let Some(ui) = self.privacy.passkeys.ceremony.as_mut() {

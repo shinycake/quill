@@ -12,6 +12,8 @@
 //! through a channel and run here on the app.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 pub(crate) mod model;
 
 mod mac;
@@ -305,7 +307,8 @@ impl QuillApp {
     fn touch_bar_reorder(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(false, ids) {
-                self.connection.status_note = format!("pin reorder failed: {err:?}");
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(false, &ids);

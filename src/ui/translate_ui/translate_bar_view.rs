@@ -1,6 +1,7 @@
 //! Methods moved out of `translate_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
@@ -426,7 +427,8 @@ impl QuillApp {
                 .accessibility_label(tr(keys::TRANSLATE_SETTINGS_CHAT))
                 .on_click(cx.listener(|this, &on, _, cx| {
                     if !this.session().is_some_and(Session::is_premium) {
-                        this.connection.status_note = tr(keys::Q_TRANSLATE_CHATS_PREMIUM).into();
+                        this.connection
+                            .set_note(StatusNote::info(tr(keys::Q_TRANSLATE_CHATS_PREMIUM)));
                         cx.notify();
                         return;
                     }

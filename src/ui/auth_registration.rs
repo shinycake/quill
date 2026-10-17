@@ -1,5 +1,6 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Textarea;
@@ -107,7 +108,7 @@ impl QuillApp {
         );
         first.zeroize();
         last.zeroize();
-        self.connection.status_note = match result {
+        self.connection.set_note(match result {
             Ok(_) => {
                 self.auth_ui
                     .registration_first_input
@@ -116,10 +117,10 @@ impl QuillApp {
                     .registration_last_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.auth_ui.accepted_registration_terms = None;
-                tr(keys::Q_MISC_REGISTRATION_SUBMITTED_WAITING_FOR_TELEGRAM).into()
+                StatusNote::silent(tr(keys::Q_MISC_REGISTRATION_SUBMITTED_WAITING_FOR_TELEGRAM))
             }
-            Err(_) => tr(keys::Q_MISC_COULD_NOT_REGISTER_CHECK_YOUR).into(),
-        };
+            Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_REGISTER_CHECK_YOUR)),
+        });
         cx.notify();
     }
 }

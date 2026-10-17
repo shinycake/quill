@@ -4,6 +4,7 @@
 //! and the "Load more" row of a paged list.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SearchConfirm, SearchMediaRow, SharedMediaTab, media_month_starts};
 
@@ -293,7 +294,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.load_more_search_results().is_err()
         {
-            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_LOAD_MORE_RESULTS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_CHAT_COULD_NOT_LOAD_MORE_RESULTS,
+            )));
         }
         cx.notify();
     }
@@ -396,7 +399,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.search_public_posts_paid().is_err()
         {
-            self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_SEARCH_PUBLIC_POSTS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_CHAT_COULD_NOT_SEARCH_PUBLIC_POSTS,
+            )));
         }
         cx.notify();
     }

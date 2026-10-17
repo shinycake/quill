@@ -10,6 +10,7 @@
 //! ends when that window closes.
 
 use super::super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
@@ -84,7 +85,9 @@ impl QuillApp {
             return;
         }
         self.cancel_recording(cx);
-        self.connection.status_note = tr(keys::Q_MISC_RECORDING_DISCARDED_ITS_WINDOW_CLOSED).into();
+        self.connection.set_note(StatusNote::silent(tr(
+            keys::Q_MISC_RECORDING_DISCARDED_ITS_WINDOW_CLOSED,
+        )));
         cx.notify();
     }
 }

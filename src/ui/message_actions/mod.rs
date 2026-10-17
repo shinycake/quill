@@ -9,6 +9,7 @@ use super::message_menu_ui::{
 use super::message_text::message_rich_block;
 use super::search_ui::chat_search_jump_note;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::skeleton::Skeleton;
@@ -39,14 +40,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_CHAT_STOPPING_A_LIVE_LOCATION_NEEDS).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_CHAT_STOPPING_A_LIVE_LOCATION_NEEDS,
+            )));
             cx.notify();
             return;
         };
-        self.connection.status_note = match live.driver.stop_live_location(chat_id, message_id) {
-            Ok(_) => tr(keys::Q_CHAT_STOPPED_SHARING_YOUR_LIVE_LOCATION).into(),
-            Err(_) => tr(keys::Q_CHAT_COULDNT_STOP_SHARING_TRY_AGAIN).into(),
-        };
+        self.connection
+            .set_note(match live.driver.stop_live_location(chat_id, message_id) {
+                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_STOPPED_SHARING_YOUR_LIVE_LOCATION)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULDNT_STOP_SHARING_TRY_AGAIN)),
+            });
         cx.notify();
     }
 
@@ -64,16 +68,15 @@ impl QuillApp {
             return false;
         }
         let kind = session.chats.get(&chat_id.0).map(|chat| chat.kind.clone());
-        self.connection.status_note = match kind {
+        self.connection.set_note(match kind {
             Some(ChatKind::Supergroup {
                 is_channel: true, ..
-            }) => tr(keys::ERROR_NOCOPY_CHANNEL),
+            }) => StatusNote::info(tr(keys::ERROR_NOCOPY_CHANNEL)),
             Some(ChatKind::Private { .. } | ChatKind::Secret { .. }) | None => {
-                tr(keys::ERROR_NOCOPY_USER)
+                StatusNote::info(tr(keys::ERROR_NOCOPY_USER))
             }
-            _ => tr(keys::ERROR_NOCOPY_GROUP),
-        }
-        .into();
+            _ => StatusNote::info(tr(keys::ERROR_NOCOPY_GROUP)),
+        });
         cx.notify();
         true
     }

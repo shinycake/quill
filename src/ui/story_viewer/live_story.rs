@@ -11,6 +11,7 @@
 use super::live_state::{LiveDelete, LiveStarsBox, SendAction, StarsBoxMode, send_action};
 use super::*;
 use crate::ui::media_panel::PanelTab;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use quill::calls::engine::StreamState;
 use quill::lang::trn_with;
@@ -90,7 +91,8 @@ impl QuillApp {
             return;
         };
         if live.driver.join_live_story(chat_id, story_id).is_err() {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE)));
         }
         cx.notify();
     }
@@ -244,8 +246,9 @@ impl QuillApp {
                 let sent = match self.live.as_mut() {
                     Some(live) => live.driver.send_live_story_comment(&markup, stars).is_ok(),
                     None => {
-                        self.connection.status_note =
-                            tr(keys::Q_MEDIA_DEMO_LIVE_STORIES_JOIN_WITH).into();
+                        self.connection.set_note(StatusNote::silent(tr(
+                            keys::Q_MEDIA_DEMO_LIVE_STORIES_JOIN_WITH,
+                        )));
                         false
                     }
                 };
@@ -270,7 +273,7 @@ impl QuillApp {
             .and_then(|s| s.stories.live.as_ref())
             .and_then(|live| live.note.clone())
         {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::info(note));
         }
     }
 
@@ -318,11 +321,11 @@ impl QuillApp {
             .and_then(Session::live_spendable_stars)
             .unwrap_or(0);
         let needed = stars.saturating_sub(have).max(1);
-        self.connection.status_note = trn_with(
+        self.connection.set_note(StatusNote::info(trn_with(
             keys::CREDITS_SMALL_BALANCE_TITLE,
             needed,
             &[("count", &group_digits(needed))],
-        );
+        )));
         self.open_stars(cx);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.payments.star_packs.open = true;
@@ -543,7 +546,7 @@ impl QuillApp {
         {
             let muted = live.driver.group_call_playback_muted(call_id);
             if let Err(err) = live.driver.set_group_call_playback_muted(call_id, !muted) {
-                self.connection.status_note = err.to_string();
+                self.connection.set_note(StatusNote::error(err.to_string()));
             }
         }
         cx.notify();

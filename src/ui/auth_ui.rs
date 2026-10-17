@@ -2,7 +2,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::AuthorizationState;
 use smallvec::SmallVec;
 use std::sync::Arc;
@@ -39,15 +41,15 @@ impl QuillApp {
         let mut email = self.auth_ui.email_input.read(cx).value().to_string();
         let result = live.driver.submit_email(&email);
         email.zeroize();
-        self.connection.status_note = match result {
+        self.connection.set_note(match result {
             Ok(_) => {
                 self.auth_ui
                     .email_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                "email submitted — waiting for Telegram".into()
+                StatusNote::silent(tr(keys::Q_NOTES_EMAIL_SUBMITTED))
             }
-            Err(_) => "could not submit email".into(),
-        };
+            Err(_) => StatusNote::error(tr(keys::Q_NOTES_COULDNT_SUBMIT_THE_EMAIL)),
+        });
         cx.notify();
     }
 
@@ -78,10 +80,13 @@ impl QuillApp {
                 self.auth_ui.signin.code_clock = None;
                 self.auth_ui.signin.error_clock = None;
                 self.auth_ui.signin.banned_dismissed = false;
-                self.connection.status_note = "phone submitted — waiting for Telegram".into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_PHONE_SUBMITTED)));
             }
             Err(_) => {
-                self.connection.status_note = "could not submit phone".into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_NOTES_COULDNT_SUBMIT_THE_PHONE_NUMBER,
+                )));
             }
         }
         let _ = window;
@@ -106,10 +111,12 @@ impl QuillApp {
                 self.auth_ui
                     .code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.connection.status_note = "code submitted — waiting for Telegram".into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_SUBMITTED)));
             }
             Err(_) => {
-                self.connection.status_note = "could not submit code".into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_SUBMIT_THE_CODE)));
             }
         }
         cx.notify();
@@ -133,10 +140,13 @@ impl QuillApp {
                 self.auth_ui
                     .password_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.connection.status_note = "password submitted — waiting for Telegram".into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_PASSWORD_SUBMITTED)));
             }
             Err(_) => {
-                self.connection.status_note = "could not submit password".into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_NOTES_COULDNT_SUBMIT_THE_PASSWORD,
+                )));
             }
         }
         cx.notify();
@@ -158,10 +168,12 @@ impl QuillApp {
         match live.driver.resend_code() {
             Ok(_) => {
                 self.auth_ui.signin.code_clock = None;
-                self.connection.status_note = "code resent — waiting for Telegram".into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_CODE_RESENT)));
             }
             Err(_) => {
-                self.connection.status_note = "could not resend code".into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_RESEND_THE_CODE)));
             }
         }
         cx.notify();
@@ -175,11 +187,12 @@ impl QuillApp {
         };
         match live.driver.request_qr_login() {
             Ok(_) => {
-                self.connection.status_note =
-                    "QR login requested — scan with a logged-in Telegram app".into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_NOTES_QR_LOGIN_REQUESTED)));
             }
             Err(_) => {
-                self.connection.status_note = "could not start QR login".into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_START_QR_LOGIN)));
             }
         }
         cx.notify();

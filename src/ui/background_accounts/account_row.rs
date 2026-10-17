@@ -4,6 +4,7 @@
 //! setting (tdesktop `BuildMultiAccountSection`).
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use crate::ui::{accent_strong, text_on_fill};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -92,10 +93,10 @@ impl QuillApp {
         if let Some(root) = safe_app_root()
             && let Err(err) = quill::settings::set_notify_from_all(&root, on)
         {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::silent(tr_with(
                 keys::Q_OPS_COULDN_T_SAVE_THE_NOTIFICATION,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
         self.background.notify_from_all = on;
         if !on {

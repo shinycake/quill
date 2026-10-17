@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -86,7 +87,10 @@ impl QuillApp {
                 .set_bot_emoji_status_access(user_id, allowed)
                 .is_err()
             {
-                self.set_status_note(tr(keys::Q_MEDIA_COULDNT_CHANGE_THE_EMOJI_STATUS), cx);
+                self.set_status_note(
+                    StatusNote::error(tr(keys::Q_MEDIA_COULDNT_CHANGE_THE_EMOJI_STATUS)),
+                    cx,
+                );
             }
         } else if let Some(Some(info)) = self
             .demo_session

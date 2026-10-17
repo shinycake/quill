@@ -9,6 +9,8 @@ use super::app::QuillApp;
 use super::chat_look_ui::is_wallpaper_image;
 use super::shell::{DialogKind, QuillShell};
 use super::wallpaper::{Wallpaper, session_wallpaper};
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -80,7 +82,9 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chats_state.background_error = None;
             if live.driver.search_background(&name).is_err() {
-                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_OPEN_THE_WALLPAPER).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MISC_COULD_NOT_OPEN_THE_WALLPAPER,
+                )));
                 return;
             }
         }
@@ -107,7 +111,8 @@ impl QuillApp {
 
     fn preview_wallpaper_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !is_wallpaper_image(&path) {
-            self.connection.status_note = tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
             cx.notify();
             return;
         }
@@ -160,7 +165,8 @@ impl QuillApp {
                     live.driver
                         .set_default_background_local(&path.to_string_lossy(), blurred, dark)
                 {
-                    self.connection.status_note = format!("could not set the wallpaper: {err:?}");
+                    self.connection
+                        .set_note(StatusNote::error(user_error(&err)));
                     return;
                 }
             }
@@ -176,8 +182,8 @@ impl QuillApp {
                             live.driver
                                 .set_default_background(background.id, Some(&kind), dark)
                         {
-                            self.connection.status_note =
-                                format!("could not set the wallpaper: {err:?}");
+                            self.connection
+                                .set_note(StatusNote::error(user_error(&err)));
                             return;
                         }
                     }
@@ -216,7 +222,9 @@ impl QuillApp {
                 .get_background_url(&background.name, &kind)
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_MAKE_THE_WALLPAPER).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MISC_COULD_NOT_MAKE_THE_WALLPAPER,
+            )));
         }
         cx.notify();
     }

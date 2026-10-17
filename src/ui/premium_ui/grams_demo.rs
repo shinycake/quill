@@ -9,6 +9,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::demo::seed_ready_chats_session;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::premium_hub::ton::{GramRevenue, GramWithdraw, parse_ton_transactions};
@@ -88,7 +89,8 @@ impl QuillApp {
             }
             _ => self.open_grams(cx),
         }
-        self.connection.status_note = "screenshot demo — My Grams".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — My Grams"));
         cx.notify();
     }
 }

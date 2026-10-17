@@ -10,6 +10,7 @@ use super::chat_row::chat_avatar;
 use super::chat_theme::{danger, text_muted};
 use super::statistics::{divider, row_text, section_title, stats_row};
 use super::statistics_graph::{OverviewCell, overview_grid};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::spinner::Spinner;
@@ -289,7 +290,9 @@ impl QuillApp {
                 .fetch_message_statistics(ChatId(chat_id), MessageId(message_id), is_dark)
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_message_stats_page(chat_id, message_id);
@@ -311,7 +314,9 @@ impl QuillApp {
                 .fetch_story_insights(ChatId(chat_id), story_id, is_dark)
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_STORY_STATISTICS).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_STORY_STATISTICS,
+            )));
         }
         cx.notify();
     }

@@ -3,6 +3,7 @@
 use super::app::QuillApp;
 use super::dialogs::CreateChatKind;
 use super::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -236,8 +237,9 @@ impl QuillApp {
                     }
                     self.payments.marketplace_open = true;
                 } else {
-                    self.connection.status_note =
-                        tr(keys::Q_NAVIGATION_OPEN_A_PRIVATE_CHAT_OR).into();
+                    self.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_NAVIGATION_OPEN_A_PRIVATE_CHAT_OR,
+                    )));
                 }
                 cx.notify();
             }

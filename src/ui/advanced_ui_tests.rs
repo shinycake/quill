@@ -150,7 +150,7 @@ fn numberbuttons_switches_fast_buttons_mode_and_lists_it_on_the_page(cx: &mut Te
     app.read_with(vcx, |app, _| {
         assert!(experimental::fast_buttons_mode());
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             experimental::FAST_BUTTONS_ENABLED_TOAST
         );
         assert!(app.experimental_values().fast_buttons_mode);
@@ -162,7 +162,7 @@ fn numberbuttons_switches_fast_buttons_mode_and_lists_it_on_the_page(cx: &mut Te
     app.read_with(vcx, |app, _| {
         assert!(!experimental::fast_buttons_mode());
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             experimental::FAST_BUTTONS_DISABLED_TOAST
         );
     });
@@ -300,13 +300,13 @@ fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestA
     );
     app.read_with(vcx, |app, _| {
         assert!(app.settings.advanced.test_environment());
-        assert_eq!(app.connection.status_note, SWITCHED_TO_TEST);
+        assert_eq!(app.connection.status_note(), SWITCHED_TO_TEST);
         assert!(app.live.is_none(), "nothing connected");
     });
     // Typed again, it switches back to production.
     vcx.simulate_keystrokes("t e s t m o d e");
     assert!(!test_mode_label_shown(vcx));
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.connection.status_note, SWITCHED_TO_PRODUCTION);
+        assert_eq!(app.connection.status_note(), SWITCHED_TO_PRODUCTION);
     });
 }

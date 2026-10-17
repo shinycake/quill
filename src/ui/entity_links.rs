@@ -15,6 +15,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -108,11 +109,14 @@ impl QuillApp {
                 let username = name.trim_start_matches('@');
                 if self.live.is_some() {
                     self.pending_deep_link = Some(format!("https://t.me/{username}"));
-                    self.connection.status_note =
-                        tr_with(keys::Q_OPS_OPENING, &[("username", username)]);
+                    self.connection.set_note(StatusNote::silent(tr_with(
+                        keys::Q_OPS_OPENING,
+                        &[("username", username)],
+                    )));
                 } else {
-                    self.connection.status_note =
-                        tr(keys::Q_OPS_CANT_OPEN_MENTIONS_WITHOUT_A).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_CANT_OPEN_MENTIONS_WITHOUT_A,
+                    )));
                 }
             }
             LinkTarget::MentionName { user_id, .. } => {
@@ -125,11 +129,12 @@ impl QuillApp {
                 self.send_bot_command(chat_id, message_id, &command, cx);
             }
             LinkTarget::Email(address) => {
-                self.connection.status_note = if quill::platform::open_mailto(&address) {
-                    tr(keys::Q_OPS_OPENED_MAIL).into()
-                } else {
-                    tr(keys::Q_OPS_COULD_NOT_OPEN_THE_MAIL).into()
-                };
+                self.connection
+                    .set_note(if quill::platform::open_mailto(&address) {
+                        StatusNote::silent(tr(keys::Q_OPS_OPENED_MAIL))
+                    } else {
+                        StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_THE_MAIL))
+                    });
             }
             LinkTarget::Phone(_) | LinkTarget::BankCard(_) | LinkTarget::DateTime { .. } => {
                 if let LinkTarget::BankCard(number) = &link {
@@ -156,7 +161,8 @@ impl QuillApp {
     /// Copy `text` and say so (Telegram Desktop's "Text copied" toast).
     pub(super) fn copy_entity_text(&mut self, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.connection.status_note = tr(keys::Q_OPS_TEXT_COPIED_TO_CLIPBOARD).into();
+        self.connection
+            .set_note(StatusNote::info(tr(keys::Q_OPS_TEXT_COPIED_TO_CLIPBOARD)));
         cx.notify();
     }
 
@@ -240,13 +246,16 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, &text);
-            self.connection.status_note = match live.driver.send_snapshot(&snapshot) {
-                Ok(_) => tr(keys::Q_OPS_SENDING).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND).into(),
-            };
+            self.connection
+                .set_note(match live.driver.send_snapshot(&snapshot) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
+                });
         } else {
             self.apply_demo_outgoing(&text, None, None);
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_SEND_APPLIED_LOCALLY_NO).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_OPS_DEMO_SEND_APPLIED_LOCALLY_NO,
+            )));
         }
     }
 
@@ -276,7 +285,8 @@ impl QuillApp {
             .flatten()
             .find_map(|message| Some((message, seek_target(&message.content, seconds)?)));
         let Some((target, kind)) = target else {
-            self.connection.status_note = tr(keys::Q_OPS_NOTHING_TO_SEEK).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_SEEK)));
             return;
         };
         let target_id = target.id;

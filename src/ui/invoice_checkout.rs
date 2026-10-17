@@ -9,6 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_base::{Disableable, StyledExt};
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -58,7 +59,9 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     live.driver.session.payments.form_loading = false;
                 }
-                self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
+                )));
             }
         }
         cx.notify();
@@ -88,7 +91,10 @@ impl QuillApp {
     ) {
         match invoice_link_invoice(name) {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
-            None => self.set_status_note(tr(keys::Q_MONEY_THIS_INVOICE_LINK_IS_BROKEN), cx),
+            None => self.set_status_note(
+                StatusNote::info(tr(keys::Q_MONEY_THIS_INVOICE_LINK_IS_BROKEN)),
+                cx,
+            ),
         }
     }
 
@@ -104,7 +110,10 @@ impl QuillApp {
             .and_then(|s| s.payments.star_packs.options.get(index).cloned());
         match pack {
             Some(pack) => self.start_invoice_checkout(stars_pack_invoice(&pack), window, cx),
-            None => self.set_status_note(tr(keys::Q_MONEY_THAT_STARS_OPTION_IS_NO), cx),
+            None => self.set_status_note(
+                StatusNote::silent(tr(keys::Q_MONEY_THAT_STARS_OPTION_IS_NO)),
+                cx,
+            ),
         }
     }
 
@@ -139,7 +148,10 @@ impl QuillApp {
         });
         match invoice {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
-            None => self.set_status_note(tr(keys::Q_MONEY_PREMIUM_CAN_ONLY_BE_GIFTED), cx),
+            None => self.set_status_note(
+                StatusNote::info(tr(keys::Q_MONEY_PREMIUM_CAN_ONLY_BE_GIFTED)),
+                cx,
+            ),
         }
     }
 
@@ -202,7 +214,9 @@ impl QuillApp {
             sent
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT,
+            )));
         }
         cx.notify();
     }

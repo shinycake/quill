@@ -7,6 +7,7 @@ use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -298,7 +299,8 @@ impl QuillApp {
     fn bar_dismiss(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.dismiss_chat_action_bar(chat_id).is_err() {
-                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_HIDE_THE_BAR).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_HIDE_THE_BAR)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -317,7 +319,9 @@ impl QuillApp {
                 .is_ok();
             let _ = live.driver.dismiss_chat_action_bar(chat_id);
             if !(moved && reset) {
-                self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_UNARCHIVE_THE_CHAT).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_CHAT_COULD_NOT_UNARCHIVE_THE_CHAT,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
@@ -357,8 +361,9 @@ impl QuillApp {
                     let _ = app.update(cx, |this, cx| {
                         if let Some(live) = this.live.as_mut() {
                             if live.driver.share_phone_number(chat_id, user_id).is_err() {
-                                this.connection.status_note =
-                                    tr(keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE).into();
+                                this.connection.set_note(StatusNote::error(tr(
+                                    keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE,
+                                )));
                             }
                         } else if let Some(session) = this.demo_session.as_mut() {
                             session.set_chat_action_bar(chat_id.0, None);
@@ -401,11 +406,12 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let reported = live.driver.report_chat(chat_id);
             let left = live.driver.leave_channel(chat_id);
-            self.connection.status_note = if reported.is_ok() && left.is_ok() {
-                tr(keys::REPORT_SPAM_DONE).into()
-            } else {
-                tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT).into()
-            };
+            self.connection
+                .set_note(if reported.is_ok() && left.is_ok() {
+                    StatusNote::silent(tr(keys::REPORT_SPAM_DONE))
+                } else {
+                    StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT))
+                });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(chat_id.0, None);
         }
@@ -440,17 +446,17 @@ impl QuillApp {
             if dialog.delete_chat {
                 ok &= live.driver.remove_chat_from_list(dialog.chat_id).is_ok();
             }
-            self.connection.status_note = if ok {
-                tr_with(
+            self.connection.set_note(if ok {
+                StatusNote::silent(tr_with(
                     keys::Q_CHAT_IS_NOW_BLOCKED,
                     &[(
                         "user_id",
                         &(self.contact_display_name(dialog.user_id)).to_string(),
                     )],
-                )
+                ))
             } else {
-                tr(keys::Q_CHAT_COULD_NOT_BLOCK_THE_USER).into()
-            };
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_BLOCK_THE_USER))
+            });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_action_bar(dialog.chat_id.0, None);
         }

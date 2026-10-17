@@ -24,6 +24,7 @@ use super::call_panel_devices::DeviceMenuTarget;
 use super::dialogs::rtmp_stream::{RtmpRows, rtmp_info_rows};
 use super::group_call_stream_layout::{StreamFacts, leave_stream_full};
 use super::video_player::controls::bar_disc;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
@@ -402,10 +403,10 @@ impl QuillApp {
             (None, Some(live)) => {
                 let microphone = live.driver.selected_call_devices().0.map(str::to_owned);
                 if let Err(err) = live.driver.select_call_devices(microphone, None) {
-                    self.connection.status_note = tr_with(
+                    self.connection.set_note(StatusNote::error(tr_with(
                         keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
                         &[("err", &err.to_string())],
-                    );
+                    )));
                 }
             }
             (None, None) => self.demo_ui.selected_devices.1 = None,
@@ -424,10 +425,10 @@ impl QuillApp {
                 .map(|c| c.id)
             && let Err(err) = live.driver.set_group_call_playback_muted(call_id, muted)
         {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_OPS_COULD_NOT_SELECT_AUDIO_DEVICE,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
         cx.notify();
     }

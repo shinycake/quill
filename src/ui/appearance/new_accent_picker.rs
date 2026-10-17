@@ -1,6 +1,7 @@
 //! Methods moved out of `appearance.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -301,7 +302,7 @@ impl QuillApp {
             .accessibility_label(tr(keys::Q_PREFS_LAUNCH_QUILL_AT_LOGIN))
             .on_click(cx.listener(|this, &on, _, cx| {
                 if let Err(err) = quill::autostart::set_enabled(on) {
-                    this.connection.status_note = err.to_string();
+                    this.connection.set_note(StatusNote::error(err.to_string()));
                 }
                 cx.notify();
             }));
@@ -341,7 +342,7 @@ impl QuillApp {
                 .disabled(unavailable)
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Err(err) = link_handler::make_default() {
-                        this.connection.status_note = err;
+                        this.connection.set_note(StatusNote::error(err));
                     }
                     // The system confirmation is asynchronous: re-read the
                     // handler a few times so the status catches up.
@@ -369,7 +370,7 @@ impl QuillApp {
                         link_handler::release()
                     };
                     if let Err(err) = result {
-                        this.connection.status_note = err;
+                        this.connection.set_note(StatusNote::error(err));
                     }
                     cx.notify();
                 }))

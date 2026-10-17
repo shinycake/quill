@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::switch::Switch;
@@ -191,10 +192,10 @@ impl QuillApp {
             return;
         };
         if let Err(err) = remove(&dir, code) {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_MISC_COULDNT_REMOVE_THE_DICTIONARY,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
         let chosen: Vec<String> = self
             .spell

@@ -8,6 +8,8 @@ use super::pressable::PressableDiv;
 use super::pressable::action_row;
 use super::profile_panels::{CopyAction, copy_menu};
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::TextareaState;
@@ -303,11 +305,13 @@ impl QuillApp {
                 InfoPanelTarget::Earn(_) => Ok(()),
             };
             if let Err(err) = fetch {
-                self.connection.status_note = format!("info request failed: {err:?}");
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
             } else if let InfoPanelTarget::User(user_id) = target
                 && let Err(err) = live.driver.download_user_photo(user_id)
             {
-                self.connection.status_note = format!("photo download failed: {err:?}");
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_open_info_panel(Some(target));

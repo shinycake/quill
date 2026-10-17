@@ -254,7 +254,7 @@ fn an_image_the_editor_refuses_toasts_could_not_load(cx: &mut TestAppContext) {
         );
         assert!(app.viewer.photo_editor.is_none());
         assert_eq!(
-            app.connection.status_note.as_str(),
+            app.connection.status_note(),
             quill::sticker_set_box::OPEN_FAILED_NOTE
         );
     });
@@ -432,7 +432,7 @@ fn a_video_the_editor_cannot_take_closes_it_with_the_bad_video_toast(cx: &mut Te
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| {
         app.composer_ui.send_box.video_editor.is_none()
-            && app.connection.status_note.as_str() == quill::sticker_video::BAD_VIDEO_NOTE
+            && app.connection.status_note() == quill::sticker_video::BAD_VIDEO_NOTE
     }));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
@@ -588,7 +588,7 @@ fn the_new_sticker_box_needs_an_emoji_and_takes_at_most_seven(cx: &mut TestAppCo
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.sticker_box.create.is_some()));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.connection.status_note.to_string()),
+        app.read_with(vcx, |app, _| app.connection.status_note().to_string()),
         quill::sticker_set_box::EMOJI_REQUIRED_NOTE
     );
     // The first grid cell toggles its emoji on and off.

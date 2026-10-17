@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea};
 use gpui_kit::component::*;
@@ -746,10 +747,11 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        self.connection.status_note = match live.driver.reset_login_email() {
-            Ok(_) => tr(keys::Q_OPS_EMAIL_RESET_REQUESTED_WAITING_FOR).into(),
-            Err(_) => tr(keys::Q_OPS_COULD_NOT_RESET_THE_EMAIL).into(),
-        };
+        self.connection
+            .set_note(match live.driver.reset_login_email() {
+                Ok(_) => StatusNote::silent(tr(keys::Q_OPS_EMAIL_RESET_REQUESTED_WAITING_FOR)),
+                Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_RESET_THE_EMAIL)),
+            });
         cx.notify();
     }
 }

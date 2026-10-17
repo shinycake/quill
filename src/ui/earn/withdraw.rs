@@ -6,6 +6,7 @@
 use super::revenue::{learn_more_band, star_amount};
 use super::*;
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputContentType};
@@ -58,7 +59,8 @@ impl QuillApp {
     /// Collect or Withdraw.
     pub(super) fn earn_withdraw(&mut self, target: WithdrawTarget, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return;
         };
@@ -66,7 +68,9 @@ impl QuillApp {
         // cloud password state (tdesktop `cloudPassword().reload()`).
         let _ = live.driver.fetch_password_state();
         if live.driver.start_withdrawal(target).is_err() {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW,
+            )));
         }
         cx.notify();
     }
@@ -78,11 +82,11 @@ impl QuillApp {
             .map_or(1000, |earn| earn.limits.withdrawal_min());
         if typed < min {
             // tdesktop `lng_bot_earn_credits_out_minimal`.
-            self.connection.status_note = format!(
+            self.connection.set_note(StatusNote::error(format!(
                 "You cannot withdraw less than {} {}.",
                 group_digits(min),
                 if min == 1 { "star" } else { "stars" }
-            );
+            )));
             cx.notify();
             return;
         }
@@ -218,7 +222,9 @@ impl QuillApp {
             .password
             .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_WITHDRAW_RIGHT_NOW,
+            )));
         }
         cx.notify();
     }
@@ -239,7 +245,9 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && live.driver.request_password_recovery().is_err()
         {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE,
+            )));
         }
         cx.notify();
     }

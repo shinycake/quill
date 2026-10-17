@@ -17,6 +17,7 @@ use super::group_call_panel::BG;
 use super::group_call_stream_layout::{
     leave_stream_full, stream_full, stream_viewport, uses_stream_layout,
 };
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
@@ -202,10 +203,9 @@ impl QuillApp {
                         app.group_call.window = Some(handle.into());
                         app.group_call.stream.window_is_stream = stream;
                     }
-                    Err(_) => {
-                        app.connection.status_note =
-                            tr(keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT).into()
-                    }
+                    Err(_) => app.connection.set_note(StatusNote::error(tr(
+                        keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT,
+                    ))),
                 }
                 cx.notify();
             });

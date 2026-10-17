@@ -11,6 +11,8 @@ use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
 use super::paid_messages_state::PriceSlider;
 use super::privacy::{PrivacyEditorTarget, PrivacyExceptionKind};
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::*;
@@ -390,8 +392,9 @@ impl QuillApp {
     pub(super) fn pick_messages_policy(&mut self, policy: MessagesPolicy, cx: &mut Context<Self>) {
         self.paid_messages.charge = None;
         if !matches!(policy, MessagesPolicy::Everybody) && !self.can_restrict_new_chats() {
-            self.connection.status_note =
-                tr(keys::Q_MONEY_RESTRICTING_NEW_CHATS_NEEDS_TELEGRAM).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MONEY_RESTRICTING_NEW_CHATS_NEEDS_TELEGRAM,
+            )));
             cx.notify();
             return;
         }
@@ -401,8 +404,9 @@ impl QuillApp {
     /// Opens the price slider on the saved price, or the default one.
     pub(super) fn open_charge_draft(&mut self, cx: &mut Context<Self>) {
         if !self.can_restrict_new_chats() {
-            self.connection.status_note =
-                tr(keys::Q_MONEY_CHARGING_FOR_MESSAGES_NEEDS_TELEGRAM).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MONEY_CHARGING_FOR_MESSAGES_NEEDS_TELEGRAM,
+            )));
             cx.notify();
             return;
         }
@@ -444,7 +448,8 @@ impl QuillApp {
     fn apply_new_chat_settings(&mut self, settings: NewChatPrivacy, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_new_chat_settings(settings) {
-                self.connection.status_note = format!("privacy update failed: {err:?}");
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
             }
         } else if let Some(demo) = self.demo_session.as_mut()
             && matches!(

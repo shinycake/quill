@@ -9,6 +9,7 @@ use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
@@ -158,7 +159,8 @@ impl QuillApp {
             ReplyOption::UpdateQuote => {
                 self.share.reply_elsewhere_open = false;
                 self.share.reply_quote_open = true;
-                self.connection.status_note = tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_OPS_PICK_THE_PART_TO_QUOTE)));
             }
             ReplyOption::ReplyInAnotherChat => {
                 self.open_reply_elsewhere(window, cx);
@@ -198,7 +200,8 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.connection.status_note = tr(keys::Q_OPS_REPLY_IN).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_OPS_REPLY_IN)));
         cx.notify();
     }
 
@@ -229,7 +232,9 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&dest.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         if secret {
-            self.connection.status_note = tr(keys::Q_OPS_REPLIES_FROM_ANOTHER_CHAT_CANT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_REPLIES_FROM_ANOTHER_CHAT_CANT,
+            )));
             cx.notify();
             return;
         }
@@ -245,7 +250,9 @@ impl QuillApp {
         self.select_listed_chat(dest, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
-        self.connection.status_note = tr(keys::Q_OPS_REPLYING_FROM_ANOTHER_CHAT).into();
+        self.connection.set_note(StatusNote::silent(tr(
+            keys::Q_OPS_REPLYING_FROM_ANOTHER_CHAT,
+        )));
         cx.notify();
     }
 

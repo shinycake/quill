@@ -23,6 +23,7 @@
 use super::app::QuillApp;
 use super::group_call_panel::{MEMBER_MUTED_ICON, MEMBERS_BG, MEMBERS_BG_OVER};
 use super::screen_share_state::{ChooserSource, ScreenFor};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::{ActiveTheme, Root};
@@ -270,7 +271,7 @@ impl QuillApp {
         let sources = match sources {
             Ok(sources) => sources,
             Err(err) => {
-                self.connection.status_note = err.to_string();
+                self.connection.set_note(StatusNote::error(err.to_string()));
                 cx.notify();
                 return false;
             }

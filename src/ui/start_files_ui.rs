@@ -11,6 +11,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -124,7 +125,7 @@ impl QuillApp {
             return;
         }
         if let Some(note) = self.start_files_refusal(chat) {
-            self.connection.status_note = note.into();
+            self.connection.set_note(StatusNote::error(note));
             cx.notify();
             return;
         }
@@ -136,7 +137,8 @@ impl QuillApp {
         if self.open_chat_id() == Some(chat) {
             self.attach_dropped_files(&files, cx);
         } else {
-            self.connection.status_note = tr(keys::Q_MISC_OPEN_THE_CHAT_TO_ATTACH).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MISC_OPEN_THE_CHAT_TO_ATTACH)));
         }
         cx.notify();
     }

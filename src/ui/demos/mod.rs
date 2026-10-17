@@ -16,6 +16,7 @@ mod platform;
 mod privacy_media;
 mod security;
 mod signin;
+mod status_toasts;
 mod stories;
 pub(in crate::ui) mod video_fixtures;
 

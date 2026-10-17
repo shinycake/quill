@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -193,7 +194,8 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, _, cx| {
                     let code = experimental::encode_export(this.experimental_values());
                     cx.write_to_clipboard(ClipboardItem::new_string(code));
-                    this.connection.status_note = experimental::EXPORTED_TOAST.into();
+                    this.connection
+                        .set_note(StatusNote::info(experimental::EXPORTED_TOAST));
                     cx.notify();
                 })),
         );
@@ -213,14 +215,15 @@ impl QuillApp {
             .read_from_clipboard()
             .and_then(|item| item.text())
             .unwrap_or_default();
-        self.connection.status_note = match experimental::decode_import(&text) {
-            Imported::NotACode => experimental::INVALID_CODE_TOAST.into(),
-            Imported::Unsupported => experimental::UNSUPPORTED_CODE_TOAST.into(),
+        let note = match experimental::decode_import(&text) {
+            Imported::NotACode => StatusNote::error(experimental::INVALID_CODE_TOAST),
+            Imported::Unsupported => StatusNote::error(experimental::UNSUPPORTED_CODE_TOAST),
             Imported::Values(values) => {
                 self.apply_experimental_values(values, cx);
-                experimental::IMPORTED_TOAST.into()
+                StatusNote::info(experimental::IMPORTED_TOAST)
             }
         };
+        self.connection.set_note(note);
         cx.notify();
     }
 

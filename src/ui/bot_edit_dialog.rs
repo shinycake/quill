@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -63,12 +64,14 @@ impl QuillApp {
 
     fn open_bot_edit(&mut self, bot_id: i64, window: &mut Window, cx: &mut Context<Self>) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_EDITING_A_BOT).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_MEDIA_DEMO_MODE_EDITING_A_BOT)));
             cx.notify();
             return;
         };
         if live.driver.begin_bot_edit(bot_id).is_err() {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOT).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOT)));
             cx.notify();
             return;
         }
@@ -181,7 +184,9 @@ impl QuillApp {
             && !changes.is_empty()
             && live.driver.save_bot_edit(bot_id, &changes).is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_CHANGES).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_SEND_THE_CHANGES,
+            )));
         }
         cx.notify();
     }
@@ -205,7 +210,8 @@ impl QuillApp {
 
     fn set_bot_photo_from(&mut self, bot_id: i64, path: &Path, cx: &mut Context<Self>) {
         if !is_photo_file(path) {
-            self.connection.status_note = tr(keys::Q_MEDIA_CHOOSE_A_JPEG_PNG_OR).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_JPEG_PNG_OR)));
             cx.notify();
             return;
         }
@@ -215,7 +221,9 @@ impl QuillApp {
                 .set_bot_photo(bot_id, &path.to_string_lossy())
                 .is_err()
         {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_PHOTO).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_SEND_THE_PHOTO,
+            )));
         }
         cx.notify();
     }

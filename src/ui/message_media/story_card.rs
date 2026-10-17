@@ -8,6 +8,7 @@
 //! from `getStory`, fetched with the open chat's replies.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 use quill::service_text::{Seg, ServiceText};
 use quill::state::{StoryCardState, StoryPreview};
@@ -86,7 +87,7 @@ impl QuillApp {
             .session()
             .map(|s| s.story_card_state(poster.0, story_id));
         if state == Some(StoryCardState::Expired) {
-            self.set_status_note(tr(keys::FORWARDED_STORY_EXPIRED), cx);
+            self.set_status_note(StatusNote::silent(tr(keys::FORWARDED_STORY_EXPIRED)), cx);
             return;
         }
         self.open_story_viewer(poster, story_id, cx);

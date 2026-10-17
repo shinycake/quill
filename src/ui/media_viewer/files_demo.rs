@@ -7,6 +7,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::demo::demo_media_allowlist;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{ChatId, MessageId};
@@ -170,7 +171,9 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-        self.connection.status_note = "screenshot demo — pictures sent as files".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — pictures sent as files",
+        ));
     }
 
     /// An HDR sunset (an ISO gain-map HEIC) sent as a file.
@@ -192,7 +195,9 @@ impl QuillApp {
         if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
             session.apply(owned);
         }
-        self.connection.status_note = "screenshot demo — an HDR picture sent as a file".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — an HDR picture sent as a file",
+        ));
     }
 
     fn demo_hdr_file_viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) {

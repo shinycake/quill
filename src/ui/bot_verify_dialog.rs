@@ -8,6 +8,7 @@
 use super::app::QuillApp;
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -190,7 +191,9 @@ impl QuillApp {
             }
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_MODE_VERIFYING_NEEDS_A).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MEDIA_DEMO_MODE_VERIFYING_NEEDS_A,
+            )));
             cx.notify();
             return true;
         };
@@ -200,17 +203,17 @@ impl QuillApp {
             live.driver
                 .set_bot_verification(bot_id, sender, &description)
         };
-        self.connection.status_note = match (sent, remove) {
-            (Ok(_), false) => tr_with(
+        self.connection.set_note(match (sent, remove) {
+            (Ok(_), false) => StatusNote::silent(tr_with(
                 keys::Q_MEDIA_VERIFYING_AS_A,
                 &[("name", &name.to_string()), ("noun", (target.noun()))],
-            ),
-            (Ok(_), true) => tr_with(
+            )),
+            (Ok(_), true) => StatusNote::silent(tr_with(
                 keys::Q_MEDIA_REMOVING_THE_VERIFICATION_FROM,
                 &[("name", &name.to_string())],
-            ),
-            (Err(_), _) => tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_VERIFICATION).into(),
-        };
+            )),
+            (Err(_), _) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_VERIFICATION)),
+        });
         cx.notify();
         true
     }

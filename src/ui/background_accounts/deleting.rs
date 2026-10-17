@@ -11,6 +11,7 @@
 
 use super::closing::CloseWait;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::tr_with;
 use quill::platform::SecretStore;
 use quill::settings::{
@@ -207,8 +208,10 @@ impl QuillApp {
         if let Err(e) = mark_for_deletion(&root, &accounts) {
             // Without the record, a quit before the clients close would
             // keep the data but lose the passcode: keep both.
-            self.connection.status_note =
-                tr_with(keys::Q_REST_COULD_NOT_LOG_OUT_E, &[("e", &e.to_string())]);
+            self.connection.set_note(StatusNote::error(tr_with(
+                keys::Q_REST_COULD_NOT_LOG_OUT_E,
+                &[("e", &e.to_string())],
+            )));
             cx.notify();
             return;
         }
@@ -229,8 +232,9 @@ impl QuillApp {
                 // Nothing opens in this run; the next start deletes the
                 // folders before connecting.
                 Deletion::Deferred => {
-                    this.connection.status_note =
-                        tr(keys::Q_REST_RESTART_QUILL_TO_FINISH_LOGGING_OUT).into();
+                    this.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_REST_RESTART_QUILL_TO_FINISH_LOGGING_OUT,
+                    )));
                 }
             },
             cx,

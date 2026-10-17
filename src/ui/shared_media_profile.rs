@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use super::playlist_manage::PlaylistDrag;
 use super::premium_ui::sticker_tile;
 use super::pressable::{PressableDiv, action_row};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::*;
@@ -33,7 +34,8 @@ impl QuillApp {
             let gallery = &mut live.driver.session.media.shared_media;
             if gallery.open {
                 if live.driver.set_shared_media_split(split).is_err() {
-                    self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB).into();
+                    self.connection
+                        .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_THAT_TAB)));
                 }
             } else {
                 gallery.media_split = split;
@@ -62,7 +64,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_more_shared_media(tab).is_err()
         {
-            self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_LOAD_MORE).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_LOAD_MORE)));
         }
         cx.notify();
     }

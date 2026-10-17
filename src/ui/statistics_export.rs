@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -149,7 +150,9 @@ impl QuillApp {
     /// "Export to File…": ask where, then write the workbook there.
     pub(super) fn export_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) {
         let Some((sheets, name)) = self.session().and_then(|s| page_workbook(s, chat_id)) else {
-            self.connection.status_note = tr(keys::Q_MONEY_THE_STATISTICS_ARE_STILL_LOADING).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MONEY_THE_STATISTICS_ARE_STILL_LOADING,
+            )));
             cx.notify();
             return;
         };
@@ -170,15 +173,15 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.status_note = match written {
-                    Ok(dest) => format!(
+                this.connection.set_note(match written {
+                    Ok(dest) => StatusNote::info(format!(
                         "Statistics saved to {}.",
                         dest.file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or(tr(keys::Q_MONEY_THE_FILE))
-                    ),
-                    Err(()) => tr(keys::STATS_EXPORT_ERROR).into(),
-                };
+                    )),
+                    Err(()) => StatusNote::error(tr(keys::STATS_EXPORT_ERROR)),
+                });
                 cx.notify();
             });
         })

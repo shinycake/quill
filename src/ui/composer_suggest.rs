@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -286,10 +287,10 @@ impl QuillApp {
             &Self::appearance_paths(),
             &self.composer_ui.suggest.hashtags,
         ) {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_CHAT_COULDNT_SAVE_RECENT_HASHTAGS,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
     }
 

@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -118,7 +119,7 @@ impl QuillApp {
         action: UsernameChange,
         cx: &mut Context<Self>,
     ) {
-        self.connection.status_note = match self.live.as_mut() {
+        self.connection.set_note(match self.live.as_mut() {
             Some(live) => {
                 let sent = match action {
                     UsernameChange::Toggle(on) => {
@@ -127,13 +128,13 @@ impl QuillApp {
                     UsernameChange::Move(up) => live.driver.move_group_username(chat_id, name, up),
                 };
                 match sent {
-                    Ok(Some(_)) => String::new(),
-                    Ok(None) => tr(keys::Q_PEOPLE_THAT_LINK_CANT_BE_CHANGED).into(),
-                    Err(_) => tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY).into(),
+                    Ok(Some(_)) => StatusNote::default(),
+                    Ok(None) => StatusNote::error(tr(keys::Q_PEOPLE_THAT_LINK_CANT_BE_CHANGED)),
+                    Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY)),
                 }
             }
-            None => tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into(),
-        };
+            None => StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)),
+        });
         cx.notify();
     }
 
@@ -476,8 +477,9 @@ impl QuillApp {
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
-                                    this.connection.status_note =
-                                        tr(keys::Q_PEOPLE_BOOST_LINK_COPIED).into();
+                                    this.connection.set_note(StatusNote::info(tr(
+                                        keys::Q_PEOPLE_BOOST_LINK_COPIED,
+                                    )));
                                     cx.notify();
                                 })),
                         ),

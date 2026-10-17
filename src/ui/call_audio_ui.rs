@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
@@ -144,7 +145,7 @@ impl QuillApp {
         } else {
             match LevelTap::open_default() {
                 Ok(tap) => self.start_mic_test(Box::new(tap), cx),
-                Err(err) => self.connection.status_note = err,
+                Err(err) => self.connection.set_note(StatusNote::error(err)),
             }
         }
         cx.notify();

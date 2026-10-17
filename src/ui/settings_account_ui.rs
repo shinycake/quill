@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -128,10 +129,14 @@ impl QuillApp {
                 self.settings.page = None;
                 window.close_dialog(cx);
             }
-            Some(Err(_)) => {
-                self.set_status_note(tr(keys::Q_PREFS_COULDNT_REACH_TELEGRAM_SUPPORT_TRY), cx)
-            }
-            None => self.set_status_note(tr(keys::Q_PREFS_SIGN_IN_TO_WRITE_TO), cx),
+            Some(Err(_)) => self.set_status_note(
+                StatusNote::error(tr(keys::Q_PREFS_COULDNT_REACH_TELEGRAM_SUPPORT_TRY)),
+                cx,
+            ),
+            None => self.set_status_note(
+                StatusNote::silent(tr(keys::Q_PREFS_SIGN_IN_TO_WRITE_TO)),
+                cx,
+            ),
         }
         cx.notify();
     }

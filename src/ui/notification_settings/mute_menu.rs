@@ -1,6 +1,7 @@
 //! The per-chat mute menu.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
@@ -14,7 +15,8 @@ impl QuillApp {
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.notify.mute_menu_open = true;
         self.notify.mute_custom_open = false;
-        self.connection.status_note = tr(keys::Q_PREFS_MUTE_FOR).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_PREFS_MUTE_FOR)));
         cx.notify();
     }
 
@@ -27,11 +29,11 @@ impl QuillApp {
         self.notify.mute_menu_open = false;
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.set_chat_mute_for(chat_id, mute_for);
-            self.connection.status_note = match result {
-                Ok(_) if mute_for == 0 => tr(keys::Q_PREFS_UNMUTING).into(),
-                Ok(_) => tr(keys::Q_PREFS_MUTING).into(),
-                Err(_) => tr(keys::Q_PREFS_COULD_NOT_CHANGE_MUTE).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) if mute_for == 0 => StatusNote::silent(tr(keys::Q_PREFS_UNMUTING)),
+                Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_MUTING)),
+                Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_MUTE)),
+            });
             cx.notify();
             return;
         }
@@ -43,11 +45,11 @@ impl QuillApp {
                 },
                 cx,
             );
-            self.connection.status_note = if mute_for == 0 {
-                "unmuted".into()
+            self.connection.set_note(if mute_for == 0 {
+                StatusNote::silent("unmuted")
             } else {
-                "muted".into()
-            };
+                StatusNote::silent("muted")
+            });
             cx.notify();
         }
     }

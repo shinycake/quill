@@ -1,6 +1,7 @@
 //! Methods moved out of `premium_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 
 impl QuillApp {
     pub(in crate::ui) fn open_premium(&mut self, cx: &mut Context<Self>) {
@@ -13,7 +14,8 @@ impl QuillApp {
             live.driver.maybe_fetch_premium()
         });
         if let Some(Err(_)) = sent {
-            self.connection.status_note = "could not load Premium".into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_NOTES_COULDNT_LOAD_PREMIUM)));
         }
         cx.notify();
     }

@@ -5,6 +5,7 @@
 //! the editor opens on it once the file is here (`LoadDocumentMedia`).
 use super::state::CreateSticker;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::sticker_video::{ENCODING_NOTE, VideoStickerJob, encode_sticker};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,7 +27,7 @@ impl QuillApp {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         self.sticker_box.encoding = Some(cancel.clone());
-        self.connection.status_note = ENCODING_NOTE.into();
+        self.connection.set_note(StatusNote::silent(ENCODING_NOTE));
         let kind = create.kind;
         let worker = cx.background_spawn(async move {
             encode_sticker(&job.source, &job.edits, &job.info, kind, &cancel)
@@ -54,7 +55,7 @@ impl QuillApp {
                     }
                     Err(error) => {
                         if let Some(note) = error.note().filter(|_| current) {
-                            this.connection.status_note = note;
+                            this.connection.set_note(StatusNote::error(note));
                         }
                     }
                 }

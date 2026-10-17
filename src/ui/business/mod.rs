@@ -13,6 +13,7 @@
 //! it comes back here.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::status_note::StatusNote;
 mod build;
 mod chat_links;
 mod chatbots;
@@ -148,7 +149,7 @@ impl QuillApp {
                 return false;
             }
             if let Some(line) = self.business_mut().and_then(|d| d.local_error.take()) {
-                self.connection.status_note = line;
+                self.connection.set_note(StatusNote::error(line));
             }
         }
         self.close_business(cx);

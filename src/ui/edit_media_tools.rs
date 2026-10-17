@@ -6,6 +6,7 @@
 
 use super::app::QuillApp;
 use super::photo_editor::PhotoEditor;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
@@ -119,7 +120,8 @@ impl QuillApp {
                 if let Some(edit) = self.composer_ui.pending_edit.as_mut() {
                     edit.media_edit.cover = None;
                 }
-                self.connection.status_note = tr(keys::Q_MISC_COVER_CLEARED).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_COVER_CLEARED)));
                 cx.notify();
             }
         }
@@ -150,10 +152,9 @@ impl QuillApp {
                             this.viewer.photo_editor = Some(PhotoEditor::for_message_edit(pixels));
                         }
                     }
-                    Err(_) => {
-                        this.connection.status_note =
-                            tr(keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).into()
-                    }
+                    Err(_) => this.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR,
+                    ))),
                 }
                 cx.notify();
             },
@@ -178,7 +179,9 @@ impl QuillApp {
         if let (Some(file_id), Some(live)) = (file_id, self.live.as_mut()) {
             let _ = live.driver.ensure_media_files(&[file_id]);
         }
-        self.connection.status_note = tr(keys::Q_MISC_DOWNLOADING_CHOOSE_EDIT_IMAGE_AGAIN).into();
+        self.connection.set_note(StatusNote::silent(tr(
+            keys::Q_MISC_DOWNLOADING_CHOOSE_EDIT_IMAGE_AGAIN,
+        )));
         cx.notify();
     }
 
@@ -186,7 +189,9 @@ impl QuillApp {
     /// as the replacement, keeping the spoiler the photo had.
     pub(super) fn finish_edit_image(&mut self, saved: Option<PathBuf>, cx: &mut Context<Self>) {
         let Some(path) = saved else {
-            self.connection.status_note = tr(keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
+            )));
             cx.notify();
             return;
         };
@@ -237,13 +242,15 @@ impl QuillApp {
         };
         match cover_send_path(path) {
             Some(cover) => {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_MISC_COVER_WILL_BE_SAVED_WITH,
                     &[("shown_name", &(shown_name(&cover)).to_string())],
-                );
+                )));
                 edit.media_edit.cover = Some(cover);
             }
-            None => self.connection.status_note = EDIT_MEDIA_INVALID_FILE.into(),
+            None => self
+                .connection
+                .set_note(StatusNote::silent(EDIT_MEDIA_INVALID_FILE)),
         }
         cx.notify();
     }

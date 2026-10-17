@@ -1,6 +1,7 @@
 //! Methods moved out of `message_menu_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -14,16 +15,16 @@ impl QuillApp {
         sender: MessageSender,
         cx: &mut Context<Self>,
     ) {
-        self.connection.status_note = match self.live.as_mut() {
+        self.connection.set_note(match self.live.as_mut() {
             Some(live) => match live
                 .driver
                 .delete_message_reactions_from(chat_id, message_id, sender)
             {
-                Ok(Some(_)) => tr(keys::Q_CHAT_DELETING_REACTION).into(),
-                _ => tr(keys::Q_CHAT_COULD_NOT_DELETE_THE_REACTION).into(),
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_CHAT_DELETING_REACTION)),
+                _ => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_THE_REACTION)),
             },
-            None => tr(keys::Q_CHAT_REACTION_DELETION_NEEDS_A_LIVE).into(),
-        };
+            None => StatusNote::info(tr(keys::Q_CHAT_REACTION_DELETION_NEEDS_A_LIVE)),
+        });
         cx.notify();
     }
 

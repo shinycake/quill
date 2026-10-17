@@ -6,6 +6,7 @@ use super::demo::demo_file_json;
 use super::message_media::waveform_row;
 use super::recording_state::{CaptureFor, CaptureMedia};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -67,13 +68,15 @@ impl QuillApp {
     /// (TGX tap-to-switch, desktop-mapped). Ignored while recording.
     pub(super) fn toggle_record_mode(&mut self, cx: &mut Context<Self>) {
         if self.recording_active() {
-            self.connection.status_note = tr(keys::Q_MISC_FINISH_THE_RECORDING_FIRST).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MISC_FINISH_THE_RECORDING_FIRST,
+            )));
             cx.notify();
             return;
         }
         let next = !matches!(self.record_mode(), RecordMode::Video);
         self.set_media_pref(|prefs| prefs.prefer_video_mode = next, cx);
-        self.connection.status_note = format!(
+        self.connection.set_note(StatusNote::silent(format!(
             "{} — {}",
             if next {
                 tr(keys::Q_MISC_VIDEO_NOTE_MODE)
@@ -81,7 +84,7 @@ impl QuillApp {
                 tr(keys::Q_MISC_VOICE_NOTE_MODE)
             },
             self.record_mode().hint()
-        );
+        )));
         cx.notify();
     }
 
@@ -118,10 +121,11 @@ impl QuillApp {
                 self.hold_capture(CaptureMedia::Voice(capture), CaptureFor::Message);
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
-                self.connection.status_note = tr(keys::Q_MISC_RECORDING_VOICE_NOTE).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VOICE_NOTE)));
             }
             Err(err) => {
-                self.connection.status_note = err;
+                self.connection.set_note(StatusNote::error(err));
             }
         }
         cx.notify();
@@ -139,10 +143,10 @@ impl QuillApp {
         if let Some((name, layer)) = self.open_secret_chat_peer_layer()
             && layer < 66
         {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::info(tr_with(
                 keys::Q_MISC_S_TELEGRAM_CLIENT_DOESNT_SUPPORT,
                 &[("name", &name.to_string())],
-            );
+            )));
             cx.notify();
             return;
         }
@@ -172,10 +176,11 @@ impl QuillApp {
                 self.recording.locked = lock;
                 self.sync_voice_action();
                 self.spawn_voice_tick(cx);
-                self.connection.status_note = tr(keys::Q_MISC_RECORDING_VIDEO_NOTE).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VIDEO_NOTE)));
             }
             Err(err) => {
-                self.connection.status_note = err;
+                self.connection.set_note(StatusNote::error(err));
             }
         }
         cx.notify();
@@ -199,7 +204,7 @@ impl QuillApp {
 
     fn fail_recording(&mut self, reason: String, cx: &mut Context<Self>) {
         self.cancel_recording(cx);
-        self.connection.status_note = reason;
+        self.connection.set_note(StatusNote::error(reason));
         cx.notify();
     }
 
@@ -227,11 +232,11 @@ impl QuillApp {
             return;
         }
         self.recording.locked = !self.recording.locked;
-        self.connection.status_note = if self.recording.locked {
-            tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL).into()
+        self.connection.set_note(if self.recording.locked {
+            StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
         } else {
-            tr(keys::Q_MISC_RECORDING_UNLOCKED).into()
-        };
+            StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
+        });
         cx.notify();
     }
 
@@ -244,10 +249,12 @@ impl QuillApp {
         if capture.is_paused() {
             capture.resume();
             self.stop_record_preview();
-            self.connection.status_note = tr(keys::Q_MISC_RECORDING_VOICE_NOTE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VOICE_NOTE)));
         } else {
             capture.pause();
-            self.connection.status_note = tr(keys::Q_MISC_RECORDING_PAUSED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_PAUSED)));
         }
         self.sync_voice_action();
         cx.notify();
@@ -267,7 +274,9 @@ impl QuillApp {
             return;
         };
         let Some(path) = capture.preview_path().map(std::path::Path::to_path_buf) else {
-            self.connection.status_note = tr(keys::Q_MISC_GETTING_THE_RECORDING_READY).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MISC_GETTING_THE_RECORDING_READY,
+            )));
             cx.notify();
             return;
         };
@@ -306,7 +315,9 @@ impl QuillApp {
             self.recording.preview = Some(clock);
             self.spawn_voice_tick(cx);
         } else {
-            self.connection.status_note = tr(keys::Q_MISC_COULDNT_PLAY_THE_RECORDING).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MISC_COULDNT_PLAY_THE_RECORDING,
+            )));
         }
         cx.notify();
     }
@@ -325,11 +336,11 @@ impl QuillApp {
     /// Switch "Play once" for the voice message being recorded.
     pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
         self.recording.once = !self.recording.once;
-        self.connection.status_note = if self.recording.once {
-            tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP).into()
+        self.connection.set_note(if self.recording.once {
+            StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
         } else {
-            tr(keys::Q_MISC_PLAY_ONCE_OFF).into()
-        };
+            StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
+        });
         cx.notify();
     }
 
@@ -357,11 +368,11 @@ impl QuillApp {
         self.recording.locked = false;
         self.recording.discard_confirm = false;
         self.sync_voice_action();
-        self.connection.status_note = if was_video {
-            tr(keys::Q_MISC_VIDEO_RECORDING_CANCELLED).into()
+        self.connection.set_note(if was_video {
+            StatusNote::silent(tr(keys::Q_MISC_VIDEO_RECORDING_CANCELLED))
         } else {
-            tr(keys::Q_MISC_VOICE_RECORDING_CANCELLED).into()
-        };
+            StatusNote::silent(tr(keys::Q_MISC_VOICE_RECORDING_CANCELLED))
+        });
         cx.notify();
     }
 
@@ -392,7 +403,7 @@ impl QuillApp {
             Ok(draft) => draft,
             Err(err) => {
                 self.sync_voice_action();
-                self.connection.status_note = err;
+                self.connection.set_note(StatusNote::error(err));
                 cx.notify();
                 return;
             }
@@ -403,11 +414,11 @@ impl QuillApp {
             let result = live
                 .driver
                 .send_voice_note(&draft, caption.trim(), reply_to, play_once);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_MISC_SENDING_VOICE_NOTE).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_SEND_VOICE_NOTE).into(),
-            };
-            if self.connection.status_note == tr(keys::Q_MISC_SENDING_VOICE_NOTE) {
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)),
+                Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VOICE_NOTE)),
+            });
+            if self.connection.status_note() == tr(keys::Q_MISC_SENDING_VOICE_NOTE) {
                 self.composer_ui.set_reply(None);
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live
@@ -429,7 +440,9 @@ impl QuillApp {
             if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                 self.forget_local_draft(open);
             }
-            self.connection.status_note = tr(keys::Q_MISC_DEMO_VOICE_NOTE_APPLIED_LOCALLY).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MISC_DEMO_VOICE_NOTE_APPLIED_LOCALLY,
+            )));
         }
         self.sync_voice_action();
         cx.notify();
@@ -500,8 +513,9 @@ impl QuillApp {
                     let _ = std::fs::remove_file(path);
                 }
                 let _ = this.main().update(cx, |this, cx| {
-                    this.connection.status_note =
-                        tr(keys::Q_MISC_VIDEO_NOTE_NOT_SENT_ITS_WINDOW_CLOSED).into();
+                    this.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_MISC_VIDEO_NOTE_NOT_SENT_ITS_WINDOW_CLOSED,
+                    )));
                     cx.notify();
                 });
             }
@@ -518,7 +532,7 @@ impl QuillApp {
         let draft = match result {
             Ok(draft) => draft,
             Err(err) => {
-                self.connection.status_note = err;
+                self.connection.set_note(StatusNote::error(err));
                 cx.notify();
                 return;
             }
@@ -527,11 +541,11 @@ impl QuillApp {
         let reply_to = self.recording_send_reply(reply.as_ref());
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_recorded_video_note(&draft, reply_to);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_MISC_SENDING_VIDEO_NOTE).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_SEND_VIDEO_NOTE).into(),
-            };
-            if self.connection.status_note == tr(keys::Q_MISC_SENDING_VIDEO_NOTE) {
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)),
+                Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEND_VIDEO_NOTE)),
+            });
+            if self.connection.status_note() == tr(keys::Q_MISC_SENDING_VIDEO_NOTE) {
                 self.composer_ui.set_reply(None);
                 self.composer_ui.clear_draft_on_success = Some(
                     self.live
@@ -554,10 +568,13 @@ impl QuillApp {
                 if let Some(open) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                     self.forget_local_draft(open);
                 }
-                self.connection.status_note =
-                    tr(keys::Q_MISC_DEMO_VIDEO_NOTE_APPLIED_LOCALLY).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MISC_DEMO_VIDEO_NOTE_APPLIED_LOCALLY,
+                )));
             } else {
-                self.connection.status_note = tr(keys::Q_MISC_DEMO_RECORDED_CLIP_IS_OUTSIDE).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MISC_DEMO_RECORDED_CLIP_IS_OUTSIDE,
+                )));
             }
         }
         self.sync_voice_action();
@@ -575,16 +592,17 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             match live.driver.recognize_speech(chat_id, message_id) {
-                Ok(_) => {
-                    self.connection.status_note = tr(keys::Q_MISC_TRANSCRIPTION_REQUESTED).into()
-                }
-                Err(_) => {
-                    self.connection.status_note =
-                        tr(keys::Q_MISC_COULDNT_REQUEST_TRANSCRIPTION).into()
-                }
+                Ok(_) => self
+                    .connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MISC_TRANSCRIPTION_REQUESTED))),
+                Err(_) => self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MISC_COULDNT_REQUEST_TRANSCRIPTION,
+                ))),
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MISC_DEMO_TRANSCRIPTION_NEEDS_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MISC_DEMO_TRANSCRIPTION_NEEDS_A_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -593,11 +611,11 @@ impl QuillApp {
     /// status-note feedback the toggle gave.
     pub(super) fn set_hq_round_videos(&mut self, on: bool, cx: &mut Context<Self>) {
         self.set_media_pref(|prefs| prefs.hq_round_videos = on, cx);
-        self.connection.status_note = if on {
-            tr(keys::Q_MISC_HQ_ROUND_VIDEOS_ON_480PX).into()
+        self.connection.set_note(if on {
+            StatusNote::silent(tr(keys::Q_MISC_HQ_ROUND_VIDEOS_ON_480PX))
         } else {
-            tr(keys::Q_MISC_HQ_ROUND_VIDEOS_OFF_280PX).into()
-        };
+            StatusNote::silent(tr(keys::Q_MISC_HQ_ROUND_VIDEOS_OFF_280PX))
+        });
         cx.notify();
     }
 

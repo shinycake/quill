@@ -115,7 +115,8 @@ impl QuillApp {
             live.driver.maybe_fetch_star_transactions()
         });
         if let Some(Err(_)) = sent {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_STARS).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_STARS)));
         }
         cx.notify();
     }
@@ -275,7 +276,8 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.open_received_gifts(owner));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)));
         }
         cx.notify();
     }
@@ -317,7 +319,9 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.toggle_gift_saved(&id, saved));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_UPDATE_THE_GIFT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_UPDATE_THE_GIFT,
+            )));
         }
         cx.notify();
     }
@@ -328,7 +332,9 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.convert_gift_to_stars(&id));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_CONVERT_THE_GIFT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_CONVERT_THE_GIFT,
+            )));
         }
         if let Some(hub) = self.hub_mut() {
             hub.gift_convert_confirm = None;
@@ -862,6 +868,7 @@ fn gift_details(
     col.into_any_element()
 }
 
+use crate::ui::status_note::StatusNote;
 pub(super) use gift_card::{gift_card_element, gift_card_of};
 mod gift_card;
 mod grams;

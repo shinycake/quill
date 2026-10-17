@@ -4,6 +4,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::demo::{demo_sessions, demo_storage_stats};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use crate::ui::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -83,7 +84,8 @@ impl QuillApp {
             self.privacy.device_login_qr =
                 Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));
         }
-        self.connection.status_note = "screenshot demo — active sessions".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — active sessions"));
     }
 
     fn demo_ready_storage_usage(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -99,7 +101,8 @@ impl QuillApp {
             session.settings.storage_freed = Some(54_525_952);
         }
         self.settings.storage_usage_open = true;
-        self.connection.status_note = "screenshot demo — data & storage".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — data & storage"));
     }
 
     fn demo_appearance(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -122,6 +125,7 @@ impl QuillApp {
         self.appearance.wallpaper_rgb = Some(0x0e1621);
         self.appearance.font_size_px = 16;
         self.settings.appearance_open = true;
-        self.connection.status_note = "screenshot demo — appearance settings".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — appearance settings"));
     }
 }

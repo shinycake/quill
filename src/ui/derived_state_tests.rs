@@ -354,7 +354,7 @@ fn an_edit_of_a_message_that_is_not_loaded_does_not_begin(cx: &mut TestAppContex
         "no edit starts on an empty field"
     );
     assert_eq!(
-        app.read_with(vcx, |app, _| app.connection.status_note.to_string()),
+        app.read_with(vcx, |app, _| app.connection.status_note().to_string()),
         quill::lang::tr(quill::lang::keys::EDIT_ERROR),
         "the refusal says so (tdesktop lng_edit_error)"
     );

@@ -11,6 +11,7 @@ use super::danger;
 use super::dialogs::GroupSettingsView;
 use super::pressable::{PressableDiv, action_row};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -212,8 +213,9 @@ impl QuillApp {
                 if let Some(live) = self.live.as_mut() {
                     let _ = live.driver.fetch_chat_boost_status(chat_id);
                 }
-                self.connection.status_note =
-                    tr(keys::Q_MISC_CHECKING_THE_BOOST_LEVEL_PRESS).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MISC_CHECKING_THE_BOOST_LEVEL_PRESS,
+                )));
             }
             ApplyOutcome::NeedsBoosts { required, have } => {
                 if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
@@ -222,17 +224,18 @@ impl QuillApp {
             }
             ApplyOutcome::Send(plan) => {
                 let Some(live) = self.live.as_mut() else {
-                    self.connection.status_note =
-                        tr(keys::Q_MISC_DEMO_MODE_APPEARANCE_NEEDS_A).into();
+                    self.connection.set_note(StatusNote::info(tr(
+                        keys::Q_MISC_DEMO_MODE_APPEARANCE_NEEDS_A,
+                    )));
                     cx.notify();
                     return;
                 };
                 let result = live.driver.apply_chat_appearance(chat_id, plan);
-                self.connection.status_note = if result.is_err() {
-                    tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_APPEARANCE).into()
+                self.connection.set_note(if result.is_err() {
+                    StatusNote::error(tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_APPEARANCE))
                 } else {
-                    tr(keys::Q_MISC_APPEARANCE_UPDATE_REQUESTED).into()
-                };
+                    StatusNote::silent(tr(keys::Q_MISC_APPEARANCE_UPDATE_REQUESTED))
+                });
                 if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
                     dialog.sent = result.is_ok();
                     dialog.needs_boosts = None;

@@ -4,6 +4,8 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::form::{field, v_form};
@@ -174,18 +176,23 @@ impl QuillApp {
         };
         let username = dialog.username_text(cx);
         if username.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_ENTER_A_USERNAME_TO_CHECK).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_ENTER_A_USERNAME_TO_CHECK,
+            )));
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
+            )));
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.check_username(&username) {
-            self.connection.status_note = format!("username check failed: {err:?}");
+            self.connection
+                .set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -211,22 +218,27 @@ impl QuillApp {
                 text == username && result == UsernameCheckResult::Available
             });
         if !username.is_empty() && username != editable && !checked_ok {
-            self.connection.status_note =
-                tr(keys::Q_PEOPLE_CHECK_AVAILABILITY_FIRST_THE_TEXT).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_CHECK_AVAILABILITY_FIRST_THE_TEXT,
+            )));
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
+            )));
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.set_username(&username) {
-            Ok(_) => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED).into()
-            }
-            Err(err) => self.connection.status_note = format!("set username failed: {err:?}"),
+            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
+            ))),
+            Err(err) => self
+                .connection
+                .set_note(StatusNote::error(user_error(&err))),
         }
         cx.notify();
     }
@@ -259,13 +271,16 @@ impl QuillApp {
         let mut new_order = order;
         new_order.swap(pos, swap);
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
+            )));
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         if let Err(err) = live.driver.reorder_active_usernames(&new_order) {
-            self.connection.status_note = format!("reorder failed: {err:?}");
+            self.connection
+                .set_note(StatusNote::error(user_error(&err)));
         }
         cx.notify();
     }
@@ -278,16 +293,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
+            )));
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.toggle_username_is_active(username, is_active) {
-            Ok(_) => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED).into()
-            }
-            Err(err) => self.connection.status_note = format!("username toggle failed: {err:?}"),
+            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_USERNAME_UPDATE_REQUESTED,
+            ))),
+            Err(err) => self
+                .connection
+                .set_note(StatusNote::error(user_error(&err))),
         }
         cx.notify();
     }
@@ -301,21 +320,27 @@ impl QuillApp {
             .and_then(|me| self.session().and_then(|s| s.user_full_info(me)))
             .and_then(|info| info.photo_id);
         let Some(photo_id) = photo_id else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_NO_PROFILE_PHOTO_TO_REMOVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_NO_PROFILE_PHOTO_TO_REMOVE,
+            )));
             cx.notify();
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_PEOPLE_DEMO_MODE_PROFILE_EDITS_NEED,
+            )));
             cx.notify();
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
         match live.driver.delete_profile_photo(photo_id) {
-            Ok(_) => {
-                self.connection.status_note = tr(keys::Q_PEOPLE_PHOTO_REMOVAL_REQUESTED).into()
-            }
-            Err(err) => self.connection.status_note = format!("remove photo failed: {err:?}"),
+            Ok(_) => self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_PHOTO_REMOVAL_REQUESTED,
+            ))),
+            Err(err) => self
+                .connection
+                .set_note(StatusNote::error(user_error(&err))),
         }
         cx.notify();
     }

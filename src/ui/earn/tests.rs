@@ -79,7 +79,7 @@ fn open_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Optio
 }
 
 fn note(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
-    app.read_with(vcx, |app, _| app.connection.status_note.to_string())
+    app.read_with(vcx, |app, _| app.connection.status_note().to_string())
 }
 
 #[gpui_kit::test]

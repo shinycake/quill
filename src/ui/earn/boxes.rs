@@ -6,6 +6,7 @@ use super::revenue::ton_amount;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::{Dialog, DialogContent};
@@ -134,8 +135,9 @@ impl QuillApp {
                                     if this.earn.diamonds < 100 {
                                         this.earn.diamonds += 1;
                                     }
-                                    this.connection.status_note =
-                                        diamonds_toast(this.earn.diamonds);
+                                    this.connection.set_note(StatusNote::info(diamonds_toast(
+                                        this.earn.diamonds,
+                                    )));
                                     cx.notify();
                                 }))
                                 .child(ton_icon(20., primary)),
@@ -353,7 +355,8 @@ impl QuillApp {
                     .disabled(link.is_empty())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                        this.connection.status_note = tr(keys::STICKERS_COPIED).into();
+                        this.connection
+                            .set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
                         cx.notify();
                     })),
             );

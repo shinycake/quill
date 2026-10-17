@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -24,8 +25,9 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.hide_suggestion(suggestion).is_err() {
-                    self.connection.status_note =
-                        tr(keys::Q_MISC_COULD_NOT_HIDE_THE_SUGGESTION).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MISC_COULD_NOT_HIDE_THE_SUGGESTION,
+                    )));
                 }
             }
             None => {
@@ -198,8 +200,9 @@ impl QuillApp {
                                 .small()
                                 .ghost()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.connection.status_note =
-                                        quill::phone_suggestion::CHANGE_NOTE.into();
+                                    this.connection.set_note(StatusNote::silent(
+                                        quill::phone_suggestion::CHANGE_NOTE,
+                                    ));
                                     cx.notify();
                                 })),
                         ),

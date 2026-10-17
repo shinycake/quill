@@ -12,6 +12,7 @@ use super::gift_market_state::MarketBox;
 use super::gift_market_ui::{BoxView, collectible_tile, feature_row, two_line_button};
 use super::gift_resale_buy::attribute_row;
 use super::shell::DialogKind;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::progress::ProgressCircle;
@@ -183,7 +184,8 @@ impl QuillApp {
         if started {
             self.market_replace(MarketBox::Craft, cx);
         } else {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_START_CRAFTING).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_START_CRAFTING)));
             cx.notify();
         }
     }
@@ -222,7 +224,8 @@ impl QuillApp {
         if started {
             self.gift_market.forge_started = Some(Instant::now());
         } else {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT)));
         }
         cx.notify();
     }
@@ -297,7 +300,8 @@ impl QuillApp {
                 }
             }
             Some(CraftResult::InvalidGift) => {
-                self.connection.status_note = tr(keys::Q_MONEY_THIS_GIFT_CANT_BE_USED).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_MONEY_THIS_GIFT_CANT_BE_USED)));
                 cx.notify();
             }
             // An error: its note is shown, the craft box stays.

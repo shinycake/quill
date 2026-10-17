@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::ui::image_decode::DecodeSize;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -55,12 +56,15 @@ impl QuillApp {
                     self.viewer.rotated = Some((path, orientation.code(), image));
                 }
                 None => {
-                    self.connection.status_note = tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO).into();
+                    self.connection
+                        .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO)));
                     (self.viewer.orientation, self.viewer.rotated) = previous;
                 }
             },
             None => {
-                self.connection.status_note = tr(keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO,
+                )));
                 (self.viewer.orientation, self.viewer.rotated) = previous;
             }
         }
@@ -153,12 +157,16 @@ impl QuillApp {
                     self.show_saved_toast(dest, item.kind.is_playable(), cx);
                 }
                 Err(err) => {
-                    self.connection.status_note =
-                        tr_with(keys::Q_AV_COULDNT_SAVE, &[("err", &err.to_string())]);
+                    self.connection.set_note(StatusNote::error(tr_with(
+                        keys::Q_AV_COULDNT_SAVE,
+                        &[("err", &err.to_string())],
+                    )));
                 }
             },
             None => {
-                self.connection.status_note = tr(keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO,
+                )));
             }
         }
         cx.notify();
@@ -202,7 +210,8 @@ impl QuillApp {
             return;
         };
         if !quill::platform::reveal_in_file_manager(&toast.dest) {
-            self.connection.status_note = tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER)));
         }
         cx.notify();
     }
@@ -303,7 +312,8 @@ impl QuillApp {
             return;
         };
         if !item.kind.is_picture() {
-            self.connection.status_note = tr(keys::Q_AV_ONLY_PHOTOS_CAN_BE_COPIED).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_AV_ONLY_PHOTOS_CAN_BE_COPIED)));
             cx.notify();
             return;
         }
@@ -337,9 +347,10 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.connection.status_note = tr(keys::Q_AV_PHOTO_COPIED).into();
+                self.connection
+                    .set_note(StatusNote::info(tr(keys::Q_AV_PHOTO_COPIED)));
             }
-            Err(note) => self.connection.status_note = note.into(),
+            Err(note) => self.connection.set_note(StatusNote::error(note)),
         }
         cx.notify();
     }
@@ -383,9 +394,10 @@ impl QuillApp {
                     gpui_kit::ImageFormat::Png,
                     bytes,
                 )));
-                self.connection.status_note = tr(keys::Q_AV_FRAME_COPIED).into();
+                self.connection
+                    .set_note(StatusNote::info(tr(keys::Q_AV_FRAME_COPIED)));
             }
-            Err(note) => self.connection.status_note = note.into(),
+            Err(note) => self.connection.set_note(StatusNote::error(note)),
         }
         cx.notify();
     }
@@ -576,7 +588,9 @@ impl QuillApp {
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
             self.message_ui.menu_ui.sticker_set_open = false;
-            self.connection.status_note = tr(keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED,
+            )));
         }
         cx.notify();
     }
@@ -608,7 +622,8 @@ impl QuillApp {
             .and_then(|s| s.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.can_pin_messages());
         if !can_pin {
-            self.connection.status_note = tr(keys::Q_AV_YOU_CANT_PIN_MESSAGES_IN).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_AV_YOU_CANT_PIN_MESSAGES_IN)));
             cx.notify();
             return;
         }
@@ -635,12 +650,14 @@ impl QuillApp {
                     self.apply_demo_pin_toggle(chat_id, *id);
                 }
             }
-            self.connection.status_note = tr(keys::Q_AV_DEMO_ALBUM_PIN_UPDATED).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_AV_DEMO_ALBUM_PIN_UPDATED)));
             cx.notify();
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_AV_NO_LIVE_CONNECTION).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_AV_NO_LIVE_CONNECTION)));
             cx.notify();
             return;
         };
@@ -651,28 +668,28 @@ impl QuillApp {
                     failed += 1;
                 }
             }
-            self.connection.status_note = if failed == 0 {
-                tr(keys::Q_AV_PINNING_ALBUM).into()
+            self.connection.set_note(if failed == 0 {
+                StatusNote::silent(tr(keys::Q_AV_PINNING_ALBUM))
             } else {
-                tr_with(
+                StatusNote::error(tr_with(
                     keys::Q_AV_COULDNT_PIN_ALBUM_ITEM_S,
                     &[("failed", &failed.to_string())],
-                )
-            };
+                ))
+            });
         } else {
             for id in &pinned {
                 if live.driver.unpin_chat_message(chat_id, *id).is_err() {
                     failed += 1;
                 }
             }
-            self.connection.status_note = if failed == 0 {
-                tr(keys::Q_AV_UNPINNING_ALBUM).into()
+            self.connection.set_note(if failed == 0 {
+                StatusNote::silent(tr(keys::Q_AV_UNPINNING_ALBUM))
             } else {
-                tr_with(
+                StatusNote::error(tr_with(
                     keys::Q_AV_COULDNT_UNPIN_ALBUM_ITEM_S,
                     &[("failed", &failed.to_string())],
-                )
-            };
+                ))
+            });
         }
         cx.notify();
     }

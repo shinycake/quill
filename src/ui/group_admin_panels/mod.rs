@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::pressable::action_row;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -49,8 +50,9 @@ impl QuillApp {
                     if let Some(live) = this.live.as_mut()
                         && live.driver.load_group_sticker_choices(chat_id).is_err()
                     {
-                        this.connection.status_note =
-                            tr(keys::Q_PEOPLE_COULD_NOT_LOAD_GROUP_PACKS).into();
+                        this.connection.set_note(StatusNote::error(tr(
+                            keys::Q_PEOPLE_COULD_NOT_LOAD_GROUP_PACKS,
+                        )));
                     }
                     cx.notify();
                 })),
@@ -115,15 +117,17 @@ impl QuillApp {
                                 } else {
                                     live.driver.set_supergroup_sticker_set(chat_id, id)
                                 };
-                                this.connection.status_note = match result {
-                                    Ok(Some(_)) => {
-                                        tr(keys::Q_PEOPLE_GROUP_PACK_CHANGE_REQUESTED).into()
-                                    }
-                                    Ok(None) => {
-                                        tr(keys::Q_PEOPLE_GROUP_PACK_CHANGE_IS_UNAVAILABLE).into()
-                                    }
-                                    Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_CHANGE_GROUP_PACK).into(),
-                                };
+                                this.connection.set_note(match result {
+                                    Ok(Some(_)) => StatusNote::silent(tr(
+                                        keys::Q_PEOPLE_GROUP_PACK_CHANGE_REQUESTED,
+                                    )),
+                                    Ok(None) => StatusNote::info(tr(
+                                        keys::Q_PEOPLE_GROUP_PACK_CHANGE_IS_UNAVAILABLE,
+                                    )),
+                                    Err(_) => StatusNote::error(tr(
+                                        keys::Q_PEOPLE_COULD_NOT_CHANGE_GROUP_PACK,
+                                    )),
+                                });
                             }
                             cx.notify();
                         })),
@@ -244,7 +248,9 @@ impl QuillApp {
                 .chat_boost_status
                 .remove(&chat_id.0);
             if live.driver.fetch_chat_boost_status(chat_id).is_err() {
-                self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_BOOST_STATUS).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULD_NOT_LOAD_BOOST_STATUS,
+                )));
             }
         }
         cx.notify();

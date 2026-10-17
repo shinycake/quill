@@ -7,6 +7,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -151,7 +152,8 @@ impl QuillApp {
             return;
         };
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_OPS_SHARING_WITH_A_BOT_NEEDS).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_OPS_SHARING_WITH_A_BOT_NEEDS)));
             cx.notify();
             return;
         };
@@ -181,13 +183,13 @@ impl QuillApp {
                 None => Ok(()),
             },
         };
-        self.connection.status_note = match result {
-            Ok(()) => tr_with(
+        self.connection.set_note(match result {
+            Ok(()) => StatusNote::silent(tr_with(
                 keys::Q_OPS_SHARED_WITH,
                 &[("bot_name", &share.bot_name.to_string())],
-            ),
-            Err(_) => tr(keys::Q_OPS_COULD_NOT_SHARE_WITH_THE).into(),
-        };
+            )),
+            Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SHARE_WITH_THE)),
+        });
         cx.notify();
     }
 

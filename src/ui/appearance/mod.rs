@@ -12,6 +12,7 @@ use super::QuillApp;
 use super::chat_theme::{set_high_contrast, set_theme_mode};
 use super::synthetic::BubbleLook;
 use super::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::dialog::Dialog;
@@ -233,10 +234,10 @@ impl QuillApp {
         quill::tray::monochrome::set_monochrome(self.appearance.tray_icon_monochrome);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         if let Err(err) = save_appearance_prefs(&Self::appearance_paths(), &self.appearance) {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_PREFS_COULDNT_SAVE_APPEARANCE_SETTINGS,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
         self.apply_appearance(cx);
         cx.notify();
@@ -256,10 +257,10 @@ impl QuillApp {
     ) {
         f(&mut self.chat_prefs);
         if let Err(err) = save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs) {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_PREFS_COULDNT_SAVE_CHAT_SETTINGS,
                 &[("err", &err.to_string())],
-            );
+            )));
         }
         // Keep kit's newline-vs-submit behavior in sync with the mode on
         // the two chat composers (other inputs always submit on Enter).

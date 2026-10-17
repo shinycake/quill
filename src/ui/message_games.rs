@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::message_media::{MediaCorners, photo_attachment};
 use super::message_text::rich_text_line;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -202,7 +203,10 @@ impl QuillApp {
             .as_ref()
             .and_then(|live| live.driver.session.my_user_id);
         let Some(user_id) = user_id else {
-            self.set_status_note(tr(keys::Q_MISC_COULDNT_LOAD_THE_SCORES), cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MISC_COULDNT_LOAD_THE_SCORES)),
+                cx,
+            );
             return;
         };
         let sent = self.live.as_mut().map(|live| {
@@ -214,7 +218,10 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.bots.game_scores.remove(&key);
             }
-            self.set_status_note(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+                cx,
+            );
         }
         cx.notify();
     }
@@ -234,7 +241,10 @@ impl QuillApp {
                 .send_game_message(chat_id, bot_user_id, game_short_name)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.set_status_note(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN), cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+                cx,
+            );
         }
         cx.notify();
     }

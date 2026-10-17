@@ -8,6 +8,8 @@
 
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -567,7 +569,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.block_sender(user_id) };
             if let Err(err) = result {
-                self.connection.status_note = format!("block failed: {err:?}");
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             let list = demo.settings.blocked_senders.get_or_insert_with(Vec::new);
@@ -586,7 +589,8 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let result = { live.driver.unblock_sender(user_id) };
             if let Err(err) = result {
-                self.connection.status_note = format!("unblock failed: {err:?}");
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
             }
         } else if let Some(demo) = self.demo_session.as_mut()
             && let Some(list) = demo.settings.blocked_senders.as_mut()

@@ -8,6 +8,7 @@ use crate::ui::forward::apply_ready_forward;
 use crate::ui::reactions::apply_ready_reactions;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::search_ui::{apply_ready_search, apply_ready_search_in_chat};
+use crate::ui::status_note::StatusNote;
 use crate::ui::*;
 use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm, ForwardDraft};
@@ -101,7 +102,9 @@ impl QuillApp {
             input.set_value("Demo chat B", window, cx);
             input.focus(window, cx);
         });
-        self.connection.status_note = "screenshot demo — select → pick dest → forwarded".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — select → pick dest → forwarded",
+        ));
     }
 
     fn demo_ready_mute_archive(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -110,8 +113,9 @@ impl QuillApp {
             apply_ready_mute_archive(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
         self.notify.mute_menu_open = true;
-        self.connection.status_note =
-            "screenshot demo — mute presets · muted icon · archive".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — mute presets · muted icon · archive",
+        ));
     }
 
     fn demo_ready_pin(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -120,7 +124,9 @@ impl QuillApp {
             apply_ready_pin(session, &self.demo_ui.sink, &self.demo_ui.seq);
             let _ = session.begin_chat_search_jump(MessageId(101));
         }
-        self.connection.status_note = "screenshot demo — pin · unpin · pinned bar".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — pin · unpin · pinned bar",
+        ));
     }
 
     fn demo_ready_reactions(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -155,7 +161,9 @@ impl QuillApp {
             position: point(px(420.), px(200.)),
         });
         self.message_ui.reactions_expanded = true;
-        self.connection.status_note = "screenshot demo — react · unreact · chips".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — react · unreact · chips",
+        ));
     }
 
     fn demo_ready_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {

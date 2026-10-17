@@ -1,6 +1,8 @@
 //! Methods moved out of `calls.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -17,7 +19,9 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|live| live.driver.session.is_offline())
         {
-            self.connection.status_note = tr(keys::Q_OPS_YOURE_OFFLINE_CANT_START_A).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_OPS_YOURE_OFFLINE_CANT_START_A,
+            )));
             cx.notify();
             return;
         }
@@ -88,8 +92,8 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.fetch_call_history()
                             {
-                                this.connection.status_note =
-                                    format!("call history request failed: {err:?}");
+                                this.connection
+                                    .set_note(StatusNote::error(user_error(&err)));
                             }
                             cx.notify();
                         })),
@@ -121,8 +125,8 @@ impl QuillApp {
                             if let Some(live) = this.live.as_mut()
                                 && let Err(err) = live.driver.fetch_more_call_history()
                             {
-                                this.connection.status_note =
-                                    format!("call history request failed: {err:?}");
+                                this.connection
+                                    .set_note(StatusNote::error(user_error(&err)));
                             }
                             cx.notify();
                         })),

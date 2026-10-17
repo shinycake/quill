@@ -190,7 +190,7 @@ fn a_windows_sign_in_waits_then_toasts_a_failure(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), None);
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             "Couldn't sign in with the security key."
         );
     });

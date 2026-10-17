@@ -10,6 +10,8 @@
 use super::app::QuillApp;
 use super::dialogs::contacts::AddContactDialog;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
@@ -88,7 +90,9 @@ impl QuillApp {
                     }
                 }
             }
-            Err(err) => self.connection.status_note = format!("add contact failed: {err:?}"),
+            Err(err) => self
+                .connection
+                .set_note(StatusNote::error(user_error(&err))),
         }
         cx.notify();
     }
@@ -113,10 +117,10 @@ impl QuillApp {
                 cx.notify();
             }
             Some(NewContactOutcome::Failed(code)) => {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_OPS_ADD_CONTACT_FAILED_ERROR,
                     &[("code", &code.to_string())],
-                );
+                )));
                 cx.notify();
             }
         }

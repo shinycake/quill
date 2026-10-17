@@ -117,6 +117,7 @@ pub(crate) mod tooltip_timing;
 mod twofa_state;
 mod updates;
 mod updates_sync_ui;
+mod user_error;
 mod vanish;
 mod viewer_state;
 
@@ -429,6 +430,7 @@ mod statistics_export;
 mod statistics_graph;
 mod statistics_posts;
 mod status_emoji;
+mod status_note;
 mod sticker_mirror;
 mod sticker_playback;
 mod sticker_set_box;

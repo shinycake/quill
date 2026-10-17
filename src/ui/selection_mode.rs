@@ -7,6 +7,7 @@
 
 use super::app::QuillApp;
 use super::motion;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -388,7 +389,8 @@ impl QuillApp {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text));
-        self.connection.status_note = "copied".into();
+        self.connection
+            .set_note(StatusNote::info(tr(keys::TEXT_COPIED)));
         cx.notify();
     }
 
@@ -450,10 +452,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_media_files(&missing);
         }
-        self.connection.status_note = match missing.len() {
-            1 => tr(keys::Q_CHAT_DOWNLOADING_1_FILE).into(),
-            n => trn(keys::Q_CHAT_DOWNLOADING_FILES, n),
-        };
+        self.connection.set_note(match missing.len() {
+            1 => StatusNote::silent(tr(keys::Q_CHAT_DOWNLOADING_1_FILE)),
+            n => StatusNote::silent(trn(keys::Q_CHAT_DOWNLOADING_FILES, n)),
+        });
         cx.notify();
     }
 
@@ -492,8 +494,9 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.ensure_media_files(&missing);
             }
-            self.connection.status_note =
-                tr(keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AGAIN_WHEN).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AGAIN_WHEN,
+            )));
             cx.notify();
             return;
         }
@@ -525,10 +528,10 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.connection.status_note = match saved {
-                    1 => tr(keys::Q_CHAT_SAVED_1_FILE).into(),
-                    n => trn(keys::Q_CHAT_SAVED_FILES, n),
-                };
+                this.connection.set_note(match saved {
+                    1 => StatusNote::silent(tr(keys::Q_CHAT_SAVED_1_FILE)),
+                    n => StatusNote::silent(trn(keys::Q_CHAT_SAVED_FILES, n)),
+                });
                 cx.notify();
             });
         })
@@ -712,7 +715,9 @@ impl QuillApp {
             self.begin_vanish(chat_id, ids);
             if let Some(live) = self.live.as_mut() {
                 if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
-                    self.connection.status_note = tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
+                    )));
                 }
             } else if self.demo_session.is_some() {
                 for id in ids {

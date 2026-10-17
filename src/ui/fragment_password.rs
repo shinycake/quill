@@ -13,6 +13,7 @@
 
 use super::app::QuillApp;
 use super::entity_links::OpenLinkConfirm;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputContentType, InputState};
 use gpui_kit::component::*;
@@ -247,7 +248,9 @@ impl QuillApp {
             && let Some(live) = self.live.as_mut()
             && live.driver.request_password_recovery().is_err()
         {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_SEND_THE_RECOVERY_CODE,
+            )));
         }
         cx.notify();
     }
@@ -258,7 +261,8 @@ impl QuillApp {
     /// opens it only if the user confirms. Anything but https is refused.
     pub(super) fn open_fragment_url(&mut self, url: &str, cx: &mut Context<Self>) {
         if !url.starts_with("https://") {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
             return;
         }
         let link = LinkTarget::Url {

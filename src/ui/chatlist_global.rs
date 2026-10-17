@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -162,8 +163,9 @@ impl QuillApp {
 
     fn copy_invitation(&mut self, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(index::INVITE_TEXT.to_string()));
-        self.connection.status_note =
-            tr(keys::Q_CHATLIST_INVITATION_COPIED_TO_THE_CLIPBOARD).into();
+        self.connection.set_note(StatusNote::info(tr(
+            keys::Q_CHATLIST_INVITATION_COPIED_TO_THE_CLIPBOARD,
+        )));
         cx.notify();
     }
 

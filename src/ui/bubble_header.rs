@@ -6,6 +6,7 @@
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -240,7 +241,8 @@ pub(super) fn forward_header_line(
                         message_id: None,
                     } => this.select_search_chat(chat_id, window, cx),
                     ForwardLink::Imported => {
-                        this.connection.status_note = imported_note.clone().unwrap_or_default();
+                        this.connection
+                            .set_note(StatusNote::info(imported_note.clone().unwrap_or_default()));
                         cx.notify();
                     }
                     ForwardLink::Hidden | ForwardLink::None => {}

@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::go_to_message::{GoToTarget, MessageListContext, go_to_message_offered, go_to_target};
 use quill::lang::{keys, tr};
 
@@ -791,11 +792,12 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn open_message_url(&mut self, url: &str, cx: &mut Context<Self>) {
-        self.connection.status_note = if quill::platform::open_external_url(url) {
-            tr(keys::Q_CHAT_OPENED_LINK).into()
-        } else {
-            tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK).into()
-        };
+        self.connection
+            .set_note(if quill::platform::open_external_url(url) {
+                StatusNote::info(tr(keys::Q_CHAT_OPENED_LINK))
+            } else {
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK))
+            });
         cx.notify();
     }
 
@@ -834,7 +836,8 @@ impl QuillApp {
             }
         }
         if requested {
-            self.connection.status_note = tr(keys::Q_CHAT_LOADING_INSTANT_VIEW).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_LOADING_INSTANT_VIEW)));
             cx.notify();
         } else {
             self.open_message_url(&url, cx);
@@ -854,15 +857,17 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.send_callback_query(chat_id, message_id, &data);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_CHAT_SENDING).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SENDING)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK)),
+            });
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
-            self.connection.status_note = tr(keys::Q_CHAT_DEMO_CALLBACK_SENT_NO_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DEMO_CALLBACK_SENT_NO_LIVE,
+            )));
             cx.notify();
         }
     }
@@ -944,9 +949,10 @@ impl QuillApp {
                 self.select_listed_chat(chat_id, window, cx);
                 self.chat_list.open_at = None;
                 if let Some(live) = self.live.as_ref() {
-                    self.connection.status_note = chat_search_jump_note(&live.driver.session);
+                    self.connection
+                        .set_note(chat_search_jump_note(&live.driver.session));
                 } else if let Some(session) = self.demo_session.as_ref() {
-                    self.connection.status_note = chat_search_jump_note(session);
+                    self.connection.set_note(chat_search_jump_note(session));
                 }
             }
             GoToTarget::SameChat { message_id } => self.jump_to_pinned_message(message_id, cx),
@@ -959,14 +965,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.jump_to_chat_search_message(message_id)
-            {
-                Ok(_) => chat_search_jump_note(&live.driver.session),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_PINNED).into(),
-            };
+            self.connection
+                .set_note(match live.driver.jump_to_chat_search_message(message_id) {
+                    Ok(_) => chat_search_jump_note(&live.driver.session),
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_PINNED)),
+                });
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
-            self.connection.status_note = chat_search_jump_note(session);
+            self.connection.set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }

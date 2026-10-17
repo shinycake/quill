@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 use super::anim_layer::LayeredClip;
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::FileId;
 use quill::lang::{keys, tr};
@@ -376,7 +377,7 @@ impl QuillApp {
                         }
                         Err(error) => {
                             this.playback_cache_mut(size).failed.insert(id.0);
-                            this.connection.status_note = error;
+                            this.connection.set_note(StatusNote::error(error));
                             None
                         }
                     };

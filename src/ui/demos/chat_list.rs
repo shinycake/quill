@@ -5,6 +5,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::chat_list::apply_ready_chat_list_3;
 use crate::ui::conversation::apply_ready_typing;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
+use crate::ui::status_note::StatusNote;
 use crate::ui::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -54,8 +55,9 @@ impl QuillApp {
             chat_id: ChatId(11),
             position: Point::new(px(120.), px(770.)),
         });
-        self.connection.status_note =
-            "screenshot demo — mentions · reactions · multi-select · report · block".into();
+        self.connection.set_note(StatusNote::silent(
+            "screenshot demo — mentions · reactions · multi-select · report · block",
+        ));
     }
 
     fn demo_ready_chat_list_search(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -65,7 +67,8 @@ impl QuillApp {
             session.search.search.begin_query("xyzzy-no-such-chat");
             session.search.search.status = SearchStatus::Empty;
         }
-        self.connection.status_note = "screenshot demo — search empty state".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — search empty state"));
     }
 
     fn demo_ready_typing(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -73,6 +76,7 @@ impl QuillApp {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_typing(session, &self.demo_ui.sink, &self.demo_ui.seq);
         }
-        self.connection.status_note = "screenshot demo — typing…".into();
+        self.connection
+            .set_note(StatusNote::silent("screenshot demo — typing…"));
     }
 }

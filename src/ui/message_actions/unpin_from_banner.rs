@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
@@ -12,10 +13,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.unpin_chat_message(chat_id, message_id);
-            self.connection.status_note = match result {
-                Ok(_) => tr(keys::Q_CHAT_UNPINNING).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_UNPIN).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_UNPINNING)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_UNPIN)),
+            });
             cx.notify();
             return;
         }
@@ -30,7 +31,6 @@ impl QuillApp {
                     session.apply(owned);
                 }
             }
-            self.connection.status_note = "unpinned".into();
             cx.notify();
         }
     }
@@ -345,13 +345,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.jump_to_replied_message(message_id) {
-                Ok(_) => chat_search_jump_note(&live.driver.session),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE).into(),
-            };
+            self.connection
+                .set_note(match live.driver.jump_to_replied_message(message_id) {
+                    Ok(_) => chat_search_jump_note(&live.driver.session),
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
+                });
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
-            self.connection.status_note = chat_search_jump_note(session);
+            self.connection.set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }

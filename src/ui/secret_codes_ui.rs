@@ -7,6 +7,7 @@
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
@@ -86,12 +87,11 @@ impl QuillApp {
             Code::NumberButtons => {
                 let now = !experimental::fast_buttons_mode();
                 self.set_experimental_option(experimental::FAST_BUTTONS_ID, now, cx);
-                self.connection.status_note = if now {
+                self.connection.set_note(StatusNote::info(if now {
                     experimental::FAST_BUTTONS_ENABLED_TOAST
                 } else {
                     experimental::FAST_BUTTONS_DISABLED_TOAST
-                }
-                .into();
+                }));
                 cx.notify();
             }
         }
@@ -111,7 +111,8 @@ impl QuillApp {
             .append(true)
             .open(&path);
         if !quill::platform::reveal_in_file_manager(&path) {
-            self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_THE_LOGS).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_THE_LOGS)));
         }
         cx.notify();
     }
@@ -146,13 +147,13 @@ impl QuillApp {
                     .map(|record| record.display_name)
                     .unwrap_or_default();
                 self.switch_account(&key, &name, window, cx);
-                self.connection.status_note = toast.into();
+                self.connection.set_note(StatusNote::info(toast));
             }
             Err(error) => {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_OPS_COULD_NOT_SWITCH_THE_ENVIRONMENT,
                     &[("error", &error.to_string())],
-                );
+                )));
             }
         }
         cx.notify();
@@ -172,12 +173,11 @@ impl QuillApp {
         };
         let to_test = action == test_environment::TestModeAction::AddTest;
         self.settings.advanced.set_demo_test_environment(to_test);
-        self.connection.status_note = if to_test {
+        self.connection.set_note(StatusNote::info(if to_test {
             test_environment::SWITCHED_TO_TEST
         } else {
             test_environment::SWITCHED_TO_PRODUCTION
-        }
-        .into();
+        }));
         cx.notify();
     }
 
@@ -199,10 +199,10 @@ impl QuillApp {
             if let (Some(api), Some(root)) = (api, root.as_deref())
                 && let Err(error) = debug_mode::start_tdlib_log(&api, root)
             {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_OPS_TDLIB_DEBUG_LOG_DID_NOT,
                     &[("error", &error.to_string())],
-                );
+                )));
             }
             debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STARTED));
             self.settings.open = false;
@@ -210,10 +210,10 @@ impl QuillApp {
         if let Some(root) = root.as_deref()
             && let Err(error) = debug_mode::persist(root, debug_mode::enabled())
         {
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::error(tr_with(
                 keys::Q_OPS_COULD_NOT_REMEMBER_THE_DEBUG,
                 &[("error", &error.to_string())],
-            );
+            )));
         }
         cx.notify();
     }

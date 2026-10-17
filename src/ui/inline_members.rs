@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::inline_members::{MoreAction, next_more};
@@ -103,7 +104,8 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
-            self.connection.status_note = tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_LOAD_MEMBERS)));
             cx.notify();
         }
     }

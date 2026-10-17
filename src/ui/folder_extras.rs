@@ -10,6 +10,8 @@ use super::chat_theme::{accent, bg_canvas, peer_name_color, text_menu};
 use super::folder_share::{chat_title, finish_dialog};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -102,7 +104,8 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.mark_folder_as_read(folder_id) {
-                self.connection.status_note = format!("mark as read failed: {err:?}");
+                self.connection
+                    .set_note(StatusNote::error(user_error(&err)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             for chat in session.chats.values_mut() {
@@ -361,7 +364,8 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.process_folder_new_chats(folder_id, &[]) {
-                    self.connection.status_note = format!("could not hide new chats: {err:?}");
+                    self.connection
+                        .set_note(StatusNote::error(user_error(&err)));
                 }
             }
             None => {
@@ -398,16 +402,14 @@ impl QuillApp {
         ids.sort_unstable();
         match self.live.as_mut() {
             Some(live) => match live.driver.process_folder_new_chats(dialog.folder_id, &ids) {
-                Ok(_) => {
-                    self.connection.status_note = match ids.len() {
-                        0 => tr(keys::Q_CHATLIST_NEW_CHATS_HIDDEN).into(),
-                        1 => tr(keys::Q_CHATLIST_JOINING_1_CHAT).into(),
-                        n => trn(keys::Q_CHATLIST_JOINING_CHATS, n),
-                    }
-                }
-                Err(err) => {
-                    self.connection.status_note = format!("could not join the chats: {err:?}")
-                }
+                Ok(_) => self.connection.set_note(match ids.len() {
+                    0 => StatusNote::silent(tr(keys::Q_CHATLIST_NEW_CHATS_HIDDEN)),
+                    1 => StatusNote::silent(tr(keys::Q_CHATLIST_JOINING_1_CHAT)),
+                    n => StatusNote::silent(trn(keys::Q_CHATLIST_JOINING_CHATS, n)),
+                }),
+                Err(err) => self
+                    .connection
+                    .set_note(StatusNote::error(user_error(&err))),
             },
             None => {
                 if let Some(session) = self.demo_session.as_mut() {

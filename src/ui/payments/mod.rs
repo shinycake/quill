@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::message_text::format_unix_date_time;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -463,7 +464,9 @@ impl QuillApp {
             live.driver.fetch_payment_receipt(chat_id, message_id)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_LOAD_THE_RECEIPT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_THE_RECEIPT,
+            )));
         }
         cx.notify();
     }
@@ -482,7 +485,9 @@ impl QuillApp {
             .as_ref()
             .is_some_and(|dialog| dialog.allow_save_order);
         let (Some(order), Some(request)) = (order, request) else {
-            self.connection.status_note = tr(keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED,
+            )));
             cx.notify();
             return;
         };
@@ -492,7 +497,9 @@ impl QuillApp {
                 .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_VALIDATE_ORDER_INFO).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_VALIDATE_ORDER_INFO,
+            )));
         }
         cx.notify();
     }
@@ -514,7 +521,9 @@ impl QuillApp {
         let (Some((Some(form), Some(request), validated, shipping_id, false)), Some(dialog)) =
             (snapshot, dialog)
         else {
-            self.connection.status_note = tr(keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MONEY_PAYMENT_FORM_NOT_LOADED,
+            )));
             cx.notify();
             return;
         };
@@ -527,7 +536,9 @@ impl QuillApp {
             || invoice.need_email_address
             || invoice.need_shipping_address;
         if needs_order && validated.is_none() {
-            self.connection.status_note = tr(keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MONEY_VALIDATE_THE_ORDER_INFO_FIRST,
+            )));
             cx.notify();
             return;
         }
@@ -559,7 +570,9 @@ impl QuillApp {
             sent
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_SUBMIT_THE_PAYMENT,
+            )));
         }
         cx.notify();
     }
@@ -591,11 +604,17 @@ impl QuillApp {
                     });
                     cx.notify();
                 }
-                None => self.set_status_note(tr(keys::Q_MONEY_LOGIN_URL_UNAVAILABLE), cx),
+                None => self.set_status_note(
+                    StatusNote::info(tr(keys::Q_MONEY_LOGIN_URL_UNAVAILABLE)),
+                    cx,
+                ),
             },
             LoginUrlInfo::Failed { fallback_url } => {
                 if fallback_url.is_empty() {
-                    self.set_status_note(tr(keys::Q_MONEY_LOGIN_URL_UNAVAILABLE), cx);
+                    self.set_status_note(
+                        StatusNote::info(tr(keys::Q_MONEY_LOGIN_URL_UNAVAILABLE)),
+                        cx,
+                    );
                 } else {
                     self.open_message_url(&fallback_url, cx);
                 }

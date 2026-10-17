@@ -4,6 +4,7 @@
 //! driver; the demo applies what it can to its own session.
 use super::state::{CreateSticker, PickExisting};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 use quill::sticker_image::{Corners, prepared_sticker_image};
 use quill::sticker_set_box::{
@@ -60,7 +61,9 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if live.driver.move_sticker_in_set(set_id, from, to).is_err() {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_MOVE_THE_STICKER).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULDNT_MOVE_THE_STICKER,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.move_viewed_sticker(set_id, from, to);
@@ -93,7 +96,8 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             if live.driver.rename_sticker_set(set_id, &title).is_err() {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_RENAME_THE_SET).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULDNT_RENAME_THE_SET)));
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(view) = session.stickers.sticker_set_view.as_mut()
@@ -123,7 +127,9 @@ impl QuillApp {
                 .remove_sticker_from_set(set_id, item.file_id)
                 .is_err()
             {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_DELETE_THE_STICKER).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MEDIA_COULDNT_DELETE_THE_STICKER,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(view) = session.stickers.sticker_set_view.as_mut()
@@ -139,7 +145,8 @@ impl QuillApp {
         self.sticker_box.delete_set_open = false;
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_owned_sticker_set(set_id).is_err() {
-                self.connection.status_note = tr(keys::Q_MEDIA_COULDNT_DELETE_THE_SET).into();
+                self.connection
+                    .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULDNT_DELETE_THE_SET)));
             }
         } else {
             self.close_sticker_set_dialog(cx);
@@ -209,7 +216,9 @@ impl QuillApp {
         });
         match editor {
             Some(editor) => self.viewer.photo_editor = Some(editor),
-            None => self.connection.status_note = OPEN_FAILED_NOTE.into(),
+            None => self
+                .connection
+                .set_note(StatusNote::error(OPEN_FAILED_NOTE)),
         }
         cx.notify();
     }
@@ -244,10 +253,9 @@ impl QuillApp {
                             video: None,
                         });
                     }
-                    None => {
-                        this.connection.status_note =
-                            tr(keys::Q_MEDIA_COULDNT_SAVE_THE_IMAGE).into()
-                    }
+                    None => this
+                        .connection
+                        .set_note(StatusNote::error(tr(keys::Q_MEDIA_COULDNT_SAVE_THE_IMAGE))),
                 }
                 cx.notify();
             });
@@ -278,7 +286,8 @@ impl QuillApp {
             return false;
         };
         if create.emojis.is_empty() {
-            self.connection.status_note = EMOJI_REQUIRED_NOTE.into();
+            self.connection
+                .set_note(StatusNote::silent(EMOJI_REQUIRED_NOTE));
             cx.notify();
             return false;
         }
@@ -299,10 +308,14 @@ impl QuillApp {
                 .add_new_sticker_to_set(create.set_id, &path, &emojis, create.format)
                 .is_err()
             {
-                self.connection.status_note = quill::sticker_set_box::UPLOAD_FAILED_NOTE.into();
+                self.connection.set_note(StatusNote::error(
+                    quill::sticker_set_box::UPLOAD_FAILED_NOTE,
+                ));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKERS_UPLOAD_WITH_LIVE).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STICKERS_UPLOAD_WITH_LIVE,
+            )));
         }
         self.sticker_box.create = None;
         self.sticker_box.encoding = None;
@@ -419,7 +432,8 @@ impl QuillApp {
             .and_then(|s| s.owned_sticker_set_count(set_id))
             .unwrap_or(0);
         if count >= kind.owned_limit() {
-            self.connection.status_note = full_note(kind).into();
+            self.connection
+                .set_note(StatusNote::silent(full_note(kind)));
             cx.notify();
             return;
         }
@@ -434,7 +448,8 @@ impl QuillApp {
                 .iter()
                 .any(|s| s.file_id == item.file_id || (item.id != 0 && s.id == item.id))
         }) {
-            self.connection.status_note = already_note(kind).into();
+            self.connection
+                .set_note(StatusNote::silent(already_note(kind)));
             cx.notify();
             return;
         }
@@ -445,11 +460,14 @@ impl QuillApp {
                 .add_existing_sticker_to_set(set_id, item.file_id, item.format, &emoji)
                 .is_err()
             {
-                self.connection.status_note =
-                    quill::sticker_set_box::ADD_EXISTING_FAILED_NOTE.into();
+                self.connection.set_note(StatusNote::error(
+                    quill::sticker_set_box::ADD_EXISTING_FAILED_NOTE,
+                ));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MEDIA_DEMO_STICKERS_ARE_ADDED_WITH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MEDIA_DEMO_STICKERS_ARE_ADDED_WITH,
+            )));
         }
         self.message_ui.menu = None;
         cx.notify();
@@ -463,7 +481,7 @@ impl QuillApp {
         };
         let mut changed = false;
         if let Some(note) = live.driver.session.take_sticker_set_edit_note() {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::info(note));
             changed = true;
         }
         let deleted = live

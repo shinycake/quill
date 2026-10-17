@@ -10,6 +10,7 @@
 
 use super::app::QuillApp;
 use super::autoscroll_ui::scroll_history_by;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::base::{GlobalState, TextSelection};
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
@@ -213,7 +214,6 @@ impl QuillApp {
                 self.share.forward_picker_open = false;
                 self.message_ui.selection_focus = None;
             }
-            self.connection.status_note = "selection cleared".into();
         } else {
             match self.share.pending_forward.as_mut() {
                 Some(draft) if draft.from_chat_id == chat => draft.message_ids = ids,
@@ -227,10 +227,10 @@ impl QuillApp {
                 }
             }
             let count = self.forward_draft().map_or(0, |d| d.count());
-            self.connection.status_note = match count {
-                1 => "1 message selected".into(),
-                n => format!("{n} messages selected"),
-            };
+            self.connection.set_note(match count {
+                1 => StatusNote::silent("1 message selected"),
+                n => StatusNote::silent(format!("{n} messages selected")),
+            });
         }
         cx.notify();
     }

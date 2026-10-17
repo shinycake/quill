@@ -4,6 +4,7 @@
 //! `quill::earn`; withdrawals only open a Fragment page in the browser.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::status_note::StatusNote;
 mod boxes;
 mod chart;
 mod demo;
@@ -207,11 +208,12 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if call(&mut live.driver).is_err() {
-                    self.connection.status_note = failure.into();
+                    self.connection.set_note(StatusNote::error(failure));
                 }
             }
             None => {
-                self.connection.status_note = tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A).into();
+                self.connection
+                    .set_note(StatusNote::info(tr(keys::Q_MONEY_DEMO_MODE_THIS_NEEDS_A)));
             }
         }
         cx.notify();
@@ -310,7 +312,8 @@ impl QuillApp {
             let _ = live.driver.fetch_chat_boost_features(chat_id);
         }
         if live.driver.open_earn_panel(panel, is_dark).is_err() {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
         }
     }
 
@@ -328,7 +331,7 @@ impl QuillApp {
         let closed = std::mem::replace(&mut earn.setup_closed, false);
         let progressed = !notes.is_empty() || url.is_some() || closed;
         if let Some(note) = notes.into_iter().last() {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::info(note));
         }
         if let Some(url) = url {
             cx.open_url(&url);

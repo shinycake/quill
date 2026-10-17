@@ -10,6 +10,7 @@ use super::paid_messages_privacy::price_slider;
 use super::paid_messages_state::DirectMessagesBox;
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -148,11 +149,14 @@ impl QuillApp {
                 .set_direct_messages_group(chat_id, boxed.enabled, stars)
                 .is_err()
             {
-                self.connection.status_note =
-                    tr(keys::Q_MONEY_COULDNT_CHANGE_THE_DIRECT_MESSAGES).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MONEY_COULDNT_CHANGE_THE_DIRECT_MESSAGES,
+                )));
             }
         } else {
-            self.connection.status_note = tr(keys::Q_MONEY_DIRECT_MESSAGES_NEED_A_LIVE).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MONEY_DIRECT_MESSAGES_NEED_A_LIVE,
+            )));
         }
         cx.notify();
     }
@@ -281,8 +285,8 @@ impl QuillApp {
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
-                                    this.connection.status_note =
-                                        tr(keys::Q_MONEY_LINK_COPIED).into();
+                                    this.connection
+                                        .set_note(StatusNote::info(tr(keys::Q_MONEY_LINK_COPIED)));
                                     cx.notify();
                                 })),
                         ),

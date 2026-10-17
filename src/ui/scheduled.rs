@@ -12,6 +12,7 @@ use super::composer_sends::SendSlot;
 use super::message_text::format_unix_date_time;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::calendar::Matcher;
 use gpui_kit::component::checkbox::Checkbox;
@@ -362,23 +363,27 @@ impl QuillApp {
                 });
                 // Sending now would send another chat's text.
                 let send_after = send_after && open.as_ref() == Some(&slot);
-                self.connection.status_note = match (scheduling, kind) {
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => tr_with(
-                        keys::Q_OPS_REMINDER_SET_FOR,
-                        &[(
-                            "format_unix_date_time",
-                            &(format_unix_date_time(date)).to_string(),
-                        )],
-                    ),
-                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Schedule) => tr_with(
-                        keys::Q_OPS_SCHEDULED_FOR,
-                        &[(
-                            "format_unix_date_time",
-                            &(format_unix_date_time(date)).to_string(),
-                        )],
-                    ),
-                    _ => tr(keys::Q_OPS_WILL_SEND_WHEN_THE_CONTACT).into(),
-                };
+                self.connection.set_note(match (scheduling, kind) {
+                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Reminder) => {
+                        StatusNote::silent(tr_with(
+                            keys::Q_OPS_REMINDER_SET_FOR,
+                            &[(
+                                "format_unix_date_time",
+                                &(format_unix_date_time(date)).to_string(),
+                            )],
+                        ))
+                    }
+                    (ComposerScheduling::SendAtDate(date), ScheduleKind::Schedule) => {
+                        StatusNote::silent(tr_with(
+                            keys::Q_OPS_SCHEDULED_FOR,
+                            &[(
+                                "format_unix_date_time",
+                                &(format_unix_date_time(date)).to_string(),
+                            )],
+                        ))
+                    }
+                    _ => StatusNote::info(tr(keys::Q_OPS_WILL_SEND_WHEN_THE_CONTACT)),
+                });
                 cx.notify();
                 if send_after {
                     self.composer_ui.send_effect_once = send_effect;
@@ -425,18 +430,18 @@ impl QuillApp {
             .edit_scheduled_message(chat_id, message_id, scheduling)
         {
             Ok(_) => {
-                self.connection.status_note = if sending_now {
-                    tr(keys::Q_OPS_SENDING).into()
+                self.connection.set_note(if sending_now {
+                    StatusNote::silent(tr(keys::Q_OPS_SENDING))
                 } else {
-                    tr(keys::Q_OPS_RESCHEDULING).into()
-                };
+                    StatusNote::silent(tr(keys::Q_OPS_RESCHEDULING))
+                });
             }
             Err(_) => {
-                self.connection.status_note = if sending_now {
-                    tr(keys::Q_OPS_COULD_NOT_SEND_THE_MESSAGE).into()
+                self.connection.set_note(if sending_now {
+                    StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_MESSAGE))
                 } else {
-                    tr(keys::Q_OPS_COULD_NOT_RESCHEDULE_THE_MESSAGE).into()
-                };
+                    StatusNote::error(tr(keys::Q_OPS_COULD_NOT_RESCHEDULE_THE_MESSAGE))
+                });
             }
         }
         cx.notify();

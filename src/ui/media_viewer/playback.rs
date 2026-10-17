@@ -2,6 +2,7 @@
 //! preferences, the media-session tick, and zoom/pan.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Instant;
 
@@ -176,7 +177,9 @@ impl QuillApp {
         match path {
             Some(path) => self.open_file_guarded(path, cx),
             None => {
-                self.connection.status_note = tr(keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO_2).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_AV_DOWNLOAD_THE_MEDIA_FIRST_TO_2,
+                )));
                 cx.notify();
             }
         }
@@ -294,10 +297,10 @@ impl QuillApp {
         }
         if !restarted {
             // Nothing playing: the speed applies to the next play.
-            self.connection.status_note = tr_with(
+            self.connection.set_note(StatusNote::silent(tr_with(
                 keys::Q_AV_PLAYBACK_SPEED,
                 &[("self_speed_label", &(Self::speed_label(next)).to_string())],
-            );
+            )));
         }
         cx.notify();
     }
@@ -450,10 +453,10 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.media_prefs = prefs;
             if let Err(err) = live.driver.save_media_prefs() {
-                self.connection.status_note = tr_with(
+                self.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_AV_COULDNT_SAVE_MEDIA_SETTINGS,
                     &[("err", &err.to_string())],
-                );
+                )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.media_prefs = prefs;

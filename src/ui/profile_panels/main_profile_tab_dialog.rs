@@ -3,6 +3,7 @@
 //! choices in a dialog next to the other profile settings rows.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 use quill::profile_tab::ProfileTab;
 
@@ -14,19 +15,23 @@ impl QuillApp {
 
     fn choose_main_profile_tab(&mut self, tab: ProfileTab, cx: &mut Context<Self>) -> bool {
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             cx.notify();
             return true;
         };
         match live.driver.set_main_profile_tab(tab) {
             Ok(_) => {
-                self.connection.status_note =
-                    tr_with(keys::Q_PEOPLE_MAIN_TAB_2, &[("label", (tab.label()))]);
+                self.connection.set_note(StatusNote::silent(tr_with(
+                    keys::Q_PEOPLE_MAIN_TAB_2,
+                    &[("label", (tab.label()))],
+                )));
                 true
             }
             Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
                 cx.notify();
                 false
             }

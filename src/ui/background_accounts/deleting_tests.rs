@@ -362,11 +362,11 @@ fn a_log_out_that_cannot_be_recorded_keeps_the_passcode_and_says_why(cx: &mut Te
         assert!(!app.background.wiping, "nothing started");
         assert!(
             app.connection
-                .status_note
+                .status_note()
                 .to_string()
                 .starts_with("Could not log out"),
             "{}",
-            app.connection.status_note
+            app.connection.status_note()
         );
     });
     let _ = std::fs::remove_dir_all(&root);
@@ -389,7 +389,7 @@ fn an_unconfirmed_log_out_tells_the_user_to_restart_quill(cx: &mut TestAppContex
     app.read_with(&vcx, |app, _| {
         assert!(app.background.wiping);
         assert_eq!(
-            app.connection.status_note.to_string(),
+            app.connection.status_note().to_string(),
             "Restart Quill to finish logging out. Nothing connects until then."
         );
     });

@@ -9,6 +9,7 @@ use super::message_media::{
 };
 use super::message_text::message_text_block;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
@@ -419,12 +420,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note =
+            self.connection.set_note(
                 match live.driver.hide_sponsored_messages(chat_id, message_id) {
-                    Ok(Some(_)) => tr(keys::Q_OPS_HIDING_ADS).into(),
-                    Ok(None) => self.connection.status_note.clone(),
-                    Err(_) => tr(keys::Q_OPS_COULD_NOT_HIDE_ADS).into(),
-                };
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_OPS_HIDING_ADS)),
+                    Ok(None) => self.connection.note().clone(),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_HIDE_ADS)),
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut()
             && session.begin_sponsored_hide(chat_id, message_id) == Some(true)
         {
@@ -487,14 +489,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live
-                .driver
-                .report_sponsored_message(chat_id, message_id, "")
-            {
-                Ok(Some(_)) => tr(keys::Q_OPS_REPORTING_SPONSORED_MESSAGE).into(),
-                Ok(None) => tr(keys::Q_OPS_REPORT_NOT_AVAILABLE_FOR_THIS).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_REPORT).into(),
-            };
+            self.connection.set_note(
+                match live
+                    .driver
+                    .report_sponsored_message(chat_id, message_id, "")
+                {
+                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_OPS_REPORTING_SPONSORED_MESSAGE)),
+                    Ok(None) => StatusNote::info(tr(keys::Q_OPS_REPORT_NOT_AVAILABLE_FOR_THIS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_REPORT)),
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             if session
                 .begin_sponsored_report(chat_id, message_id)
@@ -510,9 +514,13 @@ impl QuillApp {
                 if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                     session.apply(owned);
                 }
-                self.connection.status_note = tr(keys::Q_OPS_DEMO_REPORT_OPTIONS_INJECTED).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_OPS_DEMO_REPORT_OPTIONS_INJECTED,
+                )));
             } else {
-                self.connection.status_note = tr(keys::Q_OPS_REPORT_NOT_AVAILABLE_FOR_THIS).into();
+                self.connection.set_note(StatusNote::info(tr(
+                    keys::Q_OPS_REPORT_NOT_AVAILABLE_FOR_THIS,
+                )));
             }
         }
         cx.notify();
@@ -529,14 +537,16 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.report_sponsored_message(
-                flight.chat_id,
-                flight.message_id,
-                option_id,
-            ) {
-                Ok(_) => tr(keys::Q_OPS_REPORT_SENT).into(),
-                Err(_) => tr(keys::Q_OPS_COULD_NOT_SEND_REPORT).into(),
-            };
+            self.connection.set_note(
+                match live.driver.report_sponsored_message(
+                    flight.chat_id,
+                    flight.message_id,
+                    option_id,
+                ) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_OPS_REPORT_SENT)),
+                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_REPORT)),
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             let extra = session.request(
                 RequestPurpose::ReportChatSponsoredMessage,
@@ -550,7 +560,8 @@ impl QuillApp {
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                 session.apply(owned);
             }
-            self.connection.status_note = tr(keys::Q_OPS_DEMO_REPORT_SENT).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_REPORT_SENT)));
         }
         cx.notify();
     }

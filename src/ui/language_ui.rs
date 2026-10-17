@@ -8,6 +8,8 @@ use super::app::QuillApp;
 use super::language_state::LanguageBox;
 use super::language_state::LanguageFile;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
+use crate::ui::user_error::user_error;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -164,7 +166,8 @@ impl QuillApp {
         match self.live.as_mut() {
             Some(live) => {
                 if let Err(err) = live.driver.switch_language(info) {
-                    self.connection.status_note = format!("{err:?}");
+                    self.connection
+                        .set_note(StatusNote::error(user_error(&err)));
                 }
             }
             None => {
@@ -217,7 +220,7 @@ impl QuillApp {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.restore_language_option();
             }
-            self.connection.status_note = error;
+            self.connection.set_note(StatusNote::error(error));
         }
         progressed
     }

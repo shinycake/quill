@@ -18,6 +18,7 @@
 use super::app::QuillApp;
 use super::attach_bots::AttachMenuEntry;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -345,7 +346,10 @@ impl QuillApp {
             let chat_id = session.open_chat?;
             Some((chat_id, session.bot_user_id_for_chat(chat_id)?))
         }) else {
-            self.set_status_note(tr(keys::Q_MEDIA_OPEN_THE_BOTS_CHAT_TO), cx);
+            self.set_status_note(
+                StatusNote::silent(tr(keys::Q_MEDIA_OPEN_THE_BOTS_CHAT_TO)),
+                cx,
+            );
             return;
         };
         self.start_web_app(
@@ -383,7 +387,7 @@ impl QuillApp {
             }
         });
         let Some(bot_id) = bot_id else {
-            self.set_status_note(tr(keys::Q_MEDIA_ONLY_A_BOT_CAN_OPEN), cx);
+            self.set_status_note(StatusNote::info(tr(keys::Q_MEDIA_ONLY_A_BOT_CAN_OPEN)), cx);
             return;
         };
         self.start_web_app(
@@ -409,7 +413,7 @@ impl QuillApp {
             .session()
             .and_then(|session| session.bot_user_id_for_chat(chat_id))
         else {
-            self.set_status_note(tr(keys::Q_MEDIA_ONLY_A_BOT_CAN_OPEN), cx);
+            self.set_status_note(StatusNote::info(tr(keys::Q_MEDIA_ONLY_A_BOT_CAN_OPEN)), cx);
             return;
         };
         self.start_web_app(
@@ -519,7 +523,10 @@ impl QuillApp {
                     });
                     self.ensure_mini_app_poll(cx);
                 } else {
-                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_LOOK_UP_THAT_APP), cx);
+                    self.set_status_note(
+                        StatusNote::error(tr(keys::Q_MEDIA_COULDNT_LOOK_UP_THAT_APP)),
+                        cx,
+                    );
                 }
             }
             DeepLinkAction::OpenMainWebApp {
@@ -551,7 +558,7 @@ impl QuillApp {
                     });
                     self.ensure_mini_app_poll(cx);
                 } else {
-                    self.set_status_note(tr(keys::BOT_MENU_NOT_SUPPORTED), cx);
+                    self.set_status_note(StatusNote::error(tr(keys::BOT_MENU_NOT_SUPPORTED)), cx);
                 }
             }
             _ => return false,
@@ -574,11 +581,17 @@ impl QuillApp {
     /// Ask first when tdesktop would (`confirmOpen`), then call TDLib.
     fn start_web_app(&mut self, open: PendingOpen, cx: &mut Context<Self>) {
         if self.live.is_none() {
-            self.set_status_note(tr(keys::Q_MEDIA_MINI_APPS_NEED_A_TELEGRAM), cx);
+            self.set_status_note(
+                StatusNote::info(tr(keys::Q_MEDIA_MINI_APPS_NEED_A_TELEGRAM)),
+                cx,
+            );
             return;
         }
         if helper_path().is_none() {
-            self.set_status_note(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL), cx);
+            self.set_status_note(
+                StatusNote::silent(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL)),
+                cx,
+            );
             return;
         }
         let bot_id = open.bot_id();
@@ -657,10 +670,16 @@ impl QuillApp {
                 .map(|_| ()),
         });
         if matches!(sent, Some(Ok(()))) {
-            self.set_status_note(tr(keys::Q_MEDIA_OPENING_THE_MINI_APP), cx);
+            self.set_status_note(
+                StatusNote::silent(tr(keys::Q_MEDIA_OPENING_THE_MINI_APP)),
+                cx,
+            );
             self.ensure_mini_app_poll(cx);
         } else {
-            self.set_status_note(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_MINI_APP), cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_MINI_APP)),
+                cx,
+            );
         }
     }
 
@@ -686,7 +705,10 @@ impl QuillApp {
                 if matches!(sent, Some(Ok(_))) {
                     self.close_mini_app_window(cx);
                 } else {
-                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_REMOVE_THE_BOT_FROM), cx);
+                    self.set_status_note(
+                        StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REMOVE_THE_BOT_FROM)),
+                        cx,
+                    );
                 }
             }
             WebAppConfirm::AddToMenu {
@@ -708,7 +730,10 @@ impl QuillApp {
                     self.mini_apps.awaiting_toggle = Some(then);
                     self.ensure_mini_app_poll(cx);
                 } else {
-                    self.set_status_note(tr(keys::Q_MEDIA_COULDNT_ADD_THE_BOT_TO), cx);
+                    self.set_status_note(
+                        StatusNote::error(tr(keys::Q_MEDIA_COULDNT_ADD_THE_BOT_TO)),
+                        cx,
+                    );
                 }
             }
         }

@@ -2,6 +2,7 @@
 //! (`quill::send_to_menu`, tdesktop's "Place Telegram in \"Send to\" menu").
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -22,10 +23,10 @@ impl QuillApp {
                         .await;
                     let _ = this.update(cx, |this, cx| {
                         if let Err(error) = result {
-                            this.connection.status_note = tr_with(
+                            this.connection.set_note(StatusNote::error(tr_with(
                                 keys::Q_PREFS_COULD_NOT_UPDATE_THE_SEND,
                                 &[("error", &error.to_string())],
-                            );
+                            )));
                         }
                         cx.notify();
                     });

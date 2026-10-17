@@ -1,6 +1,7 @@
 //! Methods moved out of `media_panel.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -269,8 +270,9 @@ impl QuillApp {
             return;
         }
         if !self.session().is_some_and(|s| s.my_is_premium()) {
-            self.connection.status_note =
-                tr(keys::Q_MEDIA_CUSTOM_EMOJI_NEED_TELEGRAM_PREMIUM).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MEDIA_CUSTOM_EMOJI_NEED_TELEGRAM_PREMIUM,
+            )));
             cx.notify();
             return;
         }

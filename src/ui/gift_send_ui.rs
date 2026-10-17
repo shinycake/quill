@@ -12,6 +12,7 @@ use super::gift_manage_ui::{hint, panel, stars};
 use super::navigation::NavigationAction;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -47,7 +48,8 @@ impl QuillApp {
                 self.payments.gift_pay_upgrade = false;
             }
             _ => {
-                self.connection.status_note = tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
             }
         }
         cx.notify();
@@ -91,7 +93,8 @@ impl QuillApp {
             .as_mut()
             .map(|live| live.driver.send_star_gift(gift_id, &text, hide, upgrade));
         if let Some(Err(_)) = sent {
-            self.connection.status_note = tr(keys::Q_MONEY_COULD_NOT_SEND_THE_GIFT).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULD_NOT_SEND_THE_GIFT)));
         }
         cx.notify();
     }

@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::attachment::{
     Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup,
@@ -290,7 +291,8 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.gifs.close();
         }
-        self.connection.status_note = tr(keys::Q_CHAT_GIFS_CLOSED).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_CHAT_GIFS_CLOSED)));
         cx.notify();
     }
 
@@ -318,26 +320,30 @@ impl QuillApp {
         }
         let reply = self.send_reply_for(chat_id, cx);
         let sent = if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.send_animation(
-                chat_id,
-                quill::telegram::requests::AnimationSend {
-                    file_id,
-                    duration,
-                    width,
-                    height,
-                    reply_to: reply,
-                    // Parity slice 4: the driver addresses the open topic
-                    // from the session; the UI passes no topic.
-                    topic_id: None,
+            self.connection.set_note(
+                match live.driver.send_animation(
+                    chat_id,
+                    quill::telegram::requests::AnimationSend {
+                        file_id,
+                        duration,
+                        width,
+                        height,
+                        reply_to: reply,
+                        // Parity slice 4: the driver addresses the open topic
+                        // from the session; the UI passes no topic.
+                        topic_id: None,
+                    },
+                ) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SENDING_GIF)),
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_GIF)),
                 },
-            ) {
-                Ok(_) => tr(keys::Q_CHAT_SENDING_GIF).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_SEND_GIF).into(),
-            };
-            self.connection.status_note == tr(keys::Q_CHAT_SENDING_GIF)
+            );
+            self.connection.status_note() == tr(keys::Q_CHAT_SENDING_GIF)
         } else if self.demo_session.is_some() {
             self.apply_demo_gif(chat_id, file_id, duration, width, height, reply);
-            self.connection.status_note = tr(keys::Q_CHAT_DEMO_GIF_APPLIED_LOCALLY_NO).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_DEMO_GIF_APPLIED_LOCALLY_NO,
+            )));
             true
         } else {
             false
@@ -360,19 +366,22 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.close();
         }
-        self.connection.status_note = tr(keys::Q_CHAT_STICKERS_CLOSED).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKERS_CLOSED)));
         cx.notify();
     }
 
     pub(super) fn select_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.select_sticker_set(set_id) {
-                Ok(_) => tr(keys::Q_CHAT_STICKER_SET).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_OPEN_STICKER_SET).into(),
-            };
+            self.connection
+                .set_note(match live.driver.select_sticker_set(set_id) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_STICKER_SET)),
+                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_STICKER_SET)),
+                });
         } else if let Some(session) = self.demo_session.as_mut() {
             session.select_sticker_set(set_id);
-            self.connection.status_note = tr(keys::Q_CHAT_STICKER_SET).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_STICKER_SET)));
         }
         cx.notify();
     }

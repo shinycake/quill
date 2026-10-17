@@ -14,6 +14,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -86,7 +87,7 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.connection.status_note = message.into();
+        self.connection.set_note(StatusNote::error(message));
         cx.notify();
     }
 

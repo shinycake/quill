@@ -1,6 +1,7 @@
 //! Methods moved out of `groups.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn, trn_with};
 
 impl QuillApp {
@@ -67,11 +68,11 @@ impl QuillApp {
                 let has_emoji = value.chars().any(looks_like_emoji);
                 if too_long || has_emoji {
                     self.admin.username_dialog = Some(dialog);
-                    self.connection.status_note = if too_long {
-                        tr(keys::Q_PEOPLE_CUSTOM_TITLE_MUST_BE_AT).into()
+                    self.connection.set_note(if too_long {
+                        StatusNote::silent(tr(keys::Q_PEOPLE_CUSTOM_TITLE_MUST_BE_AT))
                     } else {
-                        tr(keys::Q_PEOPLE_CUSTOM_TITLE_CANNOT_CONTAIN_EMOJI).into()
-                    };
+                        StatusNote::error(tr(keys::Q_PEOPLE_CUSTOM_TITLE_CANNOT_CONTAIN_EMOJI))
+                    });
                     cx.notify();
                     return;
                 }
@@ -100,7 +101,8 @@ impl QuillApp {
                 // re-validates before sending.
                 if value.is_empty() || value.chars().count() > 128 {
                     self.admin.username_dialog = Some(dialog);
-                    self.connection.status_note = tr(keys::Q_PEOPLE_TITLE_MUST_BE_1_128).into();
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_TITLE_MUST_BE_1_128)));
                     cx.notify();
                     return;
                 }
@@ -128,8 +130,9 @@ impl QuillApp {
             TextPromptKind::CommunityName { community_id } => {
                 if value.is_empty() {
                     self.admin.username_dialog = Some(dialog);
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_COMMUNITY_NAME_CANNOT_BE_EMPTY).into();
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_PEOPLE_COMMUNITY_NAME_CANNOT_BE_EMPTY,
+                    )));
                     cx.notify();
                     return;
                 }
@@ -151,8 +154,9 @@ impl QuillApp {
                 // 0–255 chars per the schema (line 13533); empty clears.
                 if value.chars().count() > 255 {
                     self.admin.username_dialog = Some(dialog);
-                    self.connection.status_note =
-                        tr(keys::Q_PEOPLE_DESCRIPTION_MUST_BE_AT_MOST).into();
+                    self.connection.set_note(StatusNote::silent(tr(
+                        keys::Q_PEOPLE_DESCRIPTION_MUST_BE_AT_MOST,
+                    )));
                     cx.notify();
                     return;
                 }
@@ -191,10 +195,10 @@ impl QuillApp {
                     Some(value.as_str())
                 } else {
                     self.admin.username_dialog = Some(dialog);
-                    self.connection.status_note = tr_with(
+                    self.connection.set_note(StatusNote::silent(tr_with(
                         keys::Q_PEOPLE_FILE_NOT_FOUND,
                         &[("value", &value.to_string())],
-                    );
+                    )));
                     cx.notify();
                     return;
                 };
@@ -223,7 +227,7 @@ impl QuillApp {
                 }
             }
         };
-        self.connection.status_note = note;
+        self.connection.set_note(StatusNote::info(note));
         cx.notify();
     }
 
@@ -487,7 +491,7 @@ impl QuillApp {
                 tr(keys::Q_PEOPLE_CHAT_ACTIONS_NEED_A_LIVE).to_string()
             }
         };
-        self.connection.status_note = note;
+        self.connection.set_note(StatusNote::info(note));
         cx.notify();
     }
 

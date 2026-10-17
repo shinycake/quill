@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -96,7 +97,8 @@ impl QuillApp {
                 .map(|_| ())
         };
         if result.is_err() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
         }
         cx.notify();
     }
@@ -129,18 +131,20 @@ impl QuillApp {
             None => return,
         };
         if user_ids.is_empty() {
-            self.connection.status_note = tr(keys::Q_PEOPLE_PICK_AT_LEAST_ONE_CONTACT).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_PEOPLE_PICK_AT_LEAST_ONE_CONTACT,
+            )));
             cx.notify();
             return;
         }
         let note = match self.live.as_mut() {
             Some(live) => match live.driver.add_chat_members(chat_id, &user_ids) {
-                Ok(_) => tr(keys::Q_PEOPLE_ADDING_MEMBERS).into(),
-                Err(_) => tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS).into(),
+                Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_ADDING_MEMBERS)),
+                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)),
             },
-            None => tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE).into(),
+            None => StatusNote::info(tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE)),
         };
-        self.connection.status_note = note;
+        self.connection.set_note(note);
         // `updateChatMember` drops the cached member list and marks the
         // chat stale; `poll_live` refetches the open dialog's page.
         self.refresh_member_dialog(cx);

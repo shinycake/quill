@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -68,7 +69,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(single) = ForwardDraft::from_message(chat_id, message_id, pending) else {
-            self.connection.status_note = tr(keys::Q_MISC_CANNOT_FORWARD_THIS_MESSAGE).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MISC_CANNOT_FORWARD_THIS_MESSAGE,
+            )));
             cx.notify();
             return;
         };
@@ -110,11 +113,12 @@ impl QuillApp {
                     ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.connection.status_note = match self.forward_draft().map(|d| d.count()) {
-            Some(1) => tr(keys::Q_MISC_1_MESSAGE_SELECTED).into(),
-            Some(n) => trn(keys::Q_MISC_MESSAGES_SELECTED, n),
-            None => tr(keys::Q_MISC_SELECTION_CLEARED).into(),
-        };
+        self.connection
+            .set_note(match self.forward_draft().map(|d| d.count()) {
+                Some(1) => StatusNote::silent(tr(keys::Q_MISC_1_MESSAGE_SELECTED)),
+                Some(n) => StatusNote::silent(trn(keys::Q_MISC_MESSAGES_SELECTED, n)),
+                None => StatusNote::silent(tr(keys::Q_MISC_SELECTION_CLEARED)),
+            });
         cx.notify();
     }
 
@@ -131,7 +135,8 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.connection.status_note = tr(keys::Q_MISC_FORWARD_TO_2).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_TO_2)));
         cx.notify();
     }
 
@@ -141,7 +146,8 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.connection.status_note = tr(keys::Q_MISC_FORWARD_PICKER_CLOSED).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_PICKER_CLOSED)));
         cx.notify();
     }
 
@@ -154,7 +160,8 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.connection.status_note = tr(keys::Q_MISC_FORWARD_CANCELLED).into();
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_CANCELLED)));
         cx.notify();
     }
 
@@ -183,7 +190,13 @@ impl QuillApp {
     }
 
     pub(super) fn present_forward_result(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
-        self.connection.status_note = result.success_label();
+        let label = result.success_label();
+        self.connection
+            .set_note(if result.forwarded_ids.is_empty() {
+                StatusNote::error(label)
+            } else {
+                StatusNote::info(label)
+            });
         self.share.forward_result = Some(result);
         self.share.pending_forward = None;
         self.share.forward_bar_dest = None;

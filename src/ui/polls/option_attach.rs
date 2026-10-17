@@ -10,6 +10,7 @@ use super::super::app::QuillApp;
 use super::super::composer_field::emoji_token;
 use super::super::dialogs::{OptionAttach, OptionMediaSlot};
 use super::super::media_panel::PanelTab;
+use crate::ui::status_note::StatusNote;
 use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -344,7 +345,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let Some(kind) = media_kind_for(&path) else {
-            self.connection.status_note = tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_A).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_A)));
             cx.notify();
             return;
         };
@@ -420,7 +422,7 @@ impl QuillApp {
         }
         // Nothing waiting: the option was removed or its media replaced.
         if let Some(note) = note {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::error(note));
         }
         cx.notify();
     }
@@ -616,7 +618,8 @@ impl QuillApp {
             return;
         };
         if url.is_empty() {
-            self.connection.status_note = tr(keys::Q_MEDIA_ENTER_THE_LINKS_ADDRESS).into();
+            self.connection
+                .set_note(StatusNote::info(tr(keys::Q_MEDIA_ENTER_THE_LINKS_ADDRESS)));
             cx.notify();
             return;
         }

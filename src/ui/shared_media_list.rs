@@ -6,6 +6,7 @@
 
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
@@ -189,7 +190,9 @@ impl QuillApp {
     pub(super) fn open_shared_media_calendar_ui(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             if live.driver.open_shared_media_calendar().is_err() {
-                self.connection.status_note = tr(keys::Q_OPS_COULD_NOT_OPEN_THE_CALENDAR).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULD_NOT_OPEN_THE_CALENDAR,
+                )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_shared_media_calendar(quill::local_time::now_unix());

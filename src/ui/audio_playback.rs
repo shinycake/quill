@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::playback_state::{SeekHover, SeekSite};
 use super::*;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -271,14 +272,14 @@ impl QuillApp {
         // A failure is kept by the engine (`audio.error()`).
         let _ = self.playback.audio.seek(offset, was_playing);
         if was_playing {
-            self.connection.status_note = format!(
+            self.connection.set_note(StatusNote::silent(format!(
                 "{} — seek {}",
                 match self.active_playback_kind() {
                     PlaybackKind::Voice => tr(keys::Q_AV_PLAYING_VOICE_NOTE),
                     PlaybackKind::Audio => tr(keys::Q_AV_PLAYING_AUDIO),
                 },
                 format_voice_duration(offset as i32)
-            );
+            )));
         }
         cx.notify();
     }
@@ -327,7 +328,8 @@ impl QuillApp {
                             if let Some(id) = finished_id {
                                 this.playback.positions.insert(id, 0.0);
                             }
-                            this.connection.status_note = tr(keys::Q_AV_PLAYBACK_FINISHED).into();
+                            this.connection
+                                .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYBACK_FINISHED)));
                             if let Some((chat, id)) = next {
                                 this.play_message(chat, id, cx);
                             }
@@ -479,14 +481,15 @@ impl QuillApp {
             // bar keeps working and Play resumes from the frozen position).
             if self.playback.is_playing() {
                 self.pause_active_playback();
-                self.connection.status_note = tr(keys::Q_AV_VOICE_NOTE_PAUSED).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_NOTE_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.connection.status_note = if self.playback.is_playing() {
-                    tr(keys::Q_AV_PLAYING_VOICE_NOTE).into()
+                self.connection.set_note(if self.playback.is_playing() {
+                    StatusNote::silent(tr(keys::Q_AV_PLAYING_VOICE_NOTE))
                 } else {
-                    tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED).into()
-                };
+                    StatusNote::error(tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED))
+                });
             }
             cx.notify();
             return;
@@ -509,7 +512,8 @@ impl QuillApp {
         self.playback.pending_voice_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection.status_note = tr(keys::Q_AV_VOICE_FILE_IS_OUTSIDE_THE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_FILE_IS_OUTSIDE_THE)));
             cx.notify();
             return;
         };
@@ -531,11 +535,11 @@ impl QuillApp {
         if !listened {
             self.mark_voice_opened(chat_id, message_id);
         }
-        self.connection.status_note = if playing {
-            tr(keys::Q_AV_PLAYING_VOICE_NOTE).into()
+        self.connection.set_note(if playing {
+            StatusNote::silent(tr(keys::Q_AV_PLAYING_VOICE_NOTE))
         } else {
-            tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED).into()
-        };
+            StatusNote::error(tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED))
+        });
         cx.notify();
     }
 
@@ -553,14 +557,15 @@ impl QuillApp {
             // Active row: pause ↔ resume (see voice toggle).
             if self.playback.is_playing() {
                 self.pause_active_playback();
-                self.connection.status_note = tr(keys::Q_AV_AUDIO_PAUSED).into();
+                self.connection
+                    .set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.connection.status_note = if self.playback.is_playing() {
-                    tr(keys::Q_AV_PLAYING_AUDIO).into()
+                self.connection.set_note(if self.playback.is_playing() {
+                    StatusNote::silent(tr(keys::Q_AV_PLAYING_AUDIO))
                 } else {
-                    tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED).into()
-                };
+                    StatusNote::error(tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED))
+                });
             }
             cx.notify();
             return;
@@ -582,7 +587,8 @@ impl QuillApp {
         self.playback.pending_audio_play = None;
         let roots = self.media_display_roots();
         let Some(safe) = sandboxed_display_path(&path, &roots) else {
-            self.connection.status_note = tr(keys::Q_AV_AUDIO_FILE_IS_OUTSIDE_THE).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_FILE_IS_OUTSIDE_THE)));
             cx.notify();
             return;
         };
@@ -602,11 +608,11 @@ impl QuillApp {
             &safe,
             cx,
         );
-        self.connection.status_note = if playing {
-            tr(keys::Q_AV_PLAYING_AUDIO).into()
+        self.connection.set_note(if playing {
+            StatusNote::silent(tr(keys::Q_AV_PLAYING_AUDIO))
         } else {
-            tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED).into()
-        };
+            StatusNote::error(tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED))
+        });
         cx.notify();
     }
 

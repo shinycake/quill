@@ -114,7 +114,7 @@ fn the_security_key_pill_switches_to_the_key_sheet(cx: &mut TestAppContext) {
     );
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             "No security key found. Insert one and try again."
         );
     });
@@ -199,7 +199,7 @@ fn a_failure_during_the_probe_is_a_toast(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.connection.status_note,
+            app.connection.status_note(),
             "Couldn't connect to your phone.\nPlease try again."
         );
     });

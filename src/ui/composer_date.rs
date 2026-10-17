@@ -14,6 +14,7 @@ use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas};
 use super::composer_field::field_doc;
 use super::scheduled::{picked_unix, picker_value};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::time_field::{HourCycle, TimePrecision};
@@ -130,7 +131,8 @@ impl QuillApp {
             .filter(|time| (1..=MAX_DATE).contains(time))
             .and_then(|time| i32::try_from(time).ok())
         else {
-            self.connection.status_note = tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME)));
             cx.notify();
             return;
         };
@@ -139,7 +141,9 @@ impl QuillApp {
         self.close_composer_date_dialog(window, cx);
         let text = self.composer.read(cx).value().to_string();
         if text.get(range.clone()) != Some(selected.as_str()) {
-            self.connection.status_note = tr(keys::Q_CHAT_THE_TEXT_CHANGED_SELECT_IT).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHAT_THE_TEXT_CHANGED_SELECT_IT,
+            )));
             cx.notify();
             return;
         }

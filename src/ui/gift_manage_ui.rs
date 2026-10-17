@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::*;
@@ -92,7 +93,7 @@ impl QuillApp {
     }
 
     pub(super) fn note_gift_refused(&mut self, text: &str) {
-        self.connection.status_note = text.into();
+        self.connection.set_note(StatusNote::error(text));
     }
 
     fn pick_gift_collection(&mut self, id: i32, cx: &mut Context<Self>) {

@@ -228,7 +228,7 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
             hub.premium_requested.as_ref().map(|s| s.file_id),
             Some(FileId(1))
         );
-        assert_ne!(app.connection.status_note, "sticker sent");
+        assert_ne!(app.connection.status_note(), "sticker sent");
     });
 
     // With Premium the same sticker is just sent.
@@ -252,7 +252,7 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
                 .premium_requested
                 .is_none()
         );
-        assert_eq!(app.connection.status_note, "sticker sent");
+        assert_eq!(app.connection.status_note(), "sticker sent");
     });
 }
 

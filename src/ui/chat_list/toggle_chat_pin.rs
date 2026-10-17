@@ -1,6 +1,7 @@
 //! Methods moved out of `chat_list.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -62,22 +63,22 @@ impl QuillApp {
         }
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.toggle_chat_pin(chat_id, !pinned);
-            self.connection.status_note = match result {
-                Ok(Some(_)) if pinned => tr(keys::Q_CHATLIST_UNPINNING).into(),
-                Ok(Some(_)) => tr(keys::Q_CHATLIST_PINNING).into(),
-                Ok(None) => tr(keys::Q_CHATLIST_PIN_REQUEST_ALREADY_IN_FLIGHT).into(),
-                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_PIN).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(Some(_)) if pinned => StatusNote::silent(tr(keys::Q_CHATLIST_UNPINNING)),
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_CHATLIST_PINNING)),
+                Ok(None) => StatusNote::silent(tr(keys::Q_CHATLIST_PIN_REQUEST_ALREADY_IN_FLIGHT)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_PIN)),
+            });
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
             self.apply_demo_pin(chat_id, !pinned, archived);
-            self.connection.status_note = if pinned {
-                "unpinned".into()
+            self.connection.set_note(if pinned {
+                StatusNote::silent("unpinned")
             } else {
-                "pinned".into()
-            };
+                StatusNote::silent("pinned")
+            });
             cx.notify();
         }
     }
@@ -112,7 +113,9 @@ impl QuillApp {
                     .is_some_and(|h| !h.messages.is_empty())
         });
         if marked && nothing_to_view && self.live.is_some() {
-            self.connection.status_note = tr(keys::Q_CHATLIST_OPEN_THE_CHAT_TO_MARK).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_CHATLIST_OPEN_THE_CHAT_TO_MARK,
+            )));
             cx.notify();
             return;
         }
@@ -122,22 +125,22 @@ impl QuillApp {
             } else {
                 live.driver.toggle_chat_marked_as_unread(chat_id, true)
             };
-            self.connection.status_note = match result {
-                Ok(Some(_)) if marked => tr(keys::Q_CHATLIST_MARKING_AS_READ).into(),
-                Ok(Some(_)) => tr(keys::Q_CHATLIST_MARKING_AS_UNREAD).into(),
-                Ok(None) => tr(keys::Q_CHATLIST_REQUEST_ALREADY_IN_FLIGHT).into(),
-                Err(_) => tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_READ_STATE).into(),
-            };
+            self.connection.set_note(match result {
+                Ok(Some(_)) if marked => StatusNote::silent(tr(keys::Q_CHATLIST_MARKING_AS_READ)),
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_CHATLIST_MARKING_AS_UNREAD)),
+                Ok(None) => StatusNote::silent(tr(keys::Q_CHATLIST_REQUEST_ALREADY_IN_FLIGHT)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_READ_STATE)),
+            });
             cx.notify();
             return;
         }
         if self.demo_session.is_some() {
             self.apply_demo_marked_as_unread(chat_id, !marked);
-            self.connection.status_note = if marked {
-                tr(keys::Q_CHATLIST_MARKED_AS_READ).into()
+            self.connection.set_note(if marked {
+                StatusNote::silent(tr(keys::Q_CHATLIST_MARKED_AS_READ))
             } else {
-                tr(keys::Q_CHATLIST_MARKED_AS_UNREAD).into()
-            };
+                StatusNote::silent(tr(keys::Q_CHATLIST_MARKED_AS_UNREAD))
+            });
             cx.notify();
         }
     }

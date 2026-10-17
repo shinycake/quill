@@ -3,6 +3,7 @@
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
 use super::pressable::PressableDiv;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -18,10 +19,11 @@ impl QuillApp {
     fn search_gif_picker(&mut self, cx: &mut Context<Self>) {
         let query = self.pickers.gif_search_input.read(cx).value().to_string();
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.search_gifs(&query) {
-                Ok(_) => tr(keys::Q_MISC_SEARCHING_GIFS).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.search_gifs(&query) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SEARCHING_GIFS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SEARCH_GIFS)),
+                });
         }
         cx.notify();
     }
@@ -35,19 +37,21 @@ impl QuillApp {
     }
     fn more_gif_search_results(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.more_gif_search_results() {
-                Ok(_) => tr(keys::Q_MISC_LOADING_MORE_GIFS).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_LOAD_MORE_GIFS).into(),
-            };
+            self.connection
+                .set_note(match live.driver.more_gif_search_results() {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_LOADING_MORE_GIFS)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MORE_GIFS)),
+                });
         }
         cx.notify();
     }
     fn save_gif_pick(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.status_note = match live.driver.set_gif_saved(file_id, true) {
-                Ok(_) => tr(keys::Q_MISC_SAVING_GIF).into(),
-                Err(_) => tr(keys::Q_MISC_COULD_NOT_SAVE_GIF).into(),
-            };
+            self.connection
+                .set_note(match live.driver.set_gif_saved(file_id, true) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SAVING_GIF)),
+                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SAVE_GIF)),
+                });
         }
         cx.notify();
     }

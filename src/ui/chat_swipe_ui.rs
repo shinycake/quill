@@ -14,6 +14,7 @@
 use super::app::QuillApp;
 use super::chat_theme::accent_strong;
 use super::*;
+use crate::ui::status_note::{NoteKind, StatusNote};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -308,9 +309,9 @@ impl QuillApp {
         if !matches!(
             label,
             SwipeLabel::Pin | SwipeLabel::Unpin | SwipeLabel::Delete
-        ) && !self.connection.status_note.starts_with("could not")
+        ) && self.connection.note().kind() != NoteKind::Error
         {
-            self.connection.status_note = label.toast().into();
+            self.connection.set_note(StatusNote::info(label.toast()));
         }
         cx.notify();
     }

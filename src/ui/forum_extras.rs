@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
@@ -92,7 +93,9 @@ impl QuillApp {
             return;
         }
         let Some(live) = self.live.as_mut() else {
-            self.connection.status_note = tr(keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION).into();
+            self.connection.set_note(StatusNote::info(tr(
+                keys::Q_MISC_TOPICS_NEED_A_LIVE_CONNECTION,
+            )));
             cx.notify();
             return;
         };
@@ -132,7 +135,11 @@ impl QuillApp {
             ),
             TopicExtra::Edit => return,
         };
-        self.connection.status_note = if result.is_ok() { done } else { failed }.into();
+        self.connection.set_note(if result.is_ok() {
+            StatusNote::info(done)
+        } else {
+            StatusNote::error(failed)
+        });
         cx.notify();
     }
 }

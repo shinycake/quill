@@ -1,5 +1,6 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputContentType};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -75,10 +76,14 @@ impl QuillApp {
                 self.auth_ui
                     .recovery_code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.connection.status_note = tr(keys::Q_MISC_RECOVERY_CODE_SENT_CHECK_YOUR).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MISC_RECOVERY_CODE_SENT_CHECK_YOUR,
+                )));
             }
             Err(_) => {
-                self.connection.status_note = tr(keys::Q_MISC_COULD_NOT_REQUEST_A_RECOVERY).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MISC_COULD_NOT_REQUEST_A_RECOVERY,
+                )));
             }
         }
         cx.notify();
@@ -108,12 +113,14 @@ impl QuillApp {
                 self.auth_ui
                     .recovery_code_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.connection.status_note =
-                    tr(keys::Q_MISC_RECOVERY_CODE_SUBMITTED_2FA_WILL).into();
+                self.connection.set_note(StatusNote::silent(tr(
+                    keys::Q_MISC_RECOVERY_CODE_SUBMITTED_2FA_WILL,
+                )));
             }
             Err(_) => {
-                self.connection.status_note =
-                    tr(keys::Q_MISC_COULD_NOT_SUBMIT_RECOVERY_CODE).into();
+                self.connection.set_note(StatusNote::error(tr(
+                    keys::Q_MISC_COULD_NOT_SUBMIT_RECOVERY_CODE,
+                )));
             }
         }
         cx.notify();

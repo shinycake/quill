@@ -194,12 +194,12 @@ fn a_look_alike_fragment_address_asks_before_opening(cx: &mut TestAppContext) {
         ..info
     });
     set_lookup(&app, vcx, with_info(info, true));
-    let note_before = app.read_with(vcx, |app, _| app.connection.status_note.clone());
+    let note_before = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
     click(vcx, "gift-value-on-fragment");
     let (confirm, note) = app.read_with(vcx, |app, _| {
         (
             app.message_ui.open_link_confirm.clone(),
-            app.connection.status_note.clone(),
+            app.connection.status_note().to_string(),
         )
     });
     let confirm = confirm.expect("the Open this link? box");

@@ -13,6 +13,7 @@ use super::gift_market_ui::{BoxView, feature_row, two_line_button};
 use super::message_text::format_unix_date_time;
 use super::premium_ui::sticker_tile;
 use super::shell::DialogKind;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -162,7 +163,8 @@ impl QuillApp {
                             move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
                                 let _ = copy.update(cx, |this, cx| {
-                                    this.connection.status_note = tr(keys::STICKERS_COPIED).into();
+                                    this.connection
+                                        .set_note(StatusNote::info(tr(keys::STICKERS_COPIED)));
                                     cx.notify();
                                 });
                             },

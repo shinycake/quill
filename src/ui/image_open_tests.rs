@@ -88,7 +88,7 @@ fn photo_editor_failure_shows_the_status_note(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, _, _| {
         assert!(app.viewer.photo_editor.is_none());
         assert_eq!(
-            app.connection.status_note.to_string(),
+            app.connection.status_note().to_string(),
             quill::lang::tr(quill::lang::keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).to_string()
         );
     });
@@ -119,6 +119,6 @@ fn sticker_set_picker_reports_an_unreadable_file(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, _, _| {
         assert!(app.viewer.photo_editor.is_none());
-        assert!(!app.connection.status_note.is_empty());
+        assert!(!app.connection.status_note().is_empty());
     });
 }

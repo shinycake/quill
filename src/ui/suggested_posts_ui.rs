@@ -8,6 +8,7 @@
 
 use super::app::QuillApp;
 use super::suggested_posts_state::{BalanceFor, SuggestTarget};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -323,7 +324,9 @@ impl QuillApp {
             return false;
         };
         if text.trim().is_empty() && !is_media {
-            self.connection.status_note = tr(keys::Q_MONEY_TYPE_A_MESSAGE_OR_ATTACH).into();
+            self.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MONEY_TYPE_A_MESSAGE_OR_ATTACH,
+            )));
             cx.notify();
             return true;
         }
@@ -338,9 +341,11 @@ impl QuillApp {
             self.clear_suggest_bar_after_send(chat_id);
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
-            self.connection.status_note = tr(keys::Q_MONEY_SENDING_2).into();
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_MONEY_SENDING_2)));
         } else {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER).into();
+            self.connection
+                .set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_SEND_THE_OFFER)));
         }
         cx.notify();
         true
@@ -375,7 +380,7 @@ impl QuillApp {
         let notes = live.driver.session.take_suggested_post_notes();
         let balance_low = live.driver.session.take_suggested_post_balance_low();
         if let Some(note) = notes.into_iter().last() {
-            self.connection.status_note = note;
+            self.connection.set_note(StatusNote::info(note));
         }
         if let Some(purpose) = balance_low {
             self.ask_after_balance_error(purpose, cx);
@@ -408,7 +413,9 @@ impl QuillApp {
             SuggestedPostPurpose::Decline { .. } => (None, BalanceFor::Offer),
         };
         let Some(price) = price else {
-            self.connection.status_note = tr(keys::Q_MONEY_COULDNT_PAY_FOR_THE_POST).into();
+            self.connection.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULDNT_PAY_FOR_THE_POST,
+            )));
             return;
         };
         let short = self.suggest_shortfall(price).unwrap_or(price);

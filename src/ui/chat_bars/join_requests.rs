@@ -1,5 +1,6 @@
 //! Join requests: the bar above the chat and the requests dialog.
 use super::*;
+use crate::ui::status_note::StatusNote;
 
 impl QuillApp {
     pub(super) fn join_requests_bar(
@@ -187,13 +188,13 @@ impl QuillApp {
         approve: bool,
         cx: &mut Context<Self>,
     ) {
-        self.connection.status_note = match self.live.as_mut() {
+        self.connection.set_note(match self.live.as_mut() {
             Some(live) => match live.driver.process_all_chat_join_requests(chat_id, approve) {
-                Ok(_) => tr(keys::Q_CHAT_PROCESSING_JOIN_REQUESTS).into(),
-                Err(_) => tr(keys::Q_CHAT_COULD_NOT_PROCESS_JOIN_REQUESTS).into(),
+                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_PROCESSING_JOIN_REQUESTS)),
+                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_PROCESS_JOIN_REQUESTS)),
             },
-            None => tr(keys::Q_CHAT_JOIN_REQUESTS_NEED_A_LIVE).into(),
-        };
+            None => StatusNote::info(tr(keys::Q_CHAT_JOIN_REQUESTS_NEED_A_LIVE)),
+        });
         cx.notify();
     }
 
