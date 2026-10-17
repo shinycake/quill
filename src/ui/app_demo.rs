@@ -24,6 +24,7 @@ impl QuillApp {
         demo: Option<ScreenshotDemo>,
     ) -> Self {
         super::tooltip_timing::install(cx);
+        quill::media_tools::warm_up();
         let chat = cx.new(SyntheticChat::new);
         // Send-key mode drives kit's newline-vs-submit behavior: plain
         // Enter submits only in Enter mode; in CtrlEnter mode it inserts

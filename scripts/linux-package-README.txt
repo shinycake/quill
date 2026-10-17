@@ -8,14 +8,18 @@ Uninstall:      ./install.sh --uninstall
 This directory is relocatable. Quill finds its native libraries in lib/ beside
 the executable (libtdjson.so, libntgcalls.so, librlottie.so, libquillvideo.so
 with the FFmpeg libraries it plays video through, plus a bundled
-OpenSSL 3), so no environment variables are needed. Do not move quill out of
+OpenSSL 3), so no environment variables are needed. The ffmpeg and ffprobe
+programs beside it (same FFmpeg build) run the video editor, photo resizing
+and the camera; Quill uses them before any ffmpeg on PATH. This build has no
+H.264 or VP9 encoder (those are GPL or external libraries): to edit and send
+videos or make video stickers, also install your distribution's ffmpeg package. Do not move quill out of
 this directory without lib/.
 
 System requirements (not bundled): a glibc-based x86_64 distribution at least
 as new as the one that built this package (see the release notes), a Vulkan
 capable GPU driver, and these libraries, present on any mainstream desktop:
 libgtk-3, libxkbcommon, X11 or Wayland client libraries, fontconfig, freetype,
-ALSA (libasound), zlib.
+ALSA (libasound), PulseAudio client (libpulse), zlib.
 
   Debian/Ubuntu: sudo apt install libgtk-3-0 libxkbcommon-x11-0 libvulkan1 \
                      libfontconfig1 libasound2 mesa-vulkan-drivers

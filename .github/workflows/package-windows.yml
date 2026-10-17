@@ -161,9 +161,9 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  # FFmpeg (LGPL, shared, decoders only) + the quillvideo shim, built with
-  # MinGW-w64 (MSYS2 UCRT64): the DLLs import only Windows system DLLs
-  # (the Universal CRT is part of Windows 10+).
+  # FFmpeg (LGPL, shared) with the ffmpeg/ffprobe programs + the quillvideo
+  # shim, built with MinGW-w64 (MSYS2 UCRT64): the DLLs and programs import
+  # only Windows system DLLs (the Universal CRT is part of Windows 10+).
   windows-ffmpeg:
     name: windows-ffmpeg
     runs-on: windows-latest
@@ -187,6 +187,7 @@ jobs:
             git make diffutils
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-zlib
       - name: build FFmpeg
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-ffmpeg.sh
@@ -214,6 +215,8 @@ jobs:
           name: quill-windows-ffmpeg
           path: |
             vendor/ffmpeg/prefix/bin/*.dll
+            vendor/ffmpeg/prefix/bin/ffmpeg.exe
+            vendor/ffmpeg/prefix/bin/ffprobe.exe
             vendor/ffmpeg/prefix/share/quillvideo/*
           retention-days: 3
           if-no-files-found: error
@@ -286,6 +289,15 @@ jobs:
             Write-Host $probe
             if ($probe -notmatch 'frames=10') { throw "video probe failed for ${clip}: $probe" }
           }
+      # The ffmpeg.exe/ffprobe.exe Quill runs (src/media_tools.rs finds them
+      # next to quill.exe): from the extracted zip, started with nothing but
+      # the DLLs beside them. A missing tool or DLL fails the build.
+      - name: bundled ffmpeg and ffprobe run from the extracted zip
+        shell: bash
+        run: |
+          bash scripts/check-ffmpeg-tools.sh "$(cygpath -u "$RUNNER_TEMP")/extract/quill-windows-x86_64" \
+            --expect-encoder h264_mf --expect-encoder mpeg4 --expect-encoder aac \
+            --expect-encoder mjpeg --expect-encoder png
       - uses: actions/upload-artifact@v7
         with:
           name: quill-windows-x86_64

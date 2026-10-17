@@ -533,8 +533,14 @@ impl VideoNoteCapture {
         let log_file = std::fs::File::create(&log).map_err(|err| err.to_string())?;
         let size = round_video_size(hq);
         let preview = ROUND_PREVIEW_SIDE;
-        let mut child = crate::media_tools::spawn_capture(
+        let job = crate::video_encoder::h264_job(
+            "Video messages",
             &round_capture_args(&input, size, &path),
+            size.unsigned_abs().saturating_mul(size.unsigned_abs()),
+        )?;
+        let mut child = crate::media_tools::spawn_capture(
+            &job.program,
+            &job.args,
             Stdio::piped(),
             Stdio::from(log_file),
         )

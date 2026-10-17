@@ -1,8 +1,13 @@
 //! Locating the external media tools (`ffmpeg`, `ffprobe`).
 //!
-//! An app opened from Finder or the Dock inherits launchd's minimal `PATH`
-//! (`/usr/bin:/bin:/usr/sbin:/sbin`), which misses Homebrew and MacPorts,
-//! so a bare `Command::new("ffmpeg")` fails there even when it is installed.
+//! The Windows zip and the Linux tarball ship LGPL builds of both next to the
+//! app (docs/decisions/sweep-ffmpeg-tools-bundled.md); those win, so Quill's
+//! video editor, photo downscale and camera work on a machine that has no
+//! ffmpeg. Otherwise the search follows `PATH`, then the package-manager
+//! folders: an app opened from Finder or the Dock inherits launchd's minimal
+//! `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), which misses Homebrew and
+//! MacPorts, so a bare `Command::new("ffmpeg")` fails there even when it is
+//! installed.
 #![deny(clippy::indexing_slicing)]
 
 use std::collections::HashMap;
@@ -10,10 +15,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{LazyLock, Mutex};
 
+pub use crate::media_capture::{
+    CaptureInput, avfoundation_specifiers, camera_input, capture_input, v4l2_capture_devices,
+};
+
 /// Package-manager folders searched after `PATH`.
 const FALLBACK_DIRS: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
 
-static RESOLVED: LazyLock<Mutex<HashMap<String, PathBuf>>> =
+/// How long a bundled tool may take to answer `-version` before it counts as
+/// broken (a missing shared library, for example).
+const SELF_TEST_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+static RESOLVED: LazyLock<Mutex<HashMap<String, Vec<PathBuf>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// A `Command` for media tool `name`, resolved once per process: next to
@@ -23,28 +36,98 @@ pub fn command(name: &str) -> Command {
     Command::new(resolve(name))
 }
 
+/// Resolve the tools and list the encoders on a background thread, so the
+/// probes (up to 5 s each) are done before the UI thread asks.
+/// Runs once per process; later calls (a second window) do nothing.
+pub fn warm_up() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(spawn_warm_up);
+}
+
+fn spawn_warm_up() {
+    let _ = std::thread::Builder::new()
+        .name("quill-media-tools".into())
+        .spawn(|| {
+            for name in ["ffmpeg", "ffprobe"] {
+                let _ = candidates(name);
+            }
+            crate::video_encoder::warm_listings();
+        });
+}
+
+/// The preferred copy of `name`. Never probes: before [`warm_up`] has
+/// finished, a bundled copy is taken as working (a file check only), so the
+/// UI thread never waits on a child process here.
 fn resolve(name: &str) -> PathBuf {
+    cached_or_unprobed(name)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+fn cached_or_unprobed(name: &str) -> Vec<PathBuf> {
     if let Ok(cache) = RESOLVED.lock()
-        && let Some(path) = cache.get(name)
+        && let Some(found) = cache.get(name)
     {
-        return path.clone();
+        return found.clone();
     }
+    search(name, |_| true)
+}
+
+/// Every copy of media tool `name` that can run, in the order `command`
+/// prefers them. Resolved once per process; the first call probes a bundled
+/// copy (up to 5 s), so call it off the UI thread (see [`warm_up`]).
+pub fn candidates(name: &str) -> Vec<PathBuf> {
+    if let Ok(cache) = RESOLVED.lock()
+        && let Some(found) = cache.get(name)
+    {
+        return found.clone();
+    }
+    let found = search(name, runs);
+    if let Ok(mut cache) = RESOLVED.lock() {
+        cache.insert(name.to_string(), found.clone());
+    }
+    found
+}
+
+fn search(name: &str, works: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
     let beside_exe = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf));
     let path_dirs = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
         .unwrap_or_default();
-    let found = find_in(
+    find_all(
         name,
-        beside_exe
+        beside_exe.as_deref(),
+        path_dirs
             .into_iter()
-            .chain(path_dirs)
             .chain(FALLBACK_DIRS.iter().map(PathBuf::from)),
+        works,
     )
-    .unwrap_or_else(|| PathBuf::from(name));
-    if let Ok(mut cache) = RESOLVED.lock() {
-        cache.insert(name.to_string(), found.clone());
+}
+
+/// The executables called `name`: the copy in `bundled` first, but only when
+/// `works` says it starts (a bundled build whose shared library is missing
+/// must not hide a good one on `PATH`), then those in `others`, in order and
+/// without repeats.
+fn find_all(
+    name: &str,
+    bundled: Option<&Path>,
+    others: impl IntoIterator<Item = PathBuf>,
+    works: impl Fn(&Path) -> bool,
+) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    let bundled_copy = bundled
+        .and_then(|dir| find_in(name, [dir.to_path_buf()]))
+        .filter(|path| works(path));
+    for path in bundled_copy
+        .into_iter()
+        .chain(others.into_iter().filter_map(|dir| find_in(name, [dir])))
+    {
+        if !found.contains(&path) {
+            found.push(path);
+        }
     }
     found
 }
@@ -53,6 +136,35 @@ fn find_in(name: &str, dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBu
     dirs.into_iter()
         .map(|dir| dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)))
         .find(|candidate| is_executable(candidate))
+}
+
+/// True when `tool -version` exits successfully within [`SELF_TEST_LIMIT`].
+fn runs(tool: &Path) -> bool {
+    use std::process::Stdio;
+    let Ok(mut child) = Command::new(tool)
+        .arg("-version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .no_console()
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + SELF_TEST_LIMIT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -75,336 +187,29 @@ pub fn is_installed(name: &str) -> bool {
 
 /// What to do when `ffmpeg` is not installed, for the recording that needs it.
 pub fn ffmpeg_missing_message(what: &str) -> String {
-    let how = if cfg!(target_os = "macos") {
-        "Install it with `brew install ffmpeg`."
+    let os = if cfg!(target_os = "macos") {
+        "macos"
     } else if cfg!(windows) {
-        "Install it with `winget install ffmpeg`, or put ffmpeg.exe next to Quill.exe."
+        "windows"
     } else {
-        "Install the ffmpeg package (for example `sudo apt install ffmpeg`)."
+        "linux"
+    };
+    missing_message(what, os)
+}
+
+fn missing_message(what: &str, os: &str) -> String {
+    let how = match os {
+        "macos" => "Install it with `brew install ffmpeg`.",
+        "windows" => {
+            "Quill ships ffmpeg.exe next to Quill.exe; unzip the whole folder, or install \
+             it with `winget install ffmpeg`."
+        }
+        _ => {
+            "Quill ships ffmpeg and ffprobe in its folder; run it from there, or install the \
+             ffmpeg package (for example `sudo apt install ffmpeg`)."
+        }
     };
     format!("{what} need ffmpeg, which isn't installed. {how}")
-}
-
-/// ffmpeg input arguments for the camera and microphone of a round video,
-/// with the stream specifiers of the audio and video they produce.
-pub struct CaptureInput {
-    pub args: Vec<String>,
-    pub audio: &'static str,
-    pub video: &'static str,
-}
-
-/// The platform's camera and microphone for ffmpeg: the ones picked in the
-/// call device menu (`capture_choice`) when still present, otherwise
-/// AVFoundation's defaults on macOS, the first V4L2 capture device +
-/// PulseAudio (or ALSA) on Linux, the first DirectShow pair on Windows.
-/// Linux picks only the camera: PulseAudio source names differ from the
-/// call engine's microphone names, so audio stays on `default`.
-pub fn capture_input(
-    choice: &crate::capture_choice::CaptureChoice,
-) -> Result<CaptureInput, String> {
-    let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect();
-    if cfg!(target_os = "macos") {
-        let (video, audio) = avfoundation_inputs(choice);
-        let mut list: Vec<String> = args(&[
-            "-f",
-            "avfoundation",
-            "-framerate",
-            "30",
-            "-pixel_format",
-            "nv12",
-            "-i",
-        ]);
-        list.push(format!("{video}:{audio}"));
-        Ok(CaptureInput {
-            args: list,
-            audio: "0:a",
-            video: "0:v",
-        })
-    } else if cfg!(target_os = "linux") {
-        let nodes = v4l2_capture_devices();
-        let camera =
-            crate::capture_choice::pick_v4l2(choice.camera.as_deref(), &nodes, v4l2_card_name)
-                .ok_or("No camera found.")?;
-        let audio = linux_audio_backend();
-        Ok(CaptureInput {
-            args: vec![
-                "-f".into(),
-                "v4l2".into(),
-                "-framerate".into(),
-                "15".into(),
-                "-i".into(),
-                camera.to_string_lossy().into_owned(),
-                "-f".into(),
-                audio.into(),
-                "-i".into(),
-                "default".into(),
-            ],
-            audio: "1:a",
-            video: "0:v",
-        })
-    } else if cfg!(windows) {
-        let devices = list_dshow_devices()?;
-        let camera = crate::capture_choice::pick_device(choice.camera.as_deref(), &devices.video)
-            .ok_or("No camera found.")?;
-        let mic = crate::capture_choice::pick_device(choice.microphone.as_deref(), &devices.audio)
-            .ok_or("No microphone found.")?;
-        Ok(CaptureInput {
-            args: vec![
-                "-f".into(),
-                "dshow".into(),
-                "-i".into(),
-                format!("video={camera}:audio={mic}"),
-            ],
-            audio: "0:a",
-            video: "0:v",
-        })
-    } else {
-        Err("Recording isn't supported on this system yet.".into())
-    }
-}
-
-/// How long a device-listing ffmpeg may run. Capture starts on the UI
-/// thread, so a stuck device probe must not hang the app.
-const DEVICE_LIST_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// Run `cmd` and return what it prints on stderr, or `None` when it cannot
-/// start or does not finish within `limit` (it is killed then). ffmpeg's
-/// device lists go to stderr and the command itself "fails", so the exit
-/// status is ignored.
-fn stderr_within(cmd: &mut Command, limit: std::time::Duration) -> Option<String> {
-    use std::io::Read;
-    use std::process::Stdio;
-    let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-    let mut pipe = child.stderr.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let reader = std::thread::Builder::new()
-        .name("quill-device-list".into())
-        .spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = pipe.read_to_end(&mut bytes);
-            let _ = tx.send(bytes);
-        });
-    let bytes = match reader {
-        Ok(_) => rx.recv_timeout(limit).ok(),
-        Err(_) => None,
-    };
-    if bytes.is_none() {
-        let _ = child.kill();
-    }
-    let _ = child.wait();
-    bytes.map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-}
-
-/// AVFoundation `(video, audio)` input specifiers: the picked devices'
-/// indices, `default` for an unset or vanished pick. Lists the devices only
-/// when something was picked.
-fn avfoundation_inputs(choice: &crate::capture_choice::CaptureChoice) -> (String, String) {
-    if choice.camera.is_none() && choice.microphone.is_none() {
-        return ("default".into(), "default".into());
-    }
-    let mut list = command("ffmpeg");
-    list.args([
-        "-hide_banner",
-        "-f",
-        "avfoundation",
-        "-list_devices",
-        "true",
-        "-i",
-        "",
-    ]);
-    let listing = stderr_within(&mut list, DEVICE_LIST_LIMIT).unwrap_or_default();
-    avfoundation_specifiers(
-        choice,
-        &crate::capture_choice::parse_avfoundation_devices(&listing),
-    )
-}
-
-/// The `(video, audio)` AVFoundation specifiers for `choice` among the
-/// listed `devices`: the picked device's index, `default` when unset or gone.
-pub fn avfoundation_specifiers(
-    choice: &crate::capture_choice::CaptureChoice,
-    devices: &crate::capture_choice::AvfDevices,
-) -> (String, String) {
-    (
-        crate::capture_choice::avf_index(choice.camera.as_deref(), &devices.video),
-        crate::capture_choice::avf_index(choice.microphone.as_deref(), &devices.audio),
-    )
-}
-
-/// Audio capture backend ffmpeg uses on Linux: PulseAudio (which PipeWire
-/// also serves) when this ffmpeg has it, otherwise ALSA.
-fn linux_audio_backend() -> &'static str {
-    static BACKEND: LazyLock<&'static str> = LazyLock::new(|| {
-        let listing = command("ffmpeg")
-            .args(["-hide_banner", "-devices"])
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-            .unwrap_or_default();
-        pick_audio_backend(&listing)
-    });
-    *BACKEND
-}
-
-fn pick_audio_backend(devices_listing: &str) -> &'static str {
-    let has = |name: &str| {
-        devices_listing
-            .lines()
-            .any(|line| line.split_whitespace().nth(1) == Some(name))
-    };
-    if has("pulse") || !has("alsa") {
-        "pulse"
-    } else {
-        "alsa"
-    }
-}
-
-/// The V4L2 card name of `/dev/videoN` (what the call engine lists).
-#[cfg(target_os = "linux")]
-fn v4l2_card_name(path: &Path) -> Option<String> {
-    let file = path.file_name()?;
-    let name = std::fs::read_to_string(Path::new("/sys/class/video4linux").join(file).join("name"))
-        .ok()?;
-    Some(name.trim().to_string())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn v4l2_card_name(_path: &Path) -> Option<String> {
-    None
-}
-
-/// `/dev/video*` nodes that can capture video, in numeric order. A camera
-/// often exposes extra nodes (metadata, IR); only real capture nodes count.
-pub fn v4l2_capture_devices() -> Vec<PathBuf> {
-    let mut nodes: Vec<(u32, PathBuf)> = std::fs::read_dir("/dev")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
-            let number = name.strip_prefix("video")?.parse::<u32>().ok()?;
-            Some((number, entry.path()))
-        })
-        .collect();
-    nodes.sort();
-    nodes
-        .into_iter()
-        .filter(|(_, path)| v4l2_can_capture(path))
-        .map(|(_, path)| path)
-        .collect()
-}
-
-/// `VIDIOC_QUERYCAP`: the node's `device_caps` (falling back to
-/// `capabilities`) include `V4L2_CAP_VIDEO_CAPTURE`.
-#[cfg(target_os = "linux")]
-fn v4l2_can_capture(path: &Path) -> bool {
-    use std::os::fd::AsRawFd;
-    // struct v4l2_capability: driver[16], card[32], bus_info[32], version,
-    // capabilities, device_caps, reserved[3] = 104 bytes.
-    let mut caps = [0u32; 26];
-    // _IOR('V', 0, struct v4l2_capability)
-    const VIDIOC_QUERYCAP: libc::c_ulong = 0x8068_5600;
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    // SAFETY: `caps` is 104 writable bytes, the size QUERYCAP fills in.
-    let status = unsafe { libc::ioctl(file.as_raw_fd(), VIDIOC_QUERYCAP, caps.as_mut_ptr()) };
-    status == 0 && v4l2_caps_allow_capture(caps[21], caps[22])
-}
-
-#[cfg(not(target_os = "linux"))]
-fn v4l2_can_capture(_path: &Path) -> bool {
-    false
-}
-
-/// `V4L2_CAP_DEVICE_CAPS` says the per-node `device_caps` are valid;
-/// `V4L2_CAP_VIDEO_CAPTURE` / `_MPLANE` mark a capture node.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn v4l2_caps_allow_capture(capabilities: u32, device_caps: u32) -> bool {
-    const DEVICE_CAPS: u32 = 0x8000_0000;
-    const CAPTURE: u32 = 0x0000_0001 | 0x0000_1000;
-    let caps = if capabilities & DEVICE_CAPS != 0 {
-        device_caps
-    } else {
-        capabilities
-    };
-    caps & CAPTURE != 0
-}
-
-/// Camera and microphone names DirectShow reports, in its order.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct DshowDevices {
-    pub video: Vec<String>,
-    pub audio: Vec<String>,
-}
-
-/// `ffmpeg -list_devices true -f dshow -i dummy` (it prints the list on
-/// stderr and then fails, which is expected).
-pub fn list_dshow_devices() -> Result<DshowDevices, String> {
-    let mut list = command("ffmpeg");
-    list.args([
-        "-hide_banner",
-        "-list_devices",
-        "true",
-        "-f",
-        "dshow",
-        "-i",
-        "dummy",
-    ])
-    .no_console();
-    let stderr = stderr_within(&mut list, DEVICE_LIST_LIMIT)
-        .ok_or("Couldn't list the cameras and microphones.")?;
-    Ok(parse_dshow_devices(&stderr))
-}
-
-/// Parse ffmpeg's DirectShow device list, in both layouts: newer builds tag
-/// each line `"Name" (video)`, older ones use `DirectShow video devices`
-/// section headers. `Alternative name` lines are skipped.
-pub fn parse_dshow_devices(stderr: &str) -> DshowDevices {
-    let mut devices = DshowDevices::default();
-    let mut section = "";
-    for line in stderr.lines() {
-        let lower = line.to_ascii_lowercase();
-        if lower.contains("directshow video devices") {
-            section = "video";
-            continue;
-        }
-        if lower.contains("directshow audio devices") {
-            section = "audio";
-            continue;
-        }
-        if lower.contains("alternative name") {
-            continue;
-        }
-        let (Some(open), Some(close)) = (line.find('"'), line.rfind('"')) else {
-            continue;
-        };
-        if close <= open {
-            continue;
-        }
-        let name = line.get(open + 1..close).unwrap_or_default().to_string();
-        let tail = lower.get(close..).unwrap_or_default();
-        let kind = if tail.contains("(video)") {
-            "video"
-        } else if tail.contains("(audio)") {
-            "audio"
-        } else if tail.contains("(none)") {
-            continue;
-        } else {
-            section
-        };
-        match kind {
-            "video" => devices.video.push(name),
-            "audio" => devices.audio.push(name),
-            _ => {}
-        }
-    }
-    devices
 }
 
 /// True when Windows' privacy settings block this device for desktop apps
@@ -453,7 +258,7 @@ pub fn quiet_command(name: &str) -> Command {
 }
 
 /// Hide the console window a child would flash on Windows GUI apps.
-trait NoConsole {
+pub(crate) trait NoConsole {
     fn no_console(&mut self) -> &mut Self;
 }
 
@@ -471,11 +276,12 @@ impl NoConsole for Command {
 /// Spawn ffmpeg for a capture: no console window on Windows, and on Windows
 /// stdin piped (ffmpeg stops cleanly on `q`; elsewhere SIGINT does that).
 pub fn spawn_capture(
+    program: &Path,
     args: &[String],
     stdout: std::process::Stdio,
     stderr: std::process::Stdio,
 ) -> std::io::Result<std::process::Child> {
-    let mut command = command("ffmpeg");
+    let mut command = Command::new(program);
     command.args(args);
     command
         .stdin(if cfg!(windows) {
@@ -631,32 +437,110 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// An executable file `name` (plus the platform's suffix) in a fresh dir.
+    fn fake_tool(root: &Path, dir: &str, name: &str) -> PathBuf {
+        let dir = root.join(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("quill-tools-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
     #[test]
-    fn dshow_devices_parse_in_both_ffmpeg_layouts() {
-        let new = "[dshow @ 000001] DirectShow video devices (some may be both video and audio devices)\n\
-[dshow @ 000001]  \"Integrated Camera\" (video)\n\
-[dshow @ 000001]   Alternative name \"@device_pnp_\\\\?\\usb#vid_0c45\"\n\
-[dshow @ 000001] DirectShow audio devices\n\
-[dshow @ 000001]  \"Microphone Array (Realtek)\" (audio)\n\
-[dshow @ 000001]   Alternative name \"@device_cm_{33D9A762}\"\n\
-[dshow @ 000001]  \"Virtual Thing\" (none)\n\
-dummy: Immediate exit requested\n";
-        let want = DshowDevices {
-            video: vec!["Integrated Camera".into()],
-            audio: vec!["Microphone Array (Realtek)".into()],
-        };
-        assert_eq!(parse_dshow_devices(new), want);
-        let old = "[dshow @ 1] DirectShow video devices\n[dshow @ 1]  \"USB Cam\"\n\
-[dshow @ 1]     Alternative name \"@device_pnp\"\n[dshow @ 1] DirectShow audio devices\n\
-[dshow @ 1]  \"Mic\"\n";
-        assert_eq!(
-            parse_dshow_devices(old),
-            DshowDevices {
-                video: vec!["USB Cam".into()],
-                audio: vec!["Mic".into()]
-            }
+    fn the_bundled_copy_comes_before_path() {
+        let root = scratch("order");
+        let bundled = fake_tool(&root, "app", "ffprobe");
+        let on_path = fake_tool(&root, "path", "ffprobe");
+        let found = find_all(
+            "ffprobe",
+            bundled.parent(),
+            [on_path.parent().unwrap().to_path_buf()],
+            |_| true,
         );
-        assert_eq!(parse_dshow_devices("dummy: error"), DshowDevices::default());
+        assert_eq!(found, vec![bundled, on_path]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_bundled_copy_that_cannot_start_does_not_hide_path() {
+        let root = scratch("broken");
+        let bundled = fake_tool(&root, "app", "ffmpeg");
+        let on_path = fake_tool(&root, "path", "ffmpeg");
+        let found = find_all(
+            "ffmpeg",
+            bundled.parent(),
+            [on_path.parent().unwrap().to_path_buf()],
+            |path| path != bundled,
+        );
+        assert_eq!(found, vec![on_path]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_alone_is_used_when_nothing_is_bundled_and_repeats_collapse() {
+        let root = scratch("path");
+        let on_path = fake_tool(&root, "path", "ffmpeg");
+        let dir = on_path.parent().unwrap().to_path_buf();
+        let found = find_all(
+            "ffmpeg",
+            Some(&root.join("empty")),
+            [dir.clone(), dir],
+            |_| true,
+        );
+        assert_eq!(found, vec![on_path]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_missing_tool_resolves_to_its_bare_name_and_is_not_installed() {
+        let root = scratch("missing");
+        assert!(find_all("ffmpeg", Some(&root), [root.join("nope")], |_| true).is_empty());
+        assert_eq!(
+            resolve("quill-no-such-media-tool"),
+            PathBuf::from("quill-no-such-media-tool")
+        );
+        assert!(!is_installed("quill-no-such-media-tool"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tool_that_exits_with_an_error_or_hangs_fails_the_self_test() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch("selftest");
+        let script = |name: &str, body: &str| {
+            let path = root.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        assert!(runs(&script("good", "exit 0")));
+        assert!(!runs(&script("bad", "exit 3")));
+        assert!(!runs(&root.join("absent")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_missing_message_names_the_bundled_tool_where_one_ships() {
+        let windows = missing_message("Video messages", "windows");
+        assert!(windows.starts_with("Video messages need ffmpeg"));
+        assert!(windows.contains("ffmpeg.exe next to Quill.exe"));
+        assert!(windows.contains("winget"));
+        assert!(missing_message("The camera", "macos").contains("brew install ffmpeg"));
+        let linux = missing_message("The camera", "linux");
+        assert!(linux.contains("ships ffmpeg and ffprobe") && linux.contains("apt install"));
     }
 
     #[test]
@@ -667,41 +551,6 @@ dummy: Immediate exit requested\n";
         assert!(!consent_denies(
             "ERROR: The system was unable to find the registry key"
         ));
-    }
-
-    #[test]
-    fn v4l2_capture_nodes_are_told_from_metadata_nodes() {
-        let device_caps = 0x8000_0000u32;
-        // UVC capture node: per-node caps carry VIDEO_CAPTURE (+ STREAMING).
-        assert!(v4l2_caps_allow_capture(
-            device_caps | 0x0400_0001,
-            0x0400_0001
-        ));
-        // Its metadata node lists the device's caps but not capture itself.
-        assert!(!v4l2_caps_allow_capture(
-            device_caps | 0x0400_0001,
-            0x0480_0000
-        ));
-        // Old drivers without DEVICE_CAPS use the plain capabilities.
-        assert!(v4l2_caps_allow_capture(0x0000_0001, 0));
-        assert!(v4l2_caps_allow_capture(device_caps, 0x0000_1000), "mplane");
-    }
-
-    #[test]
-    fn ffmpeg_audio_backend_prefers_pulse_and_falls_back_to_alsa() {
-        assert_eq!(
-            pick_audio_backend(" D  alsa\n DE pulse\n DE v4l2\n"),
-            "pulse"
-        );
-        assert_eq!(pick_audio_backend(" D  alsa\n DE v4l2\n"), "alsa");
-        assert_eq!(pick_audio_backend(""), "pulse");
-    }
-
-    #[test]
-    fn missing_ffmpeg_message_says_how_to_install() {
-        let note = ffmpeg_missing_message("Video messages");
-        assert!(note.starts_with("Video messages need ffmpeg"));
-        assert!(note.to_lowercase().contains("install"));
     }
 
     #[test]
@@ -733,24 +582,5 @@ dummy: Immediate exit requested\n";
         std::fs::write(&log, "").unwrap();
         assert_eq!(capture_failure(&log, true), "Couldn't start the camera.");
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn stderr_within_returns_output_and_gives_up_on_a_stuck_command() {
-        if cfg!(windows) {
-            return;
-        }
-        let mut quick = Command::new("sh");
-        quick.args(["-c", "echo listed >&2"]);
-        let out = stderr_within(&mut quick, std::time::Duration::from_secs(10));
-        assert_eq!(out.as_deref().map(str::trim), Some("listed"));
-        let mut stuck = Command::new("sh");
-        stuck.args(["-c", "sleep 30"]);
-        let started = std::time::Instant::now();
-        assert_eq!(
-            stderr_within(&mut stuck, std::time::Duration::from_millis(100)),
-            None
-        );
-        assert!(started.elapsed() < std::time::Duration::from_secs(10));
     }
 }

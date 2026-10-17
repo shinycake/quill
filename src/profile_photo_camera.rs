@@ -23,7 +23,7 @@ pub fn frame_len(side: u32) -> usize {
 }
 
 /// ffmpeg arguments that stream the camera (`input` from
-/// `profile_photo_sources::video_only_input`) as mirrored, center-square
+/// `media_tools::camera_input`) as mirrored, center-square
 /// RGB24 frames on stdout.
 pub fn stream_args(input: &[String], side: u32, fps: u32) -> Vec<String> {
     let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error"]
@@ -75,9 +75,8 @@ impl CameraStream {
         if !crate::media_tools::is_installed("ffmpeg") {
             return Err(crate::media_tools::ffmpeg_missing_message("The camera"));
         }
-        let input = crate::media_tools::capture_input(choice)?;
         let args = stream_args(
-            &crate::profile_photo_sources::video_only_input(&input.args),
+            &crate::media_tools::camera_input(choice)?,
             LIVE_SIDE,
             LIVE_FPS,
         );

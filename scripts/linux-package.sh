@@ -9,7 +9,8 @@
 #     lib/libntgcalls.so         RUNPATH $ORIGIN
 #     lib/librlottie.so          RUNPATH $ORIGIN
 #     lib/libquillvideo.so       RUNPATH $ORIGIN  (in-process video, native/quillvideo)
-#     lib/libav{codec,format,util}.so.N, libsw{scale,resample}.so.N   FFmpeg, LGPL-2.1+
+#     lib/libav{codec,format,util,filter,device}.so.N, libsw{scale,resample}.so.N   FFmpeg, LGPL-2.1+
+#     ffmpeg, ffprobe            RUNPATH $ORIGIN/lib  (same FFmpeg build, no libx264; video send/edit, photos, camera)
 #     licenses/ffmpeg/           FFmpeg license texts + exact source and configure line
 #     lib/libssl.so.3, libcrypto.so.3   (bundled OpenSSL, see decision doc)
 #     share/applications/org.shinycake.quill.desktop, share/icons/hicolor/<size>/apps/quill.png
@@ -42,7 +43,7 @@ RLOTTIE="${QUILL_RLOTTIE_PATH:-vendor/rlottie/prefix/lib/librlottie.so}"
 FFMPEG="${QUILL_FFMPEG_PREFIX:-vendor/ffmpeg/prefix}"
 QUILLVIDEO="$FFMPEG/lib/libquillvideo.so"
 OUT="${OUT:-dist/linux}"
-for f in "$BIN" "$WEBVIEW_BIN" "$TDJSON" "$NTGCALLS" "$RLOTTIE" "$QUILLVIDEO"; do
+for f in "$BIN" "$WEBVIEW_BIN" "$TDJSON" "$NTGCALLS" "$RLOTTIE" "$QUILLVIDEO" "$FFMPEG/bin/ffmpeg" "$FFMPEG/bin/ffprobe"; do
   [[ -f "$f" ]] || { echo "error: missing input $f" >&2; exit 2; }
 done
 
@@ -64,13 +65,16 @@ install -m 755 "$(readlink -f "$RLOTTIE")" "$PKG/lib/librlottie.so"
 # sonames (dynamic linking keeps FFmpeg replaceable, as the LGPL asks).
 install -m 755 "$(readlink -f "$QUILLVIDEO")" "$PKG/lib/libquillvideo.so"
 ffmpeg_libs=0
-for lib in "$FFMPEG"/lib/lib{avcodec,avformat,avutil,swscale,swresample}.so.*; do
+for lib in "$FFMPEG"/lib/lib{avcodec,avformat,avutil,avfilter,avdevice,swscale,swresample}.so.*; do
   base="$(basename "$lib")"
   [[ "$base" =~ ^lib[a-z]+\.so\.[0-9]+$ ]] || continue
   install -m 755 "$(readlink -f "$lib")" "$PKG/lib/$base"
   ffmpeg_libs=$((ffmpeg_libs + 1))
 done
-(( ffmpeg_libs == 5 )) || { echo "error: expected 5 FFmpeg libraries in $FFMPEG/lib, found $ffmpeg_libs" >&2; exit 2; }
+(( ffmpeg_libs == 7 )) || { echo "error: expected 7 FFmpeg libraries in $FFMPEG/lib, found $ffmpeg_libs" >&2; exit 2; }
+# The command-line tools Quill runs (src/media_tools.rs finds them next to `quill`).
+install -m 755 "$FFMPEG/bin/ffmpeg" "$PKG/ffmpeg"
+install -m 755 "$FFMPEG/bin/ffprobe" "$PKG/ffprobe"
 mkdir -p "$PKG/licenses/ffmpeg"
 install -m 644 "$FFMPEG"/share/quillvideo/* "$PKG/licenses/ffmpeg/"
 
@@ -99,10 +103,13 @@ vendor_openssl
 # Only drop symbols from libraries we built ourselves; the prebuilt ntgcalls and
 # distro OpenSSL are left as shipped.
 strip --strip-unneeded "$PKG/lib/libtdjson.so" "$PKG/lib/librlottie.so" \
-  "$PKG"/lib/libquillvideo.so "$PKG"/lib/libav*.so.* "$PKG"/lib/libsw*.so.* || true
+  "$PKG"/lib/libquillvideo.so "$PKG"/lib/libav*.so.* "$PKG"/lib/libsw*.so.* \
+  "$PKG/ffmpeg" "$PKG/ffprobe" || true
 
 patchelf --set-rpath '$ORIGIN/lib' "$PKG/quill"
 patchelf --set-rpath '$ORIGIN/lib' "$PKG/quill-webview"
+patchelf --set-rpath '$ORIGIN/lib' "$PKG/ffmpeg"
+patchelf --set-rpath '$ORIGIN/lib' "$PKG/ffprobe"
 for lib in "$PKG"/lib/*.so*; do
   patchelf --set-rpath '$ORIGIN' "$lib"
 done

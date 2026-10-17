@@ -1,4 +1,4 @@
-zlib, https://zlib.net/ (shipped as z.dll in the Windows package)
+zlib, https://zlib.net/ (linked statically into tdjson.dll and the FFmpeg DLLs and programs of the Windows package)
 
 Copyright notice:
 

@@ -253,6 +253,14 @@ pub fn encode_sticker(
             crate::media_tools::ffmpeg_missing_message("Video stickers"),
         ));
     }
+    // The ffmpeg Quill ships has no VP9 encoder (libvpx); one on PATH may.
+    let Some(program) = crate::video_encoder::program_with_encoder("libvpx-vp9") else {
+        return Err(EncodeError::FfmpegMissing(
+            "Video stickers need an ffmpeg that can write VP9 (libvpx), and the one found can't. \
+             Install ffmpeg, for example `brew install ffmpeg` or `sudo apt install ffmpeg`."
+                .to_string(),
+        ));
+    };
     let dir = work_dir();
     std::fs::create_dir_all(&dir).map_err(|_| EncodeError::BadVideo)?;
     let output = dir.join(format!("sticker-{}.webm", stamp()));
@@ -266,7 +274,7 @@ pub fn encode_sticker(
             break;
         }
         let args = webm_args(&input, &out, edits, source, kind.image_side(), crf);
-        let ran = crate::media_tools::quiet_command("ffmpeg")
+        let ran = crate::video_encoder::quiet_command_for(&program)
             .args(&args)
             .output()
             .is_ok_and(|result| result.status.success());
