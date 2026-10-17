@@ -231,7 +231,7 @@ pub(in crate::ui) fn message_text_block(
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     // Resolved custom emoji stickers for inline rendering (EmojiPanel cache).
-    custom_emoji: &[StickerItem],
+    custom_emoji: Option<&quill::emoji::CustomEmojiStickers>,
     // Animated frames of this message's custom emoji, when decoded; they
     // replace the still images.
     animated_emoji: &HashMap<i64, super::super::sticker_playback::AnimatedVisual>,

@@ -33,7 +33,7 @@ impl QuillApp {
         chat: Option<&ChatSummary>,
         sender_name: &str,
         highlight_id: Option<MessageId>,
-        media_roots: Vec<PathBuf>,
+        media_roots: std::rc::Rc<[PathBuf]>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Where the lone emoji are painted is noted again by the rows.

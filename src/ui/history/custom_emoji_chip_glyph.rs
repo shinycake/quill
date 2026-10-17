@@ -11,13 +11,7 @@ pub(super) fn custom_emoji_chip_glyph(
     media_roots: &[PathBuf],
 ) -> AnyElement {
     let size = super::super::reactions::CHIP_GLYPH;
-    let sticker = session.and_then(|s| {
-        s.stickers
-            .emoji
-            .custom_emoji_stickers
-            .iter()
-            .find(|item| item.custom_emoji_id == Some(id))
-    });
+    let sticker = session.and_then(|s| s.stickers.emoji.custom_emoji_stickers.lookup(id));
     let path = sticker
         .and_then(|item| item.display_file_id())
         .and_then(|file| files.get(&file.0))

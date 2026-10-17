@@ -8,6 +8,8 @@ use super::*;
 pub(crate) struct ChatOrderSync {
     pub(crate) dirty: bool,
     pub(crate) deferred: bool,
+    /// Stored folder tab orders, dropped whenever the order is rebuilt.
+    pub(crate) folder_orders: super::folder_order_cache::FolderOrderCache,
 }
 
 impl Session {
@@ -119,6 +121,7 @@ impl Session {
 
     fn flush_chat_order(&mut self) {
         self.chat_order_sync.dirty = false;
+        self.invalidate_folder_orders();
         // Sort the `(order, chat_id)` keys TDLib orders by (descending,
         // schema 1.8.67 `chatPosition.order`), never clones of whole
         // summaries.
@@ -347,23 +350,6 @@ impl Session {
             })
             .collect();
         crate::chatlist_archive::ArchiveRowSummary::build(&chats)
-    }
-
-    /// Phase 7.1: chats in `chatListFolder(folder_id)`, highest TDLib folder
-    /// order first (same convention as main/archive).
-    pub fn ordered_folder_chats(&self, folder_id: i32) -> Vec<&ChatSummary> {
-        let mut rows: Vec<&ChatSummary> = self
-            .chats
-            .values()
-            .filter(|chat| chat.folder_positions.contains_key(&folder_id))
-            .collect();
-        rows.sort_by(|a, b| {
-            b.folder_positions
-                .get(&folder_id)
-                .cmp(&a.folder_positions.get(&folder_id))
-                .then(b.id.0.cmp(&a.id.0))
-        });
-        rows
     }
 
     /// Phase 7.1: display name of a folder tab, from `updateChatFolders`.

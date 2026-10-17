@@ -156,7 +156,7 @@ pub(super) fn sponsored_message_row(
             downloading,
             media_roots,
             // Sponsored demo rows carry no custom emoji entities.
-            &[],
+            None,
             &HashMap::new(),
             revealed,
             // Settings → Appearance: message font size.

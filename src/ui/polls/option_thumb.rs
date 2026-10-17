@@ -123,7 +123,7 @@ pub(in crate::ui) fn poll_media_view(
     session: Option<&Session>,
 ) -> PollMediaView {
     let mut view = PollMediaView::default();
-    let stickers = session.map_or(&[][..], |s| &s.stickers.emoji.custom_emoji_stickers[..]);
+    let stickers = session.map(|s| &s.stickers.emoji.custom_emoji_stickers);
     for option in &poll.options {
         view.emoji
             .extend(super::super::message_text::custom_emoji_paths(

@@ -300,10 +300,14 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         .stickers
         .emoji
         .custom_emoji_stickers
-        .iter_mut()
-        .find(|item| item.custom_emoji_id == Some(92))
-        .unwrap()
-        .set_id = 2;
+        .update(|list| {
+            if let Some(item) = list
+                .iter_mut()
+                .find(|item| item.custom_emoji_id == Some(92))
+            {
+                item.set_id = 2;
+            }
+        });
     ingest(
         &mut driver,
         json!({"@type":"updateMessageSendSucceeded","old_message_id":900,"message":{"@type":"message","id":901,"chat_id":11,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"😀","entities":[{"@type":"textEntity","offset":0,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"92"}}]}}}}),

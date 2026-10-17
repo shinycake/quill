@@ -101,11 +101,6 @@ fn visible_custom_emoji_survives_overflow() {
         allow_custom_emoji: true,
     });
     let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
-    session
-        .stickers
-        .emoji
-        .custom_emoji_stickers
-        .reserve(total as usize);
     session.accept_custom_emoji_stickers(
         (2..=total)
             .map(|id| resolved_emoji(Some(id), id as i32))
@@ -129,4 +124,72 @@ fn unresolved_custom_emoji_ids_skip_resolved_and_attempted() {
         session.unresolved_custom_emoji_ids(vec![1, 2, 3, 4]),
         vec![1, 4]
     );
+}
+
+/// What scanning the list for the first item with the id finds.
+fn scanned(session: &Session, id: i64) -> Option<i32> {
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .iter()
+        .find(|s| s.custom_emoji_id == Some(id))
+        .map(|s| s.file_id.0)
+}
+
+fn looked_up(session: &Session, id: i64) -> Option<i32> {
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .lookup(id)
+        .map(|s| s.file_id.0)
+}
+
+fn assert_lookup_matches_scan(session: &Session, ids: impl Iterator<Item = i64>) {
+    for id in ids {
+        assert_eq!(looked_up(session, id), scanned(session, id), "id {id}");
+    }
+}
+
+#[test]
+fn custom_emoji_lookup_matches_a_scan_after_inserts_and_replacements() {
+    let mut session = session();
+    assert_eq!(looked_up(&session, 1), None);
+    session.accept_custom_emoji_stickers(vec![
+        resolved_emoji(Some(1), 10),
+        resolved_emoji(Some(2), 11),
+        resolved_emoji(None, 12),
+    ]);
+    assert_eq!(looked_up(&session, 2), Some(11));
+    assert_lookup_matches_scan(&session, 0..5);
+    // A re-sent emoji replaces its entry and moves to the end.
+    session.accept_custom_emoji_stickers(vec![
+        resolved_emoji(Some(1), 20),
+        resolved_emoji(Some(3), 13),
+        resolved_emoji(Some(1), 21),
+    ]);
+    assert_eq!(looked_up(&session, 1), Some(21));
+    assert_eq!(looked_up(&session, 3), Some(13));
+    assert_lookup_matches_scan(&session, 0..5);
+}
+
+#[test]
+fn custom_emoji_lookup_matches_a_scan_after_the_cache_is_trimmed() {
+    let mut session = session();
+    let total = CUSTOM_EMOJI_CACHE_CAP as i64 + 5;
+    session.accept_custom_emoji_stickers(
+        (2..=total)
+            .map(|id| resolved_emoji(Some(id), id as i32))
+            .collect(),
+    );
+    assert!(session.stickers.emoji.custom_emoji_stickers.len() <= CUSTOM_EMOJI_CACHE_CAP);
+    // The oldest were dropped: the lookup no longer finds them either.
+    assert_eq!(looked_up(&session, 2), None);
+    assert_eq!(looked_up(&session, total), Some(total as i32));
+    assert_lookup_matches_scan(&session, 0..=total + 1);
+    // Adding more after the trim keeps the two in step.
+    session.accept_custom_emoji_stickers(vec![resolved_emoji(Some(total + 1), 7)]);
+    assert_eq!(looked_up(&session, total + 1), Some(7));
+    assert_lookup_matches_scan(&session, 0..=total + 2);
 }

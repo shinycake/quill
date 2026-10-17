@@ -19,6 +19,7 @@ mod drafts_everywhere;
 mod emoji_interaction;
 mod files_bound;
 mod folder_followups;
+mod folder_order;
 mod forum_column;
 mod forum_saved;
 mod group_admin;

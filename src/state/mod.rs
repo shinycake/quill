@@ -65,6 +65,7 @@ mod chat_activity;
 mod chat_types;
 mod composer_targets;
 mod domains;
+mod folder_order_cache;
 mod history_calendar;
 mod history_prune;
 mod history_trim;
