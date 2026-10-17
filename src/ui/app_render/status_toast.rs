@@ -200,7 +200,7 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{TOAST_GAP, ToastInsets, viewer_toast_insets};
-    use gpui::px;
+    use gpui_kit::px;
 
     #[test]
     fn with_the_viewer_open_the_toast_centres_on_the_window_above_its_bar() {
