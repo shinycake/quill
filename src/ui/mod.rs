@@ -418,6 +418,7 @@ mod share_content_ui;
 mod shared_media;
 mod shared_media_list;
 mod shared_media_profile;
+mod shared_media_row;
 mod shell;
 mod shell_layout;
 mod shortcuts;

@@ -141,6 +141,7 @@ mod tests {
             date,
             action: SharedMediaAction::Message,
             visual: SharedMediaVisual::None,
+            meta: SharedMediaMeta::None,
         }
     }
 

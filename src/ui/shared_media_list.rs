@@ -13,6 +13,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaAction, SharedMediaTab, calendar_media, month_sections};
+use quill::text::LinkTarget;
 
 impl QuillApp {
     /// The `Ready` body of a tab: items under their month headers.
@@ -28,6 +29,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let sections = month_sections(&state.items);
+        let state_chat = session.media.shared_media.chat_id;
         let mut list = div()
             .id(("shared-media-items", tab.index() as u64))
             .flex_1()
@@ -54,6 +56,8 @@ impl QuillApp {
             }
             let message_id = item.message_id;
             let action = item.action;
+            let link_url = item.meta.link_url().map(str::to_owned);
+            let chat_id = state_chat;
             let is_message = action == SharedMediaAction::Message;
             let item_ix = if is_message {
                 message_id.0 as u64
@@ -79,18 +83,37 @@ impl QuillApp {
                 .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
-                .child(div().text_lg().child(item.glyph))
-                .child(
-                    div()
+                .child(match self.shared_media_row_lines(item) {
+                    Some(lines) => self.shared_media_row_body(item, lines, cx),
+                    None => div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
                         .flex_1()
                         .min_w_0()
-                        .text_sm()
-                        .text_color(cx.theme().foreground)
-                        .child(item.label.clone()),
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.activate_shared_media_item(action, message_id, cx);
-                }));
+                        .child(div().text_lg().child(item.glyph))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_sm()
+                                .text_color(cx.theme().foreground)
+                                .child(item.label.clone()),
+                        ),
+                })
+                .on_click(
+                    cx.listener(move |this, _, _, cx| match (link_url.as_ref(), chat_id) {
+                        (Some(url), Some(chat_id)) => this.queue_link(
+                            LinkTarget::Url {
+                                url: url.clone(),
+                                label: None,
+                            },
+                            (chat_id.0, message_id.0 as u64),
+                            cx,
+                        ),
+                        _ => this.activate_shared_media_item(action, message_id, cx),
+                    }),
+                );
             // Telegram Desktop's "Go To Message" on a shared media item.
             list = list.child(if is_message {
                 row.context_menu({

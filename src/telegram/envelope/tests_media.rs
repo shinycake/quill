@@ -657,6 +657,24 @@ fn message_audio_parses_1_8_67_fields() {
 }
 
 #[test]
+fn message_audio_size_falls_back_to_the_expected_size() {
+    let track = local_file_json(7, "", false, true)
+        .replace("\"size\":12", "\"size\":0")
+        .replace("\"expected_size\":12", "\"expected_size\":500");
+    let json = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":12,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageAudio","audio":{{"@type":"audio","duration":9,"title":"T","performer":"P","file_name":"t.mp3","mime_type":"audio/mpeg","audio":{track}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+    );
+    let env = parse_envelope(&json).unwrap();
+    let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
+        panic!("expected message");
+    };
+    let MessageContent::Audio(audio) = &message.content else {
+        panic!("{:?}", message.content);
+    };
+    assert_eq!(audio.size, 500);
+}
+
+#[test]
 fn standalone_animated_emoji_keeps_readable_content() {
     let env = parse_envelope(r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"content":{"@type":"messageAnimatedEmoji","emoji":"🥰","animated_emoji":null}}}"#).unwrap();
     let EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) = env.payload else {
