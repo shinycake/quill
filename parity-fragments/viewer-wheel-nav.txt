@@ -1,0 +1,3 @@
+# Media viewer: plain wheel/trackpad scroll goes to the next or previous item,
+# Cmd/Ctrl+wheel and pinch zoom at the cursor (tdesktop `handleWheelEvent`)
+parity:media-viewer-wheel-nav
