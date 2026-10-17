@@ -11,7 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::advanced::experimental::{self, Category, Imported, OptionSpec, Values};
-use quill::advanced::{hardware_video, update_channel};
+use quill::advanced::{auto_update, hardware_video, update_channel};
 use quill::lang::{keys, tr};
 use quill::updater::UpdateState;
 
@@ -272,16 +272,79 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn update_options_visible(&self) -> bool {
+        self.appearance.check_updates_on_launch
+            && !matches!(
+                self.settings.update_state,
+                UpdateState::Downloading(_) | UpdateState::Installing(_)
+            )
+    }
+
+    /// "Install updates automatically" (tdesktop `cAutoUpdate`), off by
+    /// default. Where this installation cannot replace itself (package
+    /// manager, read-only folder, app bundle) the switch is disabled and says
+    /// where to get updates instead.
+    pub(super) fn auto_update_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.auto_update_row_for(quill::update_install::can_install_here(), cx)
+    }
+
+    pub(super) fn auto_update_row_for(
+        &self,
+        self_update_supported: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.update_options_visible() {
+            return None;
+        }
+        let label = tr(keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY);
+        let hint = if self_update_supported {
+            tr(keys::Q_OPS_INSTALL_UPDATES_AUTOMATICALLY_HINT)
+        } else {
+            tr(keys::Q_OPS_INSTALL_THE_RELEASE_PACKAGE_FROM)
+        };
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .child(div().text_sm().child(label))
+                        .child(
+                            Switch::new("install-updates-automatically")
+                                .checked(
+                                    self_update_supported && auto_update::install_automatically(),
+                                )
+                                .disabled(!self_update_supported)
+                                .accessibility_label(label)
+                                .on_click(cx.listener(|this, &on: &bool, _, cx| {
+                                    auto_update::set_install_automatically(on);
+                                    // A release already found is staged now.
+                                    this.stage_if_opted_in(cx);
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("install-updates-automatically-hint")
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(hint),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// "Install beta versions" in the update section. tdesktop shows it with
     /// the other update options, which are hidden while updates are off or
     /// one is downloading.
     pub(super) fn install_beta_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.appearance.check_updates_on_launch
-            || matches!(
-                self.settings.update_state,
-                UpdateState::Downloading(_) | UpdateState::Installing(_)
-            )
-        {
+        if !self.update_options_visible() {
             return None;
         }
         Some(

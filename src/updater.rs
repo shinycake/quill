@@ -56,6 +56,10 @@ pub enum UpdateState {
     DownloadFailed(ReleaseInfo, &'static str),
     InstallFailed(ReleaseInfo, &'static str),
     Installed(ReleaseInfo),
+    /// Downloaded and verified in the background ("Install updates
+    /// automatically"); the path is the install plan the helper applies when
+    /// Quill next quits.
+    Staged(ReleaseInfo, std::path::PathBuf),
     UpToDate,
     NoRelease,
     Failed(&'static str),
@@ -71,6 +75,10 @@ impl UpdateState {
             Self::Installing(_) => "Installing update and restarting…".into(),
             Self::DownloadFailed(_, message) | Self::InstallFailed(_, message) => (*message).into(),
             Self::Installed(release) => format!("Updated to Quill {}", release.version),
+            Self::Staged(release, _) => crate::lang::tr_with(
+                crate::lang::keys::Q_OPS_UPDATE_READY_RESTART,
+                &[("release_version", release.version.as_str())],
+            ),
             Self::UpToDate => "Quill is up to date.".into(),
             Self::NoRelease => "No published Quill release is available yet.".into(),
             Self::Failed(message) => (*message).into(),

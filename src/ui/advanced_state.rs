@@ -30,6 +30,12 @@ impl AdvancedUi {
         // The update switch reads this at render time; read the file now.
         if load_disk_state {
             let _ = quill::advanced::update_channel::install_beta();
+            let _ = quill::advanced::auto_update::install_automatically();
+            cx.on_app_quit(|this, _| {
+                this.apply_staged_update_on_quit();
+                async {}
+            })
+            .detach();
         }
         Self {
             codes: CodeFeeder::default(),

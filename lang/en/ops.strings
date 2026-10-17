@@ -668,6 +668,8 @@
 "qll_ops_info" = "Info";
 "qll_ops_info_2" = "ℹ Info";
 "qll_ops_install_the_release_package_from" = "Install the release package from GitHub for this installation.";
+"qll_ops_install_updates_automatically" = "Install updates automatically";
+"qll_ops_install_updates_automatically_hint" = "Quill downloads new versions in the background and installs them the next time it starts.";
 "qll_ops_invite_links" = "{active} invite links";
 "qll_ops_invite_links_need_a_live" = "invite links need a live connection (demo)";
 "qll_ops_invites" = "Invites";
@@ -827,6 +829,8 @@
 "qll_ops_quick_reply_message" = "Quick reply message";
 "qll_ops_quill" = "Quill {quill_version_app}";
 "qll_ops_quill_updates" = "Quill updates";
+"qll_ops_restart_to_update" = "Restart to update";
+"qll_ops_update_ready_restart" = "Quill {release_version} is ready. Restart to apply.";
 "qll_ops_quote" = "Quote";
 "qll_ops_quote_part_of_message" = "Quote Part of Message";
 "qll_ops_quoted" = "Quoted";

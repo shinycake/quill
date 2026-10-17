@@ -4,6 +4,7 @@
 //! video decoding.
 #![deny(clippy::indexing_slicing)]
 
+pub mod auto_update;
 pub mod codes;
 pub mod debug_mode;
 pub mod experimental;

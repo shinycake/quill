@@ -331,3 +331,81 @@ fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestA
         assert_eq!(app.connection.status_note(), SWITCHED_TO_PRODUCTION);
     });
 }
+
+#[gpui_kit::test]
+fn the_auto_update_switch_is_off_by_default_and_flips_the_setting(cx: &mut TestAppContext) {
+    use quill::advanced::auto_update;
+    let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-install");
+    let vcx = &mut vcx;
+    quill::update_install::force_can_install_here(Some(true));
+    assert!(!auto_update::install_automatically(), "off by default");
+    app.update(vcx, |_, cx| cx.notify());
+    for _ in 0..3 {
+        vcx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        vcx.update(|window, cx| window.render_frame(cx));
+    }
+    for _ in 0..40 {
+        let shown = vcx.update(|window, _| {
+            window
+                .try_find("install-updates-automatically")
+                .is_some_and(|row| row.visible())
+        });
+        if shown {
+            break;
+        }
+        vcx.simulate_event(gpui_kit::ScrollWheelEvent {
+            position: gpui_kit::point(px(550.), px(400.)),
+            delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-200.))),
+            modifiers: Modifiers::default(),
+            touch_phase: gpui_kit::TouchPhase::Moved,
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.render_frame(cx));
+    }
+    vcx.update(|window, cx| window.click("install-updates-automatically", cx));
+    vcx.run_until_parked();
+    assert!(auto_update::install_automatically(), "on after one click");
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.update(|window, cx| window.click("install-updates-automatically", cx));
+    vcx.run_until_parked();
+    assert!(!auto_update::install_automatically(), "off again");
+    quill::update_install::force_can_install_here(None);
+}
+
+#[gpui_kit::test]
+fn the_auto_update_row_follows_the_update_check_switch(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.appearance.check_updates_on_launch = true;
+        assert!(app.auto_update_row_for(true, cx).is_some());
+        assert!(app.auto_update_row_for(false, cx).is_some());
+        app.appearance.check_updates_on_launch = false;
+        assert!(
+            app.auto_update_row_for(true, cx).is_none(),
+            "hidden while update checks are off"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_staged_update_says_it_is_ready_and_to_restart(cx: &mut TestAppContext) {
+    use quill::updater::{ReleaseInfo, UpdateState};
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, _| {
+        let release = ReleaseInfo {
+            version: "9.9.9".into(),
+            notes: String::new(),
+            url: String::new(),
+            asset: None,
+        };
+        app.settings.update_state = UpdateState::Staged(release, "plan.json".into());
+        let label = app.settings.update_state.label();
+        assert!(
+            label.contains("9.9.9") && label.contains("Restart"),
+            "{label}"
+        );
+    });
+}
