@@ -3,6 +3,8 @@
 
 use super::video_player::VideoPlayer;
 use gpui_kit::*;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -20,6 +22,9 @@ pub(crate) struct CallUi {
     /// (keeps the overlay's ringing/connected clock fresh). Mirrors
     /// `voice_tick`.
     pub(super) tick_active: bool,
+    /// The call window's panel view, while the window is open: the
+    /// clock's tick redraws it alone.
+    pub(super) panel_view: Rc<Cell<Option<EntityId>>>,
     /// The call window (tdesktop's call panel), and its bookkeeping: a
     /// call whose window you closed stays closed until the call bar
     /// reopens it; an incoming call raises it once.
@@ -39,6 +44,14 @@ pub(crate) struct CallUi {
 }
 
 impl CallUi {
+    /// The call window is gone (closed by the user or by the app): drop its
+    /// handle and its panel view, so the clock's tick has no dead view to
+    /// notify.
+    pub(super) fn forget_window(&mut self) {
+        self.window = None;
+        self.panel_view.set(None);
+    }
+
     pub(super) fn new(audio_output: super::audio::SharedOutput) -> Self {
         Self {
             remote_player: None,
@@ -46,6 +59,7 @@ impl CallUi {
             notify_clicks: Arc::new(Mutex::new(Vec::new())),
             notified: None,
             tick_active: false,
+            panel_view: Rc::default(),
             window: None,
             window_opening: false,
             window_raised: false,

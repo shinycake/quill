@@ -27,6 +27,7 @@ use quill::calls::engine::RemoteVideoState;
 use quill::calls::live_video::{LiveKey, LiveSink};
 use quill::state::ActiveCall;
 use quill::telegram::envelope::CallState;
+use std::cell::Cell;
 use std::sync::Arc;
 
 /// Which of the call's pictures a view shows.
@@ -241,11 +242,18 @@ pub(crate) struct CallWindowRoot {
 }
 
 impl CallWindowRoot {
-    pub(crate) fn new(owner: &Entity<QuillApp>, cx: &mut Context<Self>) -> Self {
+    /// `panel_view` learns the panel's id, for the clock's own redraw.
+    pub(crate) fn new(
+        owner: &Entity<QuillApp>,
+        panel_view: &Cell<Option<EntityId>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let panel = cx.new(|cx| CallPanel::new(owner, cx));
+        panel_view.set(Some(panel.entity_id()));
         Self {
             owner: owner.downgrade(),
             _observe: cx.observe(owner, |_, _, cx| cx.notify()),
-            panel: cx.new(|cx| CallPanel::new(owner, cx)),
+            panel,
             remote: cx.new(|cx| CallPictureView::new(owner, CallPicture::Remote, cx)),
             local: cx.new(|cx| CallPictureView::new(owner, CallPicture::Local, cx)),
             drawn: (false, false),

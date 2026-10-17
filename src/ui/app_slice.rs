@@ -53,6 +53,9 @@ pub(super) enum SliceKind {
     /// The media viewer's chrome over the playing picture: top bar,
     /// arrows, caption and controls.
     ViewerChrome,
+    /// The story viewer overlay: its 100 ms playback tick redraws only
+    /// this.
+    Story,
 }
 
 pub(super) struct AppSlice {
@@ -78,6 +81,8 @@ pub(super) struct Slices {
     /// open.
     viewer: Option<Entity<AppSlice>>,
     viewer_chrome: Option<Entity<AppSlice>>,
+    /// The story viewer overlay, while it is open.
+    story: Option<Entity<AppSlice>>,
     /// The composer's height as laid out last time: a cached slice's
     /// box is sized before its content renders, so the slot takes the
     /// measured height (a change redraws the slot next frame).
@@ -167,6 +172,10 @@ impl QuillApp {
             app: app.clone(),
             kind: SliceKind::ViewerChrome,
         }));
+        self.slices.story = Some(cx.new(|_| AppSlice {
+            app: app.clone(),
+            kind: SliceKind::Story,
+        }));
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
@@ -185,6 +194,7 @@ impl QuillApp {
             .chain(self.slices.composer.iter().map(Entity::entity_id))
             .chain(self.slices.viewer.iter().map(Entity::entity_id))
             .chain(self.slices.viewer_chrome.iter().map(Entity::entity_id))
+            .chain(self.slices.story.iter().map(Entity::entity_id))
             .collect();
         let app: &mut App = cx;
         for id in ids {
@@ -289,7 +299,21 @@ impl QuillApp {
             _ if !self.slices.conversation_shown.get() => cx.notify(),
             SliceKind::Conversation => self.notify_conversation(cx),
             SliceKind::Composer => self.notify_composer(cx),
+            SliceKind::Story => self.notify_story(cx),
             SliceKind::Sidebar | SliceKind::Viewer | SliceKind::ViewerChrome => cx.notify(),
+        }
+    }
+
+    /// Redraw only the story viewer overlay (its playback tick); the
+    /// whole app before the slices exist.
+    pub(super) fn notify_story(&self, cx: &mut Context<Self>) {
+        match &self.slices.story {
+            Some(slice) => {
+                let id = slice.entity_id();
+                let app: &mut App = cx;
+                app.notify(id);
+            }
+            None => cx.notify(),
         }
     }
 
@@ -458,11 +482,31 @@ impl QuillApp {
         ))
     }
 
+    /// The story viewer overlay as a cached slice filling the window
+    /// (`None` before the slices exist).
+    pub(super) fn story_slot(&self) -> Option<AnyElement> {
+        let story = self.slices.story.as_ref()?;
+        super::image_budget::slice_shown(story.entity_id());
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .child(embed_slice(story, full(), self.slices.a11y_active.get()))
+                .into_any_element(),
+        )
+    }
+
     fn slice_layer(&self, kind: SliceKind) -> Option<Layer> {
         match kind {
             SliceKind::Sidebar => self.slices.sidebar.as_ref(),
             SliceKind::Conversation => self.slices.conversation.as_ref(),
-            SliceKind::Composer | SliceKind::Viewer | SliceKind::ViewerChrome => None,
+            SliceKind::Composer
+            | SliceKind::Viewer
+            | SliceKind::ViewerChrome
+            | SliceKind::Story => None,
         }
         .map(|parts| parts.layer.clone())
     }
@@ -482,6 +526,18 @@ impl QuillApp {
                         super::media_viewer::ViewerPart::Chrome
                     };
                     self.media_viewer_panel(part, window, cx)
+                } else {
+                    Empty.into_any_element()
+                }
+            }
+            SliceKind::Story => {
+                if self.stories.viewer.is_open() {
+                    let width = f32::from(window.viewport_size().width);
+                    div()
+                        .size_full()
+                        .relative()
+                        .child(self.story_viewer_overlay(width, cx))
+                        .into_any_element()
                 } else {
                     Empty.into_any_element()
                 }
@@ -561,6 +617,7 @@ impl Render for AppSlice {
             SliceKind::Composer => "composer",
             SliceKind::Viewer => "viewer",
             SliceKind::ViewerChrome => "viewer-chrome",
+            SliceKind::Story => "story",
         });
         let Some(app) = self.app.upgrade() else {
             return Empty.into_any_element();

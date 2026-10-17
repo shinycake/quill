@@ -50,6 +50,38 @@ pub(super) struct PlayerBarState {
     pub(super) repeat: RepeatMode,
     pub(super) order: OrderMode,
     pub(super) shuffle: ShuffleState,
+    /// The chat's playable ids, kept while its messages are unchanged.
+    playlist: PlaylistCache,
+}
+
+/// A chat's playlist (`playlist_audio_ids`) for one state of its loaded
+/// messages: the ids come from `HistoryMessages::revision`, which moves on
+/// any change, so the answer is the one a fresh scan would give.
+#[derive(Default)]
+pub(super) struct PlaylistCache(std::cell::RefCell<Option<(i64, u64, std::rc::Rc<[i64]>)>>);
+
+impl PlaylistCache {
+    /// The ids for `chat` at `revision`: the kept ones, or `compute`d anew
+    /// and kept.
+    pub(super) fn ids(
+        &self,
+        chat: i64,
+        revision: u64,
+        compute: impl FnOnce() -> Vec<i64>,
+    ) -> std::rc::Rc<[i64]> {
+        if let Ok(kept) = self.0.try_borrow()
+            && let Some((kept_chat, kept_revision, ids)) = kept.as_ref()
+            && *kept_chat == chat
+            && *kept_revision == revision
+        {
+            return ids.clone();
+        }
+        let ids: std::rc::Rc<[i64]> = compute().into();
+        if let Ok(mut kept) = self.0.try_borrow_mut() {
+            *kept = Some((chat, revision, ids.clone()));
+        }
+        ids
+    }
 }
 
 /// Cheap pseudo-random index for shuffle (no `rand` dependency): the clock's
@@ -156,17 +188,23 @@ impl QuillApp {
     }
 
     /// The chat's playable messages, oldest first.
-    fn playlist_audio_ids(&self, chat: ChatId) -> Vec<i64> {
-        self.session()
-            .and_then(|s| s.histories.get(&chat.0))
-            .map(|h| {
-                h.ordered()
-                    .into_iter()
-                    .filter(|m| matches!(m.content, MessageContent::Audio(_)))
-                    .map(|m| m.id.0)
-                    .collect()
-            })
-            .unwrap_or_default()
+    fn playlist_audio_ids(&self, chat: ChatId) -> std::rc::Rc<[i64]> {
+        let history = self.session().and_then(|s| s.histories.get(&chat.0));
+        self.playback.player.playlist.ids(
+            chat.0,
+            history.map_or(0, |h| h.messages.revision()),
+            || {
+                history
+                    .map(|h| {
+                        h.ordered()
+                            .into_iter()
+                            .filter(|m| matches!(m.content, MessageContent::Audio(_)))
+                            .map(|m| m.id.0)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            },
+        )
     }
 
     fn playlist_voice_entries(&self, chat: ChatId) -> Vec<VoiceEntry> {
@@ -580,3 +618,7 @@ impl QuillApp {
         )
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod cache_tests;

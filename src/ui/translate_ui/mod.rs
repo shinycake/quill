@@ -125,6 +125,8 @@ pub(super) struct TranslateUi {
     /// options.
     pub(super) settings_only: bool,
     offer: RefCell<Option<(OfferKey, Option<&'static str>)>>,
+    /// What `pump_translation` tested last (`pump_scan`).
+    pub(super) pump: pump_scan::PumpScan,
 }
 
 impl TranslateUi {
@@ -136,6 +138,7 @@ impl TranslateUi {
             toast_seq: 0,
             settings_only: false,
             offer: RefCell::new(None),
+            pump: Default::default(),
         }
     }
 }
@@ -881,4 +884,5 @@ crate::ui::shell::register_dialogs! {
     ),
 }
 
+mod pump_scan;
 mod translate_bar_view;

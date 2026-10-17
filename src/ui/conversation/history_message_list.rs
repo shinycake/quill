@@ -772,9 +772,10 @@ impl QuillApp {
                 rendered.push(ix);
             }
         }
-        // A row scrolled into view that hasn't been reported yet: render
-        // the app once more so `report_visible_history` sees it promptly
-        // (list scrolling alone doesn't re-render the app view).
+        // A row scrolled into view that hasn't been reported yet: redraw
+        // the conversation (its window's view) so `report_visible_history`
+        // sees it promptly (list scrolling alone doesn't re-render the app
+        // view). The other slices keep their frame.
         self.note_stale_chrome(ix, row, cx);
         let unreported = self.live.is_some()
             && self.history.window_active
@@ -786,7 +787,7 @@ impl QuillApp {
                     .is_some_and(|(_, ids)| ids.contains(id))
             });
         if unreported {
-            cx.notify();
+            self.notify_tick(crate::ui::app_slice::SliceKind::Conversation, cx);
         }
         let palette = self.history.palette.get();
         let outgoing = super::chat_palette::row_is_outgoing(row);

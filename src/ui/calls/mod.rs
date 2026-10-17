@@ -537,6 +537,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Redraw what the call's clock shows: the call window's panel and
+    /// the call bar over the open chat (in every window), while the rest
+    /// of the app keeps its frame.
+    pub(super) fn notify_call_clock(&self, cx: &mut Context<Self>) {
+        self.notify_conversations(cx);
+        if let Some(panel) = self.calls.panel_view.get() {
+            let app: &mut App = cx;
+            app.notify(panel);
+        }
+    }
+
     /// Phase C1: 1s tick while a call is tracked, keeping the overlay's
     /// ringing / connected clock fresh. Mirrors the Phase A1 slow-mode
     /// tick (at most one task; exits when no call is active).
@@ -559,7 +570,7 @@ impl QuillApp {
                             .session()
                             .is_some_and(|s| s.calls.active_call.is_some());
                         if still_active {
-                            cx.notify();
+                            this.notify_call_clock(cx);
                             true
                         } else {
                             this.calls.tick_active = false;
@@ -910,6 +921,9 @@ pub(super) mod call_video_demo;
 mod call_video_tests;
 #[cfg(test)]
 mod camera_note_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod clock_notify_tests;
 pub(super) mod demo_feed;
 pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]

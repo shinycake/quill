@@ -74,6 +74,41 @@ impl QuillApp {
         }
     }
 
+    /// The viewer tick's custom-emoji warm-up. The downloads check is cheap
+    /// and deduped, so it runs every tick (a failed or dropped download is
+    /// asked for again). Only the sticker-metadata fetch is gated: it runs
+    /// when the story, the ids it needs or the stickers known changed, and
+    /// that fact is recorded only after the fetch succeeded, so a failed
+    /// fetch is retried on the next tick. Returns whether a fetch ran.
+    pub(in crate::ui) fn warm_story_custom_emoji(&mut self) -> bool {
+        self.warm_story_custom_emoji_with(|app, ids| {
+            app.live.as_mut().is_some_and(|live| {
+                live.driver
+                    .maybe_fetch_story_custom_emoji_stickers(ids)
+                    .is_ok()
+            })
+        })
+    }
+
+    /// `warm_story_custom_emoji` with the fetch supplied; it reports
+    /// whether the fetch succeeded.
+    pub(in crate::ui) fn warm_story_custom_emoji_with(
+        &mut self,
+        fetch: impl FnOnce(&mut Self, &[i64]) -> bool,
+    ) -> bool {
+        let ids = self.story_custom_emoji_fetch_ids();
+        let known = self
+            .session()
+            .map_or(0, |s| s.stories.custom_emoji_stickers.len());
+        let key = (self.stories.viewer.current().map(|i| i.key()), ids, known);
+        let fetched = self.stories.emoji_warm.as_ref() != Some(&key);
+        if fetched && fetch(self, &key.1) {
+            self.stories.emoji_warm = Some(key);
+        }
+        self.ensure_story_custom_emoji_downloads();
+        fetched
+    }
+
     /// Phase 9.2+: warm `downloadFile` for custom-emoji reaction sticker
     /// display files (picker tiles + chosen badge). Metadata from
     /// `getCustomEmojiStickers` alone is not enough — `story_custom_emoji_path`

@@ -613,9 +613,11 @@ impl QuillApp {
             // Recorded even when the send fails: the driver keeps the ids
             // queued for the next attempt, and re-reporting every frame
             // would only spin the render loop.
-            let _ = live.driver.view_messages(chat_id, &ids);
+            let queued = matches!(live.driver.view_messages(chat_id, &ids), Ok(Some(_)));
             self.history.reported_visible = Some((chat_id, ids));
-            cx.notify();
+            if queued {
+                self.notify_tick(crate::ui::app_slice::SliceKind::Conversation, cx);
+            }
         }
     }
 }
