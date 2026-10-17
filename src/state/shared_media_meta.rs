@@ -382,8 +382,24 @@ fn text_before_links(text: &str, entities: &[TextEntity]) -> String {
     kept.trim().to_string()
 }
 
-/// tdesktop `langDateTime`: "Oct 10 at 07:00", with the year when the date
-/// is not in this year.
+/// tdesktop `langDateMaybeWithYear`: the year shows only when the date is
+/// more than a year from now, or in the neighbouring year but more than
+/// three months away across the new year ("Dec 28" still reads without it
+/// in January).
+fn needs_year(year: i64, month: i64, now_year: i64, now_month: i64) -> bool {
+    let much_greater = |year: i64, other: i64| year > other + 1;
+    let month_much_greater = |year: i64, month: i64, other_year: i64, other_month: i64| {
+        year == other_year + 1 && month + 12 > other_month + 3
+    };
+    year != now_year
+        && (much_greater(year, now_year)
+            || much_greater(now_year, year)
+            || month_much_greater(year, month, now_year, now_month)
+            || month_much_greater(now_year, now_month, year, month))
+}
+
+/// tdesktop `langDateTime`: "Oct 10 at 07:00", with the year by
+/// [`needs_year`].
 fn date_time(date: i32, now: i64) -> String {
     const MONTHS: [Key; 12] = [
         keys::MONTH1_SMALL,
@@ -409,7 +425,13 @@ fn date_time(date: i32, now: i64) -> String {
         .map(|key| tr(*key))
         .unwrap_or_default();
     let day = at.day.to_string();
-    let day_part = if at.year == civil_local(now).year {
+    let current = civil_local(now);
+    let day_part = if !needs_year(
+        at.year,
+        i64::from(at.month),
+        current.year,
+        i64::from(current.month),
+    ) {
         tr_with(keys::MONTH_DAY, &[("month", month), ("day", &day)])
     } else {
         tr_with(
@@ -715,6 +737,35 @@ mod tests {
             .lines(DATE, NOW + 400 * 86_400, no_name, no_origin)
             .expect("lines");
         assert!(older.date.starts_with("Oct 10, 2026 at "), "{}", older.date);
+    }
+
+    #[test]
+    fn the_year_follows_tdesktops_three_month_rule() {
+        // Same year: never.
+        assert!(!needs_year(2026, 1, 2026, 12));
+        // Neighbouring year: only when more than three months apart.
+        assert!(!needs_year(2025, 12, 2026, 1));
+        assert!(!needs_year(2025, 12, 2026, 3));
+        assert!(needs_year(2025, 12, 2026, 4));
+        assert!(!needs_year(2027, 1, 2026, 12));
+        assert!(needs_year(2027, 4, 2026, 12));
+        assert!(needs_year(2025, 6, 2026, 2));
+        // More than a year apart: always.
+        assert!(needs_year(2024, 12, 2026, 1));
+        assert!(needs_year(2028, 1, 2026, 12));
+    }
+
+    #[test]
+    fn a_december_row_seen_in_january_has_no_year() {
+        let meta = SharedMediaMeta::File {
+            name: "a.txt".into(),
+            size: 10,
+        };
+        // DATE is 2026-10-10; 100 days later it is January 2027.
+        let lines = meta
+            .lines(DATE, NOW + 100 * 86_400, no_name, no_origin)
+            .expect("lines");
+        assert!(lines.date.starts_with("Oct 10 at "), "{}", lines.date);
     }
 
     #[test]
