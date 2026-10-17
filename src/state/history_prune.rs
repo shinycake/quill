@@ -384,6 +384,24 @@ impl Session {
         self.histories.entry(chat_id.0).or_default()
     }
 
+    /// [`Self::history_entry`] for a forum topic: a page that lands for a
+    /// topic that was closed meanwhile recreates the entry inside the topic
+    /// LRU, so [`CLOSED_TOPICS_MAX`] bounds it too.
+    pub(crate) fn topic_history_entry(&mut self, chat_id: ChatId, topic: i32) -> &mut TopicHistory {
+        let key = (chat_id.0, topic);
+        let missing = !self.threads.topic_histories.contains_key(&key);
+        if missing {
+            self.threads.topic_histories.entry(key).or_default();
+            if !self.topic_history_in_use(chat_id, topic)
+                && !self.history_pruning.release_topics.contains(&key)
+            {
+                self.history_pruning.touch_topic(key);
+                self.enforce_closed_bounds(None);
+            }
+        }
+        self.threads.topic_histories.entry(key).or_default()
+    }
+
     /// Drop a chat's history entry whole, keeping the deleted-message ids
     /// and the newest id seen in a small bounded side table.
     fn drop_history_entry(&mut self, chat_id: i64) {

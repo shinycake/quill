@@ -76,6 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
+        self.session.begin_composer_reply_fetch(chat_id, message_id);
         if let Err(err) = self
             .sender
             .send_json(&crate::telegram::requests::get_message(
@@ -83,9 +84,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
+            self.session.fail_composer_reply_fetch(chat_id, message_id);
             return Err(err);
         }
-        self.session.begin_composer_reply_fetch(chat_id, message_id);
         Ok(true)
     }
 

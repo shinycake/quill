@@ -398,3 +398,19 @@ fn reopening_the_same_chat_releases_its_open_topic() {
         CLOSED_TAIL_KEEP
     );
 }
+
+#[test]
+fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
+    let (mut session, _sink) = session();
+    for topic in 1..=(CLOSED_TOPICS_MAX as i32 + 6) {
+        session
+            .topic_history_entry(ChatId(7), topic)
+            .loaded_complete = true;
+    }
+    assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX);
+    // The open topic's entry is not part of the LRU.
+    session.open_chat(ChatId(7));
+    session.open_topic = Some(900);
+    session.topic_history_entry(ChatId(7), 900);
+    assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX + 1);
+}

@@ -50,6 +50,9 @@ reducer:
   the player bar. The reducer cannot see those UI fields, so it learns of
   them through the sync; the queue above is what makes the sync early
   enough.
+- A late topic page for a closed topic goes through
+  `Session::topic_history_entry`, which puts the new entry in the topic LRU
+  like `history_entry` does for chats.
 - Every history entry, however it is created (`Session::history_entry`:
   send answers, deletes, read markers, late pages, search), joins the LRU
   unless a view, the release queue or a hold covers it, so
@@ -69,9 +72,13 @@ reducer:
   asks for it with `getMessage` once (`ConnectDriver::fetch_composer_reply_target`).
   The answer is kept in `MessagesState::composer_reply_fetch`, next to the
   history, never inside the window, which has to stay one contiguous run.
-  `Session::reply_target` falls back to it; a 4xx answer marks the target
-  deleted (the reply cancels like any deleted target), other errors leave
-  the bar as it is and are not retried. tdesktop's `FieldHeader` requests
+  `Session::reply_target` falls back to it; a 400, 403 or 404 answer marks the
+  target deleted (the reply cancels like any deleted target). Any other error
+  (a lost request settles as 408, flood 429, server faults), or a request
+  that could not be sent, leaves the reply alone and marks the fetch failed;
+  it is asked again while the connection is Ready after a wait of 2, 4 and
+  8 seconds, three attempts in all. The 32-entry cap makes room by dropping
+  settled entries only, never one in flight or the one being fetched. tdesktop's `FieldHeader` requests
   the replied-to item when it is missing the same way.
 - Chat-list "Mark as read" views the newest loaded message, or the chat
   summary's last message when the history was dropped (TGX views
