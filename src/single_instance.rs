@@ -60,7 +60,7 @@ pub struct Endpoint {
     pipe: String,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, test))]
 fn root_digest(root: &Path) -> String {
     digest_of(&root.to_string_lossy())
 }
