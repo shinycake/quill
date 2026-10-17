@@ -87,7 +87,10 @@ pub(super) fn bottom_chrome(frame: ViewerFrame) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{CAPTION_GAP, FitArea, GROUP_STRIP_ROOM, VIDEO_CONTROLS, ViewerFrame, bottom_chrome, fit_area};
+    use super::{
+        CAPTION_GAP, FitArea, GROUP_STRIP_ROOM, VIDEO_CONTROLS, ViewerFrame, bottom_chrome,
+        fit_area,
+    };
     use crate::ui::media_viewer::{VIEWER_SIDE_LANE, VIEWER_TOP_BAR};
 
     fn frame(caption: f32, fullscreen: bool) -> ViewerFrame {
