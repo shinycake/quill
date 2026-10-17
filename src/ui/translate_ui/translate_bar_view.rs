@@ -336,12 +336,22 @@ impl QuillApp {
         }
         let ui = self.translate_ui_language();
         let skip = self.settings.translate.prefs.skip(&ui);
+        // The scan is taken only once there is a history to walk, so an
+        // early return keeps what it learned.
+        if !self
+            .session()
+            .is_some_and(|s| s.histories.contains_key(&chat_id.0))
+        {
+            return false;
+        }
         let mut scan = std::mem::take(&mut self.settings.translate.pump);
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
+                self.settings.translate.pump = scan;
                 return false;
             };
             let Some(history) = session.histories.get(&chat_id.0) else {
+                self.settings.translate.pump = scan;
                 return false;
             };
             let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.jobs.len());

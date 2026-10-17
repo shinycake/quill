@@ -57,11 +57,11 @@ fn a_step_shows_the_next_story_in_the_overlay(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_emoji_warm_up_runs_once_per_story_and_need(cx: &mut TestAppContext) {
+fn the_emoji_warm_up_fetches_once_per_story_and_need(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let vcx = &mut vcx;
     let warm = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.update(vcx, |app, _| app.warm_story_custom_emoji())
+        app.update(vcx, |app, _| app.warm_story_custom_emoji_with(|_, _| true))
     };
     assert!(warm(&app, vcx), "the first tick warms");
     assert!(!warm(&app, vcx), "the next tick finds nothing new");
@@ -75,4 +75,21 @@ fn the_emoji_warm_up_runs_once_per_story_and_need(cx: &mut TestAppContext) {
         app.stories.emoji_warm = None;
     });
     assert!(warm(&app, vcx), "a cleared record warms again");
+}
+
+#[gpui_kit::test]
+fn a_failed_emoji_fetch_is_retried_on_the_next_tick(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    let tick = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, ok: bool| {
+        app.update(vcx, |app, _| app.warm_story_custom_emoji_with(|_, _| ok))
+    };
+    assert!(tick(&app, vcx, false), "the first fetch runs and fails");
+    assert!(
+        app.read_with(vcx, |app, _| app.stories.emoji_warm.is_none()),
+        "a failed fetch is not recorded"
+    );
+    assert!(tick(&app, vcx, false), "the next tick tries again");
+    assert!(tick(&app, vcx, true), "and again; this time it succeeds");
+    assert!(!tick(&app, vcx, true), "now it is recorded and gated");
 }

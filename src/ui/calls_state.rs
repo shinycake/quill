@@ -44,6 +44,14 @@ pub(crate) struct CallUi {
 }
 
 impl CallUi {
+    /// The call window is gone (closed by the user or by the app): drop its
+    /// handle and its panel view, so the clock's tick has no dead view to
+    /// notify.
+    pub(super) fn forget_window(&mut self) {
+        self.window = None;
+        self.panel_view.set(None);
+    }
+
     pub(super) fn new(audio_output: super::audio::SharedOutput) -> Self {
         Self {
             remote_player: None,

@@ -71,6 +71,30 @@ fn the_clock_tick_redraws_the_panel_and_the_call_bar_only(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn closing_the_call_window_forgets_its_panel_view(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_call(cx);
+    assert!(
+        app.read_with(&main, |app, _| app.calls.panel_view.get().is_some()),
+        "the open window registers its panel"
+    );
+    // The user closed this call's window: the sync closes it.
+    app.update(&mut main, |app, cx| {
+        let id = app
+            .session()
+            .and_then(|s| s.calls.active_call.as_ref().map(|c| c.id));
+        app.calls.window_closed_by_user = id;
+        app.sync_call_window(cx);
+    });
+    frames(&mut main);
+    app.read_with(&main, |app, _| {
+        assert!(app.calls.window.is_none());
+        assert!(app.calls.panel_view.get().is_none(), "no dead panel id");
+    });
+    // The clock tick has nothing left to notify, and does not fail.
+    app.update(&mut main, |app, cx| app.notify_call_clock(cx));
+}
+
+#[gpui_kit::test]
 fn an_app_notify_still_redraws_the_call_panel(cx: &mut TestAppContext) {
     let (app, mut main, mut call) = open_call(cx);
     let _ = crate::ui::frame_clock::take_slice_renders();

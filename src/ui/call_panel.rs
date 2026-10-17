@@ -251,7 +251,7 @@ impl QuillApp {
             }
             (Some(id), None) => self.open_call_window(id, cx),
             (None, Some(handle)) => {
-                self.calls.window = None;
+                self.calls.forget_window();
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
             }
             (None, None) => {}
@@ -298,7 +298,7 @@ impl QuillApp {
                     window.activate_window();
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
-                            app.calls.window = None;
+                            app.calls.forget_window();
                             app.calls.window_closed_by_user = Some(call_id);
                             cx.notify();
                         });
