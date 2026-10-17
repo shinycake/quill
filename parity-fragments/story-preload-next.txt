@@ -1,2 +1,0 @@
-# Story viewer preloads the next two stories and the previous one (tdesktop
-# preloadNext). README has no checklist line for it yet, so nothing to flip.
