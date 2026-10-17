@@ -287,6 +287,7 @@ impl QuillApp {
             Some({
                 let view = cx.entity().downgrade();
                 let scroll_view = view.clone();
+                let pinch_view = view.clone();
                 let down_view = view.clone();
                 let move_view = view.clone();
                 let up_view = view.clone();
@@ -343,19 +344,13 @@ impl QuillApp {
                     )
                     .children(picture_overlay)
                     .on_scroll_wheel(move |event, _window, cx| {
-                        let dy = match event.delta {
-                            ScrollDelta::Pixels(p) => f32::from(p.y),
-                            ScrollDelta::Lines(l) => l.y * VIEWER_WHEEL_NOTCH_PX,
-                        };
-                        let anchor = (
-                            f32::from(event.position.x) - origin.0,
-                            f32::from(event.position.y) - origin.1,
-                        );
                         if let Some(view) = scroll_view.upgrade() {
-                            view.update(cx, |this, cx| {
-                                this.viewer_note_activity(false, cx);
-                                this.viewer_zoom_scroll(dy, anchor, cx)
-                            });
+                            view.update(cx, |this, cx| this.viewer_scroll_wheel(event, origin, cx));
+                        }
+                    })
+                    .on_pinch(move |event, _window, cx| {
+                        if let Some(view) = pinch_view.upgrade() {
+                            view.update(cx, |this, cx| this.viewer_pinch(event, origin, cx));
                         }
                     })
                     .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
@@ -524,6 +519,12 @@ impl QuillApp {
                     .bg(gpui_kit::black())
                     .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
                         this.viewer_note_activity(false, cx);
+                    }))
+                    .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+                        this.viewer_scroll_wheel(event, geometry.origin, cx);
+                    }))
+                    .on_pinch(cx.listener(move |this, event: &PinchEvent, _, cx| {
+                        this.viewer_pinch(event, geometry.origin, cx);
                     }))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_backdrop_click(cx);

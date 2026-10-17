@@ -22,9 +22,10 @@ use quill::local_path::sandboxed_display_path;
 use quill::media_viewer::{
     MediaViewer, MediaViewerItem, MediaViewerKind, VIEWER_SHOW_MS, VIEWER_WAIT_HIDE_MS,
     VIEWER_WHEEL_NOTCH_PX, ViewerKeyAction, ViewerKeyMods, ViewerOrientation, ViewerSource,
-    ViewerVideoStart, ViewerZoom, collect_media_items, controls_fade_ms, controls_hide_wait_ms,
-    controls_should_hide, decide_viewer_video_start, orient_rgba, save_media_to_downloads,
-    seek_target_secs, viewer_delete_gate, viewer_key_action, wheel_zoom_factor,
+    ViewerVideoStart, ViewerZoom, WheelAction, WheelInput, WheelSource, collect_media_items,
+    controls_fade_ms, controls_hide_wait_ms, controls_should_hide, decide_viewer_video_start,
+    orient_rgba, pinch_zoom_factor, save_media_to_downloads, seek_target_secs, viewer_delete_gate,
+    viewer_key_action, wheel_zoom_factor,
 };
 use quill::settings::MediaPrefs;
 use quill::state::HistoryMessage;

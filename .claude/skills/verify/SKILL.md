@@ -70,7 +70,7 @@ order after the window is ready):
 | `m:x,y` | move the pointer (hover states, tooltips, scrubber bubbles) |
 | `mid:x,y` | middle click |
 | `k:key` | one key press, GPUI key names (`escape`, `enter`, `space`, `cmd-f`) |
-| `w:x,y,dx,dy,s\|m\|e` | one phased trackpad scroll event |
+| `w:x,y,dx,dy,s\|m\|e[,cmd]` | one phased trackpad scroll event (`cmd` holds Cmd, Ctrl off macOS) |
 | `p:ms` | pause |
 
 Other switches: `QUILL_DEMO_THEME=dark|high-contrast`,

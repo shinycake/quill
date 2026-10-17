@@ -29,6 +29,16 @@ pub fn wheel_zoom_factor(delta_y: f32) -> f32 {
     VIEWER_ZOOM_STEP.powf(notches)
 }
 
+/// Zoom factor for one pinch event (`delta` is the scale change, `0.1`
+/// is 10% larger), clamped like a wheel event.
+pub fn pinch_zoom_factor(delta: f32) -> f32 {
+    if !delta.is_finite() {
+        return 1.0;
+    }
+    let cap = VIEWER_ZOOM_STEP.powf(VIEWER_WHEEL_MAX_NOTCHES);
+    (1.0 + delta).clamp(1.0 / cap, cap)
+}
+
 /// Photo orientation in the viewer: quarter-turns clockwise plus mirror
 /// flips (Telegram Desktop's `_flip`, media_view_overlay_widget.cpp:7431).
 /// Pixels are flipped first, then rotated.
@@ -327,6 +337,16 @@ mod tests {
         let cap = VIEWER_ZOOM_STEP.powf(VIEWER_WHEEL_MAX_NOTCHES);
         assert!((wheel_zoom_factor(100_000.0) - cap).abs() < 1e-4);
         assert!((wheel_zoom_factor(-100_000.0) - 1.0 / cap).abs() < 1e-4);
+    }
+
+    #[test]
+    fn pinch_factor_follows_the_scale_change_and_clamps() {
+        assert!((pinch_zoom_factor(0.1) - 1.1).abs() < 1e-6);
+        assert!((pinch_zoom_factor(-0.1) - 0.9).abs() < 1e-6);
+        let cap = VIEWER_ZOOM_STEP.powf(VIEWER_WHEEL_MAX_NOTCHES);
+        assert!((pinch_zoom_factor(10.0) - cap).abs() < 1e-4);
+        assert!((pinch_zoom_factor(-10.0) - 1.0 / cap).abs() < 1e-4);
+        assert_eq!(pinch_zoom_factor(f32::NAN), 1.0);
     }
 
     #[test]

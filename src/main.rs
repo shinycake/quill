@@ -808,10 +808,15 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 .await;
                             continue;
                         }
-                        // `w:x,y,dx,dy,s|m|e` sends one phased trackpad scroll
-                        // event (started / moved / ended), to script a swipe.
+                        // `w:x,y,dx,dy,s|m|e[,cmd]` sends one phased trackpad
+                        // scroll event (started / moved / ended), to script a
+                        // swipe; `cmd` holds Cmd (Ctrl off macOS).
                         if let Some(wheel) = point.strip_prefix("w:") {
-                            let parts: Vec<&str> = wheel.split(',').map(str::trim).collect();
+                            let mut parts: Vec<&str> = wheel.split(',').map(str::trim).collect();
+                            let primary = parts.last() == Some(&"cmd");
+                            if primary {
+                                parts.pop();
+                            }
                             if let [x, y, dx, dy, phase] = parts[..]
                                 && let (Ok(x), Ok(y), Ok(dx), Ok(dy)) = (
                                     x.parse::<f32>(),
@@ -836,7 +841,11 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                             PlatformInput::ScrollWheel(ScrollWheelEvent {
                                                 position: point(px(x), px(y)),
                                                 delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
-                                                modifiers: Modifiers::default(),
+                                                modifiers: if primary {
+                                                    Modifiers::secondary_key()
+                                                } else {
+                                                    Modifiers::default()
+                                                },
                                                 touch_phase,
                                             }),
                                             cx,

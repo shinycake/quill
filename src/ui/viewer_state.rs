@@ -6,6 +6,7 @@ use quill::ids::FileId;
 use quill::ids::MessageId;
 use quill::media_viewer::MediaViewer;
 use quill::media_viewer::ViewerZoom;
+use quill::media_viewer::WheelNav;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -25,6 +26,8 @@ pub(crate) struct ViewerUi {
     /// Parity slice 5: drag-pan anchor — last mouse position in px while the
     /// left button is held over the zoomed visual.
     pub(super) drag: Option<(f32, f32)>,
+    /// Wheel and trackpad scrolling toward the next item.
+    pub(super) wheel: WheelNav,
     /// Parity slice 5: message whose video clip is playing in the viewer
     /// (sound playing) or paused (clock frozen, sound paused).
     pub(super) video: Option<MessageId>,
@@ -100,6 +103,7 @@ impl ViewerUi {
             zoom: ViewerZoom::new(),
             frame: (720.0, 480.0),
             drag: None,
+            wheel: WheelNav::default(),
             video: None,
             pip: None,
             video_path: None,
