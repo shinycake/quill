@@ -64,3 +64,18 @@ fn under_the_cap_nothing_goes() {
     assert_eq!(files.evict(|_| false), 0);
     assert_eq!(files.len(), 100);
 }
+
+#[test]
+fn a_pass_that_frees_too_little_waits_for_more_writes() {
+    let mut files = FileMap::default();
+    for id in 0..=FILES_MAX as i32 {
+        files.insert(file(id, "/tmp/f"));
+    }
+    assert_eq!(files.evict(|_| true), 0, "everything is held");
+    // Nothing is held now, but the last pass found nothing to drop.
+    assert_eq!(files.evict(|_| false), 0, "no rescan right away");
+    for id in 0..super::EVICT_RETRY_AFTER as i32 {
+        files.insert(file(100_000 + id, "/tmp/f"));
+    }
+    assert!(files.evict(|_| false) > 0, "tried again after more writes");
+}

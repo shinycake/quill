@@ -270,6 +270,12 @@ impl DownloadIntents {
             .is_some_and(|i| i.phase == Phase::Requested && i.paused)
     }
 
+    /// The Downloads panel lists the file: a finished or failed user
+    /// download.
+    pub fn is_listed(&self, file_id: i32) -> bool {
+        self.finished.contains(&file_id) || self.failed.contains(&file_id)
+    }
+
     /// A user download that ended without completing.
     pub fn is_failed(&self, file_id: i32) -> bool {
         self.get(file_id)

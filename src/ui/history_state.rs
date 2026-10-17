@@ -59,6 +59,9 @@ pub(crate) struct HistoryUi {
     pub(super) chrome_seen: Option<u64>,
     /// Rows drawn with stale chrome since the last render.
     pub(super) chrome_due: std::cell::RefCell<Vec<usize>>,
+    /// A deferred notify for `chrome_due` is on its way (renders that skip
+    /// the kept-rows branch leave the list undrained).
+    pub(super) chrome_notify_pending: std::cell::Cell<bool>,
     pub(super) row_stats: RowCacheStats,
     /// Tests: trust `Session::revision` the way a live session does.
     #[cfg(test)]
@@ -152,6 +155,7 @@ impl HistoryUi {
             chrome_epoch: 0,
             chrome_seen: None,
             chrome_due: Default::default(),
+            chrome_notify_pending: Default::default(),
             row_stats: RowCacheStats::default(),
             #[cfg(test)]
             follow_revision_in_tests: false,

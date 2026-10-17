@@ -38,7 +38,13 @@ pub struct FileMap {
     clock: u64,
     paths_revision: u64,
     quiet_updates: u64,
+    /// `clock` before which [`Self::evict`] does not scan again after a
+    /// pass that could not free enough (held files fill the map).
+    retry_at: u64,
 }
+
+/// Writes to wait after an eviction pass that fell short.
+const EVICT_RETRY_AFTER: u64 = 512;
 
 impl FileMap {
     /// The file, marking it used.
@@ -123,7 +129,7 @@ impl FileMap {
     /// Past [`FILES_MAX`], drop the least recently used files `held`
     /// does not keep until [`FILES_KEEP`] are left. Returns how many went.
     pub(crate) fn evict(&mut self, held: impl Fn(&ParsedFile) -> bool) -> usize {
-        if self.entries.len() <= FILES_MAX {
+        if self.entries.len() <= FILES_MAX || self.clock < self.retry_at {
             return 0;
         }
         let excess = self.entries.len().saturating_sub(FILES_KEEP);
@@ -142,6 +148,11 @@ impl FileMap {
         for id in &doomed {
             self.entries.remove(id);
         }
+        self.retry_at = if doomed.len() < excess {
+            self.clock.saturating_add(EVICT_RETRY_AFTER)
+        } else {
+            0
+        };
         doomed.len()
     }
 }

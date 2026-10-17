@@ -256,13 +256,19 @@ impl QuillApp {
         if due.contains(&ix) {
             return;
         }
-        let first = due.is_empty();
+        // Keyed on its own flag: a render that skips the kept-rows branch
+        // (the chat is hidden) leaves `due` filled, and the next row must
+        // still get its notify.
+        let first = !self.history.chrome_notify_pending.replace(true);
         due.push(ix);
         drop(due);
         if first {
             let app = cx.weak_entity();
             cx.defer(move |cx| {
-                let _ = app.update(cx, |_, cx| cx.notify());
+                let _ = app.update(cx, |this, cx| {
+                    this.history.chrome_notify_pending.set(false);
+                    cx.notify();
+                });
             });
         }
     }

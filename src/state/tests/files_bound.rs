@@ -84,6 +84,50 @@ fn many_files_stay_bounded_and_files_in_use_stay() {
 }
 
 #[test]
+fn files_the_downloads_panel_lists_stay() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let finished = 1;
+    let failed = 2;
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &update_file(finished, "", false, false),
+    );
+    session.begin_user_download(FileId(finished));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &update_file(finished, "/tmp/1", false, false),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &update_file(failed, "", false, false),
+    );
+    session.begin_user_download(FileId(failed));
+    session.media.downloads.end(failed);
+    assert!(session.media.downloads.is_listed(finished));
+    assert!(session.media.downloads.is_listed(failed));
+    for n in 0..3 * FILES_MAX as i32 {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &update_file(1000 + n, "/tmp/f", false, false),
+        );
+    }
+    assert!(
+        session.media.files.contains_key(&finished),
+        "finished stays"
+    );
+    assert!(session.media.files.contains_key(&failed), "failed stays");
+}
+
+#[test]
 fn download_progress_leaves_the_header_revision_alone() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

@@ -74,10 +74,11 @@ impl Session {
     }
 
     /// Bound `media.files` ([`FileMap::evict`]). Kept whatever they were
-    /// last used for: a file transferring, asked for or paused, an avatar
-    /// the chat list shows, the open chat's automatic downloads and the
+    /// last used for: a file transferring, asked for or paused, one the
+    /// Downloads panel lists, a queued playlist track, an avatar the chat
+    /// list shows, the open chat's automatic downloads and the
     /// notification sounds. A file a row shows is read on every render,
-    /// so it is among the most recently used.
+    /// so it is among the most recently used (kept by recency, not held).
     fn evict_unused_files(&mut self) {
         if self.media.files.len() <= FILES_MAX {
             return;
@@ -88,6 +89,12 @@ impl Session {
         let open_chat = &media.open_chat_media_downloads;
         let extras: HashSet<i32> = media.download_extras.values().copied().collect();
         let sounds = &self.settings.sound_file_ids;
+        // Queued tracks are not rendered, so no read keeps them recent.
+        let queued: HashSet<i32> = media
+            .playlists
+            .values()
+            .flat_map(|playlist| playlist.tracks.iter().map(|track| track.file_id.0))
+            .collect();
         media.files.evict(|file| {
             let id = file.id.0;
             file.local.is_downloading_active
@@ -95,6 +102,8 @@ impl Session {
                 || downloads.is_requested(id)
                 || downloads.is_paused(id)
                 || downloads.is_user(id)
+                || downloads.is_listed(id)
+                || queued.contains(&id)
                 || avatars.contains_key(&id)
                 || open_chat.contains(&id)
                 || extras.contains(&id)

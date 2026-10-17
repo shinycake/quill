@@ -74,16 +74,18 @@ is applied the same way as on a build. Only the patched rows are cloned, get new
 remeasured. If too many ids changed, an id has no row, or a change would move a row boundary, it
 falls back to a full build.
 
-**Eviction holds.** A file is never evicted while it is:
+**Eviction holds.** A file is held, and never evicted, while it is:
 
 - downloading (`is_downloading_active`) or uploading (`uploading`)
 - requested, paused or user-started in `downloads`
 - an avatar (`avatar_file_refs`)
 - one of the open chat's media downloads, or a download extra
 - a notification sound
+- listed in the Downloads panel (finished or failed) or a track of a queued playlist
 
-A file on screen is read through `FileMap::get` on every render, so it stays among the most
-recently used, and 6144 of those survive each pass. An evicted file that comes back shows up
+A file on screen is not held. It is protected by recency: `FileMap::get` touches it on every
+render, so it stays among the most recently used, and 6144 of those survive each pass. If held
+files alone fill the map, a pass that frees too little is not retried until 512 more writes. An evicted file that comes back shows up
 again in the next `updateFile`, the same as a file seen for the first time.
 
 ## Measured
