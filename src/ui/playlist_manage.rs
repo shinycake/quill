@@ -162,11 +162,11 @@ impl QuillApp {
             .and_then(|n| n.to_str())
             .unwrap_or("file")
             .to_string();
-        let suggested = if track.file_name.is_empty() {
-            local_name
+        let suggested = quill::export::names::safe_file_name(if track.file_name.is_empty() {
+            &local_name
         } else {
-            track.file_name.clone()
-        };
+            &track.file_name
+        });
         let dir =
             quill::media_viewer::downloads_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         let picker = cx.prompt_for_new_path(&dir, Some(&suggested));

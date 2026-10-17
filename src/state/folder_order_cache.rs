@@ -2,9 +2,10 @@
 //!
 //! The order is a function of `Session::chats` (each chat's position in the
 //! folder). It is stored per folder with the revision it was computed at, and
-//! the revision moves wherever the chat order is rebuilt or a folder position
-//! changes, so a stored order that does not match the revision is computed
-//! again from the chats, exactly as an uncached read would.
+//! the revision moves whenever a chat's folder position changes (the main and
+//! archive orders do not feed it), so a stored order that does not match the
+//! revision is computed again from the chats, exactly as an uncached read
+//! would.
 
 use super::*;
 use std::cell::RefCell;
@@ -41,11 +42,6 @@ impl FolderOrderCache {
 }
 
 impl Session {
-    /// Folder positions changed: stored folder orders are stale.
-    pub(crate) fn invalidate_folder_orders(&mut self) {
-        self.chat_order_sync.folder_orders.invalidate();
-    }
-
     /// Chats in `chatListFolder(folder_id)`, highest TDLib folder order
     /// first, ties by higher chat id.
     pub fn ordered_folder_chats(&self, folder_id: i32) -> Vec<&ChatSummary> {

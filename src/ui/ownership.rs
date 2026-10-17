@@ -209,14 +209,14 @@ impl QuillApp {
             })
         );
         let name = self.contact_display_name(done.user_id);
-        let place = if self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel) {
-            "channel"
-        } else {
-            "group"
-        };
+        let is_channel = self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel);
         self.connection.set_note(StatusNote::silent(tr_with(
-            keys::Q_OPS_IS_NOW_THE_OWNER_OF,
-            &[("name", &name.to_string()), ("place", place)],
+            if is_channel {
+                keys::Q_OPS_IS_NOW_THE_OWNER_OF_CHANNEL
+            } else {
+                keys::Q_OPS_IS_NOW_THE_OWNER_OF_GROUP
+            },
+            &[("name", &name.to_string())],
         )));
         self.admin.ownership_dialog = None;
         if leave_after {
@@ -239,19 +239,24 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
             let Some((chat_id, stage, password_input)) = this
-                .admin.ownership_dialog
+                .admin
+                .ownership_dialog
                 .as_ref()
                 .map(|d| (d.chat_id, d.stage, d.password_input.clone()))
             else {
                 return dialog
-                    .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_TRANSFER_OWNERSHIP)))
+                    .title(crate::ui::shell::dialog_title(tr(
+                        keys::Q_OPS_TRANSFER_OWNERSHIP,
+                    )))
                     .on_close(on_close);
             };
-            let flavor = this.group_flavor(chat_id).unwrap_or(GroupFlavor::Supergroup);
-            let (place, legacy) = match flavor {
-                GroupFlavor::Channel => ("channel", false),
-                GroupFlavor::Supergroup => ("group", false),
-                GroupFlavor::BasicGroup => ("group", true),
+            let flavor = this
+                .group_flavor(chat_id)
+                .unwrap_or(GroupFlavor::Supergroup);
+            let (is_channel, legacy) = match flavor {
+                GroupFlavor::Channel => (true, false),
+                GroupFlavor::Supergroup => (false, false),
+                GroupFlavor::BasicGroup => (false, true),
             };
             let chat_title = this
                 .session()
@@ -268,7 +273,7 @@ impl QuillApp {
             let title: String;
             match stage {
                 OwnershipStage::Leave => {
-                    title = tr(if place == "channel" {
+                    title = tr(if is_channel {
                         keys::Q_OPS_LEAVE_CHANNEL_TITLE
                     } else {
                         keys::Q_OPS_LEAVE_GROUP_TITLE
@@ -277,9 +282,14 @@ impl QuillApp {
                     let line = match ownership.owner_after_leaving.get(&chat_id.0) {
                         Some(OwnerLookup::Loaded(user_id)) => {
                             let name = this.contact_display_name(*user_id);
-                            let when = if legacy { "immediately" } else { tr(keys::Q_OPS_IN_1_WEEK) };
-                            format!(
-                                "If you leave, {name} will become the new owner of {chat_title} {when}."
+                            let when = if legacy {
+                                tr(keys::Q_OPS_OWNER_IMMEDIATELY)
+                            } else {
+                                tr(keys::Q_OPS_IN_1_WEEK)
+                            };
+                            tr_with(
+                                keys::Q_OPS_OWNER_LEAVE_SUCCESSION,
+                                &[("name", &name), ("chat_title", &chat_title), ("when", when)],
                             )
                         }
                         Some(OwnerLookup::Failed(message)) => message.clone(),
@@ -293,7 +303,11 @@ impl QuillApp {
                                 .ghost()
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_ownership_dialog(cx);
-                                    this.close_kit_dialog_if_done(DialogKind::Ownership, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::Ownership,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         )
                         .child(
@@ -304,12 +318,16 @@ impl QuillApp {
                                         OwnershipStage::Pick { leave_after: true },
                                         cx,
                                     );
-                                    this.close_kit_dialog_if_done(DialogKind::Ownership, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::Ownership,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         )
                         .child(
                             Button::new("own-leave")
-                                .label(tr(if place == "channel" {
+                                .label(tr(if is_channel {
                                     keys::Q_OPS_LEAVE_CHANNEL
                                 } else {
                                     keys::Q_OPS_LEAVE_GROUP
@@ -324,7 +342,12 @@ impl QuillApp {
                     title = if leave_after {
                         tr(keys::Q_OPS_APPOINT_NEW_OWNER).to_string()
                     } else {
-                        tr_with(keys::Q_OPS_TRANSFER_OWNERSHIP_2, &[("place", place)])
+                        tr(if is_channel {
+                            keys::Q_OPS_TRANSFER_OWNERSHIP_CHANNEL
+                        } else {
+                            keys::Q_OPS_TRANSFER_OWNERSHIP_GROUP
+                        })
+                        .to_string()
                     };
                     let choices = this.ownership_candidates(chat_id);
                     let mut list = div()
@@ -335,9 +358,12 @@ impl QuillApp {
                         .max_h(px(260.))
                         .overflow_y_scroll();
                     if choices.is_empty() {
-                        list = list.child(div().text_sm().text_color(muted).child(
-                            tr(keys::SELECT_NEXT_OWNER_BOX_EMPTY_LIST),
-                        ));
+                        list = list.child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(tr(keys::SELECT_NEXT_OWNER_BOX_EMPTY_LIST)),
+                        );
                     }
                     for (user_id, is_admin) in choices.into_iter().take(100) {
                         let name = this.contact_display_name(user_id);
@@ -353,11 +379,11 @@ impl QuillApp {
                                 .cursor_pointer()
                                 .hover(|style| style.bg(cx.theme().accent))
                                 .child(div().flex_1().text_sm().child(name))
-                                .child(div().text_xs().text_color(muted).child(if is_admin {
-                                    "admin"
+                                .child(div().text_xs().text_color(muted).child(tr(if is_admin {
+                                    keys::Q_OPS_OWNER_CANDIDATE_ADMIN
                                 } else {
-                                    "member"
-                                }))
+                                    keys::Q_OPS_OWNER_CANDIDATE_MEMBER
+                                })))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.set_ownership_stage(
                                         OwnershipStage::Confirm {
@@ -366,7 +392,11 @@ impl QuillApp {
                                         },
                                         cx,
                                     );
-                                    this.close_kit_dialog_if_done(DialogKind::Ownership, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::Ownership,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         );
                     }
@@ -381,7 +411,10 @@ impl QuillApp {
                             })),
                     );
                 }
-                OwnershipStage::Confirm { user_id, leave_after } => {
+                OwnershipStage::Confirm {
+                    user_id,
+                    leave_after,
+                } => {
                     title = tr(keys::Q_OPS_CHANGE_OWNER).to_string();
                     let name = this.contact_display_name(user_id);
                     let back = OwnershipStage::Pick { leave_after };
@@ -393,21 +426,40 @@ impl QuillApp {
                     let in_flight = ownership.transfer_in_flight.is_some();
                     if let Some(reason) = blocked {
                         body = body
-                            .child(div().text_sm().font_semibold().child(tr(keys::Q_OPS_SECURITY_CHECK)))
-                            .child(div().text_sm().text_color(muted).child(format!(
-                                "You can transfer this {place} to {name} only if you have enabled Two-Step Verification more than 7 days ago and logged in on this device more than 24 hours ago."
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .child(tr(keys::Q_OPS_SECURITY_CHECK)),
+                            )
+                            .child(div().text_sm().text_color(muted).child(tr_with(
+                                if is_channel {
+                                    keys::Q_OPS_OWNER_TRANSFER_REQUIREMENTS_CHANNEL
+                                } else {
+                                    keys::Q_OPS_OWNER_TRANSFER_REQUIREMENTS_GROUP
+                                },
+                                &[("name", &name)],
                             )))
                             .child(div().text_sm().text_color(cx.theme().danger).child(reason));
                     } else if !ready {
-                        body = body.child(div().text_sm().text_color(muted).child(tr(keys::Q_OPS_CHECKING)));
+                        body = body.child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(tr(keys::Q_OPS_CHECKING)),
+                        );
                     } else {
                         body = body
-                            .child(div().text_sm().text_color(muted).child(format!(
-                                "This will transfer the full owner rights for {chat_title} to {name}. The new owner will be free to remove any of your admin privileges or even ban you."
+                            .child(div().text_sm().text_color(muted).child(tr_with(
+                                keys::Q_OPS_OWNER_TRANSFER_CONFIRM,
+                                &[("chat_title", &chat_title), ("name", &name)],
                             )))
-                            .child(div().text_sm().text_color(muted).child(
-                                tr(keys::Q_OPS_PLEASE_ENTER_YOUR_TWO_STEP),
-                            ))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(muted)
+                                    .child(tr(keys::Q_OPS_PLEASE_ENTER_YOUR_TWO_STEP)),
+                            )
                             .child(
                                 Input::new(&password_input)
                                     .aria_label(tr(keys::Q_OPS_TWO_STEP_VERIFICATION_PASSWORD))
@@ -415,7 +467,8 @@ impl QuillApp {
                             );
                     }
                     if let Some(error) = ownership.transfer_error.clone() {
-                        body = body.child(div().text_sm().text_color(cx.theme().danger).child(error));
+                        body =
+                            body.child(div().text_sm().text_color(cx.theme().danger).child(error));
                     }
                     footer = footer
                         .child(
@@ -424,18 +477,30 @@ impl QuillApp {
                                 .ghost()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.set_ownership_stage(back, cx);
-                                    this.close_kit_dialog_if_done(DialogKind::Ownership, window, cx);
+                                    this.close_kit_dialog_if_done(
+                                        DialogKind::Ownership,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         )
                         .when(ready, |footer| {
                             footer.child(
                                 Button::new("own-submit")
-                                    .label(if in_flight { tr(keys::Q_OPS_TRANSFERRING) } else { tr(keys::Q_OPS_CHANGE_OWNER) })
+                                    .label(if in_flight {
+                                        tr(keys::Q_OPS_TRANSFERRING)
+                                    } else {
+                                        tr(keys::Q_OPS_CHANGE_OWNER)
+                                    })
                                     .danger()
                                     .disabled(in_flight)
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.submit_ownership_transfer(user_id, window, cx);
-                                        this.close_kit_dialog_if_done(DialogKind::Ownership, window, cx);
+                                        this.close_kit_dialog_if_done(
+                                            DialogKind::Ownership,
+                                            window,
+                                            cx,
+                                        );
                                     })),
                             )
                         });

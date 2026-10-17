@@ -43,7 +43,6 @@
 1 src/ui/message_menu_ui/menu_save_to_rows.rs
 1 src/ui/message_text/mod.rs
 6 src/ui/navigation.rs
-5 src/ui/ownership.rs
 1 src/ui/paid_reaction_ui.rs
 1 src/ui/payments/mod.rs
 1 src/ui/peer_color_dialog.rs

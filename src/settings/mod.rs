@@ -266,13 +266,6 @@ pub fn load_window_state() -> Option<WindowState> {
         .sanitized()
 }
 
-pub fn save_window_state(state: &WindowState) -> std::io::Result<()> {
-    let root = safe_app_root().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "no app data directory")
-    })?;
-    write_json_atomic(&root.join("window_state.json"), state)
-}
-
 /// Load call prefs; missing or corrupt files fall back to defaults
 /// (never a hard error — prefs must not block startup).
 pub fn load_call_prefs(paths: &AccountPaths) -> CallPrefs {
