@@ -668,7 +668,15 @@ fn read_plan(plan_path: &Path) -> std::io::Result<InstallPlan> {
 pub fn apply_update(plan_path: &Path) -> std::io::Result<()> {
     let exe = std::env::current_exe()?;
     let target = fs::canonicalize(&exe).unwrap_or(exe);
-    match claim::take_over(plan_path) {
+    apply_claimed(claim::take_over(plan_path), target)
+}
+
+/// [`apply_update`] once [`claim::take_over`] has answered.
+fn apply_claimed(
+    taken: Result<(claim::Claim, InstallPlan), claim::Refused>,
+    target: PathBuf,
+) -> std::io::Result<()> {
+    match taken {
         Ok((claim, plan)) => apply_plan(claim, plan, target),
         // Another helper has it, or a start found it abandoned and opened
         // Quill itself: nothing is left to do here.
@@ -676,6 +684,28 @@ pub fn apply_update(plan_path: &Path) -> std::io::Result<()> {
         Err(claim::Refused::Unreadable(claim, error)) => {
             claim.release();
             let _ = spawn_app(&target, &[]);
+            Err(error)
+        }
+        // This helper cannot install it, and nobody else will: the attempt
+        // ends as a failure, like one inside `apply_plan`.
+        Err(claim::Refused::Failed(claim, error)) => {
+            let plan = claim.and_then(|mut claim| {
+                let plan = claim.read().ok();
+                claim.release();
+                plan
+            });
+            if let Some(plan) = &plan {
+                let _ = write_result(receipt_for(&target), &plan.release, true);
+            }
+            let _ = spawn_app(
+                &target,
+                plan.as_ref().map_or(&[][..], |plan| plan.args.as_slice()),
+            );
+            if let Some(plan) = plan
+                && is_temp_entry(&plan.staged)
+            {
+                let _ = swap::remove_any(&plan.staged);
+            }
             Err(error)
         }
     }
@@ -1060,6 +1090,26 @@ mod tests {
         assert!(fx.staged.exists());
         assert!(!fx.install.join("quill.last-update.json").exists());
         claim.release();
+        fs::remove_dir_all(&fx.root).unwrap();
+    }
+
+    #[test]
+    fn a_claim_the_helper_cannot_rename_still_ends_with_quill_started() {
+        let fx = bundle_fixture("bundle-busy", OLD_APP, NEW_APP);
+        let (claim, _) = fx.take(exited_pid(), &["--start-minimized"]);
+        // Back to a `.claim` the launch handed over, then a rename that
+        // keeps failing the way a file held by a scanner does.
+        let claim_path = fx.plan_path.with_extension("claim");
+        fs::rename(claim.path(), &claim_path).unwrap();
+        drop(claim);
+        let taken = claim::take_over_with(&claim_path, |_, _| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "in use",
+            ))
+        });
+        assert!(apply_claimed(taken, fx.target.clone()).is_err());
+        assert_failed_and_old_version_restarted(&fx);
         fs::remove_dir_all(&fx.root).unwrap();
     }
 

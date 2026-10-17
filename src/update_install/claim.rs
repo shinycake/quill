@@ -104,10 +104,16 @@ impl Claim {
 }
 
 /// Claims mean "this process is handing the update off" until it exits.
-static HELD: Mutex<Vec<File>> = Mutex::new(Vec::new());
+static HELD: Mutex<Vec<Claim>> = Mutex::new(Vec::new());
 
 fn hold(claim: Claim) {
-    HELD.lock_or_recover().push(claim.file);
+    HELD.lock_or_recover().push(claim);
+}
+
+/// Lets go of a claim [`launch`] kept, as if this process had exited.
+#[cfg(test)]
+pub(super) fn drop_held(path: &Path) {
+    HELD.lock_or_recover().retain(|claim| claim.path != path);
 }
 
 /// Claims the ready plan at `ready` for this process: `plan` is written as
@@ -149,24 +155,63 @@ pub(super) enum Refused {
     Taken(io::Error),
     /// Taken over, but the plan cannot be read.
     Unreadable(Claim, io::Error),
+    /// Not taken over for another reason (a file kept busy past the retries,
+    /// say by a virus scanner). The claim, when it could be opened, is still
+    /// at its old path; nobody else can have it, so this helper ends the
+    /// attempt and starts Quill.
+    Failed(Option<Claim>, io::Error),
 }
 
 /// The helper's side: lock the claim at `path` beside its launch's lock,
 /// then rename it to `<stamp>.applying`, which only one helper can do.
 pub(super) fn take_over(path: &Path) -> Result<(Claim, InstallPlan), Refused> {
+    take_over_with(path, |from, to| fs::rename(from, to))
+}
+
+pub(super) fn take_over_with(
+    path: &Path,
+    rename: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> Result<(Claim, InstallPlan), Refused> {
     if kind_of(path) == Some(Kind::Applying) {
         return Err(Refused::Taken(io::Error::other(
             "This update is already being applied",
         )));
     }
-    let file = File::open(path).map_err(Refused::Taken)?;
+    // Windows: a scanner or indexer can hold a new file for a moment.
+    let file = match super::swap::retry(|| File::open(path)) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(Refused::Taken(error));
+        }
+        Err(error) => {
+            // A claim no helper renamed is nobody's; a fresh one would make
+            // the Quill started next wait for its 30 s grace.
+            let _ = super::swap::retry(|| fs::remove_file(path));
+            return Err(Refused::Failed(None, error));
+        }
+    };
     let _ = file.lock_shared();
     let applying = path.with_extension(APPLYING_EXT);
-    fs::rename(path, &applying).map_err(Refused::Taken)?;
-    let mut claim = Claim {
-        path: applying,
-        file,
+    let claim = match super::swap::retry(|| rename(path, &applying)) {
+        Ok(()) => Claim {
+            path: applying,
+            file,
+        },
+        // Another helper renamed it first, or a start discarded it.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(Refused::Taken(error));
+        }
+        Err(error) => {
+            return Err(Refused::Failed(
+                Some(Claim {
+                    path: path.to_path_buf(),
+                    file,
+                }),
+                error,
+            ));
+        }
     };
+    let mut claim = claim;
     match claim.read() {
         Ok(plan) => Ok((claim, plan)),
         Err(error) => Err(Refused::Unreadable(claim, error)),
@@ -315,6 +360,24 @@ mod tests {
             panic!("a fresh .applying nobody holds is stale");
         };
         stale.release();
+    }
+
+    #[test]
+    fn a_rename_that_keeps_failing_is_a_failure_and_not_another_helper() {
+        let ready = ready("busy");
+        let held = claim(&ready, &plan()).unwrap();
+        let path = held.path().to_path_buf();
+        let refused = take_over_with(&path, |_, _| {
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "busy"))
+        });
+        let Err(Refused::Failed(Some(mut stuck), _)) = refused else {
+            panic!("a busy claim is not someone else's");
+        };
+        assert_eq!(stuck.path(), path);
+        assert_eq!(stuck.read().unwrap().release.version, "999.0.0");
+        drop(held);
+        stuck.release();
+        assert!(!path.exists());
     }
 
     #[test]

@@ -290,7 +290,7 @@ fn transient(error: &io::Error) -> bool {
 
 /// Runs `op` again on a transient Windows lock, up to [`RETRIES`] times with
 /// 100–500 ms pauses (about 4 s in all).
-fn retry<T>(mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+pub(super) fn retry<T>(mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     let mut delay = Duration::from_millis(100);
     let mut attempt = 0;
     loop {

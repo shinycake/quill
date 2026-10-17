@@ -387,6 +387,8 @@ mod tests {
         assert_eq!(helpers.get(), 0);
         assert!(claim.exists());
         assert!(dir.join(format!("{TEMP_PREFIX}a.new")).exists());
+        crate::update_install::claim::drop_held(&claim);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     /// A claim abandoned by a launch or helper that died, as the next start
