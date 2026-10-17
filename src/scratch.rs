@@ -52,7 +52,7 @@ pub fn unique_dir(prefix: &str) -> PathBuf {
 /// path, so it can hold fixtures that several tests reuse.
 pub fn process_dir(prefix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
-    let known = dirs().iter().any(|d| *d == dir);
+    let known = dirs().contains(&dir);
     if !known {
         let _ = std::fs::create_dir_all(&dir);
         remove_at_exit(dir.clone());
