@@ -1,9 +1,11 @@
 //! "Hardware accelerated video decoding" (tdesktop Settings > Advanced >
 //! Performance, `Core::Settings::hardwareAcceleratedVideo`).
 //!
-//! An installation setting, on by default like tdesktop's. The FFmpeg video
-//! player reads it when it opens a clip, so a change applies to the next
-//! clip opened; players already open keep their decoder.
+//! An installation setting, on by default on macOS and off elsewhere, like
+//! tdesktop's. Windows D3D11VA/DXVA2 is unverified on a real GPU, so it stays
+//! opt-in until it is. The FFmpeg video player reads it when it opens a clip,
+//! so a change applies to the next clip opened; players already open keep
+//! their decoder.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -15,9 +17,11 @@ struct Stored {
     enabled: bool,
 }
 
+const DEFAULT: bool = cfg!(target_os = "macos");
+
 impl Default for Stored {
     fn default() -> Self {
-        Self { enabled: true }
+        Self { enabled: DEFAULT }
     }
 }
 
@@ -28,15 +32,25 @@ fn path() -> Option<PathBuf> {
 }
 
 fn load(path: &Path) -> bool {
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Stored>(&bytes).ok())
-        .unwrap_or_default()
-        .enabled
+    let Ok(bytes) = std::fs::read(path) else {
+        return DEFAULT;
+    };
+    match serde_json::from_slice::<Stored>(&bytes) {
+        Ok(stored) => stored.enabled,
+        Err(err) => {
+            eprintln!(
+                "quill: {} is unreadable ({err}); using the default",
+                path.display()
+            );
+            DEFAULT
+        }
+    }
 }
 
 fn store(path: &Path, on: bool) {
-    let _ = crate::settings::write_json_atomic(path, &Stored { enabled: on });
+    if let Err(err) = crate::settings::write_json_atomic(path, &Stored { enabled: on }) {
+        eprintln!("quill: could not save {}: {err}", path.display());
+    }
 }
 
 /// Whether video may decode on the GPU.
@@ -70,20 +84,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hardware_decoding_is_on_until_turned_off_and_the_choice_persists() {
+    fn hardware_decoding_starts_at_the_platform_default_and_the_choice_persists() {
         let dir = std::env::temp_dir().join(format!("quill-hardware-video-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("hardware_video.json");
         let _ = std::fs::remove_file(&file);
-        assert!(load(&file), "on when nothing was saved");
-        store(&file, false);
-        assert!(!load(&file), "off after turning it off");
-        store(&file, true);
-        assert!(load(&file));
+        let default = cfg!(target_os = "macos");
+        assert_eq!(
+            load(&file),
+            default,
+            "on only on macOS when nothing was saved"
+        );
+        store(&file, !default);
+        assert_eq!(load(&file), !default, "the choice persists");
+        store(&file, default);
+        assert_eq!(load(&file), default);
         std::fs::write(&file, b"not json").unwrap();
-        assert!(load(&file), "on when the file is unreadable");
+        assert_eq!(
+            load(&file),
+            default,
+            "the default when the file is unreadable"
+        );
         std::fs::write(&file, b"{}").unwrap();
-        assert!(load(&file));
+        assert_eq!(load(&file), default);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
