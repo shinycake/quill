@@ -987,6 +987,11 @@ mod live_story;
 mod live_tests;
 mod live_view;
 mod reply_media;
+#[cfg(feature = "demo-capture")]
+mod story_demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod story_header_tests;
 mod story_viewer_overlay;
 
 pub(in crate::ui) use live_state::LiveStoryUi;

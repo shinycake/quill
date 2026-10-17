@@ -319,12 +319,15 @@ impl QuillApp {
                             .flex()
                             .w(px(360.))
                             .items_center()
-                            .justify_between()
+                            .gap_2()
                             .child(self.story_header_identity(&item, &poster, position, total, cx))
-                            .children(live_header)
+                            .children(
+                                live_header.map(|controls| div().flex_shrink_0().child(controls)),
+                            )
                             .child(
                                 div()
                                     .id("story-viewer-close")
+                                    .flex_shrink_0()
                                     .role(gpui_kit::Role::Button)
                                     .aria_label(tr(keys::Q_MEDIA_CLOSE_STORY_VIEWER))
                                     .tab_index(0)
@@ -352,7 +355,7 @@ impl QuillApp {
                                 .child(counts),
                         )
                     })
-                    // Phase 9.5: "Reposted from …" / "edited" marker.
+                    // Phase 9.5: the "Reposted from …" line ("edited" is in the header).
                     .when_some(self.story_viewer_meta_line(), |this, meta| {
                         this.child(div().text_xs().text_color(chrome::secondary()).child(meta))
                     })
@@ -389,11 +392,15 @@ impl QuillApp {
     }
 
     /// tdesktop's story header (`media_stories_header.cpp`): the poster's
-    /// photo with a privacy badge, the name with the story's position, and
-    /// how long ago it was posted. Pressing it opens the poster's profile
-    /// (`:343-345`); hovering the badge says who can see the story
+    /// photo with a privacy badge, the name, the story's position after it
+    /// (`ComposeCounter`, its own label so the name truncates first,
+    /// `:492-509`), and how long ago it was posted. A watched stream shows
+    /// the LIVE badge and its viewers there instead, with no age and no
+    /// "edited" (`setVideoStreamViewers`, `updateDateText`, `:544-572`,
+    /// `:964-967`). Pressing it opens the poster's profile (`:343-345`)
+    /// when there is one; hovering the badge says who can see the story
     /// (`:738-765`). The age comes from the clock on every draw, and the
-    /// viewer's tick redraws it.
+    /// viewer's 100 ms tick redraws it.
     fn story_header_identity(
         &self,
         item: &StoryViewerItem,
@@ -414,11 +421,7 @@ impl QuillApp {
         } else {
             poster.to_owned()
         };
-        let name = if total > 1 {
-            format!("{name} · {position}/{total}")
-        } else {
-            name
-        };
+        let counter = (total > 1).then(|| format!("{STORY_BULLET} {position}/{total}"));
         let photo = self
             .session()
             .and_then(|s| s.chat_photo_path(item.chat_id))
@@ -427,14 +430,34 @@ impl QuillApp {
             .as_ref()
             .and_then(|story| quill::story_header::privacy_badge(story.privacy_settings.as_ref()));
         let about = badge.map(|badge| story_privacy_about(badge, is_self, poster));
-        let detail = story.as_ref().map(|story| {
-            let mut detail = story_age_label(story.date);
-            if story.is_edited {
-                detail = format!("{detail} · {}", tr(keys::EDITED));
-            }
-            detail
-        });
-        let chat_id = item.chat_id.0;
+        let second_line = match self.live_story_viewers() {
+            Some(viewers) => Some(
+                crate::ui::video_player::controls::live_badge(viewers)
+                    .text_xs()
+                    .text_color(chrome::fg())
+                    .into_any_element(),
+            ),
+            None => story.as_ref().map(|story| {
+                let mut detail = story_age_label(story.date);
+                if story.is_edited {
+                    detail = format!("{detail} {STORY_BULLET} {}", tr(keys::EDITED));
+                }
+                div()
+                    .debug_selector(|| "story-header-age".into())
+                    .text_xs()
+                    .text_color(chrome::secondary())
+                    .truncate()
+                    .child(detail)
+                    .into_any_element()
+            }),
+        };
+        let sender = MessageSender::Chat {
+            chat_id: item.chat_id.0,
+        };
+        let has_profile = self
+            .session()
+            .and_then(|s| s.avatar_profile_target(sender))
+            .is_some();
         let mut avatar = div()
             .relative()
             .flex_shrink_0()
@@ -443,40 +466,56 @@ impl QuillApp {
         if let (Some(badge), Some(about)) = (badge, about) {
             avatar = avatar.child(story_privacy_badge(badge, about));
         }
+        let name_row = div()
+            .flex()
+            .items_baseline()
+            .gap_1()
+            .min_w_0()
+            .child(
+                div()
+                    .debug_selector(|| "story-header-name".into())
+                    .font_semibold()
+                    .text_color(chrome::fg())
+                    .min_w_0()
+                    .truncate()
+                    .child(super::bidi_line::one_line_plain(name.clone())),
+            )
+            .children(counter.map(|counter| {
+                div()
+                    .debug_selector(|| "story-header-counter".into())
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
+                    .text_xs()
+                    .text_color(chrome::secondary())
+                    .child(counter)
+            }));
         div()
             .id("story-viewer-identity")
-            .role(gpui_kit::Role::Button)
-            .aria_label(name.clone())
-            .tab_index(0)
-            .cursor_pointer()
+            .debug_selector(|| "story-header-identity".into())
             .flex()
+            .flex_1()
             .items_center()
             .gap_2()
             .min_w_0()
+            .when(has_profile, |identity| {
+                identity
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(name)
+                    .tab_index(0)
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_story_poster_profile(sender, window, cx);
+                    }))
+            })
             .child(avatar)
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .min_w_0()
-                    .child(
-                        div()
-                            .font_semibold()
-                            .text_color(chrome::fg())
-                            .truncate()
-                            .child(super::bidi_line::one_line_plain(name)),
-                    )
-                    .children(detail.map(|detail| {
-                        div()
-                            .text_xs()
-                            .text_color(chrome::secondary())
-                            .truncate()
-                            .child(detail)
-                    })),
+                    .child(name_row)
+                    .children(second_line),
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_story_poster_profile(chat_id, window, cx);
-            }))
             .into_any_element()
     }
 
@@ -484,19 +523,12 @@ impl QuillApp {
     /// (the same hand-off as the "Stories" button).
     fn open_story_poster_profile(
         &mut self,
-        chat_id: i64,
+        sender: MessageSender,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let sender = MessageSender::Chat { chat_id };
-        if self
-            .session()
-            .and_then(|s| s.avatar_profile_target(sender))
-            .is_some()
-        {
-            self.close_story_viewer(cx);
-            self.open_avatar_profile(sender, window, cx);
-        }
+        self.close_story_viewer(cx);
+        self.open_avatar_profile(sender, window, cx);
     }
 
     /// Phase 9.6: segmented progress bar — one segment per story in the
@@ -587,17 +619,24 @@ fn story_privacy_about(
     tr_with(key, &[("user", poster)]).replace("**", "")
 }
 
-/// The badge on the photo's corner: a coloured disc with the audience's
-/// icon, as tdesktop's `UserpicBadge` (green close friends, blue contacts,
-/// orange selected).
+/// tdesktop's `kQBullet`, between the name and the position and between
+/// the age and "edited".
+const STORY_BULLET: char = '\u{2022}';
+
+/// The badge on the photo's corner: a disc with the audience's icon and
+/// tdesktop's `UserpicBadge` top-to-bottom gradient (`LookupPrivacyBadge`):
+/// green `historyPeer2UserpicBg` for close friends, purple
+/// `historyPeer5UserpicBg` for contacts, orange `historyPeer8UserpicBg` for
+/// selected contacts. The story chrome is dark in both themes, so the
+/// palette's fixed userpic colours stand as they are.
 fn story_privacy_badge(badge: quill::story_header::PrivacyBadge, about: String) -> AnyElement {
     use gpui_kit::assets::IconName;
     use gpui_kit::component::tooltip::Tooltip;
     use quill::story_header::PrivacyBadge;
-    let (icon, color) = match badge {
-        PrivacyBadge::CloseFriends => (IconName::Star, 0x4cab4a),
-        PrivacyBadge::Contacts => (IconName::User, 0x3d8fe0),
-        PrivacyBadge::SelectedContacts => (IconName::Users, 0xe08a3d),
+    let (icon, top, bottom) = match badge {
+        PrivacyBadge::CloseFriends => (IconName::Star, 0x9ad164, 0x46ba43),
+        PrivacyBadge::Contacts => (IconName::User, 0xb694f9, 0x6c61df),
+        PrivacyBadge::SelectedContacts => (IconName::Users, 0xfebb5b, 0xf68136),
     };
     div()
         .id("story-viewer-privacy-badge")
@@ -608,7 +647,11 @@ fn story_privacy_badge(badge: quill::story_header::PrivacyBadge, about: String) 
         .rounded_full()
         .border_2()
         .border_color(chrome::frame_bg())
-        .bg(rgb(color))
+        .bg(linear_gradient(
+            180.,
+            linear_color_stop(rgb(top), 0.),
+            linear_color_stop(rgb(bottom), 1.),
+        ))
         .flex()
         .items_center()
         .justify_center()

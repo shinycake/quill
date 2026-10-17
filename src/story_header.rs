@@ -58,23 +58,6 @@ pub fn age(when: i64, now: i64, offset_when: i32, offset_now: i32) -> Age {
     }
 }
 
-/// Seconds until `age` changes, so the label can be redrawn on time
-/// (tdesktop's `Timestamp::changes`). `None` once it is a plain date.
-pub fn seconds_until_change(when: i64, now: i64, offset_now: i32) -> Option<i64> {
-    let elapsed = now.saturating_sub(when).max(0);
-    let minutes = elapsed / 60;
-    if minutes == 0 {
-        Some(61 - elapsed)
-    } else if minutes < 60 {
-        Some(61 - elapsed % 60)
-    } else if elapsed / 3600 < 12 {
-        Some(3601 - elapsed % 3600)
-    } else {
-        let local = now + i64::from(offset_now);
-        Some(86_400 - local.rem_euclid(86_400) + 1)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,18 +85,6 @@ mod tests {
             age(NOW - 12 * 3600, NOW, 3 * 3600, 3 * 3600),
             Age::Yesterday(_)
         ));
-    }
-
-    #[test]
-    fn change_times_match_the_bucket() {
-        assert_eq!(seconds_until_change(NOW - 10, NOW, 0), Some(51));
-        assert_eq!(seconds_until_change(NOW - 90, NOW, 0), Some(31));
-        assert_eq!(seconds_until_change(NOW - 3700, NOW, 0), Some(3501));
-        // 21:42 + 2h18m = midnight, plus one second.
-        assert_eq!(
-            seconds_until_change(NOW - 13 * 3600, NOW, 0),
-            Some(2 * 3600 + 18 * 60 + 1)
-        );
     }
 
     #[test]

@@ -616,7 +616,6 @@ impl QuillApp {
             })),
         };
         let live = LiveFacts {
-            viewers: facts.viewers.max(1),
             muted: self.stream_muted(),
             volume,
             volume_open: false,
