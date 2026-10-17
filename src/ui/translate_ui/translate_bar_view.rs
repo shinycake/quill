@@ -1,5 +1,6 @@
 //! Methods moved out of `translate_ui.rs` to keep files under 1000 lines.
 
+use super::pump_scan::PumpKey;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with, trn};
@@ -335,6 +336,7 @@ impl QuillApp {
         }
         let ui = self.translate_ui_language();
         let skip = self.settings.translate.prefs.skip(&ui);
+        let mut scan = std::mem::take(&mut self.settings.translate.pump);
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
                 return false;
@@ -343,10 +345,23 @@ impl QuillApp {
                 return false;
             };
             let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.jobs.len());
-            history
-                .ordered()
+            let key = PumpKey {
+                chat: chat_id.0,
+                to: model.to,
+                automatic: model.automatic,
+                skip: skip.to_vec(),
+            };
+            let revision = history.messages.revision();
+            // Only the messages that wanted a translation, or were stored
+            // or changed since the last pass (`pump_scan`).
+            let found: Vec<MessageId> = scan
+                .candidates(
+                    &key,
+                    || history.messages.keys().rev().copied().collect(),
+                    |since| history.messages.changed_since(since),
+                )
                 .into_iter()
-                .rev()
+                .filter_map(|id| history.messages.get(&id))
                 .filter(|m| (model.automatic || !m.is_outgoing) && !m.pending && m.id.0 > 0)
                 .filter(|m| {
                     translatable_content(&m.content).is_some_and(|(text, _)| {
@@ -356,10 +371,12 @@ impl QuillApp {
                     })
                 })
                 .filter(|m| session.needs_translation(chat_id, m.id, model.to))
-                .take(room)
                 .map(|m| m.id)
-                .collect()
+                .collect();
+            scan.record(key, revision, found.iter().map(|id| id.0).collect());
+            found.into_iter().take(room).collect()
         };
+        self.settings.translate.pump = scan;
         let mut sent = false;
         if let Some(live) = self.live.as_mut() {
             for id in wanted {

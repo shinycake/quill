@@ -10,6 +10,9 @@ use quill::story_composer::StoryComposer;
 use quill::story_viewer::{StoryPlayback, StoryViewer};
 use std::time::Instant;
 
+/// The facts the custom-emoji warm-up of the story viewer depends on.
+pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize);
+
 pub(crate) struct StoryUi {
     /// Stories strip tiles and sideways scroll (`quill::stories_strip`).
     pub(super) strip: super::stories_strip_ui::StoryStripState,
@@ -20,6 +23,10 @@ pub(crate) struct StoryUi {
     /// pattern as `ensure_call_tick`).
     pub(super) playback: StoryPlayback,
     pub(super) tick_active: bool,
+    /// What the tick last warmed custom-emoji reaction stickers for (the
+    /// story, the ids it needs, how many stickers were known): the work
+    /// repeats only when this changes.
+    pub(super) emoji_warm: Option<EmojiWarm>,
     /// Phase 9.2: story reaction picker open above the viewer overlay.
     pub(super) reaction_picker_open: bool,
     /// Phase 9.2: story reply input open in the viewer overlay.
@@ -195,6 +202,7 @@ impl StoryUi {
             viewer: StoryViewer::closed(),
             playback: StoryPlayback::default(),
             tick_active: false,
+            emoji_warm: None,
             reaction_picker_open: false,
             reply_open: false,
             reply_panel: false,

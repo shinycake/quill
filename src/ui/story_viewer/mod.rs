@@ -777,6 +777,7 @@ impl QuillApp {
                         if !this.stories.viewer.is_open() {
                             this.stories.playback.stop();
                             this.stories.tick_active = false;
+                            this.stories.emoji_warm = None;
                             return false;
                         }
                         let now = Instant::now();
@@ -796,16 +797,11 @@ impl QuillApp {
                         }
                         // Phase 9.2+: keep custom-emoji reaction stickers
                         // warm while the viewer is open (picker options +
-                        // the chosen-reaction badge). Deduped in the
-                        // driver — a no-op when nothing new is needed.
-                        let ids = this.story_custom_emoji_fetch_ids();
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.maybe_fetch_story_custom_emoji_stickers(&ids);
-                        }
-                        // Warm display-file downloads once stickers are
-                        // cached — metadata alone leaves the img() path dead.
-                        this.ensure_story_custom_emoji_downloads();
-                        cx.notify();
+                        // the chosen-reaction badge), once per story and
+                        // per change of what they need.
+                        this.warm_story_custom_emoji();
+                        // Only the overlay shows what a tick advances.
+                        this.notify_story(cx);
                         true
                     })
                     .unwrap_or(false);
@@ -852,6 +848,9 @@ mod story_demo;
 #[cfg(feature = "demo-capture")]
 mod story_header_tests;
 mod story_viewer_overlay;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tick_notify_tests;
 
 pub(in crate::ui) use live_state::LiveStoryUi;
 pub(in crate::ui) use open::PendingStoryOpen;

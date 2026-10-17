@@ -279,6 +279,7 @@ impl QuillApp {
         cx.defer(move |cx| {
             let weak = owner.downgrade();
             let render_owner = owner.clone();
+            let panel_view = owner.read(cx).calls.panel_view.clone();
             let bounds = Bounds::centered(None, size(px(720.), px(540.)), cx);
             let result = cx.open_window(
                 WindowOptions {
@@ -303,7 +304,7 @@ impl QuillApp {
                         });
                         true
                     });
-                    let view = cx.new(|cx| CallWindowRoot::new(&render_owner, cx));
+                    let view = cx.new(|cx| CallWindowRoot::new(&render_owner, &panel_view, cx));
                     cx.new(|cx| Root::new(view, window, cx))
                 },
             );
@@ -540,6 +541,7 @@ enum ButtonLook {
 
 impl Render for CallPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        super::frame_clock::trace_slice_render("call-panel");
         let Some(owner) = self.owner.upgrade() else {
             window.remove_window();
             return div().into_any_element();

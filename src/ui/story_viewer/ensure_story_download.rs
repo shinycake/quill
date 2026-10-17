@@ -74,6 +74,27 @@ impl QuillApp {
         }
     }
 
+    /// The viewer tick's custom-emoji warm-up: fetch the missing sticker
+    /// metadata and start their downloads, but only when the story, the
+    /// ids it needs or the stickers known changed since the last time.
+    /// Returns whether it ran.
+    pub(in crate::ui) fn warm_story_custom_emoji(&mut self) -> bool {
+        let ids = self.story_custom_emoji_fetch_ids();
+        let known = self
+            .session()
+            .map_or(0, |s| s.stories.custom_emoji_stickers.len());
+        let key = (self.stories.viewer.current().map(|i| i.key()), ids, known);
+        if self.stories.emoji_warm.as_ref() == Some(&key) {
+            return false;
+        }
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.maybe_fetch_story_custom_emoji_stickers(&key.1);
+        }
+        self.ensure_story_custom_emoji_downloads();
+        self.stories.emoji_warm = Some(key);
+        true
+    }
+
     /// Phase 9.2+: warm `downloadFile` for custom-emoji reaction sticker
     /// display files (picker tiles + chosen badge). Metadata from
     /// `getCustomEmojiStickers` alone is not enough — `story_custom_emoji_path`
