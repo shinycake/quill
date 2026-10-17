@@ -50,6 +50,8 @@ pub struct QuillApp {
     pub(super) earn: super::earn_state::EarnUi,
     /// Settings → Language: the open box and recent packs (`ui/language_state.rs`).
     pub(super) language: super::language_state::LanguageUi,
+    /// The search field above a profile's groups in common.
+    pub(super) common_groups: super::profile_panels::common_groups::CommonGroupsUi,
     /// Sign-in: inputs, registration, terms, recovery and the QR code (`ui/auth_state.rs`).
     pub(super) auth_ui: super::auth_state::AuthUi,
     /// Search fields: global search and search in chat (`ui/search_state.rs`).

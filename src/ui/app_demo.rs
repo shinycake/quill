@@ -299,6 +299,7 @@ impl QuillApp {
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),
             language: super::language_state::LanguageUi::new(demo.is_some(), cx),
+            common_groups: Default::default(),
             auth_ui: super::auth_state::AuthUi::new(
                 window,
                 cx,

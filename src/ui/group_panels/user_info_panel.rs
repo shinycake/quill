@@ -229,7 +229,7 @@ impl QuillApp {
         {
             body = body.child(section);
         }
-        if let Some(section) = self.groups_in_common_section(user_id, cx) {
+        if let Some(section) = self.groups_in_common_section(user_id, groups_in_common, cx) {
             body = body.child(section);
         }
         // Slice A6: contact management for any other user — Delete

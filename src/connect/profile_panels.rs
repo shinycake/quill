@@ -4,7 +4,8 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{
-    ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose, UsersPurpose,
+    GROUPS_IN_COMMON_PAGE, ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose,
+    UsersPurpose,
 };
 use crate::telegram::requests::{
     create_private_chat, get_chat_similar_chats, get_groups_in_common,
@@ -14,9 +15,9 @@ use crate::telegram::requests::{
     suggest_user_profile_photo,
 };
 
-/// Groups in common are listed in one page (tdesktop pages by 50 as you
-/// scroll; one page of the maximum covers the practical case).
-pub const GROUPS_IN_COMMON_LIMIT: i32 = 100;
+/// Groups in common load this many at a time (tdesktop pages the list as
+/// you scroll).
+const GROUPS_IN_COMMON_LIMIT: i32 = GROUPS_IN_COMMON_PAGE as i32;
 /// `getUserProfilePhotos` page size (schema: up to 100).
 pub const PROFILE_PHOTOS_LIMIT: i32 = 100;
 
@@ -58,6 +59,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .users_state
             .profile_chat_lists
             .insert((kind, id), ProfileChatsFetch::Loading);
+        if kind == ProfileChatsKind::GroupsInCommon {
+            self.session.users_state.common_groups_paging.remove(&id);
+        }
         match self.send_json_request(extra, &json) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -106,6 +110,52 @@ impl<S: JsonSender> ConnectDriver<S> {
         user_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.fetch_profile_chats(ProfileChatsKind::GroupsInCommon, user_id)
+    }
+
+    /// The next page of a user's groups in common, after the last one
+    /// listed (`offset_chat_id`). Nothing is sent while a page is in
+    /// flight or the list is complete.
+    pub fn fetch_more_groups_in_common(
+        &mut self,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let key = (ProfileChatsKind::GroupsInCommon, user_id);
+        let Some(last) = (match self.session.users_state.profile_chat_lists.get(&key) {
+            Some(ProfileChatsFetch::Loaded(ids)) => ids.last().copied(),
+            _ => None,
+        }) else {
+            return Ok(None);
+        };
+        let paging = self.session.common_groups_paging(user_id);
+        if paging.exhausted || paging.loading_more {
+            return Ok(None);
+        }
+        let purpose = RequestPurpose::GetProfileChats(key.0);
+        let extra = self.session.request_for_user(purpose, user_id);
+        let json = get_groups_in_common(extra, user_id, last, GROUPS_IN_COMMON_LIMIT);
+        self.session
+            .users_state
+            .common_groups_paging
+            .entry(user_id)
+            .or_default()
+            .loading_more = true;
+        match self.send_json_request(extra, &json) {
+            Ok(extra) => Ok(Some(extra)),
+            Err(err) => {
+                if let Some(paging) = self
+                    .session
+                    .users_state
+                    .common_groups_paging
+                    .get_mut(&user_id)
+                {
+                    paging.loading_more = false;
+                }
+                Err(err)
+            }
+        }
     }
 
     /// `getChatSimilarChats` for a channel profile (line 11627). Only

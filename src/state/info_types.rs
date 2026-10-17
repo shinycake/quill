@@ -34,6 +34,21 @@ pub enum ProfileChatsKind {
     SuitableDiscussionChats,
 }
 
+/// Groups in common load a page at a time (`getGroupsInCommon` takes the
+/// last chat id of the previous page as `offset_chat_id`).
+pub const GROUPS_IN_COMMON_PAGE: usize = 40;
+/// The list gets a search field once it holds more than this many groups.
+pub const GROUPS_IN_COMMON_SEARCH_MIN: usize = 20;
+
+/// Paging of one user's groups in common.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CommonGroupsPaging {
+    /// The last page came back short: nothing more to load.
+    pub exhausted: bool,
+    /// A follow-up page is in flight.
+    pub loading_more: bool,
+}
+
 /// B10: fetch state of one `ProfileChatsKind` list. `Loading` is the
 /// in-flight guard; `Failed` keeps the reason for a Retry row.
 #[derive(Debug, Clone, PartialEq, Eq)]

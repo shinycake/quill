@@ -167,6 +167,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let InfoPanelTarget::User(user_id) = target {
+            self.reset_common_groups_search(user_id, window, cx);
+        }
         // Phase D3a: resolve the chat for a supergroup info-panel target
         // before the live driver is borrowed mutably below.
         let invite_panel_chat_id = match target {
@@ -431,10 +434,7 @@ impl QuillApp {
                 action_row(
                     "info-groups-in-common",
                     Some(IconName::Users),
-                    format!(
-                        "{groups_in_common} group{} in common",
-                        if groups_in_common == 1 { "" } else { "s" }
-                    ),
+                    quill::lang::trn(keys::PROFILE_COMMON_GROUPS, groups_in_common),
                     false,
                     cx,
                 )

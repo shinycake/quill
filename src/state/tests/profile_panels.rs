@@ -340,3 +340,69 @@ fn user_full_info_parses_call_restrictions() {
             .calls_blocked
     );
 }
+
+fn chats_json(extra: RequestId, ids: std::ops::Range<i64>) -> String {
+    let ids: Vec<String> = ids.map(|id| (-id).to_string()).collect();
+    format!(
+        r#"{{"@type":"chats","@extra":"{}","total_count":45,"chat_ids":[{}]}}"#,
+        extra.0,
+        ids.join(",")
+    )
+}
+
+#[test]
+fn groups_in_common_page_in_and_stop_on_a_short_page() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::GetProfileChats(ProfileChatsKind::GroupsInCommon);
+    let first = session.request_for_user(purpose, 31);
+    apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
+    let list = ProfileChatsKind::GroupsInCommon;
+    assert_eq!(session.profile_chat_list(list, 31).len(), 40);
+    assert!(!session.common_groups_paging(31).exhausted);
+
+    session
+        .users_state
+        .common_groups_paging
+        .entry(31)
+        .or_default()
+        .loading_more = true;
+    let more = session.request_for_user(purpose, 31);
+    apply_json(&mut session, &seq, &sink, &chats_json(more, 38..46));
+    // Overlap is dropped; the short page ends the list.
+    assert_eq!(session.profile_chat_list(list, 31).len(), 45);
+    let paging = session.common_groups_paging(31);
+    assert!(paging.exhausted && !paging.loading_more);
+}
+
+#[test]
+fn a_failed_follow_up_page_keeps_the_listed_groups() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::GetProfileChats(ProfileChatsKind::GroupsInCommon);
+    let first = session.request_for_user(purpose, 31);
+    apply_json(&mut session, &seq, &sink, &chats_json(first, 1..41));
+    session
+        .users_state
+        .common_groups_paging
+        .entry(31)
+        .or_default()
+        .loading_more = true;
+    let more = session.request_for_user(purpose, 31);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            more.0
+        ),
+    );
+    assert_eq!(
+        session
+            .profile_chat_list(ProfileChatsKind::GroupsInCommon, 31)
+            .len(),
+        40
+    );
+    assert!(!session.common_groups_paging(31).loading_more);
+}

@@ -6,6 +6,7 @@
 
 mod bots_profile;
 mod chat_list;
+mod common_groups;
 mod composer;
 mod derived_state;
 mod group_call_bar;
