@@ -8,6 +8,7 @@
 
 use super::app::QuillApp;
 use super::mini_image::mini_image;
+use super::shared_media_grid_state::PageKey;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::gpui::Size as ItemSize;
@@ -65,7 +66,12 @@ impl QuillApp {
         .flex_1()
         .min_h_0()
         .w_full();
-        if let Some(handle) = self.shared_media_grid.scroll(tab) {
+        let key = PageKey {
+            chat: session.media.shared_media.chat_id.map_or(0, |chat| chat.0),
+            anchor_day: state.anchor_day,
+            newest: state.items.first().map_or(0, |item| item.message_id.0),
+        };
+        if let Some(handle) = self.shared_media_grid.scroll(tab, key) {
             list = list.track_scroll(handle);
         }
         div()
@@ -160,38 +166,36 @@ impl QuillApp {
             .aria_label(tile_label(item, tile))
             .tab_index(0)
             .cursor_pointer();
-        let picture = match (path, tile) {
-            (Some(path), tile) => Some(
-                img(super::image_budget::sized_media(
-                    &path,
-                    (px(side), px(side)),
-                    tile.map(|t| (t.width, t.height))
-                        .filter(|(w, h)| *w > 0 && *h > 0),
-                    super::image_budget::Fit::Cover,
-                ))
-                .absolute()
-                .inset_0()
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            ),
-            (None, Some(tile)) => {
-                tile.mini
-                    .as_ref()
-                    .filter(|mini| !mini.data.is_empty())
-                    .map(|mini| {
-                        img(mini_image(mini))
-                            .absolute()
-                            .inset_0()
-                            .size_full()
-                            .object_fit(ObjectFit::Cover)
-                            .into_any_element()
-                    })
-            }
-            (None, None) => None,
-        };
+        // The blur lies under the picture, so a tile that scrolled back in
+        // shows it while the picture decodes.
+        let blur = tile
+            .and_then(|tile| tile.mini.as_ref())
+            .filter(|mini| !mini.data.is_empty())
+            .map(|mini| {
+                img(mini_image(mini))
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .into_any_element()
+            });
+        let picture = path.map(|path| {
+            img(super::image_budget::sized_media(
+                &path,
+                (px(side), px(side)),
+                tile.map(|t| (t.width, t.height))
+                    .filter(|(w, h)| *w > 0 && *h > 0),
+                super::image_budget::Fit::Cover,
+            ))
+            .absolute()
+            .inset_0()
+            .size_full()
+            .object_fit(ObjectFit::Cover)
+            .into_any_element()
+        });
         let badge = tile.and_then(|tile| badge_text(tile.badge));
-        base.children(picture)
+        base.children(blur)
+            .children(picture)
             .when_some(badge, |this, text| {
                 this.child(
                     div()

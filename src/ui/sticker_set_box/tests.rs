@@ -514,6 +514,7 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
                 thumb_width: 0,
                 thumb_height: 0,
                 minithumbnail: None,
+                thumb_still: true,
             });
         }
         app.sticker_box.pick = Some(PickExisting {

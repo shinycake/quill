@@ -28,9 +28,11 @@ All tabs but Stories and Gifts were glyph-and-label rows.
   row of tiles, and the Load more row. The tiles per row and their size follow the panel width as
   in tdesktop (`GridLayout`, src/state/shared_media_rows.rs). Only the rows on screen build tiles
   and ask for pictures, so the bounded image cache can evict the rest. Scroll positions live in
-  `SharedMediaGridUi` so a tab keeps its place across re-renders.
-- A tile shows the minithumbnail until the downloaded thumbnail exists, then the thumbnail through
-  `image_budget::sized_media`. A click opens the media viewer over the tab (as the rows did); Go
+  `SharedMediaGridUi` so a tab keeps its place across re-renders; a tab goes back to the top when
+  it draws another first page (another chat, a date jump, Show latest), and keeps its place on
+  Load more.
+- A tile shows the minithumbnail, and the downloaded thumbnail (through
+  `image_budget::sized_media`) over it once it decodes. A click opens the media viewer over the tab (as the rows did); Go
   to message stays in the context menu. The calendar's date bar sits above the list.
 - Spoiler and secret media get no thumbnail and no blur.
 
@@ -44,7 +46,7 @@ All tabs but Stories and Gifts were glyph-and-label rows.
 - Round videos have no tab of their own in Quill; they stay rows in the Voice tab.
 - Spoiler and secret media draw as a plain tile instead of tdesktop's spoiler overlay.
 - A video's duration pill has no play icon.
-- A video or GIF whose thumbnail is an MPEG-4 clip (not a still) shows its blur only.
+- A video or GIF whose thumbnail is an MPEG-4 clip or a GIF (not a still) shows its blur only.
 - Paging keeps the existing Load more button; tdesktop loads more automatically near the bottom.
 
 ## Verified

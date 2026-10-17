@@ -122,7 +122,7 @@ impl SharedMediaMeta {
                 SharedMediaMeta::Tile(SharedMediaTile {
                     thumbs: video
                         .thumb_file_id()
-                        .filter(|_| !hidden)
+                        .filter(|_| !hidden && video.thumb_still)
                         .into_iter()
                         .collect(),
                     width: video.thumb_width,
@@ -136,7 +136,7 @@ impl SharedMediaMeta {
                 SharedMediaMeta::Tile(SharedMediaTile {
                     thumbs: gif
                         .thumb_file_id()
-                        .filter(|_| !hidden)
+                        .filter(|_| !hidden && gif.thumb_still)
                         .into_iter()
                         .collect(),
                     width: gif.thumb_width,

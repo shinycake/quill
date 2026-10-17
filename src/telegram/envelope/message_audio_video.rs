@@ -133,6 +133,9 @@ pub struct AnimationContent {
     pub thumb_height: i32,
     /// The ~40 px blur TDLib sends with the clip.
     pub minithumbnail: Option<MiniThumbnail>,
+    /// The thumbnail is a still picture (JPEG, PNG or WebP), not an MPEG-4
+    /// clip or a GIF, which a tile cannot draw.
+    pub thumb_still: bool,
 }
 
 impl AnimationContent {
@@ -171,6 +174,9 @@ pub struct VideoContent {
     pub thumb_height: i32,
     /// The ~40 px blur TDLib sends with the clip.
     pub minithumbnail: Option<MiniThumbnail>,
+    /// The thumbnail is a still picture (JPEG, PNG or WebP), not an MPEG-4
+    /// clip or a GIF, which a tile cannot draw.
+    pub thumb_still: bool,
     /// `messageVideo.alternative_videos`: other qualities of the clip.
     pub alternatives: Vec<VideoAlternative>,
 }
@@ -237,6 +243,26 @@ pub struct AnimationItem {
     pub thumb_height: i32,
     /// The ~40 px blur TDLib sends with the clip.
     pub minithumbnail: Option<MiniThumbnail>,
+    /// The thumbnail is a still picture (JPEG, PNG or WebP), not an MPEG-4
+    /// clip or a GIF, which a tile cannot draw.
+    pub thumb_still: bool,
+}
+
+/// Whether a `thumbnail` object holds a still picture a tile can draw
+/// (absent format counts as one).
+fn is_still_thumbnail(thumb: &Value) -> bool {
+    !matches!(
+        thumb
+            .get("format")
+            .and_then(|format| format.get("@type"))
+            .and_then(Value::as_str),
+        Some(
+            "thumbnailFormatMpeg4"
+                | "thumbnailFormatGif"
+                | "thumbnailFormatTgs"
+                | "thumbnailFormatWebm"
+        )
+    )
 }
 
 pub(crate) fn parse_message_animation(value: &Value) -> (MessageContent, Vec<ParsedFile>) {
@@ -278,6 +304,7 @@ pub(crate) fn parse_message_animation(value: &Value) -> (MessageContent, Vec<Par
             thumb_width: item.thumb_width,
             thumb_height: item.thumb_height,
             minithumbnail: item.minithumbnail,
+            thumb_still: item.thumb_still,
         }),
         files,
     )
@@ -371,6 +398,7 @@ pub(crate) fn parse_message_video(value: &Value) -> (MessageContent, Vec<ParsedF
             thumb_width,
             thumb_height,
             minithumbnail: parse_minithumbnail(video.get("minithumbnail")),
+            thumb_still: thumb.is_none_or(is_still_thumbnail),
             alternatives,
         }),
         files,
@@ -496,6 +524,7 @@ pub(crate) fn parse_animation_value(
             thumb_width,
             thumb_height,
             minithumbnail: parse_minithumbnail(value.get("minithumbnail")),
+            thumb_still: thumb.is_none_or(is_still_thumbnail),
         }),
         files,
     )

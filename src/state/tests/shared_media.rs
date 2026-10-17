@@ -478,3 +478,69 @@ fn videos_and_gifs_keep_their_blur_and_hidden_media_leaks_nothing() {
     // Only the pictures that may show are queued, each once.
     assert_eq!(session.take_profile_thumbs(), vec![FileId(81), FileId(83)]);
 }
+
+#[test]
+fn an_mpeg4_thumbnail_keeps_the_blur_and_load_more_appends_tiles() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    let tab = SharedMediaTab::Gifs;
+    session.media.shared_media.open_for(chat);
+    let generation = session.media.shared_media.begin_fetch(tab);
+    let file = |id: i32| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":10,"expected_size":10,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false}},"remote":{{"@type":"remoteFile","id":"r{id}","unique_id":"u{id}"}}}}"#
+        )
+    };
+    let gif = |id: i64, format: &str, file_id: i32| {
+        format!(
+            r#"{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageAnimation","caption":{{"@type":"formattedText","text":"","entities":[]}},"animation":{{"@type":"animation","duration":2,"width":320,"height":240,"file_name":"a.mp4","mime_type":"video/mp4","minithumbnail":{{"@type":"minithumbnail","width":8,"height":8,"data":"/9j/"}},"thumbnail":{{"@type":"thumbnail","width":320,"height":240,"format":{{"@type":"{format}"}},"file":{}}},"animation":{}}}}}}}"#,
+            file(file_id),
+            file(file_id + 50)
+        )
+    };
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia { tab, generation },
+        Some(chat),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":3,"next_from_message_id":401,"messages":[{},{}]}}"#,
+            extra.0,
+            gif(402, "thumbnailFormatMpeg4", 91),
+            gif(401, "thumbnailFormatJpeg", 92)
+        ),
+    );
+    let items = &session.media.shared_media.tabs[tab.index()].items;
+    let clip = items[0].meta.tile().expect("gif tile");
+    assert!(clip.thumbs.is_empty() && clip.mini.is_some());
+    assert_eq!(items[1].meta.tile().expect("tile").thumbs, vec![FileId(92)]);
+    assert_eq!(session.take_profile_thumbs(), vec![FileId(92)]);
+
+    // Load more appends the next page's tiles and queues their pictures.
+    let (more_generation, _) = session.media.shared_media.begin_fetch_more(tab).unwrap();
+    let extra = session.request(
+        RequestPurpose::Media(MediaPurpose::GetSharedMediaMore {
+            tab,
+            generation: more_generation,
+        }),
+        Some(chat),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":3,"next_from_message_id":0,"messages":[{}]}}"#,
+            extra.0,
+            gif(300, "thumbnailFormatJpeg", 93)
+        ),
+    );
+    let items = &session.media.shared_media.tabs[tab.index()].items;
+    let ids: Vec<i64> = items.iter().map(|item| item.message_id.0).collect();
+    assert_eq!(ids, vec![402, 401, 300]);
+    assert_eq!(session.take_profile_thumbs(), vec![FileId(93)]);
+}

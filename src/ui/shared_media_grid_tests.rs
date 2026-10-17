@@ -33,10 +33,11 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
-/// Fill the Media tab with `count` photos, newest first (ids 1000 down).
-fn show_photos(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, count: i64) {
+/// Fill the Media tab with `count` photos, newest first (ids `base` + count
+/// down to `base` + 1).
+fn show_photos(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, base: i64, count: i64) {
     let messages = (0..count)
-        .map(|n| photo_message(1000 + count - n, n / 4, ""))
+        .map(|n| photo_message(base + count - n, n / 4, ""))
         .collect();
     app.update_in(vcx, |app, _, cx| {
         app.demo_fill_shared_media(SharedMediaTab::Media, messages, cx);
@@ -49,7 +50,7 @@ fn show_photos(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, count: i64) 
 fn tiles_render_and_a_click_opens_the_viewer(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    show_photos(&app, vcx, 4);
+    show_photos(&app, vcx, 1000, 4);
     let bounds = vcx
         .debug_bounds("shared-media-tile-1004")
         .expect("the newest tile is on screen");
@@ -66,8 +67,35 @@ fn tiles_render_and_a_click_opens_the_viewer(cx: &mut TestAppContext) {
 fn a_long_tab_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    show_photos(&app, vcx, 400);
+    show_photos(&app, vcx, 1000, 400);
     assert!(vcx.debug_bounds("shared-media-tile-1400").is_some());
     // The oldest tile is hundreds of rows below the fold.
     assert!(vcx.debug_bounds("shared-media-tile-1001").is_none());
+}
+
+#[gpui_kit::test]
+fn another_page_starts_at_the_top_and_the_same_page_keeps_its_place(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    show_photos(&app, vcx, 1000, 400);
+    app.update_in(vcx, |app, _, cx| {
+        app.shared_media_grid
+            .scroll_down(SharedMediaTab::Media, 1500.);
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    let offset = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.shared_media_grid.offset_y(SharedMediaTab::Media)
+        })
+    };
+    assert!(offset(&app, vcx).is_some_and(|y| y < px(0.)), "scrolled");
+    // The same page drawn again (a re-render, Load more) stays put.
+    app.update_in(vcx, |_, _, cx| cx.notify());
+    vcx.run_until_parked();
+    assert!(offset(&app, vcx).is_some_and(|y| y < px(0.)), "kept");
+    // Another chat's first page starts at the top.
+    show_photos(&app, vcx, 5000, 400);
+    assert_eq!(offset(&app, vcx), Some(px(0.)));
+    assert!(vcx.debug_bounds("shared-media-tile-5400").is_some());
 }

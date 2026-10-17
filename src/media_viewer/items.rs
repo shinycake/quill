@@ -352,6 +352,7 @@ mod tests {
                 thumb_width: 320,
                 thumb_height: 240,
                 minithumbnail: None,
+                thumb_still: true,
                 alternatives: Vec::new(),
             }),
         )
@@ -531,6 +532,7 @@ mod tests {
                 thumb_width: 160,
                 thumb_height: 120,
                 minithumbnail: None,
+                thumb_still: true,
             }),
         )
     }
