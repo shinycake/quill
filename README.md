@@ -417,6 +417,7 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Bot profile rows: Bot Help and Bot Settings (when the bot has those commands), Bot Privacy Policy, "Stop and block bot" / "Restart bot" <!-- parity:profile-bot-actions -->
 - [x] Report row on bots and on channels you don't own, and a Join Channel row on channels you haven't joined <!-- parity:profile-report-join -->
 - [x] Group and channel descriptions show links, mentions and hashtags (TDLib getTextEntities); groups keep only Telegram links; Copy Text and Translate menu <!-- parity:profile-about-links -->
+- [x] Groups in common load 40 at a time, with a Load more row, local search past 20 groups and a plural count <!-- parity:profile-common-groups-paging -->
 
 ### Media
 
@@ -476,6 +477,8 @@ A weekly `telegram-update-watch` scheduled job keeps this checklist current with
 - [x] Empty states per shared-media tab — one shared renderer (glyph + TGX `No*ToShow` title + `No*ToShowInChat`/`InChannel` description, strings.xml:1601-1627), distinct Loading / Empty / Failed states per tab <!-- parity:media-shared-gallery-empty -->
 - [x] Shared media rows show their details: file name, size and date; link title, description and addresses (opened through the link safety check); voice sender, date and duration; music performer, title, duration and size <!-- parity:media-shared-row-meta -->
 - [x] Photos, Videos and GIFs tabs are a virtualized thumbnail grid with a blurred placeholder and a duration badge on videos <!-- parity:media-shared-grid -->
+- [x] Search inside the shared media Files, Music and Links tabs (shown once a tab has more than 10 items) <!-- parity:media-shared-search -->
+- [x] Shared media row menu (Go to message, Cancel download, Show in folder, Forward, Delete, Select) and multi-select with Forward, Delete and Clear, up to 100 items <!-- parity:media-shared-select -->
 - [x] Captions render on photos, videos, animations, audio, and documents <!-- parity:media-caption-render -->
 - [x] Edit a sent media caption via `editMessageCaption` (requests.rs:2123, connect.rs:4941) <!-- parity:media-caption-edit -->
 - [x] Caption position toggle: show above vs below media (composer toggle for photo/video, preserved on caption edits, rendered per `show_caption_above_media`) <!-- parity:media-caption-position -->
