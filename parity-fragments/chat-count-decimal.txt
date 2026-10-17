@@ -1,2 +1,0 @@
-# chat header and profile cover: full member/subscriber counts (lt_count_decimal)
-parity:groups-count-decimal
