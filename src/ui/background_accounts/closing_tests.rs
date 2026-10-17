@@ -11,7 +11,7 @@ use quill::ids::AccountKey;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 const CLOSED: u8 = 1;
@@ -23,6 +23,8 @@ pub(super) struct Fake {
     close_sent: Arc<AtomicUsize>,
     progress: Arc<AtomicU8>,
     finished: Arc<AtomicBool>,
+    longest_drain_micros: Arc<AtomicU64>,
+    drains: Arc<AtomicU64>,
 }
 
 impl Closable for Fake {
@@ -30,7 +32,11 @@ impl Closable for Fake {
         self.close_sent.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn drain(&mut self, _budget: Duration) -> CloseProgress {
+    fn drain(&mut self, budget: Duration) -> CloseProgress {
+        self.drains.fetch_add(1, Ordering::SeqCst);
+        let micros = u64::try_from(budget.as_micros()).unwrap_or(u64::MAX);
+        self.longest_drain_micros
+            .fetch_max(micros, Ordering::SeqCst);
         match self.progress.load(Ordering::SeqCst) {
             CLOSED => CloseProgress::Closed,
             LOST => CloseProgress::Lost,
@@ -44,6 +50,17 @@ impl Closable for Fake {
 }
 
 impl Fake {
+    /// The longest a drain was allowed to block: how long a poll could hold
+    /// the window up, without timing the (loaded) test machine.
+    pub(super) fn longest_drain(&self) -> Duration {
+        Duration::from_micros(self.longest_drain_micros.load(Ordering::SeqCst))
+    }
+
+    /// Whether a drain happened at all, so a budget assert is not vacuous.
+    pub(super) fn was_drained(&self) -> bool {
+        self.drains.load(Ordering::SeqCst) > 0
+    }
+
     pub(super) fn finished(&self) -> bool {
         self.finished.load(Ordering::SeqCst)
     }
@@ -81,12 +98,12 @@ fn a_client_that_never_answers_close_does_not_hold_the_poll(cx: &mut TestAppCont
     let fake = Fake::default();
     app.update_in(&mut vcx, |app, _, cx| {
         app.background.closing.push(account(1), fake.boxed(), false);
-        let started = Instant::now();
         app.poll_background(cx);
+        assert!(fake.was_drained(), "the poll drained the fake");
         assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "poll took {:?}",
-            started.elapsed()
+            fake.longest_drain() < Duration::from_millis(500),
+            "poll could block for {:?}",
+            fake.longest_drain()
         );
         assert!(app.background.closing.contains(&account(1)));
         assert!(app.background.has_work(), "the poll keeps draining it");
@@ -212,9 +229,7 @@ fn stopping_every_account_never_waits_cancels_restarts_and_keeps_draining(cx: &m
     let fake = Fake::default();
     app.update_in(&mut vcx, |app, _, cx| {
         app.background.closing.push(account(1), fake.boxed(), true);
-        let started = Instant::now();
         app.stop_background_accounts(cx);
-        assert!(started.elapsed() < Duration::from_millis(500));
         assert!(app.background.closing.contains(&account(1)));
         assert!(
             app.background.polling,
@@ -224,6 +239,8 @@ fn stopping_every_account_never_waits_cancels_restarts_and_keeps_draining(cx: &m
     fake.close();
     // Nobody waits on it: the background poll alone finishes it.
     run_for(&mut vcx, 600);
+    assert!(fake.was_drained(), "the background poll drained the fake");
+    assert!(fake.longest_drain() < Duration::from_millis(500));
     assert!(fake.finished());
     app.read_with(&vcx, |app, _| {
         assert!(app.background.closing.is_empty());

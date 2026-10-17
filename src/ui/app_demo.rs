@@ -23,6 +23,8 @@ impl QuillApp {
         credentials: Option<TelegramCredentials>,
         demo: Option<ScreenshotDemo>,
     ) -> Self {
+        #[cfg(test)]
+        quill::wake::isolate_current_thread();
         super::tooltip_timing::install(cx);
         quill::media_tools::warm_up();
         let chat = cx.new(SyntheticChat::new);

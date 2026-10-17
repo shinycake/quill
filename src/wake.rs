@@ -20,11 +20,38 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll, Waker};
+use std::thread::ThreadId;
+
+thread_local! {
+    static ISOLATED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Test apps only: from now on this thread's waiters are woken only by
+/// pokes from this same thread, and its pokes wake only its own waiters.
+///
+/// The signals are process-wide statics shared by every app in a test
+/// process. A GPUI test scheduler allows activity only from the thread that
+/// owns it, so a poke from one test (a window activation) that woke
+/// another test's task panicked that test as "not deterministic". Pokes
+/// from threads that were never marked (helper threads) still wake every
+/// waiter, marked or not. The app never calls this; its pokes from the
+/// TDLib thread, the tray and the single-instance listener wake everything
+/// as before.
+pub fn isolate_current_thread() {
+    let _ = ISOLATED.try_with(|isolated| isolated.set(true));
+}
+
+fn isolated_thread() -> Option<ThreadId> {
+    ISOLATED
+        .try_with(|isolated| isolated.get())
+        .unwrap_or(false)
+        .then(|| std::thread::current().id())
+}
 
 /// An epoch counter with a list of waiting tasks.
 pub struct Signal {
     epoch: AtomicU64,
-    wakers: Mutex<Vec<Waker>>,
+    wakers: Mutex<Vec<(Waker, Option<ThreadId>)>>,
 }
 
 impl Signal {
@@ -43,8 +70,23 @@ impl Signal {
     /// Wake every waiter. Cheap and safe from any thread.
     pub fn poke(&self) {
         self.epoch.fetch_add(1, Ordering::AcqRel);
-        let wakers = std::mem::take(&mut *lock_or_recover(&self.wakers));
-        for waker in wakers {
+        let me = isolated_thread();
+        let woken = {
+            let mut wakers = lock_or_recover(&self.wakers);
+            match me {
+                // Production: nothing is marked, so everything wakes.
+                None => std::mem::take(&mut *wakers),
+                // Partition under one lock so no waiter is ever absent.
+                Some(_) => {
+                    let (mine, others): (Vec<_>, Vec<_>) = std::mem::take(&mut *wakers)
+                        .into_iter()
+                        .partition(|(_, owner)| *owner == me);
+                    *wakers = others;
+                    mine
+                }
+            }
+        };
+        for (waker, _) in woken {
             waker.wake();
         }
     }
@@ -76,8 +118,8 @@ impl Future for WaitSince<'_> {
         }
         {
             let mut wakers = lock_or_recover(&self.signal.wakers);
-            if !wakers.iter().any(|w| w.will_wake(cx.waker())) {
-                wakers.push(cx.waker().clone());
+            if !wakers.iter().any(|(w, _)| w.will_wake(cx.waker())) {
+                wakers.push((cx.waker().clone(), isolated_thread()));
             }
         }
         // A poke between the check above and the registration would have
@@ -170,5 +212,62 @@ mod tests {
         assert!(UPDATES.epoch() != updates);
         assert!(PASSCODE.epoch() != passcode);
         assert!(CHROME.epoch() != chrome);
+    }
+
+    struct Flag(std::sync::atomic::AtomicBool);
+    impl Wake for Flag {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Register a waiter on the current thread; returns its wake flag.
+    fn park_waiter(signal: &Signal) -> Arc<Flag> {
+        let flag = Arc::new(Flag(std::sync::atomic::AtomicBool::new(false)));
+        let waker = Waker::from(flag.clone());
+        let mut cx = Context::from_waker(&waker);
+        let mut wait = Box::pin(signal.wait_since(signal.epoch()));
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
+        flag
+    }
+
+    fn woken(flag: &Flag) -> bool {
+        flag.0.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn a_marked_threads_poke_leaves_another_threads_waiter_pending() {
+        static SIGNAL: Signal = Signal::new();
+        let other = std::thread::spawn(|| park_waiter(&SIGNAL));
+        let Ok(other_flag) = other.join() else { return };
+        let marked = std::thread::spawn(|| {
+            isolate_current_thread();
+            let mine = park_waiter(&SIGNAL);
+            SIGNAL.poke();
+            woken(&mine)
+        });
+        assert_eq!(marked.join().ok(), Some(true), "its own waiter wakes");
+        assert!(
+            !woken(&other_flag),
+            "the other thread's waiter stays asleep"
+        );
+        SIGNAL.poke();
+        assert!(woken(&other_flag), "an unmarked poke still reaches it");
+    }
+
+    #[test]
+    fn an_unmarked_poke_wakes_marked_and_unmarked_waiters() {
+        static SIGNAL: Signal = Signal::new();
+        let marked = std::thread::spawn(|| {
+            isolate_current_thread();
+            park_waiter(&SIGNAL)
+        });
+        let Ok(marked_flag) = marked.join() else {
+            return;
+        };
+        let plain = park_waiter(&SIGNAL);
+        SIGNAL.poke();
+        assert!(woken(&marked_flag));
+        assert!(woken(&plain));
     }
 }
