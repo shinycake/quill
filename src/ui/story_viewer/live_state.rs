@@ -1,6 +1,7 @@
 //! The story viewer's state for the live story it plays: the stream's
 //! live player, the comment field, the Stars the
-//! composer will add, the boxes it opened and the Star effects in flight.
+//! composer will add, the boxes it opened and the Star effects in flight
+//! with their clock.
 //! The call, the comments and the donors live in the session
 //! (`stories.live`). The menus are the kit's and keep their own state.
 #![deny(clippy::indexing_slicing)]
@@ -12,12 +13,12 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::live_story::{level_for_stars, pin_finish};
+use quill::live_story::{STAR_EFFECT_MS, level_for_stars, pin_finish, star_effect_shift};
 use quill::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
 use std::time::{Duration, Instant};
 
 /// tdesktop `StarEffect`: a badge rises from the Stars button for 2 s.
-pub(super) const EFFECT_DURATION: Duration = Duration::from_millis(2000);
+pub(super) const EFFECT_DURATION: Duration = Duration::from_millis(STAR_EFFECT_MS);
 /// At most four effects at once.
 pub(super) const MAX_EFFECTS: usize = 4;
 /// tdesktop `kMessageBgOpacity`: an admin's comment background.
@@ -62,11 +63,15 @@ pub(in crate::ui) struct LiveDelete {
 }
 
 /// One Stars effect on screen.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(in crate::ui) struct FlyingStars {
     pub(super) sender: MessageSender,
     pub(super) stars: i64,
     pub(super) started: Instant,
+    /// Where across the canvas it rises, 0 to 1 (tdesktop `shift`).
+    pub(super) shift: f32,
+    /// Which burst it plays (`quill::live_story::burst_order`).
+    pub(super) seed: u64,
 }
 
 pub(in crate::ui) struct LiveStoryUi {
@@ -99,6 +104,8 @@ pub(in crate::ui) struct LiveStoryUi {
     pub(in crate::ui) volume_pill: crate::ui::calls::stream_volume::VolumePill,
     pub(in crate::ui) volume_focus: FocusHandle,
     _volume_focus: [Subscription; 2],
+    /// The screenshot demo's stopped clock for the Stars effects.
+    pub(super) demo_clock: Option<Instant>,
 }
 
 impl LiveStoryUi {
@@ -154,6 +161,7 @@ impl LiveStoryUi {
                 }),
             ],
             volume_focus,
+            demo_clock: None,
         }
     }
 
@@ -168,15 +176,27 @@ impl LiveStoryUi {
         self.flying.clear();
         self.last_comment = None;
         self.overlay = Default::default();
+        self.demo_clock = None;
     }
 
-    /// Queue effects, keeping the newest four.
+    /// The Stars effects' clock: the time, or the demo's stopped one.
+    pub(super) fn now(&self) -> Instant {
+        self.demo_clock.unwrap_or_else(Instant::now)
+    }
+
     pub(super) fn fly(&mut self, sender: MessageSender, stars: i64, now: Instant) {
-        self.flying.push(FlyingStars {
+        self.push_flying(FlyingStars {
             sender,
             stars,
             started: now,
+            shift: star_effect_shift(rand::random()),
+            seed: rand::random(),
         });
+    }
+
+    /// Queue effects, keeping the newest four.
+    pub(super) fn push_flying(&mut self, effect: FlyingStars) {
+        self.flying.push(effect);
         let over = self.flying.len().saturating_sub(MAX_EFFECTS);
         self.flying.drain(..over);
     }

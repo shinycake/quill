@@ -12,9 +12,11 @@
 //! - The comments toggle state (`CommentsHas` / `CommentsState`).
 //! - The pending Star reaction: taps add up for 5.5 seconds after the last
 //!   one (`kPaidAccumulatePeriod`), then they are committed.
+//! - The Stars effect's flight (`StarEffect`, `setupStarsEffectsCanvas`).
 #![deny(clippy::indexing_slicing)]
 
 use crate::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
+use std::time::{Duration, Instant};
 
 /// tdesktop `kMaxShownVideoStreamMessages`.
 pub const MAX_SHOWN_COMMENTS: usize = 100;
@@ -328,6 +330,85 @@ impl PendingLiveReaction {
         let left = self.commit_at_ms.saturating_sub(now_ms) as f32;
         (1.0 - left / crate::paid_reaction::ACCUMULATE_MS as f32).clamp(0.0, 1.0)
     }
+}
+
+/// tdesktop `kStarEffectDuration`: a Stars effect rises for 2 s.
+pub const STAR_EFFECT_MS: u64 = 2000;
+/// tdesktop `effectSize` (`reactionInlineImage * 2`): the burst's box.
+pub const STAR_EFFECT_SIZE: f32 = 64.;
+/// tdesktop `reactionInlineImage`: the box the badge is centred in.
+pub const STAR_EFFECT_TARGET: f32 = 32.;
+/// tdesktop `setupStarsEffectsCanvas`: two bursts wide, four tall.
+pub const STAR_EFFECT_CANVAS_W: f32 = STAR_EFFECT_SIZE * 2.;
+pub const STAR_EFFECT_CANVAS_H: f32 = STAR_EFFECT_SIZE * 4.;
+/// tdesktop `kStarEffectScaleMin` / `kStarEffectScaleMax`.
+const STAR_EFFECT_SCALE_MIN: f32 = 0.3;
+const STAR_EFFECT_SCALE_MAX: f32 = 0.7;
+/// tdesktop's 0.125 of the flight spent fading in, and fading out.
+const STAR_EFFECT_FADE: f32 = 0.125;
+
+/// Where one Stars effect is at a moment of its flight: the top left of
+/// its `STAR_EFFECT_SIZE` box in the canvas (the badge's
+/// `STAR_EFFECT_TARGET` box is centred in it), and the badge's opacity and
+/// scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StarEffectFrame {
+    pub left: f32,
+    pub top: f32,
+    pub opacity: f32,
+    pub scale: f32,
+}
+
+/// tdesktop `setupStarsEffectsCanvas` paint: the effect at `progress`
+/// (0 to 1) that started at `shift` (0 to 1) across the canvas.
+pub fn star_effect_frame(progress: f32, shift: f32) -> StarEffectFrame {
+    let progress = progress.clamp(0.0, 1.0);
+    let opacity = if progress < STAR_EFFECT_FADE {
+        progress / STAR_EFFECT_FADE
+    } else if progress > 1.0 - STAR_EFFECT_FADE {
+        (1.0 - progress) / STAR_EFFECT_FADE
+    } else {
+        1.0
+    };
+    StarEffectFrame {
+        left: shift.clamp(0.0, 1.0) * (STAR_EFFECT_CANVAS_W - STAR_EFFECT_SIZE),
+        top: (1.0 - progress) * (STAR_EFFECT_CANVAS_H - STAR_EFFECT_SIZE),
+        opacity,
+        scale: STAR_EFFECT_SCALE_MIN + (STAR_EFFECT_SCALE_MAX - STAR_EFFECT_SCALE_MIN) * opacity,
+    }
+}
+
+/// tdesktop `RandomIndex(360) / 360.` from any random number.
+pub fn star_effect_shift(random: u32) -> f32 {
+    (random % 360) as f32 / 360.
+}
+
+/// The order an effect tries the `count` bursts in (tdesktop
+/// `randomLoadedFrom` shuffles them): from the one `seed` picks, round.
+pub fn burst_order(seed: u64, count: usize) -> impl Iterator<Item = usize> {
+    let start = usize::try_from(seed % u64::try_from(count.max(1)).unwrap_or(1)).unwrap_or(0);
+    (0..count).map(move |step| (start + step) % count)
+}
+
+/// The burst an effect started at `started` plays (tdesktop
+/// `randomLoadedFrom`, resolved once, when the effect starts): the first in
+/// `seed`'s order whose clip was ready by then. `ready[i]` is when
+/// candidate `i`'s clip became ready, if it has.
+pub fn ready_burst(seed: u64, ready: &[Option<Instant>], started: Instant) -> Option<usize> {
+    burst_order(seed, ready.len()).find(|&i| {
+        ready
+            .get(i)
+            .copied()
+            .flatten()
+            .is_some_and(|at| at <= started)
+    })
+}
+
+/// The frame of a `count`-frame burst at `fps`, `age` into its effect: it
+/// plays once, so there is none after the last.
+pub fn burst_frame_index(age: Duration, fps: f64, count: usize) -> Option<usize> {
+    let index = (age.as_secs_f64() * fps) as usize;
+    (index < count).then_some(index)
 }
 
 #[cfg(test)]

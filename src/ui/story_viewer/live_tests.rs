@@ -6,15 +6,17 @@
 //! playing beside a 1:1 call, and the header drawn by the live
 //! controller). Nothing reaches Telegram: the app
 //! has no connection and joins nothing.
+use super::live_effects::burst_tint;
 use super::live_state::{
-    EFFECT_DURATION, SendAction, StarsBoxMode, effect_progress, pin_label, pinned_comments,
-    send_action,
+    EFFECT_DURATION, FlyingStars, SendAction, StarsBoxMode, effect_progress, pin_label,
+    pinned_comments, send_action,
 };
 use super::live_story::live_item;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::sticker_playback::{ClipKey, PlaybackSize};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -24,8 +26,11 @@ use gpui_kit::{
 use quill::calls::engine::StreamState;
 use quill::ids::{ChatId, FileId};
 use quill::live_story::fallback_levels;
+use quill::state::LiveBursts;
 use quill::story_viewer::{LiveStoryCall, StoryViewerItem, StoryViewerKind};
-use quill::telegram::envelope::{MessageSender, ParsedGroupCallMessage};
+use quill::telegram::envelope::{
+    MessageSender, ParsedGroupCallMessage, StickerFormat, StickerItem,
+};
 use std::time::{Duration, Instant};
 
 fn message(id: i32, date: i32, stars: i64) -> ParsedGroupCallMessage {
@@ -619,4 +624,110 @@ fn an_account_switch_closes_a_story_pip(cx: &mut TestAppContext) {
         assert!(app.group_call.live_pip.is_none());
         assert!(app.stories.live.watching.is_none());
     });
+}
+
+/// tdesktop `setupStarsEffectsCanvas`.
+#[gpui_kit::test]
+fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
+    let vcx = &mut vcx;
+    let layer = find(vcx, "live-story-effects").expect("the effects in flight");
+    let stars = find(vcx, "live-story-stars").expect("the Stars button");
+    assert_eq!(layer.size.width, px(128.));
+    assert_eq!(layer.size.height, px(256.));
+    assert_eq!(layer.bottom(), stars.bottom());
+    assert_eq!(layer.center().x, stars.center().x);
+    assert!(find(vcx, "live-story-effect-badge").is_some());
+    app.update(vcx, |app, cx| {
+        let live = &mut app.stories.live;
+        live.demo_clock = live.demo_clock.map(|now| now + EFFECT_DURATION);
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(find(vcx, "live-story-effects").is_none());
+    assert!(find(vcx, "live-story-effect-badge").is_none());
+}
+
+/// The burst's gold frames come from its decode's background job, and an
+/// effect plays them only when they were ready before it started (tdesktop
+/// `ReactionFlyAnimation` resolves its effect once).
+#[gpui_kit::test]
+fn a_tinted_burst_is_made_off_thread_and_plays_for_effects_after_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
+    let vcx = &mut vcx;
+    let file = FileId(9001);
+    let key = ClipKey {
+        file,
+        tint: Some(burst_tint()),
+    };
+    let effect = |started| FlyingStars {
+        sender: MessageSender::User { user_id: 801 },
+        stars: 5,
+        started,
+        shift: 0.5,
+        seed: 0,
+    };
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.live_bursts = LiveBursts::Loaded(vec![burst_sticker(file)]);
+        }
+        let live = &mut app.stories.live;
+        let now = Instant::now();
+        live.demo_clock = Some(now);
+        live.flying.clear();
+        live.push_flying(effect(now));
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(find(vcx, "live-story-effect-badge").is_some());
+    assert!(find(vcx, "live-story-effect-burst").is_none());
+
+    let white = image::RgbaImage::from_pixel(4, 4, image::Rgba([255; 4]));
+    app.update(vcx, |app, cx| {
+        app.spawn_clip_job(
+            key,
+            PlaybackSize::Sticker,
+            move |_, _| Ok((vec![white; 3], 30.)),
+            cx,
+        );
+    });
+    frames(vcx);
+    let first_pixel = app.read_with(vcx, |app, _| {
+        let clip = app.decoded_clip(key, PlaybackSize::Sticker, false)?;
+        let bytes = clip.frames.first()?.as_bytes(0)?;
+        bytes.get(..4).map(<[u8]>::to_vec)
+    });
+    assert_eq!(first_pixel, Some(vec![0, 184, 255, 255]), "tinted gold");
+    assert!(
+        find(vcx, "live-story-effect-burst").is_none(),
+        "an effect that started before the burst was ready flies alone"
+    );
+
+    app.update(vcx, |app, cx| {
+        let live = &mut app.stories.live;
+        let now = Instant::now() + Duration::from_millis(1);
+        live.demo_clock = Some(now);
+        live.push_flying(effect(now));
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(find(vcx, "live-story-effect-burst").is_some());
+}
+
+fn burst_sticker(file: FileId) -> StickerItem {
+    StickerItem {
+        custom_emoji_id: None,
+        id: i64::from(file.0),
+        set_id: 0,
+        emoji: String::new(),
+        width: 512,
+        height: 512,
+        format: StickerFormat::Tgs,
+        file_id: file,
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        requires_premium: false,
+        premium_animation: None,
+    }
 }
