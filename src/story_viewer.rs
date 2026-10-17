@@ -193,6 +193,23 @@ impl StoryViewerItem {
     }
 }
 
+/// Where the viewer was opened from, which decides what it shows
+/// (tdesktop `Controller::rebuildFromContext`,
+/// `media_stories_controller.cpp:720-777`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryOpenScope {
+    /// A story tray tile (`StorySourcesList`): the poster's active stories
+    /// inside the walk across the tray, with the neighbours beside them.
+    Tray,
+    /// A story card or a story reply header in a message
+    /// (`StoriesContextSingle`): that one story, no walk, no neighbours.
+    Single,
+    /// A `t.me/<user>/s/<id>` link: a [`StoryOpenScope::Single`] open that
+    /// says the link is broken when the story is gone
+    /// (`lng_stories_link_invalid`, `window_session_controller.cpp:693-705`).
+    Link,
+}
+
 /// What the viewer's story list follows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 enum ListSource {
@@ -280,26 +297,38 @@ impl StoryViewer {
         }
     }
 
-    /// Replace the list with another poster's stories, on `index`.
-    pub fn switch_poster(&mut self, items: Vec<StoryViewerItem>, index: usize) {
-        if index < items.len() {
+    /// Replace the list with another poster's stories, on `index`, and the
+    /// walk with one that already shows that poster, so the two never
+    /// disagree about who is current.
+    pub fn switch_poster(&mut self, walk: TrayWalk, items: Vec<StoryViewerItem>, index: usize) {
+        if index < items.len() && self.tray_walk().is_some() {
             self.items = items;
             self.index = index;
+            self.source = ListSource::Tray(walk);
         }
     }
 
     /// Swap in a fresh build of the followed poster's stories, keeping the
-    /// current story current. A build without the current story is ignored:
-    /// a deleted story closes the viewer elsewhere, and one that only left
-    /// the tray stays on screen until the user moves on.
-    pub fn refresh(&mut self, items: Vec<StoryViewerItem>) {
-        let Some(key) = self.current().map(StoryViewerItem::key) else {
+    /// current story current. A build without the current story keeps it
+    /// in its place by id, so a story that only left the tray stays on
+    /// screen until the user moves on while the rest of the list stays
+    /// live; a deleted story closes the viewer elsewhere.
+    pub fn refresh(&mut self, mut items: Vec<StoryViewerItem>) {
+        let Some(current) = self.current().cloned() else {
             return;
         };
-        if items == self.items {
-            return;
-        }
-        if let Some(index) = items.iter().position(|item| item.key() == key) {
+        let index = match items.iter().position(|item| item.key() == current.key()) {
+            Some(index) => index,
+            None => {
+                let at = items
+                    .iter()
+                    .position(|item| item.story_id > current.story_id)
+                    .unwrap_or(items.len());
+                items.insert(at, current);
+                at
+            }
+        };
+        if items != self.items || index != self.index {
             self.items = items;
             self.index = index;
         }
@@ -458,58 +487,11 @@ fn story_viewer_item(chat_id: ChatId, story: &ParsedStory) -> Option<StoryViewer
     Some(item)
 }
 
-/// The story a tray tap opens: the oldest story after `max_read_story_id`,
-/// or the oldest story when all are read (tdesktop `StoriesSource::toOpen`).
-/// `0` when the poster has no active stories.
-pub fn story_to_open(view: &ChatActiveStoriesView) -> i32 {
-    let ids = || view.stories.iter().map(|info| info.story_id);
-    ids()
-        .filter(|id| *id > view.max_read_story_id)
-        .min()
-        .or_else(|| ids().min())
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::story_tray_walk::TraySource;
-    use crate::telegram::envelope::{PhotoSizeView, StoryInfoView};
-
-    fn active(max_read: i32, ids: &[i32]) -> ChatActiveStoriesView {
-        ChatActiveStoriesView {
-            chat_id: 1,
-            list: None,
-            order: 0,
-            max_read_story_id: max_read,
-            stories: ids
-                .iter()
-                .map(|id| StoryInfoView {
-                    story_id: *id,
-                    date: 0,
-                    is_for_close_friends: false,
-                    is_live: false,
-                })
-                .collect(),
-        }
-    }
-
-    #[test]
-    fn story_to_open_is_first_unread() {
-        assert_eq!(story_to_open(&active(4, &[3, 4, 5, 6])), 5);
-        assert_eq!(story_to_open(&active(0, &[9, 7, 8])), 7);
-        assert_eq!(story_to_open(&active(4, &[3, 7, 5])), 5);
-    }
-
-    #[test]
-    fn story_to_open_is_first_when_all_read() {
-        assert_eq!(story_to_open(&active(6, &[5, 3, 6])), 3);
-    }
-
-    #[test]
-    fn story_to_open_is_zero_without_stories() {
-        assert_eq!(story_to_open(&active(0, &[])), 0);
-    }
+    use crate::telegram::envelope::{PhotoSizeView, StoryInfoView, StoryListView};
 
     fn size(file_id: i32, width: i32, height: i32) -> PhotoSizeView {
         PhotoSizeView {
@@ -706,7 +688,7 @@ mod tests {
             chat_id: 7,
             unread: true,
         }];
-        let walk = TrayWalk::open(&sources, 7, 6, false).expect("in the tray");
+        let walk = TrayWalk::open(StoryListView::Main, &sources, 7, 6, false).expect("in the tray");
         let mut viewer = StoryViewer::open_tray(walk, vec![item(StoryViewerKind::Photo, 6)], 0);
         assert_eq!(viewer.followed_poster(), Some(ChatId(7)));
         viewer.refresh(vec![
@@ -716,9 +698,16 @@ mod tests {
         ]);
         assert_eq!(viewer.current().unwrap().story_id, 6);
         assert_eq!(viewer.position(), Some((2, 3)));
-        // A build that lost the current story leaves the list alone.
-        viewer.refresh(vec![item(StoryViewerKind::Photo, 7)]);
-        assert_eq!(viewer.position(), Some((2, 3)));
+        // A build that lost the current story keeps it in id order and
+        // still takes the rest.
+        viewer.refresh(vec![
+            item(StoryViewerKind::Photo, 7),
+            item(StoryViewerKind::Photo, 8),
+        ]);
+        assert_eq!(viewer.current().unwrap().story_id, 6);
+        assert_eq!(viewer.position(), Some((1, 3)));
+        viewer.refresh(vec![item(StoryViewerKind::Photo, 2)]);
+        assert_eq!(viewer.position(), Some((2, 2)));
         viewer.close();
         assert_eq!(viewer.followed_poster(), None);
         let fixed = StoryViewer::open(vec![item(StoryViewerKind::Photo, 5)], 0);

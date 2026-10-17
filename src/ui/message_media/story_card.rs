@@ -12,6 +12,7 @@ use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 use quill::service_text::{Seg, ServiceText};
 use quill::state::{StoryCardState, StoryPreview};
+use quill::story_viewer::StoryOpenScope;
 
 /// Side of the round picture of a story mention (`st::storyMentionSize`).
 const MENTION_SIDE: f32 = 72.0;
@@ -93,7 +94,7 @@ impl QuillApp {
             self.set_status_note(StatusNote::silent(tr(keys::FORWARDED_STORY_EXPIRED)), cx);
             return;
         }
-        self.open_story_viewer(poster, story_id, cx);
+        self.open_story_viewer(poster, story_id, StoryOpenScope::Single, cx);
     }
 }
 

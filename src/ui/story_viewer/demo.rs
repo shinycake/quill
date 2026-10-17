@@ -1,7 +1,9 @@
 //! `ready-story-viewer` screenshot demo: the showcase account's story tray
 //! with a photo behind every story, opened the way a tray tap opens it
 //! (injected, no live Telegram). `QUILL_DEMO_STORY=gone` instead opens a
-//! story the server no longer has, which shows the broken-link toast.
+//! linked story the server no longer has, which shows the broken-link
+//! toast, and `QUILL_DEMO_STORY=card` opens Leo's story the way a story
+//! card in a message does: alone, with no neighbours.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -11,6 +13,7 @@ use crate::ui::showcase_demo::{MAYA, Scene, apply_ready_showcase};
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
+use quill::story_viewer::StoryOpenScope;
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -36,7 +39,7 @@ register_demos![
 
 impl QuillApp {
     fn demo_story_viewer(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let gone = std::env::var("QUILL_DEMO_STORY").is_ok_and(|v| v == "gone");
+        let variant = std::env::var("QUILL_DEMO_STORY").unwrap_or_default();
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
@@ -60,11 +63,13 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-        if gone {
-            session.stories.missing.insert((LEO, 99));
-            self.open_story_viewer(ChatId(LEO), 99, cx);
-        } else {
-            self.open_story_viewer(ChatId(LEO), 3, cx);
+        match variant.as_str() {
+            "gone" => {
+                session.stories.missing.insert((LEO, 99));
+                self.open_story_viewer(ChatId(LEO), 99, StoryOpenScope::Link, cx);
+            }
+            "card" => self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Single, cx),
+            _ => self.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Tray, cx),
         }
     }
 }

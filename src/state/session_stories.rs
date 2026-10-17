@@ -88,11 +88,28 @@ impl Session {
     /// main-list entries only, sorted by `(order, chat_id)` descending
     /// (schema `chatActiveStories` comment, line 6781).
     pub fn ordered_story_tray(&self) -> Vec<&ChatActiveStoriesView> {
+        self.ordered_story_list(StoryListView::Main)
+    }
+
+    /// One story list as the viewer's walk sees it: each poster and whether
+    /// it has unread stories, in tray order.
+    pub fn story_walk_sources(
+        &self,
+        list: StoryListView,
+    ) -> Vec<crate::story_tray_walk::TraySource> {
+        self.ordered_story_list(list)
+            .into_iter()
+            .map(crate::story_tray_walk::TraySource::of)
+            .collect()
+    }
+
+    /// The posters in one story list (main or archive), in tray order.
+    pub fn ordered_story_list(&self, list: StoryListView) -> Vec<&ChatActiveStoriesView> {
         let mut entries: Vec<&ChatActiveStoriesView> = self
             .stories
             .tray
             .values()
-            .filter(|entry| entry.list == Some(StoryListView::Main))
+            .filter(|entry| entry.list == Some(list))
             .collect();
         entries.sort_by_key(|entry| std::cmp::Reverse((entry.order, entry.chat_id)));
         entries

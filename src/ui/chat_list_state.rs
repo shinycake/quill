@@ -76,10 +76,10 @@ pub(crate) struct ChatListUi {
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pub(super) pending_close_secret_chat: Option<ChatId>,
-    /// Phase 9.1: `(chat_id, story_id)` the user tapped while the story's
-    /// full content was still being fetched; resolved on the next render
-    /// once the `story` response lands in the cache.
-    pub(super) pending_story_open: Option<(i64, i32)>,
+    /// Phase 9.1: the story the user opened while its full content was
+    /// still being fetched; resolved on the next render once the `story`
+    /// response lands in the cache.
+    pub(super) pending_story_open: Option<super::story_viewer::PendingStoryOpen>,
     /// The keyboard selection in the list and in its search results.
     pub(super) keys: super::chat_list_keys::ChatListKeys,
 }

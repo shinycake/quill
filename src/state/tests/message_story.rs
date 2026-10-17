@@ -61,6 +61,36 @@ fn card_state_is_loading_until_the_story_lands_or_fails() {
 }
 
 #[test]
+fn a_transient_get_story_failure_leaves_the_story_to_ask_for_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for code in [500, 420] {
+        let extra = session.request_for_story(RequestPurpose::GetStory, ChatId(77), 5);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":{code},"message":"x"}}"#,
+                extra.0
+            ),
+        );
+        assert_eq!(session.story_card_state(77, 5), StoryCardState::Loading);
+    }
+    let extra = session.request_for_story(RequestPurpose::GetStory, ChatId(77), 5);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"STORY_ID_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.story_card_state(77, 5), StoryCardState::Expired);
+}
+
+#[test]
 fn a_story_is_unread_only_while_active_and_newer_than_the_read_mark() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

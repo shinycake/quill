@@ -2,6 +2,7 @@
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
 use crate::state::*;
+use std::time::{Duration, Instant};
 
 pub struct StoriesState {
     /// Phase 9.1: active stories per chat from `updateChatActiveStories` /
@@ -87,9 +88,12 @@ pub struct StoriesState {
     /// Phase 9.1: `loadActiveStories(storyListMain)` was issued. A retry is
     /// allowed (the flag is reset) if the attempt failed.
     pub stories_active_loaded: bool,
-    /// `loadActiveStories` failed, usually with 404 once the whole main
-    /// tray is loaded: no more pages are asked for.
+    /// `loadActiveStories` answered 404: the whole main tray is loaded and
+    /// no more pages are asked for.
     pub stories_active_exhausted: bool,
+    /// After any other `loadActiveStories` failure: no page goes out before
+    /// this instant, and the wait before it, which doubles per failure.
+    pub stories_active_retry: Option<(Instant, Duration)>,
     /// Stories replied to that `getStory` was already asked for, so a
     /// deleted one is not requested again on every refresh.
     pub reply_attempted: HashSet<(i64, i32)>,
@@ -134,6 +138,7 @@ impl StoriesState {
             close_friends_pending: None,
             stories_active_loaded: false,
             stories_active_exhausted: false,
+            stories_active_retry: None,
             reply_attempted: HashSet::new(),
             missing: HashSet::new(),
             live: None,
@@ -144,14 +149,45 @@ impl StoriesState {
     }
 }
 
+/// The first wait after a failed `loadActiveStories`; each later failure
+/// doubles it, up to [`ACTIVE_STORIES_RETRY_MAX`].
+pub const ACTIVE_STORIES_RETRY_FIRST: Duration = Duration::from_secs(5);
+pub const ACTIVE_STORIES_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
+
 impl StoriesState {
     /// Allow one more `loadActiveStories` page, which the driver otherwise
-    /// sends once per Ready. `false` once the main tray is fully loaded.
-    pub fn rearm_active_stories_load(&mut self) -> bool {
-        if self.stories_active_exhausted {
+    /// sends once per Ready. `false` once the main tray is fully loaded, or
+    /// while waiting out a failed page.
+    pub fn rearm_active_stories_load(&mut self, now: Instant) -> bool {
+        if self.stories_active_exhausted
+            || self.stories_active_retry.is_some_and(|(at, _)| now < at)
+        {
             return false;
         }
         self.stories_active_loaded = false;
         true
+    }
+
+    /// `loadActiveStories` failed with `code`: 404 means everything is
+    /// loaded; anything else (a timeout, FLOOD_WAIT, a 500) waits and tries
+    /// again.
+    pub fn active_stories_failed(&mut self, code: i32, now: Instant) {
+        if code == 404 {
+            self.stories_active_exhausted = true;
+            return;
+        }
+        let wait = self
+            .stories_active_retry
+            .map_or(ACTIVE_STORIES_RETRY_FIRST, |(_, wait)| {
+                wait.saturating_mul(2).min(ACTIVE_STORIES_RETRY_MAX)
+            });
+        self.stories_active_retry = Some((now + wait, wait));
+    }
+
+    /// A new Ready pages the tray from the start.
+    pub fn reset_active_stories_paging(&mut self) {
+        self.stories_active_loaded = false;
+        self.stories_active_exhausted = false;
+        self.stories_active_retry = None;
     }
 }

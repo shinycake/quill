@@ -1,26 +1,20 @@
 //! The neighbour posters beside the story, for a viewer opened from the
 //! story tray (tdesktop `Media::Stories::Sibling`,
 //! `media_stories_sibling.cpp`): the story each would open on, shrunk and
-//! dimmed, with the poster's photo and name over it. A click opens that
-//! poster (`jumpFor`).
+//! dimmed, with the poster's photo and name over it, placed by
+//! [`quill::story_sibling_layout`]. A click opens that poster (`jumpFor`).
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
 use crate::ui::chat_row::chat_avatar;
-use quill::story_viewer::collect_found_story_items;
+use quill::story_sibling_layout::{SiblingLayout, sibling_layout};
 
-/// tdesktop `kSiblingMultiplierDefault`: a sibling's size against the story.
-const SIBLING_SCALE: f32 = 0.448;
 /// tdesktop `kSiblingUserpicSize`: the photo's size against the sibling.
 const SIBLING_PHOTO_SCALE: f32 = 0.3;
 /// tdesktop `kSiblingFade` and `kSiblingFadeOver`: the dimming over the
 /// picture, lighter under the pointer.
 const SIBLING_FADE: f32 = 0.5;
 const SIBLING_FADE_OVER: f32 = 0.4;
-/// The story is 360 × 640 inside the panel's 16 px padding.
-const STORY_WIDTH: f32 = 360.;
-const STORY_HEIGHT: f32 = 640.;
-const PANEL_WIDTH: f32 = STORY_WIDTH + 32.;
 const SIBLING_GROUP: &str = "story-sibling";
 
 impl QuillApp {
@@ -38,46 +32,42 @@ impl QuillApp {
         (!local && !busy && item.download_file_id.0 != 0).then_some(item.download_file_id)
     }
 
-    fn story_sibling_item(&self, delta: i32) -> Option<StoryViewerItem> {
-        let (chat_id, story_id) = self.story_sibling(delta)?;
-        let stories = &self.session()?.stories.stories;
-        collect_found_story_items(&[(chat_id.0, story_id)], stories)
-            .into_iter()
-            .next()
-    }
-
-    /// Both neighbours, each centered in the space beside the story.
-    pub(in crate::ui) fn story_sibling_layer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let left = self.story_sibling_preview(-1, cx);
-        let right = self.story_sibling_preview(1, cx);
-        if left.is_none() && right.is_none() {
-            return None;
-        }
-        let zone = || {
-            div()
-                .flex_1()
-                .min_w_0()
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
+    /// Both neighbours, positioned against the story frame they are
+    /// children of, for a window `window_width` wide.
+    pub(in crate::ui) fn story_sibling_layer(
+        &self,
+        window_width: f32,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(layout) = sibling_layout(window_width) else {
+            return Vec::new();
         };
-        Some(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .flex()
-                .child(zone().children(left))
-                .child(div().w(px(PANEL_WIDTH)).flex_none())
-                .child(zone().children(right))
-                .into_any_element(),
-        )
+        [
+            (-1, layout.left_from_frame(window_width)),
+            (1, layout.right_from_frame(window_width)),
+        ]
+        .into_iter()
+        .filter_map(|(delta, left)| {
+            let preview = self.story_sibling_preview(delta, &layout, cx)?;
+            Some(
+                div()
+                    .absolute()
+                    .left(px(left))
+                    .top(relative(0.5))
+                    .mt(px(-layout.height / 2.))
+                    .child(preview)
+                    .into_any_element(),
+            )
+        })
+        .collect()
     }
 
-    fn story_sibling_preview(&self, delta: i32, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn story_sibling_preview(
+        &self,
+        delta: i32,
+        layout: &SiblingLayout,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let item = self.story_sibling_item(delta)?;
         let session = self.session()?;
         let roots = self.media_display_roots();
@@ -95,8 +85,7 @@ impl QuillApp {
         let photo = session
             .chat_photo_path(item.chat_id)
             .and_then(|path| sandboxed_display_path(path, &roots));
-        let width = STORY_WIDTH * SIBLING_SCALE;
-        let height = STORY_HEIGHT * SIBLING_SCALE;
+        let (width, height) = (layout.width, layout.height);
         let fill = || div().absolute().top_0().left_0().right_0().bottom_0();
         let picture: AnyElement = match picture {
             Some(path) => img(path)

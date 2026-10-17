@@ -721,7 +721,7 @@ impl Render for QuillApp {
             .children(self.photo_editor_overlay(cx))
             // Phase 9.1: story viewer overlay above the media viewer.
             .when(self.stories.viewer.is_open(), |this| {
-                this.child(self.story_viewer_overlay(cx))
+                this.child(self.story_viewer_overlay(f32::from(window.viewport_size().width), cx))
             })
             // Phase 9.3: story composer overlay above the story viewer.
             .when(self.stories.composer.open, |this| {

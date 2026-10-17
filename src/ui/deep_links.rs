@@ -216,7 +216,12 @@ impl QuillApp {
             ..
         } = action
         {
-            self.open_story_viewer(chat_id, *story_id, cx);
+            self.open_story_viewer(
+                chat_id,
+                *story_id,
+                quill::story_viewer::StoryOpenScope::Link,
+                cx,
+            );
         }
         cx.notify();
     }

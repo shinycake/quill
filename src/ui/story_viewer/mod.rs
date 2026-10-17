@@ -841,3 +841,4 @@ mod story_header_tests;
 mod story_viewer_overlay;
 
 pub(in crate::ui) use live_state::LiveStoryUi;
+pub(in crate::ui) use open::PendingStoryOpen;

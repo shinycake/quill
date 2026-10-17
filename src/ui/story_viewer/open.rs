@@ -1,36 +1,49 @@
 //! Opening the story viewer: fetching what the clicked story needs, the
-//! deferred open while `getStory` is in flight, and the toast when the
-//! story turned out to be gone.
+//! deferred open while `getStory` is in flight, and the toast when a
+//! linked story turned out to be gone. What the viewer shows depends on
+//! where it was opened from ([`StoryOpenScope`]).
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
 use quill::state::StoryCardState;
-use quill::story_tray_walk::{TraySource, TrayWalk};
+use quill::story_tray_walk::TrayWalk;
+use quill::story_viewer::{StoryOpenScope, collect_found_story_items};
+
+/// A story open waiting for its `getStory` answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) struct PendingStoryOpen {
+    pub chat_id: i64,
+    pub story_id: i32,
+    pub scope: StoryOpenScope,
+}
 
 impl QuillApp {
-    /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`.
-    /// Missing story details for the chat's active stories are fetched with
-    /// `getStory` first; the clicked story opens once its `story` response
-    /// lands in the cache (`pending_story_open`, resolved on the next
-    /// render). `openStory` marks the current story as viewed.
+    /// Phase 9.1: open the fullscreen story viewer on `(chat_id, story_id)`
+    /// from `scope`. A tray open fetches the poster's other active stories
+    /// with `getStory` too; a single open fetches only its story. The story
+    /// opens once its `story` response lands in the cache
+    /// (`pending_story_open`, resolved on the next render). `openStory`
+    /// marks the current story as viewed.
     pub(in crate::ui) fn open_story_viewer(
         &mut self,
         chat_id: ChatId,
         story_id: i32,
+        scope: StoryOpenScope,
         cx: &mut Context<Self>,
     ) {
-        let mut wanted: Vec<i32> = self
-            .session()
-            .and_then(|session| session.stories.tray.get(&chat_id.0))
-            .map(|tray| tray.stories.iter().map(|info| info.story_id).collect())
-            .unwrap_or_default();
-        // A story opened from a message (forward or mention) may not be in
-        // the poster's tray at all; fetch it too when it is not cached.
+        let mut wanted: Vec<i32> = match scope {
+            StoryOpenScope::Tray => self
+                .session()
+                .and_then(|session| session.stories.tray.get(&chat_id.0))
+                .map(|tray| tray.stories.iter().map(|info| info.story_id).collect())
+                .unwrap_or_default(),
+            StoryOpenScope::Single | StoryOpenScope::Link => Vec::new(),
+        };
         if !wanted.contains(&story_id) {
             wanted.push(story_id);
         }
         // A story `getStory` already failed for is known to be gone: asking
-        // again would only delay the toast below.
+        // again would only delay the answer below.
         let fetch: Vec<i32> = self
             .session()
             .map(|s| {
@@ -49,83 +62,85 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
             )));
         }
-        if !self.rebuild_story_viewer(chat_id, story_id, cx) {
-            self.chat_list.pending_story_open = Some((chat_id.0, story_id));
+        let open = PendingStoryOpen {
+            chat_id: chat_id.0,
+            story_id,
+            scope,
+        };
+        if !self.rebuild_story_viewer(open, cx) {
+            self.chat_list.pending_story_open = Some(open);
         }
         cx.notify();
     }
 
     /// Phase 9.1: resolve a tapped story once `getStory` answered. A story
     /// that arrived opens; one the server no longer has (deleted, expired
-    /// or not reachable) drops the open and says so, like tdesktop's
-    /// `lng_stories_link_invalid` toast after `Stories::resolve`
-    /// (`window_session_controller.cpp:700-705`).
+    /// or not reachable) drops the open. Only a link says so, like
+    /// tdesktop's `lng_stories_link_invalid` toast after `Stories::resolve`
+    /// (`window_session_controller.cpp:700-705`); a card or reply header
+    /// shows the story as expired already, and tdesktop's `openPeerStory`
+    /// stays silent.
     pub(in crate::ui) fn resolve_pending_story_open(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, story_id)) = self.chat_list.pending_story_open else {
+        let Some(open) = self.chat_list.pending_story_open else {
             return;
         };
         match self
             .session()
-            .map(|s| s.story_card_state(chat_id, story_id))
+            .map(|s| s.story_card_state(open.chat_id, open.story_id))
         {
             Some(StoryCardState::Ready) => {
                 self.chat_list.pending_story_open = None;
-                self.rebuild_story_viewer(ChatId(chat_id), story_id, cx);
+                self.rebuild_story_viewer(open, cx);
             }
             Some(StoryCardState::Expired) => {
                 self.chat_list.pending_story_open = None;
-                self.set_status_note(StatusNote::info(tr(keys::STORIES_LINK_INVALID)), cx);
+                if open.scope == StoryOpenScope::Link {
+                    self.set_status_note(StatusNote::info(tr(keys::STORIES_LINK_INVALID)), cx);
+                }
             }
             Some(StoryCardState::Loading) | None => {}
         }
     }
 
-    /// Build the viewer items for `chat_id`'s cached stories and open on
-    /// `story_id`. Returns `false` when the clicked story is not cached yet.
-    pub(in crate::ui) fn rebuild_story_viewer(
-        &mut self,
-        chat_id: ChatId,
-        story_id: i32,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let items: Vec<StoryViewerItem> = self
-            .session()
-            .and_then(|session| {
-                session
-                    .stories
-                    .tray
-                    .get(&chat_id.0)
-                    .map(|tray| collect_story_items(chat_id, tray, &session.stories.stories))
-            })
-            .unwrap_or_default();
-        // A story in the poster's tray opens on the tray's list, which then
-        // follows the tray, inside the walk across the tray's posters
-        // (tdesktop's sources-list context); one that is not in it opens
-        // alone.
-        let walk = self.session().and_then(|s| {
-            let sources: Vec<TraySource> = s
-                .ordered_story_tray()
-                .into_iter()
-                .map(TraySource::of)
-                .collect();
-            let unread = s.story_is_unread(chat_id.0, story_id);
-            TrayWalk::open(&sources, chat_id.0, story_id, unread)
-        });
-        let index = items.iter().position(|item| item.story_id == story_id);
-        let viewer = match (index, walk) {
-            (Some(index), Some(walk)) => StoryViewer::open_tray(walk, items, index),
-            (Some(index), None) => StoryViewer::open(items, index),
-            (None, _) => StoryViewer::open(
-                self.session()
-                    .map(|s| {
-                        quill::story_viewer::collect_found_story_items(
-                            &[(chat_id.0, story_id)],
-                            &s.stories.stories,
-                        )
-                    })
-                    .unwrap_or_default(),
+    /// Build the viewer for `open` from the cached stories. Returns `false`
+    /// when the opened story is not cached yet.
+    fn rebuild_story_viewer(&mut self, open: PendingStoryOpen, cx: &mut Context<Self>) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        let chat_id = ChatId(open.chat_id);
+        let alone = || {
+            StoryViewer::open(
+                collect_found_story_items(
+                    &[(open.chat_id, open.story_id)],
+                    &session.stories.stories,
+                ),
                 0,
-            ),
+            )
+        };
+        // A tray open shows the poster's active stories, which then follow
+        // the tray, inside the walk across the story list the poster is in
+        // (tdesktop's `StorySourcesList` context). A single open, or a
+        // story no longer in its poster's tray, shows that story alone
+        // (`StoriesContextSingle`).
+        let viewer = match (open.scope, session.stories.tray.get(&open.chat_id)) {
+            (StoryOpenScope::Tray, Some(tray)) => {
+                let items = collect_story_items(chat_id, tray, &session.stories.stories);
+                let walk = tray.list.and_then(|list| {
+                    let unread = session.story_is_unread(open.chat_id, open.story_id);
+                    let sources = session.story_walk_sources(list);
+                    TrayWalk::open(list, &sources, open.chat_id, open.story_id, unread)
+                });
+                match (
+                    items.iter().position(|item| item.story_id == open.story_id),
+                    walk,
+                ) {
+                    (Some(index), Some(walk)) => StoryViewer::open_tray(walk, items, index),
+                    (Some(index), None) => StoryViewer::open(items, index),
+                    (None, _) => alone(),
+                }
+            }
+            _ => alone(),
         };
         if !viewer.is_open() {
             return false;

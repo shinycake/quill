@@ -10,7 +10,8 @@
 
 use super::*;
 use quill::state::StoryCardState;
-use quill::story_tray_walk::{TraySource, wants_more_tray};
+use quill::story_tray_walk::wants_more_tray;
+use quill::telegram::envelope::StoryListView;
 
 impl QuillApp {
     pub(in crate::ui) fn follow_story_tray(&mut self, cx: &mut Context<Self>) {
@@ -21,6 +22,9 @@ impl QuillApp {
         if self.stories.viewer.followed_poster() != Some(poster) {
             return;
         }
+        let Some(list) = self.stories.viewer.tray_walk().map(|walk| walk.list()) else {
+            return;
+        };
         let Some(session) = self.session() else {
             return;
         };
@@ -33,11 +37,7 @@ impl QuillApp {
             .iter()
             .map(|info| (poster, info.story_id))
             .collect();
-        let sources: Vec<TraySource> = session
-            .ordered_story_tray()
-            .into_iter()
-            .map(TraySource::of)
-            .collect();
+        let sources = session.story_walk_sources(list);
         self.stories.viewer.refresh(items);
         if let Some(walk) = self.stories.viewer.tray_walk_mut() {
             walk.show(&sources, poster.0, story_id);
@@ -62,8 +62,14 @@ impl QuillApp {
             for (chat, id) in fetch {
                 let _ = live.driver.get_story(chat, id);
             }
-            if wants_more_tray(&sources, poster.0)
-                && live.driver.session.stories.rearm_active_stories_load()
+            // Only the main list pages (`loadActiveStories(storyListMain)`).
+            if list == StoryListView::Main
+                && wants_more_tray(&sources, poster.0)
+                && live
+                    .driver
+                    .session
+                    .stories
+                    .rearm_active_stories_load(Instant::now())
             {
                 let _ = live.driver.maybe_load_active_stories();
             }

@@ -7,31 +7,50 @@
 
 use super::*;
 use quill::state::StoryCardState;
-use quill::story_tray_walk::{StoryStep, TraySource, story_to_open};
+use quill::story_tray_walk::{StoryStep, shown_story};
+use quill::story_viewer::collect_found_story_items;
 
 impl QuillApp {
     /// The story the neighbour poster in direction `delta` (-1 or 1) opens
-    /// on, whether or not it is cached yet.
+    /// on, whether or not it is cached yet. A poster whose story is known
+    /// to be gone, or cannot be shown, is passed over for the next one in
+    /// the walk.
     pub(in crate::ui) fn story_sibling_key(&self, delta: i32) -> Option<(ChatId, i32)> {
-        let (chat_id, shown) = self.stories.viewer.tray_walk()?.neighbour(delta)?;
-        let tray = self.session()?.stories.tray.get(&chat_id)?;
-        Some((ChatId(chat_id), story_to_open(tray, shown)?))
+        let walk = self.stories.viewer.tray_walk()?;
+        let session = self.session()?;
+        walk.neighbours(delta)
+            .into_iter()
+            .filter_map(|(chat_id, shown)| {
+                let tray = session.stories.tray.get(&chat_id)?;
+                Some((ChatId(chat_id), shown_story(tray, shown)?))
+            })
+            .find(|(chat, id)| match session.story_card_state(chat.0, *id) {
+                StoryCardState::Loading => true,
+                StoryCardState::Ready => {
+                    !collect_found_story_items(&[(chat.0, *id)], &session.stories.stories)
+                        .is_empty()
+                }
+                StoryCardState::Expired => false,
+            })
     }
 
-    /// The neighbour poster's story when it is cached, so a jump can show
-    /// it at once (tdesktop closes the viewer on a jump to a story it does
-    /// not have, `OverlayWidget::storiesJumpTo`).
-    pub(in crate::ui) fn story_sibling(&self, delta: i32) -> Option<(ChatId, i32)> {
-        let key = self.story_sibling_key(delta)?;
-        let ready = self.session()?.story_card_state(key.0.0, key.1) == StoryCardState::Ready;
-        ready.then_some(key)
+    /// The neighbour poster's story when it can be shown now, so a jump
+    /// shows it at once (tdesktop closes the viewer on a jump to a story it
+    /// does not have, `OverlayWidget::storiesJumpTo`). The one test of
+    /// whether Prev / Next can cross to that poster.
+    pub(in crate::ui) fn story_sibling_item(&self, delta: i32) -> Option<StoryViewerItem> {
+        let (chat_id, story_id) = self.story_sibling_key(delta)?;
+        let stories = &self.session()?.stories.stories;
+        collect_found_story_items(&[(chat_id.0, story_id)], stories)
+            .into_iter()
+            .next()
     }
 
     fn plan_story_step(&self, delta: i32) -> StoryStep {
         self.stories.viewer.plan_step(
             delta,
-            self.story_sibling(-1).is_some(),
-            self.story_sibling(1).is_some(),
+            self.story_sibling_item(-1).is_some(),
+            self.story_sibling_item(1).is_some(),
         )
     }
 
@@ -58,33 +77,34 @@ impl QuillApp {
     }
 
     /// Open the neighbour poster's story (tdesktop `jumpFor`; also a click
-    /// on a sibling preview).
+    /// on a sibling preview). The list and the walk switch together, or
+    /// not at all.
     pub(in crate::ui) fn jump_story_poster(&mut self, delta: i32, cx: &mut Context<Self>) {
-        let Some((chat_id, story_id)) = self.story_sibling(delta) else {
+        let Some(target) = self.story_sibling_item(delta) else {
             return;
         };
+        let (chat_id, story_id) = target.key();
         let Some(session) = self.session() else {
             return;
         };
+        let Some(mut walk) = self.stories.viewer.tray_walk().cloned() else {
+            return;
+        };
+        let sources = session.story_walk_sources(walk.list());
+        if !walk.show(&sources, chat_id.0, story_id) {
+            return;
+        }
         let items = session
             .stories
             .tray
             .get(&chat_id.0)
             .map(|tray| collect_story_items(chat_id, tray, &session.stories.stories))
             .unwrap_or_default();
-        let sources: Vec<TraySource> = session
-            .ordered_story_tray()
-            .into_iter()
-            .map(TraySource::of)
-            .collect();
-        let Some(index) = items.iter().position(|item| item.story_id == story_id) else {
+        let Some(index) = items.iter().position(|item| item.key() == target.key()) else {
             return;
         };
         let prev = self.stories.viewer.current().map(StoryViewerItem::key);
-        self.stories.viewer.switch_poster(items, index);
-        if let Some(walk) = self.stories.viewer.tray_walk_mut() {
-            walk.show(&sources, chat_id.0, story_id);
-        }
+        self.stories.viewer.switch_poster(walk, items, index);
         self.story_changed(prev, cx);
     }
 

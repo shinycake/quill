@@ -6,7 +6,9 @@ use super::open_tests::{frames, open_app};
 use crate::ui::app::QuillApp;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
 use quill::ids::ChatId;
-use quill::story_viewer::StoryViewerItem;
+use quill::story_sibling_layout::sibling_layout;
+use quill::story_viewer::{StoryOpenScope, StoryViewerItem};
+use quill::telegram::envelope::StoryListView;
 
 const LEO: i64 = 105;
 const NEWS: i64 = 54;
@@ -79,7 +81,7 @@ fn the_last_story_of_the_last_poster_closes_the_viewer(cx: &mut TestAppContext) 
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         app.close_story_viewer(cx);
-        app.open_story_viewer(ChatId(MAYA), 6, cx);
+        app.open_story_viewer(ChatId(MAYA), 6, StoryOpenScope::Tray, cx);
     });
     frames(vcx);
     assert_eq!(shown(&app, vcx), Some((MAYA, 6)));
@@ -103,5 +105,119 @@ fn a_click_on_the_right_preview_opens_that_poster(cx: &mut TestAppContext) {
     assert!(
         vcx.debug_bounds("story-sibling-left").is_some(),
         "Leo is now left"
+    );
+}
+
+#[gpui_kit::test]
+fn a_story_opened_from_a_card_shows_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.close_story_viewer(cx);
+        app.open_story_viewer(ChatId(LEO), 3, StoryOpenScope::Single, cx);
+    });
+    frames(vcx);
+    assert_eq!(shown(&app, vcx), Some((LEO, 3)));
+    app.read_with(vcx, |app, _| {
+        assert!(app.stories.viewer.tray_walk().is_none(), "no walk");
+        assert_eq!(app.stories.viewer.position(), Some((1, 1)));
+        assert!(!app.story_step_available(1));
+    });
+    assert!(vcx.debug_bounds("story-sibling-left").is_none());
+    assert!(vcx.debug_bounds("story-sibling-right").is_none());
+    step(&app, vcx, 1);
+    assert!(
+        app.read_with(vcx, |app, _| !app.stories.viewer.is_open()),
+        "Next past the story closes the viewer"
+    );
+}
+
+#[gpui_kit::test]
+fn a_neighbour_whose_story_is_gone_is_passed_over(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.stories.remove(&(NEWS, 1));
+            session.stories.missing.insert((NEWS, 1));
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.story_step_available(1)));
+    step(&app, vcx, 1);
+    assert_eq!(shown(&app, vcx), Some((MAYA, 5)), "Quill News is skipped");
+}
+
+#[gpui_kit::test]
+fn a_neighbour_that_cannot_show_yet_neither_enables_next_nor_blocks_the_end(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.stories.remove(&(NEWS, 1));
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.story_step_available(1)),
+        "Quill News is still loading"
+    );
+    assert!(vcx.debug_bounds("story-sibling-right").is_none());
+    step(&app, vcx, 1);
+    assert!(app.read_with(vcx, |app, _| !app.stories.viewer.is_open()));
+}
+
+#[gpui_kit::test]
+fn an_archived_poster_walks_the_archive(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.close_story_viewer(cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            for chat in [LEO, MAYA] {
+                if let Some(entry) = session.stories.tray.get_mut(&chat) {
+                    entry.list = Some(StoryListView::Archive);
+                }
+            }
+        }
+        app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        let walk = app.stories.viewer.tray_walk().expect("a walk");
+        assert_eq!(walk.list(), StoryListView::Archive);
+        let mut posters: Vec<i64> = [-1, 1]
+            .into_iter()
+            .flat_map(|delta| walk.neighbours(delta))
+            .map(|(chat, _)| chat)
+            .collect();
+        posters.sort_unstable();
+        assert_eq!(posters, vec![LEO], "only the other archived poster");
+    });
+}
+
+#[gpui_kit::test]
+fn the_neighbour_sits_beside_the_panel_centred_on_the_story(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    let frame = vcx.debug_bounds("story-viewer-frame").expect("the story");
+    let panel = vcx.debug_bounds("story-viewer-panel").expect("the panel");
+    let right = vcx.debug_bounds("story-sibling-right").expect("Quill News");
+    let window = f32::from(vcx.update(|window, _| window.viewport_size().width));
+    let layout = sibling_layout(window).expect("room beside the story");
+    assert!((f32::from(right.size.width) - layout.width).abs() < 0.5);
+    assert!((f32::from(right.origin.x) - layout.right_x).abs() < 0.5);
+    assert!(
+        right.origin.x >= panel.origin.x + panel.size.width,
+        "clear of the panel"
+    );
+    let centre = |b: gpui_kit::Bounds<gpui_kit::Pixels>| f32::from(b.origin.y + b.size.height / 2.);
+    assert!(
+        (centre(right) - centre(frame)).abs() <= 1.,
+        "centred on the story: {right:?} {frame:?}"
     );
 }

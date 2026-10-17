@@ -57,13 +57,13 @@ impl Session {
                     );
                 }
             }
-            // 404 means the whole tray is loaded; any other failure stops
-            // paging too, so the viewer's per-frame load cannot retry it
-            // every round trip.
             Some(RequestPurpose::LoadActiveStories) => {
-                self.stories.stories_active_exhausted = true;
+                self.stories
+                    .active_stories_failed(err.code, std::time::Instant::now());
             }
-            Some(RequestPurpose::GetStory) => {
+            // Only a not-found or invalid answer means the story is gone; a
+            // timeout, FLOOD_WAIT or 500 leaves it to be asked for again.
+            Some(RequestPurpose::GetStory) if matches!(err.code, 400 | 404) => {
                 if let Some((chat, story)) = pending.and_then(|p| Some((p.chat_id?, p.story_id?))) {
                     self.stories.missing.insert((chat.0, story));
                 }

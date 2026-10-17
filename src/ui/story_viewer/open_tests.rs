@@ -1,6 +1,7 @@
-//! Opening stories: one the server no longer has drops the open and toasts
-//! that the link is broken (tdesktop `lng_stories_link_invalid`), and a
-//! poster's stories that arrive after the viewer opened join its list.
+//! Opening stories: a linked one the server no longer has drops the open and
+//! toasts that the link is broken (tdesktop `lng_stories_link_invalid`),
+//! while a card or tray open of one drops it silently, and a poster's
+//! stories that arrive after the viewer opened join its list.
 //! Nothing reaches Telegram: the demo app has no connection.
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -11,7 +12,9 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::story_viewer::StoryViewerItem;
+use quill::story_viewer::{StoryOpenScope, StoryViewerItem};
+
+use super::PendingStoryOpen;
 
 const POSTER: i64 = 13;
 
@@ -44,13 +47,23 @@ pub(super) fn open_app(
 }
 
 #[gpui_kit::test]
-fn a_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut TestAppContext) {
+fn a_linked_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-channels");
     let vcx = &mut vcx;
-    app.update(vcx, |app, cx| app.open_story_viewer(ChatId(POSTER), 99, cx));
+    app.update(vcx, |app, cx| {
+        app.open_story_viewer(ChatId(POSTER), 99, StoryOpenScope::Link, cx)
+    });
     frames(vcx);
     let waiting = app.read_with(vcx, |app, _| app.chat_list.pending_story_open);
-    assert_eq!(waiting, Some((POSTER, 99)), "the open waits for getStory");
+    assert_eq!(
+        waiting,
+        Some(PendingStoryOpen {
+            chat_id: POSTER,
+            story_id: 99,
+            scope: StoryOpenScope::Link,
+        }),
+        "the open waits for getStory"
+    );
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.missing.insert((POSTER, 99));
@@ -71,20 +84,47 @@ fn a_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
-fn a_story_known_to_be_gone_toasts_on_the_next_frame(cx: &mut TestAppContext) {
+fn a_linked_story_known_to_be_gone_toasts_on_the_next_frame(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-channels");
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.missing.insert((POSTER, 98));
         }
-        app.open_story_viewer(ChatId(POSTER), 98, cx);
+        app.open_story_viewer(ChatId(POSTER), 98, StoryOpenScope::Link, cx);
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(app.chat_list.pending_story_open, None);
         assert_eq!(app.connection.note().text(), tr(keys::STORIES_LINK_INVALID));
     });
+}
+
+#[gpui_kit::test]
+fn a_gone_story_opened_from_a_card_or_the_tray_drops_the_open_quietly(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-channels");
+    let vcx = &mut vcx;
+    for scope in [StoryOpenScope::Single, StoryOpenScope::Tray] {
+        app.update(vcx, |app, cx| {
+            app.connection
+                .set_note(crate::ui::status_note::StatusNote::silent(""));
+            app.open_story_viewer(ChatId(POSTER), 97, scope, cx);
+            if let Some(session) = app.demo_session.as_mut() {
+                session.stories.missing.insert((POSTER, 97));
+            }
+            cx.notify();
+        });
+        frames(vcx);
+        app.read_with(vcx, |app, _| {
+            assert_eq!(app.chat_list.pending_story_open, None, "{scope:?}");
+            assert!(!app.stories.viewer.is_open());
+            assert_ne!(
+                app.connection.note().text(),
+                tr(keys::STORIES_LINK_INVALID),
+                "{scope:?}: only a link says it is broken"
+            );
+        });
+    }
 }
 
 /// Maya's stories in the `ready-story-viewer` demo.
@@ -100,7 +140,7 @@ fn a_story_that_arrives_after_the_viewer_opened_joins_the_list(cx: &mut TestAppC
             .demo_session
             .as_mut()
             .and_then(|session| session.stories.stories.remove(&(MAYA, 6)));
-        app.open_story_viewer(ChatId(MAYA), 5, cx);
+        app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
         late
     });
     frames(vcx);
