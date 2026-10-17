@@ -519,11 +519,12 @@ impl QuillApp {
                     let mut used = std::collections::HashSet::new();
                     let mut saved = 0usize;
                     for (path, name) in files {
-                        let dest = unique_destination(&dir, &name, &mut used);
+                        let (dest, claimed) = unique_destination(&dir, &name, &mut used);
                         if std::fs::copy(&path, &dest).is_ok() {
                             saved += 1;
-                        } else {
-                            // Drop the empty file `unique_destination` claimed.
+                        } else if claimed {
+                            // Drop the empty file `unique_destination` created,
+                            // never a path it did not create.
                             let _ = std::fs::remove_file(&dest);
                         }
                     }
@@ -931,57 +932,5 @@ impl QuillApp {
     }
 }
 
-/// `dir/name`, or `dir/name (2).ext` when the name is taken on disk or by an
-/// earlier file of the same save.
-fn unique_destination(
-    dir: &std::path::Path,
-    name: &str,
-    used: &mut std::collections::HashSet<std::path::PathBuf>,
-) -> std::path::PathBuf {
-    let safe = quill::export::names::safe_file_name(name);
-    let name = safe.as_str();
-    let path = std::path::Path::new(name);
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
-    let ext = path.extension().and_then(|e| e.to_str());
-    let mut n = 1;
-    loop {
-        let file = match (n, ext) {
-            (1, _) => name.to_string(),
-            (n, Some(ext)) => format!("{stem} ({n}).{ext}"),
-            (n, None) => format!("{stem} ({n})"),
-        };
-        let candidate = dir.join(file);
-        // `create_new` claims the name atomically, so a file that appears
-        // between the check and the copy is never overwritten. When the
-        // claim fails for another reason, the copy reports that itself.
-        let free = match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(_) => true,
-            Err(err) => err.kind() != std::io::ErrorKind::AlreadyExists,
-        };
-        if free && used.insert(candidate.clone()) {
-            return candidate;
-        }
-        n += 1;
-    }
-}
-
-#[cfg(test)]
-mod save_destination_tests {
-    use super::unique_destination;
-    use std::collections::HashSet;
-    use std::path::Path;
-
-    #[test]
-    fn hostile_names_stay_inside_the_folder() {
-        let dir = Path::new("/picked/dir");
-        let mut used = HashSet::new();
-        for name in ["../../x", "/etc/passwd", "..\\..\\x", "", ".."] {
-            let dest = unique_destination(dir, name, &mut used);
-            assert_eq!(dest.parent(), Some(dir), "{name:?} -> {dest:?}");
-        }
-    }
-}
+mod save_destination;
+use save_destination::unique_destination;

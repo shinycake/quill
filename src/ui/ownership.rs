@@ -209,14 +209,14 @@ impl QuillApp {
             })
         );
         let name = self.contact_display_name(done.user_id);
-        let place = if self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel) {
-            "channel"
-        } else {
-            "group"
-        };
+        let is_channel = self.group_flavor(ChatId(done.chat_id)) == Some(GroupFlavor::Channel);
         self.connection.set_note(StatusNote::silent(tr_with(
-            keys::Q_OPS_IS_NOW_THE_OWNER_OF,
-            &[("name", &name.to_string()), ("place", place)],
+            if is_channel {
+                keys::Q_OPS_IS_NOW_THE_OWNER_OF_CHANNEL
+            } else {
+                keys::Q_OPS_IS_NOW_THE_OWNER_OF_GROUP
+            },
+            &[("name", &name.to_string())],
         )));
         self.admin.ownership_dialog = None;
         if leave_after {
@@ -253,10 +253,10 @@ impl QuillApp {
             let flavor = this
                 .group_flavor(chat_id)
                 .unwrap_or(GroupFlavor::Supergroup);
-            let (place, legacy) = match flavor {
-                GroupFlavor::Channel => ("channel", false),
-                GroupFlavor::Supergroup => ("group", false),
-                GroupFlavor::BasicGroup => ("group", true),
+            let (is_channel, legacy) = match flavor {
+                GroupFlavor::Channel => (true, false),
+                GroupFlavor::Supergroup => (false, false),
+                GroupFlavor::BasicGroup => (false, true),
             };
             let chat_title = this
                 .session()
@@ -273,7 +273,7 @@ impl QuillApp {
             let title: String;
             match stage {
                 OwnershipStage::Leave => {
-                    title = tr(if place == "channel" {
+                    title = tr(if is_channel {
                         keys::Q_OPS_LEAVE_CHANNEL_TITLE
                     } else {
                         keys::Q_OPS_LEAVE_GROUP_TITLE
@@ -327,7 +327,7 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("own-leave")
-                                .label(tr(if place == "channel" {
+                                .label(tr(if is_channel {
                                     keys::Q_OPS_LEAVE_CHANNEL
                                 } else {
                                     keys::Q_OPS_LEAVE_GROUP
@@ -342,7 +342,12 @@ impl QuillApp {
                     title = if leave_after {
                         tr(keys::Q_OPS_APPOINT_NEW_OWNER).to_string()
                     } else {
-                        tr_with(keys::Q_OPS_TRANSFER_OWNERSHIP_2, &[("place", place)])
+                        tr(if is_channel {
+                            keys::Q_OPS_TRANSFER_OWNERSHIP_CHANNEL
+                        } else {
+                            keys::Q_OPS_TRANSFER_OWNERSHIP_GROUP
+                        })
+                        .to_string()
                     };
                     let choices = this.ownership_candidates(chat_id);
                     let mut list = div()
@@ -374,11 +379,11 @@ impl QuillApp {
                                 .cursor_pointer()
                                 .hover(|style| style.bg(cx.theme().accent))
                                 .child(div().flex_1().text_sm().child(name))
-                                .child(div().text_xs().text_color(muted).child(if is_admin {
-                                    "admin"
+                                .child(div().text_xs().text_color(muted).child(tr(if is_admin {
+                                    keys::Q_OPS_OWNER_CANDIDATE_ADMIN
                                 } else {
-                                    "member"
-                                }))
+                                    keys::Q_OPS_OWNER_CANDIDATE_MEMBER
+                                })))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.set_ownership_stage(
                                         OwnershipStage::Confirm {
@@ -428,8 +433,12 @@ impl QuillApp {
                                     .child(tr(keys::Q_OPS_SECURITY_CHECK)),
                             )
                             .child(div().text_sm().text_color(muted).child(tr_with(
-                                keys::Q_OPS_OWNER_TRANSFER_REQUIREMENTS,
-                                &[("place", place), ("name", &name)],
+                                if is_channel {
+                                    keys::Q_OPS_OWNER_TRANSFER_REQUIREMENTS_CHANNEL
+                                } else {
+                                    keys::Q_OPS_OWNER_TRANSFER_REQUIREMENTS_GROUP
+                                },
+                                &[("name", &name)],
                             )))
                             .child(div().text_sm().text_color(cx.theme().danger).child(reason));
                     } else if !ready {

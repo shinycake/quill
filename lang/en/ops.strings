@@ -677,7 +677,8 @@
 "qll_ops_invites" = "Invites";
 "qll_ops_is_calling" = "{name} is calling ({kind})";
 "qll_ops_is_calling_2" = "{caller} is calling {account_name}.";
-"qll_ops_is_now_the_owner_of" = "{name} is now the owner of the {place}.";
+"qll_ops_is_now_the_owner_of_channel" = "{name} is now the owner of the channel.";
+"qll_ops_is_now_the_owner_of_group" = "{name} is now the owner of the group.";
 "qll_ops_israel" = "Israel";
 "qll_ops_japan" = "Japan";
 "qll_ops_join_request_approved_by" = "join request approved by {user_name}";
@@ -1009,7 +1010,8 @@
 "qll_ops_to" = "To";
 "qll_ops_tonights_release_notes_are_out" = "Tonight's release notes are out - read them below.";
 "qll_ops_transfer_ownership" = "Transfer ownership";
-"qll_ops_transfer_ownership_2" = "Transfer {place} ownership";
+"qll_ops_transfer_ownership_channel" = "Transfer channel ownership";
+"qll_ops_transfer_ownership_group" = "Transfer group ownership";
 "qll_ops_transferring" = "Transferring…";
 "qll_ops_transferring_ownership" = "transferring ownership…";
 "qll_ops_transferring_ownership_needs_a_live" = "transferring ownership needs a live connection (demo)";
@@ -1196,5 +1198,8 @@
 "qll_ops_err_flood_later" = "Too many attempts. Try again later.";
 "qll_ops_owner_immediately" = "immediately";
 "qll_ops_owner_leave_succession" = "If you leave, {name} will become the new owner of {chat_title} {when}.";
-"qll_ops_owner_transfer_requirements" = "You can transfer this {place} to {name} only if you have enabled Two-Step Verification more than 7 days ago and logged in on this device more than 24 hours ago.";
+"qll_ops_owner_transfer_requirements_channel" = "You can transfer this channel to {name} only if you have enabled Two-Step Verification more than 7 days ago and logged in on this device more than 24 hours ago.";
+"qll_ops_owner_transfer_requirements_group" = "You can transfer this group to {name} only if you have enabled Two-Step Verification more than 7 days ago and logged in on this device more than 24 hours ago.";
+"qll_ops_owner_candidate_admin" = "admin";
+"qll_ops_owner_candidate_member" = "member";
 "qll_ops_owner_transfer_confirm" = "This will transfer the full owner rights for {chat_title} to {name}. The new owner will be free to remove any of your admin privileges or even ban you.";
