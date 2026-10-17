@@ -112,6 +112,8 @@ impl ToastQueue {
     /// Pointer over the toast stops its timer; leaving restarts it with the
     /// time that was left.
     pub(crate) fn set_hovered(&mut self, hovered: bool, now: Instant) {
+        // Only the rendered toast reports hover, so a hover with nothing
+        // showing is stale and must not pause the next toast.
         let Some(showing) = self.showing.as_mut() else {
             return;
         };
@@ -230,6 +232,17 @@ mod tests {
         queue.set_hovered(false, secs(t0, 60));
         assert_eq!(queue.deadline(secs(t0, 60)), Some(secs(t0, 61)));
         queue.tick(secs(t0, 61));
+        assert_eq!(text(&queue), None);
+    }
+
+    #[test]
+    fn a_hover_with_no_toast_never_pauses_the_next_one() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.set_hovered(true, t0);
+        queue.push(StatusNote::info("Copied"), t0);
+        assert!(queue.deadline(secs(t0, 1)).is_some());
+        queue.tick(secs(t0, 60));
         assert_eq!(text(&queue), None);
     }
 

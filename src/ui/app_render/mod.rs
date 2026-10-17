@@ -99,7 +99,6 @@ impl Render for QuillApp {
             self.request_animation_tick(30, cx);
         }
         let status_toast = self.status_toast_visible(cx);
-        let viewer_open = self.viewer.state.is_open();
         let menu_open = self.message_ui.menu.is_some()
             || self.chat_list.menu.is_some()
             || self.chat_list.archive_menu.is_some()
@@ -690,13 +689,8 @@ impl Render for QuillApp {
             // after a few seconds. It paints above the media viewer too
             // ("Saved to Downloads", "Frame copied"), clear of its controls.
             .when_some(status_toast, |this, note| {
-                let (left, right) = self.chat_insets();
-                let bottom = if viewer_open {
-                    px(132.)
-                } else {
-                    self.toast_bottom()
-                };
-                this.child(self.status_toast_layer(&note, left, right, bottom, cx))
+                let insets = self.toast_insets(window, cx);
+                this.child(self.status_toast_layer(&note, insets, cx))
             })
             .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))
