@@ -62,12 +62,14 @@ references are to `Telegram/SourceFiles`.
   and bottom padding, the userpic at the height less 2, the gold star and
   the white count. GPUI cannot scale a div tree, so the scale is applied
   to the metrics (font, line, userpic, paddings).
-- The burst picks the first candidate in `burst_order` whose clip was
-  decoded before the effect started (`randomLoadedFrom`'s "loaded"). If
-  none was, the seed's own candidate is used once it is decoded, and the
-  layer always asks for that one, which starts its download and decode.
-  The frame shown is the one at the effect's age, played once at the
-  clip's rate, in a 64 px box at `(left, top)`, at full opacity.
+- The burst is `ready_burst`: the first candidate in `burst_order` whose
+  tinted clip was ready when the effect started (`randomLoadedFrom`'s
+  "loaded"), resolved like tdesktop's at the effect's start. If none was,
+  that effect has no burst, as in tdesktop. While the seed's own candidate
+  is not decoded the layer asks for it, which starts its download and
+  decode, so later effects have it. The frame shown is the one at the
+  effect's age (`burst_frame_index`), played once at the clip's rate, in a
+  64 px box at `(left, top)`, at full opacity.
 - The effects clock is `LiveStoryUi::now()`: the real time, or the
   screenshot demo's pinned instant. The frame clock
   (`request_animation_tick`) redraws while an effect is in flight.
@@ -85,15 +87,42 @@ once per session, the first time a live story is joined, and kept in
 A failed request goes back to unasked, so the next join asks again. These
 bursts are not star-coloured, so their frames are tinted with
 `chrome::stars_gold()`: each pixel keeps its alpha and takes the gold
-scaled by its luminance. The tint is made once per clip and cached, as
-`mirrored_frames` does for message effects.
+scaled by its luminance (`quill::sticker_playback::Tint`, integer Rec. 709
+weights, in place).
+
+The tinted frames are a variant in the sticker playback cache
+(`src/ui/sticker_playback.rs`), keyed by `ClipKey { file, tint }`. The
+variant has its own background job, which decodes the file and tints the
+frames there, so the UI thread never tints. The cache's byte budget and
+its least-recently-shown eviction cover the variant like any other clip.
+The burst only ever asks for the tinted key, so the untinted frames are
+never decoded for it. Only the clip being painted is kept fresh, and the
+cache does not evict a clip shown in the last 500 ms. Until its tinted
+clip is ready, an effect shows only the badge.
 
 ## The swap point
 
 `star_burst(session)` in `live_effects.rs` is the only place that names
-the source. It returns `StarBurst { candidates, tint }`. Moving to
-bundled `.tgs` files (option A) changes that function and adds the
-assets; the motion, the pick, the layer and the badge stay.
+the source. It returns `StarBurst { candidates, tint }`, where the
+candidates are TDLib stickers. Moving to bundled `.tgs` files (option A)
+needs more than that function:
+
+- A local file source. The playback cache keys clips by TDLib `FileId`,
+  and `ensure_sticker_playback` finds the path in `session.media.files`
+  (or asks the driver to download it) and checks it against the media
+  display roots. A bundled file has no `FileId`. `ClipKey.file` would
+  become a source that is either a TDLib file or a bundled asset, and
+  `ensure_sticker_playback` would take a bundled asset's path from the
+  app's resources directory, with no download and no display-root check.
+- `StarBurst.candidates` would hold those sources, not `StickerItem`s,
+  and `tint` would be `None`, since tdesktop's files are already
+  star-coloured.
+- The three files shipped in each package: `Contents/Resources` on
+  macOS, beside the binary on Linux and Windows, as `THIRD_PARTY.md` is
+  found today (`about.rs`), with their licence notice.
+- `LiveBursts` and its once-per-session request would go.
+
+The motion, the pick, the layer and the badge stay.
 
 ## Deviations
 
@@ -105,14 +134,18 @@ assets; the motion, the pick, the layer and the badge stay.
   both.
 - The burst is the server's generic reaction animation tinted gold, not
   tdesktop's star burst, until the owner decides on the GPL files.
-- A clip still decoding when its effect starts is drawn once decoded, at
-  the effect's age, if no earlier clip was ready. tdesktop's lazy frame
-  generator has no decode wait; Quill's decode is a background job.
+- tdesktop's effect file is a lazy frame generator that is ready when
+  loaded. Quill decodes and tints a burst in a background job first, so a
+  burst that loaded during that job counts as ready only once the job is
+  done. An effect that starts in that gap has no burst.
 
 ## Demo
 
-`ready-live-story-stars` pins the effects clock and shows three effects
-at progress 0.1, 0.3 and 0.7 with different shifts, over a burst
-fixture (`docs/screenshots/fixtures/demo-star-burst.tgs`, an original
-test-only Lottie made by `scripts/make-star-burst-fixture.py`). The real
-asset comes from the server.
+`ready-live-story-stars` asks for the burst fixture's tinted clip
+(`docs/screenshots/fixtures/demo-star-burst.tgs`, an original test-only
+Lottie made by `scripts/make-star-burst-fixture.py`) and waits for its
+background job to finish. Then it pins the effects clock 2 s after the
+clip was ready and starts three effects at progress 0.1, 0.3 and 0.7
+with different shifts, so all of them started after the burst was ready.
+If the decode fails (no rlottie, as in the UI tests), the effects start
+without a burst. The real asset comes from the server.
